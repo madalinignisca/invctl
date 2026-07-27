@@ -1,0 +1,144 @@
+{{/* One dependency, in either panel. Swapped on its own after a verify, so
+     the row updates without reloading the page around it. */}}
+{{define "dependency_row"}}
+<tr id="dep-{{.Dep.ID}}" class="rail-row {{if eq .Dep.Nature "hard"}}is-down{{else if eq .Dep.Nature "startup"}}is-startup{{else if eq .Dep.Nature "optional"}}is-ok{{else}}is-degraded{{end}}">
+  <td>
+    {{if eq .Direction "upstream"}}
+      <a class="id" href="/services/{{.Dep.ProviderSvc}}">{{.Dep.ProviderCode}}</a>
+      <div class="mono" style="color:var(--faint);font-size:11.5px">
+        {{if eq .Dep.ProviderKind "route"}}route{{end}} {{.Dep.ProviderName}}{{if .Dep.ProviderPort}}:{{.Dep.ProviderPort}}{{end}}
+      </div>
+    {{else}}
+      <a class="id" href="/services/{{.Dep.ConsumerServiceID}}">{{.Dep.ConsumerCode}}</a>
+      <div class="mono" style="color:var(--faint);font-size:11.5px">{{.Dep.ConsumerName}}</div>
+    {{end}}
+  </td>
+  <td>
+    <span class="{{natureClass .Dep.Nature}}">{{.Dep.Nature}}</span>
+    {{if .Dep.ToleranceSeconds}}<div class="mono" style="color:var(--faint);font-size:11.5px">tolerates {{.Dep.ToleranceSeconds}}s</div>{{end}}
+  </td>
+  <td>
+    <div>{{.Dep.FailureMode}}</div>
+    {{if .DataClasses}}
+      <div class="tag-list" style="margin-top:4px">
+        {{range .DataClasses}}<span class="pill pill-muted">{{.}}</span>{{end}}
+      </div>
+    {{end}}
+  </td>
+  <td class="mono" style="font-size:11.5px;color:var(--muted)">
+    {{if .Dep.IdentityName}}{{deref .Dep.IdentityName}}{{else}}—{{end}}
+    {{if .Dep.AuthMethod}}<div style="color:var(--faint)">{{deref .Dep.AuthMethod}}</div>{{end}}
+    {{if .Dep.FirewallRuleRef}}<div style="color:var(--faint)">{{deref .Dep.FirewallRuleRef}}</div>{{end}}
+  </td>
+  <td>
+    {{if .Dep.VerifiedAt}}
+      <span class="pill pill-info" title="Confirmed by {{deref .Dep.VerifiedBy}}">verified {{since (deref .Dep.VerifiedAt)}}</span>
+    {{else}}
+      <span class="pill pill-muted">unverified</span>
+    {{end}}
+    {{if eq .Dep.Source "declared"}}{{else}}<div><span class="pill pill-degraded">{{.Dep.Source}}</span></div>{{end}}
+  </td>
+  {{if .CanWrite}}
+  <td style="white-space:nowrap">
+    {{/* The direction travels with the request: only the client knows which
+         of the two panels this row is in, and the row re-renders differently
+         for each. Without it every verified row comes back upstream-shaped,
+         naming the wrong service. */}}
+    <button class="btn btn-sm" type="button"
+            hx-post="/dependencies/{{.Dep.ID}}/verify?direction={{.Direction}}"
+            hx-target="#dep-{{.Dep.ID}}" hx-swap="outerHTML">Verify</button>
+    <button class="btn btn-sm btn-danger" type="button"
+            hx-post="/dependencies/{{.Dep.ID}}/retire"
+            hx-confirm="Retire this dependency? The record is kept.">Retire</button>
+  </td>
+  {{end}}
+</tr>
+{{end}}
+
+
+{{define "search_results"}}
+<div id="search-results">
+  {{if .Query}}
+    {{if .Results}}
+      <div class="panel">
+        <div class="panel-head">
+          <h2>{{pluralise (len .Results) "match" "matches"}} for <span class="mono">{{.Query}}</span></h2>
+        </div>
+        <div class="scroll-x">
+          <table>
+            <thead><tr><th>Result</th><th>Type</th><th>Why it matched</th></tr></thead>
+            <tbody>
+              {{range .Results}}
+              <tr>
+                <td>
+                  {{if eq .EntityType "asset"}}<a class="id" href="/assets/{{.EntityID}}">{{.Title}}</a>
+                  {{else if eq .EntityType "service"}}<a class="id" href="/services/{{.EntityID}}">{{.Title}}</a>
+                  {{else}}<span class="id">{{.Title}}</span>{{end}}
+                  {{if .Subtitle}}<div class="mono" style="color:var(--faint);font-size:11.5px">{{.Subtitle}}</div>{{end}}
+                </td>
+                <td><span class="pill pill-muted">{{.EntityType}}</span></td>
+                <td style="color:var(--muted)">{{if .Why}}{{.Why}}{{else}}name or description{{end}}</td>
+              </tr>
+              {{end}}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    {{else}}
+      <div class="panel"><div class="empty">
+        <strong>Nothing matches <span class="mono">{{.Query}}</span>.</strong>
+        Try an IP address, a MAC, a serial number, a service code, or a port number.
+      </div></div>
+    {{end}}
+  {{else}}
+    <div class="panel"><div class="empty">
+      <strong>Search the estate.</strong>
+      An IP or MAC resolves to the box that holds it, a bare number to whatever listens on that port.
+    </div></div>
+  {{end}}
+</div>
+{{end}}
+
+
+{{define "service_table"}}
+<div id="service-table" class="panel">
+  <div class="panel-head">
+    <h2>{{pluralise (len .Services) "service" "services"}}</h2>
+    <span class="panel-note">One row per logical service, however many replicas run.</span>
+  </div>
+  {{if .Services}}
+  <div class="scroll-x">
+    <table>
+      <thead>
+        <tr>
+          <th>Code</th><th>Name</th><th>Kind</th><th>Environment</th>
+          <th>Availability</th><th>Instances</th><th>Tier</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .Services}}
+        <tr>
+          <td><a class="id" href="/services/{{.ID}}">{{.Code}}</a></td>
+          <td>{{.Name}}</td>
+          <td><span class="pill pill-muted">{{.Kind}}</span></td>
+          <td><span class="pill pill-info">{{.EnvironmentCode}}</span></td>
+          <td>
+            <span class="mono" style="font-size:12px">{{.Availability}}</span>
+            {{if .MinHealthy}}<span class="mono" style="color:var(--faint)"> min {{.MinHealthy}}</span>{{end}}
+            {{if .FailoverMode}}<div class="mono" style="color:var(--faint);font-size:11.5px">failover: {{deref .FailoverMode}}</div>{{end}}
+          </td>
+          <td class="num">{{.InstanceCount}}</td>
+          <td><span class="{{tierClass .Tier}}">tier {{.Tier}}</span></td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{else}}
+  <div class="empty">
+    <strong>No services match those filters.</strong>
+    A service is the logical thing; its replicas are instances.
+  </div>
+  {{end}}
+</div>
+{{end}}

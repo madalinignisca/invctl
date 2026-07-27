@@ -1,0 +1,41 @@
+{{define "content"}}
+<div class="page-head">
+  <div class="eyebrow">Segmentation</div>
+  <h1>Environments</h1>
+  <p class="lede">
+    An environment is a segmentation boundary, and membership is many-to-many —
+    a shared switch really does belong to two of them. A transit environment
+    exists to broker traffic between the others, so it never counts as a span.
+  </p>
+</div>
+
+<div class="panel">
+  <div class="panel-head"><h2>{{pluralise (len .Environments) "environment" "environments"}}</h2></div>
+  {{if .Environments}}
+  <div class="scroll-x">
+    <table>
+      <thead><tr><th>Code</th><th>Name</th><th>Role</th><th>Criticality</th><th>Audit scope</th></tr></thead>
+      <tbody>
+        {{range .Environments}}
+        <tr>
+          <td class="mono">{{.Code}}</td>
+          <td>{{.Name}}</td>
+          <td>
+            <span class="pill {{if eq .Role "transit"}}pill-degraded{{else if eq .Role "production"}}pill-info{{else}}pill-muted{{end}}">{{.Role}}</span>
+          </td>
+          <td class="num">{{.Criticality}}</td>
+          <td>{{if .InScope}}<span class="pill pill-info">in scope</span>{{else}}<span class="pill pill-muted">out of scope</span>{{end}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{else}}
+  <div class="empty"><strong>No environments yet.</strong>Start with production, and add a transit zone if traffic crosses between segments.</div>
+  {{end}}
+</div>
+
+{{if .CanWrite}}
+  {{template "environment_form" .FormData}}
+{{end}}
+{{end}}

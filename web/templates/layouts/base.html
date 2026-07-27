@@ -1,0 +1,77 @@
+{{define "base"}}<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{.Title}} — invctl</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' rx='3' fill='%2335c9c9'/></svg>">
+  <script src="/static/htmx.min.js" defer></script>
+  <script src="/static/app.js" defer></script>
+  <script src="/static/alpine.min.js" defer></script>
+</head>
+{{/* The CSRF token is injected once here, so every non-GET HTMX request
+     carries it without each form having to remember. */}}
+<body hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<div class="shell">
+
+  <nav class="rail">
+    <div class="rail-brand">
+      <div class="wordmark">inv<span>ctl</span></div>
+      <div class="tagline">infrastructure inventory</div>
+    </div>
+
+    <div class="rail-nav">
+      <div class="rail-section">Inventory</div>
+      <a class="rail-link" href="/" {{if eq .Nav "dashboard"}}aria-current="page"{{end}}>Overview</a>
+      <a class="rail-link" href="/assets" {{if eq .Nav "assets"}}aria-current="page"{{end}}>Assets</a>
+      <a class="rail-link" href="/services" {{if eq .Nav "services"}}aria-current="page"{{end}}>Services</a>
+      <a class="rail-link" href="/environments" {{if eq .Nav "environments"}}aria-current="page"{{end}}>Environments</a>
+
+      <div class="rail-section">Analysis</div>
+      <a class="rail-link" href="/reports/spanning" {{if eq .Nav "reports"}}aria-current="page"{{end}}>Environment spans</a>
+      <a class="rail-link" href="/changes" {{if eq .Nav "changes"}}aria-current="page"{{end}}>Change log</a>
+    </div>
+
+    <div class="rail-foot">
+      {{if .User}}
+        <div class="id">{{.User.Display}}</div>
+        <div style="margin-top:2px">
+          {{if .CanWrite}}
+            <span class="pill pill-info">read / write</span>
+          {{else}}
+            <span class="pill pill-muted">read only</span>
+          {{end}}
+        </div>
+        <form method="post" action="/logout" style="margin-top:8px">
+          <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+          <button class="btn btn-sm" type="submit">Sign out</button>
+        </form>
+      {{end}}
+    </div>
+  </nav>
+
+  <div class="main">
+    <header class="topbar">
+      <form action="/search" method="get" style="flex:1;max-width:520px">
+        <label for="global-search" class="sr-only" style="display:none">Search</label>
+        <input id="global-search" type="search" name="q" class="mono"
+               placeholder="IP, MAC, serial, hostname, service code or port"
+               autocomplete="off">
+      </form>
+    </header>
+
+    <main class="content">
+      {{template "content" .}}
+    </main>
+  </div>
+</div>
+
+{{/* Flash messages land here via out-of-band swaps, so any handler can emit
+     one without the caller arranging somewhere to put it. */}}
+<div class="flash-dock" id="flash-dock">
+  {{if .Flash}}{{template "flash" .Flash}}{{end}}
+</div>
+
+</body>
+</html>{{end}}

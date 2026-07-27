@@ -1,0 +1,129 @@
+SHELL := /bin/bash
+BIN   := bin/invctl
+
+# Tailwind standalone CLI: no Node runtime in the build pipeline. DaisyUI was
+# considered and dropped -- it is an npm package that has to be on disk, which
+# would drag a second runtime into the build for styling convenience. The
+# component layer in web/src/app.css replaces it.
+TAILWIND         := bin/tailwindcss
+TAILWIND_VERSION := v4.3.3
+TAILWIND_URL     := https://github.com/tailwindlabs/tailwindcss/releases/download/$(TAILWIND_VERSION)/tailwindcss-linux-x64
+
+# The demo runs on SQLite. Nothing in docker-compose.yml is needed to try it.
+#
+# It binds 0.0.0.0 so the demo is reachable from another machine, on 8088
+# because 8080 is commonly already taken. That means the demo is exposed to
+# whatever network this host is on, over plain HTTP, with a fixed password --
+# fine for showing someone the tool, not fine for anything real. Set
+# INV_LISTEN=127.0.0.1:8088 to keep it local.
+export INV_DB_DRIVER    ?= sqlite
+export INV_DB_DSN       ?= file:invctl.db?_txlock=immediate
+export INV_LISTEN       ?= 0.0.0.0:8088
+export INV_ADMIN_USERS  ?= admin
+export INV_ADMIN_PASSWORD ?= demo-password
+export INV_SEED         ?= true
+
+PG_DSN := postgres://invctl:invctl@127.0.0.1:5433/invctl?sslmode=disable
+
+.PHONY: help
+help:
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
+
+# ---------------------------------------------------------------------------
+# Build
+# ---------------------------------------------------------------------------
+
+.PHONY: build
+build: css ## Build the static binary
+	CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o $(BIN) ./cmd/invctl
+
+$(TAILWIND):
+	@mkdir -p bin
+	curl -sSL -o $(TAILWIND) $(TAILWIND_URL)
+	chmod +x $(TAILWIND)
+
+.PHONY: css
+css: $(TAILWIND) ## Rebuild the stylesheet
+	$(TAILWIND) -i web/src/app.css -o web/static/app.css --minify
+
+.PHONY: css-watch
+css-watch: $(TAILWIND)
+	$(TAILWIND) -i web/src/app.css -o web/static/app.css --watch
+
+# ---------------------------------------------------------------------------
+# Run
+# ---------------------------------------------------------------------------
+
+.PHONY: dev
+dev: css ## Migrate, seed and run against SQLite with live template reload
+	go run ./cmd/invctl -dev
+
+.PHONY: demo
+demo: clean-db dev ## Throw away the database and start a fresh demo
+
+.PHONY: run-postgres
+run-postgres: css compose-up ## Run against PostgreSQL instead of SQLite
+	INV_DB_DRIVER=postgres INV_DB_DSN="$(PG_DSN)" go run ./cmd/invctl -dev
+
+.PHONY: migrate
+migrate: ## Apply migrations to $INV_DB_DSN and exit
+	go run ./cmd/invctl -migrate
+
+.PHONY: seed
+seed: ## Load the demo estate and exit
+	go run ./cmd/invctl -seed
+
+.PHONY: clean-db
+clean-db:
+	rm -f invctl.db invctl.db-wal invctl.db-shm
+
+# ---------------------------------------------------------------------------
+# Test
+# ---------------------------------------------------------------------------
+
+.PHONY: test
+test: compose-up ## Run the full suite against both engines
+	INV_TEST_POSTGRES_DSN="$(PG_DSN)" go test ./... -count=1
+
+.PHONY: test-sqlite
+test-sqlite: ## Run the suite against SQLite only (no Docker needed)
+	go test ./... -count=1
+
+.PHONY: test-race
+test-race: compose-up ## Run the suite with the race detector
+	INV_TEST_POSTGRES_DSN="$(PG_DSN)" go test ./... -race -count=1
+
+.PHONY: cover
+cover: compose-up ## Report test coverage
+	INV_TEST_POSTGRES_DSN="$(PG_DSN)" go test ./... -coverprofile=coverage.out -count=1
+	go tool cover -func=coverage.out | tail -20
+
+.PHONY: compose-up
+compose-up:
+	@docker compose up -d --wait postgres
+
+.PHONY: compose-down
+compose-down: ## Stop the supporting containers
+	docker compose down -v
+
+# ---------------------------------------------------------------------------
+# Quality
+# ---------------------------------------------------------------------------
+
+.PHONY: lint
+lint: ## gofmt, go vet and staticcheck
+	@echo "== gofmt =="
+	@test -z "$$(gofmt -l cmd internal web)" || (gofmt -l cmd internal web; echo "run gofmt -w"; exit 1)
+	@echo "== go vet =="
+	go vet ./...
+	@echo "== staticcheck =="
+	@command -v staticcheck >/dev/null 2>&1 && staticcheck ./... || \
+	  echo "staticcheck not installed: go install honnef.co/go/tools/cmd/staticcheck@latest"
+
+.PHONY: tidy
+tidy:
+	go mod tidy
+
+.PHONY: clean
+clean: clean-db ## Remove build artefacts
+	rm -rf bin coverage.out

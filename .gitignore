@@ -1,0 +1,18 @@
+# Build output. The Tailwind binary is downloaded on demand by `make css`.
+/bin/
+
+# The default SQLite database and its write-ahead log.
+invctl.db
+invctl.db-wal
+invctl.db-shm
+
+# Coverage output.
+coverage.out
+
+# Browser tooling scratch.
+/.playwright-mcp/
+shot-*.png
+
+# web/static/app.css is generated but *is* committed: the Go build embeds it,
+# and requiring the Tailwind binary to build the binary would defeat the point
+# of having no Node runtime in the pipeline.

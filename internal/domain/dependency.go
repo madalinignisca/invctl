@@ -1,0 +1,316 @@
+package domain
+
+import (
+	"strings"
+	"time"
+)
+
+// Dependency natures encode failure semantics (HANDOVER §3.4).
+const (
+	// NatureHard: the consumer cannot serve without the provider.
+	NatureHard = "hard"
+	// NatureSoft: the consumer degrades but keeps serving.
+	NatureSoft = "soft"
+	// NatureStartup: only needed at boot. The consumer is fine right now and
+	// will not come back after a restart. This is the highest-value nature and
+	// the one people forget — the outage lands weeks later when something
+	// unrelated triggers a restart.
+	NatureStartup = "startup"
+	// NatureAsync: buffered or retried. Survives an outage shorter than
+	// tolerance_seconds.
+	NatureAsync = "async"
+	// NatureOptional: no functional effect (metrics scrape, telemetry).
+	NatureOptional = "optional"
+)
+
+// Natures is the Go side of the dependency.nature CHECK constraint.
+var Natures = []string{NatureHard, NatureSoft, NatureStartup, NatureAsync, NatureOptional}
+
+// Data classes carried over a dependency. chd/sad are PCI terms (cardholder
+// data / sensitive authentication data); pii drives GDPR scope. Tracking them
+// on the edge is what lets "which flows carry personal data across a
+// segmentation boundary" be a query rather than an interview.
+var DataClasses = []string{"chd", "sad", "pii", "credential", "telemetry", "config", "none"}
+
+// Dependency is a directed edge from a consumer service to a provider endpoint
+// or route. Exactly one of the two provider columns is set.
+type Dependency struct {
+	ID                 string   `db:"id"`
+	ConsumerServiceID  string   `db:"consumer_service_id"`
+	ConsumerInstanceID *string  `db:"consumer_instance_id"`
+	ProviderEndpointID *string  `db:"provider_endpoint_id"`
+	ProviderRouteID    *string  `db:"provider_route_id"`
+	Nature             string   `db:"nature"`
+	ToleranceSeconds   *int     `db:"tolerance_seconds"`
+	FailureMode        string   `db:"failure_mode"`
+	IdentityID         *string  `db:"identity_id"`
+	AuthMethod         *string  `db:"auth_method"`
+	FirewallRuleRef    *string  `db:"firewall_rule_ref"`
+	Source             string   `db:"source"`
+	Confidence         *float64 `db:"confidence"`
+	FirstSeen          *string  `db:"first_seen"`
+	LastSeen           *string  `db:"last_seen"`
+	VerifiedBy         *string  `db:"verified_by"`
+	VerifiedAt         *string  `db:"verified_at"`
+	Lifecycle          string   `db:"lifecycle"`
+	CreatedAt          string   `db:"created_at"`
+	UpdatedAt          string   `db:"updated_at"`
+}
+
+// DependencySpec is everything needed to declare an edge.
+//
+// Like ServiceSpec, it exists because nature and the fields it requires must
+// be validated together: tolerance_seconds is mandatory for an async edge and
+// meaningless for the others.
+type DependencySpec struct {
+	ConsumerServiceID  string
+	ConsumerInstanceID *string
+	ProviderEndpointID *string
+	ProviderRouteID    *string
+	Nature             string
+	ToleranceSeconds   *int
+	FailureMode        string
+	IdentityID         *string
+	AuthMethod         *string
+	FirewallRuleRef    *string
+	// Source defaults to declared when empty. A reconciler sets it explicitly.
+	Source string
+}
+
+// NewDependency validates and constructs an edge.
+//
+// failure_mode is mandatory and free text on purpose: forcing the author to
+// write down what actually breaks is most of the value of recording the edge
+// at all.
+func NewDependency(id string, spec DependencySpec, now time.Time) (*Dependency, error) {
+	source := spec.Source
+	if source == "" {
+		source = SourceDeclared
+	}
+	d := &Dependency{
+		ID:                 id,
+		ConsumerServiceID:  spec.ConsumerServiceID,
+		ConsumerInstanceID: spec.ConsumerInstanceID,
+		ProviderEndpointID: spec.ProviderEndpointID,
+		ProviderRouteID:    spec.ProviderRouteID,
+		Nature:             spec.Nature,
+		ToleranceSeconds:   spec.ToleranceSeconds,
+		FailureMode:        spec.FailureMode,
+		IdentityID:         spec.IdentityID,
+		AuthMethod:         spec.AuthMethod,
+		FirewallRuleRef:    spec.FirewallRuleRef,
+		Source:             source,
+		Lifecycle:          LifecycleActive,
+		CreatedAt:          FormatTime(now),
+		UpdatedAt:          FormatTime(now),
+	}
+	if err := d.Validate(); err != nil {
+		return nil, err
+	}
+	return d, nil
+}
+
+// Validate checks a dependency against its business rules.
+func (d *Dependency) Validate() error {
+	ve := &ValidationError{}
+	checkRequired(ve, "consumer_service_id", d.ConsumerServiceID)
+	checkEnum(ve, "nature", d.Nature, Natures)
+	checkEnum(ve, "source", d.Source, DependencySources)
+	d.FailureMode = checkRequired(ve, "failure_mode", d.FailureMode)
+
+	hasEndpoint := d.ProviderEndpointID != nil && *d.ProviderEndpointID != ""
+	hasRoute := d.ProviderRouteID != nil && *d.ProviderRouteID != ""
+	switch {
+	case hasEndpoint && hasRoute:
+		ve.Add("provider", "set either a provider endpoint or a route, not both")
+	case !hasEndpoint && !hasRoute:
+		ve.Add("provider", "a provider endpoint or route is required")
+	}
+	// Normalize the unset side to NULL so the table CHECK is satisfied by an
+	// empty-string form value.
+	if !hasEndpoint {
+		d.ProviderEndpointID = nil
+	}
+	if !hasRoute {
+		d.ProviderRouteID = nil
+	}
+
+	if d.Nature == NatureAsync {
+		if d.ToleranceSeconds == nil {
+			ve.Add("tolerance_seconds", "is required for an async dependency")
+		} else if *d.ToleranceSeconds < 0 {
+			ve.Add("tolerance_seconds", "must not be negative")
+		}
+	}
+	if d.Confidence != nil && (*d.Confidence < 0 || *d.Confidence > 1) {
+		ve.Add("confidence", "must be between 0 and 1")
+	}
+	return ve.OrNil()
+}
+
+// IsDeclared reports whether this edge was entered by an operator. Declared
+// data is authoritative and is never silently overwritten by a reconciler.
+func (d *Dependency) IsDeclared() bool { return d.Source == SourceDeclared }
+
+// Propagation is the effect of a provider's status on its consumer.
+type Propagation struct {
+	// Status is the status to merge into the consumer. StatusOK means the
+	// consumer is unaffected by this edge.
+	Status Status
+	// WontRestart marks an unmet startup dependency: the consumer is serving
+	// now but will not come back if it restarts.
+	WontRestart bool
+}
+
+// Propagate applies the nature table from HANDOVER §6 phase 3.
+//
+// windowSeconds matters only for async edges — a 3-minute reboot and a
+// 45-minute one genuinely differ for a queue consumer with a buffer.
+func (d *Dependency) Propagate(provider Status, windowSeconds int) Propagation {
+	if provider == StatusOK {
+		return Propagation{Status: StatusOK}
+	}
+	switch d.Nature {
+	case NatureHard:
+		// The only nature that transmits an outage at full strength.
+		if provider == StatusDown {
+			return Propagation{Status: StatusDown}
+		}
+		return Propagation{Status: StatusDegraded}
+
+	case NatureSoft:
+		if provider == StatusDown {
+			return Propagation{Status: StatusDegraded}
+		}
+		return Propagation{Status: StatusOK}
+
+	case NatureAsync:
+		// Buffered: the consumer only notices once the outage outlasts its
+		// tolerance. A degraded provider is still answering, so nothing yet.
+		if provider == StatusDown && d.ToleranceSeconds != nil && *d.ToleranceSeconds < windowSeconds {
+			return Propagation{Status: StatusDegraded}
+		}
+		return Propagation{Status: StatusOK}
+
+	case NatureStartup:
+		// Deliberately no status change. Reporting this as an outage would be
+		// wrong — the consumer is serving. Reporting nothing at all would hide
+		// a landmine, so it goes on a separate list.
+		if provider == StatusDown {
+			return Propagation{Status: StatusOK, WontRestart: true}
+		}
+		return Propagation{Status: StatusOK}
+
+	default: // NatureOptional
+		return Propagation{Status: StatusOK}
+	}
+}
+
+// NatureDescription renders the failure semantics for the UI, so an operator
+// filling in the form does not have to remember the table.
+func NatureDescription(nature string) string {
+	switch nature {
+	case NatureHard:
+		return "Consumer goes down immediately"
+	case NatureSoft:
+		return "Consumer degrades but keeps serving"
+	case NatureStartup:
+		return "Fine now, but will not restart"
+	case NatureAsync:
+		return "Fine until the tolerance window elapses"
+	case NatureOptional:
+		return "No effect"
+	default:
+		return ""
+	}
+}
+
+// Change log actions.
+const (
+	ActionCreate = "create"
+	ActionUpdate = "update"
+	ActionDelete = "delete"
+	ActionRetire = "retire"
+)
+
+// ChangeActions is the Go side of the change_log.action CHECK constraint.
+var ChangeActions = []string{ActionCreate, ActionUpdate, ActionDelete, ActionRetire}
+
+// ActorKinds is the Go side of the change_log.actor_kind CHECK constraint.
+var ActorKinds = []string{"user", "agent", "system"}
+
+// ChangeLog is the audit trail. Every mutation writes one of these in the same
+// transaction as the mutation itself — a handler that mutates without logging
+// is incomplete, not merely untidy.
+//
+// Diff holds field-level changes as JSON (see docs/DECISIONS.md Q3):
+// {"field": {"old": ..., "new": ...}} for updates, a full snapshot under "new"
+// for creates.
+type ChangeLog struct {
+	ID         string  `db:"id"`
+	EntityType string  `db:"entity_type"`
+	EntityID   string  `db:"entity_id"`
+	Action     string  `db:"action"`
+	Actor      string  `db:"actor"`
+	ActorKind  string  `db:"actor_kind"`
+	Diff       string  `db:"diff"`
+	TicketRef  *string `db:"ticket_ref"`
+	At         string  `db:"at"`
+}
+
+// Actor identifies who is making a change, for the audit trail.
+type Actor struct {
+	Name string
+	Kind string
+}
+
+// SystemActor is used by the seeder and migrations.
+var SystemActor = Actor{Name: "system", Kind: "system"}
+
+// UserActor builds an actor for a logged-in operator.
+func UserActor(username string) Actor { return Actor{Name: username, Kind: "user"} }
+
+// AppUser is an operator account. Local users carry an argon2id hash; LDAP
+// users carry none and are upserted on successful bind.
+type AppUser struct {
+	ID           string  `db:"id"`
+	Username     string  `db:"username"`
+	DisplayName  *string `db:"display_name"`
+	Email        *string `db:"email"`
+	Source       string  `db:"source"`
+	PasswordHash *string `db:"password_hash"`
+	IsActive     bool    `db:"is_active"`
+	LastLoginAt  *string `db:"last_login_at"`
+	CreatedAt    string  `db:"created_at"`
+}
+
+// User sources.
+const (
+	UserSourceLocal = "local"
+	UserSourceLDAP  = "ldap"
+)
+
+// UserSources is the Go side of the app_user.source CHECK constraint.
+var UserSources = []string{UserSourceLocal, UserSourceLDAP}
+
+// NewAppUser validates and constructs an account.
+func NewAppUser(id, username, source string, now time.Time) (*AppUser, error) {
+	ve := &ValidationError{}
+	username = strings.ToLower(checkRequired(ve, "username", username))
+	checkEnum(ve, "source", source, UserSources)
+	if err := ve.OrNil(); err != nil {
+		return nil, err
+	}
+	return &AppUser{
+		ID: id, Username: username, Source: source,
+		IsActive: true, CreatedAt: FormatTime(now),
+	}, nil
+}
+
+// Display returns the friendliest available name.
+func (u *AppUser) Display() string {
+	if u.DisplayName != nil && *u.DisplayName != "" {
+		return *u.DisplayName
+	}
+	return u.Username
+}

@@ -1,0 +1,129 @@
+{{/* The impact result.
+
+     This is the page the whole tool builds towards, so it is laid out as an
+     answer rather than as a data dump: what breaks, what merely degrades, and
+     separately, what is serving right now but will not come back. Each row
+     carries a severity rail and the capacity arithmetic that produced it, so
+     a surprising verdict can be checked rather than merely believed. */}}
+{{define "impact_result"}}
+<div id="impact-result">
+
+  {{if not .HasImpact}}
+    <div class="panel"><div class="empty">
+      <strong>Nothing breaks.</strong>
+      No service loses enough capacity to matter, and no dependency propagates from here.
+    </div></div>
+  {{end}}
+
+  {{if .Result.Services}}
+  <div class="panel">
+    <div class="panel-head">
+      <h2>Affected services</h2>
+      <span class="panel-note">
+        Settled after {{pluralise .Result.Iterations "propagation round" "propagation rounds"}}.
+      </span>
+    </div>
+    <div class="scroll-x">
+      <table>
+        <thead>
+          <tr><th>Service</th><th>Status</th><th>Capacity</th><th>Why</th><th>Tier</th></tr>
+        </thead>
+        <tbody>
+          {{range .Result.Services}}
+          <tr class="rail-row {{if eq .Status "down"}}is-down{{else}}is-degraded{{end}}">
+            <td>
+              <a class="id" href="/services/{{.ServiceID}}">{{.Code}}</a>
+              <div style="color:var(--muted);font-size:12.5px">{{.Name}}</div>
+            </td>
+            <td><span class="{{statusClass .Status}}">{{statusLabel .Status}}</span></td>
+            <td>
+              {{if .TotalInstances}}
+                {{$lost := .LostInstances}}
+                <span class="meter" aria-label="{{.LostInstances}} of {{.TotalInstances}} instances lost">
+                  {{range $i := seq .TotalInstances}}<i class="{{if lt $i $lost}}lost{{end}}"></i>{{end}}
+                </span>
+                <span class="num" style="color:var(--muted);font-size:12px;margin-left:6px">
+                  {{.LostInstances}}/{{.TotalInstances}} lost
+                </span>
+              {{else}}
+                <span style="color:var(--faint)">—</span>
+              {{end}}
+            </td>
+            <td>
+              <div>{{.Reason}}</div>
+              {{if .Via}}<div class="reason">via {{.Via}}</div>{{end}}
+            </td>
+            <td><span class="{{tierClass .Tier}}">tier {{.Tier}}</span></td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {{end}}
+
+  {{if .Result.WontRestart}}
+  <div class="callout">
+    <h2>Will not restart</h2>
+    <p class="lede" style="margin-bottom:12px">
+      These are serving right now and will keep serving. They have an unmet startup
+      dependency, so they will fail to come back the next time anything restarts them —
+      which may be weeks from now, for a reason unrelated to this work.
+    </p>
+    <div class="scroll-x">
+      <table>
+        <thead><tr><th>Service</th><th>Unmet at startup</th><th>Tier</th></tr></thead>
+        <tbody>
+          {{range .Result.WontRestart}}
+          <tr class="rail-row is-startup">
+            <td><a class="id" href="/services/{{.ServiceID}}">{{.Code}}</a></td>
+            <td>
+              <div>{{.Via}}</div>
+              <div class="reason">{{.Reason}}</div>
+            </td>
+            <td><span class="{{tierClass .Tier}}">tier {{.Tier}}</span></td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {{end}}
+
+  {{if .Result.Cycles}}
+  <div class="callout callout-warn">
+    <h2>Dependency cycles</h2>
+    <p class="lede" style="margin-bottom:10px">
+      These services depend on each other in a loop, so there is no order that brings
+      them all back cleanly. This is a finding about the estate, not a fault in the report.
+    </p>
+    {{range .Result.Cycles}}
+      <div class="order-list" style="margin-bottom:6px">
+        {{range $i, $code := .}}
+          {{if $i}}<span class="arrow">→</span>{{end}}
+          <span class="step">{{$code}}</span>
+        {{end}}
+      </div>
+    {{end}}
+  </div>
+  {{end}}
+
+  {{if .Result.SafeOrder}}
+  <div class="panel">
+    <div class="panel-head">
+      <h2>Suggested shutdown order</h2>
+      <span class="panel-note">Consumers first, then what they depend on.</span>
+    </div>
+    <div class="panel-body">
+      <div class="order-list">
+        {{range $i, $code := .Result.SafeOrder}}
+          {{if $i}}<span class="arrow">→</span>{{end}}
+          <span class="step">{{$code}}</span>
+        {{end}}
+      </div>
+    </div>
+  </div>
+  {{end}}
+
+</div>
+{{end}}

@@ -1,0 +1,14 @@
+{{/* A flash rendered inside a full page. */}}
+{{define "flash"}}
+<div class="flash flash-{{.Kind}}" role="status">{{.Text}}</div>
+{{end}}
+
+{{/* The same message as an out-of-band swap, so a handler responding with an
+     unrelated fragment can still report what happened. The id targets the
+     dock in the layout; hx-swap-oob="beforeend" appends rather than replacing,
+     so two quick actions do not overwrite each other. */}}
+{{define "flash_oob"}}
+<div id="flash-dock" hx-swap-oob="beforeend">
+  <div class="flash flash-{{.Kind}}" role="status">{{.Text}}</div>
+</div>
+{{end}}

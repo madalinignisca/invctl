@@ -1,0 +1,27 @@
+{{define "content"}}
+<div class="page-head">
+  <div class="eyebrow">Search</div>
+  <h1>Resolve an identifier</h1>
+  <p class="lede">
+    An IP or MAC resolves to the interface that holds it and the prefix that contains
+    it. A bare number is treated as a port. Everything else falls through to a text
+    match on names, serials and asset tags.
+  </p>
+</div>
+
+<div class="panel">
+  <div class="panel-body">
+    <form hx-get="/search" hx-target="#search-results" hx-swap="outerHTML"
+          hx-push-url="true" hx-trigger="keyup changed delay:250ms, search">
+      <div class="field" style="margin-bottom:0">
+        <label for="q">Query</label>
+        <input id="q" class="mono" type="search" name="q" value="{{.Query}}"
+               placeholder="10.20.30.5 · aa:bb:cc:00:01:01 · FCH2033V0YR · 5432 · vault"
+               autofocus autocomplete="off">
+      </div>
+    </form>
+  </div>
+</div>
+
+{{template "search_results" .}}
+{{end}}

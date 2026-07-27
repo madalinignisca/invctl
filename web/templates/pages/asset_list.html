@@ -1,0 +1,48 @@
+{{define "content"}}
+<div class="page-head">
+  <div class="eyebrow">Inventory</div>
+  <h1>Assets</h1>
+  <p class="lede">
+    Layers 1 to 3: the physical network, the physical compute, and the virtualisation
+    on top of it. Containment is a strict tree; everything else is an explicit edge.
+  </p>
+</div>
+
+<div class="panel">
+  <div class="panel-body">
+    {{/* Filters swap only the table below. GET with hx-push-url keeps the URL
+         shareable, so a filtered view can be pasted into a ticket. */}}
+    <form class="toolbar" hx-get="/assets" hx-target="#asset-table" hx-swap="outerHTML"
+          hx-push-url="true" hx-trigger="change, keyup changed delay:300ms from:input[name='q']">
+      <div class="field">
+        <label for="f-q">Name or serial</label>
+        <input id="f-q" class="mono" type="search" name="q" value="{{.Filter.Query}}" placeholder="hv-0">
+      </div>
+      <div class="field">
+        <label for="f-kind">Kind</label>
+        <select id="f-kind" name="kind">
+          <option value="">any</option>
+          {{range $.Kinds}}<option value="{{.}}" {{if eq . $.Filter.Kind}}selected{{end}}>{{.}}</option>{{end}}
+        </select>
+      </div>
+      <div class="field">
+        <label for="f-env">Environment</label>
+        <select id="f-env" name="environment">
+          <option value="">any</option>
+          {{range $.Environments}}<option value="{{.ID}}" {{if eq .ID $.Filter.EnvironmentID}}selected{{end}}>{{.Code}}</option>{{end}}
+        </select>
+      </div>
+      <label class="check" style="margin-bottom:2px">
+        <input type="checkbox" name="retired" value="1" {{if .Filter.IncludeRetired}}checked{{end}}>
+        Include retired
+      </label>
+    </form>
+  </div>
+</div>
+
+{{template "asset_table" .}}
+
+{{if .CanWrite}}
+  {{template "asset_form" dict "CSRF" .CSRF "Errors" (dict) "Environments" .Environments "Kinds" .Kinds "Parents" .Assets}}
+{{end}}
+{{end}}

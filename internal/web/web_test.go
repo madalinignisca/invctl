@@ -1,0 +1,989 @@
+package web_test
+
+import (
+	"bytes"
+	"context"
+	"html"
+	"io"
+	"io/fs"
+	"log/slog"
+	"net/http"
+	"net/http/cookiejar"
+	"net/http/httptest"
+	"net/url"
+	"path/filepath"
+	"regexp"
+	"strings"
+	"sync"
+	"testing"
+
+	"github.com/alexedwards/scs/sqlite3store"
+	"github.com/alexedwards/scs/v2"
+
+	"github.com/gabriel/invctl/internal/auth"
+	"github.com/gabriel/invctl/internal/config"
+	"github.com/gabriel/invctl/internal/domain"
+	"github.com/gabriel/invctl/internal/seed"
+	"github.com/gabriel/invctl/internal/store"
+	"github.com/gabriel/invctl/internal/web"
+	"github.com/gabriel/invctl/internal/web/handlers"
+	"github.com/gabriel/invctl/internal/web/render"
+	webassets "github.com/gabriel/invctl/web"
+)
+
+// These tests drive the real router over real HTTP against a real database.
+// The things worth protecting here -- that a reader cannot write, that a form
+// error is a 422 and not a 200, that HTMX gets a fragment and a browser gets a
+// page -- are all properties of the whole stack, and a handler tested in
+// isolation would demonstrate none of them.
+
+type harness struct {
+	t      *testing.T
+	server *httptest.Server
+	client *http.Client
+	store  *store.SQLStore
+	refs   *seed.Refs
+}
+
+func newHarness(t *testing.T) *harness {
+	t.Helper()
+
+	dsn := "file:" + filepath.Join(t.TempDir(), "web.db")
+	db, err := store.Open(store.DriverSQLite, dsn)
+	if err != nil {
+		t.Fatalf("opening database: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+
+	ctx := context.Background()
+	if err := store.Migrate(ctx, db); err != nil {
+		t.Fatalf("migrating: %v", err)
+	}
+	st := store.New(db)
+
+	refs, err := seed.Load(ctx, st)
+	if err != nil {
+		t.Fatalf("seeding: %v", err)
+	}
+
+	// Two accounts: one with write access, one without. The read-only user is
+	// the whole point of having an authorization model at all.
+	for _, u := range []struct{ name, password string }{
+		{"admin", "admin-password"},
+		{"viewer", "viewer-password"},
+	} {
+		hash, err := auth.HashPassword(u.password)
+		if err != nil {
+			t.Fatalf("hashing password: %v", err)
+		}
+		user, err := domain.NewAppUser(store.NewID(), u.name, domain.UserSourceLocal, st.Now())
+		if err != nil {
+			t.Fatalf("building user: %v", err)
+		}
+		user.PasswordHash = &hash
+		if err := st.CreateUser(ctx, domain.SystemActor, user); err != nil {
+			t.Fatalf("creating user: %v", err)
+		}
+	}
+
+	sessions := scs.New()
+	sessions.Store = sqlite3store.New(db.SQLDB())
+	sessions.Cookie.Secure = false
+
+	renderer, err := render.New(webassets.FS, false)
+	if err != nil {
+		t.Fatalf("parsing templates: %v", err)
+	}
+
+	cfg := &config.Config{AdminUsers: []string{"admin"}, AuthLocal: true}
+	authz := auth.NewAuthorizer(cfg.AdminUsers)
+
+	app := &handlers.App{
+		Store:    st,
+		Render:   renderer,
+		Sessions: sessions,
+		Auth:     auth.NewChain(st, auth.NewLocalAuthenticator(st)),
+		Authz:    authz,
+		Config:   cfg,
+	}
+
+	server := httptest.NewServer(web.Routes(app, staticFS(t), authz))
+	t.Cleanup(server.Close)
+
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatalf("building cookie jar: %v", err)
+	}
+	client := &http.Client{
+		Jar: jar,
+		// Redirects are part of what is under test, so they are not followed.
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+
+	return &harness{t: t, server: server, client: client, store: st, refs: refs}
+}
+
+// staticFS serves the real embedded assets, so a template referencing a
+// missing file would be visible here rather than only in a browser.
+func staticFS(t *testing.T) fs.FS {
+	t.Helper()
+	sub, err := fs.Sub(webassets.FS, "static")
+	if err != nil {
+		t.Fatalf("opening embedded static assets: %v", err)
+	}
+	return sub
+}
+
+func (h *harness) url(path string) string { return h.server.URL + path }
+
+// get issues a GET, optionally as an HTMX request.
+func (h *harness) get(path string, htmx bool) *http.Response {
+	h.t.Helper()
+	req, err := http.NewRequest(http.MethodGet, h.url(path), nil)
+	if err != nil {
+		h.t.Fatalf("building request: %v", err)
+	}
+	if htmx {
+		req.Header.Set("HX-Request", "true")
+	}
+	resp, err := h.client.Do(req)
+	if err != nil {
+		h.t.Fatalf("GET %s: %v", path, err)
+	}
+	return resp
+}
+
+var csrfPattern = regexp.MustCompile(`name="csrf_token" value="([^"]+)"`)
+
+// csrfToken fetches a page and extracts the token from it.
+func (h *harness) csrfToken(path string) string {
+	h.t.Helper()
+	resp := h.get(path, false)
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		h.t.Fatalf("reading body: %v", err)
+	}
+	match := csrfPattern.FindSubmatch(body)
+	if match == nil {
+		h.t.Fatalf("no CSRF token on %s", path)
+	}
+	// The token is base64, so it can contain "+", which html/template escapes
+	// to "&#43;" in the attribute. A browser un-escapes it while parsing; this
+	// harness has to do the same or roughly one login in two fails.
+	return html.UnescapeString(string(match[1]))
+}
+
+// post issues a form POST. Origin is set because nosurf requires one of
+// Sec-Fetch-Site, Origin or Referer on every unsafe request -- a browser
+// always sends one.
+func (h *harness) post(path string, form url.Values, htmx bool) *http.Response {
+	h.t.Helper()
+	req, err := http.NewRequest(http.MethodPost, h.url(path), strings.NewReader(form.Encode()))
+	if err != nil {
+		h.t.Fatalf("building request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Origin", h.server.URL)
+	if htmx {
+		req.Header.Set("HX-Request", "true")
+	}
+	resp, err := h.client.Do(req)
+	if err != nil {
+		h.t.Fatalf("POST %s: %v", path, err)
+	}
+	return resp
+}
+
+// login signs in and asserts it worked.
+func (h *harness) login(username, password string) {
+	h.t.Helper()
+	token := h.csrfToken("/login")
+	resp := h.post("/login", url.Values{
+		"csrf_token": {token},
+		"username":   {username},
+		"password":   {password},
+	}, false)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther {
+		h.t.Fatalf("login as %s returned %d, want 303", username, resp.StatusCode)
+	}
+}
+
+func body(t *testing.T, resp *http.Response) string {
+	t.Helper()
+	defer resp.Body.Close()
+	b, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("reading body: %v", err)
+	}
+	return string(b)
+}
+
+// ---------------------------------------------------------------------------
+
+// TestAnonymousIsRedirectedToLogin: every page except the public ones is
+// behind authentication.
+func TestAnonymousIsRedirectedToLogin(t *testing.T) {
+	h := newHarness(t)
+
+	protected := []string{
+		"/", "/assets", "/services", "/environments",
+		"/search", "/changes", "/reports/spanning",
+	}
+	for _, path := range protected {
+		resp := h.get(path, false)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusSeeOther {
+			t.Errorf("GET %s as anonymous returned %d, want 303 to the login page", path, resp.StatusCode)
+		}
+		if loc := resp.Header.Get("Location"); !strings.HasPrefix(loc, "/login") {
+			t.Errorf("GET %s redirected to %q, want the login page", path, loc)
+		}
+	}
+}
+
+// TestPublicEndpoints stay reachable without a session.
+func TestPublicEndpoints(t *testing.T) {
+	h := newHarness(t)
+
+	for _, path := range []string{"/healthz", "/login"} {
+		resp := h.get(path, false)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("GET %s returned %d, want 200", path, resp.StatusCode)
+		}
+	}
+}
+
+// TestHTMXRequestGetsARedirectHeader: HTMX will not follow a 302 the way a
+// browser does, so an expired session has to come back as HX-Redirect or the
+// login page ends up swapped into a table cell.
+func TestHTMXRequestGetsARedirectHeader(t *testing.T) {
+	h := newHarness(t)
+
+	resp := h.get("/assets", true)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Errorf("status = %d, want 204", resp.StatusCode)
+	}
+	if loc := resp.Header.Get("HX-Redirect"); !strings.HasPrefix(loc, "/login") {
+		t.Errorf("HX-Redirect = %q, want the login page", loc)
+	}
+}
+
+func TestLoginRejectsBadCredentials(t *testing.T) {
+	h := newHarness(t)
+	token := h.csrfToken("/login")
+
+	cases := []struct{ name, username, password string }{
+		{"wrong password", "admin", "not-the-password"},
+		{"unknown user", "nobody", "any-password"},
+		{"empty password", "admin", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			resp := h.post("/login", url.Values{
+				"csrf_token": {token},
+				"username":   {tc.username},
+				"password":   {tc.password},
+			}, false)
+			text := body(t, resp)
+
+			if resp.StatusCode != http.StatusUnauthorized {
+				t.Errorf("status = %d, want 401", resp.StatusCode)
+			}
+			// The message must not distinguish an unknown user from a wrong
+			// password: that difference is a username oracle.
+			if !strings.Contains(text, "was not recognised") {
+				t.Errorf("body does not carry the generic failure message")
+			}
+			if strings.Contains(strings.ToLower(text), "no such user") {
+				t.Errorf("the response distinguishes an unknown username")
+			}
+		})
+	}
+}
+
+// TestCSRFIsEnforced: a POST without a valid token is refused, whatever the
+// session says.
+func TestCSRFIsEnforced(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	cases := []struct {
+		name  string
+		token string
+	}{
+		{name: "missing token", token: ""},
+		{name: "garbage token", token: "not-a-real-token"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			resp := h.post("/environments", url.Values{
+				"csrf_token": {tc.token},
+				"code":       {"csrf-test"},
+				"name":       {"CSRF test"},
+				"role":       {domain.EnvRoleDev},
+			}, false)
+			resp.Body.Close()
+			if resp.StatusCode != http.StatusBadRequest {
+				t.Errorf("status = %d, want 400", resp.StatusCode)
+			}
+		})
+	}
+
+	// And the environment was not created.
+	if _, err := h.store.GetEnvironmentByCode(context.Background(), "csrf-test"); err == nil {
+		t.Error("an environment was created despite the CSRF failure")
+	}
+}
+
+// TestReadOnlyUserCannotWrite is the authorization model, end to end.
+func TestReadOnlyUserCannotWrite(t *testing.T) {
+	h := newHarness(t)
+	h.login("viewer", "viewer-password")
+
+	t.Run("can read", func(t *testing.T) {
+		for _, path := range []string{"/", "/assets", "/services"} {
+			resp := h.get(path, false)
+			resp.Body.Close()
+			if resp.StatusCode != http.StatusOK {
+				t.Errorf("GET %s as viewer returned %d, want 200", path, resp.StatusCode)
+			}
+		}
+	})
+
+	t.Run("cannot write", func(t *testing.T) {
+		token := h.csrfToken("/environments")
+		resp := h.post("/environments", url.Values{
+			"csrf_token": {token},
+			"code":       {"sneaky"},
+			"name":       {"Sneaky"},
+			"role":       {domain.EnvRoleDev},
+		}, false)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusForbidden {
+			t.Errorf("status = %d, want 403", resp.StatusCode)
+		}
+	})
+
+	t.Run("the write did not happen", func(t *testing.T) {
+		if _, err := h.store.GetEnvironmentByCode(context.Background(), "sneaky"); err == nil {
+			t.Error("a read-only user created an environment")
+		}
+	})
+
+	t.Run("write controls are not rendered", func(t *testing.T) {
+		text := body(t, h.get("/environments", false))
+		if strings.Contains(text, `action="/environments"`) {
+			t.Error("the create form is rendered for a read-only user")
+		}
+		if !strings.Contains(text, "read only") {
+			t.Error("the page does not tell the user they are read-only")
+		}
+	})
+}
+
+// TestValidationFailureIs422 covers the rule from CLAUDE.md: a validation
+// failure re-renders the form partial with error state, never a 200 with the
+// message buried in the body.
+func TestValidationFailureIs422(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+	token := h.csrfToken("/environments")
+
+	resp := h.post("/environments", url.Values{
+		"csrf_token": {token},
+		"code":       {""}, // required
+		"name":       {"No code"},
+		"role":       {"not-a-real-role"},
+	}, true)
+	text := body(t, resp)
+
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422", resp.StatusCode)
+	}
+	// The form comes back with its error state, ready to resubmit.
+	if !strings.Contains(text, `id="environment-form"`) {
+		t.Error("the response is not the form partial")
+	}
+	if !strings.Contains(text, "is required") {
+		t.Error("the response does not show the field error")
+	}
+	if !strings.Contains(text, "must be one of") {
+		t.Error("the response does not show the enum error")
+	}
+	// A partial, not a whole page swapped into a div.
+	if strings.Contains(text, "<!doctype html>") {
+		t.Error("an HTMX request received a full page")
+	}
+}
+
+// TestHTMXBranching: the same URL serves a fragment to HTMX and a full page to
+// a browser, which is what keeps every route deep-linkable.
+func TestHTMXBranching(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	full := body(t, h.get("/assets", false))
+	if !strings.Contains(full, "<!doctype html>") {
+		t.Error("a browser navigation did not receive a full page")
+	}
+	if !strings.Contains(full, `id="asset-table"`) {
+		t.Error("the full page does not contain the table")
+	}
+
+	fragment := body(t, h.get("/assets", true))
+	if strings.Contains(fragment, "<!doctype html>") {
+		t.Error("an HTMX request received a full page")
+	}
+	if !strings.Contains(fragment, `id="asset-table"`) {
+		t.Error("the fragment is not the table")
+	}
+}
+
+// TestSuccessfulMutationRedirects: after a successful write, HTMX is told to
+// navigate rather than swap.
+func TestSuccessfulMutationRedirects(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+	token := h.csrfToken("/environments")
+
+	resp := h.post("/environments", url.Values{
+		"csrf_token":  {token},
+		"code":        {"qa"},
+		"name":        {"QA"},
+		"role":        {domain.EnvRoleStaging},
+		"criticality": {"3"},
+	}, true)
+	resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204 with an HX-Redirect", resp.StatusCode)
+	}
+	if got := resp.Header.Get("HX-Redirect"); got != "/environments" {
+		t.Errorf("HX-Redirect = %q, want /environments", got)
+	}
+
+	env, err := h.store.GetEnvironmentByCode(context.Background(), "qa")
+	if err != nil {
+		t.Fatalf("the environment was not created: %v", err)
+	}
+	if env.Role != domain.EnvRoleStaging {
+		t.Errorf("role = %s, want staging", env.Role)
+	}
+}
+
+// TestDependencyValidationRoundTrip drives the form that carries the most
+// business rules: nature, tolerance and the exclusive provider.
+func TestDependencyValidationRoundTrip(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	serviceID := h.refs.Services["orders-web"]
+	path := "/services/" + serviceID
+	token := h.csrfToken(path)
+
+	t.Run("async without a tolerance is rejected", func(t *testing.T) {
+		resp := h.post(path+"/dependencies", url.Values{
+			"csrf_token":           {token},
+			"provider_endpoint_id": {h.refs.Endpoints["rabbitmq/amqp"]},
+			"nature":               {domain.NatureAsync},
+			"failure_mode":         {"Events buffer"},
+		}, true)
+		text := body(t, resp)
+		if resp.StatusCode != http.StatusUnprocessableEntity {
+			t.Fatalf("status = %d, want 422", resp.StatusCode)
+		}
+		if !strings.Contains(text, "required for an async dependency") {
+			t.Errorf("the response does not explain the tolerance requirement")
+		}
+	})
+
+	t.Run("no provider is rejected", func(t *testing.T) {
+		resp := h.post(path+"/dependencies", url.Values{
+			"csrf_token":   {token},
+			"nature":       {domain.NatureHard},
+			"failure_mode": {"Everything stops"},
+		}, true)
+		text := body(t, resp)
+		if resp.StatusCode != http.StatusUnprocessableEntity {
+			t.Fatalf("status = %d, want 422", resp.StatusCode)
+		}
+		if !strings.Contains(text, "provider endpoint or route is required") {
+			t.Errorf("the response does not explain the missing provider")
+		}
+	})
+
+	t.Run("a valid edge is recorded", func(t *testing.T) {
+		resp := h.post(path+"/dependencies", url.Values{
+			"csrf_token":           {token},
+			"provider_endpoint_id": {h.refs.Endpoints["rabbitmq/amqp"]},
+			"nature":               {domain.NatureAsync},
+			"tolerance_seconds":    {"120"},
+			"failure_mode":         {"Events buffer for two minutes"},
+			"data_class":           {"pii", "telemetry"},
+		}, true)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusNoContent {
+			t.Fatalf("status = %d, want 204", resp.StatusCode)
+		}
+
+		ctx := context.Background()
+		deps, err := h.store.ListUpstream(ctx, serviceID)
+		if err != nil {
+			t.Fatalf("listing upstream: %v", err)
+		}
+		var found bool
+		for _, d := range deps {
+			if d.Nature == domain.NatureAsync {
+				found = true
+				if d.ToleranceSeconds == nil || *d.ToleranceSeconds != 120 {
+					t.Errorf("tolerance = %v, want 120", d.ToleranceSeconds)
+				}
+				classes, err := h.store.DataClassesFor(ctx, []string{d.ID})
+				if err != nil {
+					t.Fatalf("loading data classes: %v", err)
+				}
+				if len(classes[d.ID]) != 2 {
+					t.Errorf("data classes = %v, want two", classes[d.ID])
+				}
+			}
+		}
+		if !found {
+			t.Error("the dependency was not recorded")
+		}
+	})
+}
+
+// TestImpactPageRendersTheDemoNarrative walks the case the whole tool exists
+// for, through the UI rather than through the engine's API.
+func TestImpactPageRendersTheDemoNarrative(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	assetID := h.refs.Assets["hv-01"]
+	text := body(t, h.get("/assets/"+assetID+"/impact?window=180", false))
+
+	// Both replicas of orders-api live on this hypervisor.
+	if !strings.Contains(text, "orders-api") {
+		t.Error("orders-api is not reported as affected")
+	}
+	// The proxy is elsewhere and healthy, but the route it fronts is not.
+	if !strings.Contains(text, "partner-gateway") {
+		t.Error("the route consumer is not reported; route-as-node is not working through the UI")
+	}
+	// Quorum survives, so Vault must not appear as affected.
+	if strings.Contains(text, "HashiCorp Vault") {
+		t.Error("vault is reported as affected despite surviving quorum")
+	}
+	// And the capacity arithmetic is shown, not just the verdict.
+	if !strings.Contains(text, "lost") {
+		t.Error("the page does not show the capacity arithmetic")
+	}
+}
+
+// TestImpactWindowChangesTheAnswer proves the control is wired to the engine.
+func TestImpactWindowChangesTheAnswer(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	assetID := h.refs.Assets["vm-queue-1"]
+
+	short := body(t, h.get("/assets/"+assetID+"/impact?window=180", true))
+	long := body(t, h.get("/assets/"+assetID+"/impact?window=2700", true))
+
+	// The fixture's async edge tolerates 300 seconds.
+	if strings.Contains(short, "orders-api") {
+		t.Error("a 3-minute outage degraded a consumer that buffers for 5 minutes")
+	}
+	if !strings.Contains(long, "orders-api") {
+		t.Error("a 45-minute outage did not degrade a consumer that buffers for 5 minutes")
+	}
+}
+
+func TestUnknownAssetIs404(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	resp := h.get("/assets/00000000-0000-0000-0000-000000000000", false)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", resp.StatusCode)
+	}
+}
+
+// TestSecurityHeaders: cheap defences that should never silently disappear.
+func TestSecurityHeaders(t *testing.T) {
+	h := newHarness(t)
+	resp := h.get("/login", false)
+	resp.Body.Close()
+
+	want := map[string]string{
+		"X-Content-Type-Options": "nosniff",
+		"X-Frame-Options":        "DENY",
+	}
+	for header, value := range want {
+		if got := resp.Header.Get(header); got != value {
+			t.Errorf("%s = %q, want %q", header, got, value)
+		}
+	}
+	csp := resp.Header.Get("Content-Security-Policy")
+	if !strings.Contains(csp, "script-src 'self'") {
+		t.Errorf("CSP = %q, want a self-only script-src", csp)
+	}
+	// The CSP-safe Alpine build is vendored precisely so this is not needed.
+	if strings.Contains(csp, "unsafe-eval") {
+		t.Errorf("CSP allows unsafe-eval: %q", csp)
+	}
+}
+
+// TestLogoutEndsTheSession.
+func TestLogoutEndsTheSession(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	resp := h.get("/", false)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("signed-in request returned %d", resp.StatusCode)
+	}
+
+	token := h.csrfToken("/")
+	logout := h.post("/logout", url.Values{"csrf_token": {token}}, false)
+	logout.Body.Close()
+
+	after := h.get("/", false)
+	after.Body.Close()
+	if after.StatusCode != http.StatusSeeOther {
+		t.Errorf("status after sign-out = %d, want a redirect to the login page", after.StatusCode)
+	}
+}
+
+// TestOpenRedirectIsRefused: /login?next=... must not be able to send someone
+// to another site after they authenticate.
+func TestOpenRedirectIsRefused(t *testing.T) {
+	hostile := []string{
+		"https://evil.example/steal",
+		"//evil.example/steal",
+		"/\\evil.example",
+		"https:/evil.example",
+	}
+	for _, next := range hostile {
+		t.Run(next, func(t *testing.T) {
+			// A fresh harness per case: after a successful sign-in, /login
+			// redirects away and there is no form to read a token from.
+			h := newHarness(t)
+			token := h.csrfToken("/login")
+			resp := h.post("/login", url.Values{
+				"csrf_token": {token},
+				"username":   {"admin"},
+				"password":   {"admin-password"},
+				"next":       {next},
+			}, false)
+			resp.Body.Close()
+
+			if loc := resp.Header.Get("Location"); loc != "/" {
+				t.Errorf("next=%q redirected to %q, want /", next, loc)
+			}
+		})
+	}
+
+	t.Run("a legitimate internal path is honoured", func(t *testing.T) {
+		h := newHarness(t)
+		token := h.csrfToken("/login")
+		resp := h.post("/login", url.Values{
+			"csrf_token": {token},
+			"username":   {"admin"},
+			"password":   {"admin-password"},
+			"next":       {"/services"},
+		}, false)
+		resp.Body.Close()
+
+		if loc := resp.Header.Get("Location"); loc != "/services" {
+			t.Errorf("Location = %q, want /services", loc)
+		}
+	})
+}
+
+// TestSearchThroughTheUI closes the loop on M5.
+func TestSearchThroughTheUI(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	cases := []struct{ query, want string }{
+		{"10.20.30.11", "vm-vault-1"},
+		{"aa:bb:cc:00:10:01", "hv-01"},
+		{"FCH2033V0YR", "hv-01"},
+		{"5432", "PostgreSQL"},
+	}
+	for _, tc := range cases {
+		text := body(t, h.get("/search?q="+url.QueryEscape(tc.query), true))
+		if !strings.Contains(text, tc.want) {
+			t.Errorf("searching for %q did not surface %q", tc.query, tc.want)
+		}
+	}
+}
+
+// TestStaticAssetsAreServed. A stylesheet that 404s does not break a page --
+// it renders unstyled, which is easy to miss in a test that only checks status
+// codes and easy to ship. So the assets are asserted directly, including their
+// content type, because a CSS file served as text/plain is refused by the
+// browser just as firmly as a missing one.
+func TestStaticAssetsAreServed(t *testing.T) {
+	h := newHarness(t)
+
+	assets := []struct{ path, wantType string }{
+		{"/static/app.css", "text/css"},
+		{"/static/htmx.min.js", "javascript"},
+		{"/static/alpine.min.js", "javascript"},
+		{"/static/app.js", "javascript"},
+	}
+	for _, a := range assets {
+		resp := h.get(a.path, false)
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("GET %s returned %d, want 200", a.path, resp.StatusCode)
+			continue
+		}
+		if len(body) == 0 {
+			t.Errorf("GET %s returned an empty body", a.path)
+		}
+		if ct := resp.Header.Get("Content-Type"); !strings.Contains(ct, a.wantType) {
+			t.Errorf("GET %s content type = %q, want it to contain %q", a.path, ct, a.wantType)
+		}
+	}
+}
+
+// TestEveryPageTemplateRenders walks each page a signed-in user can reach.
+// A template error surfaces as a 500, and a page nobody visits in a test is a
+// page that breaks in the demo.
+func TestEveryPageTemplateRenders(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	assetID := h.refs.Assets["hv-01"]
+	serviceID := h.refs.Services["orders-api"]
+
+	pages := []string{
+		"/",
+		"/assets",
+		"/assets/" + assetID,
+		"/assets/" + assetID + "/impact",
+		"/services",
+		"/services/" + serviceID,
+		"/environments",
+		"/reports/spanning",
+		"/changes",
+		"/search?q=vault",
+	}
+	for _, path := range pages {
+		resp := h.get(path, false)
+		text := body(t, resp)
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("GET %s returned %d", path, resp.StatusCode)
+			continue
+		}
+		if !strings.Contains(text, "</html>") {
+			t.Errorf("GET %s did not render a complete page", path)
+		}
+		// html/template writes this when a field does not exist on the data.
+		if strings.Contains(text, "<no value>") {
+			t.Errorf("GET %s rendered <no value>; a template references a missing field", path)
+		}
+	}
+}
+
+// TestVerifyKeepsThePanelItCameFrom. The two dependency panels render the same
+// row partial in opposite orientations. The verify request has to say which
+// one it came from, or the swapped-in row names the wrong service and the
+// operator sees a link to the provider where the consumer should be.
+func TestVerifyKeepsThePanelItCameFrom(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	// pgsql-core has upstream deps (vault) and downstream consumers
+	// (orders-api, sso), so both panels are populated.
+	serviceID := h.refs.Services["pgsql-core"]
+	page := body(t, h.get("/services/"+serviceID, false))
+
+	// The rendered buttons must carry a direction, and both values must appear.
+	for _, want := range []string{"direction=upstream", "direction=downstream"} {
+		if !strings.Contains(page, want) {
+			t.Errorf("the service page has no verify button carrying %s", want)
+		}
+	}
+
+	// And the handler must honour it: verifying a downstream row comes back
+	// shaped as a downstream row, naming the consumer.
+	deps, err := h.store.ListDownstream(context.Background(), serviceID)
+	if err != nil {
+		t.Fatalf("listing downstream: %v", err)
+	}
+	if len(deps) == 0 {
+		t.Fatal("fixture has no downstream dependencies on pgsql-core")
+	}
+	dep := deps[0]
+
+	token := h.csrfToken("/services/" + serviceID)
+	fragment := body(t, h.post("/dependencies/"+dep.ID+"/verify?direction=downstream",
+		url.Values{"csrf_token": {token}}, true))
+	if !strings.Contains(fragment, dep.ConsumerCode) {
+		t.Errorf("downstream verify returned a row without the consumer %q: %s", dep.ConsumerCode, fragment)
+	}
+	if !strings.Contains(fragment, "/services/"+dep.ConsumerServiceID) {
+		t.Errorf("downstream verify linked somewhere other than the consumer service")
+	}
+}
+
+// TestFlashSurvivesAValidationFailure. A flash is consumed exactly once, and
+// the layout renders it from the *page* data. The 422 path builds the embedded
+// form context before the page context, so popping the session on every call
+// meant the form swallowed a pending message and the page rendered without it.
+//
+// Reaching that path takes a queued flash followed by a failed submission with
+// no GET in between -- which is exactly what happens to someone submitting a
+// bad form right after a successful one with JavaScript disabled.
+func TestFlashSurvivesAValidationFailure(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+	token := h.csrfToken("/environments")
+
+	// Queue a flash, and deliberately do not follow the redirect: the message
+	// is still sitting in the session.
+	created := h.post("/environments", url.Values{
+		"csrf_token":  {token},
+		"code":        {"qa"},
+		"name":        {"QA"},
+		"role":        {domain.EnvRoleStaging},
+		"criticality": {"3"},
+	}, false)
+	created.Body.Close()
+	if created.StatusCode != http.StatusSeeOther {
+		t.Fatalf("setup: create returned %d, want 303", created.StatusCode)
+	}
+
+	// Now fail validation on the same session, as a plain browser POST.
+	page := body(t, h.post("/environments", url.Values{
+		"csrf_token": {token},
+		"code":       {""},
+		"name":       {"No code"},
+		"role":       {domain.EnvRoleDev},
+	}, false))
+
+	if !strings.Contains(page, "Environment qa created.") {
+		t.Error("the pending flash was consumed by the form context and never rendered")
+	}
+	if !strings.Contains(page, "is required") {
+		t.Error("the validation error is missing")
+	}
+}
+
+// TestFlashIsShownExactlyOnce.
+func TestFlashIsShownExactlyOnce(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+	token := h.csrfToken("/environments")
+
+	resp := h.post("/environments", url.Values{
+		"csrf_token":  {token},
+		"code":        {"qa"},
+		"name":        {"QA"},
+		"role":        {domain.EnvRoleStaging},
+		"criticality": {"3"},
+	}, false)
+	resp.Body.Close()
+
+	if first := body(t, h.get("/environments", false)); !strings.Contains(first, "Environment qa created.") {
+		t.Error("the flash was not shown")
+	}
+	if second := body(t, h.get("/environments", false)); strings.Contains(second, "Environment qa created.") {
+		t.Error("the flash was shown twice")
+	}
+}
+
+// TestAccessLogRecordsTheUser. Authenticate attaches the user to a *derived*
+// context, so any middleware wrapping it sees only the original. With the
+// logger on the outside every line read user=- -- including authenticated
+// writes, which are the lines the log exists for.
+func TestAccessLogRecordsTheUser(t *testing.T) {
+	// The server logs from its own goroutines, so the sink has to be safe to
+	// write and read concurrently.
+	buf := &syncBuffer{}
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	buf.Reset()
+	resp := h.get("/assets", false)
+	resp.Body.Close()
+
+	logged := buf.String()
+	if !strings.Contains(logged, "path=/assets") {
+		t.Fatalf("the request was not logged: %s", logged)
+	}
+	if strings.Contains(logged, "user=-") {
+		t.Errorf("an authenticated request logged user=-: %s", logged)
+	}
+	if !strings.Contains(logged, "user=admin") {
+		t.Errorf("the access log does not name the signed-in user: %s", logged)
+	}
+}
+
+// TestLoginRedirectEscapesTheNextPath. r.URL.Path is decoded, so pasting it
+// straight into a query string lets a path containing & or = split into extra
+// parameters and send the user somewhere else after signing in.
+func TestLoginRedirectEscapesTheNextPath(t *testing.T) {
+	h := newHarness(t)
+
+	// A path containing characters that are significant in a query string.
+	resp := h.get("/assets/a%26b%3Dc", false)
+	resp.Body.Close()
+
+	location := resp.Header.Get("Location")
+	parsed, err := url.Parse(location)
+	if err != nil {
+		t.Fatalf("parsing redirect %q: %v", location, err)
+	}
+	next := parsed.Query().Get("next")
+	if next != "/assets/a&b=c" {
+		t.Errorf("next = %q, want the whole path %q (redirect was %q)",
+			next, "/assets/a&b=c", location)
+	}
+	if len(parsed.Query()) != 1 {
+		t.Errorf("the redirect grew extra query parameters: %v", parsed.Query())
+	}
+}
+
+// syncBuffer is a concurrency-safe log sink. httptest serves each request on
+// its own goroutine, so an unguarded bytes.Buffer races with the assertions.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+func (b *syncBuffer) Reset() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.buf.Reset()
+}

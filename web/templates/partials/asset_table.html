@@ -1,0 +1,50 @@
+{{/* The asset table. Swapped on its own when the filter box changes, so the
+     page around it is not rebuilt on every keystroke. */}}
+{{define "asset_table"}}
+<div id="asset-table" class="panel">
+  <div class="panel-head">
+    <h2>{{pluralise (len .Assets) "asset" "assets"}}</h2>
+    <span class="panel-note">Containment is a tree; environment membership is not.</span>
+  </div>
+  {{if .Assets}}
+  <div class="scroll-x">
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Kind</th>
+          <th>Contained by</th>
+          <th>Environments</th>
+          <th>Serial</th>
+          <th>Lifecycle</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .Assets}}
+        <tr>
+          <td><a class="id" href="/assets/{{.ID}}">{{.Name}}</a></td>
+          <td><span class="pill pill-muted">{{.Kind}}</span></td>
+          <td class="id" style="color:var(--muted)">{{if .ParentName}}{{.ParentName}}{{else}}—{{end}}</td>
+          <td>
+            <div class="tag-list">
+              {{range .Environments}}<span class="pill pill-info">{{.Code}}</span>{{end}}
+              {{if .SpansEnvironments}}
+                <span class="pill pill-degraded" title="In more than one non-transit environment">spans</span>
+              {{end}}
+            </div>
+          </td>
+          <td class="mono" style="color:var(--muted)">{{deref .Serial}}</td>
+          <td><span class="{{lifecycleClass .Lifecycle}}">{{.Lifecycle}}</span></td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{else}}
+  <div class="empty">
+    <strong>Nothing matches those filters.</strong>
+    Clear the filters, or add the asset if it is genuinely missing.
+  </div>
+  {{end}}
+</div>
+{{end}}

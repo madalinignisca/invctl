@@ -1,0 +1,38 @@
+{{define "content"}}
+<div class="crumbs">
+  <a href="/assets">assets</a><span class="sep">/</span>
+  <a href="/assets/{{.Asset.ID}}">{{.Asset.Name}}</a><span class="sep">/</span><span>impact</span>
+</div>
+
+<div class="page-head">
+  <div class="eyebrow">Outage simulation</div>
+  <h1>If <span class="mono">{{.Asset.Name}}</span> goes away</h1>
+  <p class="lede">
+    Everything contained by this {{.Asset.Kind}} goes with it. Availability policy is
+    applied first, then failure semantics propagate along the dependency edges until
+    the result stops changing.
+  </p>
+</div>
+
+<div class="panel">
+  <div class="panel-body">
+    {{/* The outage length is not decoration: an async dependency with a
+         300-second buffer survives a reboot and not a hardware swap. */}}
+    <form class="toolbar" hx-get="/assets/{{.Asset.ID}}/impact"
+          hx-target="#impact-result" hx-swap="outerHTML"
+          hx-push-url="true" hx-trigger="change">
+      <div class="field">
+        <label for="window">How long is it gone?</label>
+        <select id="window" name="window">
+          {{range $.Windows}}
+            <option value="{{.Seconds}}" {{if eq .Seconds $.Window}}selected{{end}}>{{.Label}}</option>
+          {{end}}
+        </select>
+        <div class="field-hint">Only async dependencies read this.</div>
+      </div>
+    </form>
+  </div>
+</div>
+
+{{template "impact_result" .}}
+{{end}}

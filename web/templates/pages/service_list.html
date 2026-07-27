@@ -1,0 +1,52 @@
+{{define "content"}}
+<div class="page-head">
+  <div class="eyebrow">Inventory</div>
+  <h1>Services</h1>
+  <p class="lede">
+    Layer 4. A service is the logical thing — one row however many replicas run —
+    so a dependency is written once rather than once per replica.
+  </p>
+</div>
+
+<div class="panel">
+  <div class="panel-body">
+    <form class="toolbar" hx-get="/services" hx-target="#service-table" hx-swap="outerHTML"
+          hx-push-url="true" hx-trigger="change, keyup changed delay:300ms from:input[name='q']">
+      <div class="field">
+        <label for="sf-q">Code or name</label>
+        <input id="sf-q" class="mono" type="search" name="q" value="{{.Filter.Query}}" placeholder="orders">
+      </div>
+      <div class="field">
+        <label for="sf-env">Environment</label>
+        <select id="sf-env" name="environment">
+          <option value="">any</option>
+          {{range $.Environments}}<option value="{{.ID}}" {{if eq .ID $.Filter.EnvironmentID}}selected{{end}}>{{.Code}}</option>{{end}}
+        </select>
+      </div>
+      <div class="field">
+        <label for="sf-kind">Kind</label>
+        <select id="sf-kind" name="kind">
+          <option value="">any</option>
+          {{range $.Kinds}}<option value="{{.}}" {{if eq . $.Filter.Kind}}selected{{end}}>{{.}}</option>{{end}}
+        </select>
+      </div>
+      <div class="field">
+        <label for="sf-avail">Availability</label>
+        <select id="sf-avail" name="availability">
+          <option value="">any</option>
+          {{range $.Availabilities}}<option value="{{.}}" {{if eq . $.Filter.Availability}}selected{{end}}>{{.}}</option>{{end}}
+        </select>
+      </div>
+    </form>
+  </div>
+</div>
+
+{{template "service_table" .}}
+
+{{if .CanWrite}}
+  {{template "service_form" dict
+      "CSRF" .CSRF "Errors" (dict) "Spec" (dict)
+      "Environments" .Environments "Applications" .Applications
+      "Kinds" .Kinds "Availabilities" .Availabilities}}
+{{end}}
+{{end}}

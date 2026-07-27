@@ -1,0 +1,212 @@
+{{define "content"}}
+<div class="crumbs">
+  <a href="/services">services</a><span class="sep">/</span><span>{{.Service.Code}}</span>
+</div>
+
+<div class="page-head">
+  <div class="eyebrow">{{.Service.Kind}} · {{.Service.EnvironmentCode}}</div>
+  <h1>{{.Service.Name}}</h1>
+  <div class="tag-list" style="margin-top:8px">
+    <span class="mono pill pill-muted">{{.Service.Code}}</span>
+    <span class="{{tierClass .Service.Tier}}">tier {{.Service.Tier}}</span>
+    <span class="{{lifecycleClass .Service.Lifecycle}}">{{.Service.Lifecycle}}</span>
+    {{if .Service.ApplicationName}}<span class="pill pill-muted">{{.Service.ApplicationName}}</span>{{end}}
+  </div>
+</div>
+
+<div class="panel">
+  <div class="panel-body">
+    <dl class="kv">
+      <dt>Availability</dt>
+      <dd>
+        <span class="mono">{{.Service.Availability}}</span>
+        {{if .Service.MinHealthy}}<span style="color:var(--muted)"> — needs at least {{.Service.MinHealthy}} healthy</span>{{end}}
+        {{if .Service.FailoverMode}}<span style="color:var(--muted)"> — {{deref .Service.FailoverMode}} failover</span>{{end}}
+      </dd>
+      <dt>Owner</dt>
+      <dd>{{if .Service.OwnerTeam}}{{deref .Service.OwnerTeam}}{{else}}<span style="color:var(--faint)">unassigned</span>{{end}}</dd>
+      <dt>RTO / RPO</dt>
+      <dd class="num">
+        {{if .Service.RTOMinutes}}{{.Service.RTOMinutes}} min{{else}}—{{end}}
+        /
+        {{if .Service.RPOMinutes}}{{.Service.RPOMinutes}} min{{else}}—{{end}}
+      </dd>
+    </dl>
+  </div>
+</div>
+
+<div class="panel">
+  <div class="panel-head">
+    <h2>Instances</h2>
+    <span class="panel-note">Where this service actually runs. Placement lives here; everything logical lives above.</span>
+  </div>
+  {{if .Instances}}
+  <div class="scroll-x">
+    <table>
+      <thead><tr><th>Host</th><th>Runtime</th><th>Role</th><th>Shard</th><th>Ordinal</th><th>Desired</th><th>Observed</th>{{if .CanWrite}}<th></th>{{end}}</tr></thead>
+      <tbody>
+        {{range .Instances}}
+        <tr {{if eq .DesiredState "disabled"}}style="opacity:0.55"{{end}}>
+          <td><a class="id" href="/assets/{{.HostAssetID}}">{{.HostName}}</a>
+              <div class="mono" style="color:var(--faint);font-size:11.5px">{{.HostKind}}</div></td>
+          <td><span class="pill pill-muted">{{.RuntimeType}}</span></td>
+          <td class="mono">{{if .Role}}{{deref .Role}}{{else}}—{{end}}</td>
+          <td class="mono">{{if .Shard}}{{deref .Shard}}{{else}}—{{end}}</td>
+          <td class="num">{{.Ordinal}}</td>
+          <td class="mono" style="font-size:12px">{{.DesiredState}}</td>
+          <td class="mono" style="font-size:12px;color:var(--muted)">
+            {{if .ObservedState}}{{deref .ObservedState}}{{if .ObservedAt}} <span style="color:var(--faint)">({{since (deref .ObservedAt)}})</span>{{end}}{{else}}—{{end}}
+          </td>
+          {{if $.CanWrite}}
+          <td>
+            {{if ne .DesiredState "disabled"}}
+            <form method="post" action="/instances/{{.ID}}/disable" style="display:inline">
+              <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+              <button class="btn btn-sm btn-danger" type="submit">Disable</button>
+            </form>
+            {{end}}
+          </td>
+          {{end}}
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{else}}
+  <div class="empty"><strong>Not placed anywhere yet.</strong>Without an instance, no outage can reach this service.</div>
+  {{end}}
+  {{if .CanWrite}}
+  <div class="panel-body" style="border-top:1px solid var(--line-soft)">
+    {{template "instance_form" .InstanceForm}}
+  </div>
+  {{end}}
+</div>
+
+<div class="panel">
+  <div class="panel-head">
+    <h2>Endpoints</h2>
+    <span class="panel-note">The sockets other services connect to.</span>
+  </div>
+  {{if .Endpoints}}
+  <div class="scroll-x">
+    <table>
+      <thead><tr><th>Name</th><th>Address</th><th>Bind scope</th><th>TLS</th><th>Exposure</th></tr></thead>
+      <tbody>
+        {{range .Endpoints}}
+        <tr>
+          <td class="mono">{{.Name}}</td>
+          <td class="mono">{{.Addr}}{{if .AddrText}} <span style="color:var(--faint)">on {{.AddrText}}</span>{{end}}</td>
+          <td><span class="pill pill-muted">{{.BindScope}}</span></td>
+          <td class="mono" style="font-size:12px">{{.TLSMode}}</td>
+          <td>
+            <span class="pill {{if eq .Exposure "external"}}pill-down{{else if eq .Exposure "cross_env"}}pill-degraded{{else}}pill-muted{{end}}">{{.Exposure}}</span>
+          </td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{else}}
+  <div class="empty"><strong>No endpoints.</strong>Nothing can depend on this service until it has one.</div>
+  {{end}}
+  {{if .CanWrite}}
+  <div class="panel-body" style="border-top:1px solid var(--line-soft)">
+    {{template "endpoint_form" .EndpointForm}}
+  </div>
+  {{end}}
+</div>
+
+{{if .Routes}}
+<div class="panel">
+  <div class="panel-head">
+    <h2>Routes</h2>
+    <span class="panel-note">A route is a node in the graph: its health follows its pool, not just this proxy.</span>
+  </div>
+  <div class="scroll-x">
+    <table>
+      <thead><tr><th>Match</th><th>Frontend</th><th>Backend pool</th><th>Members</th><th>TLS</th><th>Priority</th></tr></thead>
+      <tbody>
+        {{range .Routes}}
+        <tr>
+          <td class="mono">{{.MatchType}} {{deref .MatchValue}}</td>
+          <td class="mono">{{.FrontendName}}</td>
+          <td class="mono">{{.PoolName}}</td>
+          <td class="num">{{.MemberCount}}</td>
+          <td class="mono" style="font-size:12px">{{deref .TLSTermination}}</td>
+          <td class="num">{{.Priority}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+</div>
+{{end}}
+
+{{/* The two dependency panels: the first point at which this tool is more
+     useful than a spreadsheet. */}}
+<div class="panel">
+  <div class="panel-head">
+    <h2>Depends on</h2>
+    <span class="panel-note">What has to be working for this service to work.</span>
+  </div>
+  {{if .Upstream}}
+  <div class="scroll-x">
+    <table>
+      <thead><tr><th>Provider</th><th>Nature</th><th>What breaks</th><th>Identity</th><th>Verified</th>{{if .CanWrite}}<th></th>{{end}}</tr></thead>
+      <tbody>
+        {{range .Upstream}}{{template "dependency_row" .}}{{end}}
+      </tbody>
+    </table>
+  </div>
+  {{else}}
+  <div class="empty"><strong>No recorded dependencies.</strong>Almost nothing genuinely has none — this usually means nobody has written them down.</div>
+  {{end}}
+  {{if .CanWrite}}
+  <div class="panel-body" style="border-top:1px solid var(--line-soft)">
+    {{template "dependency_form" .DependencyForm}}
+  </div>
+  {{end}}
+</div>
+
+<div class="panel">
+  <div class="panel-head">
+    <h2>Depended on by</h2>
+    <span class="panel-note">What breaks if this service stops.</span>
+  </div>
+  {{if .Downstream}}
+  <div class="scroll-x">
+    <table>
+      <thead><tr><th>Consumer</th><th>Nature</th><th>What breaks</th><th>Identity</th><th>Verified</th>{{if .CanWrite}}<th></th>{{end}}</tr></thead>
+      <tbody>
+        {{range .Downstream}}{{template "dependency_row" .}}{{end}}
+      </tbody>
+    </table>
+  </div>
+  {{else}}
+  <div class="empty"><strong>Nothing depends on this.</strong>If that is a surprise, the dependency has not been recorded yet.</div>
+  {{end}}
+</div>
+
+<div class="panel">
+  <div class="panel-head"><h2>History</h2></div>
+  {{if .Changes}}
+  <div class="scroll-x">
+    <table>
+      <thead><tr><th>When</th><th>Action</th><th>By</th><th>Change</th></tr></thead>
+      <tbody>
+        {{range .Changes}}
+        <tr>
+          <td class="mono" style="font-size:12px;color:var(--muted)">{{shortTime .At}}</td>
+          <td><span class="pill pill-muted">{{.Action}}</span></td>
+          <td class="mono" style="font-size:12px">{{.Actor}}</td>
+          <td class="mono" style="font-size:11.5px;color:var(--muted);max-width:520px;overflow-wrap:anywhere">{{.Diff}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{else}}
+  <div class="empty"><strong>No recorded changes.</strong></div>
+  {{end}}
+</div>
+{{end}}

@@ -1,0 +1,42 @@
+{{define "content"}}{{end}}
+
+{{/* Login replaces the whole layout: there is no navigation to show someone
+     who is not signed in. */}}
+{{define "base"}}<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sign in — invctl</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<div class="login-shell">
+  <div class="login-card">
+    <div style="margin-bottom:18px">
+      <div class="wordmark mono" style="font-size:20px;font-weight:600">inv<span style="color:var(--aqua)">ctl</span></div>
+      <div style="color:var(--faint);font-size:12px;margin-top:2px">infrastructure inventory</div>
+    </div>
+
+    {{if .Error}}
+      <div class="flash flash-error" style="margin-bottom:14px" role="alert">{{.Error}}</div>
+    {{end}}
+
+    <form method="post" action="/login">
+      <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+      <input type="hidden" name="next" value="{{.Next}}">
+      <div class="field">
+        <label for="username">Username</label>
+        <input id="username" class="mono" type="text" name="username" value="{{.Username}}"
+               autocomplete="username" autofocus required>
+      </div>
+      <div class="field">
+        <label for="password">Password</label>
+        <input id="password" type="password" name="password" autocomplete="current-password" required>
+      </div>
+      <button class="btn btn-primary" type="submit" style="width:100%;justify-content:center">Sign in</button>
+    </form>
+  </div>
+</div>
+</body>
+</html>{{end}}

@@ -1,0 +1,379 @@
+{{/* Forms. Each re-renders itself with error state on a 422, which is why
+     every one of these is a standalone partial with a stable wrapping id. */}}
+
+{{define "environment_form"}}
+<form id="environment-form" class="panel" method="post" action="/environments"
+      hx-post="/environments" hx-target="#environment-form" hx-swap="outerHTML">
+  <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+  <div class="panel-head"><h2>Add an environment</h2></div>
+  <div class="panel-body">
+    <div class="field-row">
+      <div class="field">
+        <label for="env-code">Code</label>
+        <input id="env-code" class="mono {{if index .Errors "code"}}invalid{{end}}"
+               type="text" name="code" value="{{.Form.Code}}" placeholder="prod" required>
+        {{with index .Errors "code"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="env-name">Name</label>
+        <input id="env-name" type="text" name="name" value="{{.Form.Name}}" placeholder="Production" required>
+        {{with index .Errors "name"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="env-role">Role</label>
+        <select id="env-role" name="role">
+          {{range $.Roles}}<option value="{{.}}" {{if eq . $.Form.Role}}selected{{end}}>{{.}}</option>{{end}}
+        </select>
+        {{with index .Errors "role"}}<div class="field-error">{{.}}</div>{{end}}
+        <div class="field-hint">A transit environment brokers traffic between the others.</div>
+      </div>
+      <div class="field">
+        <label for="env-crit">Criticality</label>
+        <input id="env-crit" type="number" name="criticality" min="1" max="5" value="{{.Form.Criticality}}">
+        {{with index .Errors "criticality"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+    </div>
+    <label class="check">
+      <input type="checkbox" name="in_scope" {{if .Form.InScope}}checked{{end}}>
+      In audit scope
+    </label>
+    <div style="margin-top:12px"><button class="btn btn-primary" type="submit">Add environment</button></div>
+  </div>
+</form>
+{{end}}
+
+
+{{define "asset_form"}}
+<form id="asset-form" class="panel" method="post" action="/assets"
+      hx-post="/assets" hx-target="#asset-form" hx-swap="outerHTML">
+  <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+  <div class="panel-head"><h2>Add an asset</h2></div>
+  <div class="panel-body">
+    <div class="field-row">
+      <div class="field">
+        <label for="asset-name">Name</label>
+        <input id="asset-name" class="mono {{if index .Errors "name"}}invalid{{end}}"
+               type="text" name="name" placeholder="hv-04" required>
+        {{with index .Errors "name"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="asset-kind">Kind</label>
+        <select id="asset-kind" name="kind">
+          {{range .Kinds}}<option value="{{.}}">{{.}}</option>{{end}}
+        </select>
+        {{with index .Errors "kind"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="asset-parent">Contained by</label>
+        <select id="asset-parent" name="parent_id">
+          <option value="">— nothing (top level) —</option>
+          {{range .Parents}}<option value="{{.ID}}">{{.Name}} ({{.Kind}})</option>{{end}}
+        </select>
+        {{with index .Errors "parent_id"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+    </div>
+    <div class="field-row">
+      <div class="field">
+        <label for="asset-vendor">Vendor</label>
+        <input id="asset-vendor" type="text" name="vendor">
+      </div>
+      <div class="field">
+        <label for="asset-model">Model</label>
+        <input id="asset-model" type="text" name="model">
+      </div>
+      <div class="field">
+        <label for="asset-serial">Serial</label>
+        <input id="asset-serial" class="mono" type="text" name="serial">
+      </div>
+      <div class="field">
+        <label for="asset-owner">Owner team</label>
+        <input id="asset-owner" type="text" name="owner_team">
+      </div>
+    </div>
+    <div class="field">
+      <label>Environments</label>
+      <div class="checks">
+        {{range .Environments}}
+        <label class="check">
+          <input type="checkbox" name="environments" value="{{.ID}}"> {{.Code}}
+        </label>
+        {{end}}
+      </div>
+      <div class="field-hint">Membership is many-to-many. An asset in two non-transit environments is flagged as a span.</div>
+    </div>
+    <button class="btn btn-primary" type="submit">Add asset</button>
+  </div>
+</form>
+{{end}}
+
+
+{{define "service_form"}}
+<form id="service-form" class="panel" method="post" action="/services"
+      hx-post="/services" hx-target="#service-form" hx-swap="outerHTML"
+      x-data="serviceForm">
+  <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+  <div class="panel-head"><h2>Add a service</h2></div>
+  <div class="panel-body">
+    <div class="field-row">
+      <div class="field">
+        <label for="svc-code">Code</label>
+        <input id="svc-code" class="mono {{if index .Errors "code"}}invalid{{end}}"
+               type="text" name="code" value="{{.Spec.Code}}" placeholder="orders-api" required>
+        {{with index .Errors "code"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="svc-name">Name</label>
+        <input id="svc-name" type="text" name="name" value="{{.Spec.Name}}" required>
+        {{with index .Errors "name"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="svc-kind">Kind</label>
+        <select id="svc-kind" name="kind">
+          {{range $.Kinds}}<option value="{{.}}" {{if eq . $.Spec.Kind}}selected{{end}}>{{.}}</option>{{end}}
+        </select>
+      </div>
+      <div class="field">
+        <label for="svc-env">Environment</label>
+        <select id="svc-env" name="environment_id">
+          {{range $.Environments}}<option value="{{.ID}}" {{if eq .ID $.Spec.EnvironmentID}}selected{{end}}>{{.Code}}</option>{{end}}
+        </select>
+        {{with index .Errors "environment_id"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+    </div>
+
+    <div class="field-row">
+      <div class="field">
+        <label for="svc-avail">Availability policy</label>
+        <select id="svc-avail" name="availability" x-on:change="setAvailability">
+          {{range $.Availabilities}}<option value="{{.}}" {{if eq . $.Spec.Availability}}selected{{end}}>{{.}}</option>{{end}}
+        </select>
+        <div class="field-hint">This is what decides whether losing one node is an outage.</div>
+      </div>
+      <div class="field" x-show="needsMinHealthy">
+        <label for="svc-min">Minimum healthy instances</label>
+        <input id="svc-min" type="number" name="min_healthy" min="1" value="{{derefInt .Spec.MinHealthy}}">
+        {{with index .Errors "min_healthy"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field" x-show="needsFailover">
+        <label for="svc-failover">Failover</label>
+        <select id="svc-failover" name="failover_mode">
+          <option value="">—</option>
+          {{range $.FailoverModes}}<option value="{{.}}" {{if eq . (deref $.Spec.FailoverMode)}}selected{{end}}>{{.}}</option>{{end}}
+        </select>
+        {{with index .Errors "failover_mode"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="svc-tier">Tier</label>
+        <input id="svc-tier" type="number" name="tier" min="1" max="4" value="{{if .Spec.Tier}}{{.Spec.Tier}}{{else}}3{{end}}">
+        {{with index .Errors "tier"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+    </div>
+
+    <div class="field-row">
+      <div class="field">
+        <label for="svc-owner">Owner team</label>
+        <input id="svc-owner" type="text" name="owner_team" value="{{deref .Spec.OwnerTeam}}">
+      </div>
+      <div class="field">
+        <label for="svc-rto">RTO (minutes)</label>
+        <input id="svc-rto" type="number" name="rto_minutes" value="{{derefInt .Spec.RTOMinutes}}">
+      </div>
+      <div class="field">
+        <label for="svc-rpo">RPO (minutes)</label>
+        <input id="svc-rpo" type="number" name="rpo_minutes" value="{{derefInt .Spec.RPOMinutes}}">
+      </div>
+      <div class="field">
+        <label for="svc-app">Application</label>
+        <select id="svc-app" name="application_id">
+          <option value="">—</option>
+          {{range .Applications}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
+        </select>
+      </div>
+    </div>
+
+    <button class="btn btn-primary" type="submit">Add service</button>
+  </div>
+</form>
+{{end}}
+
+
+{{define "instance_form"}}
+<form id="instance-form" method="post" action="/services/{{.ServiceID}}/instances"
+      hx-post="/services/{{.ServiceID}}/instances" hx-target="#instance-form" hx-swap="outerHTML">
+  <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+  <div class="field-row">
+    <div class="field">
+      <label for="inst-host">Host</label>
+      <select id="inst-host" name="host_asset_id">
+        {{range .Hosts}}<option value="{{.ID}}">{{.Name}} ({{.Kind}})</option>{{end}}
+      </select>
+      {{with index .Errors "host_asset_id"}}<div class="field-error">{{.}}</div>{{end}}
+    </div>
+    <div class="field">
+      <label for="inst-runtime">Runtime</label>
+      <select id="inst-runtime" name="runtime_type">
+        {{range .RuntimeTypes}}<option value="{{.}}">{{.}}</option>{{end}}
+      </select>
+      {{with index .Errors "runtime_type"}}<div class="field-error">{{.}}</div>{{end}}
+    </div>
+    <div class="field">
+      <label for="inst-role">Role</label>
+      <input id="inst-role" class="mono" type="text" name="role" placeholder="primary / standby">
+      <div class="field-hint">Only active/passive reads this.</div>
+    </div>
+    <div class="field">
+      <label for="inst-shard">Shard</label>
+      <input id="inst-shard" class="mono" type="text" name="shard" placeholder="shard-a">
+      <div class="field-hint">Only sharded reads this.</div>
+    </div>
+    <div class="field">
+      <label for="inst-ordinal">Ordinal</label>
+      <input id="inst-ordinal" type="number" name="ordinal" min="0" value="0">
+      {{with index .Errors "ordinal"}}<div class="field-error">{{.}}</div>{{end}}
+    </div>
+  </div>
+  <button class="btn btn-primary" type="submit">Place instance</button>
+</form>
+{{end}}
+
+
+{{define "endpoint_form"}}
+<form id="endpoint-form" method="post" action="/services/{{.ServiceID}}/endpoints"
+      hx-post="/services/{{.ServiceID}}/endpoints" hx-target="#endpoint-form" hx-swap="outerHTML"
+      x-data="endpointForm">
+  <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+  <div class="field-row">
+    <div class="field">
+      <label for="ep-name">Name</label>
+      <input id="ep-name" class="mono {{if index .Errors "name"}}invalid{{end}}"
+             type="text" name="name" placeholder="https" required>
+      {{with index .Errors "name"}}<div class="field-error">{{.}}</div>{{end}}
+    </div>
+    <div class="field">
+      <label for="ep-proto">Protocol</label>
+      <select id="ep-proto" name="l4_proto" x-on:change="setProto">
+        {{range .Protos}}<option value="{{.}}">{{.}}</option>{{end}}
+      </select>
+    </div>
+    <div class="field" x-show="!isUnix">
+      <label for="ep-port">Port</label>
+      <input id="ep-port" type="number" name="port" min="1" max="65535" placeholder="8443">
+      {{with index .Errors "port"}}<div class="field-error">{{.}}</div>{{end}}
+    </div>
+    <div class="field" x-show="isUnix">
+      <label for="ep-path">Socket path</label>
+      <input id="ep-path" class="mono" type="text" name="unix_path" placeholder="/var/run/app.sock">
+      {{with index .Errors "unix_path"}}<div class="field-error">{{.}}</div>{{end}}
+    </div>
+    <div class="field">
+      <label for="ep-bind">Bind scope</label>
+      <select id="ep-bind" name="bind_scope">
+        {{range .BindScopes}}<option value="{{.}}">{{.}}</option>{{end}}
+      </select>
+    </div>
+    <div class="field">
+      <label for="ep-exposure">Exposure</label>
+      <select id="ep-exposure" name="exposure">
+        {{range .Exposures}}<option value="{{.}}">{{.}}</option>{{end}}
+      </select>
+    </div>
+    <div class="field">
+      <label for="ep-tls">TLS</label>
+      <select id="ep-tls" name="tls_mode">
+        {{range .TLSModes}}<option value="{{.}}">{{.}}</option>{{end}}
+      </select>
+    </div>
+  </div>
+  <button class="btn btn-primary" type="submit">Add endpoint</button>
+</form>
+{{end}}
+
+
+{{define "dependency_form"}}
+<form id="dependency-form" method="post" action="/services/{{.ServiceID}}/dependencies"
+      hx-post="/services/{{.ServiceID}}/dependencies" hx-target="#dependency-form" hx-swap="outerHTML"
+      x-data="dependencyForm">
+  <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+
+  <div class="field-row">
+    <div class="field">
+      <label for="dep-provider-kind">Depends on</label>
+      <select id="dep-provider-kind" x-on:change="setProviderKind">
+        <option value="endpoint">an endpoint</option>
+        <option value="route">a route</option>
+      </select>
+      <div class="field-hint">A route resolves through its pool, so its health follows the backends.</div>
+    </div>
+    <div class="field" x-show="!usesRoute">
+      <label for="dep-endpoint">Provider endpoint</label>
+      <select id="dep-endpoint" name="provider_endpoint_id">
+        <option value="">—</option>
+        {{range .AllEndpoints}}
+          <option value="{{.ID}}">{{.ServiceCode}} / {{.Name}} ({{.Addr}})</option>
+        {{end}}
+      </select>
+    </div>
+    <div class="field" x-show="usesRoute">
+      <label for="dep-route">Provider route</label>
+      <select id="dep-route" name="provider_route_id">
+        <option value="">—</option>
+        {{range .AllRoutes}}
+          <option value="{{.ID}}">{{.FrontendService}} → {{deref .MatchValue}}</option>
+        {{end}}
+      </select>
+    </div>
+    {{with index .Errors "provider"}}<div class="field-error">{{.}}</div>{{end}}
+  </div>
+
+  <div class="field-row">
+    <div class="field">
+      <label for="dep-nature">Nature</label>
+      <select id="dep-nature" name="nature" x-on:change="setNature">
+        {{range .Natures}}<option value="{{.}}">{{.}} — {{natureDesc .}}</option>{{end}}
+      </select>
+      {{with index .Errors "nature"}}<div class="field-error">{{.}}</div>{{end}}
+    </div>
+    <div class="field" x-show="needsTolerance">
+      <label for="dep-tolerance">Tolerance (seconds)</label>
+      <input id="dep-tolerance" type="number" name="tolerance_seconds" min="0" placeholder="300">
+      <div class="field-hint">How long the consumer buffers before it degrades.</div>
+      {{with index .Errors "tolerance_seconds"}}<div class="field-error">{{.}}</div>{{end}}
+    </div>
+    <div class="field">
+      <label for="dep-identity">Identity</label>
+      <select id="dep-identity" name="identity_id">
+        <option value="">—</option>
+        {{range .Identities}}<option value="{{.ID}}">{{deref .Realm}}/{{.Name}}</option>{{end}}
+      </select>
+    </div>
+    <div class="field">
+      <label for="dep-auth">Auth method</label>
+      <input id="dep-auth" class="mono" type="text" name="auth_method" placeholder="mtls">
+    </div>
+    <div class="field">
+      <label for="dep-fw">Firewall rule</label>
+      <input id="dep-fw" class="mono" type="text" name="firewall_rule_ref" placeholder="PROD-APP-TO-DB-5432">
+    </div>
+  </div>
+
+  <div class="field">
+    <label for="dep-failure">What breaks when the provider is gone</label>
+    <input id="dep-failure" class="{{if index .Errors "failure_mode"}}invalid{{end}}"
+           type="text" name="failure_mode"
+           placeholder="Order writes fail immediately; the API returns 503" required>
+    <div class="field-hint">Write this in plain terms. It is what the next person on call reads.</div>
+    {{with index .Errors "failure_mode"}}<div class="field-error">{{.}}</div>{{end}}
+  </div>
+
+  <div class="field">
+    <label>Data carried</label>
+    <div class="checks">
+      {{range .ClassOptions}}
+      <label class="check"><input type="checkbox" name="data_class" value="{{.}}"> {{.}}</label>
+      {{end}}
+    </div>
+  </div>
+
+  <button class="btn btn-primary" type="submit">Record dependency</button>
+</form>
+{{end}}

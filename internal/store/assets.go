@@ -1,0 +1,543 @@
+package store
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/gabriel/invctl/internal/domain"
+)
+
+// ---------- environments ----------
+
+// CreateEnvironment inserts an environment and its audit row.
+func (s *SQLStore) CreateEnvironment(ctx context.Context, actor domain.Actor, env *domain.Environment) error {
+	return s.write(ctx, actor, func(t *tx) error {
+		_, err := t.exec(ctx,
+			`INSERT INTO environment (id, code, name, role, in_scope, criticality, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			env.ID, env.Code, env.Name, env.Role, env.InScope, env.Criticality, env.CreatedAt, env.UpdatedAt)
+		if err != nil {
+			return translateWriteErr(err, "creating environment")
+		}
+		if err := t.logCreate(ctx, "environment", env.ID, env); err != nil {
+			return err
+		}
+		return s.indexEntity(ctx, t, searchDoc{
+			EntityType: "environment", EntityID: env.ID,
+			Title: env.Name, Subtitle: env.Code, Body: env.Role,
+		})
+	})
+}
+
+// UpdateEnvironment persists a modified environment.
+func (s *SQLStore) UpdateEnvironment(ctx context.Context, actor domain.Actor, env *domain.Environment) error {
+	before, err := s.GetEnvironment(ctx, env.ID)
+	if err != nil {
+		return err
+	}
+	env.CreatedAt = before.CreatedAt
+	env.UpdatedAt = domain.FormatTime(s.now())
+
+	return s.write(ctx, actor, func(t *tx) error {
+		_, err := t.exec(ctx,
+			`UPDATE environment
+			 SET code = ?, name = ?, role = ?, in_scope = ?, criticality = ?, updated_at = ?
+			 WHERE id = ?`,
+			env.Code, env.Name, env.Role, env.InScope, env.Criticality, env.UpdatedAt, env.ID)
+		if err != nil {
+			return translateWriteErr(err, "updating environment")
+		}
+		if err := t.logUpdate(ctx, "environment", env.ID, before, env); err != nil {
+			return err
+		}
+		return s.indexEntity(ctx, t, searchDoc{
+			EntityType: "environment", EntityID: env.ID,
+			Title: env.Name, Subtitle: env.Code, Body: env.Role,
+		})
+	})
+}
+
+// GetEnvironment loads one environment by id.
+func (s *SQLStore) GetEnvironment(ctx context.Context, id string) (*domain.Environment, error) {
+	var env domain.Environment
+	if err := s.readOne(ctx, &env, `SELECT * FROM environment WHERE id = ?`, id); err != nil {
+		return nil, fmt.Errorf("getting environment %s: %w", id, err)
+	}
+	return &env, nil
+}
+
+// GetEnvironmentByCode loads one environment by its short code.
+func (s *SQLStore) GetEnvironmentByCode(ctx context.Context, code string) (*domain.Environment, error) {
+	var env domain.Environment
+	if err := s.readOne(ctx, &env, `SELECT * FROM environment WHERE code = ?`, code); err != nil {
+		return nil, fmt.Errorf("getting environment %s: %w", code, err)
+	}
+	return &env, nil
+}
+
+// ListEnvironments returns every environment, most critical first.
+func (s *SQLStore) ListEnvironments(ctx context.Context) ([]domain.Environment, error) {
+	var envs []domain.Environment
+	err := s.read(ctx, &envs, `SELECT * FROM environment ORDER BY criticality ASC, code ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("listing environments: %w", err)
+	}
+	return envs, nil
+}
+
+// ---------- assets ----------
+
+// AssetFilter narrows a list query. Empty fields are ignored.
+type AssetFilter struct {
+	Kind          string
+	Lifecycle     string
+	EnvironmentID string
+	ParentID      string
+	Query         string
+	// IncludeRetired defaults false: retired assets are kept forever but are
+	// noise in day-to-day lists.
+	IncludeRetired bool
+}
+
+// ListAssets returns assets matching the filter, with their environment codes
+// preloaded for display.
+func (s *SQLStore) ListAssets(ctx context.Context, f AssetFilter) ([]AssetRow, error) {
+	query := `SELECT a.* FROM asset a`
+	var args []any
+	var where []string
+
+	if f.EnvironmentID != "" {
+		query += ` JOIN asset_environment ae ON ae.asset_id = a.id AND ae.environment_id = ?`
+		args = append(args, f.EnvironmentID)
+	}
+	if f.Kind != "" {
+		where = append(where, `a.kind = ?`)
+		args = append(args, f.Kind)
+	}
+	if f.Lifecycle != "" {
+		where = append(where, `a.lifecycle = ?`)
+		args = append(args, f.Lifecycle)
+	} else if !f.IncludeRetired {
+		where = append(where, `a.lifecycle <> ?`)
+		args = append(args, domain.LifecycleRetired)
+	}
+	if f.ParentID != "" {
+		where = append(where, `a.parent_id = ?`)
+		args = append(args, f.ParentID)
+	}
+	if f.Query != "" {
+		// LIKE with a leading wildcard, not a full-text match: this is the
+		// list page's filter box, not the global search, and it has to work
+		// identically on both engines. LOWER() on both sides keeps it
+		// case-insensitive on PostgreSQL, where LIKE is case-sensitive.
+		where = append(where, `(LOWER(a.name) LIKE ? OR LOWER(COALESCE(a.serial, '')) LIKE ?)`)
+		pattern := "%" + lower(f.Query) + "%"
+		args = append(args, pattern, pattern)
+	}
+	query += whereClause(where) + ` ORDER BY a.kind, a.name`
+
+	var assets []domain.Asset
+	if err := s.read(ctx, &assets, query, args...); err != nil {
+		return nil, fmt.Errorf("listing assets: %w", err)
+	}
+	return s.decorateAssets(ctx, assets)
+}
+
+// AssetRow is an asset plus the denormalised bits every list view needs.
+type AssetRow struct {
+	domain.Asset
+	ParentName    string
+	Environments  []domain.Environment
+	InstanceCount int
+}
+
+// SpansEnvironments reports whether this asset sits in more than one
+// environment -- the query the handover says will be run constantly.
+//
+// A transit environment does not count towards the span: brokering traffic
+// between segments is a transit zone's entire purpose, so counting it would
+// make every firewall a permanent false positive (docs/DECISIONS.md Q4).
+func (r *AssetRow) SpansEnvironments() bool {
+	nonTransit := 0
+	for _, env := range r.Environments {
+		if !env.IsTransit() {
+			nonTransit++
+		}
+	}
+	return nonTransit > 1
+}
+
+// decorateAssets attaches parent names and environment membership in two
+// queries rather than one per row.
+func (s *SQLStore) decorateAssets(ctx context.Context, assets []domain.Asset) ([]AssetRow, error) {
+	rows := make([]AssetRow, len(assets))
+	ids := make([]string, 0, len(assets))
+	index := make(map[string]int, len(assets))
+	for i, a := range assets {
+		rows[i] = AssetRow{Asset: a}
+		ids = append(ids, a.ID)
+		index[a.ID] = i
+	}
+	if len(ids) == 0 {
+		return rows, nil
+	}
+
+	type membership struct {
+		AssetID string `db:"asset_id"`
+		domain.Environment
+	}
+	var memberships []membership
+	err := s.read(ctx, &memberships, `
+		SELECT ae.asset_id, e.*
+		FROM asset_environment ae
+		JOIN environment e ON e.id = ae.environment_id
+		WHERE ae.asset_id IN (`+placeholders(len(ids))+`)
+		ORDER BY e.code`, anySlice(ids)...)
+	if err != nil {
+		return nil, fmt.Errorf("loading asset environments: %w", err)
+	}
+	for _, m := range memberships {
+		if i, ok := index[m.AssetID]; ok {
+			rows[i].Environments = append(rows[i].Environments, m.Environment)
+		}
+	}
+
+	type parentName struct {
+		ID   string `db:"id"`
+		Name string `db:"name"`
+	}
+	var parents []parentName
+	err = s.read(ctx, &parents, `
+		SELECT DISTINCT p.id, p.name
+		FROM asset a JOIN asset p ON p.id = a.parent_id
+		WHERE a.id IN (`+placeholders(len(ids))+`)`, anySlice(ids)...)
+	if err != nil {
+		return nil, fmt.Errorf("loading parent names: %w", err)
+	}
+	byID := make(map[string]string, len(parents))
+	for _, p := range parents {
+		byID[p.ID] = p.Name
+	}
+	for i := range rows {
+		if rows[i].ParentID != nil {
+			rows[i].ParentName = byID[*rows[i].ParentID]
+		}
+	}
+	return rows, nil
+}
+
+// GetAsset loads one asset with its environments attached.
+func (s *SQLStore) GetAsset(ctx context.Context, id string) (*AssetRow, error) {
+	var asset domain.Asset
+	if err := s.readOne(ctx, &asset, `SELECT * FROM asset WHERE id = ?`, id); err != nil {
+		return nil, fmt.Errorf("getting asset %s: %w", id, err)
+	}
+	rows, err := s.decorateAssets(ctx, []domain.Asset{asset})
+	if err != nil {
+		return nil, err
+	}
+	return &rows[0], nil
+}
+
+// CreateAsset inserts an asset, seeds its closure rows, and audits the change.
+func (s *SQLStore) CreateAsset(ctx context.Context, actor domain.Actor, a *domain.Asset, environmentIDs []string) error {
+	if err := a.Validate(); err != nil {
+		return err
+	}
+	return s.write(ctx, actor, func(t *tx) error {
+		_, err := t.exec(ctx,
+			`INSERT INTO asset (id, kind, name, parent_id, serial, asset_tag, vendor, model,
+			                    lifecycle, owner_team, attrs, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			a.ID, a.Kind, a.Name, a.ParentID, a.Serial, a.AssetTag, a.Vendor, a.Model,
+			a.Lifecycle, a.OwnerTeam, a.Attrs, a.CreatedAt, a.UpdatedAt)
+		if err != nil {
+			return translateWriteErr(err, "creating asset")
+		}
+		if err := insertClosureForNewNode(ctx, t, a.ID, a.ParentID); err != nil {
+			return err
+		}
+		if err := setAssetEnvironments(ctx, t, a.ID, environmentIDs); err != nil {
+			return err
+		}
+		if err := t.logCreate(ctx, "asset", a.ID, a); err != nil {
+			return err
+		}
+		return s.indexAsset(ctx, t, a)
+	})
+}
+
+// UpdateAsset persists field changes. Reparenting is deliberately not handled
+// here -- it has to rebuild the closure subtree, so it gets its own method.
+func (s *SQLStore) UpdateAsset(ctx context.Context, actor domain.Actor, a *domain.Asset, environmentIDs []string) error {
+	if err := a.Validate(); err != nil {
+		return err
+	}
+	before, err := s.GetAsset(ctx, a.ID)
+	if err != nil {
+		return err
+	}
+	a.CreatedAt = before.CreatedAt
+	a.ParentID = before.ParentID // reparenting goes through ReparentAsset
+	a.UpdatedAt = domain.FormatTime(s.now())
+
+	return s.write(ctx, actor, func(t *tx) error {
+		_, err := t.exec(ctx,
+			`UPDATE asset SET kind = ?, name = ?, serial = ?, asset_tag = ?, vendor = ?,
+			                  model = ?, lifecycle = ?, owner_team = ?, attrs = ?, updated_at = ?
+			 WHERE id = ?`,
+			a.Kind, a.Name, a.Serial, a.AssetTag, a.Vendor, a.Model,
+			a.Lifecycle, a.OwnerTeam, a.Attrs, a.UpdatedAt, a.ID)
+		if err != nil {
+			return translateWriteErr(err, "updating asset")
+		}
+		if err := setAssetEnvironments(ctx, t, a.ID, environmentIDs); err != nil {
+			return err
+		}
+		if err := t.logUpdate(ctx, "asset", a.ID, &before.Asset, a); err != nil {
+			return err
+		}
+		return s.indexAsset(ctx, t, a)
+	})
+}
+
+// RetireAsset is the only form of deletion. The row stays; lifecycle moves to
+// retired, and the audit trail records who did it.
+func (s *SQLStore) RetireAsset(ctx context.Context, actor domain.Actor, id string) error {
+	before, err := s.GetAsset(ctx, id)
+	if err != nil {
+		return err
+	}
+	if before.Lifecycle == domain.LifecycleRetired {
+		return nil
+	}
+	at := domain.FormatTime(s.now())
+	return s.write(ctx, actor, func(t *tx) error {
+		_, err := t.exec(ctx, `UPDATE asset SET lifecycle = ?, updated_at = ? WHERE id = ?`,
+			domain.LifecycleRetired, at, id)
+		if err != nil {
+			return translateWriteErr(err, "retiring asset")
+		}
+		diff := fmt.Sprintf(`{"lifecycle":{"old":%q,"new":%q}}`, before.Lifecycle, domain.LifecycleRetired)
+		return t.log(ctx, "asset", id, domain.ActionRetire, diff)
+	})
+}
+
+// ---------- containment ----------
+
+// insertClosureForNewNode writes the closure rows for a leaf that has just
+// been created: a self-row at depth 0, plus one row per ancestor of its
+// parent. A new node has no descendants yet, so this is the cheap case.
+func insertClosureForNewNode(ctx context.Context, t *tx, id string, parentID *string) error {
+	if _, err := t.exec(ctx,
+		`INSERT INTO asset_closure (ancestor_id, descendant_id, depth) VALUES (?, ?, 0)`,
+		id, id); err != nil {
+		return translateWriteErr(err, "seeding closure self row")
+	}
+	if parentID == nil || *parentID == "" {
+		return nil
+	}
+	_, err := t.exec(ctx,
+		`INSERT INTO asset_closure (ancestor_id, descendant_id, depth)
+		 SELECT c.ancestor_id, ?, c.depth + 1
+		 FROM asset_closure c
+		 WHERE c.descendant_id = ?`,
+		id, *parentID)
+	if err != nil {
+		return translateWriteErr(err, "seeding closure ancestors")
+	}
+	return nil
+}
+
+// ReparentAsset moves a subtree.
+//
+// The closure rows for the whole subtree are rebuilt rather than patched
+// incrementally: incremental updates to a closure table are where these
+// implementations go wrong, and a subtree here is small enough that rebuilding
+// costs nothing.
+func (s *SQLStore) ReparentAsset(ctx context.Context, actor domain.Actor, id string, newParentID *string) error {
+	before, err := s.GetAsset(ctx, id)
+	if err != nil {
+		return err
+	}
+	if newParentID != nil && *newParentID == "" {
+		newParentID = nil
+	}
+	if newParentID != nil && *newParentID == id {
+		ve := &domain.ValidationError{}
+		ve.Add("parent_id", "an asset cannot contain itself")
+		return ve
+	}
+
+	at := domain.FormatTime(s.now())
+	return s.write(ctx, actor, func(t *tx) error {
+		if newParentID != nil {
+			// Moving a node underneath its own descendant would detach the
+			// subtree into a cycle, and the closure table has no way to
+			// represent that.
+			var n int
+			err := t.get(ctx, &n,
+				`SELECT COUNT(*) FROM asset_closure WHERE ancestor_id = ? AND descendant_id = ?`,
+				id, *newParentID)
+			if err != nil {
+				return fmt.Errorf("checking for containment cycle: %w", err)
+			}
+			if n > 0 {
+				ve := &domain.ValidationError{}
+				ve.Add("parent_id", "that asset is inside this one; moving it there would create a cycle")
+				return ve
+			}
+		}
+
+		// Detach: drop every edge from outside the subtree into it, keeping
+		// the subtree's internal edges intact.
+		_, err := t.exec(ctx, `
+			DELETE FROM asset_closure
+			WHERE descendant_id IN (SELECT descendant_id FROM asset_closure WHERE ancestor_id = ?)
+			  AND ancestor_id NOT IN (SELECT descendant_id FROM asset_closure WHERE ancestor_id = ?)`,
+			id, id)
+		if err != nil {
+			return translateWriteErr(err, "detaching closure subtree")
+		}
+
+		// Reattach: cross-join every ancestor of the new parent with every
+		// descendant of the moved node.
+		if newParentID != nil {
+			_, err = t.exec(ctx, `
+				INSERT INTO asset_closure (ancestor_id, descendant_id, depth)
+				SELECT super.ancestor_id, sub.descendant_id, super.depth + sub.depth + 1
+				FROM asset_closure super
+				CROSS JOIN asset_closure sub
+				WHERE super.descendant_id = ? AND sub.ancestor_id = ?`,
+				*newParentID, id)
+			if err != nil {
+				return translateWriteErr(err, "reattaching closure subtree")
+			}
+		}
+
+		if _, err := t.exec(ctx, `UPDATE asset SET parent_id = ?, updated_at = ? WHERE id = ?`,
+			newParentID, at, id); err != nil {
+			return translateWriteErr(err, "reparenting asset")
+		}
+
+		after := before.Asset
+		after.ParentID = newParentID
+		return t.logUpdate(ctx, "asset", id, &before.Asset, &after)
+	})
+}
+
+// SubtreeIDs returns every asset at or below the given assets, including the
+// assets themselves. This is the query that makes "reboot this VM", "reboot
+// this hypervisor" and "this rack loses power" the same operation.
+func (s *SQLStore) SubtreeIDs(ctx context.Context, assetIDs []string) ([]string, error) {
+	if len(assetIDs) == 0 {
+		return nil, nil
+	}
+	var ids []string
+	err := s.read(ctx, &ids, `
+		SELECT DISTINCT descendant_id FROM asset_closure
+		WHERE ancestor_id IN (`+placeholders(len(assetIDs))+`)`, anySlice(assetIDs)...)
+	if err != nil {
+		return nil, fmt.Errorf("resolving subtree: %w", err)
+	}
+	return ids, nil
+}
+
+// Ancestors returns the containment path from the root down to the asset,
+// excluding the asset itself. Used for breadcrumbs.
+func (s *SQLStore) Ancestors(ctx context.Context, assetID string) ([]domain.Asset, error) {
+	var assets []domain.Asset
+	err := s.read(ctx, &assets, `
+		SELECT a.* FROM asset_closure c
+		JOIN asset a ON a.id = c.ancestor_id
+		WHERE c.descendant_id = ? AND c.depth > 0
+		ORDER BY c.depth DESC`, assetID)
+	if err != nil {
+		return nil, fmt.Errorf("loading ancestors of %s: %w", assetID, err)
+	}
+	return assets, nil
+}
+
+// Children returns the direct children of an asset.
+func (s *SQLStore) Children(ctx context.Context, assetID string) ([]AssetRow, error) {
+	return s.ListAssets(ctx, AssetFilter{ParentID: assetID, IncludeRetired: true})
+}
+
+// ---------- environment membership ----------
+
+func setAssetEnvironments(ctx context.Context, t *tx, assetID string, environmentIDs []string) error {
+	if environmentIDs == nil {
+		return nil // caller is not managing membership in this operation
+	}
+	if _, err := t.exec(ctx, `DELETE FROM asset_environment WHERE asset_id = ?`, assetID); err != nil {
+		return translateWriteErr(err, "clearing asset environments")
+	}
+	for _, envID := range environmentIDs {
+		if envID == "" {
+			continue
+		}
+		_, err := t.exec(ctx,
+			`INSERT INTO asset_environment (asset_id, environment_id) VALUES (?, ?)`,
+			assetID, envID)
+		if err != nil {
+			return translateWriteErr(err, "adding asset to environment")
+		}
+	}
+	return nil
+}
+
+// SpanningAssets returns assets that belong to more than one non-transit
+// environment. These are the segmentation exceptions worth reviewing: a
+// transit zone spanning environments is doing its job, a database doing it is
+// a finding.
+func (s *SQLStore) SpanningAssets(ctx context.Context) ([]AssetRow, error) {
+	// Retired assets are excluded: a decommissioned server that once bridged
+	// two environments is history, not a live segmentation exception, and
+	// leaving it on the report keeps a resolved finding permanently open.
+	var ids []string
+	err := s.read(ctx, &ids, `
+		SELECT ae.asset_id
+		FROM asset_environment ae
+		JOIN environment e ON e.id = ae.environment_id
+		JOIN asset a ON a.id = ae.asset_id
+		WHERE e.role <> ? AND a.lifecycle <> ?
+		GROUP BY ae.asset_id
+		HAVING COUNT(*) > 1`, domain.EnvRoleTransit, domain.LifecycleRetired)
+	if err != nil {
+		return nil, fmt.Errorf("finding spanning assets: %w", err)
+	}
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	var assets []domain.Asset
+	err = s.read(ctx, &assets,
+		`SELECT * FROM asset WHERE id IN (`+placeholders(len(ids))+`) ORDER BY name`, anySlice(ids)...)
+	if err != nil {
+		return nil, fmt.Errorf("loading spanning assets: %w", err)
+	}
+	return s.decorateAssets(ctx, assets)
+}
+
+// whereClause joins predicates, returning an empty string when there are none.
+func whereClause(where []string) string {
+	if len(where) == 0 {
+		return ""
+	}
+	out := " WHERE " + where[0]
+	for _, w := range where[1:] {
+		out += " AND " + w
+	}
+	return out
+}
+
+// lower is strings.ToLower, kept local so the LIKE-building code reads as one
+// idea rather than importing strings for a single call.
+func lower(s string) string {
+	b := []byte(s)
+	for i := range b {
+		if b[i] >= 'A' && b[i] <= 'Z' {
+			b[i] += 'a' - 'A'
+		}
+	}
+	return string(b)
+}

@@ -1,0 +1,154 @@
+{{define "content"}}
+<div class="crumbs">
+  <a href="/assets">assets</a>
+  {{range .Ancestors}}<span class="sep">/</span><a href="/assets/{{.ID}}">{{.Name}}</a>{{end}}
+  <span class="sep">/</span><span>{{.Asset.Name}}</span>
+</div>
+
+<div class="page-head">
+  <div class="eyebrow">{{.Asset.Kind}}</div>
+  <h1>{{.Asset.Name}}</h1>
+  <div class="tag-list" style="margin-top:8px">
+    <span class="{{lifecycleClass .Asset.Lifecycle}}">{{.Asset.Lifecycle}}</span>
+    {{range .Asset.Environments}}<span class="pill pill-info">{{.Code}}</span>{{end}}
+    {{if .Asset.SpansEnvironments}}<span class="pill pill-degraded">spans environments</span>{{end}}
+  </div>
+</div>
+
+<div style="margin-bottom:18px">
+  <a class="btn btn-primary" href="/assets/{{.Asset.ID}}/impact">Simulate losing this</a>
+  {{if .CanWrite}}
+    {{if ne .Asset.Lifecycle "retired"}}
+    <form method="post" action="/assets/{{.Asset.ID}}/retire" style="display:inline"
+          hx-post="/assets/{{.Asset.ID}}/retire"
+          hx-confirm="Retire {{.Asset.Name}}? Nothing is deleted — the row and its history stay.">
+      <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+      <button class="btn btn-danger" type="submit">Retire</button>
+    </form>
+    {{end}}
+  {{end}}
+</div>
+
+<div class="grid-2">
+  <div class="panel">
+    <div class="panel-head"><h2>Details</h2></div>
+    <div class="panel-body">
+      <dl class="kv">
+        <dt>Vendor</dt><dd>{{if .Asset.Vendor}}{{deref .Asset.Vendor}}{{else}}—{{end}}</dd>
+        <dt>Model</dt><dd class="mono">{{if .Asset.Model}}{{deref .Asset.Model}}{{else}}—{{end}}</dd>
+        <dt>Serial</dt><dd class="mono">{{if .Asset.Serial}}{{deref .Asset.Serial}}{{else}}—{{end}}</dd>
+        <dt>Asset tag</dt><dd class="mono">{{if .Asset.AssetTag}}{{deref .Asset.AssetTag}}{{else}}—{{end}}</dd>
+        <dt>Owner team</dt><dd>{{if .Asset.OwnerTeam}}{{deref .Asset.OwnerTeam}}{{else}}—{{end}}</dd>
+        <dt>Contained by</dt>
+        <dd>{{if .Asset.ParentName}}<span class="id">{{.Asset.ParentName}}</span>{{else}}<span style="color:var(--faint)">top level</span>{{end}}</dd>
+      </dl>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head">
+      <h2>Contains</h2>
+      <span class="panel-note">{{pluralise (len .Children) "direct child" "direct children"}}</span>
+    </div>
+    {{if .Children}}
+    <div class="scroll-x">
+      <table>
+        <thead><tr><th>Name</th><th>Kind</th><th>Lifecycle</th></tr></thead>
+        <tbody>
+          {{range .Children}}
+          <tr>
+            <td><a class="id" href="/assets/{{.ID}}">{{.Name}}</a></td>
+            <td><span class="pill pill-muted">{{.Kind}}</span></td>
+            <td><span class="{{lifecycleClass .Lifecycle}}">{{.Lifecycle}}</span></td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+    {{else}}
+    <div class="empty"><strong>Nothing inside this.</strong>Losing it takes only what runs directly on it.</div>
+    {{end}}
+  </div>
+</div>
+
+<div class="panel">
+  <div class="panel-head">
+    <h2>Workloads</h2>
+    <span class="panel-note">Service instances placed here. These are what an outage actually takes away.</span>
+  </div>
+  {{if .Instances}}
+  <div class="scroll-x">
+    <table>
+      <thead><tr><th>Service</th><th>Runtime</th><th>Role</th><th>Desired</th><th>Observed</th></tr></thead>
+      <tbody>
+        {{range .Instances}}
+        <tr>
+          <td><a class="id" href="/services/{{.ServiceID}}">{{.ServiceCode}}</a>
+              <div style="color:var(--muted);font-size:12.5px">{{.ServiceName}}</div></td>
+          <td><span class="pill pill-muted">{{.RuntimeType}}</span></td>
+          <td class="mono">{{if .Role}}{{deref .Role}}{{else}}—{{end}}</td>
+          <td class="mono" style="font-size:12px">{{.DesiredState}}</td>
+          <td class="mono" style="font-size:12px;color:var(--muted)">{{if .ObservedState}}{{deref .ObservedState}}{{else}}—{{end}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{else}}
+  <div class="empty"><strong>Nothing runs here.</strong></div>
+  {{end}}
+</div>
+
+{{if .Interfaces}}
+<div class="panel">
+  <div class="panel-head">
+    <h2>Interfaces</h2>
+    <span class="panel-note">Identity is (asset, port name) — a NIC swap keeps the port.</span>
+  </div>
+  <div class="scroll-x">
+    <table>
+      <thead><tr><th>Port</th><th>Form factor</th><th>Speed</th><th>MAC</th><th>Addresses</th><th>Patched to</th></tr></thead>
+      <tbody>
+        {{range .Interfaces}}
+        <tr>
+          <td class="mono">{{.Name}} {{if .IsMgmt}}<span class="pill pill-info">mgmt</span>{{end}}</td>
+          <td class="mono" style="font-size:12px">{{.FormFactor}}</td>
+          <td class="num">{{if .SpeedMbps}}{{.SpeedMbps}} Mb/s{{else}}—{{end}}</td>
+          <td class="mono" style="font-size:12px;color:var(--muted)">{{if .MAC}}{{deref .MAC}}{{else}}—{{end}}</td>
+          <td class="mono" style="font-size:12px">
+            {{range .Addresses}}<div>{{.AddrText}} <span class="pill pill-muted">{{.Role}}</span></div>{{end}}
+          </td>
+          <td class="mono" style="font-size:12px;color:var(--muted)">
+            {{if .PeerAsset}}{{.PeerAsset}} · {{.PeerPort}}{{else}}—{{end}}
+          </td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+</div>
+{{end}}
+
+<div class="panel">
+  <div class="panel-head"><h2>History</h2></div>
+  {{if .Changes}}
+  <div class="scroll-x">
+    <table>
+      <thead><tr><th>When</th><th>Action</th><th>By</th><th>Change</th></tr></thead>
+      <tbody>
+        {{range .Changes}}
+        <tr>
+          <td class="mono" style="font-size:12px;color:var(--muted)">{{shortTime .At}}</td>
+          <td><span class="pill pill-muted">{{.Action}}</span></td>
+          <td class="mono" style="font-size:12px">{{.Actor}}</td>
+          <td class="mono" style="font-size:11.5px;color:var(--muted);max-width:520px;overflow-wrap:anywhere">{{.Diff}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{else}}
+  <div class="empty"><strong>No recorded changes.</strong></div>
+  {{end}}
+</div>
+{{end}}

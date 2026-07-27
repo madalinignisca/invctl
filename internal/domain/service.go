@@ -1,0 +1,506 @@
+package domain
+
+import (
+	"strings"
+	"time"
+)
+
+// Service kinds.
+const (
+	SvcDB         = "db"
+	SvcCache      = "cache"
+	SvcQueue      = "queue"
+	SvcWeb        = "web"
+	SvcAPI        = "api"
+	SvcProxy      = "proxy"
+	SvcAuth       = "auth"
+	SvcBatch      = "batch"
+	SvcAgent      = "agent"
+	SvcStorage    = "storage"
+	SvcInfra      = "infra"
+	SvcMonitoring = "monitoring"
+)
+
+// ServiceKinds is the Go side of the service.kind CHECK constraint.
+var ServiceKinds = []string{
+	SvcDB, SvcCache, SvcQueue, SvcWeb, SvcAPI, SvcProxy,
+	SvcAuth, SvcBatch, SvcAgent, SvcStorage, SvcInfra, SvcMonitoring,
+}
+
+// Availability policies (HANDOVER §3.3). Without these, "reboot node 3"
+// reports everything on node 3 as down, which is useless — losing one of three
+// Vault nodes has to report ok.
+const (
+	AvailStandalone    = "standalone"
+	AvailActiveActive  = "active_active"
+	AvailActivePassive = "active_passive"
+	AvailQuorum        = "quorum"
+	AvailSharded       = "sharded"
+)
+
+// Availabilities is the Go side of the service.availability CHECK constraint.
+var Availabilities = []string{
+	AvailStandalone, AvailActiveActive, AvailActivePassive, AvailQuorum, AvailSharded,
+}
+
+// Failover modes. Manual failover is why an active/passive pair losing its
+// primary reports degraded rather than ok — somebody has to be paged.
+const (
+	FailoverAuto   = "auto"
+	FailoverManual = "manual"
+	FailoverNone   = "none"
+)
+
+// FailoverModes is the Go side of the service.failover_mode CHECK constraint.
+var FailoverModes = []string{FailoverAuto, FailoverManual, FailoverNone}
+
+// ServiceLifecycles is the Go side of the service.lifecycle CHECK constraint.
+// Note it has no 'maintenance' value, unlike asset.
+var ServiceLifecycles = []string{
+	LifecyclePlanned, LifecycleActive, LifecycleDeprecated, LifecycleRetired,
+}
+
+// Status is the health of a service under a simulated outage. It is monotonic
+// within an impact run — ok -> degraded -> down, never back — which is what
+// guarantees the fixed-point iteration terminates.
+type Status string
+
+const (
+	StatusOK       Status = "ok"
+	StatusDegraded Status = "degraded"
+	StatusDown     Status = "down"
+)
+
+// rank orders statuses for monotonic merging.
+func (s Status) rank() int {
+	switch s {
+	case StatusDown:
+		return 2
+	case StatusDegraded:
+		return 1
+	default:
+		return 0
+	}
+}
+
+// Worse returns the more severe of two statuses. Merging only ever moves a
+// service further from ok.
+func (s Status) Worse(other Status) Status {
+	if other.rank() > s.rank() {
+		return other
+	}
+	return s
+}
+
+// Application groups services under a business-facing name.
+type Application struct {
+	ID        string  `db:"id"`
+	Code      string  `db:"code"`
+	Name      string  `db:"name"`
+	OwnerTeam *string `db:"owner_team"`
+	CreatedAt string  `db:"created_at"`
+	UpdatedAt string  `db:"updated_at"`
+}
+
+// NewApplication validates and constructs.
+func NewApplication(id, code, name string, now time.Time) (*Application, error) {
+	ve := &ValidationError{}
+	code = checkRequired(ve, "code", code)
+	name = checkRequired(ve, "name", name)
+	if err := ve.OrNil(); err != nil {
+		return nil, err
+	}
+	ts := FormatTime(now)
+	return &Application{ID: id, Code: strings.ToLower(code), Name: name, CreatedAt: ts, UpdatedAt: ts}, nil
+}
+
+// Service is a logical workload: one row regardless of how many replicas run
+// (HANDOVER §3.2). Dependencies, ownership and SLOs attach here, not to the
+// instance — otherwise every dependency edge has to be written once per replica.
+type Service struct {
+	ID            string  `db:"id"`
+	ApplicationID *string `db:"application_id"`
+	Code          string  `db:"code"`
+	Name          string  `db:"name"`
+	Kind          string  `db:"kind"`
+	EnvironmentID string  `db:"environment_id"`
+	Availability  string  `db:"availability"`
+	MinHealthy    *int    `db:"min_healthy"`
+	FailoverMode  *string `db:"failover_mode"`
+	Tier          int     `db:"tier"`
+	RTOMinutes    *int    `db:"rto_minutes"`
+	RPOMinutes    *int    `db:"rpo_minutes"`
+	OwnerTeam     *string `db:"owner_team"`
+	Lifecycle     string  `db:"lifecycle"`
+	Attrs         string  `db:"attrs"`
+	CreatedAt     string  `db:"created_at"`
+	UpdatedAt     string  `db:"updated_at"`
+}
+
+// ServiceSpec is everything needed to define a service.
+//
+// It exists because the availability policy and the fields it requires have to
+// be validated together: min_healthy is mandatory for active_active and
+// meaningless otherwise, and failover_mode is mandatory for active_passive.
+// A positional constructor would either have to take those fields it does not
+// always need, or accept a half-built service and validate it later -- and
+// "validate it later" is how invalid rows reach the database.
+type ServiceSpec struct {
+	Code          string
+	Name          string
+	Kind          string
+	EnvironmentID string
+	Availability  string
+	Tier          int
+	ApplicationID *string
+	MinHealthy    *int
+	FailoverMode  *string
+	RTOMinutes    *int
+	RPOMinutes    *int
+	OwnerTeam     *string
+}
+
+// NewService validates and constructs a service.
+//
+// The availability/min_healthy pairing is validated here rather than in SQL
+// because a CHECK spanning two columns with policy-dependent semantics is
+// exactly the kind of expression that behaves differently across engines.
+func NewService(id string, spec ServiceSpec, now time.Time) (*Service, error) {
+	s := &Service{
+		ID:            id,
+		ApplicationID: spec.ApplicationID,
+		Code:          strings.ToLower(strings.TrimSpace(spec.Code)),
+		Name:          spec.Name,
+		Kind:          spec.Kind,
+		EnvironmentID: spec.EnvironmentID,
+		Availability:  spec.Availability,
+		MinHealthy:    spec.MinHealthy,
+		FailoverMode:  spec.FailoverMode,
+		Tier:          spec.Tier,
+		RTOMinutes:    spec.RTOMinutes,
+		RPOMinutes:    spec.RPOMinutes,
+		OwnerTeam:     spec.OwnerTeam,
+		Lifecycle:     LifecycleActive,
+		Attrs:         "{}",
+		CreatedAt:     FormatTime(now),
+		UpdatedAt:     FormatTime(now),
+	}
+	if err := s.Validate(); err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
+// Validate checks a service against its business rules.
+func (s *Service) Validate() error {
+	ve := &ValidationError{}
+	s.Code = strings.ToLower(checkRequired(ve, "code", s.Code))
+	s.Name = checkRequired(ve, "name", s.Name)
+	checkEnum(ve, "kind", s.Kind, ServiceKinds)
+	checkEnum(ve, "availability", s.Availability, Availabilities)
+	checkEnum(ve, "lifecycle", s.Lifecycle, ServiceLifecycles)
+	checkRequired(ve, "environment_id", s.EnvironmentID)
+	if s.Tier < 1 || s.Tier > 4 {
+		ve.Add("tier", "must be between 1 and 4")
+	}
+	if s.FailoverMode != nil && *s.FailoverMode != "" {
+		checkEnum(ve, "failover_mode", *s.FailoverMode, FailoverModes)
+	}
+	// active_active is the only policy where min_healthy carries meaning: the
+	// others derive their threshold from the instance count or the role.
+	if s.Availability == AvailActiveActive {
+		if s.MinHealthy == nil {
+			ve.Add("min_healthy", "is required for active_active")
+		} else if *s.MinHealthy < 1 {
+			ve.Add("min_healthy", "must be at least 1")
+		}
+	}
+	if s.Availability == AvailActivePassive && (s.FailoverMode == nil || *s.FailoverMode == "") {
+		ve.Add("failover_mode", "is required for active_passive")
+	}
+	if strings.TrimSpace(s.Attrs) == "" {
+		s.Attrs = "{}"
+	}
+	return ve.OrNil()
+}
+
+// InstanceHealth is the minimal per-instance input to a capacity decision.
+// Shard is the shard key for a sharded service and is otherwise empty.
+type InstanceHealth struct {
+	ID    string
+	Role  string
+	Shard string
+	Alive bool
+}
+
+// Instance roles that matter to capacity evaluation.
+const (
+	RolePrimary = "primary"
+	RoleStandby = "standby"
+)
+
+// EvaluateCapacity applies the service's availability policy to the surviving
+// instances and returns the resulting status (HANDOVER §6 phase 2).
+//
+// This is the whole point of modelling availability: without it, any lost
+// instance reads as a lost service.
+func (s *Service) EvaluateCapacity(instances []InstanceHealth) Status {
+	total := len(instances)
+	if total == 0 {
+		// A service with no instances at all cannot be reasoned about; it is
+		// not affected by losing a host it does not run on.
+		return StatusOK
+	}
+	surviving := 0
+	for _, i := range instances {
+		if i.Alive {
+			surviving++
+		}
+	}
+	if surviving == total {
+		return StatusOK
+	}
+	if surviving == 0 {
+		return StatusDown
+	}
+
+	switch s.Availability {
+	case AvailStandalone:
+		// Any survivor means at least one copy is serving. Reaching here with
+		// 0 < surviving < total implies several instances under a standalone
+		// policy, which is a modelling smell but not an outage.
+		return StatusOK
+
+	case AvailQuorum:
+		// Raft/Paxos: strictly more than half of the *configured* members.
+		if surviving < total/2+1 {
+			return StatusDown
+		}
+		return StatusOK
+
+	case AvailActiveActive:
+		min := 1
+		if s.MinHealthy != nil && *s.MinHealthy > 0 {
+			min = *s.MinHealthy
+		}
+		if surviving < min {
+			return StatusDegraded
+		}
+		return StatusOK
+
+	case AvailActivePassive:
+		primaryAlive := false
+		standbyAlive := false
+		hasPrimary := false
+		for _, i := range instances {
+			switch i.Role {
+			case RolePrimary:
+				hasPrimary = true
+				if i.Alive {
+					primaryAlive = true
+				}
+			case RoleStandby:
+				if i.Alive {
+					standbyAlive = true
+				}
+			}
+		}
+		if !hasPrimary {
+			// Roles were never declared; fall back to "something is alive".
+			return StatusDegraded
+		}
+		if primaryAlive {
+			return StatusOK
+		}
+		if !standbyAlive {
+			return StatusDown
+		}
+		// Primary is gone but a standby can take over. Automatic promotion is
+		// a blip; manual promotion needs a human, so it is degraded until then.
+		if s.FailoverMode != nil && *s.FailoverMode == FailoverAuto {
+			return StatusOK
+		}
+		return StatusDegraded
+
+	case AvailSharded:
+		// Data is partitioned: a shard with no surviving replica means that
+		// slice of the keyspace is unavailable even though the service as a
+		// whole still answers.
+		alive := map[string]int{}
+		for _, i := range instances {
+			shard := i.Shard
+			if shard == "" {
+				shard = i.Role
+			}
+			if _, ok := alive[shard]; !ok {
+				alive[shard] = 0
+			}
+			if i.Alive {
+				alive[shard]++
+			}
+		}
+		for _, n := range alive {
+			if n == 0 {
+				return StatusDegraded
+			}
+		}
+		return StatusOK
+	}
+	return StatusDegraded
+}
+
+// Runtime types for a service instance.
+const (
+	RuntimeSystemd        = "systemd"
+	RuntimeWindowsService = "windows_service"
+	RuntimeContainer      = "container"
+	RuntimeK8sWorkload    = "k8s_workload"
+	RuntimeAppliance      = "appliance"
+)
+
+// RuntimeTypes is the Go side of the service_instance.runtime_type CHECK.
+var RuntimeTypes = []string{
+	RuntimeSystemd, RuntimeWindowsService, RuntimeContainer,
+	RuntimeK8sWorkload, RuntimeAppliance,
+}
+
+// DesiredStates is the Go side of the service_instance.desired_state CHECK.
+var DesiredStates = []string{"running", "stopped", "disabled"}
+
+// Sources record where a fact came from (HANDOVER §3.5). Declared data is
+// authoritative and is never silently overwritten by a reconciler.
+const (
+	SourceDeclared          = "declared"
+	SourceDiscoveredNetstat = "discovered_netstat"
+	SourceDiscoveredSystemd = "discovered_systemd"
+	SourceDiscoveredK8s     = "discovered_k8s"
+	SourceDiscoveredConfig  = "discovered_config"
+)
+
+// DependencySources is the Go side of the dependency.source CHECK constraint.
+var DependencySources = []string{
+	SourceDeclared, SourceDiscoveredNetstat, SourceDiscoveredSystemd,
+	SourceDiscoveredK8s, SourceDiscoveredConfig,
+}
+
+// ServiceInstance is one running copy of a service on one host.
+//
+// Placement and observed state live here; everything logical lives on Service.
+// Shard is used only by the sharded availability policy.
+type ServiceInstance struct {
+	ID            string  `db:"id"`
+	ServiceID     string  `db:"service_id"`
+	HostAssetID   string  `db:"host_asset_id"`
+	RuntimeType   string  `db:"runtime_type"`
+	Role          *string `db:"role"`
+	Shard         *string `db:"shard"`
+	Ordinal       int     `db:"ordinal"`
+	DesiredState  string  `db:"desired_state"`
+	ObservedState *string `db:"observed_state"`
+	ObservedAt    *string `db:"observed_at"`
+	Source        string  `db:"source"`
+	CreatedAt     string  `db:"created_at"`
+	UpdatedAt     string  `db:"updated_at"`
+}
+
+// NewServiceInstance validates and constructs a placement.
+func NewServiceInstance(id, serviceID, hostAssetID, runtimeType string, ordinal int, now time.Time) (*ServiceInstance, error) {
+	si := &ServiceInstance{
+		ID: id, ServiceID: serviceID, HostAssetID: hostAssetID,
+		RuntimeType: runtimeType, Ordinal: ordinal,
+		DesiredState: "running", Source: SourceDeclared,
+		CreatedAt: FormatTime(now), UpdatedAt: FormatTime(now),
+	}
+	if err := si.Validate(); err != nil {
+		return nil, err
+	}
+	return si, nil
+}
+
+// Validate checks an instance against its business rules.
+func (si *ServiceInstance) Validate() error {
+	ve := &ValidationError{}
+	checkRequired(ve, "service_id", si.ServiceID)
+	checkRequired(ve, "host_asset_id", si.HostAssetID)
+	checkEnum(ve, "runtime_type", si.RuntimeType, RuntimeTypes)
+	checkEnum(ve, "desired_state", si.DesiredState, DesiredStates)
+	if si.Ordinal < 0 {
+		ve.Add("ordinal", "must not be negative")
+	}
+	return ve.OrNil()
+}
+
+// RoleOrEmpty dereferences Role for capacity evaluation.
+func (si *ServiceInstance) RoleOrEmpty() string {
+	if si.Role == nil {
+		return ""
+	}
+	return *si.Role
+}
+
+// ShardOrEmpty dereferences Shard for capacity evaluation.
+func (si *ServiceInstance) ShardOrEmpty() string {
+	if si.Shard == nil {
+		return ""
+	}
+	return *si.Shard
+}
+
+// Runtime detail tables. Exactly one applies per instance, keyed by
+// runtime_type; they are separate tables rather than a wide nullable one so
+// that a Windows service's run-as identity is a real foreign key.
+
+// RTSystemd holds systemd unit detail. UnitAfter and UnitRequires are JSON
+// arrays stored as opaque TEXT and parsed in Go — never queried in SQL.
+type RTSystemd struct {
+	InstanceID   string  `db:"instance_id"`
+	UnitName     string  `db:"unit_name"`
+	UnitType     *string `db:"unit_type"`
+	ExecStart    *string `db:"exec_start"`
+	RunAsUser    *string `db:"run_as_user"`
+	RunAsGroup   *string `db:"run_as_group"`
+	Restart      *string `db:"restart"`
+	UnitAfter    string  `db:"unit_after"`
+	UnitRequires string  `db:"unit_requires"`
+	DropIns      string  `db:"drop_ins"`
+}
+
+// RTWindows holds Windows service detail, including the run-as account, which
+// is the usual reason a Windows service dies after a credential rotation.
+type RTWindows struct {
+	InstanceID      string  `db:"instance_id"`
+	ServiceName     string  `db:"service_name"`
+	DisplayName     *string `db:"display_name"`
+	BinaryPath      *string `db:"binary_path"`
+	StartType       *string `db:"start_type"`
+	LogonIdentityID *string `db:"logon_identity_id"`
+	DependsOnSvc    string  `db:"depends_on_svc"`
+	RecoveryAction  *string `db:"recovery_action"`
+}
+
+// RTContainer holds container runtime detail.
+type RTContainer struct {
+	InstanceID     string  `db:"instance_id"`
+	Engine         *string `db:"engine"`
+	ContainerName  *string `db:"container_name"`
+	ComposeProject *string `db:"compose_project"`
+	ComposeService *string `db:"compose_service"`
+	ImageRepo      *string `db:"image_repo"`
+	ImageTag       *string `db:"image_tag"`
+	ImageDigest    *string `db:"image_digest"`
+	RestartPolicy  *string `db:"restart_policy"`
+	NetworkMode    *string `db:"network_mode"`
+	Rootless       bool    `db:"rootless"`
+}
+
+// RTK8s holds Kubernetes workload detail.
+type RTK8s struct {
+	InstanceID      string  `db:"instance_id"`
+	ClusterAssetID  *string `db:"cluster_asset_id"`
+	Namespace       *string `db:"namespace"`
+	WorkloadKind    *string `db:"workload_kind"`
+	WorkloadName    *string `db:"workload_name"`
+	ReplicasDesired *int    `db:"replicas_desired"`
+	ServiceAccount  *string `db:"service_account"`
+	ImageDigest     *string `db:"image_digest"`
+}

@@ -1,0 +1,41 @@
+{{define "content"}}
+<div class="page-head">
+  <div class="eyebrow">Analysis</div>
+  <h1>Assets spanning environments</h1>
+  <p class="lede">
+    Assets that belong to more than one non-transit environment. A transit zone
+    brokering between segments is doing its job and is excluded; a database or a
+    hypervisor appearing here is a segmentation exception worth a decision.
+  </p>
+</div>
+
+<div class="panel">
+  <div class="panel-head">
+    <h2>{{pluralise (len .Assets) "asset" "assets"}}</h2>
+    <span class="panel-note">Membership is many-to-many; this is the query that makes that useful.</span>
+  </div>
+  {{if .Assets}}
+  <div class="scroll-x">
+    <table>
+      <thead><tr><th>Asset</th><th>Kind</th><th>Environments</th><th>Owner</th><th>Lifecycle</th></tr></thead>
+      <tbody>
+        {{range .Assets}}
+        <tr class="rail-row is-degraded">
+          <td><a class="id" href="/assets/{{.ID}}">{{.Name}}</a></td>
+          <td><span class="pill pill-muted">{{.Kind}}</span></td>
+          <td><div class="tag-list">{{range .Environments}}<span class="pill pill-info">{{.Code}}</span>{{end}}</div></td>
+          <td>{{if .OwnerTeam}}{{deref .OwnerTeam}}{{else}}—{{end}}</td>
+          <td><span class="{{lifecycleClass .Lifecycle}}">{{.Lifecycle}}</span></td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{else}}
+  <div class="empty">
+    <strong>Nothing spans a boundary.</strong>
+    Every asset belongs to at most one non-transit environment.
+  </div>
+  {{end}}
+</div>
+{{end}}

@@ -1,0 +1,100 @@
+{{define "content"}}
+<div class="page-head">
+  <div class="eyebrow">Overview</div>
+  <h1>What is here, and what crosses a boundary</h1>
+  <p class="lede">
+    Pick an asset and simulate losing it to see what actually breaks. The engine
+    accounts for availability policy, so losing one node of a quorum reports what
+    it should: nothing.
+  </p>
+</div>
+
+<div class="stat-row">
+  <div class="stat"><div class="k">Assets</div><div class="v">{{.AssetCount}}</div></div>
+  <div class="stat"><div class="k">Services</div><div class="v">{{.ServiceCount}}</div></div>
+  <div class="stat"><div class="k">Environments</div><div class="v">{{len .Environments}}</div></div>
+  <div class="stat"><div class="k">Spanning assets</div><div class="v">{{len .Spanning}}</div></div>
+</div>
+
+<div class="grid-2">
+  <div class="panel">
+    <div class="panel-head">
+      <h2>Tier 1 services</h2>
+      <a href="/services" class="mono" style="font-size:12px">All services</a>
+    </div>
+    {{if .Services}}
+    <div class="scroll-x">
+      <table>
+        <thead><tr><th>Code</th><th>Availability</th><th>Instances</th><th>Environment</th></tr></thead>
+        <tbody>
+          {{range .Services}}
+          <tr>
+            <td><a class="id" href="/services/{{.ID}}">{{.Code}}</a></td>
+            <td class="mono" style="font-size:12px">{{.Availability}}</td>
+            <td class="num">{{.InstanceCount}}</td>
+            <td><span class="pill pill-info">{{.EnvironmentCode}}</span></td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+    {{else}}
+    <div class="empty"><strong>No tier 1 services yet.</strong>Tier 1 is what wakes someone up.</div>
+    {{end}}
+  </div>
+
+  <div class="panel">
+    <div class="panel-head">
+      <h2>Assets spanning environments</h2>
+      <a href="/reports/spanning" class="mono" style="font-size:12px">Full report</a>
+    </div>
+    {{if .Spanning}}
+    <div class="scroll-x">
+      <table>
+        <thead><tr><th>Asset</th><th>Kind</th><th>Environments</th></tr></thead>
+        <tbody>
+          {{range .Spanning}}
+          <tr class="rail-row is-degraded">
+            <td><a class="id" href="/assets/{{.ID}}">{{.Name}}</a></td>
+            <td><span class="pill pill-muted">{{.Kind}}</span></td>
+            <td><div class="tag-list">{{range .Environments}}<span class="pill pill-info">{{.Code}}</span>{{end}}</div></td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+    {{else}}
+    <div class="empty">
+      <strong>Nothing spans a segmentation boundary.</strong>
+      Transit environments are excluded — brokering between segments is their job.
+    </div>
+    {{end}}
+  </div>
+</div>
+
+<div class="panel">
+  <div class="panel-head">
+    <h2>Recent changes</h2>
+    <a href="/changes" class="mono" style="font-size:12px">Full change log</a>
+  </div>
+  {{if .Changes}}
+  <div class="scroll-x">
+    <table>
+      <thead><tr><th>When</th><th>Entity</th><th>Action</th><th>By</th></tr></thead>
+      <tbody>
+        {{range .Changes}}
+        <tr>
+          <td class="mono" style="font-size:12px;color:var(--muted)">{{since .At}}</td>
+          <td class="mono" style="font-size:12px">{{.EntityType}}</td>
+          <td><span class="pill pill-muted">{{.Action}}</span></td>
+          <td class="mono" style="font-size:12px;color:var(--muted)">{{.Actor}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{else}}
+  <div class="empty"><strong>Nothing has changed yet.</strong>Every mutation lands here, in the same transaction that made it.</div>
+  {{end}}
+</div>
+{{end}}

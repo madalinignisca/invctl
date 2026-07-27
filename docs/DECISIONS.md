@@ -1,0 +1,182 @@
+# Decisions
+
+Answers to `HANDOVER.md` §11, plus the deviations from the handover schema and
+the two stack choices that needed resolving. Recorded here because several code
+comments point at this file, and because a decision without its reasoning is
+just a constraint nobody can safely revisit.
+
+---
+
+## §11 open questions
+
+### 1. Kubernetes granularity — *needed by M2*
+
+**One `service_instance` per replica, placed on the node it runs on.**
+
+Per-workload with a replica count is tempting because it is less data, but it
+makes the impact engine useless for exactly the case Kubernetes exists for: if
+three replicas of a workload are recorded as one row against the cluster, then
+draining a node reports either nothing or everything, and neither is true. The
+whole value of the placement phase is knowing which node each copy is on.
+
+The consequence, once a discovery reconciler exists, is that it owns those rows
+outright and nobody hand-edits them. For the POC they are seeded like any other
+instance.
+
+`rt_k8s` keeps `replicas_desired` as declared intent, so a drift check ("three
+declared, two placed") is available later without a schema change.
+
+### 2. Interface identity across reboots — *needed by M1*
+
+**`(asset_id, name)` is the key. MAC is an attribute.**
+
+A MAC follows the card, not the port: replace a failed NIC and the cable, the
+patch panel port and the switch port are all unchanged, but the MAC is new.
+Virtual interfaces are worse — many regenerate a MAC on every boot unless
+pinned. Keying on MAC would make a NIC swap look like a decommission plus a
+new interface, and would break the cable topology every time.
+
+So `UNIQUE (asset_id, name)` is the identity, and `mac` is an indexed attribute
+that search resolves through. A reconciler matching on MAC alone would be
+wrong; matching on name and *updating* the MAC is correct.
+
+### 3. Change log granularity — *needed by M1*
+
+**Field-level diffs, with a full snapshot on create.**
+
+Full-row snapshots are simpler but answer the wrong question. "Who changed the
+availability policy" is the question people actually arrive with, and against
+snapshots that means diffing rows by eye. Field-level diffs answer it directly
+and are far smaller, which matters for a table that is never pruned.
+
+The usual objection to diffs — that point-in-time reconstruction needs a
+starting point — is handled by the create entry carrying a complete snapshot
+under `"new"`. Replaying from creation reconstructs any row at any time.
+
+`updated_at` is excluded from diffs. It changes on every write and would bury
+the field that actually changed.
+
+A no-op update writes no entry at all. An audit trail full of empty entries is
+worse than one without them, because it trains people not to read it.
+
+### 4. Multi-tenancy of the transit zone — *needed by M1*
+
+**Yes, an asset may belong to several transit environments — and transit
+membership never counts towards a span.**
+
+The span report exists to surface segmentation exceptions. A firewall or a
+transit switch bridging two segments is not an exception; it is the mechanism.
+Counting transit membership would put every firewall permanently at the top of
+the report, and a report whose top entries are always the same is a report
+nobody reads.
+
+So `SpanningAssets` counts only non-transit memberships and flags an asset in
+more than one. The shared switch carrying production and development VLANs is
+a finding; the edge firewall in production and transit is not.
+
+### 5. Where certificates live — *needed by M3*
+
+**An opaque `certificate_id` string, not an entity.**
+
+Certificates are already managed somewhere — Vault PKI, an internal CA, ACME —
+and each of those is authoritative for expiry, chain and rotation. Modelling
+them here would create a second copy that is wrong within a month.
+
+The column holds a reference into whichever system issues them
+(`vault-pki/orders-api` in the fixture). If certificate expiry becomes
+something this tool should reason about, it arrives as a discovery source
+populating a real entity, and this column becomes its natural key.
+
+---
+
+## Deviations from the handover schema
+
+Two columns were added. Both are noted in the migration that introduces them.
+
+### `service_instance.shard`
+
+The `sharded` availability policy is defined in §3.3 and evaluated in §6 phase
+2 as "every shard has ≥1 replica" — but the schema has nowhere to record which
+shard an instance belongs to. Overloading `role` was the alternative and it is
+worse: `role` already means primary/standby for `active_passive`, and one
+column meaning two different things depending on a third is how data models rot.
+
+`EvaluateCapacity` falls back to `role` when `shard` is empty, so the overloaded
+form still works if it turns up in existing data.
+
+### `dependency.lifecycle`
+
+"Soft delete only" is a hard rule, and a dependency edge is the single thing
+operators most often need to withdraw after entering it wrongly — a mistyped
+provider, an edge recorded against the wrong consumer. Without a lifecycle
+column the only options were a hard `DELETE` (against the rules) or leaving the
+wrong edge in place (silently corrupting every impact report).
+
+Values are `active` and `retired` only. Retired edges are excluded from the
+graph, from both dependency panels, and from the impact engine, but the row and
+its audit history remain.
+
+---
+
+## Stack decisions
+
+### Tailwind without DaisyUI
+
+`CLAUDE.md` asks for the Tailwind standalone CLI and flags DaisyUI as needing
+verification. Verified: the standalone binary (v4.3.3) runs with no Node
+runtime at all, but DaisyUI is an npm package that has to be present on disk,
+so using it would mean an `npm install` in the build — a second runtime in the
+pipeline purely for styling convenience.
+
+Dropped, as `CLAUDE.md` allows, in favour of a small hand-rolled component
+layer in `web/src/app.css`. The generated stylesheet is committed, so the Go
+build never needs the Tailwind binary; `make css` regenerates it and downloads
+the binary on demand.
+
+### The CSP build of Alpine
+
+The standard Alpine build compiles `x-data` attribute expressions with the
+`Function` constructor, which requires `script-src 'unsafe-eval'`. For a tool
+holding an estate's entire topology, weakening the CSP for styling convenience
+is a poor trade.
+
+`@alpinejs/csp` is vendored instead. Components are registered in
+`web/static/app.js` and referenced by name from `x-data`, which keeps the CSP
+at `script-src 'self'` with no `unsafe-eval`. A test asserts that header, so
+switching builds cannot silently weaken it.
+
+### `BYTEA` as the byte-column type
+
+The handover writes `addr_start BLOB`. PostgreSQL has no `BLOB` type, so a
+literal reading would have forced the whole core schema to be dialect-split.
+
+`BYTEA` works on both: PostgreSQL requires it, and SQLite does not recognise
+the name, so the column takes NUMERIC affinity — which only ever coerces *text*
+that looks numeric and therefore leaves blob values untouched. Bytewise
+comparison then behaves identically on both engines.
+
+This is subtle enough that `TestByteRangeContainment` asserts a byte-for-byte
+round trip and the full containment query on both engines rather than trusting
+the reasoning.
+
+### FTS5 tokeniser characters
+
+`.` and `:` are token characters so an IPv4 address, an IPv6 address and a MAC
+each stay one token instead of fragmenting into meaningless numbers.
+
+`-` is deliberately *not*, which was a corrected mistake: with it,
+`hv-01-renamed` was a single token and the prefix query used for type-ahead
+could never match `renamed`. Splitting on the hyphen makes `orders-api`
+findable as `orders`, as `api`, and as the whole string. The test that caught
+this passed on PostgreSQL — whose `LIKE '%q%'` does substring matching — and
+failed on SQLite, which is exactly why the suite runs against both.
+
+---
+
+## Deliberately not built
+
+Everything past M5, per §7: discovery agents, the lint engine, firewall
+reconciliation, and the read-only Ansible inventory endpoint. The schema
+carries the columns they need (`source`, `confidence`, `first_seen`,
+`last_seen`, `verified_by`, `verified_at`, `firewall_rule_ref`) so that adding
+them later is not a migration of existing data.
