@@ -1,0 +1,107 @@
+{{define "content"}}
+<div class="page-head">
+  <div class="eyebrow">Layer 1-3</div>
+  <h1>Network</h1>
+  <p class="lede">
+    Declared forwarder groups, uplinks and anchors -- the topology model M3's
+    reachability engine reads. A lone switch is a group of one; an MC-LAG pair
+    or an active/passive firewall pair is a group of two. An asset with no
+    attachment anywhere in its containment ancestry is unmodelled, never
+    counted against anything.
+  </p>
+</div>
+
+<div class="panel">
+  <div class="panel-head"><h2>Coverage</h2></div>
+  <div class="panel-body">
+    <p class="field-hint">
+      Of {{.Coverage.TotalAttachable}} assets that can carry an attachment at
+      all (racks, PDUs and switches never can). Modelled means an active
+      attachment on that plane exists somewhere in the asset's own containment
+      ancestry. Unmodelled is absence of topology data, never evidence of
+      disconnection.
+    </p>
+    <div class="field-row">
+      <div class="field"><label>Data plane</label>
+        <div class="num" style="font-size:22px">{{.Coverage.Data.Modelled}} / {{.Coverage.TotalAttachable}}</div>
+        <div class="field-hint">{{.Coverage.Data.Unmodelled}} unmodelled</div>
+      </div>
+      <div class="field"><label>Mgmt plane</label>
+        <div class="num" style="font-size:22px">{{.Coverage.Mgmt.Modelled}} / {{.Coverage.TotalAttachable}}</div>
+        <div class="field-hint">{{.Coverage.Mgmt.Unmodelled}} unmodelled</div>
+      </div>
+      <div class="field"><label>Storage plane</label>
+        <div class="num" style="font-size:22px">{{.Coverage.Storage.Modelled}} / {{.Coverage.TotalAttachable}}</div>
+        <div class="field-hint">{{.Coverage.Storage.Unmodelled}} unmodelled</div>
+      </div>
+    </div>
+    {{if .CanWrite}}
+    <form method="post" action="/network/derive" hx-post="/network/derive"
+          hx-target="#network-derive-result" hx-swap="innerHTML">
+      <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+      <button class="btn" type="submit">Propose from cabling</button>
+    </form>
+    <div id="network-derive-result"></div>
+    {{end}}
+  </div>
+</div>
+
+<div class="panel" id="network-table">
+  <div class="panel-head"><h2>{{pluralise (len .Groups) "forwarder group" "forwarder groups"}}</h2></div>
+  {{if .Groups}}
+  <div class="scroll-x">
+    <table>
+      <thead><tr><th>Code</th><th>Role</th><th>Kind</th><th>Availability</th><th>Members</th><th>Uplinks</th><th>Anchors</th><th>Source</th></tr></thead>
+      <tbody>
+        {{range .Groups}}
+        <tr>
+          <td class="mono">{{.Code}}</td>
+          <td><span class="pill pill-info">{{.Role}}</span></td>
+          <td>{{.Kind}}</td>
+          <td>{{.Availability}}</td>
+          <td class="num">{{.MemberCount}}</td>
+          <td class="num">{{.UplinkCount}}</td>
+          <td class="num">{{.AnchorCount}}</td>
+          <td>{{if eq .Source "declared"}}<span class="pill pill-muted">declared</span>{{else}}<span class="pill pill-degraded">{{.Source}}</span>{{end}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{else}}
+  <div class="empty"><strong>No forwarder groups declared yet.</strong>A lone switch is a group of one.</div>
+  {{end}}
+</div>
+
+<div class="panel">
+  <div class="panel-head"><h2>{{pluralise (len .Anchors) "anchor" "anchors"}}</h2></div>
+  {{if .Anchors}}
+  <div class="scroll-x">
+    <table>
+      <thead><tr><th>Code</th><th>Name</th><th>Scope</th><th>Group</th><th>Plane</th></tr></thead>
+      <tbody>
+        {{range .Anchors}}
+        <tr>
+          <td class="mono">{{.Code}}</td>
+          <td>{{.Name}}</td>
+          <td><span class="pill pill-info">{{.Scope}}</span></td>
+          <td class="mono">{{.GroupCode}}</td>
+          <td>{{.Plane}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{else}}
+  <div class="empty"><strong>No anchors declared yet.</strong>An anchor names where a reachability scope enters the estate.</div>
+  {{end}}
+</div>
+
+{{if .CanWrite}}
+  {{template "net_group_form" .GroupForm}}
+  {{template "net_member_form" .MemberForm}}
+  {{template "net_uplink_form" .UplinkForm}}
+  {{template "net_attachment_form" .AttachmentForm}}
+  {{template "net_anchor_form" .AnchorForm}}
+{{end}}
+{{end}}

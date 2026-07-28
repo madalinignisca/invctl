@@ -51,6 +51,7 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer) http.Handle
 	read("GET /services", app.ServiceList)
 	read("GET /services/{id}", app.ServiceDetail)
 	read("GET /prefixes", app.PrefixList)
+	read("GET /network", app.NetworkList)
 
 	// Authenticated writes. Every non-GET route goes through RequireAdmin,
 	// and the whole mux is wrapped in CSRF below.
@@ -81,6 +82,13 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer) http.Handle
 	write("POST /links", app.LinkCreate)
 	write("POST /links/{id}/retire", app.LinkRetire)
 	write("POST /prefixes", app.PrefixCreate)
+
+	write("POST /network/groups", app.NetworkGroupCreate)
+	write("POST /network/groups/{id}/members", app.NetworkGroupMemberCreate)
+	write("POST /network/groups/{id}/uplinks", app.NetworkUplinkCreate)
+	write("POST /network/attachments", app.NetworkAttachmentCreate)
+	write("POST /network/anchors", app.NetworkAnchorCreate)
+	write("POST /network/derive", app.NetworkDerive)
 
 	// Outermost first. Recovery wraps everything so a panic anywhere still
 	// produces a response; the session manager has to wrap CSRF because

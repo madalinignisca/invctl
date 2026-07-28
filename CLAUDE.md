@@ -54,7 +54,9 @@ Vendor `htmx.min.js` and `alpine.min.js` into `web/static`. This will likely run
 - **Containment queries go through `asset_closure`**, never recursive `parent_id` walks in application code.
 - **Every mutation of *declared* state writes a `change_log` row in the same transaction.** No exceptions. If a handler mutates declared state without logging, it's incomplete.
 - **Observed state has its own audit obligation — narrower, not absent.** It logs *transitions* to `observed_transition`, never to `change_log`. See "Declared vs observed" below. Reclassifying a column to dodge the audit rule is an architecture decision, not a refactor.
-- **Soft delete only.** Set `lifecycle = 'retired'`. The single permitted `DELETE FROM` in this codebase is the admin-invoked prune of `observed_transition`; there is none in handler code.
+- **Soft delete only, for entities.** Set `lifecycle = 'retired'`. Never delete an asset, service, dependency, cable or topology row.
+- **Set and index tables are replaced wholesale, and that is not deletion** — `asset_environment`, `dependency_data_class`, `asset_closure`, `search_index`. They hold the *current value* of something the parent owns, so delete-then-insert inside the parent's transaction is correct. But the parent's `change_log` entry MUST record the change: three separate times a set replacement produced no diff on the parent struct and therefore no audit entry at all, twice for the rows that decide audit scope. Fold the set into the audited value (see `assetAudit`, `dependencyAudit`).
+- The only `DELETE FROM` that removes a *fact* rather than replacing a set is the admin-invoked prune of `observed_transition`. There is none in handler code.
 
 ### invctl never acts on the estate
 

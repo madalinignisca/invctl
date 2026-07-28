@@ -3,6 +3,8 @@ package store
 import (
 	"context"
 	"fmt"
+	"sort"
+	"strings"
 
 	"github.com/gabriel/invctl/internal/domain"
 )
@@ -86,6 +88,39 @@ func (s *SQLStore) ListEnvironments(ctx context.Context) ([]domain.Environment, 
 }
 
 // ---------- assets ----------
+
+// assetAudit is the audited shape of an asset: the row plus the environments it
+// belongs to.
+//
+// Membership lives in a join table, so replacing it produced no diff on the
+// asset struct and therefore no change_log entry -- an asset could be moved
+// into a second environment, which is precisely what the segmentation-span
+// report keys on, in complete silence. Same failure as dependency data classes;
+// same fix. Codes rather than ids because an audit entry is read by people.
+type assetAudit struct {
+	domain.Asset
+	Environments string `db:"environments"`
+}
+
+func auditedAsset(a *domain.Asset, codes []string) *assetAudit {
+	sorted := append([]string(nil), codes...)
+	sort.Strings(sorted)
+	return &assetAudit{Asset: *a, Environments: strings.Join(sorted, ",")}
+}
+
+// environmentCodes resolves environment ids to their codes for the audit trail.
+func (s *SQLStore) environmentCodes(ctx context.Context, ids []string) ([]string, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	var codes []string
+	err := s.read(ctx, &codes,
+		`SELECT code FROM environment WHERE id IN (`+placeholders(len(ids))+`)`, anySlice(ids)...)
+	if err != nil {
+		return nil, fmt.Errorf("resolving environment codes: %w", err)
+	}
+	return codes, nil
+}
 
 // AssetFilter narrows a list query. Empty fields are ignored.
 type AssetFilter struct {
@@ -244,6 +279,10 @@ func (s *SQLStore) CreateAsset(ctx context.Context, actor domain.Actor, a *domai
 	if err := a.Validate(); err != nil {
 		return err
 	}
+	codes, err := s.environmentCodes(ctx, environmentIDs)
+	if err != nil {
+		return err
+	}
 	return s.write(ctx, actor, func(t *tx) error {
 		_, err := t.exec(ctx,
 			`INSERT INTO asset (id, kind, name, parent_id, serial, asset_tag, vendor, model,
@@ -260,7 +299,7 @@ func (s *SQLStore) CreateAsset(ctx context.Context, actor domain.Actor, a *domai
 		if err := setAssetEnvironments(ctx, t, a.ID, environmentIDs); err != nil {
 			return err
 		}
-		if err := t.logCreate(ctx, "asset", a.ID, a); err != nil {
+		if err := t.logCreate(ctx, "asset", a.ID, auditedAsset(a, codes)); err != nil {
 			return err
 		}
 		return s.indexAsset(ctx, t, a)
@@ -281,6 +320,19 @@ func (s *SQLStore) UpdateAsset(ctx context.Context, actor domain.Actor, a *domai
 	a.ParentID = before.ParentID // reparenting goes through ReparentAsset
 	a.UpdatedAt = domain.FormatTime(s.now())
 
+	beforeCodes := make([]string, 0, len(before.Environments))
+	for _, env := range before.Environments {
+		beforeCodes = append(beforeCodes, env.Code)
+	}
+	afterCodes := beforeCodes
+	if environmentIDs != nil {
+		// nil means "not managing membership here", so it is unchanged.
+		afterCodes, err = s.environmentCodes(ctx, environmentIDs)
+		if err != nil {
+			return err
+		}
+	}
+
 	return s.write(ctx, actor, func(t *tx) error {
 		_, err := t.exec(ctx,
 			`UPDATE asset SET kind = ?, name = ?, serial = ?, asset_tag = ?, vendor = ?,
@@ -294,7 +346,9 @@ func (s *SQLStore) UpdateAsset(ctx context.Context, actor domain.Actor, a *domai
 		if err := setAssetEnvironments(ctx, t, a.ID, environmentIDs); err != nil {
 			return err
 		}
-		if err := t.logUpdate(ctx, "asset", a.ID, &before.Asset, a); err != nil {
+		if err := t.logUpdate(ctx, "asset", a.ID,
+			auditedAsset(&before.Asset, beforeCodes),
+			auditedAsset(a, afterCodes)); err != nil {
 			return err
 		}
 		return s.indexAsset(ctx, t, a)
@@ -303,6 +357,24 @@ func (s *SQLStore) UpdateAsset(ctx context.Context, actor domain.Actor, a *domai
 
 // RetireAsset is the only form of deletion. The row stays; lifecycle moves to
 // retired, and the audit trail records who did it.
+//
+// It also retires any live topology edge that names this asset: its
+// net_group_member row, any net_attachment it owns, any net_attachment it is
+// pinned to as a chassis member, and any link cabling one of its interfaces
+// -- all in the same transaction, so no live edge can ever point at a retired
+// box (docs/reachability-design.md, M2). net_uplink is not touched directly:
+// it is a group-to-group edge with no asset_id column of its own, so retiring
+// one asset out of a forwarder group is a group-health question for the
+// impact engine (M3), not a row this method can cascade into.
+//
+// writeSerializable, not write: this method now asserts a cross-table
+// invariant ("no active attachment/attachment-member points at a retired
+// asset") the same way CreateNetAttachment asserts one when it inserts. At
+// Postgres's default read-committed level, a plain write() here racing a
+// serializable CreateNetAttachment gets no protection at all -- SSI only
+// guards transactions that are themselves serializable -- and the result is
+// exactly the state this method's contract says cannot exist: an active
+// attachment naming a retired asset.
 func (s *SQLStore) RetireAsset(ctx context.Context, actor domain.Actor, id string) error {
 	before, err := s.GetAsset(ctx, id)
 	if err != nil {
@@ -312,15 +384,95 @@ func (s *SQLStore) RetireAsset(ctx context.Context, actor domain.Actor, id strin
 		return nil
 	}
 	at := domain.FormatTime(s.now())
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.writeSerializable(ctx, actor, func(t *tx) error {
 		_, err := t.exec(ctx, `UPDATE asset SET lifecycle = ?, updated_at = ? WHERE id = ?`,
 			domain.LifecycleRetired, at, id)
 		if err != nil {
 			return translateWriteErr(err, "retiring asset")
 		}
 		diff := fmt.Sprintf(`{"lifecycle":{"old":%q,"new":%q}}`, before.Lifecycle, domain.LifecycleRetired)
-		return t.log(ctx, "asset", id, domain.ActionRetire, diff)
+		if err := t.log(ctx, "asset", id, domain.ActionRetire, diff); err != nil {
+			return err
+		}
+		return retireAssetTopology(ctx, t, id, at)
 	})
+}
+
+// retireAssetTopology retires every live topology edge naming assetID, so
+// "no live topology edge may point at a retired box" holds without a reader
+// having to know to filter it out.
+func retireAssetTopology(ctx context.Context, t *tx, assetID, at string) error {
+	var groupMembers []struct {
+		GroupID string `db:"group_id"`
+	}
+	if err := t.tx.SelectContext(ctx, &groupMembers, t.rebind(
+		`SELECT group_id FROM net_group_member WHERE asset_id = ? AND lifecycle = ?`),
+		assetID, domain.LifecycleActive); err != nil {
+		return fmt.Errorf("finding net group memberships to retire: %w", err)
+	}
+	for _, m := range groupMembers {
+		if _, err := t.exec(ctx,
+			`UPDATE net_group_member SET lifecycle = ?, updated_at = ? WHERE group_id = ? AND asset_id = ?`,
+			domain.LifecycleRetired, at, m.GroupID, assetID); err != nil {
+			return translateWriteErr(err, "retiring net group membership")
+		}
+		diff := fmt.Sprintf(`{"lifecycle":{"old":%q,"new":%q}}`, domain.LifecycleActive, domain.LifecycleRetired)
+		if err := t.log(ctx, "net_group_member", m.GroupID+"/"+assetID, domain.ActionRetire, diff); err != nil {
+			return err
+		}
+	}
+
+	// Attachments to retire: this asset's own (it is the attaching host), and
+	// any attachment this asset is pinned to as a chassis member. Both cases
+	// retire the WHOLE net_attachment row, never just delete or retire the
+	// member pin: net_attachment_member has no lifecycle column of its own on
+	// purpose (see 00007_reachability.sql) precisely because deleting a pin
+	// when its chassis retires would turn a single-homed host's *last*
+	// surviving chassis into an empty member set -- which means "attached to
+	// the group as a whole" -- promoting a host that just lost its only path
+	// into reading as MORE robust than before. Retiring the declaration
+	// instead is the pessimistic-safe choice; an operator can re-declare a
+	// corrected attachment against the surviving chassis if one remains.
+	var attachmentIDs []string
+	if err := t.tx.SelectContext(ctx, &attachmentIDs, t.rebind(`
+		SELECT id FROM net_attachment WHERE asset_id = ? AND lifecycle = ?
+		UNION
+		SELECT DISTINCT am.attachment_id
+		FROM net_attachment_member am
+		JOIN net_attachment na ON na.id = am.attachment_id
+		WHERE am.asset_id = ? AND na.lifecycle = ?`),
+		assetID, domain.LifecycleActive, assetID, domain.LifecycleActive); err != nil {
+		return fmt.Errorf("finding net attachments to retire: %w", err)
+	}
+	if err := retireRows(ctx, t, "net_attachment", attachmentIDs, at); err != nil {
+		return err
+	}
+
+	// This asset's own patched interfaces: the cables themselves become dead
+	// topology the moment the asset behind either end is gone, exactly like
+	// unpatching a port (docs/DECISIONS.md, 2026-07-28 decisions). `link` has
+	// no updated_at column (see RetireLink), so this can't go through the
+	// generic retireRows helper the rest of this cascade uses.
+	linkIDs, err := selectIDs(ctx, t, `
+		SELECT id FROM link
+		WHERE lifecycle = ?
+		  AND (a_interface_id IN (SELECT id FROM interface WHERE asset_id = ?)
+		    OR b_interface_id IN (SELECT id FROM interface WHERE asset_id = ?))`,
+		domain.LifecycleActive, assetID, assetID)
+	if err != nil {
+		return fmt.Errorf("finding links to retire: %w", err)
+	}
+	for _, id := range linkIDs {
+		if _, err := t.exec(ctx, `UPDATE link SET lifecycle = ? WHERE id = ?`,
+			domain.LifecycleRetired, id); err != nil {
+			return translateWriteErr(err, "retiring link")
+		}
+		diff := fmt.Sprintf(`{"lifecycle":{"old":%q,"new":%q}}`, domain.LifecycleActive, domain.LifecycleRetired)
+		if err := t.log(ctx, "link", id, domain.ActionRetire, diff); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // ---------- containment ----------

@@ -230,7 +230,7 @@ func TestAnonymousIsRedirectedToLogin(t *testing.T) {
 	h := newHarness(t)
 
 	protected := []string{
-		"/", "/assets", "/services", "/environments", "/prefixes",
+		"/", "/assets", "/services", "/environments", "/prefixes", "/network",
 		"/search", "/changes", "/reports/spanning",
 	}
 	for _, path := range protected {
@@ -781,6 +781,7 @@ func TestEveryPageTemplateRenders(t *testing.T) {
 		"/reports/spanning",
 		"/changes",
 		"/search?q=vault",
+		"/network",
 	}
 	for _, path := range pages {
 		resp := h.get(path, false)

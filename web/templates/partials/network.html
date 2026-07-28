@@ -1,0 +1,261 @@
+{{/* Reachability topology forms and the derivation review fragment. Every one
+     of these is a standalone partial, same rule as everything in forms.html:
+     it has to work whether the parent page has rendered or not. */}}
+
+{{define "net_group_form"}}
+<form id="net-group-form" class="panel" method="post" action="/network/groups"
+      hx-post="/network/groups" hx-target="#net-group-form" hx-swap="outerHTML">
+  <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+  <div class="panel-head"><h2>Declare a forwarder group</h2></div>
+  <div class="panel-body">
+    <div class="field-row">
+      <div class="field">
+        <label for="ng-code">Code</label>
+        <input id="ng-code" class="mono {{if index .Errors "code"}}invalid{{end}}"
+               type="text" name="code" value="{{.Spec.Code}}" placeholder="sw-core" required>
+        {{with index .Errors "code"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="ng-name">Name</label>
+        <input id="ng-name" type="text" name="name" value="{{.Spec.Name}}" placeholder="Core switch" required>
+        {{with index .Errors "name"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="ng-kind">Kind</label>
+        <select id="ng-kind" name="kind">
+          {{range .Kinds}}<option value="{{.}}" {{if eq . $.Spec.Kind}}selected{{end}}>{{.}}</option>{{end}}
+        </select>
+        {{with index .Errors "kind"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="ng-role">Role</label>
+        <select id="ng-role" name="role">
+          {{range .Roles}}<option value="{{.}}" {{if eq . $.Spec.Role}}selected{{end}}>{{.}}</option>{{end}}
+        </select>
+        {{with index .Errors "role"}}<div class="field-error">{{.}}</div>{{end}}
+        <div class="field-hint">Load-bearing: orients a cable between two forwarders, edge &gt; core &gt; distribution &gt; access.</div>
+      </div>
+      <div class="field">
+        <label for="ng-avail">Availability</label>
+        <select id="ng-avail" name="availability">
+          {{range .Availabilities}}<option value="{{.}}" {{if eq . $.Spec.Availability}}selected{{end}}>{{.}}</option>{{end}}
+        </select>
+        {{with index .Errors "availability"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="ng-minhealthy">Min healthy (active_active)</label>
+        <input id="ng-minhealthy" type="number" min="1" name="min_healthy">
+        {{with index .Errors "min_healthy"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="ng-failover">Failover mode (active_passive)</label>
+        <select id="ng-failover" name="failover_mode">
+          <option value="">—</option>
+          {{range .FailoverModes}}<option value="{{.}}">{{.}}</option>{{end}}
+        </select>
+        {{with index .Errors "failover_mode"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+    </div>
+    <div style="margin-top:12px"><button class="btn btn-primary" type="submit">Declare group</button></div>
+  </div>
+</form>
+{{end}}
+
+
+{{define "net_member_form"}}
+<form id="net-member-form" class="panel" method="post" action="{{if .Groups}}/network/groups/{{(index .Groups 0).ID}}/members{{end}}"
+      hx-post="{{if .Groups}}/network/groups/{{(index .Groups 0).ID}}/members{{end}}"
+      hx-target="#net-member-form" hx-swap="outerHTML">
+  <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+  <div class="panel-head"><h2>Add a group member</h2></div>
+  <div class="panel-body">
+    {{if .Groups}}
+    <div class="field-row">
+      <div class="field">
+        <label for="nm-group">Group</label>
+        <select id="nm-group" name="group_id" onchange="this.form.action='/network/groups/'+this.value+'/members'; this.form.setAttribute('hx-post', this.form.action)">
+          {{range .Groups}}<option value="{{.ID}}">{{.Code}}</option>{{end}}
+        </select>
+      </div>
+      <div class="field">
+        <label for="nm-asset">Asset</label>
+        <select id="nm-asset" name="asset_id">
+          {{range .Assets}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
+        </select>
+        {{with index .Errors "asset_id"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="nm-role">Role</label>
+        <select id="nm-role" name="role">
+          {{range .MemberRoles}}<option value="{{.}}">{{.}}</option>{{end}}
+        </select>
+      </div>
+    </div>
+    <div style="margin-top:12px"><button class="btn btn-primary" type="submit">Add member</button></div>
+    {{else}}
+    <div class="empty">Declare a forwarder group first.</div>
+    {{end}}
+  </div>
+</form>
+{{end}}
+
+
+{{define "net_uplink_form"}}
+<form id="net-uplink-form" class="panel" method="post" action="{{if .Groups}}/network/groups/{{(index .Groups 0).ID}}/uplinks{{end}}"
+      hx-post="{{if .Groups}}/network/groups/{{(index .Groups 0).ID}}/uplinks{{end}}"
+      hx-target="#net-uplink-form" hx-swap="outerHTML">
+  <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+  <div class="panel-head"><h2>Declare an uplink</h2></div>
+  <div class="panel-body">
+    {{if .Groups}}
+    <div class="field-row">
+      <div class="field">
+        <label for="nu-group">Group</label>
+        <select id="nu-group" name="group_id" onchange="this.form.action='/network/groups/'+this.value+'/uplinks'; this.form.setAttribute('hx-post', this.form.action)">
+          {{range .Groups}}<option value="{{.ID}}">{{.Code}}</option>{{end}}
+        </select>
+      </div>
+      <div class="field">
+        <label for="nu-upstream">Upstream group</label>
+        <select id="nu-upstream" name="upstream_group_id">
+          {{range .Groups}}<option value="{{.ID}}">{{.Code}}</option>{{end}}
+        </select>
+        {{with index .Errors "upstream_group_id"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="nu-plane">Plane</label>
+        <select id="nu-plane" name="plane">
+          {{range .Planes}}<option value="{{.}}">{{.}}</option>{{end}}
+        </select>
+      </div>
+    </div>
+    <div style="margin-top:12px"><button class="btn btn-primary" type="submit">Declare uplink</button></div>
+    {{else}}
+    <div class="empty">Declare at least two forwarder groups first.</div>
+    {{end}}
+  </div>
+</form>
+{{end}}
+
+
+{{define "net_attachment_form"}}
+<form id="net-attachment-form" class="panel" method="post" action="/network/attachments"
+      hx-post="/network/attachments" hx-target="#net-attachment-form" hx-swap="outerHTML">
+  <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+  <div class="panel-head"><h2>Declare an attachment</h2></div>
+  <div class="panel-body">
+    {{if .Groups}}
+    <div class="field-row">
+      <div class="field">
+        <label for="na-asset">Asset</label>
+        <select id="na-asset" name="asset_id">
+          {{range .Assets}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
+        </select>
+        {{with index .Errors "asset_id"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="na-group">Group</label>
+        <select id="na-group" name="group_id">
+          {{range .Groups}}<option value="{{.ID}}">{{.Code}}</option>{{end}}
+        </select>
+        {{with index .Errors "group_id"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="na-plane">Plane</label>
+        <select id="na-plane" name="plane">
+          {{range .Planes}}<option value="{{.}}">{{.}}</option>{{end}}
+        </select>
+      </div>
+    </div>
+    <div style="margin-top:12px"><button class="btn btn-primary" type="submit">Attach</button></div>
+    {{else}}
+    <div class="empty">Declare a forwarder group first.</div>
+    {{end}}
+  </div>
+</form>
+{{end}}
+
+
+{{define "net_anchor_form"}}
+<form id="net-anchor-form" class="panel" method="post" action="/network/anchors"
+      hx-post="/network/anchors" hx-target="#net-anchor-form" hx-swap="outerHTML">
+  <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+  <div class="panel-head"><h2>Declare an anchor</h2></div>
+  <div class="panel-body">
+    {{if .Groups}}
+    <div class="field-row">
+      <div class="field">
+        <label for="nan-code">Code</label>
+        <input id="nan-code" class="mono {{if index .Errors "code"}}invalid{{end}}"
+               type="text" name="code" placeholder="internet" required>
+        {{with index .Errors "code"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="nan-name">Name</label>
+        <input id="nan-name" type="text" name="name" placeholder="Internet" required>
+        {{with index .Errors "name"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="nan-scope">Scope</label>
+        <select id="nan-scope" name="scope">
+          {{range .Scopes}}<option value="{{.}}">{{.}}</option>{{end}}
+        </select>
+        {{with index .Errors "scope"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="nan-group">Group</label>
+        <select id="nan-group" name="group_id">
+          {{range .Groups}}<option value="{{.ID}}">{{.Code}}</option>{{end}}
+        </select>
+        {{with index .Errors "group_id"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+    </div>
+    <div style="margin-top:12px"><button class="btn btn-primary" type="submit">Declare anchor</button></div>
+    {{else}}
+    <div class="empty">Declare a forwarder group first.</div>
+    {{end}}
+  </div>
+</form>
+{{end}}
+
+
+{{define "network_derive_result"}}
+<div class="panel">
+  <div class="panel-head"><h2>Derivation proposal</h2></div>
+  <div class="panel-body">
+    {{if .Proposal.Attachments}}
+    <h3>Proposed attachments</h3>
+    <div class="scroll-x">
+      <table>
+        <thead><tr><th>Asset</th><th>Group</th><th>Plane</th></tr></thead>
+        <tbody>
+          {{range .Proposal.Attachments}}
+          <tr><td>{{.AssetName}}</td><td class="mono">{{.GroupCode}}</td><td>{{.Plane}}</td></tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+    {{end}}
+    {{if .Proposal.Uplinks}}
+    <h3>Proposed uplinks</h3>
+    <div class="scroll-x">
+      <table>
+        <thead><tr><th>Group</th><th>Upstream</th><th>Plane</th></tr></thead>
+        <tbody>
+          {{range .Proposal.Uplinks}}
+          <tr><td class="mono">{{.GroupCode}}</td><td class="mono">{{.UpstreamCode}}</td><td>{{.Plane}}</td></tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+    {{end}}
+    {{if and (not .Proposal.Attachments) (not .Proposal.Uplinks)}}
+    <div class="empty"><strong>Nothing new to propose.</strong>Either there is no cabling behind an unmodelled asset, or every candidate already has a declared or derived row.</div>
+    {{end}}
+    {{if .Proposal.SkippedAmbiguous}}
+    <p class="field-hint">{{.Proposal.SkippedAmbiguous}} cable(s) between two forwarders of equal role rank were skipped: direction cannot be derived from role alone.</p>
+    {{end}}
+    <p class="field-hint">Proposed only. Nothing here has been written; declare the rows you want through the forms above.</p>
+  </div>
+</div>
+{{end}}

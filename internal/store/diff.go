@@ -26,18 +26,22 @@ type fieldChange struct {
 //
 // Returns ok=false when nothing changed, which lets a caller skip a pointless
 // audit row for a no-op form submission.
-func diffJSON(before, after any) (string, bool, error) {
-	changes := map[string]fieldChange{}
-
-	bv := reflect.Indirect(reflect.ValueOf(before))
-	av := reflect.Indirect(reflect.ValueOf(after))
-	if bv.Type() != av.Type() {
-		return "", false, fmt.Errorf("diffing: type mismatch %s vs %s", bv.Type(), av.Type())
-	}
-
-	t := bv.Type()
+// auditFields flattens a struct into db-tag -> value.
+//
+// It descends into embedded structs, which is not an optimisation: the audited
+// shapes (assetAudit, dependencyAudit) embed the domain entity and add the
+// child-table set beside it. A walk that only looks at top-level fields sees
+// the embedded struct as one untagged field, skips it, and silently reduces the
+// whole audit entry to the added column -- which is exactly what happened, and
+// shipped, because the test only asserted the added column was present.
+func auditFields(v reflect.Value, out map[string]auditField) {
+	t := v.Type()
 	for i := 0; i < t.NumField(); i++ {
 		field := t.Field(i)
+		if field.Anonymous && field.Type.Kind() == reflect.Struct {
+			auditFields(v.Field(i), out)
+			continue
+		}
 		name := field.Tag.Get("db")
 		if name == "" || name == "-" {
 			continue
@@ -46,17 +50,47 @@ func diffJSON(before, after any) (string, bool, error) {
 		if name == "updated_at" {
 			continue
 		}
-		oldVal := deref(bv.Field(i))
-		newVal := deref(av.Field(i))
-		if reflect.DeepEqual(oldVal, newVal) {
+		out[name] = auditField{value: deref(v.Field(i)), entity: t.Name()}
+	}
+}
+
+// auditField carries the owning struct's name so redaction can be judged per
+// entity -- display_name is a person on app_user and a service description on
+// rt_windows.
+type auditField struct {
+	value  any
+	entity string
+}
+
+// diffJSON produces the field-level diff between two values of the same struct
+// type, keyed by db tag. Fields that did not change are omitted.
+//
+// Returns ok=false when nothing changed, which lets a caller skip a pointless
+// audit row for a no-op form submission.
+func diffJSON(before, after any) (string, bool, error) {
+	bv := reflect.Indirect(reflect.ValueOf(before))
+	av := reflect.Indirect(reflect.ValueOf(after))
+	if bv.Type() != av.Type() {
+		return "", false, fmt.Errorf("diffing: type mismatch %s vs %s", bv.Type(), av.Type())
+	}
+
+	beforeFields := map[string]auditField{}
+	afterFields := map[string]auditField{}
+	auditFields(bv, beforeFields)
+	auditFields(av, afterFields)
+
+	changes := map[string]fieldChange{}
+	for name, after := range afterFields {
+		before := beforeFields[name]
+		if reflect.DeepEqual(before.value, after.value) {
 			continue
 		}
-		if domain.IsRedacted(t.Name(), name) {
+		if domain.IsRedacted(after.entity, name) {
 			// Record that it changed, never what to.
 			changes[name] = fieldChange{Old: domain.Redacted, New: domain.Redacted}
 			continue
 		}
-		changes[name] = fieldChange{Old: oldVal, New: newVal}
+		changes[name] = fieldChange{Old: before.value, New: after.value}
 	}
 
 	if len(changes) == 0 {
@@ -72,19 +106,16 @@ func diffJSON(before, after any) (string, bool, error) {
 // snapshotJSON renders a full row for a create entry, under "new" so that a
 // create and an update entry can be read by the same code.
 func snapshotJSON(entity any) (string, error) {
-	v := reflect.Indirect(reflect.ValueOf(entity))
-	t := v.Type()
-	fields := map[string]any{}
-	for i := 0; i < t.NumField(); i++ {
-		name := t.Field(i).Tag.Get("db")
-		if name == "" || name == "-" {
-			continue
-		}
-		if domain.IsRedacted(t.Name(), name) {
+	collected := map[string]auditField{}
+	auditFields(reflect.Indirect(reflect.ValueOf(entity)), collected)
+
+	fields := make(map[string]any, len(collected))
+	for name, f := range collected {
+		if domain.IsRedacted(f.entity, name) {
 			fields[name] = domain.Redacted
 			continue
 		}
-		fields[name] = deref(v.Field(i))
+		fields[name] = f.value
 	}
 	encoded, err := json.Marshal(map[string]any{"new": fields})
 	if err != nil {

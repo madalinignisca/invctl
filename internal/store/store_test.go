@@ -1082,3 +1082,164 @@ func TestCreateLinkIsSerialised(t *testing.T) {
 		})
 	}
 }
+
+// TestEnvironmentMembershipChangeIsAudited. Membership lives in a join table
+// replaced wholesale, so moving an asset into a second environment produced no
+// diff on the asset struct and therefore no audit entry -- and that change is
+// exactly what the segmentation-span report keys on. Third instance of this
+// failure shape after dependency data classes and network attachment members.
+func TestEnvironmentMembershipChangeIsAudited(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			s, ctx := newStore(t, e)
+			prod := mustEnvironment(t, s, ctx, "prod", domain.EnvRoleProduction)
+			dev := mustEnvironment(t, s, ctx, "dev", domain.EnvRoleDev)
+			id := mustAsset(t, s, ctx, domain.KindSwitch, "sw-shared", nil, prod)
+
+			t.Run("the create entry records the environments", func(t *testing.T) {
+				changes, err := s.ListChangesForEntity(ctx, "asset", id, 10)
+				if err != nil {
+					t.Fatalf("listing changes: %v", err)
+				}
+				if !strings.Contains(changes[0].Diff, "prod") {
+					t.Errorf("create entry does not record membership: %s", changes[0].Diff)
+				}
+			})
+
+			t.Run("spanning a second environment is audited", func(t *testing.T) {
+				before, _ := s.ListChangesForEntity(ctx, "asset", id, 50)
+
+				a, err := s.GetAsset(ctx, id)
+				if err != nil {
+					t.Fatalf("getting asset: %v", err)
+				}
+				updated := a.Asset
+				if err := s.UpdateAsset(ctx, testActor, &updated, []string{prod, dev}); err != nil {
+					t.Fatalf("updating asset: %v", err)
+				}
+
+				after, err := s.ListChangesForEntity(ctx, "asset", id, 50)
+				if err != nil {
+					t.Fatalf("listing changes: %v", err)
+				}
+				if len(after) == len(before) {
+					t.Fatal("an asset began spanning two environments with no audit entry")
+				}
+				if !strings.Contains(after[0].Diff, "dev") {
+					t.Errorf("the entry does not name the environment joined: %s", after[0].Diff)
+				}
+			})
+
+			t.Run("nil membership leaves it unchanged and unlogged", func(t *testing.T) {
+				before, _ := s.ListChangesForEntity(ctx, "asset", id, 50)
+				a, _ := s.GetAsset(ctx, id)
+				unchanged := a.Asset
+				if err := s.UpdateAsset(ctx, testActor, &unchanged, nil); err != nil {
+					t.Fatalf("updating asset: %v", err)
+				}
+				after, _ := s.ListChangesForEntity(ctx, "asset", id, 50)
+				if len(after) != len(before) {
+					t.Errorf("a no-op update wrote an audit entry: %s", after[0].Diff)
+				}
+			})
+		})
+	}
+}
+
+// TestAuditSnapshotIsComplete. The audited shapes embed the domain entity and
+// add a child-table set beside it. Reflection over top-level fields only sees
+// the embedded struct as one untagged field and skips it, silently reducing the
+// whole entry to the added column -- which shipped, because the tests asserted
+// the added column was *present* rather than that the entry was *complete*.
+//
+// Assert completeness: every db-tagged column of the entity must appear.
+func TestAuditSnapshotIsComplete(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			s, ctx := newStore(t, e)
+			prod := mustEnvironment(t, s, ctx, "prod", domain.EnvRoleProduction)
+
+			t.Run("asset", func(t *testing.T) {
+				id := mustAsset(t, s, ctx, domain.KindServer, "srv-1", nil, prod)
+				changes, err := s.ListChangesForEntity(ctx, "asset", id, 1)
+				if err != nil {
+					t.Fatalf("listing changes: %v", err)
+				}
+				var snap struct {
+					New map[string]any `json:"new"`
+				}
+				if err := json.Unmarshal([]byte(changes[0].Diff), &snap); err != nil {
+					t.Fatalf("decoding snapshot: %v", err)
+				}
+				// The entity's own columns, plus the folded-in set.
+				for _, want := range []string{
+					"id", "kind", "name", "lifecycle", "serial", "vendor",
+					"owner_team", "attrs", "created_at", "environments",
+				} {
+					if _, ok := snap.New[want]; !ok {
+						t.Errorf("asset snapshot is missing %q: %v", want, snap.New)
+					}
+				}
+				if snap.New["name"] != "srv-1" {
+					t.Errorf("name = %v, want srv-1", snap.New["name"])
+				}
+			})
+
+			t.Run("dependency", func(t *testing.T) {
+				mk := func(code string) string {
+					svc, err := domain.NewService(NewID(), domain.ServiceSpec{
+						Code: code, Name: code, Kind: domain.SvcAPI, EnvironmentID: prod,
+						Availability: domain.AvailStandalone, Tier: 1}, s.Now())
+					if err != nil {
+						t.Fatalf("building service: %v", err)
+					}
+					if err := s.CreateService(ctx, testActor, svc); err != nil {
+						t.Fatalf("creating service: %v", err)
+					}
+					return svc.ID
+				}
+				consumer, provider := mk("dep-consumer"), mk("dep-provider")
+				port := 5432
+				ep, err := domain.NewEndpoint(NewID(), provider, "sql", domain.ProtoTCP, &port, domain.BindHost)
+				if err != nil {
+					t.Fatalf("building endpoint: %v", err)
+				}
+				if err := s.CreateEndpoint(ctx, testActor, ep); err != nil {
+					t.Fatalf("creating endpoint: %v", err)
+				}
+				epID := ep.ID
+				dep, err := domain.NewDependency(NewID(), domain.DependencySpec{
+					ConsumerServiceID: consumer, ProviderEndpointID: &epID,
+					Nature: domain.NatureHard, FailureMode: "order writes fail"}, s.Now())
+				if err != nil {
+					t.Fatalf("building dependency: %v", err)
+				}
+				if err := s.CreateDependency(ctx, testActor, dep, []string{"chd"}); err != nil {
+					t.Fatalf("creating dependency: %v", err)
+				}
+
+				changes, err := s.ListChangesForEntity(ctx, "dependency", dep.ID, 1)
+				if err != nil {
+					t.Fatalf("listing changes: %v", err)
+				}
+				var snap struct {
+					New map[string]any `json:"new"`
+				}
+				if err := json.Unmarshal([]byte(changes[0].Diff), &snap); err != nil {
+					t.Fatalf("decoding snapshot: %v", err)
+				}
+				for _, want := range []string{
+					"id", "consumer_service_id", "provider_endpoint_id", "nature",
+					"failure_mode", "source", "lifecycle", "created_at", "data_classes",
+				} {
+					if _, ok := snap.New[want]; !ok {
+						t.Errorf("dependency snapshot is missing %q: %v", want, snap.New)
+					}
+				}
+				if snap.New["failure_mode"] != "order writes fail" {
+					t.Errorf("failure_mode = %v", snap.New["failure_mode"])
+				}
+			})
+		})
+	}
+}
