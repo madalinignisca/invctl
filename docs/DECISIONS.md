@@ -672,11 +672,22 @@ operator's password in clear. This is the only place in the application where a 
 crosses the network. Refused now unless the channel is encrypted by either route — `ldaps://` is
 TLS from the first byte, StartTLS upgrades a plain `ldap://`.
 
-`INV_LDAP_SKIP_VERIFY` is **allowed but announced loudly at startup** rather than refused. A lab
-directory with a self-signed certificate is a legitimate thing to develop against and the channel
-is still encrypted, so it is a real trade-off rather than a mistake — but an unverified channel
-means any host that can answer the connection collects operator passwords, and settings survive
-from labs into production.
+`INV_LDAP_SKIP_VERIFY` is **also refused**. It was a loud startup warning first, on the grounds
+that a lab directory with a self-signed certificate is a legitimate thing to develop against and
+the channel is still encrypted. Overruled, and the argument against it is the stronger one:
+encryption without verification is not authentication of the peer. Anything that can answer the
+connection — a DNS answer somebody controls, a host on the path — presents its own certificate,
+is accepted, and collects an operator's password on every sign-in, while the login looks
+completely normal. A warning is a thing that scrolls past once and then lives in a systemd unit
+forever, which is precisely how a lab setting reaches production.
+
+A lab that genuinely needs a self-signed directory adds its CA to the host trust store. That is a
+real step somebody takes deliberately, and it does not follow the config into a deployment
+carrying real credentials.
+
+The `tls.Config` still reads `SkipVerify` rather than hardcoding `false`: a struct that silently
+ignores its own configuration is worse than one that cannot be given a bad value, and
+`config.validate` is what makes the bad value unreachable.
 
 Both are GDPR-relevant in the transport sense: operator passwords and session cookies are
 credentials of identifiable people. Nothing was found leaking personal data at rest —

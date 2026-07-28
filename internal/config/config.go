@@ -156,6 +156,25 @@ func (c *Config) validate() error {
 				"so the bind would send an operator's password in clear. Use an ldaps:// URL or "+
 				"set INV_LDAP_STARTTLS=true", c.LDAP.URL)
 		}
+		// Encryption without verification is not authentication of the peer.
+		// Anything that can answer the connection -- a DNS answer somebody
+		// controls, a host on the path -- presents its own certificate, is
+		// accepted, and collects an operator's password on every sign-in. The
+		// operator sees a normal login.
+		//
+		// This was previously a loud startup warning on the grounds that a lab
+		// directory with a self-signed certificate is a legitimate thing to
+		// develop against. It is, and it is also how the setting reaches
+		// production: a warning is a thing that scrolls past once and then
+		// lives in a systemd unit forever. A lab that needs this can add its
+		// own CA to the host trust store, which is a real step somebody takes
+		// deliberately and does not silently follow the config into a
+		// deployment carrying real credentials.
+		if c.LDAP.SkipVerify {
+			return fmt.Errorf("validating config: INV_LDAP_SKIP_VERIFY is set, so any host able to "+
+				"answer %q could present its own certificate and collect operator passwords. "+
+				"Add the directory's CA to the host trust store instead", c.LDAP.URL)
+		}
 	}
 	if err := c.validateAgents(); err != nil {
 		return err

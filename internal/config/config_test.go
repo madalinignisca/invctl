@@ -389,23 +389,35 @@ func TestSecurityFlagsFailClosed(t *testing.T) {
 	})
 }
 
-// TestLDAPRefusesAPlaintextBind.
+// TestLDAPRefusesAnUntrustworthyChannel.
 //
 // A simple bind sends an operator's password. It is the only place in this
 // application where a human credential crosses the network, and the default
 // configuration -- set a URL, set a bind DN, start -- used to be the
-// unencrypted one.
-func TestLDAPRefusesAPlaintextBind(t *testing.T) {
+// unencrypted one. Both halves are refused: an unencrypted channel, and an
+// encrypted one whose peer is never verified.
+func TestLDAPRefusesAnUntrustworthyChannel(t *testing.T) {
 	tests := []struct {
-		name     string
-		url      string
-		startTLS string
-		wantErr  bool
+		name       string
+		url        string
+		startTLS   string
+		skipVerify string
+		wantErr    bool
+		wantMsg    string
 	}{
 		{name: "plain ldap:// with no StartTLS", url: "ldap://dir.example.com", wantErr: true},
 		{name: "plain ldap:// with StartTLS", url: "ldap://dir.example.com", startTLS: "true"},
 		{name: "ldaps:// needs no StartTLS", url: "ldaps://dir.example.com"},
 		{name: "LDAPS:// is matched case-insensitively", url: "LDAPS://dir.example.com"},
+		// Encryption without verification is not authentication of the peer:
+		// anything that can answer the connection presents its own certificate
+		// and collects an operator's password, while the login looks normal.
+		// This was a startup warning first, which is a thing that scrolls past
+		// once and then lives in a systemd unit forever.
+		{name: "ldaps:// with verification disabled", url: "ldaps://dir.example.com",
+			skipVerify: "true", wantErr: true, wantMsg: "collect operator passwords"},
+		{name: "StartTLS with verification disabled", url: "ldap://dir.example.com",
+			startTLS: "true", skipVerify: "true", wantErr: true, wantMsg: "collect operator passwords"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -417,6 +429,9 @@ func TestLDAPRefusesAPlaintextBind(t *testing.T) {
 			if tc.startTLS != "" {
 				t.Setenv("INV_LDAP_STARTTLS", tc.startTLS)
 			}
+			if tc.skipVerify != "" {
+				t.Setenv("INV_LDAP_SKIP_VERIFY", tc.skipVerify)
+			}
 
 			_, err := Load()
 			if tc.wantErr {
@@ -424,8 +439,12 @@ func TestLDAPRefusesAPlaintextBind(t *testing.T) {
 					t.Fatal("a plaintext LDAP bind was accepted; an operator's password would " +
 						"cross the network in clear")
 				}
-				if !strings.Contains(err.Error(), "clear") {
-					t.Errorf("the error does not say what is wrong: %v", err)
+				want := tc.wantMsg
+				if want == "" {
+					want = "clear"
+				}
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("the error does not say what is wrong (wanted %q): %v", want, err)
 				}
 				return
 			}
