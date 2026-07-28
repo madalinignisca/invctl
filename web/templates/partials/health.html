@@ -301,11 +301,54 @@
       <tbody>
         {{range .Overrides}}
         <tr>
-          <td class="mono" style="font-size:12px">{{.EntityType}}</td>
+          <td>
+            {{if .EntityHref}}<a class="id" href="{{.EntityHref}}">{{.DisplayEntity}}</a>
+            {{else}}<span class="mono" style="font-size:12px">{{.DisplayEntity}}</span>{{end}}
+            <div style="color:var(--muted);font-size:12px">{{.EntityType}}</div>
+          </td>
           <td><span class="{{healthClass .AssertedState}}">{{.AssertedState}}</span></td>
           <td>{{template "actor_cell" .}}</td>
           <td class="mono" style="font-size:12px;color:var(--muted)">{{shortTime .ExpiresAt}}</td>
           <td style="color:var(--muted)">{{.Reason}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+</div>
+{{end}}
+{{end}}
+
+
+{{/* Drift: what the collectors are naming that this inventory does not hold.
+     Rule 6 calls an asset the estate has and the inventory does not "a finding,
+     not noise" -- and until it was rendered it was neither, because the queue
+     was written by the webhook and read by nothing at all. That is the same as
+     dropping the report, except that it also grows.
+
+     Deliberately NOT a link: there is nothing to link to. That is the finding. */}}
+{{define "drift_summary"}}
+{{if .Drift}}
+<div class="panel">
+  <div class="panel-head">
+    <h2>{{pluralise (len .Drift) "unrecognised entity" "unrecognised entities"}}</h2>
+    <span class="panel-note">
+      A collector is reporting on these and the inventory has no record of them. Either the estate
+      grew without being written down, or a reporter is pointed at the wrong place.
+    </span>
+  </div>
+  <div class="scroll-x">
+    <table>
+      <thead><tr><th>Reported as</th><th>Type</th><th>Reporter</th><th>State</th><th>Reports</th><th>Last seen</th></tr></thead>
+      <tbody>
+        {{range .Drift}}
+        <tr>
+          <td class="mono" style="font-size:12px">{{.EntityRef}}</td>
+          <td style="color:var(--muted);font-size:12.5px">{{.EntityType}}</td>
+          <td class="mono" style="font-size:12px">{{.Reporter}}</td>
+          <td><span class="{{healthClass .State}}">{{.State}}</span></td>
+          <td class="num">{{.ReportCount}}</td>
+          <td class="mono" style="font-size:12px;color:var(--muted)">{{shortTime .LastSeenAt}}</td>
         </tr>
         {{end}}
       </tbody>

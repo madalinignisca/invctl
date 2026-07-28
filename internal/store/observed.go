@@ -1357,6 +1357,37 @@ func (w *observedWrite) countRecentTransitions(ctx context.Context, key healthKe
 func (s *SQLStore) queueUnmatched(ctx context.Context, obs *domain.Observation, now time.Time) error {
 	at := domain.FormatTime(now)
 	return s.observedTx(ctx, func(w *observedWrite) error {
+		// The queue is bounded per reporter, and the bound is the point.
+		//
+		// The upsert key includes entity_ref, which the reporter chooses
+		// freely, so novel refs never collide and the counter never absorbs
+		// them. An authenticated credential could therefore drive unbounded
+		// unindexed inserts -- each its own transaction against SQLite's single
+		// writer -- and rule 10 names observed_transition as the only prunable
+		// table, so nothing could ever remove them. That is the same writer
+		// contention rule 4 exists to prevent, arriving through the drift queue
+		// instead of the heartbeat path.
+		//
+		// Past the cap the report is simply not recorded. It still 404s to the
+		// caller, unchanged, and the finding rule 6 cares about -- "this
+		// reporter is naming things the inventory does not have" -- is already
+		// represented by the rows that did land. A reporter genuinely ahead of
+		// the inventory by more than MaxUnmatchedPerReporter distinct entities
+		// is not a longer list, it is a different conversation.
+		var distinct int
+		if err := w.get(ctx, &distinct,
+			`SELECT COUNT(*) FROM unmatched_observation WHERE reporter = ?`, obs.Reporter); err != nil {
+			return fmt.Errorf("counting queued drift for %s: %w", obs.Reporter, err)
+		}
+		if distinct >= MaxUnmatchedPerReporter {
+			// Not silent: a reporter that has saturated the queue is itself a
+			// finding, and one an operator should see rather than discover as
+			// disk pressure.
+			slog.WarnContext(ctx, "drift queue saturated for reporter",
+				"reporter", obs.Reporter, "cap", MaxUnmatchedPerReporter,
+				"entity_type", obs.EntityType)
+			return nil
+		}
 		_, err := w.exec(ctx, unmatchedUpsert,
 			NewID(), obs.EntityType, obs.EntityID, obs.Reporter, string(obs.State),
 			obs.ReportedAt, at, at)
@@ -1366,6 +1397,13 @@ func (s *SQLStore) queueUnmatched(ctx context.Context, obs *domain.Observation, 
 		return nil
 	})
 }
+
+// MaxUnmatchedPerReporter bounds the drift queue per credential.
+//
+// Large enough that a real inventory gap -- a rack commissioned before anyone
+// entered it -- is fully visible, small enough that a credential cannot use the
+// queue as unbounded storage.
+const MaxUnmatchedPerReporter = 500
 
 // ---------------------------------------------------------------------------
 // Small helpers

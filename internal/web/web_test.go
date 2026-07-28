@@ -168,6 +168,7 @@ func newHarnessWith(t *testing.T, creds []config.AgentCredential) *harness {
 			Handler:       handlers.NewObservationAPI(store.NewObservedRecorder(st)),
 			SessionCookie: sessions.Cookie.Name,
 		}
+		app.Agents = registry
 	}
 
 	server := httptest.NewServer(web.Routes(app, staticFS(t), authz, agents))

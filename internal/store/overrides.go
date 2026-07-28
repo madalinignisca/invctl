@@ -39,6 +39,28 @@ type HealthOverrideRow struct {
 	domain.HealthOverride
 	// ActorName is empty when the id does not resolve to a live account.
 	ActorName string `db:"actor_name"`
+	// EntityName is the asset's name or the instance's service code. Empty
+	// when the entity has since been removed.
+	EntityName string `db:"entity_name"`
+}
+
+// DisplayEntity is what the Entity column renders: a name when one resolves,
+// the opaque id when it does not. Never the bare type, which identifies
+// nothing.
+func (r HealthOverrideRow) DisplayEntity() string {
+	if r.EntityName != "" {
+		return r.EntityName
+	}
+	return r.EntityID
+}
+
+// EntityHref links to the thing being silenced, so the panel is one click from
+// the page that explains it.
+func (r HealthOverrideRow) EntityHref() string {
+	if r.EntityType == domain.ObservableAsset {
+		return "/assets/" + r.EntityID
+	}
+	return ""
 }
 
 // DisplayActor is what a template renders, falling back to the opaque id.
@@ -59,10 +81,24 @@ func (r HealthOverrideRow) DisplayActor() string {
 // constant.
 func (r HealthOverrideRow) ActorKind() string { return domain.ActorKindUser }
 
+// overrideSelect resolves the entity to something an operator can act on.
+//
+// The dashboard panel announced "2 active overrides" and then printed the
+// entity TYPE in its Entity column, so two silenced machines rendered as two
+// identical rows reading "asset". Somebody reading a green estate mid-incident
+// could see that something was silenced and not which thing -- which is worse
+// than not showing the panel, because it costs a search to find out.
+//
+// Both joins are keyed on entity_type as well as id, so a service_instance id
+// can never accidentally match an asset row.
 const overrideSelect = `
-	SELECT ho.*, COALESCE(u.display_name, u.username, '') AS actor_name
+	SELECT ho.*, COALESCE(u.display_name, u.username, '') AS actor_name,
+	       COALESCE(a.name, sv.code, '') AS entity_name
 	FROM health_override ho
-	LEFT JOIN app_user u ON u.id = ho.actor`
+	LEFT JOIN app_user u ON u.id = ho.actor
+	LEFT JOIN asset a ON a.id = ho.entity_id AND ho.entity_type = 'asset'
+	LEFT JOIN service_instance si ON si.id = ho.entity_id AND ho.entity_type = 'service_instance'
+	LEFT JOIN service sv ON sv.id = si.service_id`
 
 // GetHealthOverride loads one override whatever its lifecycle, for the amend
 // and clear paths.

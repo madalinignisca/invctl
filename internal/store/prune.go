@@ -324,3 +324,81 @@ func (t *tx) countOne(ctx context.Context, query string, args ...any) (int64, er
 	}
 	return n, nil
 }
+
+// unmatchedTable is the second and last prunable table. Like prunableTable it
+// is a constant, and PruneUnmatchedObservations takes no table parameter, so
+// the rule-10 property holds: a prune method names its own target and a caller
+// cannot redirect one at change_log.
+const unmatchedTable = "unmatched_observation"
+
+// PruneUnmatchedObservations clears resolved drift.
+//
+// The drift queue records reports about entities the inventory does not hold.
+// Rule 6 wants those surfaced as findings, and a finding that has been dealt
+// with -- the asset was entered, or the reporter was fixed -- should not sit in
+// the queue forever making the real backlog harder to read. It is also the one
+// observed table an authenticated credential can grow at will, which is why it
+// needs a way out at all: MaxUnmatchedPerReporter bounds it, and this empties
+// it.
+//
+// Deliberately NOT folded into PruneObservedTransitions as an extra flag. The
+// two have genuinely different safety arguments: the transition ledger is
+// evidence of what an estate did and carries the 365-day in-scope floor, while
+// this queue is a worklist. Sharing an entry point would mean one set of
+// options guarding two different risks, and the weaker argument would win.
+//
+// Same actor rule: an operator only. An agent that can clear the record of
+// entities it named is an agent that can cover its own reconnaissance.
+func (s *SQLStore) PruneUnmatchedObservations(ctx context.Context, actor domain.Actor, opts PruneOptions) (*PruneReport, error) {
+	now := s.Now()
+
+	ve := &domain.ValidationError{}
+	if actor.Kind != domain.ActorKindUser {
+		ve.Add("actor", "a prune is an operator's act and is recorded as one; a %s actor may not run it", actor.Kind)
+	}
+	if actor.ID == "" {
+		ve.Add("actor", "is required: the run records who did it")
+	}
+	if opts.Before.IsZero() {
+		ve.Add("before", "is required: a prune with no cutoff is a truncate")
+	} else if opts.Before.UTC().After(now) {
+		ve.Add("before", "must not be in the future")
+	}
+	if err := ve.OrNil(); err != nil {
+		return nil, fmt.Errorf("pruning %s: %w", unmatchedTable, err)
+	}
+
+	before := opts.Before.UTC()
+	cutoff := domain.FormatTime(before)
+	report := &PruneReport{RunID: NewID(), Before: before, DryRun: opts.DryRun, At: now}
+
+	// last_seen_at, not first_seen_at: a ref still being reported is still a live
+	// finding however long ago it first appeared.
+	n, err := s.countOne(ctx, `SELECT COUNT(*) FROM unmatched_observation WHERE last_seen_at < ?`, cutoff)
+	if err != nil {
+		return nil, fmt.Errorf("counting prunable %s rows: %w", unmatchedTable, err)
+	}
+	report.Deleted = n
+	if opts.DryRun {
+		return report, nil
+	}
+
+	err = s.write(ctx, actor, func(t *tx) error {
+		if _, err := t.exec(ctx,
+			`DELETE FROM unmatched_observation WHERE last_seen_at < ?`, cutoff); err != nil {
+			return translateWriteErr(err, "pruning "+unmatchedTable)
+		}
+		diff, err := pruneDiff(report)
+		if err != nil {
+			return err
+		}
+		// One row per run whether or not anything matched, for the same reason
+		// the transition prune does it: "ran and found nothing" and "did not
+		// run" are different facts and the second is the one an auditor wants.
+		return t.log(ctx, unmatchedTable, report.RunID, domain.ActionDelete, diff)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return report, nil
+}

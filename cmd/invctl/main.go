@@ -62,7 +62,13 @@ func run() error {
 		pruneAs = flag.String("prune-as", "",
 			"the operator account the prune is recorded against; required with -prune-observed")
 		pruneDryRun = flag.Bool("prune-dry-run", false,
-			"report what -prune-observed would remove, and remove nothing")
+			"report what a prune would remove, and remove nothing")
+		// A separate flag rather than a mode of -prune-observed. The drift
+		// queue is a worklist, the transition ledger is evidence, and they
+		// carry different safety arguments -- sharing one entry point would
+		// mean one set of options guarding two different risks.
+		pruneUnmatched = flag.Bool("prune-unmatched", false,
+			"delete resolved drift-queue entries older than -prune-keep-days and exit")
 	)
 	flag.Parse()
 
@@ -93,6 +99,9 @@ func run() error {
 
 	if *pruneObserved {
 		return pruneObservedTransitions(ctx, st, cfg, *pruneKeepDays, *pruneAs, *pruneDryRun)
+	}
+	if *pruneUnmatched {
+		return pruneUnmatchedObservations(ctx, st, cfg, *pruneKeepDays, *pruneAs, *pruneDryRun)
 	}
 
 	if *seedOnly || cfg.SeedOnStart {
@@ -146,6 +155,11 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	// The dashboard needs the configured ids so a credential that has never
+	// checked in is shown as silent rather than omitted.
+	if agents != nil {
+		app.Agents = agents.Registry
+	}
 
 	server := &http.Server{
 		Addr:              cfg.Listen,
@@ -173,6 +187,65 @@ func run() error {
 	stopFlushing()
 	<-flusherDone
 	return serveErr
+}
+
+// pruneUnmatchedObservations clears drift-queue entries nothing is reporting
+// any more.
+//
+// The queue holds reports about entities the inventory does not have, which
+// rule 6 wants surfaced as findings. A finding that has been dealt with -- the
+// asset was entered, or the reporter was corrected -- should not stay in the
+// list making the real backlog harder to read. It is also the one observed
+// table an authenticated credential can grow deliberately, so it needs a way
+// out as well as the per-reporter cap.
+//
+// Same operator requirement as the transition prune, for the same reason: an
+// agent that could clear the record of entities it named could cover its own
+// reconnaissance.
+func pruneUnmatchedObservations(ctx context.Context, st *store.SQLStore, cfg *config.Config,
+	keepDays int, username string, dryRun bool) error {
+	user, err := resolvePruneOperator(ctx, st, cfg, username, keepDays)
+	if err != nil {
+		return err
+	}
+	report, err := st.PruneUnmatchedObservations(ctx, domain.UserActor(user), store.PruneOptions{
+		Before: st.Now().AddDate(0, 0, -keepDays),
+		DryRun: dryRun,
+	})
+	if err != nil {
+		return err
+	}
+	verb := "pruned drift queue"
+	if dryRun {
+		verb = "dry run: would prune drift queue"
+	}
+	slog.Info(verb,
+		"before", domain.FormatTime(report.Before),
+		"keep_days", keepDays,
+		"deleted", report.Deleted,
+		"actor", user.ID)
+	return nil
+}
+
+// resolvePruneOperator is the shared front half of both prunes: an operator
+// with write access, named by opaque id.
+func resolvePruneOperator(ctx context.Context, st *store.SQLStore, cfg *config.Config,
+	username string, keepDays int) (*domain.AppUser, error) {
+	if strings.TrimSpace(username) == "" {
+		return nil, fmt.Errorf("pruning: -prune-as is required; the run records which operator asked for it")
+	}
+	if keepDays < 0 {
+		return nil, fmt.Errorf("pruning: -prune-keep-days must not be negative")
+	}
+	user, err := st.GetUserByUsername(ctx, username)
+	if err != nil {
+		return nil, fmt.Errorf("pruning: %w", err)
+	}
+	if !auth.NewAuthorizer(cfg.AdminUsers).CanWrite(user) {
+		return nil, fmt.Errorf("pruning: %s does not have write access, "+
+			"so the audit entry would name somebody who could not have done this", user.Username)
+	}
+	return user, nil
 }
 
 // pruneObservedTransitions runs the retention prune (docs/AUDIT.md rule 10).

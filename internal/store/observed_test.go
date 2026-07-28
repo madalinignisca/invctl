@@ -1221,3 +1221,82 @@ func TestAWorkloadInheritsItsHostsEnvironments(t *testing.T) {
 		})
 	}
 }
+
+// TestTheDriftQueueIsBoundedAndPrunable.
+//
+// The upsert key includes entity_ref, which the reporter chooses freely, so
+// novel refs never collide and the counter never absorbs them. An authenticated
+// credential could drive unbounded unindexed inserts -- each its own
+// transaction against SQLite's single writer -- and rule 10 named
+// observed_transition as the only prunable table, so nothing could ever remove
+// them. Same writer contention rule 4 exists to prevent, arriving through the
+// drift queue instead of the heartbeat path.
+func TestTheDriftQueueIsBoundedAndPrunable(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newObservedFixture(t, e)
+
+			// Every ref is novel, which is the attacker's shape: the upsert
+			// counter can never collapse them.
+			ghosts := MaxUnmatchedPerReporter + 50
+			for i := 0; i < ghosts; i++ {
+				_, err := f.recorder.RecordObservation(f.ctx, f.agent, f.scope, domain.ObservationSpec{
+					EntityType:      domain.ObservableAsset,
+					EntityID:        fmt.Sprintf("ghost-%06d", i),
+					State:           "down",
+					ReportedAt:      domain.FormatTime(f.clock.Now()),
+					IntervalSeconds: 30,
+				})
+				// Every one is a 404 for an unknown entity; that is correct and
+				// unchanged. What matters is what it left behind.
+				if err == nil {
+					t.Fatalf("ghost %d was accepted; an observation for an unknown entity must never create it", i)
+				}
+			}
+
+			queued := f.count(t, `SELECT COUNT(*) FROM unmatched_observation`)
+			if queued > MaxUnmatchedPerReporter {
+				t.Errorf("%d drift rows queued from %d novel refs, above the %d cap: a credential "+
+					"can use the queue as unbounded storage on the single writer",
+					queued, ghosts, MaxUnmatchedPerReporter)
+			}
+			if queued == 0 {
+				t.Fatal("nothing was queued at all, so the drift finding rule 6 wants is gone entirely")
+			}
+
+			// And it has a way out. Without one the cap alone would turn a
+			// saturated queue into a permanent blind spot.
+			operator, err := domain.NewAppUser(NewID(), "drift-operator", domain.UserSourceLocal, f.store.Now())
+			if err != nil {
+				t.Fatalf("building operator: %v", err)
+			}
+			if err := f.store.CreateUser(f.ctx, testActor, operator); err != nil {
+				t.Fatalf("creating operator: %v", err)
+			}
+			// Move time forward rather than asking the prune to reach into the
+			// future, which it refuses -- correctly, since a cutoff ahead of
+			// now is a truncate wearing a cutoff's clothes.
+			queuedAt := f.clock.Now()
+			f.clock.Advance(48 * time.Hour)
+			report, err := f.store.PruneUnmatchedObservations(f.ctx, domain.UserActor(operator), PruneOptions{
+				Before: queuedAt.Add(time.Minute),
+			})
+			if err != nil {
+				t.Fatalf("pruning the drift queue: %v", err)
+			}
+			if report.Deleted == 0 {
+				t.Error("the prune removed nothing, so the drift queue has no way out")
+			}
+			if left := f.count(t, `SELECT COUNT(*) FROM unmatched_observation`); left != 0 {
+				t.Errorf("%d drift rows survived a prune reaching past all of them", left)
+			}
+
+			// An agent may not clear the record of what it named.
+			if _, err := f.store.PruneUnmatchedObservations(f.ctx, f.agent, PruneOptions{
+				Before: f.clock.Now(),
+			}); err == nil {
+				t.Error("a machine credential pruned the drift queue; it could cover its own reconnaissance")
+			}
+		})
+	}
+}

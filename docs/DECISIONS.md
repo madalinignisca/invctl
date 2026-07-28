@@ -554,3 +554,61 @@ immediately followed by an unlabelled last-report age, so an entity that went do
 minutes ago read "down … just now" — pointing an incident review at whatever happened in the
 last minute. The onset now leads and is labelled, and the poll age says "polled". Rule 3
 forbids collapsing the three timestamps; the page must not let them *read* as one either.
+
+### M6 follow-ups: the seven that were left open
+
+Two of them had been under-triaged rather than judged minor, and both changed what the M6
+commit message could truthfully claim.
+
+**The boundary test could be stepped around by moving a string.** Rule 1's whole argument is
+that the observed/declared boundary is structural rather than a convention, and
+`TestObservedPathTouchesNoDeclaredTable` is what backs that. It resolved string constants
+declared *in the file under inspection only*, so `const q = "UPDATE asset SET lifecycle = ..."`
+in `health.go`, called from `observed.go`, produced a bare identifier the walker resolved to
+nothing — no statement, no check, both boundary tests green while the observed path retired an
+asset. Constants are now collected package-wide and bare identifiers are resolved. Verified by
+reproducing the evasion: it now fails with `observed.go:1033: update writes to "asset"`.
+
+**The drift queue was unbounded and unreachable.** `unmatched_observation` upserts on
+`(entity_type, entity_ref, reporter)`, and `entity_ref` is whatever the reporter claimed — so
+novel refs never collide and the counter never absorbs them. An authenticated credential could
+drive unbounded unindexed inserts, each its own transaction against SQLite's single writer,
+and `prunableTable` hard-coded `observed_transition` so nothing could ever remove them. Same
+writer contention rule 4 exists to prevent, arriving through the drift queue instead of the
+heartbeat path.
+
+Bounded at `MaxUnmatchedPerReporter`, and given a way out via `PruneUnmatchedObservations` —
+a *separate* method, not a table parameter on the existing prune, so rule 10's property holds.
+Deliberately not folded into `PruneObservedTransitions`: the transition ledger is evidence and
+carries the 365-day in-scope floor, the drift queue is a worklist, and sharing one entry point
+would mean one set of options guarding two different risks with the weaker argument winning.
+
+### The rest
+
+- **`MIN(interval_seconds)`, not `MAX`.** A reporter declares a cadence per reading, so one
+  entity watched lazily gave the whole credential a lazy horizon and a dead collector stayed
+  "reporting" for as long as its slowest row allowed — with the fast-cadence entity correctly
+  stale on the same screen. The tightest promise is the one that proves it is alive.
+- **A credential that never checked in is now shown as silent**, not omitted. The panel exists
+  so a dead collector is one alertable event; a collector provisioned and never deployed was
+  simply absent from it, and "never started" and "started and stopped" are different findings.
+- **The drift queue is rendered.** It was written from the first webhook and read by nothing —
+  the same as dropping the report, except that it also grows.
+- **The 24h override cap moved into `Validate`.** It lived only in the constructors, which is a
+  cap describable as "must not use the other path" — the shape rule 1 rejects — and `Validate`
+  is what the store entry point actually runs.
+- **The override panel names the entity.** It printed the entity *type*, so two silenced
+  machines rendered as two identical rows reading "asset".
+
+### Two test assertions that were not testing what they said
+
+- The override "why" check matched the reason anywhere on an admin's page, where it also
+  survives inside the amend form's `<input value="...">`. Deleting the reason from the banner
+  left it green while a read-only operator — who gets no amend form — saw no reason at all.
+  Now anchored to the banner markup.
+- The flap escape-hatch check was `Contains(page, "degraded")`, which is already true on a
+  service page with zero observations: the override form has a `degraded` option and the
+  flapping badge uses `pill-degraded`. It held with the escape hatch entirely disabled. Now
+  anchored to the transition row itself.
+
+Both were verified by reproducing the exact perturbation that used to pass.

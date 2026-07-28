@@ -820,6 +820,26 @@ func (o *HealthOverride) Validate() error {
 	if o.ExpiresAt <= o.CreatedAt {
 		ve.Add("expires_at", "must be after the override was created")
 	}
+	// The 24h ceiling belongs here, not only in the constructors.
+	//
+	// Rule 14 caps it because a permanent override is how a real outage stays
+	// invisible for six weeks. A cap that lives only in NewHealthOverride and
+	// Amend is a cap that can be described as "must not use the other path" --
+	// exactly the shape rule 1 rejects -- and Validate is what the store entry
+	// point actually runs, so a future admin CLI, seeder or bulk
+	// maintenance-window importer building the struct directly would have
+	// bypassed it entirely.
+	//
+	// Enforced in Go rather than as a CHECK because timestamp arithmetic is not
+	// portable across both engines; SQL enforces direction only.
+	if created, err := ParseTime(o.CreatedAt); err == nil {
+		if expires, err := ParseTime(o.ExpiresAt); err == nil {
+			if expires.Sub(created) > MaxOverrideDuration {
+				ve.Add("expires_at", "is more than %s after creation: an override that outlives an "+
+					"incident hides the next one", MaxOverrideDuration)
+			}
+		}
+	}
 	return ve.OrNil()
 }
 

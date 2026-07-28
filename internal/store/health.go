@@ -33,6 +33,7 @@ package store
 import (
 	"context"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/gabriel/invctl/internal/domain"
@@ -203,13 +204,25 @@ func (r ReporterStatus) StaleAfter() (time.Time, bool) {
 
 // ListReporterStatus is "is anything still watching?", answered once per
 // credential rather than once per entity.
+//
+// MIN(interval_seconds), not MAX. A reporter declares a cadence per reading, so
+// one entity watched lazily and one watched closely give the same credential
+// two horizons; the tightest promise is the one that proves it is alive. Taking
+// the loosest let a single slow row hide a dead collector for as long as that
+// row's cadence allowed -- the two halves of rule 8 then contradicted each
+// other on one screen, with the fast-cadence entity correctly stale while the
+// reporters panel showed the same credential as reporting.
+//
+// The cap on a declared cadence (domain.MaxIntervalSeconds) bounds the other
+// end: MIN cannot be gamed downwards to make a reporter look alive, because a
+// smaller interval means a TIGHTER deadline, not a looser one.
 func (s *SQLStore) ListReporterStatus(ctx context.Context) ([]ReporterStatus, error) {
 	var rows []ReporterStatus
 	err := s.read(ctx, &rows, `
 		SELECT reporter AS reporter,
 		       COUNT(*) AS entity_count,
 		       MAX(last_report_at) AS last_report_at,
-		       MAX(interval_seconds) AS interval_seconds
+		       MIN(interval_seconds) AS interval_seconds
 		FROM asset_health
 		GROUP BY reporter
 		ORDER BY reporter`)
@@ -235,4 +248,37 @@ func (s *SQLStore) ListReporterStatus(ctx context.Context) ([]ReporterStatus, er
 		}
 	}
 	return rows, nil
+}
+
+// WithConfiguredReporters folds in credentials that have never written a row.
+//
+// ListReporterStatus groups over asset_health, so it can only see reporters
+// that have reported. A credential provisioned and never deployed, or one
+// removed from the estate whose rows were later pruned, is invisible to it --
+// and the panel exists precisely so that a collector going quiet is one
+// alertable event rather than a thousand entities drifting green. "Never
+// checked in" and "checked in and stopped" are different findings and both
+// belong on the screen.
+//
+// Configured ids come from the same registry the startup username-collision
+// check uses, so the panel cannot disagree with what the server will accept.
+func WithConfiguredReporters(rows []ReporterStatus, configured []string) []ReporterStatus {
+	seen := make(map[string]bool, len(rows))
+	for _, r := range rows {
+		seen[r.Reporter] = true
+	}
+	for _, id := range configured {
+		if seen[id] {
+			continue
+		}
+		rows = append(rows, ReporterStatus{
+			Reporter: id,
+			Silent:   true,
+			// No SilentSince: there is no instant it stopped, because it never
+			// started. A view must show that difference rather than inventing
+			// a timestamp for it.
+		})
+	}
+	sort.Slice(rows, func(i, j int) bool { return rows[i].Reporter < rows[j].Reporter })
+	return rows
 }

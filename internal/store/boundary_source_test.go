@@ -6,6 +6,7 @@ import (
 	"go/parser"
 	"go/token"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"reflect"
 	"sort"
@@ -351,7 +352,20 @@ func sqlStatementsIn(t *testing.T, path string) []sqlStatement {
 		t.Fatalf("parsing %s: %v", path, err)
 	}
 
-	consts := fileStringConstants(file)
+	// Constants from the WHOLE package, not just this file.
+	//
+	// Scoping this to the file under inspection left the boundary trivially
+	// evadable: declare `const q = "UPDATE asset SET lifecycle = ..."` in
+	// health.go, call w.exec(ctx, q, ...) from observed.go, and the argument is
+	// a bare identifier this walker resolved to nothing. No statement, no
+	// check, and both boundary tests pass while the observed path retires an
+	// asset. Rule 1's whole claim is that the boundary is structural rather
+	// than a convention, and a guard that a rename steps around is a
+	// convention.
+	consts := packageStringConstants(t, filepath.Dir(path))
+	for name, value := range fileStringConstants(file) {
+		consts[name] = value
+	}
 
 	var out []sqlStatement
 	seen := map[token.Pos]bool{}
@@ -382,6 +396,18 @@ func sqlStatementsIn(t *testing.T, path string) []sqlStatement {
 				return true
 			}
 			text, pos = unquoted, node.Pos()
+		case *ast.Ident:
+			// A bare identifier standing in for a query string. This is the
+			// evasion above: the SQL is real, it is simply spelled somewhere
+			// else.
+			if seen[node.Pos()] {
+				return true
+			}
+			value, ok := consts[node.Name]
+			if !ok {
+				return true
+			}
+			text, pos = value, node.Pos()
 		default:
 			return true
 		}
@@ -433,6 +459,33 @@ func flattenStringConcat(expr ast.Expr, consts map[string]string) (string, token
 // fileStringConstants collects package-level `const name = "literal"` and
 // `var name = "literal"` declarations, so a statement assembled around one is
 // still readable.
+// packageStringConstants collects every package-level string constant and var
+// in a directory, across all non-test files, so a query defined in one file and
+// used in another is still visible to the boundary check.
+func packageStringConstants(t *testing.T, dir string) map[string]string {
+	t.Helper()
+	out := map[string]string{}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("reading %s: %v", dir, err)
+	}
+	fset := token.NewFileSet()
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		file, err := parser.ParseFile(fset, filepath.Join(dir, name), nil, parser.SkipObjectResolution)
+		if err != nil {
+			t.Fatalf("parsing %s: %v", name, err)
+		}
+		for k, v := range fileStringConstants(file) {
+			out[k] = v
+		}
+	}
+	return out
+}
+
 func fileStringConstants(file *ast.File) map[string]string {
 	out := map[string]string{}
 	for _, decl := range file.Decls {

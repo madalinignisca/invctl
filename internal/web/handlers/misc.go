@@ -30,6 +30,12 @@ type dashboardPage struct {
 	// because an operator reading a green estate needs to know how much of that
 	// green somebody asserted rather than observed.
 	Overrides []store.HealthOverrideRow
+	// Drift is what reporters are naming that the inventory does not hold.
+	// Rule 6 calls this "a finding, not noise" -- an asset the estate has and
+	// the inventory does not. It was queued from the first webhook and read by
+	// nothing, which is the same as dropping the report except that it also
+	// grows.
+	Drift []domain.UnmatchedObservation
 }
 
 // SilentReporters is how many collectors have stopped, for the panel heading.
@@ -76,7 +82,15 @@ func (a *App) Dashboard(w http.ResponseWriter, r *http.Request) {
 		a.serverError(w, r, err)
 		return
 	}
+	if a.Agents != nil {
+		reporters = store.WithConfiguredReporters(reporters, a.Agents.IDs())
+	}
 	overrides, err := a.Store.ListActiveOverrides(r.Context())
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
+	drift, err := a.Store.ListUnmatchedObservations(r.Context(), 12)
 	if err != nil {
 		a.serverError(w, r, err)
 		return
@@ -100,6 +114,7 @@ func (a *App) Dashboard(w http.ResponseWriter, r *http.Request) {
 		ServiceCount: len(services),
 		Reporters:    reporters,
 		Overrides:    overrides,
+		Drift:        drift,
 	})
 }
 

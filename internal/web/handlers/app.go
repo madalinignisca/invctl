@@ -27,6 +27,12 @@ type App struct {
 	Auth     auth.Authenticator
 	Authz    *auth.Authorizer
 	Config   *config.Config
+	// Agents is the configured credential list, used to show a credential that
+	// has never checked in. Without it the reporters panel is built purely from
+	// rows that exist, so a collector provisioned and never deployed -- or one
+	// removed and later pruned -- is simply absent, and a panel whose whole job
+	// is "a dead collector is one alertable event" reads as a covered estate.
+	Agents *auth.AgentRegistry
 }
 
 // Flash is a one-shot message shown after a mutation.

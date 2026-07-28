@@ -206,8 +206,21 @@ func TestEveryViewOfAnOverriddenEntityShowsWhoWhyAndUntilWhen(t *testing.T) {
 			t.Errorf("the asset page does not show %q; rule 14 wants who, why and until when", want)
 		}
 	}
-	if !strings.Contains(page, expiresAt[:10]) {
-		t.Errorf("the asset page does not show when the override lapses (expected a date from %s)", expiresAt)
+
+	// The reason, anchored to the BANNER rather than to the page.
+	//
+	// A bare Contains(page, reason) was presence-not-completeness: signed in as
+	// admin the reason also appears inside the amend form's <input value="...">,
+	// so deleting it from the banner left this test green while a read-only
+	// operator -- who gets no amend form, because it is behind {{if .CanWrite}}
+	// -- saw "overridden", "by admin", "until <T>" and no reason at all. Rule 14
+	// says every view, and the view without an edit form is exactly the one a
+	// presence check stops covering.
+	bannerReason := `margin-top:3px">` + reason + `</div>`
+	if !strings.Contains(page, bannerReason) {
+		t.Errorf("the override banner itself does not carry the reason; it may only be surviving "+
+			"inside the admin-only amend form, which a read-only operator never sees.\n"+
+			"looked for: %s", bannerReason)
 	}
 
 	// The landing page too: somebody reading a green estate needs to know how
@@ -409,8 +422,16 @@ func TestTheTimelineAccountsForACompressedEpisode(t *testing.T) {
 	}
 	// The escape hatch, on the page: the novel value is its own row rather than
 	// being absorbed into the episode.
-	if !strings.Contains(page, "degraded") {
-		t.Error("the transition to a value the episode had not seen is not on the timeline")
+	//
+	// Anchored to the transition markup, not to the bare word. A service page
+	// contains "degraded" twice before any observation exists -- the override
+	// form's <option> and the pill-degraded class used by the flapping badge --
+	// so `Contains(page, "degraded")` was true with the escape hatch entirely
+	// disabled and no timeline row for the novel value at all.
+	if !strings.Contains(page, "up → degraded") {
+		t.Error("the transition to a value the episode had not seen is not on the timeline as " +
+			"its own row; a novel value is by definition not part of the oscillation being " +
+			"compressed, and that is what stops a stolen token hiding behind a tripped threshold")
 	}
 }
 
@@ -508,8 +529,26 @@ func TestASilentReporterIsOneEventNotAThousand(t *testing.T) {
 	h.insertHealth(domain.ObservableAsset, h.asset("hv-01"), "prom-a", "up", quiet, 30)
 
 	dashboard := body(t, h.get("/", false))
-	if n := strings.Count(dashboard, ">silent<"); n != 1 {
-		t.Errorf("the dashboard reports %d silent entries for one dead collector watching three things, want 1", n)
+
+	// The invariant is per COLLECTOR, not per row: prom-a watches three things
+	// and must account for exactly one silent entry however many entities it
+	// covers. The other configured credentials contribute one each because
+	// they have never checked in at all -- "never started" and "started and
+	// stopped" are different findings and the panel shows both, which is why
+	// this counts prom-a's own row rather than the total.
+	// prom-a wrote rows without being a configured credential -- a collector
+	// whose entry was removed but whose readings remain -- so the expected
+	// total is the three configured ids, none of which has ever checked in,
+	// plus prom-a itself.
+	want := len(testAgentCredentials()) + 1
+	if n := strings.Count(dashboard, ">silent<"); n != want {
+		t.Errorf("the dashboard reports %d silent entries, want %d: one dead collector watching "+
+			"three things counts once, and each configured credential that never checked in "+
+			"counts once", n, want)
+	}
+	if n := strings.Count(dashboard, "prom-a"); n != 1 {
+		t.Errorf("prom-a appears %d times in the reporters panel, want exactly 1: a dead collector "+
+			"is one alertable event, not one per entity it was watching", n)
 	}
 	if !strings.Contains(dashboard, "prom-a") {
 		t.Error("the reporter panel does not name the collector that stopped")
