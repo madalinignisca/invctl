@@ -48,6 +48,12 @@ type builder struct {
 	poolIDs      map[string]string // name -> id
 }
 
+// ObserveDemo makes Load stage a set of demo observations after the inventory,
+// through the same write path a monitoring credential uses. Set from
+// INV_SEED_OBSERVATIONS by the server; off everywhere else, including every
+// test, so the fixture the suite asserts against is unchanged.
+var ObserveDemo bool
+
 // Load populates an empty database with the demo estate.
 func Load(ctx context.Context, s *store.SQLStore) (*Refs, error) {
 	b := &builder{
@@ -81,6 +87,14 @@ func Load(ctx context.Context, s *store.SQLStore) (*Refs, error) {
 	b.endpoints()
 	b.routing()
 	b.dependencies()
+
+	// Last, and only when asked. Observations are telemetry rather than
+	// inventory, so a deployment gets the honest empty state unless somebody is
+	// presenting and wants the panels to have something to say. Staged through
+	// the real recorder, never by writing asset_health directly.
+	if ObserveDemo {
+		b.observations()
+	}
 
 	if b.err != nil {
 		return nil, b.err

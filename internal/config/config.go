@@ -44,6 +44,12 @@ type Config struct {
 	// SeedOnStart loads the demo estate when the database is empty. Intended
 	// for the demo and for development, off by default.
 	SeedOnStart bool
+	// SeedObservations additionally stages demo telemetry, through the same
+	// recorder the webhook uses rather than by writing asset_health. It exists
+	// so a presentation has something in the reporters, override and drift
+	// panels; an operator's first real run should show the honest empty state,
+	// so it is off unless asked for.
+	SeedObservations bool
 	// DevAdminPassword seeds the initial admin account. Empty means a random
 	// password is generated and logged once at startup.
 	DevAdminPassword string
@@ -91,6 +97,7 @@ func Load() (*Config, error) {
 		AdminUsername:    envOr("INV_ADMIN_USERNAME", "admin"),
 		LogLevel:         envOr("INV_LOG_LEVEL", "info"),
 		SecureCookies:    envBool("INV_SECURE_COOKIES", false, &badBools),
+		SeedObservations: envBool("INV_SEED_OBSERVATIONS", false, &badBools),
 		LDAP: LDAPConfig{
 			URL:            os.Getenv("INV_LDAP_URL"),
 			BindDNTemplate: os.Getenv("INV_LDAP_BIND_DN"),

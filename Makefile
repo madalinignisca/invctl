@@ -22,6 +22,16 @@ export INV_LISTEN       ?= 0.0.0.0:8088
 export INV_ADMIN_USERS  ?= admin
 export INV_ADMIN_PASSWORD ?= demo-password
 export INV_SEED         ?= true
+# Presentation settings. Both are demo-only and neither is a default anywhere
+# else: a real deployment gets no credentials it did not configure and no
+# readings nobody sent.
+#
+# The tokens are throwaway and public by construction -- they are in a Makefile
+# in the repository. That is fine for a laptop demo and would be a credential
+# leak anywhere else, which is why INV_AGENT_TOKENS has no default in config.
+export INV_SEED_OBSERVATIONS ?= true
+export INV_AGENT_TOKENS ?= mon-prod:demo-token-prod-0000000000000000,mon-oob:demo-token-oob-00000000000000000
+export INV_AGENT_SCOPES ?= mon-prod:prod|dev|transit,mon-oob:prod|dev|transit
 
 PG_DSN := postgres://invctl:invctl@127.0.0.1:5433/invctl?sslmode=disable
 

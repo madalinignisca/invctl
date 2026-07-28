@@ -97,6 +97,11 @@ func run() error {
 
 	st := store.New(db)
 
+	// Presentation only: stage a set of demo observations through the real
+	// recorder after the inventory. Never on by default -- an operator's first
+	// run should show the honest empty state, not readings nobody sent.
+	seed.ObserveDemo = cfg.SeedObservations
+
 	if *pruneObserved {
 		return pruneObservedTransitions(ctx, st, cfg, *pruneKeepDays, *pruneAs, *pruneDryRun)
 	}
@@ -115,6 +120,16 @@ func run() error {
 
 	if err := ensureAdmin(ctx, st, cfg); err != nil {
 		return err
+	}
+
+	// After ensureAdmin, because an override is declared state and needs a real
+	// operator to attribute it to. Best-effort: a demo without an override is
+	// still a demo, and refusing to start over presentation data would be
+	// absurd.
+	if cfg.SeedObservations && cfg.SeedOnStart {
+		if err := seed.StageDemoOverride(ctx, st, cfg.AdminUsername); err != nil {
+			slog.Warn("demo override not staged", "error", err)
+		}
 	}
 
 	sessions, err := newSessionManager(db, cfg)
