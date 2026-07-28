@@ -28,7 +28,7 @@ func (s *SQLStore) LoadGraph(ctx context.Context) (*impact.Graph, error) {
 	}
 
 	var instances []domain.ServiceInstance
-	if err := s.read(ctx, &instances, `SELECT * FROM service_instance`); err != nil {
+	if err := s.read(ctx, &instances, `SELECT * FROM service_instance ORDER BY id`); err != nil {
 		return nil, fmt.Errorf("loading instances for graph: %w", err)
 	}
 	for _, si := range instances {
@@ -76,7 +76,7 @@ func (s *SQLStore) LoadGraph(ctx context.Context) (*impact.Graph, error) {
 	}
 
 	var members []domain.BackendMember
-	if err := s.read(ctx, &members, `SELECT * FROM backend_member`); err != nil {
+	if err := s.read(ctx, &members, `SELECT * FROM backend_member ORDER BY pool_id, endpoint_id`); err != nil {
 		return nil, fmt.Errorf("loading backend members for graph: %w", err)
 	}
 	for _, m := range members {
@@ -84,7 +84,14 @@ func (s *SQLStore) LoadGraph(ctx context.Context) (*impact.Graph, error) {
 	}
 
 	var deps []domain.Dependency
-	err = s.read(ctx, &deps, `SELECT * FROM dependency WHERE lifecycle = ?`, domain.LifecycleActive)
+	// ORDER BY id, and it is load-bearing rather than tidiness. phasePropagate
+	// records via/Cause/Reason from whichever edge last *changed* a consumer's
+	// status, so when two providers would independently produce the same
+	// terminal status -- one genuinely dead, one merely partitioned -- the row
+	// order decides which explanation the operator is shown. Unordered, that is
+	// engine-defined, and SQLite and Postgres are free to disagree about the
+	// same data. UUIDv7 ids sort by creation time, so this is stable and cheap.
+	err = s.read(ctx, &deps, `SELECT * FROM dependency WHERE lifecycle = ? ORDER BY id`, domain.LifecycleActive)
 	if err != nil {
 		return nil, fmt.Errorf("loading dependencies for graph: %w", err)
 	}

@@ -1,11 +1,18 @@
 # Reachability design (working reference for M2-M6)
 
-> **M3 gates application behind `Request.ApplyReachability`, default off.** The
-> algorithm below computes and reports in full, but the three seams only move a
-> status when that flag is set. M4 is flipping the default. The flag exists so
-> the "report-only" milestone is a real review checkpoint rather than a
-> description of intent — `TestReachabilityIsGatedAndTheGateIsReal` asserts both
-> directions against a topology that genuinely isolates.
+> **M4 is done: reachability applies by default.** The gate M3 introduced was
+> inverted rather than deleted — `Request.ReportReachabilityOnly` still gives
+> the report-only view, but the zero-value request now composes reachability
+> into the answer. `TestReachabilityAppliesByDefault` asserts both directions.
+>
+> Flipping it exposed a defect that had been unreachable while the seams were
+> gated: Seam 2 forces a partitioned provider's status to `down` before
+> `Propagate` runs, which is right for deciding the consumer's fate and wrong
+> for explaining it. The report said "hard dependency on pgsql-core is down"
+> about a database that was up and not even listed among the affected services.
+> `propagationReason` now distinguishes the two, and `Cause` classifies a
+> partitioned edge as reachability rather than dependency, because Cause
+> answers "where do I go to fix this?".
 >
 > **`asset_health` in this document is superseded.** It shows a simple
 > `asset_id PRIMARY KEY` shape; `docs/AUDIT.md` is authoritative and requires
@@ -696,7 +703,8 @@ That is the entire integration. Every one of the three seams then fires unchange
 - **Data rot in `net_attachment_member`, and the rot direction is pessimistic.** It is the numerous, machine-generated, hand-corrected, unverifiable field: someone adds a second cable to make a host dual-homed and nobody adds the member row, so the tool reports that host cut off when it is fine. Pessimistic errors are the ones that get a report ignored. Mitigations are real but partial: derivation is re-runnable and produces a diff against current state, `last_seen` is carried, and a post-POC lint can compare `link` against attachment members. None of that forces anyone to run it.
 - **This models forwarding paths, not permitted traffic.** A firewall that is up but whose rule was deleted, a VLAN not trunked, an MTU mismatch, a routing adjacency that did not come up — the model says the path exists and is silent about all of them. Those cause most real network outages. An operator burned by a trunk misconfiguration will find the report unhelpful and may start distrusting it wholesale.
 - **Uplinks are group-to-group, so member-level uplink diversity is reported optimistically.** A core whose members are individually single-homed upward will be scored as if the mesh were full. This is the one place I consciously accept an optimistic error, and optimistic errors are the more dangerous kind. It is bounded to the forwarder-to-forwarder layer, which is where operators genuinely do build full meshes, and the host layer — where single-homing is common and cheap to record — gets the member-level gate.
-- **`endpoint.exposure` becomes load-bearing having been decorative.** Every operator who typed `internal` because it sounded modest has now silently changed an impact result. The 'no anchor declared for that scope means no claim' rule makes it opt-in per scope, so the blast radius is bounded — but shipping M4 honestly needs a review pass over every endpoint's exposure, and that is data-entry arriving through the back door.
+- **~~`endpoint.exposure` becomes load-bearing having been decorative.~~ Resolved at M4, more narrowly than feared.** The worry was that every operator who typed `internal` because it sounded modest would silently change an impact result. In the built form they cannot: exposure feeds Seam 3 only, and Seam 3 builds `Result.Unreachable` as a separate list filtered by `!existing[id]` — it never merges into `statuses` and never propagates. So a mistyped exposure can add a row to a report, and can never move a service's status. The review pass over every endpoint's exposure is therefore worth doing before anyone *acts* on the Unreachable panel, but it is not a precondition for M4 being correct. If Seam 3 is ever promoted to move statuses, this becomes a real blocker again.
+- **When two independent causes reach the same terminal status, only one is explained.** `phasePropagate` records `Via`/`Cause`/`Reason` from whichever edge last *changed* a consumer's status. If a consumer has one provider that genuinely died and another that is merely partitioned, and either alone would take it down, the second edge's `merged == consumer` and it is dropped silently — the operator is told about one cause and not the other. Ordering is now deterministic and identical on both engines (`ORDER BY id` on the dependency load, UUIDv7 so it sorts by creation), so the answer is stable and reproducible rather than engine-defined. Which of the two tied explanations wins is nonetheless arbitrary: earliest-created edge. Reporting *all* contributing causes rather than the last one is a product decision, not a bug fix, and has not been made.
 - **Reachability here is symmetric; real networks are not.** Asymmetric firewall policy, NAT and asymmetric routing are unrepresentable, and 'A can reach B but B cannot reach A' cannot be said. This collides directly with the post-POC firewall-reconciliation goal, which is inherently directional and port-scoped.
 - **An isolated Patroni primary reads as 'primary lost'.** Feeding an unreachable instance into `EvaluateCapacity` as not-alive is right for the consumer's view and wrong for the split-brain view: the model will suggest a promotion that must not happen. The reason string says 'running but network-isolated' rather than 'lost', which is honest text over identical arithmetic — but the arithmetic is the same, and this model cannot detect a partition-of-a-cluster.
 - **`asset_health` versus CLAUDE.md's 'every mutation writes a change_log row, no exceptions'.** A health endpoint polled every 30 seconds would make that table unbounded. My position is that the rule was written for declared intent, not observed telemetry, and the compromise is to log only on state *transition*. CLAUDE.md says to raise a conflict rather than work around it, so this needs explicit sign-off before M6 — it is the one place the design bends a stated rule.

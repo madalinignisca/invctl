@@ -10,8 +10,15 @@
 
   {{if not .HasImpact}}
     <div class="panel"><div class="empty">
-      <strong>Nothing breaks.</strong>
-      No service loses enough capacity to matter, and no dependency propagates from here.
+      {{if .HasNetworkFinding}}
+        <strong>No service changes status — but the network does.</strong>
+        Nothing loses enough capacity to matter and no dependency propagates from here,
+        yet this outage still changes what can reach what. See the reachability findings below
+        before treating this as safe.
+      {{else}}
+        <strong>Nothing breaks.</strong>
+        No service loses enough capacity to matter, and no dependency propagates from here.
+      {{end}}
     </div></div>
   {{end}}
 
@@ -52,6 +59,11 @@
             <td>
               <div>{{.Reason}}</div>
               {{if .Via}}<div class="reason">via {{.Via}}</div>{{end}}
+              {{/* Only the network cause is called out. "capacity" and
+                   "dependency" are already evident from the columns either
+                   side; "the path, not the thing" is the one an operator
+                   would otherwise misread as a failed provider. */}}
+              {{if eq .Cause "reachability"}}<div class="reason">network path, not the service itself</div>{{end}}
             </td>
             <td><span class="{{tierClass .Tier}}">tier {{.Tier}}</span></td>
           </tr>
@@ -125,18 +137,20 @@
   </div>
   {{end}}
 
-  {{/* Network reachability -- M3. Everything below this point is
-       informational: it never changed a status above, it only explains
-       *why* in terms of the physical network, or reports a finding the
-       capacity/dependency engine has no way to express (an asset cut off
-       from its network, or a running service with no path to its declared
-       anchor). The honest empty state matters as much as the panels
-       themselves: an estate that has not declared its cabling must not be
-       told the network is fine. */}}
+  {{/* Network reachability. As of M4 this is not a separate opinion: an
+       instance that is running but cut off is counted as lost above, and a
+       dependency whose path is broken propagates like any other. What lives
+       here is the physical detail behind those statuses, plus the findings
+       the capacity/dependency engine has no way to express at all -- an
+       asset cut off from its network, a running service with no path to its
+       declared anchor, a group that survived this outage with no redundancy
+       left for the next one. The honest empty state matters as much as the
+       panels themselves: an estate that has not declared its cabling must
+       not be told the network is fine. */}}
   <div class="panel">
     <div class="panel-head">
       <h2>Network reachability</h2>
-      <span class="panel-note">Informational -- reported, never propagated into the statuses above.</span>
+      <span class="panel-note">The physical detail behind the statuses above.</span>
     </div>
     <div class="panel-body">
       {{$cov := .Result.Coverage}}

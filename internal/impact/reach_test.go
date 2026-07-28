@@ -1,6 +1,7 @@
 package impact_test
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -10,17 +11,21 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// The headline guarantee: M3 computes reachability and REPORTS it. No
-// existing impact status may move. For every simulation below,
-// Result.Services, Result.WontRestart, Result.Cycles, Result.SafeOrder and
-// Result.Iterations must be identical to what HEAD produces -- with topology
-// rows present AND absent. This is the sign-off checkpoint before M4 changes
-// any answer.
+// The compositional guarantee: declaring a HEALTHY topology, with nothing
+// taken down on it, must not move a single existing status. For every
+// simulation below, Result.Services, Result.WontRestart, Result.Cycles,
+// Result.SafeOrder and Result.Iterations must be identical with topology rows
+// present and absent.
+//
+// This began as M3's report-only checkpoint, where it held trivially because
+// the seams were gated off. Under M4 it is a real assertion: reachability now
+// composes into the answer, so these tests pass only because a healthy network
+// genuinely subtracts nothing.
 // ---------------------------------------------------------------------------
 
 // impactProjection is every field the headline guarantee actually covers --
-// deliberately excluding Cause and LostToIsolation, which are new fields M3
-// is allowed to add. Comparing this projection rather than the whole struct
+// deliberately excluding Cause and LostToIsolation, which are fields the
+// reachability work is allowed to add. Comparing this projection rather than the whole struct
 // is what makes the assertion fail if a M3 change ever perturbs an existing
 // answer, without being so strict it breaks the moment a new field is added.
 type impactProjection struct {
@@ -132,9 +137,9 @@ func scenarioKey(assets []string) string {
 	return joined
 }
 
-// TestHeadlineGuaranteeNoTopology is the M3 sign-off checkpoint's first half:
-// with zero net_* rows, Inputs.Net is nil and the engine must answer exactly
-// as it did before M3 existed.
+// TestHeadlineGuaranteeNoTopology is the first half: with zero net_* rows,
+// Inputs.Net is nil and the engine must answer exactly as it did before any of
+// this existed. An estate that has not entered its cabling loses nothing.
 func TestHeadlineGuaranteeNoTopology(t *testing.T) {
 	f := newFixture(t)
 	for _, assets := range headlineScenarios {
@@ -150,10 +155,10 @@ func TestHeadlineGuaranteeNoTopology(t *testing.T) {
 }
 
 // TestHeadlineGuaranteeWithTopology is the second half: the same scenarios,
-// re-run after declaring a full, healthy topology (groups, members, an
-// uplink and anchors, nothing taken down). Populating the reachability
-// tables must not move a single byte of Services, WontRestart, Cycles,
-// SafeOrder or Iterations.
+// re-run after declaring a full, healthy topology (groups, members, an uplink
+// and anchors, nothing taken down). Merely knowing how the estate is cabled
+// must not move a single byte of Services, WontRestart, Cycles, SafeOrder or
+// Iterations -- only a break in that cabling may.
 func TestHeadlineGuaranteeWithTopology(t *testing.T) {
 	f := newFixture(t)
 	before := snapshotAll(t, f)
@@ -468,11 +473,8 @@ func TestRetiredGroupMemberIsNotCapacity(t *testing.T) {
 	svc := mustSimpleService(t, f, "test-svc-retired", "test-retired-svc")
 	mustInstance(t, f, svc, host)
 
-	// ApplyReachability on: this asserts what the reachability *semantics*
-	// conclude, not whether the M3 gate lets them through. The gate itself is
-	// covered by TestReachabilityIsGatedAndTheGateIsReal.
 	result, err := f.store.Simulate(f.ctx, impact.Request{
-		DownAssetIDs: []string{primary}, WindowSeconds: 180, ApplyReachability: true,
+		DownAssetIDs: []string{primary}, WindowSeconds: 180,
 	})
 	if err != nil {
 		t.Fatalf("simulating: %v", err)
@@ -599,7 +601,7 @@ func timeoutAfter(t *testing.T) <-chan time.Time {
 }
 
 // simulateWith runs a simulation with an explicit Request, so a test can toggle
-// ApplyReachability.
+// ReportReachabilityOnly.
 func (f *fixture) simulateWith(t *testing.T, req impact.Request, assetNames ...string) impact.Result {
 	t.Helper()
 	for _, name := range assetNames {
@@ -616,18 +618,21 @@ func (f *fixture) simulateWith(t *testing.T, req impact.Request, assetNames ...s
 	return result
 }
 
-// TestReachabilityIsGatedAndTheGateIsReal.
+// TestReachabilityAppliesByDefault is the M4 inversion of the M3 gate test.
 //
-// The M3 contract is that reachability is computed and reported but changes no
-// existing answer, so an operator gets one milestone in which to judge whether
-// the model matches their estate before it starts moving statuses they already
-// trust. A gate is only worth having if it is demonstrably load-bearing, so
-// this asserts BOTH directions against a topology that genuinely isolates:
-// losing the single core switch cuts off every hypervisor attached to it.
+// M3's contract was that reachability computed and reported but moved nothing,
+// so an operator got one milestone in which to judge the model against their
+// estate before it started changing statuses they already trusted. M4 is that
+// judgement having been made: the zero-value Request now composes reachability
+// into the answer, and ReportReachabilityOnly is what preserves the old view.
 //
-// Asserting only the "off" half would pass just as well if the seams had never
-// been wired at all.
-func TestReachabilityIsGatedAndTheGateIsReal(t *testing.T) {
+// Both directions are still asserted, for the same reason they were in M3. A
+// test that only checked the default would pass identically if
+// ReportReachabilityOnly silently did nothing, and a test that only checked
+// ReportReachabilityOnly would pass if the seams had never been wired. The
+// topology genuinely isolates: losing the single core switch cuts off every
+// hypervisor attached to it.
+func TestReachabilityAppliesByDefault(t *testing.T) {
 	f := newFixture(t)
 
 	// Baseline with no topology at all: losing a switch that hosts nothing
@@ -639,32 +644,240 @@ func TestReachabilityIsGatedAndTheGateIsReal(t *testing.T) {
 
 	declareHealthyTopology(t, f)
 
-	t.Run("off by default: no existing answer moves", func(t *testing.T) {
+	t.Run("the default request now moves statuses", func(t *testing.T) {
 		got := f.simulateWith(t, impact.Request{WindowSeconds: 180}, "sw-core-1")
-		assertSameSnapshot(t, "sw-core-1 with reachability off", snapshotOf(bare), snapshotOf(got))
-	})
-
-	t.Run("but the reachability report is populated regardless", func(t *testing.T) {
-		got := f.simulateWith(t, impact.Request{WindowSeconds: 180}, "sw-core-1")
-		if len(got.Isolated) == 0 {
-			t.Error("nothing reported isolated, so the report half of M3 is not working " +
-				"and the 'off' assertion above proves nothing")
-		}
-	})
-
-	t.Run("on: the same outage now moves statuses", func(t *testing.T) {
-		got := f.simulateWith(t, impact.Request{
-			WindowSeconds: 180, ApplyReachability: true,
-		}, "sw-core-1")
 
 		if len(got.Services) == 0 {
-			t.Fatal("with reachability applied, losing the only core switch still " +
-				"reported nothing affected -- the seams are not wired")
+			t.Fatal("losing the only core switch still reported nothing affected -- " +
+				"reachability is not composing into the answer")
 		}
-		// And it must be strictly more than the flag-off run, never fewer.
+		// And it must be strictly more than the untopologied run, never fewer.
 		if len(got.Services) <= len(bare.Services) {
-			t.Errorf("applied run reported %d services, gated run %d -- expected the "+
+			t.Errorf("applied run reported %d services, untopologied run %d -- expected the "+
 				"applied run to find strictly more", len(got.Services), len(bare.Services))
 		}
 	})
+
+	t.Run("ReportReachabilityOnly still holds every answer still", func(t *testing.T) {
+		got := f.simulateWith(t, impact.Request{
+			WindowSeconds: 180, ReportReachabilityOnly: true,
+		}, "sw-core-1")
+		assertSameSnapshot(t, "sw-core-1 report-only", snapshotOf(bare), snapshotOf(got))
+	})
+
+	t.Run("and reports isolation in either mode", func(t *testing.T) {
+		for _, mode := range []struct {
+			name string
+			req  impact.Request
+		}{
+			{"default", impact.Request{WindowSeconds: 180}},
+			{"report-only", impact.Request{WindowSeconds: 180, ReportReachabilityOnly: true}},
+		} {
+			got := f.simulateWith(t, mode.req, "sw-core-1")
+			if len(got.Isolated) == 0 {
+				t.Errorf("%s: nothing reported isolated, so the report half is not working "+
+					"and the assertions above prove less than they appear to", mode.name)
+			}
+		}
+	})
+}
+
+// ---------------------------------------------------------------------------
+// M4: a partitioned provider is not a failed provider
+// ---------------------------------------------------------------------------
+
+// declarePartitionableTopology builds three forwarder groups arranged so that
+// taking down one of them splits the estate in two without isolating either
+// half:
+//
+//	group-a (sw-core-1)  <- hv-01, hv-02
+//	     \
+//	      group-mid (fw-edge-1)     <- the only path between the halves
+//	     /
+//	group-b (sw-acc-b)   <- hv-03
+//
+// Losing fw-edge-1 leaves every host attached to a live group, so nothing is
+// isolated, and yet hv-01 can no longer reach hv-03. That is a partition
+// proper, and it is the only shape that exercises Seam 2 -- an outage that
+// isolates a host instead kills its instances at Seam 1, and the dependency
+// edge never gets asked about.
+func declarePartitionableTopology(t *testing.T, f *fixture) {
+	t.Helper()
+	declareSplitTopology(t, f, []string{"hv-01", "hv-02"}, []string{"hv-03"})
+}
+
+// declareSplitTopology is declarePartitionableTopology with the two sides
+// chosen by the caller, so a test can put a route's frontend and its backends
+// on opposite sides of the break.
+func declareSplitTopology(t *testing.T, f *fixture, sideA, sideB []string) {
+	t.Helper()
+	now := f.store.Now()
+
+	// The fixture has two network assets and this topology needs three, so the
+	// second access switch is created here rather than added to the seed --
+	// the demo estate should not grow a switch that exists only for a test.
+	rackB := f.refs.Assets["rack-b1"]
+	accB, err := domain.NewAsset(store.NewID(), domain.KindSwitch, "sw-acc-b", &rackB, now)
+	if err != nil {
+		t.Fatalf("building sw-acc-b: %v", err)
+	}
+	if err := f.store.CreateAsset(f.ctx, domain.SystemActor, accB, nil); err != nil {
+		t.Fatalf("creating sw-acc-b: %v", err)
+	}
+
+	group := func(code, name string, memberAsset string) *domain.NetGroup {
+		t.Helper()
+		g, err := domain.NewNetGroup(store.NewID(), domain.NetGroupSpec{
+			Code: code, Name: name, Kind: domain.NetGroupStandalone,
+			Role: domain.NetRoleCore, Availability: domain.AvailStandalone,
+		}, now)
+		if err != nil {
+			t.Fatalf("building %s: %v", code, err)
+		}
+		if err := f.store.CreateNetGroup(f.ctx, domain.SystemActor, g); err != nil {
+			t.Fatalf("creating %s: %v", code, err)
+		}
+		m, err := domain.NewNetGroupMember(g.ID, memberAsset, "member", now)
+		if err != nil {
+			t.Fatalf("building %s member: %v", code, err)
+		}
+		if err := f.store.AddNetGroupMember(f.ctx, domain.SystemActor, m); err != nil {
+			t.Fatalf("adding %s member: %v", code, err)
+		}
+		return g
+	}
+
+	a := group("group-a", "A-side access", f.refs.Assets["sw-core-1"])
+	mid := group("group-mid", "Transit", f.refs.Assets["fw-edge-1"])
+	b := group("group-b", "B-side access", accB.ID)
+
+	for _, pair := range [][2]string{{a.ID, mid.ID}, {b.ID, mid.ID}} {
+		up, err := domain.NewNetUplink(store.NewID(), pair[0], pair[1], domain.PlaneData, now)
+		if err != nil {
+			t.Fatalf("building uplink: %v", err)
+		}
+		if err := f.store.CreateNetUplink(f.ctx, domain.SystemActor, up); err != nil {
+			t.Fatalf("creating uplink: %v", err)
+		}
+	}
+
+	attach := func(assetID, groupID string) {
+		t.Helper()
+		att, err := domain.NewNetAttachment(store.NewID(), assetID, groupID, domain.PlaneData, now)
+		if err != nil {
+			t.Fatalf("building attachment: %v", err)
+		}
+		if err := f.store.CreateNetAttachment(f.ctx, domain.SystemActor, att, nil); err != nil {
+			t.Fatalf("creating attachment: %v", err)
+		}
+	}
+	for _, hv := range sideA {
+		attach(f.refs.Assets[hv], a.ID)
+	}
+	for _, hv := range sideB {
+		attach(f.refs.Assets[hv], b.ID)
+	}
+}
+
+// TestPartitionedProviderIsNotReportedAsFailed is the defect M3's gate was
+// hiding: Seam 2 forces a partitioned provider's status to down before
+// Propagate runs, which is right for deciding the consumer's fate and wrong
+// for explaining it. Until this test, the report said "hard dependency on
+// pgsql-core is down" about a database that was up, healthy and not even
+// listed among the affected services -- during an incident, that sends
+// somebody to inspect a green service while the actual break is in the path.
+//
+// sso lives on hv-03 and depends hard on pgsql-core, which lives entirely on
+// hv-01 and hv-02. Losing the transit group cuts the two halves apart without
+// isolating either, so sso is the consumer whose provider is fine.
+func TestPartitionedProviderIsNotReportedAsFailed(t *testing.T) {
+	f := newFixture(t)
+	declarePartitionableTopology(t, f)
+
+	result, byCode := f.simulate(t, 180, "fw-edge-1")
+
+	sso, ok := byCode["sso"]
+	if !ok {
+		t.Fatalf("sso not affected by the partition; got %d services: %v",
+			len(result.Services), codesOf(result.Services))
+	}
+
+	// The premise: the provider really is healthy. If pgsql-core were itself
+	// affected, "is down" would have been the truth and this test would be
+	// asserting nothing.
+	if pg, affected := byCode["pgsql-core"]; affected {
+		t.Fatalf("premise broken: pgsql-core is itself %s (%s), so the provider is "+
+			"not healthy and this scenario proves nothing", pg.Status, pg.Reason)
+	}
+
+	if strings.Contains(sso.Reason, "is down") {
+		t.Errorf("sso reason says its provider is down, but pgsql-core is healthy "+
+			"and merely unreachable -- this sends an operator to the wrong service.\n got: %q", sso.Reason)
+	}
+	if !strings.Contains(sso.Reason, "unreachable") {
+		t.Errorf("sso reason does not say the provider is unreachable\n got: %q", sso.Reason)
+	}
+	if sso.Cause != impact.CauseReachability {
+		t.Errorf("sso cause = %q, want %q: the edge propagated it, but the network "+
+			"broke it, and Cause is what tells an operator where to go",
+			sso.Cause, impact.CauseReachability)
+	}
+
+	// And the partition must be reported in its own right, not only implied by
+	// a service's reason string.
+	if len(result.Partitions) == 0 {
+		t.Error("no partition reported, so the reason string above is the only " +
+			"evidence the network was involved at all")
+	}
+}
+
+func codesOf(in []impact.ServiceImpact) []string {
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		out = append(out, s.Code+"="+string(s.Status))
+	}
+	return out
+}
+
+// TestPartitionThroughARouteIsNotReportedAsFailed is the same defect one hop
+// further down, and it survives the direct-endpoint fix.
+//
+// routeStatuses folds a route's member reachability into the route's own
+// status before phasePropagate ever sees it, so a route whose backends are
+// merely unreachable from its frontend arrives looking exactly like a route
+// whose backends crashed. Comparing the provider's status against the reach
+// level of the consumer's own hop cannot tell them apart: that hop is fine.
+// Only the network-free status can.
+//
+// The fixture's route runs haproxy-edge (hv-02) to a pool of orders-api and
+// orders-web (hv-01), consumed hard by partner-gateway (hv-03). Splitting
+// hv-01 from hv-02 and hv-03 leaves the consumer able to reach the proxy and
+// the proxy unable to reach anything it fronts.
+func TestPartitionThroughARouteIsNotReportedAsFailed(t *testing.T) {
+	f := newFixture(t)
+	declareSplitTopology(t, f, []string{"hv-02", "hv-03"}, []string{"hv-01"})
+
+	result, byCode := f.simulate(t, 180, "fw-edge-1")
+
+	gw, ok := byCode["partner-gateway"]
+	if !ok {
+		t.Fatalf("partner-gateway not affected; got: %v", codesOf(result.Services))
+	}
+
+	// The premise: the proxy itself is fine. If haproxy-edge were down, "is
+	// down" would be the truth about the route and this proves nothing.
+	if hap, affected := byCode["haproxy-edge"]; affected {
+		t.Fatalf("premise broken: haproxy-edge is itself %s (%s)", hap.Status, hap.Reason)
+	}
+
+	if strings.Contains(gw.Reason, "is down") {
+		t.Errorf("partner-gateway reason says its route is down, but the proxy is healthy "+
+			"and the break is between it and its backends\n got: %q", gw.Reason)
+	}
+	if !strings.Contains(gw.Reason, "unreachable") {
+		t.Errorf("partner-gateway reason does not name the break as a reachability one\n got: %q", gw.Reason)
+	}
+	if gw.Cause != impact.CauseReachability {
+		t.Errorf("partner-gateway cause = %q, want %q", gw.Cause, impact.CauseReachability)
+	}
 }

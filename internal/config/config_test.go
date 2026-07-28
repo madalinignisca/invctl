@@ -9,7 +9,33 @@ import (
 // Configuration is validated at startup rather than at first use, so these
 // tests are about refusing to start rather than about behaviour later.
 
+// pristineEnv clears every variable Load reads, so a test asserting default
+// behaviour asserts it regardless of who invoked the test binary.
+//
+// This is not defensive tidiness. `make test` exports INV_LISTEN=0.0.0.0:8088
+// for the demo server, which meant TestLoadDefaults asserted the default port
+// while running with a non-default port in its environment -- it failed under
+// `make test` and passed under a bare `go test`, so the suite's verdict
+// depended on how it was invoked. A test named "defaults" must own its
+// environment rather than inherit one.
+//
+// t.Setenv is enough to clear: envOr treats empty as unset, and the testing
+// package restores the previous values when the test ends.
+func pristineEnv(t *testing.T) {
+	t.Helper()
+	for _, key := range []string{
+		"INV_ADMIN_PASSWORD", "INV_ADMIN_USERNAME", "INV_ADMIN_USERS",
+		"INV_AUTH_LDAP", "INV_AUTH_LOCAL", "INV_DB_DRIVER", "INV_DB_DSN",
+		"INV_LDAP_BIND_DN", "INV_LDAP_SKIP_VERIFY", "INV_LDAP_STARTTLS",
+		"INV_LDAP_URL", "INV_LISTEN", "INV_LOG_LEVEL", "INV_SECURE_COOKIES",
+		"INV_SEED", "INV_SESSION_KEY", "INV_SESSION_TIMEOUT",
+	} {
+		t.Setenv(key, "")
+	}
+}
+
 func TestLoadDefaults(t *testing.T) {
+	pristineEnv(t)
 	t.Setenv("INV_ADMIN_USERS", "gabriel,Nikolaj")
 
 	cfg, err := Load()
@@ -63,6 +89,7 @@ func TestIsAdmin(t *testing.T) {
 }
 
 func TestValidationRefusesToStart(t *testing.T) {
+	pristineEnv(t)
 	tests := []struct {
 		name    string
 		env     map[string]string
@@ -130,6 +157,7 @@ func TestValidationRefusesToStart(t *testing.T) {
 }
 
 func TestValidSessionKeyIsAccepted(t *testing.T) {
+	pristineEnv(t)
 	key := make([]byte, 32)
 	for i := range key {
 		key[i] = byte(i)

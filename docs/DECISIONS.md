@@ -252,3 +252,104 @@ After sign-off this stops. From that point migrations are additive and reversibl
 every release must upgrade an existing database in place, and a destructive migration
 needs an explicit decision recorded here. Note the boundary when it is crossed — the
 first deployment holding real data is the moment this rule changes.
+
+---
+
+## 2026-07-28 — M4: reachability applies
+
+### The gate was inverted, not deleted
+
+M3 shipped reachability computed and reported but unable to move a status, behind
+`Request.ApplyReachability` defaulting off. M4 makes it live. The flag survives as
+`Request.ReportReachabilityOnly` with the sense reversed, so the zero-value request is
+production behaviour and the report-only view stays reachable.
+
+Keeping it costs one branch and buys the honest way to introduce this to an estate that
+has just entered its cabling and not yet checked it: look at what the model concludes
+before letting it change answers you already trust.
+
+### A partitioned provider is not a failed provider
+
+Seam 2 forces an unreachable provider's status to `down` before propagation runs. That
+is right for deciding the consumer's fate — the consumer cannot reach it, so the effect
+is identical — and wrong for explaining it.
+
+While the seams were gated this path had never executed. Flipping the default exposed
+the consequence: the report said *"hard dependency on pgsql-core is down"* about a
+database that was up, healthy, and not even listed among the affected services. During
+an incident that sends somebody to inspect a green service while the break is in the
+path.
+
+`propagationReason` now takes the pre-downgrade status and says "unreachable" when the
+network, not the provider, caused the change. `Cause` classifies such an edge as
+`reachability` rather than `dependency`, because Cause answers *where do I go to fix
+this?*.
+
+The general lesson, worth keeping: **a flag defaulting off defers test coverage, not
+just risk.** Everything behind M3's gate was untested-in-effect by construction. Flipping
+a default is the moment latent defects in the gated path become live, and it deserves the
+scrutiny of a feature landing rather than the ceremony of a one-line change.
+
+### "Nothing breaks" had to stop being printed above a list of things that broke
+
+A network asset can be lost without any service changing status while still isolating
+assets or leaving a group without redundancy. The impact page's empty state keyed on
+service impact alone, so it printed **Nothing breaks** above a populated reachability
+panel. `HasNetworkFinding` splits the two, and the copy now says a status did not change
+*and* the network did.
+
+### `endpoint.exposure` did not become load-bearing after all
+
+The design doc flagged this as an M4 blocker: exposure had been decorative, and making it
+matter would silently change results for everyone who typed `internal` because it sounded
+modest. In the built form it does not. Exposure feeds Seam 3 only, which builds
+`Result.Unreachable` as a separate list and never merges into `statuses`. A mistyped
+exposure can add a row to a report; it cannot move a status. The review pass over every
+endpoint's exposure is worth doing before anyone *acts* on that panel, and is not a
+precondition for M4 being correct. If Seam 3 is ever promoted to move statuses, it
+becomes a blocker again.
+
+### Review found the same defect one hop down, and an ordering hazard under it
+
+`code-reviewer` caught two things the direct-endpoint fix did not, both confirmed by
+reverting the fix and watching the new tests fail:
+
+**The route path launders the network effect.** `routeStatuses` folds member
+reachability into a route's status *before* `phasePropagate` sees it, so a route whose
+backends are unreachable from its own frontend arrives looking exactly like one whose
+backends crashed. Comparing against the consumer's own hop cannot tell them apart —
+that hop is fine. `routeHealth` now carries the status twice, applied and network-free,
+and `netEffect` is derived from the gap between them rather than from `reachOfDep`. One
+rule now covers both shapes. Proven by `TestPartitionThroughARouteIsNotReportedAsFailed`,
+which failed with `"hard dependency on route orders.example.com is down"` about a healthy
+proxy.
+
+**`Cause` was decided by unordered SQL.** `SELECT * FROM dependency WHERE lifecycle = ?`
+had no `ORDER BY`, and `phasePropagate` records attribution from whichever edge last
+changed a status. Two providers that independently produce the same terminal status —
+one dead, one partitioned — meant row order picked the explanation, and SQLite and
+Postgres are free to disagree about the same data. The portability rule this project is
+built on was being violated in the answer rather than in the schema. Now `ORDER BY id`,
+which is meaningful because UUIDv7 sorts by creation time.
+
+Which of two tied explanations wins is now stable but arbitrary. Reporting all
+contributing causes instead of the last one is a product decision and has not been made
+— recorded under known limits.
+
+**`WontRestart` rows inherited the wrong `Cause`.** A startup dependency never changes a
+status (`NatureStartup` always propagates ok), so it never reaches the attribution
+assignment, and the row inherited whichever unrelated edge moved the service. `Via` and
+`Reason` were already repointed; `Cause` now follows them via `startupFault.NetEffect`.
+Not user-visible today — the WontRestart table does not render `Cause` — which is why it
+is worth fixing now rather than after something starts reading it.
+
+### `make test` was green only when invoked as `go test`
+
+Unrelated to reachability, found by running the real gate. The Makefile exports
+`INV_LISTEN=0.0.0.0:8088` for the demo server, so `TestLoadDefaults` asserted the default
+port while a non-default port sat in its environment. It failed under `make test` and
+passed under a bare `go test` — the suite's verdict depended on how it was invoked, and
+the build cache hid it.
+
+The fix belongs in the test, not the Makefile: a test named "defaults" must own its
+environment. `pristineEnv` clears every `INV_*` variable `Load` reads.

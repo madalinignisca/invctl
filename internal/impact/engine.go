@@ -25,24 +25,22 @@ type Request struct {
 	// dependencies, where a 3-minute reboot and a 45-minute one genuinely
 	// differ for a consumer with a buffer.
 	WindowSeconds int
-	// UseObservedHealth is inert in M3 -- there is nowhere yet to read
+	// UseObservedHealth is inert until M6 -- there is nowhere yet to read
 	// observed health from (asset_health lands in M6, docs/AUDIT.md). The
 	// field exists now so the signature does not change again when it does.
 	UseObservedHealth bool
 	// SkipNetwork is the escape hatch: when true, Analyse behaves exactly as
 	// if Inputs.Net were nil, regardless of what was loaded.
 	SkipNetwork bool
-	// ApplyReachability decides whether reachability may change an answer.
+	// ReportReachabilityOnly computes and reports reachability without letting
+	// it change a status.
 	//
-	// It defaults to OFF, which is the M3 contract: reachability is computed
-	// and reported in full, but Services, WontRestart, Cycles, SafeOrder and
-	// Iterations come out exactly as they would with no topology declared.
-	// That gives an operator a milestone in which they can read what the model
-	// concludes and judge whether it matches the estate, before it starts
-	// moving statuses they already trust. Turning it on is M4, and it is one
-	// flag rather than a rewrite precisely so that the review gate is real
-	// rather than notional.
-	ApplyReachability bool
+	// The zero value is production behaviour: reachability composes into the
+	// answer. This flag inverts that for the case where somebody wants to see
+	// what the model concludes before trusting it -- which was the whole of M3,
+	// and remains the honest way to introduce the feature to an estate whose
+	// topology has just been entered and not yet checked.
+	ReportReachabilityOnly bool
 }
 
 // Inputs are the down-state facts Analyse needs.
@@ -77,12 +75,15 @@ type ServiceImpact struct {
 	// Via names the dependency that propagated the status, empty when the
 	// service was hit directly by losing its own instances.
 	Via string
-	// Cause names which of M3's three disjoint channels produced this
-	// entry: capacity (an instance is actually gone), reachability (an
-	// instance is running but cut off), dependency (propagated through an
-	// edge) or exposure (a running service lost its only path to an
-	// external/cross-env/environment anchor -- reported here but never
-	// merged into statuses or propagated).
+	// Cause names which channel produced this entry: capacity (an instance is
+	// actually gone), reachability (an instance is running but cut off, or the
+	// path to a healthy provider is broken), dependency (propagated through an
+	// edge whose provider genuinely failed) or exposure (a running service lost
+	// its only path to an external/cross-env/environment anchor -- reported
+	// here but never merged into statuses or propagated).
+	//
+	// It answers "where do I go to fix this?", which is why a partitioned edge
+	// is reachability and not dependency.
 	Cause Cause
 	// LostToIsolation is the subset of LostInstances that are running but
 	// network-isolated rather than actually down -- what lets the reason
@@ -144,7 +145,7 @@ func Analyse(g *Graph, req Request, in Inputs) Result {
 	// existed. The reach model is still built, because the report below needs
 	// it -- what is gated is the effect, not the computation.
 	needsNet := map[string]bool{}
-	if req.ApplyReachability {
+	if !req.ReportReachabilityOnly {
 		needsNet = computeNeedsNet(g)
 	}
 
@@ -159,11 +160,11 @@ func Analyse(g *Graph, req Request, in Inputs) Result {
 	// Seam 2. nil maps read as the zero reachLevel, which the downgrade switch
 	// ignores, so Propagate sees the provider status it always saw.
 	appliedDepReach, appliedRouteReach := reachOfDep, routeMemberReach
-	if !req.ApplyReachability {
+	if req.ReportReachabilityOnly {
 		appliedDepReach, appliedRouteReach = nil, nil
 	}
 
-	via, wontRestartIDs, iterations := phasePropagate(g, req, statuses, reasons, appliedDepReach, appliedRouteReach)
+	via, viaPartition, wontRestartIDs, iterations := phasePropagate(g, req, statuses, reasons, appliedDepReach, appliedRouteReach)
 
 	result := Result{Iterations: iterations}
 	existingIDs := map[string]bool{}
@@ -176,9 +177,15 @@ func Analyse(g *Graph, req Request, in Inputs) Result {
 		if svc == nil {
 			continue
 		}
+		// Cause answers "where do I go to fix this?", so a status that arrived
+		// down a dependency edge only because the network cut that edge is
+		// classified as reachability, not dependency -- the provider is fine and
+		// the path is not.
 		cause := CauseCapacity
 		switch {
 		case lostToIsolation[id] > 0 && lostToIsolation[id] == lost[id]:
+			cause = CauseReachability
+		case via[id] != "" && viaPartition[id]:
 			cause = CauseReachability
 		case via[id] != "":
 			cause = CauseDependency
@@ -204,6 +211,13 @@ func Analyse(g *Graph, req Request, in Inputs) Result {
 			startup := si
 			startup.Via = fault.Via
 			startup.Reason = fault.Reason
+			// Cause must follow Via and Reason onto the startup edge. si.Cause
+			// describes whichever edge moved the service's status, which for a
+			// WontRestart row is routinely a different dependency entirely.
+			startup.Cause = CauseDependency
+			if fault.NetEffect != reachUnknown {
+				startup.Cause = CauseReachability
+			}
 			result.WontRestart = append(result.WontRestart, startup)
 		}
 	}
@@ -354,6 +368,13 @@ func capacityReasonBase(svc *domain.Service, status domain.Status, lost, total i
 type startupFault struct {
 	Via    string
 	Reason string
+	// NetEffect is the startup edge's own network verdict. It is tracked
+	// separately from the status-propagating edge because a startup dependency
+	// never changes a status -- domain.NatureStartup always propagates ok -- so
+	// it can never reach the via/viaPartition assignment below. Without this,
+	// a WontRestart row would inherit the Cause of whichever unrelated edge
+	// happened to move the service's status.
+	NetEffect reachLevel
 }
 
 func phasePropagate(
@@ -363,8 +384,9 @@ func phasePropagate(
 	reasons map[string]string,
 	reachOfDep map[string]reachLevel,
 	routeMemberReach map[string]reachLevel,
-) (via map[string]string, wontRestart map[string]startupFault, iterations int) {
+) (via map[string]string, viaPartition map[string]bool, wontRestart map[string]startupFault, iterations int) {
 	via = map[string]string{}
+	viaPartition = map[string]bool{}
 	wontRestart = map[string]startupFault{}
 
 	for iterations = 1; iterations <= maxIterations; iterations++ {
@@ -385,7 +407,7 @@ func phasePropagate(
 				continue
 			}
 
-			providerStatus, providerName, ok := providerHealth(g, dep, statuses, routeStatus)
+			providerStatus, ownStatus, providerName, ok := providerHealth(g, dep, statuses, routeStatus)
 			if !ok {
 				continue
 			}
@@ -393,6 +415,15 @@ func phasePropagate(
 			// Seam 2: a pairwise partition downgrades the provider's status
 			// before Propagate runs, so the dependency's hard/soft/startup/
 			// async/optional table does all the semantic work unchanged.
+			//
+			// ownStatus is the provider's health with no network effect
+			// anywhere in the chain, and it is kept because the downgrade is
+			// deliberately lossy: a provider that is perfectly healthy but cut
+			// off from this consumer arrives at Propagate looking exactly like
+			// one that has crashed. That is right for deciding the consumer's
+			// status and wrong for explaining it -- "pg-main is down" sends an
+			// operator to inspect a service that is green, during the incident
+			// when they can least afford the detour.
 			switch reachOfDep[dep.ID] {
 			case reachDown:
 				providerStatus = domain.StatusDown
@@ -400,13 +431,34 @@ func phasePropagate(
 				providerStatus = providerStatus.Worse(domain.StatusDegraded)
 			}
 
+			// netEffect is derived from the gap between the two statuses rather
+			// than from reachOfDep, because reachOfDep only describes the
+			// consumer-to-provider hop. A route whose backends are unreachable
+			// from its own frontend was already downgraded inside
+			// routeStatuses, and that consumer's own hop is fine -- reading
+			// reachOfDep alone would call that a crash and send somebody to the
+			// wrong place, which is the very bug this pair exists to prevent.
+			// The gap catches both shapes with one rule.
+			netEffect := reachUnknown
+			if providerStatus != ownStatus {
+				netEffect = reachDegraded
+				if providerStatus == domain.StatusDown {
+					netEffect = reachDown
+				}
+			}
+
 			effect := dep.Propagate(providerStatus, req.WindowSeconds)
 
 			if _, already := wontRestart[dep.ConsumerServiceID]; effect.WontRestart && !already {
+				unmet := " is unmet"
+				if netEffect != reachUnknown {
+					unmet = " is unreachable from here"
+				}
 				wontRestart[dep.ConsumerServiceID] = startupFault{
 					Via: providerName,
-					Reason: "startup dependency on " + providerName +
-						" is unmet: running now, will not come back after a restart",
+					Reason: "startup dependency on " + providerName + unmet +
+						": running now, will not come back after a restart",
+					NetEffect: netEffect,
 				}
 				changed = true
 			}
@@ -415,44 +467,76 @@ func phasePropagate(
 			if merged != consumer {
 				statuses[dep.ConsumerServiceID] = merged
 				via[dep.ConsumerServiceID] = providerName
-				reasons[dep.ConsumerServiceID] = propagationReason(dep, providerStatus, providerName)
+				viaPartition[dep.ConsumerServiceID] = netEffect != reachUnknown
+				reasons[dep.ConsumerServiceID] = propagationReason(dep, providerStatus, providerName, netEffect)
 				changed = true
 			}
 		}
 
 		if !changed {
-			return via, wontRestart, iterations
+			return via, viaPartition, wontRestart, iterations
 		}
 	}
-	return via, wontRestart, maxIterations
+	return via, viaPartition, wontRestart, maxIterations
+}
+
+// tallyMember folds one backend's status into the alive/degraded counts. A
+// degraded member is alive -- it is still serving, just not well.
+func tallyMember(status domain.Status, alive, degraded int) (int, int) {
+	switch status {
+	case domain.StatusDown:
+		return alive, degraded // contributes nothing
+	case domain.StatusDegraded:
+		return alive + 1, degraded + 1
+	default:
+		return alive + 1, degraded
+	}
+}
+
+func poolVerdict(alive, degraded, members int) domain.Status {
+	switch {
+	case alive == 0:
+		return domain.StatusDown
+	case alive < members || degraded > 0:
+		return domain.StatusDegraded
+	default:
+		return domain.StatusOK
+	}
 }
 
 // providerHealth resolves the status of whatever a dependency points at.
+//
+// It returns the status twice: as the consumer experiences it, and as it would
+// be with no network effect anywhere in the chain. For a direct endpoint those
+// are the same value; for a route they diverge exactly when the pool's verdict
+// was decided by reachability rather than by a backend actually failing.
 func providerHealth(
 	g *Graph,
 	dep domain.Dependency,
 	statuses map[string]domain.Status,
-	routeStatus map[string]domain.Status,
-) (domain.Status, string, bool) {
+	routeStatus map[string]routeHealth,
+) (status, bare domain.Status, name string, ok bool) {
 	if dep.ProviderEndpointID != nil {
-		ep, ok := g.Endpoints[*dep.ProviderEndpointID]
-		if !ok {
-			return domain.StatusOK, "", false
+		ep, found := g.Endpoints[*dep.ProviderEndpointID]
+		if !found {
+			return domain.StatusOK, domain.StatusOK, "", false
 		}
 		svc := g.Services[ep.ServiceID]
 		if svc == nil {
-			return domain.StatusOK, "", false
+			return domain.StatusOK, domain.StatusOK, "", false
 		}
-		return statuses[ep.ServiceID], svc.Code + "/" + ep.Name, true
+		own := statuses[ep.ServiceID]
+		return own, own, svc.Code + "/" + ep.Name, true
 	}
 	if dep.ProviderRouteID != nil {
-		r, ok := g.Routes[*dep.ProviderRouteID]
-		if !ok {
-			return domain.StatusOK, "", false
+		r, found := g.Routes[*dep.ProviderRouteID]
+		if !found {
+			return domain.StatusOK, domain.StatusOK, "", false
 		}
-		return routeStatus[r.ID], "route " + r.Name, true
+		rh := routeStatus[r.ID]
+		return rh.Status, rh.Bare, "route " + r.Name, true
 	}
-	return domain.StatusOK, "", false
+	return domain.StatusOK, domain.StatusOK, "", false
 }
 
 // routeStatuses derives each route's health from its proxy and its pool.
@@ -460,8 +544,23 @@ func providerHealth(
 // This is what the handover means by "routes are nodes in the graph, not
 // passthroughs": a proxy that is up but whose every backend sits on the host
 // being rebooted is not serving, and only pool-level derivation shows that.
-func routeStatuses(g *Graph, statuses map[string]domain.Status, routeMemberReach map[string]reachLevel) map[string]domain.Status {
-	out := make(map[string]domain.Status, len(g.Routes))
+// routeHealth is a route's status with reachability applied, alongside what it
+// would have been without it.
+//
+// Both are needed because a route launders the network effect: routeStatuses
+// folds routeMemberReach into the pool arithmetic before phasePropagate ever
+// sees the route, so a route whose backends are merely unreachable arrives
+// looking exactly like one whose backends crashed. Comparing Status against
+// Bare is what lets the reason string tell those apart -- the same distinction
+// propagationReason draws for a direct endpoint, which would otherwise be lost
+// for every consumer that reaches its provider through a proxy.
+type routeHealth struct {
+	Status domain.Status
+	Bare   domain.Status
+}
+
+func routeStatuses(g *Graph, statuses map[string]domain.Status, routeMemberReach map[string]reachLevel) map[string]routeHealth {
+	out := make(map[string]routeHealth, len(g.Routes))
 	for id, r := range g.Routes {
 		// The proxy terminating the route.
 		frontend := domain.StatusOK
@@ -487,59 +586,78 @@ func routeStatuses(g *Graph, statuses map[string]domain.Status, routeMemberReach
 			members = append(members, endpointID)
 		}
 
-		poolStatus := domain.StatusOK
+		// The pool is scored twice over the same members: once with
+		// reachability applied and once ignoring it. The pair is what makes a
+		// partition distinguishable from a crash one hop further down.
+		poolStatus, poolBare := domain.StatusOK, domain.StatusOK
 		if len(members) > 0 {
 			alive, degraded := 0, 0
+			bareAlive, bareDegraded := 0, 0
 			for _, endpointID := range members {
 				ep, ok := g.Endpoints[endpointID]
 				if !ok {
 					continue
 				}
+				own := statuses[ep.ServiceID]
 				// Seam 2 at pool-member granularity: a member's own status is
 				// downgraded by its reachability from the route's frontend
 				// before it is counted, so "every backend is on the far side
 				// of the break" is caught the same way host loss already is.
-				memberStatus := statuses[ep.ServiceID]
+				memberStatus := own
 				switch routeMemberReach[r.ID+"/"+endpointID] {
 				case reachDown:
 					memberStatus = domain.StatusDown
 				case reachDegraded:
 					memberStatus = memberStatus.Worse(domain.StatusDegraded)
 				}
-				switch memberStatus {
-				case domain.StatusDown:
-					// contributes nothing
-				case domain.StatusDegraded:
-					degraded++
-					alive++
-				default:
-					alive++
-				}
+				alive, degraded = tallyMember(memberStatus, alive, degraded)
+				bareAlive, bareDegraded = tallyMember(own, bareAlive, bareDegraded)
 			}
-			switch {
-			case alive == 0:
-				poolStatus = domain.StatusDown
-			case alive < len(members) || degraded > 0:
-				poolStatus = domain.StatusDegraded
-			}
+			poolStatus = poolVerdict(alive, degraded, len(members))
+			poolBare = poolVerdict(bareAlive, bareDegraded, len(members))
 		}
-		out[id] = frontend.Worse(poolStatus)
+		out[id] = routeHealth{
+			Status: frontend.Worse(poolStatus),
+			Bare:   frontend.Worse(poolBare),
+		}
 	}
 	return out
 }
 
-func propagationReason(dep domain.Dependency, providerStatus domain.Status, providerName string) string {
+// propagationReason explains a propagated status in the consumer's terms.
+//
+// netEffect reports that the provider's status was forced by the network rather
+// than by the provider's own health, and replaces "is down" with a description
+// of the path. The two are the same fact for the consumer and completely
+// different instructions for the person reading the report: one says go and fix
+// the provider, the other says go and fix the path.
+//
+// The distinction between the two network levels is kept because they call for
+// different urgency. A severed path is an outage; a path that survives only
+// through a failover leg is a warning that the next failure has nowhere to go.
+func propagationReason(dep domain.Dependency, providerStatus domain.Status, providerName string, netEffect reachLevel) string {
+	state := string(providerStatus)
+	switch netEffect {
+	case reachDown:
+		state = "unreachable"
+	case reachDegraded:
+		state = "reachable only over a degraded path"
+	}
 	switch dep.Nature {
 	case domain.NatureHard:
-		return "hard dependency on " + providerName + " is " + string(providerStatus)
+		return "hard dependency on " + providerName + " is " + state
 	case domain.NatureSoft:
-		return "soft dependency on " + providerName + " is " + string(providerStatus) +
+		return "soft dependency on " + providerName + " is " + state +
 			"; degraded but still serving"
 	case domain.NatureAsync:
+		if netEffect == reachDown {
+			return "async dependency on " + providerName +
+				" has been unreachable for longer than its tolerance window"
+		}
 		return "async dependency on " + providerName +
 			" is down for longer than its tolerance window"
 	default:
-		return "dependency on " + providerName + " is " + string(providerStatus)
+		return "dependency on " + providerName + " is " + state
 	}
 }
 

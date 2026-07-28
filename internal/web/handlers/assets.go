@@ -352,12 +352,20 @@ func (a *App) renderAssetFormError(w http.ResponseWriter, r *http.Request, messa
 
 type impactPage struct {
 	Base
-	Asset     *store.AssetRow
-	Result    impact.Result
-	Window    int
-	Windows   []windowOption
-	Subtree   []string
-	HasImpact bool
+	Asset   *store.AssetRow
+	Result  impact.Result
+	Window  int
+	Windows []windowOption
+	Subtree []string
+	// HasImpact is true when a service is affected. HasNetworkFinding is true
+	// when the network has something to say that no service status carries --
+	// an isolated asset, a partitioned edge, a group left without redundancy.
+	// They are separate because "Nothing breaks" printed above a list of
+	// isolated assets is the exact contradiction this feature was built to
+	// remove: an operator who reads the headline and stops is being told the
+	// opposite of what the page below it says.
+	HasImpact         bool
+	HasNetworkFinding bool
 }
 
 type windowOption struct {
@@ -401,6 +409,8 @@ func (a *App) AssetImpact(w http.ResponseWriter, r *http.Request) {
 		Window:    window,
 		Windows:   windows,
 		HasImpact: len(result.Services) > 0 || len(result.WontRestart) > 0,
+		HasNetworkFinding: len(result.Isolated) > 0 || len(result.Partitions) > 0 ||
+			len(result.Unreachable) > 0 || len(result.RedundancyLost) > 0,
 	}
 	a.Render.Respond(w, r, http.StatusOK, "impact", "impact_result", data)
 }
