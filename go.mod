@@ -3,26 +3,26 @@ module github.com/gabriel/invctl
 go 1.26.4
 
 require (
+	github.com/alexedwards/argon2id v1.0.0
+	github.com/alexedwards/scs/postgresstore v0.0.0-20251002162104-209de6e426de
+	github.com/alexedwards/scs/sqlite3store v0.0.0-20251002162104-209de6e426de
+	github.com/alexedwards/scs/v2 v2.9.0
+	github.com/go-ldap/ldap/v3 v3.4.14
+	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/jmoiron/sqlx v1.4.0
+	github.com/justinas/nosurf v1.2.0
 	github.com/pressly/goose/v3 v3.27.3
 	modernc.org/sqlite v1.54.0
 )
 
 require (
 	github.com/Azure/go-ntlmssp v0.1.1 // indirect
-	github.com/alexedwards/argon2id v1.0.0 // indirect
-	github.com/alexedwards/scs/postgresstore v0.0.0-20251002162104-209de6e426de // indirect
-	github.com/alexedwards/scs/sqlite3store v0.0.0-20251002162104-209de6e426de // indirect
-	github.com/alexedwards/scs/v2 v2.9.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/go-asn1-ber/asn1-ber v1.5.8 // indirect
-	github.com/go-ldap/ldap/v3 v3.4.14 // indirect
-	github.com/google/uuid v1.6.0 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
-	github.com/justinas/nosurf v1.2.0 // indirect
 	github.com/mattn/go-isatty v0.0.23 // indirect
 	github.com/mfridman/interpolate v0.0.2 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect

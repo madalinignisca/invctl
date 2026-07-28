@@ -36,6 +36,7 @@
 // The caller is cmd/invctl. Rule 10 says admin-invoked: never handler code,
 // never an automatic side effect of a write path. Nothing in internal/web
 // references this file, and a test asserts that.
+
 package store
 
 import (

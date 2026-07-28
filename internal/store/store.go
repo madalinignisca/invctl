@@ -172,7 +172,7 @@ func (s *SQLStore) writeTx(ctx context.Context, actor domain.Actor, opts *sql.Tx
 
 	if err := fn(t); err != nil {
 		if rbErr := sqlTx.Rollback(); rbErr != nil && !errors.Is(rbErr, sql.ErrTxDone) {
-			return fmt.Errorf("%w (rollback also failed: %v)", err, rbErr)
+			return fmt.Errorf("%w (rollback also failed: %w)", err, rbErr)
 		}
 		return err
 	}

@@ -11,6 +11,7 @@
 // every net_* table -- makes every function in this file a no-op. That is
 // the compositional guarantee the design calls out: no topology data means
 // no claim, never "everything is unreachable".
+
 package impact
 
 import (
@@ -1170,6 +1171,9 @@ func computeRedundancyLost(net *NetGraph, groupStatus map[string]domain.Status, 
 			note = "the whole group is down"
 		case domain.StatusDegraded:
 			note = "no redundancy remains until a standby is promoted"
+		case domain.StatusOK:
+			// Members were lost but the group still meets its policy, which is
+			// the default note above: one more loss and it does not.
 		}
 		out = append(out, GroupFinding{
 			GroupCode: g.Code,

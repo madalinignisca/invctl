@@ -12,6 +12,7 @@
 // Zero external dependencies, like every other file in this package. Nothing
 // here reads a token: a token is a secret and never reaches domain, never
 // reaches the store, and never reaches a log line.
+
 package domain
 
 import (

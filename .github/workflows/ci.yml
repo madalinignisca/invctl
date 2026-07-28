@@ -1,0 +1,95 @@
+name: CI
+
+# The gate is the same one `make lint` and `make test` run locally, deliberately.
+# A CI that checks more than the local target teaches people to push and wait; one
+# that checks less makes green meaningless. Both run the identical commands.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: gofmt
+        run: |
+          test -z "$(gofmt -l cmd internal web)" || {
+            gofmt -l cmd internal web
+            echo "::error::run gofmt -w"
+            exit 1
+          }
+
+      - name: go vet
+        run: go vet ./...
+
+      - uses: golangci/golangci-lint-action@v6
+        with:
+          version: v2.11.1
+
+      # Reachability-aware, unlike a plain dependency scan: it reports only
+      # vulnerabilities this code can actually call.
+      - name: govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+
+      # go.mod and go.sum must already be what `go mod tidy` produces. A drifting
+      # go.sum is how an unreviewed dependency arrives.
+      - name: go mod tidy is a no-op
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod go.sum
+
+  test:
+    runs-on: ubuntu-latest
+    services:
+      # Two engines is the project's central constraint: a change that only
+      # passes on SQLite is not done. Pinned one major behind current stable,
+      # per the stack convention.
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: invctl
+          POSTGRES_PASSWORD: invctl
+          POSTGRES_DB: invctl
+        ports: ["5433:5432"]
+        options: >-
+          --health-cmd "pg_isready -U invctl"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      INV_TEST_POSTGRES_DSN: postgres://invctl:invctl@127.0.0.1:5433/invctl?sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: build
+        run: CGO_ENABLED=0 go build ./...
+
+      - name: test (both engines)
+        run: go test ./... -count=1
+
+      # Separate from the plain run: the race detector is slow enough that
+      # folding it in would make the fast signal wait for the slow one, and both
+      # are worth having.
+      - name: test -race (both engines)
+        run: go test -race ./... -count=1

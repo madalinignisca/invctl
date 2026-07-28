@@ -26,7 +26,7 @@ const (
 // Natures is the Go side of the dependency.nature CHECK constraint.
 var Natures = []string{NatureHard, NatureSoft, NatureStartup, NatureAsync, NatureOptional}
 
-// Data classes carried over a dependency. chd/sad are PCI terms (cardholder
+// DataClasses are the classes of data carried over a dependency. chd/sad are PCI terms (cardholder
 // data / sensitive authentication data); pii drives GDPR scope. Tracking them
 // on the edge is what lets "which flows carry personal data across a
 // segmentation boundary" be a query rather than an interview.

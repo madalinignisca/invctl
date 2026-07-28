@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -190,7 +191,7 @@ func (s *SQLStore) searchStructured(ctx context.Context, query string) ([]Search
 				EntityType: "prefix", EntityID: prefixHit.ID,
 				Title: prefixHit.CIDRText, Subtitle: subtitle, Why: why,
 			})
-		} else if err != domain.ErrNotFound {
+		} else if !errors.Is(err, domain.ErrNotFound) {
 			return nil, fmt.Errorf("resolving prefix for %s: %w", query, err)
 		}
 	}

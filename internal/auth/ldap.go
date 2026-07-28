@@ -53,7 +53,7 @@ func (a *LDAPAuthenticator) Authenticate(ctx context.Context, username, password
 	if err != nil {
 		return nil, fmt.Errorf("dialling ldap: %w", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	if a.cfg.StartTLS {
 		if err := conn.StartTLS(&tls.Config{InsecureSkipVerify: a.cfg.SkipVerify}); err != nil {

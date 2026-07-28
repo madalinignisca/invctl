@@ -17,6 +17,7 @@
 //
 // Adding a column therefore means three edits: the migration, the table in
 // docs/AUDIT.md, and this file. That is the intended friction.
+
 package domain
 
 import "sort"

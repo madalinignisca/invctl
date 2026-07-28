@@ -33,6 +33,7 @@
 //
 // Nothing here acts on the estate. invctl presents state (HANDOVER.md §1); an
 // observation changes what is displayed and never what is running.
+
 package store
 
 import (
@@ -261,6 +262,9 @@ func (r *ObservedRecorder) RecordObservation(ctx context.Context, actor domain.A
 	// report that changes nothing must not open a write transaction, so
 	// classification cannot happen inside one.
 	switch classify(obs, current) {
+	case ObservationTransitioned:
+		// Falls through to the write path below: a transition is the one
+		// disposition that must reach the database immediately.
 	case ObservationDuplicate:
 		return settled(ObservationDuplicate, current, now), nil
 	case ObservationStale:
@@ -341,6 +345,8 @@ func (r *ObservedRecorder) writeThrough(ctx context.Context, key healthKey, obs 
 		}
 
 		switch classify(obs, current) {
+		case ObservationTransitioned:
+			// Handled after the switch: this is the write path.
 		case ObservationDuplicate:
 			out = settled(ObservationDuplicate, current, now)
 			return nil
@@ -1217,7 +1223,7 @@ func (s *SQLStore) observedTx(ctx context.Context, fn func(*observedWrite) error
 	w := &observedWrite{tx: sqlTx, db: s.db}
 	if err := fn(w); err != nil {
 		if rbErr := sqlTx.Rollback(); rbErr != nil && !errors.Is(rbErr, sql.ErrTxDone) {
-			return fmt.Errorf("%w (rollback also failed: %v)", err, rbErr)
+			return fmt.Errorf("%w (rollback also failed: %w)", err, rbErr)
 		}
 		return err
 	}

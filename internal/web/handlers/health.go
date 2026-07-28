@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -232,7 +233,7 @@ func (a *App) HealthOverrideClear(w http.ResponseWriter, r *http.Request) {
 // overrideExpiry turns a bounded minute count into an instant.
 func (a *App) overrideExpiry(minutes int) (time.Time, error) {
 	if minutes <= 0 {
-		return time.Time{}, fmt.Errorf("choose how long this override should last")
+		return time.Time{}, errors.New("choose how long this override should last")
 	}
 	if time.Duration(minutes)*time.Minute > domain.MaxOverrideDuration {
 		return time.Time{}, fmt.Errorf("an override lasts at most %s", domain.MaxOverrideDuration)

@@ -346,10 +346,10 @@ func phaseCapacity(g *Graph, downInstanceIDs map[string]bool, net *reachModel, n
 
 func capacityReason(svc *domain.Service, status domain.Status, lost, total, lostToIsolation int) string {
 	base := capacityReasonBase(svc, status, lost, total)
-	switch {
-	case lostToIsolation == 0:
+	switch lostToIsolation {
+	case 0:
 		return base
-	case lostToIsolation == lost:
+	case lost:
 		return base + " (running, but network-isolated -- not powered off)"
 	default:
 		return fmt.Sprintf("%s (%d of those network-isolated)", base, lostToIsolation)
@@ -450,6 +450,10 @@ func phasePropagate(
 				providerStatus = domain.StatusDown
 			case reachDegraded:
 				providerStatus = providerStatus.Worse(domain.StatusDegraded)
+			case reachUnknown, reachOK:
+				// Nothing to say: either the path is fine, or there is no
+				// opinion to offer. Named rather than left to a default so a
+				// fourth reach level cannot be added and silently mean "fine".
 			}
 
 			// netEffect is derived from the gap between the two statuses rather
@@ -630,6 +634,8 @@ func routeStatuses(g *Graph, statuses map[string]domain.Status, routeMemberReach
 					memberStatus = domain.StatusDown
 				case reachDegraded:
 					memberStatus = memberStatus.Worse(domain.StatusDegraded)
+				case reachUnknown, reachOK:
+					// The member's own status stands.
 				}
 				alive, degraded = tallyMember(memberStatus, alive, degraded)
 				bareAlive, bareDegraded = tallyMember(own, bareAlive, bareDegraded)
@@ -663,6 +669,9 @@ func propagationReason(dep domain.Dependency, providerStatus domain.Status, prov
 		state = "unreachable"
 	case reachDegraded:
 		state = "reachable only over a degraded path"
+	case reachUnknown, reachOK:
+		// The provider's own status is the whole story; the network added
+		// nothing, and saying otherwise would be the false lead in reverse.
 	}
 	switch dep.Nature {
 	case domain.NatureHard:

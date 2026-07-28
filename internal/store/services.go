@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/gabriel/invctl/internal/domain"
@@ -498,7 +499,7 @@ func (s *SQLStore) GetRuntimeDetail(ctx context.Context, instanceID, runtimeType
 		return detail, nil // appliance has no detail table
 	}
 	// A missing detail row is normal: the operator has not filled it in yet.
-	if err != nil && err != domain.ErrNotFound {
+	if err != nil && !errors.Is(err, domain.ErrNotFound) {
 		return nil, fmt.Errorf("loading runtime detail for %s: %w", instanceID, err)
 	}
 	return detail, nil

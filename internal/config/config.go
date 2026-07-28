@@ -8,6 +8,7 @@ package config
 import (
 	"crypto/rand"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -130,17 +131,17 @@ func (c *Config) validate() error {
 		return fmt.Errorf("validating config: INV_DB_DRIVER must be sqlite or postgres, got %q", c.DBDriver)
 	}
 	if c.DBDSN == "" {
-		return fmt.Errorf("validating config: INV_DB_DSN is required")
+		return errors.New("validating config: INV_DB_DSN is required")
 	}
 	if !c.AuthLocal && !c.AuthLDAP {
-		return fmt.Errorf("validating config: at least one of INV_AUTH_LOCAL or INV_AUTH_LDAP must be enabled")
+		return errors.New("validating config: at least one of INV_AUTH_LOCAL or INV_AUTH_LDAP must be enabled")
 	}
 	if c.AuthLDAP {
 		if c.LDAP.URL == "" {
-			return fmt.Errorf("validating config: INV_LDAP_URL is required when INV_AUTH_LDAP is enabled")
+			return errors.New("validating config: INV_LDAP_URL is required when INV_AUTH_LDAP is enabled")
 		}
 		if !strings.Contains(c.LDAP.BindDNTemplate, "%s") {
-			return fmt.Errorf("validating config: INV_LDAP_BIND_DN must contain %%s for the username")
+			return errors.New("validating config: INV_LDAP_BIND_DN must contain %%s for the username")
 		}
 		// A simple bind sends a real person's password. This is the only place
 		// in the application where a human credential crosses the network, and

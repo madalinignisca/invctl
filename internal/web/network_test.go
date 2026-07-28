@@ -2,6 +2,7 @@ package web_test
 
 import (
 	"context"
+	"net/http"
 	"net/url"
 	"strings"
 	"testing"
@@ -52,7 +53,7 @@ func TestReadOnlyUserCannotWriteReachabilityTopology(t *testing.T) {
 			token := h.csrfToken("/network")
 			resp := h.post(tc.path, url.Values{"csrf_token": {token}}, false)
 			resp.Body.Close()
-			if resp.StatusCode != 403 {
+			if resp.StatusCode != http.StatusForbidden {
 				t.Errorf("POST %s as viewer returned %d, want 403", tc.path, resp.StatusCode)
 			}
 		})
@@ -74,7 +75,7 @@ func TestCSRFIsEnforcedOnReachabilityRoutes(t *testing.T) {
 		"availability": {domain.AvailStandalone},
 	}, false)
 	resp.Body.Close()
-	if resp.StatusCode != 400 {
+	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", resp.StatusCode)
 	}
 	if _, err := h.store.GetNetGroup(context.Background(), "csrf-net"); err == nil {
@@ -101,7 +102,7 @@ func TestNetworkGroupValidationIs422(t *testing.T) {
 	}, true)
 	text := body(t, resp)
 
-	if resp.StatusCode != 422 {
+	if resp.StatusCode != http.StatusUnprocessableEntity {
 		t.Fatalf("status = %d, want 422", resp.StatusCode)
 	}
 	if !strings.Contains(text, `id="net-group-form"`) {
@@ -173,7 +174,7 @@ func TestNetworkDeriveProposesAndDoesNotWriteThroughUI(t *testing.T) {
 	resp := h.post("/network/derive", url.Values{"csrf_token": {token}}, true)
 	text := body(t, resp)
 
-	if resp.StatusCode != 200 {
+	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200 (derivation renders, it does not redirect)", resp.StatusCode)
 	}
 	if strings.Contains(text, "<!doctype html>") {

@@ -273,7 +273,7 @@ func TestTimeRoundTripSortsLexicographically(t *testing.T) {
 	later := FormatTime(time.Date(2026, 12, 31, 23, 59, 59, 0, time.UTC))
 
 	// ORDER BY on a TEXT column depends entirely on this.
-	if !(earlier < later) {
+	if earlier >= later {
 		t.Errorf("%q should sort before %q", earlier, later)
 	}
 

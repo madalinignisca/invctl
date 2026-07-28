@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"errors"
 	"fmt"
 	"net/netip"
 	"strings"
@@ -42,7 +43,7 @@ type PrefixValue struct {
 func ParseAddr(s string) (AddrValue, error) {
 	trimmed := strings.TrimSpace(s)
 	if trimmed == "" {
-		return AddrValue{}, fmt.Errorf("parsing address: empty")
+		return AddrValue{}, errors.New("parsing address: empty")
 	}
 	a, err := netip.ParseAddr(trimmed)
 	if err != nil {
@@ -65,7 +66,7 @@ func ParseAddr(s string) (AddrValue, error) {
 func ParsePrefix(s string) (PrefixValue, error) {
 	trimmed := strings.TrimSpace(s)
 	if trimmed == "" {
-		return PrefixValue{}, fmt.Errorf("parsing prefix: empty")
+		return PrefixValue{}, errors.New("parsing prefix: empty")
 	}
 	p, err := netip.ParsePrefix(trimmed)
 	if err != nil {
@@ -102,7 +103,7 @@ func broadcast(start []byte, bits int) []byte {
 	copy(end, start)
 	totalBits := len(start) * 8
 	for i := bits; i < totalBits; i++ {
-		end[i/8] |= 1 << (7 - uint(i%8))
+		end[i/8] |= 1 << (7 - i%8)
 	}
 	return end
 }
@@ -123,7 +124,7 @@ func ParseMAC(s string) (string, error) {
 		return "", fmt.Errorf("parsing mac %q: expected 12 hex digits, got %d", s, len(cleaned))
 	}
 	for _, r := range cleaned {
-		if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f')) {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'f') {
 			return "", fmt.Errorf("parsing mac %q: %q is not a hex digit", s, r)
 		}
 	}

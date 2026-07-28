@@ -17,6 +17,7 @@
 // The reachability *algorithm* -- group status, union-find, pairwise reach --
 // is internal/impact/reach.go and lands in M3. This file only has entities and
 // validating constructors; nothing here is read by the impact engine yet.
+
 package domain
 
 import (

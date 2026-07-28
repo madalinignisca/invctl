@@ -17,6 +17,7 @@
 //
 // Nothing here acts on the estate. Silencing a reading changes what a person
 // sees; it does not restart, drain or promote anything (HANDOVER.md §1).
+
 package store
 
 import (

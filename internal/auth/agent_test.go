@@ -161,7 +161,12 @@ func TestRegistryRefusesACredentialItCannotBuild(t *testing.T) {
 		},
 		{
 			name: "an unknown vocabulary",
-			cred: config.AgentCredential{ID: "prom-a", Token: tokenA, Environments: []string{"prod"}, Vocabulary: "promethues"},
+			// Misspelt on purpose: the case is "a typo in the deployment is
+			// refused at startup". golangci-lint --fix corrected it to the
+			// valid name once, which quietly turned this into an assertion that
+			// a CORRECT vocabulary is rejected -- and the case still passed,
+			// because NewAgentRegistry rejected it for a different reason.
+			cred: config.AgentCredential{ID: "prom-a", Token: tokenA, Environments: []string{"prod"}, Vocabulary: "promethues"}, //nolint:misspell // deliberate typo under test
 			want: "vocabulary",
 		},
 		{

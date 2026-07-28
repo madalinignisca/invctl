@@ -26,6 +26,7 @@
 //
 // Everything below is a read. Nothing in this file writes anything, and nothing
 // in this file acts on the estate.
+
 package store
 
 import (

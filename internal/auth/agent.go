@@ -10,6 +10,7 @@
 // Authorizer.CanWrite -- whose parameter is *domain.AppUser -- cannot be handed
 // an Agent even by mistake. It does not compile, which is the only kind of
 // boundary worth having.
+
 package auth
 
 import (

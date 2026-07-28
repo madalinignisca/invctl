@@ -1,0 +1,136 @@
+version: "2"
+
+# Linters are chosen for what this codebase actually is: hand-written SQL against
+# two engines, a server-rendered HTML surface, and one route that authenticates a
+# machine credential. A linter that does not speak to one of those is noise, and a
+# noisy linter gets disabled wholesale by the first person it inconveniences.
+#
+# Everything enabled here is expected to stay at zero findings. There is no
+# baseline file and no `nolint` sprinkled to get green: a suppression is a
+# decision and each one below carries its reason.
+
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  default: none
+  enable:
+    # --- correctness -------------------------------------------------------
+    - errcheck          # an ignored error is the bug this project keeps finding
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - errorlint         # CLAUDE.md mandates %w wrapping; this is what enforces it
+    - nilerr            # `if err != nil { return nil }` -- returns success on failure
+    - nilnesserr
+    - bodyclose         # leaks a connection per request; the test suite makes many
+    - noctx             # every store method takes a ctx; an HTTP call without one bypasses cancellation
+    - rowserrcheck      # rows.Err() after a manual scan loop, or the loop silently truncates
+    - sqlclosecheck     # hand-written SQL, no ORM to clean up after us
+    - durationcheck
+    - makezero
+    - copyloopvar
+    - exhaustive        # a new HealthState or Cause must not silently fall through a switch
+
+    # --- security ----------------------------------------------------------
+    - gosec
+
+    # --- clarity -----------------------------------------------------------
+    - misspell
+    - unconvert
+    - wastedassign
+    - usestdlibvars
+    - perfsprint
+
+  settings:
+    errcheck:
+      check-type-assertions: true
+      check-blank: false
+      # Close() on a deferred handle after the useful work is done. There is
+      # genuinely nothing to do with the error and `_ =` on every line reads worse
+      # than the exclusion, but ONLY for these: a Close whose failure loses data
+      # (a writer being flushed) is not in this list and must be handled.
+      exclude-functions:
+        - (io.Closer).Close
+        - (*database/sql.Rows).Close
+        - (net/http.ResponseWriter).Write
+
+    errorlint:
+      errorf: true
+      asserts: true
+      comparison: true
+
+    exhaustive:
+      default-signifies-exhaustive: true
+
+    gosec:
+      excludes:
+        # G104 duplicates errcheck, which is configured more precisely above.
+        - G104
+        # G120 ParseForm without a body limit. Every request body is capped by
+        # middleware.LimitBody in the chain (routes.go), which gosec cannot see
+        # from a handler. Capping again per-handler would be twelve places to
+        # forget instead of one. The M6 observation route additionally sets its
+        # own tighter 64 KiB limit.
+        - G120
+        # G203 template.URL. The one use is render.funcs.queryString, which
+        # builds its value exclusively from template.URLQueryEscaper output with
+        # literal keys supplied by templates, never from a request.
+        - G203
+        # G304 file-inclusion-via-variable: the only variable paths here are the
+        # migrations directory and the Tailwind binary, both build-time constants
+        # reaching the filesystem through embed or the Makefile, never user input.
+        - G304
+        # G402 InsecureSkipVerify. config.validate REFUSES TO START when
+        # INV_LDAP_SKIP_VERIFY is set, so the field can never be true at the
+        # point gosec flags. The tls.Config still reads it rather than
+        # hardcoding false, because a struct that ignores its own configuration
+        # is worse than one that cannot be given a bad value.
+        - G402
+        # G706 log injection. Established by experiment, not assumption: this
+        # application configures slog.TextHandler (main.go), and a value
+        # containing a newline is quoted and escaped --
+        # path="/assets\nlevel=INFO msg=\"forged\"" -- so no log line can be
+        # forged through a URL path. Revisit if the handler is ever swapped for
+        # one that writes values raw.
+        - G706
+
+    staticcheck:
+      checks:
+        - all
+
+  exclusions:
+    rules:
+      # Tests only, and deliberately narrow in what it forgives.
+      #
+      # errcheck/bodyclose/noctx in a test are about resources whose leak lasts
+      # until the process exits seconds later, and whose failure the test itself
+      # would surface far more loudly than a linter can. Handling each one turns
+      # a readable assertion into four lines of ceremony.
+      #
+      # PRODUCTION CODE GETS NO SUCH PASS. Every one of these is enabled there,
+      # which is where a leaked connection or an unchecked write actually costs
+      # something.
+      - path: _test\.go
+        linters:
+          - errcheck
+          - bodyclose
+          - noctx
+
+      # gosec's G404 (weak RNG) in tests: fixtures want repeatable data, not
+      # cryptographic randomness.
+      - path: _test\.go
+        linters:
+          - gosec
+        text: "G404"
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

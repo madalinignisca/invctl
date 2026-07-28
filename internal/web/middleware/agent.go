@@ -9,6 +9,7 @@
 // Nothing in this file logs a token. Not on success, not on failure, not
 // truncated, not hashed-and-logged-for-correlation. A rejected token is
 // reported by what it is not.
+
 package middleware
 
 import (

@@ -6,9 +6,12 @@ package render
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"html/template"
+	"io"
 	"io/fs"
+	"log/slog"
 	"net/http"
 	"path"
 	"strings"
@@ -49,7 +52,7 @@ func (r *Renderer) parse() error {
 		return fmt.Errorf("listing pages: %w", err)
 	}
 	if len(pageFiles) == 0 {
-		return fmt.Errorf("parsing templates: no pages found")
+		return errors.New("parsing templates: no pages found")
 	}
 
 	pages := make(map[string]*template.Template, len(pageFiles))
@@ -95,7 +98,7 @@ func (r *Renderer) Page(w http.ResponseWriter, status int, name string, data any
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(status)
-	buf.WriteTo(w)
+	writeBuffered(w, &buf)
 }
 
 // Partial renders a single named partial.
@@ -113,7 +116,7 @@ func (r *Renderer) Partial(w http.ResponseWriter, status int, name string, data 
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(status)
-	buf.WriteTo(w)
+	writeBuffered(w, &buf)
 }
 
 // Respond is the HTMX dispatch: an HTMX request gets the partial, a plain
@@ -189,11 +192,29 @@ func (r *Renderer) PartialWithOOB(w http.ResponseWriter, status int, name string
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(status)
-	buf.WriteTo(w)
+	writeBuffered(w, &buf)
 }
 
 // OOB is one out-of-band fragment to append to a response.
 type OOB struct {
 	Template string
 	Data     any
+}
+
+// writeBuffered sends a fully rendered page or fragment.
+//
+// The status line has already gone out by the time this runs, so a failure here
+// cannot be turned into an error response -- the client is getting a truncated
+// document whatever happens. Ignoring it silently was still wrong: a page that
+// renders correctly and then arrives half-written is exactly the kind of fault
+// somebody reports as "the impact page is blank sometimes", with nothing in the
+// log to work from.
+//
+// Debug rather than Warn because the overwhelmingly common cause is a client
+// that navigated away mid-response, which is normal and would drown the log at
+// any higher level. It is there when somebody goes looking.
+func writeBuffered(w io.Writer, buf *bytes.Buffer) {
+	if _, err := buf.WriteTo(w); err != nil {
+		slog.Debug("response body truncated", "error", err)
+	}
 }

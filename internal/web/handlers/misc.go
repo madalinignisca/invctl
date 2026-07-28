@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -310,5 +311,10 @@ func (a *App) Health(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
-	json.NewEncoder(w).Encode(status)
+	// Same reasoning as render.writeBuffered: the status is already sent, so a
+	// write failure cannot become an error response, and the usual cause is a
+	// client that went away. Recorded rather than dropped.
+	if err := json.NewEncoder(w).Encode(status); err != nil {
+		slog.Debug("health response truncated", "error", err)
+	}
 }

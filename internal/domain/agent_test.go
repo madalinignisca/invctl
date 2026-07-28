@@ -195,7 +195,11 @@ func TestEveryVocabularyMapsOnlyToRealStates(t *testing.T) {
 // 422, which reads as a broken collector rather than as a typo in the
 // deployment.
 func TestUnknownVocabularyIsAStartupFailure(t *testing.T) {
-	if _, err := LookupVocabulary("promethues"); err == nil {
+	// The misspelling is the subject of the test, not a typo in it. golangci-lint
+	// --fix silently "corrected" it to "prometheus" once, which inverted the
+	// assertion into "a VALID name is rejected" and turned the test red. Left as
+	// a marker: an autofix that edits test data can change what a test means.
+	if _, err := LookupVocabulary("promethues"); err == nil { //nolint:misspell // deliberate typo under test
 		t.Fatal("accepted a misspelt vocabulary name")
 	} else if !errors.Is(err, ErrInvalid) {
 		t.Errorf("error = %v, want ErrInvalid", err)

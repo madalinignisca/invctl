@@ -693,3 +693,79 @@ Both are GDPR-relevant in the transport sense: operator passwords and session co
 credentials of identifiable people. Nothing was found leaking personal data at rest —
 `change_log.actor` and `health_override.actor` carry opaque ids, and webhook errors echo only
 environment codes and UUIDv7 ids.
+
+---
+
+## 2026-07-28 — the quality gate
+
+`make lint` was gofmt, go vet and a staticcheck invocation that **printed an install hint and
+exited 0** when the tool was absent. A gate that passes because it did not run is worse than no
+gate, because it is believed — the same fail-open shape as the `envBool` bug fixed the same day,
+in the thing that was supposed to catch bugs like it. Missing tooling is now a failure, with
+`make tools` to install it.
+
+### The linter set is chosen, not inherited
+
+`.golangci.yml` enables what speaks to what this codebase actually is: hand-written SQL on two
+engines, a server-rendered HTML surface, and one route that authenticates a machine credential.
+`rowserrcheck` and `sqlclosecheck` because there is no ORM to clean up after us; `errorlint`
+because CLAUDE.md mandates `%w`; `exhaustive` because a new `HealthState` or `Cause` must not
+fall silently through a switch; `bodyclose`/`noctx` for the HTTP surface; `gosec` throughout.
+
+There is no baseline file and no `nolint` sprinkled to reach green. Every exclusion carries the
+reason it is safe, and the two `//nolint` directives in the tree are both "this typo is the
+subject of the test".
+
+Tests are forgiven `errcheck`/`bodyclose`/`noctx` — resources whose leak ends when the process
+exits seconds later, and whose failure the test surfaces far more loudly than a linter can.
+Production code is forgiven nothing.
+
+### What it found
+
+**Twelve handlers called `r.ParseForm` with no body limit**, including `Login`, which needs no
+session to reach. `ParseForm` reads the body to completion into memory, so a single
+unauthenticated request could ask the process to buffer as much as the sender liked. The M6
+observation route had a 64 KiB cap; nothing on the browser surface had any. Fixed once as
+`middleware.LimitBody` in the chain rather than in twelve handlers, because the per-handler
+version's failure mode is the thirteenth handler.
+
+The end-to-end test for it was **not load-bearing and I nearly shipped it that way**: CSRF parses
+the form to find its token and rejects a tokenless request at 400 before the body is ever read,
+so the probe returned 400 with the limit present *and* absent. Moved to a direct middleware test,
+which fails properly when the cap is removed.
+
+### The autofix broke two tests, and the tests caught it
+
+`golangci-lint --fix` ran `misspell` over test data and "corrected" `"promethues"` to
+`"prometheus"` in two places whose entire purpose was asserting that a **misspelt** vocabulary is
+rejected. One inverted into "a valid name is rejected" and went red; the other kept passing while
+testing something else. Both restored with `//nolint:misspell` explaining that the typo is the
+subject.
+
+`perfsprint` also rewrote a loop into a `strings.Builder` named `joinedSb131`. Replaced by hand
+with `strings.Join`.
+
+Worth keeping as a rule: an autofix that edits test data can change what a test *means*. Review
+the diff, never the summary.
+
+### Established by experiment rather than assumed
+
+`gosec` G706 flags logging `r.URL.Path` as log injection. Rather than suppress on belief, the
+behaviour was measured: this application configures `slog.TextHandler`, and a value containing a
+newline comes out quoted and escaped — `path="/assets\nlevel=INFO msg=\"forged\""`. No line can
+be forged. The exclusion records the experiment and the condition that would invalidate it: a
+handler that writes values raw.
+
+`govulncheck` reports **0 reachable vulnerabilities**, independently corroborating the earlier
+Trivy read that the `x/crypto/openpgp` advisory does not apply — nothing imports it.
+
+### CI
+
+There was none. `.github/workflows/ci.yml` runs the same commands as the local targets — a CI
+that checks more than `make lint` teaches people to push and wait, one that checks less makes
+green meaningless. Both engines, race detector as a separate job so the fast signal does not wait
+on the slow one, and `go mod tidy` asserted to be a no-op because a drifting `go.sum` is how an
+unreviewed dependency arrives.
+
+That last check found `go.mod` already stale: `argon2id`, `scs`, `go-ldap`, `uuid` and `nosurf`
+are all directly imported and were marked `// indirect`. No new module enters the graph.

@@ -1,9 +1,11 @@
 package render
 
 import (
+	"errors"
 	"fmt"
 	"html/template"
 	"log/slog"
+	"strconv"
 	"strings"
 	"time"
 
@@ -69,7 +71,7 @@ func seq(n int) []int {
 // one value without inventing a struct for every call site.
 func dict(values ...any) (map[string]any, error) {
 	if len(values)%2 != 0 {
-		return nil, fmt.Errorf("dict: odd number of arguments")
+		return nil, errors.New("dict: odd number of arguments")
 	}
 	m := make(map[string]any, len(values)/2)
 	for i := 0; i < len(values); i += 2 {
@@ -210,7 +212,7 @@ func derefInt(n *int) string {
 	if n == nil {
 		return ""
 	}
-	return fmt.Sprintf("%d", *n)
+	return strconv.Itoa(*n)
 }
 
 func titleCase(s string) string {

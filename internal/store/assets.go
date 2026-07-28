@@ -676,9 +676,11 @@ func whereClause(where []string) string {
 		return ""
 	}
 	out := " WHERE " + where[0]
+	var outSb679 strings.Builder
 	for _, w := range where[1:] {
-		out += " AND " + w
+		outSb679.WriteString(" AND " + w)
 	}
+	out += outSb679.String()
 	return out
 }
 

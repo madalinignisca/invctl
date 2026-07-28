@@ -28,6 +28,7 @@
 // internal/store/observed.go -- that file owns the WRITES. Nothing in this file
 // writes anything, and nothing in it acts on the estate: showing a state is not
 // changing one.
+
 package store
 
 import (

@@ -319,3 +319,37 @@ func Chain(h http.Handler, middlewares ...func(http.Handler) http.Handler) http.
 	}
 	return h
 }
+
+// MaxRequestBody is the ceiling on a browser-facing request body.
+//
+// Generous for the forms this application actually has -- the largest is an
+// asset with a free-text description -- and far below anything that threatens
+// the process. There are no file uploads.
+const MaxRequestBody = 1 << 20 // 1 MiB
+
+// LimitBody caps every request body before a handler can read it.
+//
+// r.ParseForm reads the body to completion into memory, so a handler that calls
+// it without a limit will hold whatever was sent. Twelve handlers did, and one
+// of them is Login -- reachable with no session, no CSRF token that matters to
+// an attacker who is not trying to forge one, and no rate limit on the browser
+// surface. A single unauthenticated request could ask the process to buffer as
+// much as it liked.
+//
+// Applied once in the chain rather than in each handler, because the failure
+// mode of the per-handler version is a handler added later that forgets. The
+// observation route wraps its own tighter 64 KiB limit inside this one; nesting
+// MaxBytesReader is well-defined and the inner limit wins.
+//
+// GET and HEAD are left alone: they have no body worth reading, and wrapping
+// them would only add allocation to every static asset request.
+func LimitBody(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet, http.MethodHead, http.MethodOptions:
+		default:
+			r.Body = http.MaxBytesReader(w, r.Body, MaxRequestBody)
+		}
+		next.ServeHTTP(w, r)
+	})
+}

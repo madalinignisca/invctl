@@ -127,14 +127,7 @@ func scenarioKey(assets []string) string {
 	if len(assets) == 0 {
 		return "(empty)"
 	}
-	joined := ""
-	for i, a := range assets {
-		if i > 0 {
-			joined += ","
-		}
-		joined += a
-	}
-	return joined
+	return strings.Join(assets, ",")
 }
 
 // clearSeededTopology retires every forwarder group the fixture arrives with,

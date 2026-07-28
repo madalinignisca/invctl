@@ -82,7 +82,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	ctx := context.Background()
 	if err := store.Migrate(ctx, db); err != nil {
@@ -232,10 +232,10 @@ func pruneUnmatchedObservations(ctx context.Context, st *store.SQLStore, cfg *co
 func resolvePruneOperator(ctx context.Context, st *store.SQLStore, cfg *config.Config,
 	username string, keepDays int) (*domain.AppUser, error) {
 	if strings.TrimSpace(username) == "" {
-		return nil, fmt.Errorf("pruning: -prune-as is required; the run records which operator asked for it")
+		return nil, errors.New("pruning: -prune-as is required; the run records which operator asked for it")
 	}
 	if keepDays < 0 {
-		return nil, fmt.Errorf("pruning: -prune-keep-days must not be negative")
+		return nil, errors.New("pruning: -prune-keep-days must not be negative")
 	}
 	user, err := st.GetUserByUsername(ctx, username)
 	if err != nil {
@@ -268,11 +268,11 @@ func resolvePruneOperator(ctx context.Context, st *store.SQLStore, cfg *config.C
 func pruneObservedTransitions(ctx context.Context, st *store.SQLStore, cfg *config.Config,
 	keepDays int, username string, dryRun bool) error {
 	if strings.TrimSpace(username) == "" {
-		return fmt.Errorf("pruning observed transitions: -prune-as is required; " +
+		return errors.New("pruning observed transitions: -prune-as is required; " +
 			"the run records which operator asked for it")
 	}
 	if keepDays < 0 {
-		return fmt.Errorf("pruning observed transitions: -prune-keep-days must not be negative")
+		return errors.New("pruning observed transitions: -prune-keep-days must not be negative")
 	}
 
 	user, err := st.GetUserByUsername(ctx, username)
@@ -468,7 +468,7 @@ func buildAuthenticator(st *store.SQLStore, cfg *config.Config) (auth.Authentica
 		slog.Info("ldap authentication enabled", "url", cfg.LDAP.URL)
 	}
 	if len(authenticators) == 0 {
-		return nil, fmt.Errorf("building authenticator: none enabled")
+		return nil, errors.New("building authenticator: none enabled")
 	}
 	return auth.NewChain(st, authenticators...), nil
 }

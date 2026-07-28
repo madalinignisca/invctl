@@ -13,6 +13,7 @@
 //
 // Nothing in this file logs a token, and AgentCredential deliberately cannot be
 // printed with one: see String and LogValue.
+
 package config
 
 import (

@@ -110,7 +110,9 @@ func openSQLite(dsn string) (*DB, error) {
 
 		db := &DB{Reader: pool, Writer: pool, Driver: DriverSQLite}
 		if err := db.verify(); err != nil {
-			db.Close()
+			// The verify error is what the caller needs; a Close failure on an
+			// already-broken handle adds nothing and must not mask it.
+			_ = db.Close()
 			return nil, err
 		}
 		return db, nil
@@ -128,7 +130,7 @@ func openSQLite(dsn string) (*DB, error) {
 
 	reader, err := sqlx.Open(sqlDriver(DriverSQLite), readerDSN)
 	if err != nil {
-		writer.Close()
+		_ = writer.Close()
 		return nil, fmt.Errorf("opening sqlite reader: %w", err)
 	}
 	reader.SetMaxOpenConns(8)
@@ -136,7 +138,7 @@ func openSQLite(dsn string) (*DB, error) {
 
 	db := &DB{Reader: reader, Writer: writer, Driver: DriverSQLite}
 	if err := db.verify(); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, err
 	}
 	return db, nil
@@ -177,7 +179,7 @@ func openPostgres(dsn string) (*DB, error) {
 
 	db := &DB{Reader: pool, Writer: pool, Driver: DriverPostgres}
 	if err := db.verify(); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, err
 	}
 	return db, nil

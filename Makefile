@@ -131,14 +131,29 @@ compose-down: ## Stop the supporting containers
 # ---------------------------------------------------------------------------
 
 .PHONY: lint
-lint: ## gofmt, go vet and staticcheck
+lint: ## gofmt, go vet, golangci-lint and govulncheck
 	@echo "== gofmt =="
 	@test -z "$$(gofmt -l cmd internal web)" || (gofmt -l cmd internal web; echo "run gofmt -w"; exit 1)
 	@echo "== go vet =="
 	go vet ./...
-	@echo "== staticcheck =="
-	@command -v staticcheck >/dev/null 2>&1 && staticcheck ./... || \
-	  echo "staticcheck not installed: go install honnef.co/go/tools/cmd/staticcheck@latest"
+	@echo "== golangci-lint =="
+	@# Missing tool is a FAILURE, not a note. The previous version printed an
+	@# install hint and exited 0, so a machine without staticcheck reported a
+	@# clean lint -- the same fail-open shape as the envBool bug this project
+	@# fixed in config. A gate that passes when it did not run is worse than no
+	@# gate, because it is believed.
+	@command -v golangci-lint >/dev/null 2>&1 || \
+	  (echo "golangci-lint is required: see 'make tools'"; exit 1)
+	golangci-lint run ./...
+	@echo "== govulncheck =="
+	@command -v govulncheck >/dev/null 2>&1 || \
+	  (echo "govulncheck is required: see 'make tools'"; exit 1)
+	govulncheck ./...
+
+.PHONY: tools
+tools: ## Install the linters `make lint` requires
+	go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
+	go install golang.org/x/vuln/cmd/govulncheck@latest
 
 .PHONY: tidy
 tidy:

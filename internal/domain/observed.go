@@ -7,6 +7,7 @@
 // the estate (HANDOVER.md §1, docs/DECISIONS.md). Observed health may inform
 // what is *displayed* -- labelled as observed, with its reporter and its age --
 // because showing is not acting.
+
 package domain
 
 import (
