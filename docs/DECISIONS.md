@@ -451,3 +451,106 @@ the window. The Remove link's own comment already reasons this out for its own d
 "swapping only the result panel would leave every one of them describing an outage that is
 no longer being simulated." Either every restatement re-renders or none may, so the window
 is now a full navigation too.
+
+---
+
+## 2026-07-28 — M6: the observed-state seam
+
+### AUDIT.md rule 7 contradicted rule 10, and the strict reading was unimplementable
+
+Rule 7 said "only a `user` actor may write the provenance value `declared`". Rule 10 names
+`SystemActor` as a legitimate writer of declared state — it seeds the inventory — and
+`UpsertLDAPUser` creates accounts as `Kind:"system"`. Both cannot hold once the check is
+enforced at the store entry points, and the strict reading was **verified to fail the
+seed** at "seeding instance of vault on vm-vault-1".
+
+Resolved toward the threat model: `CheckProvenanceWrite` denies **agent** actors. Laundering
+matters because a credential arrives over the network and asserts more authority than it was
+issued; `SystemActor` is this process and is not reachable from outside, so denying it closes
+nothing. AUDIT.md rule 7 has been amended in place with this reasoning.
+
+### The guard existed and nothing called it
+
+`domain.CheckProvenanceWrite` was written, unit-tested, and invoked from **zero** store
+methods. `make test` was red on both engines when the workflow finished, because the
+boundary-test agent wrote `TestOnlyUserActorWritesDeclaredSource`, watched it fail, and
+honoured its instruction not to touch production code to make a test pass. That is the
+process working: the milestone landed with a red suite and a correct explanation rather than
+a green suite and a hole.
+
+Now wired into `CreateDependency`, `UpdateDependency`, `CreateInstance` and `UpdateInstance`,
+plus two guards it did not cover:
+
+- `CheckAttestationWrite` on `VerifyDependency`. `verified_by`/`verified_at` are a *person's*
+  attestation; a machine writing them is a rubber stamp on an undocumented `chd` edge and on
+  the firewall rule justified by it. Separate from provenance because it is a different
+  claim — a machine may legitimately *report* an edge and may never *sign it off*, so neither
+  check implies the other.
+- `ConfidenceFor`. A machine's self-graded certainty was stored verbatim; rule 7 says
+  confidence is set by the store from the credential. An agent's write is now fixed at
+  `AgentConfidence`.
+
+### Scope used the entity's most permissive environment
+
+`authoriseScope` asked `AllowsAny`: does the credential cover *any* environment this entity
+is in? The seeded estate has exactly the shape that makes that fail — `sw-core-1` and
+`sw-core-2` are in `{prod, dev}` and prod is `in_scope` — so a dev collector's token could
+assert that a production core switch was up or down. Rule 6 forbids this in as many words.
+
+Now `AllowsAll`. A reading is visible in every environment the entity sits in, so the
+credential must cover all of them.
+
+**The existing scope test passed throughout**, because every asset it used belonged to
+exactly one environment. A test whose fixture cannot express the failure is not a test of it.
+
+### A reporter could declare its own staleness horizon
+
+`interval_seconds` arrived from the payload with no ceiling. Declare ten years and rule 8
+never fires for you: the collector dies, the estate stays green forever, and the one signal
+that an intruder killed the collector is gone. Capped at `MaxIntervalSeconds` (6h) as a
+domain constant, for the same reason `FlapThreshold` is one — a value the reporter can
+influence is a value the reporter can use to hide.
+
+### A flap episode never closed, which made compression a mute button
+
+`FlapSettled` measured quiet from `state_since`, which moves on **every** transition
+including the compressed ones. Any cadence faster than one change per `FlapWindow` kept an
+episode alive indefinitely: toggling once every four minutes produced twenty real state
+changes and zero ledger rows, at a rate that would never have qualified for compression.
+
+An episode now also ends when it stops earning its suppression — when its own average rate
+falls below the rate that opened it. With hysteresis at half the opening rate, because
+opening and closing on the same number would make the flap detector itself flap.
+
+### The clock-skew tolerance was a weapon inside its own limit
+
+Reports more than 300s ahead were refused. A report 295s ahead was **accepted and stored as
+sent**, became the monotonicity floor, and every truthful report from that credential was
+then discarded as stale for five minutes — re-poison once per window and the entity freezes
+indefinitely while its collector reports honestly into a black hole. Measured at 108
+consecutive discarded reports over an hour.
+
+Future timestamps inside the tolerance are now **clamped to the server clock**. The tolerance
+keeps doing its real job (a collector a few seconds fast is not an error) and loses the
+ability to reserve a position in the ordering. We cannot know the future, so a report
+claiming it is treated as having arrived now.
+
+### Rule 15's failure had been relocated, not fixed
+
+The entity timeline is a `UNION ALL` of `change_log` and `observed_transition` under **one**
+`LIMIT`. Observed rows are unboundedly noisier by construction, so 75 ordinary transitions —
+deliberately below `FlapThreshold`, so nothing was even compressed — pushed every declared
+row off an asset's timeline, including an edit made seconds earlier. Rule 15 is about exactly
+this failure on `/changes`; sharing a budget moved it onto the screen an incident review
+actually opens.
+
+Each arm now gets its own budget and the merge happens in Go. Both timestamps are RFC3339
+UTC TEXT with the id as tiebreak, so the order is total and identical on both engines.
+
+### "down · just now"
+
+`state_since` was rendered nowhere in the application. A reading showed its state pill
+immediately followed by an unlabelled last-report age, so an entity that went down twenty
+minutes ago read "down … just now" — pointing an incident review at whatever happened in the
+last minute. The onset now leads and is labelled, and the poll age says "polled". Rule 3
+forbids collapsing the three timestamps; the page must not let them *read* as one either.

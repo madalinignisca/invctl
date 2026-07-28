@@ -1,0 +1,316 @@
+{{/* Observed health, as a person sees it (docs/AUDIT.md rules 2, 8 and 14).
+
+     Three things are load-bearing here and none of them is decoration.
+
+     A state is never shown on its own. Every reading carries its REPORTER and
+     its AGE, because an operator has to be able to tell an asserted "ok" from
+     an established one, and a value with neither reads as configuration rather
+     than telemetry.
+
+     A stale reading renders as `unknown (stale since T)` and NEVER as its last
+     value. Silence is not health: an intruder's first act is killing the
+     collector, and under transition-only logging a dead collector and a healthy
+     estate are otherwise the same picture, forever. The staleness arithmetic is
+     done in Go -- these templates render `.Display`, which is already the
+     honest value, and `.State` is only ever shown underneath an override where
+     it is explicitly labelled as what the reporter said.
+
+     Two reporters that disagree stay two rows. Nothing here picks a winner. */}}
+
+{{/* One reporter's current reading. */}}
+{{define "health_reading"}}
+<div style="display:flex;gap:6px;align-items:baseline;flex-wrap:wrap">
+  <span class="{{healthClass .Display}}">{{.Display}}</span>
+  {{/* Rule 9. "Flapping" sits BESIDE the state and never replaces it: a box
+       that died twenty minutes ago must read as down, not as noise. The count
+       is what the compression has absorbed so far, so the badge says how much
+       of the recent history is not in the ledger row by row. */}}
+  {{if .Flapping}}
+    <span class="pill pill-degraded"
+          title="This reporter has seen more than 5 state changes in 5 minutes, so the individual oscillations are being compressed. The state shown is still the current one. Opened {{shortTime .FlapOpenedAt}}.">
+      flapping · {{.FlapTransitions}}
+    </span>
+  {{end}}
+  {{/* Onset first, and labelled. "down since when" is the first question
+       anyone asks at 03:00, and state_since is the only column that answers
+       it. Before this the row rendered the state pill immediately followed by
+       an unlabelled last-report age, so an entity that went down twenty
+       minutes ago read "down … just now" -- pointing an incident review at
+       whatever happened in the last minute, which is the opposite of the
+       truth. The two timestamps mean different things and the rule forbids
+       collapsing them, so the page must not let them read as one. */}}
+  {{if and (not .Stale) (ne (printf "%s" .Display) "up")}}
+    <span class="mono" style="font-size:11.5px;color:var(--muted)"
+          title="When this reporter first saw the current state. Never moved by a repeat report.">
+      since {{shortTime .StateSince}}
+    </span>
+  {{end}}
+  <span class="mono" style="font-size:11.5px;color:var(--muted)">{{.Reporter}}</span>
+  {{if .Stale}}
+    <span class="mono" style="font-size:11.5px;color:var(--faint)"
+          title="Nothing has arrived from this reporter for three of its declared intervals, so its last value is no longer believed.">
+      stale since {{shortTime .StaleSince}}
+    </span>
+  {{else}}
+    <span class="mono" style="font-size:11.5px;color:var(--faint)"
+          title="How long ago this reporter last checked in. Not how long the state has held.">
+      polled {{since .LastReportAt}}
+    </span>
+  {{end}}
+</div>
+{{end}}
+
+
+{{/* Who overrode this, why, and until when. Rendered wherever an overridden
+     entity appears -- rule 14 says every view, and the entity detail pages are
+     the ones an incident review actually opens. */}}
+{{define "override_banner"}}
+<div style="display:flex;gap:6px;align-items:baseline;flex-wrap:wrap">
+  <span class="{{healthClass .AssertedState}}">{{.AssertedState}}</span>
+  <span class="pill pill-info" title="An operator asserted this state. The reporters are still recording underneath it.">overridden</span>
+  <span class="mono" style="font-size:11.5px;color:var(--muted)">until {{shortTime .ExpiresAt}}</span>
+</div>
+<div class="mono" style="font-size:11.5px;color:var(--muted);margin-top:3px">
+  by {{template "actor_cell" .}}
+</div>
+<div style="font-size:12.5px;color:var(--muted);margin-top:3px">{{.Reason}}</div>
+{{end}}
+
+
+{{/* The compact cell for a table row. */}}
+{{define "health_cell"}}
+{{if .Overridden}}
+  {{template "override_banner" .Override}}
+  {{if .Observed}}
+  <div style="margin-top:6px;padding-top:6px;border-top:1px dashed var(--line-soft)">
+    <div class="mono" style="font-size:10.5px;letter-spacing:0.08em;text-transform:uppercase;color:var(--faint)">
+      reported underneath
+    </div>
+    {{range .Readings}}{{template "health_reading" .}}{{end}}
+  </div>
+  {{end}}
+{{else if .Observed}}
+  {{range .Readings}}{{template "health_reading" .}}{{end}}
+  {{if .Disagree}}
+    <span class="pill pill-degraded" title="Two reporters disagree. Usually one of them is watching the wrong thing; nothing here picks a winner.">reporters disagree</span>
+  {{end}}
+{{else}}
+  <span class="pill pill-muted" title="Nothing has ever reported on this. An empty result is not health.">unobserved</span>
+{{end}}
+{{end}}
+
+
+{{/* The full panel for an entity that has a page of its own. */}}
+{{define "health_panel"}}
+<div class="panel">
+  <div class="panel-head">
+    <h2>Observed health</h2>
+    <span class="panel-note">
+      What the estate reports about itself, with the reporter and the age beside it.
+      A reading older than three of its reporter's intervals shows as unknown, never as its last value.
+    </span>
+  </div>
+  <div class="panel-body">
+    {{template "health_cell" .}}
+  </div>
+</div>
+{{end}}
+
+
+{{/* Amend and clear, for one active override. Both are declared mutations:
+     POST, CSRF, RequireAdmin, and a change_log row in the same transaction. */}}
+{{define "override_card"}}
+<div class="callout callout-warn" id="override-{{.Override.ID}}">
+  <div style="font-size:12.5px;color:var(--muted);margin-bottom:8px">{{.Label}}</div>
+  {{template "override_banner" .Override}}
+  {{if .CanWrite}}
+  <div style="margin-top:12px;display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
+    {{/* Amend re-states all three fields rather than offering "extend by": an
+         amendment that only moved the clock would leave a reason written about
+         a situation that has since changed. */}}
+    <form method="post" action="/overrides/{{.Override.ID}}" style="flex:1;min-width:300px">
+      <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+      <div class="field-row">
+        <div class="field">
+          <label for="amend-state-{{.Override.ID}}">Asserted state</label>
+          <select id="amend-state-{{.Override.ID}}" name="asserted_state">
+            {{$current := printf "%s" .Override.AssertedState}}
+            {{range $.States}}<option value="{{.}}" {{if eq . $current}}selected{{end}}>{{.}}</option>{{end}}
+          </select>
+        </div>
+        <div class="field">
+          <label for="amend-minutes-{{.Override.ID}}">Lasts, from now</label>
+          <select id="amend-minutes-{{.Override.ID}}" name="minutes">
+            {{range $.Durations}}<option value="{{.Minutes}}">{{.Label}}</option>{{end}}
+          </select>
+        </div>
+        <div class="field" style="flex:2">
+          <label for="amend-reason-{{.Override.ID}}">Reason</label>
+          <input id="amend-reason-{{.Override.ID}}" type="text" name="reason"
+                 value="{{.Override.Reason}}" required>
+        </div>
+      </div>
+      <div style="margin-top:10px"><button class="btn" type="submit">Amend</button></div>
+    </form>
+    <form method="post" action="/overrides/{{.Override.ID}}/clear"
+          hx-post="/overrides/{{.Override.ID}}/clear"
+          hx-confirm="Clear this override? What the reporters have been saying becomes visible again. The record is kept.">
+      <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+      <button class="btn btn-danger" type="submit">Clear</button>
+    </form>
+  </div>
+  {{end}}
+</div>
+{{end}}
+
+
+{{/* The create form. Standalone, with a stable id, so a 422 re-renders just
+     this and the operator keeps what they typed. */}}
+{{define "override_form"}}
+<form id="override-form" class="panel" method="post" action="/overrides"
+      hx-post="/overrides" hx-target="#override-form" hx-swap="outerHTML">
+  <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+  <div class="panel-head">
+    <h2>Override a reading</h2>
+    <span class="panel-note">
+      For when you know a reading is wrong. It shadows the reading and never changes it —
+      the reporter keeps recording underneath, so you can see what actually happened once it lapses.
+    </span>
+  </div>
+  <div class="panel-body">
+    {{if .Targets}}
+    <div class="field-row">
+      <div class="field" style="flex:2">
+        <label for="override-target">Applies to</label>
+        <select id="override-target" name="target">
+          {{range .Targets}}
+          <option value="{{.Value}}" {{if eq .Value $.Form.Target}}selected{{end}} {{if .Overridden}}disabled{{end}}>
+            {{.Label}}{{if .Overridden}} — already overridden{{end}}
+          </option>
+          {{end}}
+        </select>
+        {{with index .Errors "target"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="override-state">Asserted state</label>
+        <select id="override-state" name="asserted_state">
+          {{range .States}}<option value="{{.}}" {{if eq . $.Form.AssertedState}}selected{{end}}>{{.}}</option>{{end}}
+        </select>
+        {{with index .Errors "asserted_state"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="override-minutes">Lasts</label>
+        <select id="override-minutes" name="minutes">
+          {{range .Durations}}<option value="{{.Minutes}}" {{if eq .Minutes $.Form.Minutes}}selected{{end}}>{{.Label}}</option>{{end}}
+        </select>
+        {{with index .Errors "minutes"}}<div class="field-error">{{.}}</div>{{end}}
+        <div class="field-hint">Capped at 24 hours. A permanent override is how a real outage stays invisible for six weeks.</div>
+      </div>
+    </div>
+    <div class="field">
+      <label for="override-reason">Reason</label>
+      <input id="override-reason" class="{{if index .Errors "reason"}}invalid{{end}}" type="text"
+             name="reason" value="{{.Form.Reason}}"
+             placeholder="probe is checking the wrong port — INC-4102" required>
+      {{with index .Errors "reason"}}<div class="field-error">{{.}}</div>{{end}}
+      <div class="field-hint">Mandatory. Whoever reads this during the next incident is not you.</div>
+    </div>
+    <div style="margin-top:12px"><button class="btn btn-primary" type="submit">Record override</button></div>
+    {{else}}
+    <div class="empty"><strong>Nothing here can be observed.</strong>An override shadows a reading, so there has to be something capable of reporting one.</div>
+    {{end}}
+  </div>
+</form>
+{{end}}
+
+
+{{/* Everything an operator needs to see and do about overrides on one page:
+     the active ones first, because rule 14 says every view of an overridden
+     entity shows it, and then the form. */}}
+{{define "overrides_panel"}}
+<div id="overrides">
+  {{range .Targets}}
+    {{if .Overridden}}
+      {{template "override_card" dict "Override" .Override "Label" .Label
+                                      "CanWrite" $.CanWrite "CSRF" $.CSRF
+                                      "States" $.States "Durations" $.Durations}}
+    {{end}}
+  {{end}}
+  {{if .CanWrite}}{{template "override_form" .}}{{end}}
+</div>
+{{end}}
+
+
+{{/* Rule 8's other half: a reporter that stops entirely is ONE alertable event,
+     not a thousand entities quietly going green. */}}
+{{define "reporter_panel"}}
+<div class="panel">
+  <div class="panel-head">
+    <h2>Reporters</h2>
+    <span class="panel-note">
+      One line per monitoring credential. A collector that stops is one thing to notice,
+      not a thousand entities drifting to unknown.
+    </span>
+  </div>
+  {{if .Reporters}}
+  <div class="scroll-x">
+    <table>
+      <thead><tr><th>Reporter</th><th>Watching</th><th>Last report</th><th>State</th></tr></thead>
+      <tbody>
+        {{range .Reporters}}
+        <tr>
+          <td class="mono">{{.Reporter}} <span class="pill pill-muted" title="a machine, not a person">agent</span></td>
+          <td class="num">{{.Entities}}</td>
+          <td class="mono" style="font-size:12px;color:var(--muted)">{{since .LastReportAt}}</td>
+          <td>
+            {{if .Silent}}
+              <span class="pill pill-down">silent</span>
+              <span class="mono" style="font-size:11.5px;color:var(--faint)">since {{shortTime .SilentSince}}</span>
+            {{else}}
+              <span class="pill pill-ok">reporting</span>
+            {{end}}
+          </td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{else}}
+  <div class="empty">
+    <strong>Nothing is reporting yet.</strong>
+    No collector has sent an observation. Every entity reads as unobserved, which is the honest answer.
+  </div>
+  {{end}}
+</div>
+{{end}}
+
+
+{{/* What is silenced right now, on the landing page, because somebody reading a
+     green estate needs to know how much of that green was asserted rather than
+     observed. */}}
+{{define "override_summary"}}
+{{if .Overrides}}
+<div class="panel">
+  <div class="panel-head">
+    <h2>{{pluralise (len .Overrides) "active override" "active overrides"}}</h2>
+    <span class="panel-note">Readings an operator is currently shadowing. Each one lapses on its own.</span>
+  </div>
+  <div class="scroll-x">
+    <table>
+      <thead><tr><th>Entity</th><th>Asserted</th><th>By</th><th>Until</th><th>Reason</th></tr></thead>
+      <tbody>
+        {{range .Overrides}}
+        <tr>
+          <td class="mono" style="font-size:12px">{{.EntityType}}</td>
+          <td><span class="{{healthClass .AssertedState}}">{{.AssertedState}}</span></td>
+          <td>{{template "actor_cell" .}}</td>
+          <td class="mono" style="font-size:12px;color:var(--muted)">{{shortTime .ExpiresAt}}</td>
+          <td style="color:var(--muted)">{{.Reason}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+</div>
+{{end}}
+{{end}}

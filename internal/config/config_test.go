@@ -29,6 +29,7 @@ func pristineEnv(t *testing.T) {
 		"INV_LDAP_BIND_DN", "INV_LDAP_SKIP_VERIFY", "INV_LDAP_STARTTLS",
 		"INV_LDAP_URL", "INV_LISTEN", "INV_LOG_LEVEL", "INV_SECURE_COOKIES",
 		"INV_SEED", "INV_SESSION_KEY", "INV_SESSION_TIMEOUT",
+		"INV_AGENT_TOKENS", "INV_AGENT_SCOPES", "INV_AGENT_VOCAB",
 	} {
 		t.Setenv(key, "")
 	}
@@ -174,4 +175,173 @@ func TestValidSessionKeyIsAccepted(t *testing.T) {
 	if SessionKeyGenerated() {
 		t.Error("SessionKeyGenerated reports true for a configured key")
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Monitoring credentials (docs/AUDIT.md rule 6)
+// ---------------------------------------------------------------------------
+
+// TestAgentCredentialsAreParsedAndScoped. INV_AGENT_TOKENS follows the shape
+// rule 6 names -- `id:token`, comma-separated -- and the scope and vocabulary
+// live beside it rather than inside it, so an operator editing a scope never
+// has to handle a secret to do it.
+func TestAgentCredentialsAreParsedAndScoped(t *testing.T) {
+	pristineEnv(t)
+	t.Setenv("INV_ADMIN_USERS", "gabriel")
+	t.Setenv("INV_AGENT_TOKENS", "prom-prod:"+longToken("a")+", Prom-Dev :"+longToken("b"))
+	t.Setenv("INV_AGENT_SCOPES", "prom-prod:prod|transit,prom-dev:DEV")
+	t.Setenv("INV_AGENT_VOCAB", "prom-prod:prometheus")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(cfg.AgentCredentials) != 2 {
+		t.Fatalf("%d credentials, want 2", len(cfg.AgentCredentials))
+	}
+
+	// Sorted by id, so a log line and a test see the same order however the
+	// variable was written.
+	dev, prod := cfg.AgentCredentials[0], cfg.AgentCredentials[1]
+	if dev.ID != "prom-dev" {
+		t.Errorf("first credential = %q, want prom-dev (ids are lower-cased and sorted)", dev.ID)
+	}
+	if got := strings.Join(dev.Environments, ","); got != "dev" {
+		t.Errorf("prom-dev scope = %q, want dev (environment codes are lower-cased)", got)
+	}
+	if dev.Vocabulary != "" {
+		t.Errorf("prom-dev vocabulary = %q, want the default", dev.Vocabulary)
+	}
+	if got := strings.Join(prod.Environments, ","); got != "prod,transit" {
+		t.Errorf("prom-prod scope = %q, want prod,transit", got)
+	}
+	if prod.Vocabulary != "prometheus" {
+		t.Errorf("prom-prod vocabulary = %q, want prometheus", prod.Vocabulary)
+	}
+	// The token is not lower-cased -- doing so would mangle it, and a mangled
+	// token fails as an authentication error with nothing to point at.
+	if prod.Token != longToken("a") {
+		t.Errorf("token was altered during parsing")
+	}
+}
+
+func TestNoAgentTokensMeansNoCredentials(t *testing.T) {
+	pristineEnv(t)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(cfg.AgentCredentials) != 0 {
+		t.Errorf("%d credentials configured by default, want none", len(cfg.AgentCredentials))
+	}
+}
+
+// TestAgentConfigurationRefusesToStart. Every one of these is a way for a
+// deployment to end up running an authorization model that differs from the one
+// somebody wrote down, and every one of them refuses to start rather than
+// surfacing later as a puzzling 401 or a silently wider scope.
+func TestAgentConfigurationRefusesToStart(t *testing.T) {
+	cases := []struct {
+		name    string
+		tokens  string
+		scopes  string
+		vocab   string
+		admins  string
+		wantErr string
+	}{
+		{
+			name:    "a credential with no scope",
+			tokens:  "prom:" + longToken("a"),
+			wantErr: "INV_AGENT_SCOPES",
+		},
+		{
+			name:    "an empty scope",
+			tokens:  "prom:" + longToken("a"),
+			scopes:  "prom: | ",
+			wantErr: "empty environment scope",
+		},
+		{
+			name:    "the same id twice",
+			tokens:  "prom:" + longToken("a") + ",prom:" + longToken("b"),
+			scopes:  "prom:prod",
+			wantErr: "twice",
+		},
+		{
+			// Two credentials sharing a token makes the reporter recorded
+			// against a reading whichever one the lookup happened to find --
+			// attribution decided by map order.
+			name:    "two credentials sharing a token",
+			tokens:  "prom-a:" + longToken("a") + ",prom-b:" + longToken("a"),
+			scopes:  "prom-a:prod,prom-b:dev",
+			wantErr: "share a token",
+		},
+		{
+			name:    "a short token",
+			tokens:  "prom:short",
+			scopes:  "prom:prod",
+			wantErr: "characters",
+		},
+		{
+			name:    "an entry with no colon",
+			tokens:  longToken("a"),
+			scopes:  "prom:prod",
+			wantErr: "no colon",
+		},
+		{
+			// Almost always a typo in an id, and its effect is that the real
+			// credential silently falls back to no scope or to the default
+			// vocabulary.
+			name:    "a scope naming a credential that does not exist",
+			tokens:  "prom:" + longToken("a"),
+			scopes:  "prom:prod,prometheus:dev",
+			wantErr: "not in INV_AGENT_TOKENS",
+		},
+		{
+			name:    "a vocabulary naming a credential that does not exist",
+			tokens:  "prom:" + longToken("a"),
+			scopes:  "prom:prod",
+			vocab:   "promm:prometheus",
+			wantErr: "not in INV_AGENT_TOKENS",
+		},
+		{
+			// Rule 6's opening sentence: a monitoring credential never appears
+			// in INV_ADMIN_USERS, because that list grants every write route.
+			name:    "a credential in the admin list",
+			tokens:  "prom:" + longToken("a"),
+			scopes:  "prom:prod",
+			admins:  "gabriel,prom",
+			wantErr: "INV_ADMIN_USERS",
+		},
+		{
+			name:    "a credential named after the seeded admin",
+			tokens:  "admin:" + longToken("a"),
+			scopes:  "admin:prod",
+			wantErr: "INV_ADMIN_USERNAME",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			pristineEnv(t)
+			t.Setenv("INV_ADMIN_USERS", tc.admins)
+			t.Setenv("INV_AGENT_TOKENS", tc.tokens)
+			t.Setenv("INV_AGENT_SCOPES", tc.scopes)
+			t.Setenv("INV_AGENT_VOCAB", tc.vocab)
+
+			_, err := Load()
+			if err == nil {
+				t.Fatal("Load succeeded; it should have refused to start")
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Errorf("error = %q, want it to mention %q", err, tc.wantErr)
+			}
+			if strings.Contains(err.Error(), longToken("a")) {
+				t.Errorf("the error message contains a token: %q", err)
+			}
+		})
+	}
+}
+
+// longToken builds a token that satisfies MinAgentTokenLength.
+func longToken(seed string) string {
+	return seed + strings.Repeat("x", MinAgentTokenLength)
 }

@@ -165,9 +165,11 @@ func (b *builder) services() {
 		if spec.shard != "" {
 			si.Shard = str(spec.shard)
 		}
-		si.ObservedState = str("running")
-		observed := domain.FormatTime(b.now)
-		si.ObservedAt = &observed
+		// No observed health is seeded. A fixture that invents a reading has to
+		// invent a reporter and a cadence to go with it (docs/AUDIT.md rules 5
+		// and 8), and provenance fabricated in the demo data is the one thing
+		// this milestone exists to prevent. The panels honestly show that
+		// nothing has reported yet.
 		if err := b.store.CreateInstance(b.ctx, Actor, si); err != nil {
 			b.fail(fmt.Errorf("seeding instance of %s on %s: %w", spec.service, spec.host, err))
 			return

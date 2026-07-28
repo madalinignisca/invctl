@@ -17,6 +17,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -47,6 +49,20 @@ func run() error {
 		migrateOnly = flag.Bool("migrate", false, "apply migrations and exit")
 		seedOnly    = flag.Bool("seed", false, "load the demo estate and exit")
 		devMode     = flag.Bool("dev", false, "reparse templates on every request")
+
+		// The retention prune (docs/AUDIT.md rule 10). Admin-invoked, here,
+		// and nowhere else: never a handler, never a side effect of a write
+		// path, never a timer inside the server. A deletion that can happen
+		// without somebody asking for it is one nobody remembers asking for.
+		pruneObserved = flag.Bool("prune-observed", false,
+			"delete observed transitions older than -prune-keep-days and exit")
+		pruneKeepDays = flag.Int("prune-keep-days", domain.MinInScopeRetentionDays,
+			"days of observed transitions to keep; anything in an in_scope environment "+
+				"keeps at least "+strconv.Itoa(domain.MinInScopeRetentionDays)+" regardless")
+		pruneAs = flag.String("prune-as", "",
+			"the operator account the prune is recorded against; required with -prune-observed")
+		pruneDryRun = flag.Bool("prune-dry-run", false,
+			"report what -prune-observed would remove, and remove nothing")
 	)
 	flag.Parse()
 
@@ -74,6 +90,10 @@ func run() error {
 	}
 
 	st := store.New(db)
+
+	if *pruneObserved {
+		return pruneObservedTransitions(ctx, st, cfg, *pruneKeepDays, *pruneAs, *pruneDryRun)
+	}
 
 	if *seedOnly || cfg.SeedOnStart {
 		if err := loadDemoData(ctx, st); err != nil {
@@ -116,16 +136,182 @@ func run() error {
 		Config:   cfg,
 	}
 
+	// One recorder, shared between the webhook and the flusher below. Two
+	// would each hold half of rule 4's buffer, and the half the flusher does
+	// not own would never be written down -- so every quiet entity would age
+	// into `unknown` while its collector reported normally.
+	recorder := store.NewObservedRecorder(st)
+
+	agents, err := buildAgentSurface(ctx, st, cfg, recorder, sessions.Cookie.Name)
+	if err != nil {
+		return err
+	}
+
 	server := &http.Server{
 		Addr:              cfg.Listen,
-		Handler:           web.Routes(app, staticFS, app.Authz),
+		Handler:           web.Routes(app, staticFS, app.Authz, agents),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      60 * time.Second,
 		IdleTimeout:       2 * time.Minute,
 	}
 
-	return serve(server, cfg)
+	// The observation flusher (docs/AUDIT.md rule 4). It must outlive the
+	// server's shutdown by one flush: a deployment that never runs it invents
+	// outages, because an entity whose state never changes keeps an ageing
+	// last_report_at and renders stale.
+	flushCtx, stopFlushing := context.WithCancel(context.Background())
+	ticker := time.NewTicker(store.FlushInterval)
+	defer ticker.Stop()
+	flusherDone := make(chan struct{})
+	go func() {
+		recorder.Run(flushCtx, ticker.C)
+		close(flusherDone)
+	}()
+
+	serveErr := serve(server, cfg)
+	stopFlushing()
+	<-flusherDone
+	return serveErr
+}
+
+// pruneObservedTransitions runs the retention prune (docs/AUDIT.md rule 10).
+//
+// Three things are deliberate about the shape of this.
+//
+// It resolves -prune-as to an app_user and passes that account's OPAQUE ID to
+// the store. change_log.actor never holds a username, here or anywhere else, so
+// the audit trail carries no personal data and scrubbing an account to answer
+// an erasure request leaves the entry intact and simply stops resolving a name
+// for it.
+//
+// It requires that account to have write access. "Admin-invoked" has to mean
+// something, and an entry naming somebody who could not have performed the act
+// is worse than no name: it is a wrong name that looks authoritative.
+//
+// It never runs on its own. There is no schedule here and no call to this from
+// the server, because rule 10 says the prune is invoked, and because the one
+// thing that must not happen quietly is history going away.
+func pruneObservedTransitions(ctx context.Context, st *store.SQLStore, cfg *config.Config,
+	keepDays int, username string, dryRun bool) error {
+	if strings.TrimSpace(username) == "" {
+		return fmt.Errorf("pruning observed transitions: -prune-as is required; " +
+			"the run records which operator asked for it")
+	}
+	if keepDays < 0 {
+		return fmt.Errorf("pruning observed transitions: -prune-keep-days must not be negative")
+	}
+
+	user, err := st.GetUserByUsername(ctx, username)
+	if err != nil {
+		return fmt.Errorf("pruning observed transitions: %w", err)
+	}
+	if !auth.NewAuthorizer(cfg.AdminUsers).CanWrite(user) {
+		return fmt.Errorf("pruning observed transitions: %s does not have write access, "+
+			"so the audit entry would name somebody who could not have done this", user.Username)
+	}
+
+	before := st.Now().AddDate(0, 0, -keepDays)
+	report, err := st.PruneObservedTransitions(ctx, domain.UserActor(user), store.PruneOptions{
+		Before: before,
+		DryRun: dryRun,
+	})
+	if err != nil {
+		return err
+	}
+
+	verb := "pruned observed transitions"
+	if dryRun {
+		verb = "dry run: would prune observed transitions"
+	}
+	slog.Info(verb,
+		"before", domain.FormatTime(report.Before),
+		"keep_days", keepDays,
+		"deleted", report.Deleted,
+		"protected_in_scope", report.Protected,
+		"run", report.RunID)
+
+	if report.FloorApplied() {
+		// Said out loud rather than left to the counts, and said whether or not
+		// anything was actually held back today. An operator who set 30 days and
+		// saw a number come back would otherwise conclude the estate now keeps
+		// 30 days of history, which for the in_scope half is untrue and will
+		// stay untrue on every future run.
+		slog.Warn("the in_scope retention floor is in force: anything resolving to an in_scope "+
+			"environment keeps at least the minimum regardless of -prune-keep-days",
+			"floor", domain.FormatTime(report.InScopeFloor),
+			"minimum_days", domain.MinInScopeRetentionDays,
+			"kept_by_the_floor", report.Protected)
+	}
+	return nil
+}
+
+// buildAgentSurface assembles the machine-facing route, or nothing at all.
+//
+// docs/AUDIT.md rule 6. Every failure here refuses to start. The alternative --
+// logging a warning and carrying on with a credential dropped or a collision
+// unresolved -- means the deployment is running with an authorization model
+// that differs from the one somebody wrote down, which is the state this whole
+// rule exists to prevent.
+func buildAgentSurface(ctx context.Context, st *store.SQLStore, cfg *config.Config,
+	recorder store.ObservedStore, sessionCookie string) (*web.AgentSurface, error) {
+	registry, err := auth.NewAgentRegistry(cfg.AgentCredentials)
+	if err != nil {
+		return nil, err
+	}
+	if !registry.Enabled() {
+		slog.Info("no monitoring credentials configured; the observation route is not mounted")
+		return nil, nil
+	}
+
+	// Rule 5: "Startup fails if an agent name collides with an app_user
+	// username." Checked here rather than in config because it needs the
+	// database, and checked before the listener opens rather than at first use.
+	clashes, err := st.UsernamesMatching(ctx, registry.IDs())
+	if err != nil {
+		return nil, err
+	}
+	if len(clashes) > 0 {
+		return nil, fmt.Errorf("configuring monitoring credentials: %s also names an operator account; "+
+			"a credential and a person must never share a name in the audit trail",
+			strings.Join(clashes, ", "))
+	}
+
+	// An environment code with no environment behind it is almost always a
+	// typo, and its effect is a credential that authenticates and is then
+	// refused on everything -- which reads as a broken collector. Environments
+	// are created at runtime, so this is a warning rather than a refusal.
+	warnUnknownScopes(ctx, st, cfg)
+
+	for _, cred := range cfg.AgentCredentials {
+		slog.Info("monitoring credential configured", "credential", cred)
+	}
+	return &web.AgentSurface{
+		Registry:      registry,
+		Handler:       handlers.NewObservationAPI(recorder),
+		SessionCookie: sessionCookie,
+	}, nil
+}
+
+// warnUnknownScopes reports scope entries that name no environment.
+func warnUnknownScopes(ctx context.Context, st *store.SQLStore, cfg *config.Config) {
+	envs, err := st.ListEnvironments(ctx)
+	if err != nil {
+		slog.Warn("could not check monitoring credential scopes against the environments", "error", err)
+		return
+	}
+	known := make(map[string]bool, len(envs))
+	for _, e := range envs {
+		known[e.Code] = true
+	}
+	for _, cred := range cfg.AgentCredentials {
+		for _, code := range cred.Environments {
+			if !known[code] {
+				slog.Warn("monitoring credential is scoped to an environment that does not exist",
+					"credential", cred.ID, "environment", code)
+			}
+		}
+	}
 }
 
 // serve runs the HTTP server and shuts it down cleanly on a signal, so an

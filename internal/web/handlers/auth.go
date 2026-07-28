@@ -42,9 +42,11 @@ func (a *App) Login(w http.ResponseWriter, r *http.Request) {
 			// An operational failure (directory unreachable, database down)
 			// is logged in full but still shown to the user as a generic
 			// failure -- the detail would only help an attacker.
-			slog.Error("authentication failed", "error", err, "username", username)
+			auth.LogSecurityEvent(r.Context(), slog.LevelError, auth.EventSignInError,
+				"username", username, "remote", r.RemoteAddr, "error", err)
 		} else {
-			slog.Warn("failed sign-in", "username", username, "remote", r.RemoteAddr)
+			auth.LogSecurityEvent(r.Context(), slog.LevelWarn, auth.EventSignInFailed,
+				"username", username, "remote", r.RemoteAddr)
 		}
 		a.Render.Page(w, http.StatusUnauthorized, "login", loginPage{
 			Base:     a.base(r, "Sign in", ""),
@@ -63,8 +65,9 @@ func (a *App) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.Sessions.Put(r.Context(), middleware.SessionUserIDKey, user.Username)
-	slog.Info("signed in", "username", user.Username, "source", user.Source,
-		"can_write", a.Authz.CanWrite(user))
+	auth.LogSecurityEvent(r.Context(), slog.LevelInfo, auth.EventSignInSucceeded,
+		"username", user.Username, "source", user.Source,
+		"can_write", a.Authz.CanWrite(user), "remote", r.RemoteAddr)
 
 	if next == "" {
 		next = "/"

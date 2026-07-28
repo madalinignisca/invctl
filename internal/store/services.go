@@ -274,6 +274,12 @@ func (s *SQLStore) CreateInstance(ctx context.Context, actor domain.Actor, si *d
 	if err := si.Validate(); err != nil {
 		return err
 	}
+	// Rule 7. A fabricated workload inside an in_scope environment must not be
+	// able to render to an operator as hand-asserted fact; the 00008 CHECK
+	// constrains the value, this constrains the writer.
+	if err := domain.CheckProvenanceWrite(actor, si.Source); err != nil {
+		return err
+	}
 	// A workload on a patch panel is a data-entry mistake, and the impact
 	// engine's placement phase would silently inherit it.
 	host, err := s.GetAsset(ctx, si.HostAssetID)
@@ -289,12 +295,10 @@ func (s *SQLStore) CreateInstance(ctx context.Context, actor domain.Actor, si *d
 	return s.write(ctx, actor, func(t *tx) error {
 		_, err := t.exec(ctx, `
 			INSERT INTO service_instance (id, service_id, host_asset_id, runtime_type, role, shard,
-			                              ordinal, desired_state, observed_state, observed_at,
-			                              source, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			                              ordinal, desired_state, source, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			si.ID, si.ServiceID, si.HostAssetID, si.RuntimeType, si.Role, si.Shard,
-			si.Ordinal, si.DesiredState, si.ObservedState, si.ObservedAt,
-			si.Source, si.CreatedAt, si.UpdatedAt)
+			si.Ordinal, si.DesiredState, si.Source, si.CreatedAt, si.UpdatedAt)
 		if err != nil {
 			return translateWriteErr(err, "creating service instance")
 		}
@@ -303,8 +307,18 @@ func (s *SQLStore) CreateInstance(ctx context.Context, actor domain.Actor, si *d
 }
 
 // UpdateInstance persists field changes to a placement.
+//
+// It writes declared columns only. Until migration 00008 this statement also
+// carried observed_state and observed_at from the round-tripped struct, so a
+// stale read silently reverted a concurrent operator edit and logUpdate
+// attributed the revert to the human. The columns are gone rather than merely
+// omitted here: a boundary that can only be described as "must not write X" is
+// not implemented (docs/AUDIT.md rule 1).
 func (s *SQLStore) UpdateInstance(ctx context.Context, actor domain.Actor, si *domain.ServiceInstance) error {
 	if err := si.Validate(); err != nil {
+		return err
+	}
+	if err := domain.CheckProvenanceWrite(actor, si.Source); err != nil {
 		return err
 	}
 	before, err := s.GetInstance(ctx, si.ID)
@@ -318,10 +332,10 @@ func (s *SQLStore) UpdateInstance(ctx context.Context, actor domain.Actor, si *d
 		_, err := t.exec(ctx, `
 			UPDATE service_instance
 			SET host_asset_id = ?, runtime_type = ?, role = ?, shard = ?, ordinal = ?,
-			    desired_state = ?, observed_state = ?, observed_at = ?, source = ?, updated_at = ?
+			    desired_state = ?, source = ?, updated_at = ?
 			WHERE id = ?`,
 			si.HostAssetID, si.RuntimeType, si.Role, si.Shard, si.Ordinal,
-			si.DesiredState, si.ObservedState, si.ObservedAt, si.Source, si.UpdatedAt, si.ID)
+			si.DesiredState, si.Source, si.UpdatedAt, si.ID)
 		if err != nil {
 			return translateWriteErr(err, "updating service instance")
 		}

@@ -236,8 +236,22 @@ const (
 // ChangeActions is the Go side of the change_log.action CHECK constraint.
 var ChangeActions = []string{ActionCreate, ActionUpdate, ActionDelete, ActionRetire}
 
+// Actor kinds. "was this a person or a machine" is the thing a reader needs at
+// a glance, and it is not personal data, so every view that renders `actor`
+// renders this beside it.
+const (
+	// ActorKindUser is a signed-in operator.
+	ActorKindUser = "user"
+	// ActorKindAgent is a monitoring or discovery credential -- a machine, and
+	// never an app_user.
+	ActorKindAgent = "agent"
+	// ActorKindSystem is this process itself: the seeder, a migration, the LDAP
+	// upsert. Not an external writer.
+	ActorKindSystem = "system"
+)
+
 // ActorKinds is the Go side of the change_log.actor_kind CHECK constraint.
-var ActorKinds = []string{"user", "agent", "system"}
+var ActorKinds = []string{ActorKindUser, ActorKindAgent, ActorKindSystem}
 
 // ChangeLog is the audit trail. Every mutation writes one of these in the same
 // transaction as the mutation itself — a handler that mutates without logging
@@ -292,13 +306,157 @@ type Actor struct {
 
 // SystemActor is used by the seeder and migrations. "system" is not a
 // person's name, so it needs no opaque id of its own.
-var SystemActor = Actor{ID: "system", Name: "system", Kind: "system"}
+var SystemActor = Actor{ID: "system", Name: "system", Kind: ActorKindSystem}
 
 // UserActor builds an actor for a logged-in operator. Only the account's
 // opaque id reaches the audit trail; the username never does.
 func UserActor(user *AppUser) Actor {
-	return Actor{ID: user.ID, Name: user.Username, Kind: "user"}
+	return Actor{ID: user.ID, Name: user.Username, Kind: ActorKindUser}
 }
+
+// AgentActorPrefix namespaces a monitoring or discovery credential inside
+// change_log.actor.
+//
+// The column is free TEXT shared with app_user ids, so without a namespace a
+// credential called after a person's account id would write entries
+// indistinguishable from that person's. The prefix makes the two spaces
+// disjoint by construction rather than by hoping the ids never collide;
+// startup additionally refuses to run if a credential id matches an
+// app_user.username (docs/AUDIT.md rule 5).
+const AgentActorPrefix = "monitor:"
+
+// AgentActor builds the actor for a monitoring credential.
+//
+// Call this; never write Actor{Kind: "agent", ...} by hand. A struct literal
+// puts the namespace and the kind spelling in the caller's hands, and a typo in
+// either surfaces as a CHECK constraint failure inside a webhook at 03:00 --
+// the worst possible time and place to learn it. Here it is an error returned
+// where the credential is loaded, at startup.
+//
+// credentialID is the id half of an INV_AGENT_TOKENS pair. Name carries the
+// namespaced id too: an agent has no person's name to leak.
+func AgentActor(credentialID string) (Actor, error) {
+	ve := &ValidationError{}
+	id := checkRequired(ve, "credential_id", credentialID)
+	switch {
+	case strings.HasPrefix(id, AgentActorPrefix):
+		ve.Add("credential_id", "is already namespaced; pass the bare credential id, not %q", id)
+	case strings.ContainsAny(id, ": \t\n"):
+		ve.Add("credential_id", "must not contain a colon or whitespace")
+	case id != strings.ToLower(id):
+		ve.Add("credential_id", "must be lower case, like every other identifier read from the environment")
+	}
+	if err := ve.OrNil(); err != nil {
+		return Actor{}, err
+	}
+	namespaced := AgentActorPrefix + id
+	return Actor{ID: namespaced, Name: namespaced, Kind: ActorKindAgent}, nil
+}
+
+// IsAgent reports whether this actor is a machine credential.
+func (a Actor) IsAgent() bool { return a.Kind == ActorKindAgent }
+
+// CredentialID undoes AgentActor's namespacing, for a reporter column or a log
+// line. ok is false for any actor that is not an agent.
+func (a Actor) CredentialID() (string, bool) {
+	if !a.IsAgent() || !strings.HasPrefix(a.ID, AgentActorPrefix) {
+		return "", false
+	}
+	return strings.TrimPrefix(a.ID, AgentActorPrefix), true
+}
+
+// Validate rejects an actor that could not have come from one of the
+// constructors above.
+//
+// This is what makes the struct-literal path *clearly wrong* rather than merely
+// discouraged: a hand-built agent actor fails here, in Go, with a message
+// naming the constructor -- instead of reaching the database and failing a
+// CHECK with no indication of what to do about it.
+func (a Actor) Validate() error {
+	ve := &ValidationError{}
+	checkRequired(ve, "actor", a.ID)
+	checkEnum(ve, "actor_kind", a.Kind, ActorKinds)
+	switch a.Kind {
+	case ActorKindAgent:
+		if !strings.HasPrefix(a.ID, AgentActorPrefix) {
+			ve.Add("actor", "an agent actor must be built with domain.AgentActor: %q is missing the %q namespace",
+				a.ID, AgentActorPrefix)
+		}
+	case ActorKindUser, ActorKindSystem:
+		if strings.HasPrefix(a.ID, AgentActorPrefix) {
+			ve.Add("actor", "a %s actor must not carry the %q namespace", a.Kind, AgentActorPrefix)
+		}
+	}
+	return ve.OrNil()
+}
+
+// CheckProvenanceWrite enforces rule 7 for a fact arriving from outside this
+// process -- a webhook, a discovery reconciler, a form post.
+//
+// No machine may assert that a fact was hand-declared. That laundering is how a
+// fabricated workload inside an in_scope environment renders to an operator as
+// hand-asserted fact and never reaches the conflict queue; a machine credential
+// may set only discovered-subset values.
+//
+// It denies AGENT actors specifically rather than everything that is not a
+// user, which is a deliberate reading of rule 7 against rule 10. The seeder,
+// the LDAP upsert and migrations write declared state as SystemActor by design
+// -- rule 10 names all three -- and they are this process, not an external
+// writer holding a narrow token. Denying them would break the fixture without
+// closing anything: laundering is a threat because a credential arrives from
+// outside and asserts more authority than it was issued, and SystemActor is not
+// reachable from outside at all. An agent is the only principal that both
+// authenticates over the network and could benefit from the lie.
+//
+// This is enforced at the store entry points, not left to callers, because a
+// guard every caller must remember to invoke is the shape rule 1 rejects.
+func CheckProvenanceWrite(actor Actor, source string) error {
+	if source != SourceDeclared || actor.Kind != ActorKindAgent {
+		return nil
+	}
+	ve := &ValidationError{}
+	ve.Add("source", "only a signed-in operator may assert source = %q; a %s actor may set only a discovered_* value",
+		SourceDeclared, actor.Kind)
+	return ve
+}
+
+// CheckAttestationWrite enforces the classification table's ruling on
+// dependency.verified_by / .verified_at: they are "a *person's* attestation
+// that an edge is legitimate. A machine credential may never write these --
+// that is a rubber stamp on an undocumented chd edge and the firewall rule
+// justified by it."
+//
+// Separate from CheckProvenanceWrite because it is a different claim. Rule 7 is
+// about where a fact came from; this is about somebody putting their name to
+// it. A machine may legitimately report a discovered edge and may never sign it
+// off, so the two checks deny different sets and neither implies the other.
+func CheckAttestationWrite(actor Actor) error {
+	if actor.Kind == ActorKindUser {
+		return nil
+	}
+	ve := &ValidationError{}
+	ve.Add("verified_by", "only a signed-in operator may verify an edge; a %s actor may not attest to one", actor.Kind)
+	return ve
+}
+
+// ConfidenceFor decides the confidence stored for a write.
+//
+// Rule 7: "confidence is likewise set by the store from the credential, never
+// from the payload: self-attested confidence is not a control." A machine that
+// grades its own certainty can claim 1.0 for a guess, and every downstream
+// report that filters on confidence then treats the guess as fact. An
+// operator's own figure is their judgement and is kept.
+func ConfidenceFor(actor Actor, requested *float64) *float64 {
+	if actor.Kind != ActorKindAgent {
+		return requested
+	}
+	c := AgentConfidence
+	return &c
+}
+
+// AgentConfidence is what a machine-reported fact is worth until a person looks
+// at it. Not 1.0, and not writable by the reporter.
+const AgentConfidence = 0.5
 
 // AppUser is an operator account. Local users carry an argon2id hash; LDAP
 // users carry none and are upserted on successful bind.

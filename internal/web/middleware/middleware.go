@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"runtime/debug"
+	"strings"
 	"time"
 
 	"github.com/alexedwards/scs/v2"
@@ -191,13 +192,41 @@ func RequireAdmin(authz *auth.Authorizer) func(http.Handler) http.Handler {
 				return
 			}
 			if !authz.CanWrite(user) {
-				slog.Warn("write refused", "user", user.Username, "path", r.URL.Path)
+				auth.LogSecurityEvent(r.Context(), slog.LevelWarn, auth.EventWriteDenied,
+					"user", user.Username, "path", r.URL.Path, "method", r.Method)
 				http.Error(w, "You have read-only access.", http.StatusForbidden)
 				return
 			}
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// ExactPath is a single URL path exempted from CSRF, and the type is the point.
+//
+// docs/AUDIT.md rule 6 requires the observed-state webhook's exemption to be
+// registered "for that exact path -- never a prefix or glob, or the planned
+// /api/inventory inherits it for free". nosurf offers ExemptPath, ExemptPaths,
+// ExemptGlob, ExemptRegexp and ExemptFunc; four of those five would grant that
+// inheritance, and the one that would not is the one CSRF calls. Requiring this
+// named type at the call site means widening the exemption is not a matter of
+// passing a different string -- it takes editing this file, where the rule is
+// written down.
+//
+// A value carrying a glob metacharacter is refused rather than exempted, so the
+// failure direction is "CSRF stayed on" rather than "CSRF came off more paths
+// than intended".
+type ExactPath string
+
+// valid reports whether p is a single literal path.
+func (p ExactPath) valid() bool {
+	s := string(p)
+	if s == "" || !strings.HasPrefix(s, "/") {
+		return false
+	}
+	// path.Match's metacharacters, plus the regexp ones that would matter if
+	// somebody swapped the call below.
+	return !strings.ContainsAny(s, "*?[]\\^$()|+{}")
 }
 
 // CSRF wraps the mux with nosurf.
@@ -211,9 +240,26 @@ func RequireAdmin(authz *auth.Authorizer) func(http.Handler) http.Handler {
 // demo is served over plain HTTP: it would compute https://host, compare it
 // against the browser's http://host Origin, and reject every form submission.
 // So the scheme is told the truth instead.
-func CSRF(secure bool) func(http.Handler) http.Handler {
+//
+// exempt lists the paths that carry their own authentication and cannot carry a
+// token -- in practice exactly one, the observed-state webhook, which a
+// monitoring system reaches with a bearer token and no browser. Exempting it is
+// safe only because RequireAgent refuses any request on it that carries a
+// session; a CSRF-exempt route that accepted a session would be a hole.
+func CSRF(secure bool, exempt ...ExactPath) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		handler := nosurf.New(next)
+		for _, p := range exempt {
+			if !p.valid() {
+				// Fail closed and say so. Silently exempting a pattern that
+				// nosurf would match loosely is the failure this guards.
+				slog.Error("refusing to exempt a path from CSRF: not a single literal path", "path", string(p))
+				continue
+			}
+			// ExemptPath and nothing else. Never ExemptGlob, ExemptRegexp,
+			// ExemptFunc or the variadic ExemptPaths -- see ExactPath above.
+			handler.ExemptPath(string(p))
+		}
 		handler.SetIsTLSFunc(func(r *http.Request) bool {
 			if r.TLS != nil {
 				return true
@@ -232,7 +278,8 @@ func CSRF(secure bool) func(http.Handler) http.Handler {
 			Secure:   secure,
 		})
 		handler.SetFailureHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			slog.Warn("csrf rejected", "path", r.URL.Path, "reason", nosurf.Reason(r))
+			auth.LogSecurityEvent(r.Context(), slog.LevelWarn, auth.EventCSRFRejected,
+				"path", r.URL.Path, "method", r.Method, "reason", nosurf.Reason(r))
 			http.Error(w, "Your session expired. Reload the page and try again.", http.StatusBadRequest)
 		}))
 		return handler

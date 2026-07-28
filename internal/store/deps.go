@@ -302,6 +302,11 @@ func (s *SQLStore) CreateDependency(ctx context.Context, actor domain.Actor, d *
 	if err := d.Validate(); err != nil {
 		return err
 	}
+	// Rule 7, enforced at the entry point rather than by every caller.
+	if err := domain.CheckProvenanceWrite(actor, d.Source); err != nil {
+		return err
+	}
+	d.Confidence = domain.ConfidenceFor(actor, d.Confidence)
 	return s.write(ctx, actor, func(t *tx) error {
 		_, err := t.exec(ctx, `
 			INSERT INTO dependency (id, consumer_service_id, consumer_instance_id,
@@ -330,6 +335,14 @@ func (s *SQLStore) UpdateDependency(ctx context.Context, actor domain.Actor, d *
 	if err := d.Validate(); err != nil {
 		return err
 	}
+	// Rule 7 covers the flip as well as the create: "Flipping an edge between
+	// declared and discovered_* is an operator act with a change_log row."
+	// Laundering an existing discovered edge is the cheaper attack of the two,
+	// because the edge already exists and looks established.
+	if err := domain.CheckProvenanceWrite(actor, d.Source); err != nil {
+		return err
+	}
+	d.Confidence = domain.ConfidenceFor(actor, d.Confidence)
 	before, err := s.GetDependency(ctx, d.ID)
 	if err != nil {
 		return err
@@ -397,6 +410,12 @@ func (s *SQLStore) RetireDependency(ctx context.Context, actor domain.Actor, id 
 // data is authoritative, but a verification date is what distinguishes
 // "someone wrote this down once" from "this is still true".
 func (s *SQLStore) VerifyDependency(ctx context.Context, actor domain.Actor, id string) error {
+	// verified_by/verified_at are a person putting their name to an edge. A
+	// machine signing one off is a rubber stamp on an undocumented chd edge and
+	// on the firewall rule justified by it.
+	if err := domain.CheckAttestationWrite(actor); err != nil {
+		return err
+	}
 	before, err := s.GetDependency(ctx, id)
 	if err != nil {
 		return err
@@ -496,7 +515,20 @@ const changeLogSelect = `
 	FROM change_log cl
 	LEFT JOIN app_user u ON u.id = cl.actor`
 
-// ListChangesForEntity returns the audit history of one row, newest first.
+// ListChangesForEntity returns the declared audit history of one row, newest
+// first.
+//
+// No page calls this any more, and that is deliberate. It answers "what changed
+// about this one row", which is the easy half of the question an incident asks:
+// it omits the observed transitions for the same row, and it omits the one-hop
+// declared neighbours -- the host that was retired, the port that was unpatched
+// -- which is usually where the cause is. The entity detail pages call
+// TimelineForEntityAndNeighbours instead (docs/AUDIT.md rule 15).
+//
+// It stays because it is the sharpest assertion a test can make about the audit
+// trail: exactly these entries, for exactly this row, with nothing folded in.
+// Most of internal/store's "every mutation writes a change_log row" coverage is
+// built on it, and a broader read would make those tests weaker.
 func (s *SQLStore) ListChangesForEntity(ctx context.Context, entityType, entityID string, limit int) ([]domain.ChangeLog, error) {
 	if limit <= 0 {
 		limit = 50

@@ -81,6 +81,24 @@ document.addEventListener('alpine:init', () => {
   }));
 });
 
+// A 422 carries a re-rendered form and must be swapped in.
+//
+// HTMX 2 does not swap a 4xx by default, which quietly defeats the convention
+// this codebase uses everywhere: a validation failure returns 422 with the form
+// partial re-rendered and error state on the offending field (CLAUDE.md, "HTTP
+// and HTMX conventions"). Without this the server does the right thing and the
+// operator sees nothing happen at all -- the worst of both, because the form
+// still holds what they typed and gives no hint why it was refused.
+//
+// Deliberately only 422. A 400, 403 or 500 is not a form to re-render, and
+// swapping one of those into a panel would put an error page inside a table.
+document.addEventListener('htmx:beforeSwap', (event) => {
+  if (event.detail.xhr && event.detail.xhr.status === 422) {
+    event.detail.shouldSwap = true;
+    event.detail.isError = false;
+  }
+});
+
 // Flash messages dismiss themselves. They are confirmations of something the
 // operator just did, not information they need to act on.
 document.addEventListener('DOMContentLoaded', () => {

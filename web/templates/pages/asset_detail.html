@@ -71,6 +71,8 @@
   </div>
 </div>
 
+{{template "health_panel" .Health}}
+
 <div class="panel">
   <div class="panel-head">
     <h2>Workloads</h2>
@@ -79,6 +81,12 @@
   {{if .Instances}}
   <div class="scroll-x">
     <table>
+      {{/* Desired and Observed are two different kinds of fact and are two
+           columns. "Observed stopped, therefore desired stopped" is the
+           intent-collapse that makes drift undetectable (docs/AUDIT.md rule 2),
+           and a health cell with no reporter and no age reads as configuration
+           rather than telemetry -- which is why the observed cell always carries
+           both. */}}
       <thead><tr><th>Service</th><th>Runtime</th><th>Role</th><th>Desired</th><th>Observed</th></tr></thead>
       <tbody>
         {{range .Instances}}
@@ -88,7 +96,7 @@
           <td><span class="pill pill-muted">{{.RuntimeType}}</span></td>
           <td class="mono">{{if .Role}}{{deref .Role}}{{else}}—{{end}}</td>
           <td class="mono" style="font-size:12px">{{.DesiredState}}</td>
-          <td class="mono" style="font-size:12px;color:var(--muted)">{{if .ObservedState}}{{deref .ObservedState}}{{else}}—{{end}}</td>
+          <td>{{template "health_cell" (index $.InstanceHealth .ID)}}</td>
         </tr>
         {{end}}
       </tbody>
@@ -98,6 +106,8 @@
   <div class="empty"><strong>Nothing runs here.</strong></div>
   {{end}}
 </div>
+
+{{template "overrides_panel" .OverrideForm}}
 
 <div class="panel">
   <div class="panel-head">
@@ -156,26 +166,5 @@
   {{end}}
 </div>
 
-<div class="panel">
-  <div class="panel-head"><h2>History</h2></div>
-  {{if .Changes}}
-  <div class="scroll-x">
-    <table>
-      <thead><tr><th>When</th><th>Action</th><th>By</th><th>Change</th></tr></thead>
-      <tbody>
-        {{range .Changes}}
-        <tr>
-          <td class="mono" style="font-size:12px;color:var(--muted)">{{shortTime .At}}</td>
-          <td><span class="pill pill-muted">{{.Action}}</span></td>
-          <td>{{template "actor_cell" .}}</td>
-          <td class="mono" style="font-size:11.5px;color:var(--muted);max-width:520px;overflow-wrap:anywhere">{{.Diff}}</td>
-        </tr>
-        {{end}}
-      </tbody>
-    </table>
-  </div>
-  {{else}}
-  <div class="empty"><strong>No recorded changes.</strong></div>
-  {{end}}
-</div>
+{{template "timeline_panel" .Timeline}}
 {{end}}

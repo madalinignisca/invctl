@@ -19,6 +19,36 @@ func (s *SQLStore) GetUserByUsername(ctx context.Context, username string) (*dom
 	return &u, nil
 }
 
+// UsernamesMatching returns the subset of names that exist as accounts.
+//
+// It answers docs/AUDIT.md rule 5's startup check: "Startup fails if an agent
+// name collides with an app_user.username." The collision matters because
+// change_log.actor is free TEXT shared between operator ids and namespaced
+// credential ids -- the monitor: prefix already keeps the two spaces disjoint,
+// but a credential and a person sharing a name makes every log line, every
+// security event and every conversation about them ambiguous, and ambiguity in
+// an audit trail is the thing the trail exists to remove.
+//
+// A read, not a write, and deliberately not in observed.go: this runs once at
+// startup, from cmd/invctl, and no request path can reach it.
+func (s *SQLStore) UsernamesMatching(ctx context.Context, names []string) ([]string, error) {
+	if len(names) == 0 {
+		return nil, nil
+	}
+	lowered := make([]string, 0, len(names))
+	for _, n := range names {
+		lowered = append(lowered, lower(n))
+	}
+	var found []string
+	err := s.read(ctx, &found,
+		`SELECT username FROM app_user WHERE username IN (`+placeholders(len(lowered))+`) ORDER BY username`,
+		anySlice(lowered)...)
+	if err != nil {
+		return nil, fmt.Errorf("checking usernames: %w", err)
+	}
+	return found, nil
+}
+
 // CountUsers reports how many accounts exist, used to decide whether the
 // seeded admin needs creating on first run.
 func (s *SQLStore) CountUsers(ctx context.Context) (int, error) {

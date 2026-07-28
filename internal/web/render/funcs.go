@@ -25,6 +25,7 @@ func funcs() template.FuncMap {
 		"shortTime":      shortTime,
 		"statusClass":    statusClass,
 		"statusLabel":    statusLabel,
+		"healthClass":    healthClass,
 		"lifecycleClass": lifecycleClass,
 		"tierClass":      tierClass,
 		"natureClass":    natureClass,
@@ -137,6 +138,26 @@ func statusLabel(status domain.Status) string {
 		return "Degraded"
 	default:
 		return "OK"
+	}
+}
+
+// healthClass colours an observed state.
+//
+// `unknown` is deliberately muted rather than alarming. It is what a stale
+// reading renders as (docs/AUDIT.md rule 8), and "nobody is watching this any
+// more" is a different problem from "this is down" -- it calls for looking at
+// the collector, not at the box. Colouring them alike would send an operator to
+// the wrong place at the worst time.
+func healthClass(state domain.HealthState) string {
+	switch state {
+	case domain.HealthUp:
+		return "pill pill-ok"
+	case domain.HealthDegraded:
+		return "pill pill-degraded"
+	case domain.HealthDown:
+		return "pill pill-down"
+	default:
+		return "pill pill-muted"
 	}
 }
 

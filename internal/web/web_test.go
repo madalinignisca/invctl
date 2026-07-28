@@ -45,7 +45,53 @@ type harness struct {
 	refs   *seed.Refs
 }
 
+// Monitoring credentials the harness configures (docs/AUDIT.md rule 6). They
+// are here rather than in the agent tests because every test in this package
+// runs against a router that has the machine-facing route mounted -- otherwise
+// "an agent token reaches nothing else" would be proved against a server where
+// agents reach nothing at all.
+//
+// Tokens are long enough to satisfy config.MinAgentTokenLength; they are test
+// fixtures and nothing else in this repository accepts them.
+const (
+	agentProdID    = "mon-prod"
+	agentProdToken = "prod-token-000000000000000000000000"
+	agentDevID     = "mon-dev"
+	agentDevToken  = "dev-token-1111111111111111111111111"
+	// A reporter that speaks Alertmanager rather than the canonical four, so
+	// the per-reporter mapping in rule 13 is exercised by a real vocabulary
+	// rather than by the identity one.
+	agentPromID    = "mon-prom"
+	agentPromToken = "prom-token-22222222222222222222222"
+)
+
+// testAgentCredentials is the fixture deployment's rule 6 configuration: prod
+// and transit for one collector, the out-of-scope development zone for another.
+func testAgentCredentials() []config.AgentCredential {
+	return []config.AgentCredential{
+		{ID: agentProdID, Token: agentProdToken, Environments: []string{"prod", "transit"}},
+		{ID: agentDevID, Token: agentDevToken, Environments: []string{"dev"}},
+		{ID: agentPromID, Token: agentPromToken, Environments: []string{"prod"}, Vocabulary: "prometheus"},
+	}
+}
+
+// newHarness builds the fixture deployment, with the machine-facing route
+// mounted. Every test in this package runs against it, so "an agent token
+// reaches nothing else" is proved against a server where the route exists.
 func newHarness(t *testing.T) *harness {
+	t.Helper()
+	return newHarnessWith(t, testAgentCredentials())
+}
+
+// newHarnessWithoutAgents builds the same deployment with no monitoring
+// credentials configured, which mounts no machine-facing route and registers no
+// CSRF exemption.
+func newHarnessWithoutAgents(t *testing.T) *harness {
+	t.Helper()
+	return newHarnessWith(t, nil)
+}
+
+func newHarnessWith(t *testing.T, creds []config.AgentCredential) *harness {
 	t.Helper()
 
 	dsn := "file:" + filepath.Join(t.TempDir(), "web.db")
@@ -89,6 +135,10 @@ func newHarness(t *testing.T) *harness {
 	sessions := scs.New()
 	sessions.Store = sqlite3store.New(db.SQLDB())
 	sessions.Cookie.Secure = false
+	// Named as production names it, because RequireAgent refuses a request
+	// carrying this cookie by name and a test against a different name would
+	// prove nothing about the deployment.
+	sessions.Cookie.Name = "invctl_session"
 
 	renderer, err := render.New(webassets.FS, false)
 	if err != nil {
@@ -107,7 +157,20 @@ func newHarness(t *testing.T) *harness {
 		Config:   cfg,
 	}
 
-	server := httptest.NewServer(web.Routes(app, staticFS(t), authz))
+	var agents *web.AgentSurface
+	if len(creds) > 0 {
+		registry, err := auth.NewAgentRegistry(creds)
+		if err != nil {
+			t.Fatalf("building agent registry: %v", err)
+		}
+		agents = &web.AgentSurface{
+			Registry:      registry,
+			Handler:       handlers.NewObservationAPI(store.NewObservedRecorder(st)),
+			SessionCookie: sessions.Cookie.Name,
+		}
+	}
+
+	server := httptest.NewServer(web.Routes(app, staticFS(t), authz, agents))
 	t.Cleanup(server.Close)
 
 	jar, err := cookiejar.New(nil)
@@ -769,12 +832,21 @@ func TestEveryPageTemplateRenders(t *testing.T) {
 
 	assetID := h.refs.Assets["hv-01"]
 	serviceID := h.refs.Services["orders-api"]
+	// hv-01 hosts no service instance, so its Workloads table is empty and every
+	// field inside {{range .Instances}} goes unevaluated -- which meant no test
+	// in this suite had ever rendered that block. Removing a field it referenced
+	// would have left the suite green while /assets/{any VM that runs something}
+	// returned 500, for exactly the page an operator opens during an incident.
+	// vm-app-1 runs two orders-api containers.
+	hostingAssetID := h.refs.Assets["vm-app-1"]
 
 	pages := []string{
 		"/",
 		"/assets",
 		"/assets/" + assetID,
 		"/assets/" + assetID + "/impact",
+		"/assets/" + hostingAssetID,
+		"/assets/" + hostingAssetID + "/impact",
 		"/services",
 		"/services/" + serviceID,
 		"/environments",

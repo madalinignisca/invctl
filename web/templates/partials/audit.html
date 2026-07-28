@@ -1,0 +1,176 @@
+{{/* The audit views (docs/AUDIT.md rule 15).
+
+     Two of them, and they answer different questions.
+
+     `change_log` is the global trail: paginated, with a date range, because a
+     screen that only ever shows the newest N entries loses the one that
+     explains an incident as soon as a busy afternoon happens. Observed
+     transitions are not in this table at all -- that is rule 10, enforced by
+     the schema rather than by a filter here.
+
+     `timeline_panel` is the 03:00 view: one entity's declared history folded
+     with its one-hop declared neighbours' AND with the observed transitions for
+     the same rows, in one ordering. A configuration change at 02:58 followed by
+     a transition to down at 03:01 is the whole answer, and it is invisible if
+     the two ledgers are read on separate pages. */}}
+
+{{define "timeline_panel"}}
+<div class="panel">
+  <div class="panel-head">
+    <h2>Timeline</h2>
+    <span class="panel-note">
+      What changed, and what the estate reported, for this and the things one hop from it —
+      in one ordering. Declared changes are permanent; observed transitions are prunable.
+    </span>
+  </div>
+  {{if .}}
+  <div class="scroll-x">
+    <table>
+      <thead><tr><th>When</th><th>What</th><th>Where</th><th>By</th><th>Detail</th></tr></thead>
+      <tbody>
+        {{range .}}
+        <tr class="rail-row {{if .IsObserved}}{{if eq .ToState "down"}}is-down{{else if eq .ToState "degraded"}}is-degraded{{else}}is-ok{{end}}{{end}}">
+          <td class="mono" style="font-size:12px;white-space:nowrap;color:var(--muted)">{{shortTime .At}}</td>
+          <td>
+            {{if .IsObserved}}
+              <span class="pill pill-info" title="Telemetry. Nobody decided this.">observed</span>
+              <div class="mono" style="font-size:11.5px;color:var(--muted);margin-top:3px">{{.Label}}</div>
+            {{else}}
+              <span class="pill {{if eq .Label "retire"}}pill-degraded{{else}}pill-muted{{end}}">{{.Label}}</span>
+              <div class="mono" style="font-size:11.5px;color:var(--faint);margin-top:3px">declared</div>
+            {{end}}
+          </td>
+          <td class="mono" style="font-size:11.5px">
+            {{if .Subject}}
+              <span style="color:var(--muted)">this {{.EntityType}}</span>
+            {{else}}
+              <span>{{if .EntityLabel}}{{.EntityLabel}}{{else}}{{.EntityID}}{{end}}</span>
+              <div style="color:var(--faint)">{{.EntityType}}{{if .Relation}} · {{.Relation}}{{end}}</div>
+            {{end}}
+          </td>
+          <td>{{template "actor_cell" .}}</td>
+          <td class="mono" style="font-size:11.5px;color:var(--muted);max-width:520px;overflow-wrap:anywhere">
+            {{if .IsObserved}}
+              {{if .FromState}}{{.FromState}} → {{end}}{{.ToState}}
+              {{/* Rule 9: a reader must ALWAYS see that compression happened
+                   and how much it hid. The closing row is where that is
+                   accounted for, so it is spelled out here rather than left
+                   inside a column nobody opens. */}}
+              {{if .IsFlapClose}}
+                <div style="color:var(--warn,var(--muted));margin-top:3px">
+                  episode covered {{pluralise .FlapCount "transition" "transitions"}}
+                  between {{shortTime .WindowStart}} and {{shortTime .WindowEnd}}
+                </div>
+              {{else if .IsFlapOpen}}
+                <div style="color:var(--warn,var(--muted));margin-top:3px">
+                  oscillating — individual changes compressed from here
+                </div>
+              {{end}}
+            {{else}}
+              {{.Detail}}
+            {{end}}
+          </td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{else}}
+  <div class="empty">
+    <strong>Nothing recorded yet.</strong>
+    Neither this nor anything one hop from it has changed or been reported on.
+  </div>
+  {{end}}
+</div>
+{{end}}
+
+
+{{define "change_log"}}
+<div id="change-log">
+  {{/* hx-push-url keeps the address bar in step with what is on screen, so a
+       filtered page stays a valid deep link and the back button works. Without
+       it an operator cannot paste "the change log around 03:00 on Tuesday" into
+       an incident channel, which is most of what this page is for. */}}
+  <form class="panel" method="get" action="/changes"
+        hx-get="/changes" hx-target="#change-log" hx-swap="outerHTML" hx-push-url="true">
+    <div class="panel-head">
+      <h2>Filter</h2>
+      <span class="panel-note">A range and a kind. Everything outside them is still there; it is simply not on this screen.</span>
+    </div>
+    <div class="panel-body">
+      <div class="field-row">
+        <div class="field">
+          <label for="changes-type">Entity</label>
+          <select id="changes-type" name="entity_type">
+            <option value="">— everything —</option>
+            {{range .EntityTypes}}<option value="{{.}}" {{if eq . $.Filter.EntityType}}selected{{end}}>{{.}}</option>{{end}}
+          </select>
+        </div>
+        <div class="field">
+          <label for="changes-from">From</label>
+          <input id="changes-from" class="mono {{if index .Errors "from"}}invalid{{end}}"
+                 type="date" name="from" value="{{.Filter.From}}">
+          {{with index .Errors "from"}}<div class="field-error">{{.}}</div>{{end}}
+        </div>
+        <div class="field">
+          <label for="changes-to">To</label>
+          <input id="changes-to" class="mono {{if index .Errors "to"}}invalid{{end}}"
+                 type="date" name="to" value="{{.Filter.To}}">
+          {{with index .Errors "to"}}<div class="field-error">{{.}}</div>{{end}}
+          <div class="field-hint">Both ends included, whole days, UTC.</div>
+        </div>
+        <div class="field" style="align-self:flex-end">
+          <button class="btn btn-primary" type="submit">Apply</button>
+          <a class="btn" href="/changes" hx-get="/changes" hx-target="#change-log" hx-swap="outerHTML" hx-push-url="true">Clear</a>
+        </div>
+      </div>
+    </div>
+  </form>
+
+  <div class="panel">
+    <div class="panel-head">
+      <h2>{{pluralise .Page.Total "entry" "entries"}} in range</h2>
+      <span class="panel-note">{{pluralise (len .Page.Changes) "entry" "entries"}} on this page</span>
+    </div>
+    {{if .Page.Changes}}
+    <div class="scroll-x">
+      <table>
+        <thead><tr><th>When</th><th>Entity</th><th>Action</th><th>By</th><th>Change</th></tr></thead>
+        <tbody>
+          {{range .Page.Changes}}
+          <tr>
+            <td class="mono" style="font-size:12px;white-space:nowrap;color:var(--muted)">{{shortTime .At}}</td>
+            <td class="mono" style="font-size:12px">{{.EntityType}}</td>
+            <td><span class="pill {{if eq .Action "retire"}}pill-degraded{{else}}pill-muted{{end}}">{{.Action}}</span></td>
+            <td>{{template "actor_cell" .}}</td>
+            <td class="mono" style="font-size:11.5px;color:var(--muted);max-width:640px;overflow-wrap:anywhere">{{.Diff}}</td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+    {{/* Cursor paging, not page numbers: the log is written to constantly and
+         an offset silently skips or repeats rows when something lands between
+         two requests. A link appears only when following it would show
+         something. */}}
+    <div class="panel-body" style="display:flex;gap:8px;justify-content:space-between;border-top:1px solid var(--line-soft)">
+      <div>
+        {{if .NewerURL}}
+        <a class="btn btn-sm" href="{{.NewerURL}}" hx-get="{{.NewerURL}}" hx-target="#change-log" hx-swap="outerHTML" hx-push-url="true">← Newer</a>
+        {{end}}
+      </div>
+      <div>
+        {{if .OlderURL}}
+        <a class="btn btn-sm" href="{{.OlderURL}}" hx-get="{{.OlderURL}}" hx-target="#change-log" hx-swap="outerHTML" hx-push-url="true">Older →</a>
+        {{end}}
+      </div>
+    </div>
+    {{else}}
+    <div class="empty">
+      <strong>Nothing in that range.</strong>
+      Widen the dates or clear the filter — nothing has been deleted, this table is append-only.
+    </div>
+    {{end}}
+  </div>
+</div>
+{{end}}

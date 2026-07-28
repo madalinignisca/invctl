@@ -61,16 +61,25 @@ func (a *App) ServiceList(w http.ResponseWriter, r *http.Request) {
 
 type serviceDetailPage struct {
 	Base
-	Service        *store.ServiceRow
-	Instances      []store.InstanceRow
-	Endpoints      []store.EndpointRow
-	Routes         []store.RouteRow
-	Upstream       []depRowData
-	Downstream     []depRowData
-	Changes        []domain.ChangeLog
+	Service    *store.ServiceRow
+	Instances  []store.InstanceRow
+	Endpoints  []store.EndpointRow
+	Routes     []store.RouteRow
+	Upstream   []depRowData
+	Downstream []depRowData
+	// InstanceHealth is what the estate reports about each placement, keyed by
+	// instance id, with staleness applied and any override alongside rather
+	// than merged in. A service has no health of its own -- only the places it
+	// actually runs can be up or down.
+	InstanceHealth map[string]store.EntityHealth
+	// Timeline folds this service's declared history with its one-hop declared
+	// neighbours' -- its placements, the hosts under them, its endpoints, its
+	// dependencies -- and with the observed transitions for the same rows.
+	Timeline       []store.TimelineEntry
 	InstanceForm   instanceFormData
 	EndpointForm   endpointFormData
 	DependencyForm dependencyFormData
+	OverrideForm   overrideFormData
 }
 
 // ServiceDetail is the page the whole tool builds towards: header, placement,
@@ -108,7 +117,18 @@ func (a *App) ServiceDetail(w http.ResponseWriter, r *http.Request) {
 		a.serverError(w, r, err)
 		return
 	}
-	changes, err := a.Store.ListChangesForEntity(r.Context(), "service", id, 20)
+	instanceHealth, err := a.Store.EntityHealthFor(r.Context(), domain.ObservableServiceInstance,
+		instanceIDs(instances))
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
+	timeline, _, err := a.Store.TimelineForEntityAndNeighbours(r.Context(), "service", id, timelineLimit)
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
+	overrideTargets, err := a.instanceOverrideTargets(r.Context(), instances)
 	if err != nil {
 		a.serverError(w, r, err)
 		return
@@ -159,10 +179,12 @@ func (a *App) ServiceDetail(w http.ResponseWriter, r *http.Request) {
 		Routes:         routes,
 		Upstream:       depRows(upstream, classes, "upstream", b.CSRF, b.CanWrite),
 		Downstream:     depRows(downstream, classes, "downstream", b.CSRF, b.CanWrite),
-		Changes:        changes,
+		InstanceHealth: instanceHealth,
+		Timeline:       timeline,
 		InstanceForm:   a.newInstanceForm(r, id, nil, hostable),
 		EndpointForm:   a.newEndpointForm(r, id, nil),
 		DependencyForm: a.newDependencyForm(r, id, nil, domain.DependencySpec{}, allEndpoints, allRoutes, identities),
+		OverrideForm:   a.newOverrideForm(r, overrideTargets, nil, overrideForm{}),
 	})
 }
 

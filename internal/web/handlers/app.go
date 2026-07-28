@@ -126,6 +126,8 @@ func (a *App) handleStoreError(w http.ResponseWriter, r *http.Request, err error
 	switch {
 	case errors.Is(err, domain.ErrNotFound):
 		a.notFound(w, r)
+	case errors.Is(err, domain.ErrForbidden):
+		http.Error(w, "You are not allowed to do that.", http.StatusForbidden)
 	case errors.Is(err, domain.ErrConflict):
 		http.Error(w, "That conflicts with something that already exists.", http.StatusConflict)
 	case errors.Is(err, domain.ErrInvalid):

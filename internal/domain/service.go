@@ -419,24 +419,44 @@ var DependencySources = []string{
 	SourceDiscoveredK8s, SourceDiscoveredConfig,
 }
 
+// ServiceInstanceSources is the Go side of the service_instance.source CHECK
+// added in 00008_observed.sql. Until then this column was the only
+// unconstrained provenance column in the schema (docs/AUDIT.md rule 7).
+//
+// 'discovered_netstat' is deliberately absent: netstat discovers connections --
+// dependency edges -- not placements, so nothing could ever legitimately set it
+// here, and a vocabulary admitting values the writer cannot produce is not a
+// constraint.
+var ServiceInstanceSources = []string{
+	SourceDeclared, SourceDiscoveredSystemd, SourceDiscoveredK8s, SourceDiscoveredConfig,
+}
+
 // ServiceInstance is one running copy of a service on one host.
 //
-// Placement and observed state live here; everything logical lives on Service.
+// Placement and declared intent live here; everything logical lives on Service.
 // Shard is used only by the sharded availability policy.
+//
+// Observed state does NOT live here. Migration 00008 moved observed_state and
+// observed_at to asset_health, keyed (entity_type, entity_id, reporter), because
+// a mixed row produces a mixed audit entry that no portable query can classify
+// -- the distinguishing information would sit inside change_log.diff, and
+// querying inside JSON is banned. Concretely: UpdateInstance used to write
+// desired_state and observed_state in one statement from a round-tripped
+// struct, so a stale read silently reverted a concurrent operator edit and the
+// audit trail attributed the revert to the human. Read health through the
+// observed store; never add a health column back here (docs/AUDIT.md rule 1).
 type ServiceInstance struct {
-	ID            string  `db:"id"`
-	ServiceID     string  `db:"service_id"`
-	HostAssetID   string  `db:"host_asset_id"`
-	RuntimeType   string  `db:"runtime_type"`
-	Role          *string `db:"role"`
-	Shard         *string `db:"shard"`
-	Ordinal       int     `db:"ordinal"`
-	DesiredState  string  `db:"desired_state"`
-	ObservedState *string `db:"observed_state"`
-	ObservedAt    *string `db:"observed_at"`
-	Source        string  `db:"source"`
-	CreatedAt     string  `db:"created_at"`
-	UpdatedAt     string  `db:"updated_at"`
+	ID           string  `db:"id"`
+	ServiceID    string  `db:"service_id"`
+	HostAssetID  string  `db:"host_asset_id"`
+	RuntimeType  string  `db:"runtime_type"`
+	Role         *string `db:"role"`
+	Shard        *string `db:"shard"`
+	Ordinal      int     `db:"ordinal"`
+	DesiredState string  `db:"desired_state"`
+	Source       string  `db:"source"`
+	CreatedAt    string  `db:"created_at"`
+	UpdatedAt    string  `db:"updated_at"`
 }
 
 // NewServiceInstance validates and constructs a placement.
@@ -460,6 +480,9 @@ func (si *ServiceInstance) Validate() error {
 	checkRequired(ve, "host_asset_id", si.HostAssetID)
 	checkEnum(ve, "runtime_type", si.RuntimeType, RuntimeTypes)
 	checkEnum(ve, "desired_state", si.DesiredState, DesiredStates)
+	// The DB CHECK is the second line of defence, not the first: a provenance
+	// value that reaches the driver has already been accepted by a handler.
+	checkEnum(ve, "source", si.Source, ServiceInstanceSources)
 	if si.Ordinal < 0 {
 		ve.Add("ordinal", "must not be negative")
 	}

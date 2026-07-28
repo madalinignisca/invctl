@@ -29,6 +29,12 @@ type Config struct {
 	// grants write access, everyone else is read-only.
 	AdminUsers []string
 
+	// AgentCredentials are the monitoring credentials (docs/AUDIT.md rule 6).
+	// They are a different principal type entirely: not app_user rows, never in
+	// AdminUsers, and never seen by authz.CanWrite. Empty means no
+	// machine-facing route is mounted at all.
+	AgentCredentials []AgentCredential
+
 	AuthLocal bool
 	AuthLDAP  bool
 
@@ -88,6 +94,12 @@ func Load() (*Config, error) {
 	}
 	cfg.SessionKey = key
 
+	agents, err := loadAgentCredentials()
+	if err != nil {
+		return nil, err
+	}
+	cfg.AgentCredentials = agents
+
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
@@ -113,6 +125,9 @@ func (c *Config) validate() error {
 		if !strings.Contains(c.LDAP.BindDNTemplate, "%s") {
 			return fmt.Errorf("validating config: INV_LDAP_BIND_DN must contain %%s for the username")
 		}
+	}
+	if err := c.validateAgents(); err != nil {
+		return err
 	}
 	if len(c.AdminUsers) == 0 {
 		// Not fatal: a read-only deployment is legitimate. But an operator

@@ -154,18 +154,31 @@ func (a *App) AssetList(w http.ResponseWriter, r *http.Request) {
 
 type assetDetailPage struct {
 	Base
-	Asset         *store.AssetRow
-	Ancestors     []domain.Asset
-	Children      []store.AssetRow
-	Interfaces    []store.InterfaceRow
-	Instances     []store.InstanceRow
-	Changes       []domain.ChangeLog
+	Asset      *store.AssetRow
+	Ancestors  []domain.Asset
+	Children   []store.AssetRow
+	Interfaces []store.InterfaceRow
+	Instances  []store.InstanceRow
+	// Health is what the estate reports about this asset, with staleness
+	// applied and any operator override alongside it -- never merged into it.
+	Health *store.EntityHealth
+	// InstanceHealth is the same for each workload placed here, keyed by
+	// instance id. Every placement has an entry, including the ones nothing
+	// watches: a missing key and an unobserved entity render identically and
+	// mean completely different things.
+	InstanceHealth map[string]store.EntityHealth
+	// Timeline folds this asset's declared history with its one-hop declared
+	// neighbours' and with the observed transitions for the same rows. "What
+	// changed just before this broke" is the 03:00 question and it is not
+	// answerable from one entity's history.
+	Timeline      []store.TimelineEntry
 	Environments  []domain.Environment
 	Kinds         []string
 	Lifecycles    []string
 	InterfaceForm interfaceFormData
 	IPAddressForm ipAddressFormData
 	LinkForm      linkFormData
+	OverrideForm  overrideFormData
 }
 
 // AssetDetail renders one asset with its containment, ports and workloads.
@@ -197,7 +210,23 @@ func (a *App) AssetDetail(w http.ResponseWriter, r *http.Request) {
 		a.serverError(w, r, err)
 		return
 	}
-	changes, err := a.Store.ListChangesForEntity(r.Context(), "asset", id, 20)
+	health, err := a.Store.GetEntityHealth(r.Context(), domain.ObservableAsset, id)
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
+	instanceHealth, err := a.Store.EntityHealthFor(r.Context(), domain.ObservableServiceInstance,
+		instanceIDs(instances))
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
+	timeline, _, err := a.Store.TimelineForEntityAndNeighbours(r.Context(), "asset", id, timelineLimit)
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
+	targets, err := a.assetOverrideTargets(r.Context(), asset, instances)
 	if err != nil {
 		a.serverError(w, r, err)
 		return
@@ -211,27 +240,44 @@ func (a *App) AssetDetail(w http.ResponseWriter, r *http.Request) {
 	// the estate, this asset's own ports included. Excluding nothing by asset
 	// keeps the query simple; CreateLink's uniqueness check is what actually
 	// prevents a bad cable.
-	targets, err := a.Store.ListAvailableInterfaces(r.Context(), "")
+	linkTargets, err := a.Store.ListAvailableInterfaces(r.Context(), "")
 	if err != nil {
 		a.serverError(w, r, err)
 		return
 	}
 
 	a.Render.Page(w, http.StatusOK, "asset_detail", assetDetailPage{
-		Base:          a.base(r, asset.Name, "assets"),
-		Asset:         asset,
-		Ancestors:     ancestors,
-		Children:      children,
-		Interfaces:    interfaces,
-		Instances:     instances,
-		Changes:       changes,
-		Environments:  envs,
-		Kinds:         domain.AssetKinds,
-		Lifecycles:    domain.AssetLifecycles,
-		InterfaceForm: a.newInterfaceForm(r, id, nil),
-		IPAddressForm: a.newIPAddressForm(r, id, nil, interfaces),
-		LinkForm:      a.newLinkForm(r, id, nil, interfaces, targets),
+		Base:           a.base(r, asset.Name, "assets"),
+		Asset:          asset,
+		Ancestors:      ancestors,
+		Children:       children,
+		Interfaces:     interfaces,
+		Instances:      instances,
+		Health:         health,
+		InstanceHealth: instanceHealth,
+		Timeline:       timeline,
+		Environments:   envs,
+		Kinds:          domain.AssetKinds,
+		Lifecycles:     domain.AssetLifecycles,
+		InterfaceForm:  a.newInterfaceForm(r, id, nil),
+		IPAddressForm:  a.newIPAddressForm(r, id, nil, interfaces),
+		LinkForm:       a.newLinkForm(r, id, nil, interfaces, linkTargets),
+		OverrideForm:   a.newOverrideForm(r, targets, nil, overrideForm{}),
 	})
+}
+
+// timelineLimit is one screen of folded history. It is larger than the old
+// per-entity change list because the timeline covers the neighbourhood as well,
+// and a page that shows the neighbours but truncates before reaching them would
+// be worse than not folding at all.
+const timelineLimit = 60
+
+func instanceIDs(rows []store.InstanceRow) []string {
+	out := make([]string, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, row.ID)
+	}
+	return out
 }
 
 // AssetCreate adds an asset.

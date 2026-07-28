@@ -29,6 +29,8 @@ func TestMigrate(t *testing.T) {
 				"change_log", "app_user", "sessions", "search_index",
 				"net_group", "net_group_member", "net_uplink",
 				"net_attachment", "net_attachment_member", "net_anchor",
+				"asset_health", "observed_transition", "unmatched_observation",
+				"health_override",
 			}
 			for _, table := range tables {
 				var n int

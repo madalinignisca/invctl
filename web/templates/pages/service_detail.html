@@ -43,6 +43,11 @@
   {{if .Instances}}
   <div class="scroll-x">
     <table>
+      {{/* Desired is intent and Observed is telemetry: two kinds of fact, two
+           columns, never collapsed into one (docs/AUDIT.md rule 2). The observed
+           cell always carries its reporter and its age, and shows `unknown` once
+           a reading is older than three of that reporter's intervals -- never
+           its last value, because silence is not health (rule 8). */}}
       <thead><tr><th>Host</th><th>Runtime</th><th>Role</th><th>Shard</th><th>Ordinal</th><th>Desired</th><th>Observed</th>{{if .CanWrite}}<th></th>{{end}}</tr></thead>
       <tbody>
         {{range .Instances}}
@@ -54,9 +59,7 @@
           <td class="mono">{{if .Shard}}{{deref .Shard}}{{else}}—{{end}}</td>
           <td class="num">{{.Ordinal}}</td>
           <td class="mono" style="font-size:12px">{{.DesiredState}}</td>
-          <td class="mono" style="font-size:12px;color:var(--muted)">
-            {{if .ObservedState}}{{deref .ObservedState}}{{if .ObservedAt}} <span style="color:var(--faint)">({{since (deref .ObservedAt)}})</span>{{end}}{{else}}—{{end}}
-          </td>
+          <td>{{template "health_cell" (index $.InstanceHealth .ID)}}</td>
           {{if $.CanWrite}}
           <td>
             {{if ne .DesiredState "disabled"}}
@@ -81,6 +84,8 @@
   </div>
   {{end}}
 </div>
+
+{{template "overrides_panel" .OverrideForm}}
 
 <div class="panel">
   <div class="panel-head">
@@ -187,26 +192,5 @@
   {{end}}
 </div>
 
-<div class="panel">
-  <div class="panel-head"><h2>History</h2></div>
-  {{if .Changes}}
-  <div class="scroll-x">
-    <table>
-      <thead><tr><th>When</th><th>Action</th><th>By</th><th>Change</th></tr></thead>
-      <tbody>
-        {{range .Changes}}
-        <tr>
-          <td class="mono" style="font-size:12px;color:var(--muted)">{{shortTime .At}}</td>
-          <td><span class="pill pill-muted">{{.Action}}</span></td>
-          <td>{{template "actor_cell" .}}</td>
-          <td class="mono" style="font-size:11.5px;color:var(--muted);max-width:520px;overflow-wrap:anywhere">{{.Diff}}</td>
-        </tr>
-        {{end}}
-      </tbody>
-    </table>
-  </div>
-  {{else}}
-  <div class="empty"><strong>No recorded changes.</strong></div>
-  {{end}}
-</div>
+{{template "timeline_panel" .Timeline}}
 {{end}}

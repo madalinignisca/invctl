@@ -73,6 +73,26 @@ migrate: ## Apply migrations to $INV_DB_DSN and exit
 seed: ## Load the demo estate and exit
 	go run ./cmd/invctl -seed
 
+# The retention prune (docs/AUDIT.md rule 10). Admin-invoked, never automatic,
+# and never reachable from a handler -- so it lives here rather than in a timer
+# inside the server.
+#
+# AS names the operator the run is recorded against; it is required, and it is
+# resolved to an opaque app_user id before anything is written, because
+# change_log.actor never holds a username. KEEP is a request, not a guarantee:
+# anything resolving to an in_scope environment keeps at least 365 days
+# whatever KEEP says, and the run says so when the floor applies.
+#
+# Run it with DRY=1 first. It is the only command in this repo that removes a
+# fact.
+KEEP ?= 365
+
+.PHONY: prune-observed
+prune-observed: ## Prune observed transitions older than KEEP days (AS=<user>, DRY=1 to preview)
+	@test -n "$(AS)" || (echo "AS=<username> is required: the run records who asked for it"; exit 1)
+	go run ./cmd/invctl -prune-observed -prune-keep-days $(KEEP) -prune-as $(AS) \
+	  $(if $(DRY),-prune-dry-run,)
+
 .PHONY: clean-db
 clean-db:
 	rm -f invctl.db invctl.db-wal invctl.db-shm

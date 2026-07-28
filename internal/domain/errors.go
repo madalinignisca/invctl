@@ -18,6 +18,12 @@ var (
 	ErrNotFound = errors.New("not found")
 	ErrConflict = errors.New("conflict")
 	ErrInvalid  = errors.New("invalid")
+	// ErrForbidden is authenticated-but-not-permitted, and it is deliberately
+	// distinct from ErrInvalid: a monitoring credential reporting on an
+	// environment outside its scope has sent a well-formed request that it is
+	// not allowed to make (docs/AUDIT.md rule 6). 422 would tell its operator
+	// to fix the payload; 403 tells them to fix the credential.
+	ErrForbidden = errors.New("forbidden")
 )
 
 // FieldError is a single field-level validation failure.

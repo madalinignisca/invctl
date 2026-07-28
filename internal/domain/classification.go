@@ -1,0 +1,333 @@
+// Column classification: which kind of fact each column in the schema holds.
+//
+// This is the Go mirror of the normative table in docs/AUDIT.md, and it exists
+// because naming is a hint rather than a rule. `desired_state` contains "state"
+// and is declared intent; `verified_at` is a timestamp and is a person's
+// attestation. Guess and you will be wrong, and the two things that are
+// miserable to retrofit -- the portability constraint and the audit trail --
+// are exactly what a wrong guess damages.
+//
+// The census is DELIBERATELY EXHAUSTIVE. AUDIT.md's table ends with "everything
+// else is declared", which reads as a default -- but a default makes
+// TestEveryColumnIsClassified impossible to write, because nothing can ever be
+// unclassified and a new column silently inherits a class nobody chose. So
+// every column of every fact-bearing table is listed exactly once, and a column
+// present in the live schema but absent here has no class at all. That is the
+// gap the test looks for.
+//
+// Adding a column therefore means three edits: the migration, the table in
+// docs/AUDIT.md, and this file. That is the intended friction.
+package domain
+
+import "sort"
+
+// ColumnClass is which of the three kinds of fact a column holds.
+type ColumnClass string
+
+const (
+	// ClassDeclared: somebody asserts this should be true. Configuration and
+	// intent. Changes rarely, always because a person decided, and every change
+	// is a permanent record in change_log.
+	ClassDeclared ColumnClass = "declared"
+	// ClassObserved: the estate reporting about itself. Telemetry. Changes
+	// constantly, nobody decided it, most reports repeat the last one -- so it
+	// logs transitions to observed_transition and never touches change_log.
+	ClassObserved ColumnClass = "observed"
+	// ClassProvenance: not a fact about the world but a claim about where a fact
+	// came from. Governed separately because laundering provenance is how a
+	// fabricated fact becomes an authoritative one (rule 7).
+	ClassProvenance ColumnClass = "provenance"
+)
+
+// ObservedTables are tables where every column is observed, so a new column on
+// one of them needs no entry below. These are the tables migration 00008
+// creates for exactly that purpose: the separation is physical, and that is
+// what lets rule 10 say "observed_transition is the only prunable table"
+// instead of writing a predicate somebody has to keep correct.
+//
+// health_override is deliberately NOT here. An override is a person overruling
+// a monitor -- declared state that happens to be about observed state (rule 14).
+var ObservedTables = map[string]bool{
+	"asset_health":          true,
+	"observed_transition":   true,
+	"unmatched_observation": true,
+}
+
+// ExemptTables carry no inventory fact, mapped to why they are exempt. Listing
+// them explicitly rather than skipping by prefix is the point: a table that
+// appears in the live schema and in neither this map nor the census below is a
+// failure, not a shrug.
+//
+// The search_index_* entries are FTS5's private shadow tables and exist only on
+// SQLite; sqlite_sequence likewise. If a future SQLite adds another, the test
+// fails and a human looks -- which is the correct outcome.
+var ExemptTables = map[string]string{
+	"goose_db_version":         "migration bookkeeping, owned by goose",
+	"goose_db_version_dialect": "migration bookkeeping for the dialect-split migrations",
+	"sessions":                 "session store, owned by scs; holds no inventory fact",
+	"search_index":             "derived index over declared columns; rebuilt, never authored",
+	"search_index_config":      "FTS5 shadow table (SQLite only)",
+	"search_index_content":     "FTS5 shadow table (SQLite only)",
+	"search_index_data":        "FTS5 shadow table (SQLite only)",
+	"search_index_docsize":     "FTS5 shadow table (SQLite only)",
+	"search_index_idx":         "FTS5 shadow table (SQLite only)",
+	"sqlite_sequence":          "SQLite internal",
+}
+
+// ObservedColumns are the observed columns of otherwise-declared tables, keyed
+// by table. This is the half of docs/AUDIT.md's table that is easiest to get
+// wrong, so each entry says why.
+var ObservedColumns = map[string][]string{
+	// A login is telemetry about a person, not a configuration change. This is
+	// also the one pre-existing unaudited write in the codebase (TouchLogin),
+	// and rule 11 closes that exception list around it: adding a second means
+	// editing docs/AUDIT.md first.
+	"app_user": {"last_login_at"},
+
+	// first_seen/last_seen/confidence stay on the dependency row rather than
+	// moving to a health table: HANDOVER §3.5 makes them part of the fact, and
+	// a reconciler writes them at reconciler frequency, not at poll frequency,
+	// so they do not carry the unbounded-growth problem that moved
+	// service_instance.observed_state out.
+	//
+	// AUDIT.md's opening paragraph groups `confidence` with `source` as
+	// provenance, while its normative table classifies dependency.confidence as
+	// observed. The table wins here, because the table is the part labelled
+	// normative -- but rule 7 still governs who may WRITE it ("set by the store
+	// from the credential, never from the payload"), and classification decides
+	// the audit obligation, not the authorisation. Worth resolving upstream.
+	"dependency": {"confidence", "first_seen", "last_seen"},
+
+	// The four net_* tables carry the same provenance/observation column set as
+	// dependency, added by 00007 for the same reason, and are classified the
+	// same way. AUDIT.md's table predates them and does not list them; applying
+	// its rule column-by-column is the only reading that does not leave a third
+	// of the schema unclassified.
+	"net_anchor":     {"confidence", "first_seen", "last_seen"},
+	"net_attachment": {"confidence", "first_seen", "last_seen"},
+	"net_group":      {"confidence", "first_seen", "last_seen"},
+	"net_uplink":     {"confidence", "first_seen", "last_seen"},
+}
+
+// ProvenanceColumns record where a fact came from. Every one of these decides
+// whether a row is authoritative, which is why rule 7 governs them separately:
+// no machine may assert that a fact was hand-declared.
+//
+// app_user.source is deliberately absent. Its vocabulary is local|ldap -- which
+// authentication backend owns the account -- and shares no value with the
+// declared/discovered_* provenance vocabulary, so rule 7 has nothing to say
+// about it. It is a property of the account, and declared.
+var ProvenanceColumns = map[string][]string{
+	"dependency":       {"source"},
+	"net_anchor":       {"source"},
+	"net_attachment":   {"source"},
+	"net_group":        {"source"},
+	"net_uplink":       {"source"},
+	"service_instance": {"source"},
+}
+
+// DeclaredColumns is the rest of the schema, enumerated so that nothing
+// defaults. Order within a table follows the migration, so a diff against the
+// CREATE TABLE reads straight down.
+var DeclaredColumns = map[string][]string{
+	"app_user": {
+		"id", "username", "display_name", "email", "source",
+		"password_hash", "is_active", "created_at",
+	},
+	"application": {"id", "code", "name", "owner_team", "created_at", "updated_at"},
+	"asset": {
+		"id", "kind", "name", "parent_id", "serial", "asset_tag", "vendor",
+		"model", "lifecycle", "owner_team", "attrs", "created_at", "updated_at",
+	},
+	"asset_closure":     {"ancestor_id", "descendant_id", "depth"},
+	"asset_environment": {"asset_id", "environment_id", "note"},
+	"backend_member":    {"pool_id", "endpoint_id", "weight", "is_backup"},
+	"backend_pool":      {"id", "service_id", "name", "lb_algorithm"},
+	// The audit trail of declared change is itself declared: it is written by a
+	// person's act and is append-only forever (rule 10).
+	"change_log": {
+		"id", "entity_type", "entity_id", "action", "actor", "actor_kind",
+		"diff", "ticket_ref", "at",
+	},
+	"dependency": {
+		"id", "consumer_service_id", "consumer_instance_id", "provider_endpoint_id",
+		"provider_route_id", "nature", "tolerance_seconds", "failure_mode",
+		"identity_id", "auth_method", "firewall_rule_ref",
+		// verified_by/verified_at are a PERSON's attestation that an edge is
+		// legitimate, which is why a machine credential may never write them:
+		// that is a rubber stamp on an undocumented chd edge and on the firewall
+		// rule justified by it.
+		"verified_by", "verified_at",
+		"lifecycle", "created_at", "updated_at",
+	},
+	"dependency_data_class": {"dependency_id", "data_class"},
+	"endpoint": {
+		"id", "service_id", "name", "l4_proto", "port", "unix_path", "bind_scope",
+		"ip_address_id", "l7_proto", "tls_mode", "certificate_id", "exposure",
+	},
+	"environment": {"id", "code", "name", "role", "in_scope", "criticality", "created_at", "updated_at"},
+	// Rule 14: an operator overruling a monitor is a declared act, audited like
+	// any other. The row is about observed state; it is not observed state.
+	"health_override": {
+		"id", "entity_type", "entity_id", "asserted_state", "reason", "actor",
+		"lifecycle", "created_at", "updated_at", "expires_at",
+	},
+	"identity": {
+		"id", "kind", "name", "realm", "secret_ref", "rotation_days",
+		"last_rotated", "owner_team", "lifecycle",
+	},
+	"interface": {
+		"id", "asset_id", "name", "form_factor", "speed_mbps", "mac", "mtu",
+		"lag_parent_id", "is_mgmt", "enabled",
+	},
+	"ip_address": {"id", "addr_text", "addr_family", "addr_start", "interface_id", "role"},
+	"link":       {"id", "a_interface_id", "b_interface_id", "medium", "length_m", "lifecycle"},
+	"net_anchor": {
+		"id", "code", "name", "scope", "group_id", "environment_id", "plane",
+		"lifecycle", "verified_by", "verified_at", "created_at", "updated_at",
+	},
+	"net_attachment": {
+		"id", "asset_id", "group_id", "plane", "lifecycle",
+		"verified_by", "verified_at", "created_at", "updated_at",
+	},
+	"net_attachment_member": {"attachment_id", "asset_id", "interface_id"},
+	"net_group": {
+		"id", "code", "name", "kind", "role", "availability", "min_healthy",
+		"failover_mode", "environment_id", "lifecycle",
+		"verified_by", "verified_at", "attrs", "created_at", "updated_at",
+	},
+	"net_group_member": {"group_id", "asset_id", "role", "lifecycle", "created_at", "updated_at"},
+	"net_uplink": {
+		"id", "group_id", "upstream_group_id", "plane", "lifecycle",
+		"verified_by", "verified_at", "created_at", "updated_at",
+	},
+	"prefix": {
+		"id", "cidr_text", "addr_family", "addr_start", "addr_end",
+		"vlan_id", "environment_id", "role",
+	},
+	"route": {
+		"id", "frontend_endpoint_id", "match_type", "match_value",
+		"backend_pool_id", "tls_termination", "priority",
+	},
+	"rt_container": {
+		"instance_id", "engine", "container_name", "compose_project", "compose_service",
+		"image_repo", "image_tag", "image_digest", "restart_policy", "network_mode", "rootless",
+	},
+	"rt_k8s": {
+		"instance_id", "cluster_asset_id", "namespace", "workload_kind",
+		"workload_name", "replicas_desired", "service_account", "image_digest",
+	},
+	"rt_systemd": {
+		"instance_id", "unit_name", "unit_type", "exec_start", "run_as_user",
+		"run_as_group", "restart", "unit_after", "unit_requires", "drop_ins",
+	},
+	"rt_windows": {
+		"instance_id", "service_name", "display_name", "binary_path", "start_type",
+		"logon_identity_id", "depends_on_svc", "recovery_action",
+	},
+	"service": {
+		"id", "application_id", "code", "name", "kind", "environment_id",
+		"availability", "min_healthy", "failover_mode", "tier", "rto_minutes",
+		"rpo_minutes", "owner_team", "lifecycle", "attrs", "created_at", "updated_at",
+	},
+	// desired_state is DECLARED and stays here after 00008 moved observed_state
+	// and observed_at out. "Observed stopped, therefore desired stopped" is the
+	// intent-collapse that makes drift undetectable (rule 2).
+	"service_instance": {
+		"id", "service_id", "host_asset_id", "runtime_type", "role", "shard",
+		"ordinal", "desired_state", "created_at", "updated_at",
+	},
+}
+
+// ClassifyColumn returns the class of a column. ok is false when the column is
+// not classified at all, which is a failure rather than a default.
+func ClassifyColumn(table, column string) (ColumnClass, bool) {
+	if ObservedTables[table] {
+		return ClassObserved, true
+	}
+	if containsString(ProvenanceColumns[table], column) {
+		return ClassProvenance, true
+	}
+	if containsString(ObservedColumns[table], column) {
+		return ClassObserved, true
+	}
+	if containsString(DeclaredColumns[table], column) {
+		return ClassDeclared, true
+	}
+	return "", false
+}
+
+// IsExemptTable reports whether a table is outside the classification, and why.
+func IsExemptTable(table string) (string, bool) {
+	why, ok := ExemptTables[table]
+	return why, ok
+}
+
+// ClassifiedTables lists every table the census covers, sorted.
+func ClassifiedTables() []string {
+	seen := map[string]bool{}
+	for t := range ObservedTables {
+		seen[t] = true
+	}
+	for _, m := range []map[string][]string{DeclaredColumns, ObservedColumns, ProvenanceColumns} {
+		for t := range m {
+			seen[t] = true
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for t := range seen {
+		out = append(out, t)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// ClassificationConflicts reports contradictions inside this file: a column
+// claimed by two classes, or a table both exempt and classified.
+//
+// The maps are hand-maintained and a copy-paste can put one column in two of
+// them, at which point ClassifyColumn silently returns whichever it checks
+// first and the census looks complete while being wrong. A test asserting this
+// is empty costs nothing and removes that whole failure mode.
+func ClassificationConflicts() []string {
+	var out []string
+	for _, table := range ClassifiedTables() {
+		if _, exempt := ExemptTables[table]; exempt {
+			out = append(out, table+": both exempt and classified")
+		}
+		if ObservedTables[table] {
+			for _, m := range []map[string][]string{DeclaredColumns, ObservedColumns, ProvenanceColumns} {
+				if len(m[table]) > 0 {
+					out = append(out, table+": every column is observed, so it needs no per-column entry")
+					break
+				}
+			}
+			continue
+		}
+		seen := map[string]ColumnClass{}
+		for class, cols := range map[ColumnClass][]string{
+			ClassDeclared:   DeclaredColumns[table],
+			ClassObserved:   ObservedColumns[table],
+			ClassProvenance: ProvenanceColumns[table],
+		} {
+			for _, c := range cols {
+				if prev, dup := seen[c]; dup {
+					out = append(out, table+"."+c+": classified as both "+string(prev)+" and "+string(class))
+					continue
+				}
+				seen[c] = class
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func containsString(haystack []string, needle string) bool {
+	for _, v := range haystack {
+		if v == needle {
+			return true
+		}
+	}
+	return false
+}
