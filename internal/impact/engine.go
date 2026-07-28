@@ -25,6 +25,39 @@ type Request struct {
 	// dependencies, where a 3-minute reboot and a 45-minute one genuinely
 	// differ for a consumer with a buffer.
 	WindowSeconds int
+	// UseObservedHealth is inert in M3 -- there is nowhere yet to read
+	// observed health from (asset_health lands in M6, docs/AUDIT.md). The
+	// field exists now so the signature does not change again when it does.
+	UseObservedHealth bool
+	// SkipNetwork is the escape hatch: when true, Analyse behaves exactly as
+	// if Inputs.Net were nil, regardless of what was loaded.
+	SkipNetwork bool
+	// ApplyReachability decides whether reachability may change an answer.
+	//
+	// It defaults to OFF, which is the M3 contract: reachability is computed
+	// and reported in full, but Services, WontRestart, Cycles, SafeOrder and
+	// Iterations come out exactly as they would with no topology declared.
+	// That gives an operator a milestone in which they can read what the model
+	// concludes and judge whether it matches the estate, before it starts
+	// moving statuses they already trust. Turning it on is M4, and it is one
+	// flag rather than a rewrite precisely so that the review gate is real
+	// rather than notional.
+	ApplyReachability bool
+}
+
+// Inputs are the down-state facts Analyse needs.
+type Inputs struct {
+	DownInstanceIDs map[string]bool
+	// DownAssetIDs is already closure-expanded by the caller (the same
+	// expansion that produced DownInstanceIDs), so a forwarder inside a
+	// falling rack is downed as a consequence of the rack, not as a separate
+	// input.
+	DownAssetIDs map[string]bool
+	// Net is nil whenever the estate has declared no topology at all -- zero
+	// rows in every net_* table -- which makes every reachability step a
+	// no-op and the result byte-identical to a build that never had this
+	// feature.
+	Net *NetGraph
 }
 
 // ServiceImpact is one service's outcome.
@@ -44,6 +77,17 @@ type ServiceImpact struct {
 	// Via names the dependency that propagated the status, empty when the
 	// service was hit directly by losing its own instances.
 	Via string
+	// Cause names which of M3's three disjoint channels produced this
+	// entry: capacity (an instance is actually gone), reachability (an
+	// instance is running but cut off), dependency (propagated through an
+	// edge) or exposure (a running service lost its only path to an
+	// external/cross-env/environment anchor -- reported here but never
+	// merged into statuses or propagated).
+	Cause Cause
+	// LostToIsolation is the subset of LostInstances that are running but
+	// network-isolated rather than actually down -- what lets the reason
+	// string say "the host is running but cut off" instead of "lost".
+	LostToIsolation int
 }
 
 // Result is the whole answer.
@@ -63,15 +107,66 @@ type Result struct {
 	SafeOrder []string
 	// Iterations is how many propagation rounds the fixed point needed.
 	Iterations int
+
+	// Isolated names every asset cut off from its declared network on any
+	// plane. Reporting-only: only the data-plane cut actually feeds Seam 1.
+	Isolated []AssetIsolation
+	// Partitions names dependency edges whose reachability, not their
+	// provider's own status, degraded or cut them.
+	Partitions []EdgePartition
+	// Unreachable holds running services with no path to their endpoint's
+	// declared anchor. Reported, never propagated (Seam 3).
+	Unreachable []EndpointReach
+	// RedundancyLost names forwarder groups that survived this outage but
+	// have no redundancy left for the next one.
+	RedundancyLost []GroupFinding
+	// Coverage is the modelled/unmodelled split this run saw, so a report can
+	// say honestly how much of the estate it actually has an opinion about.
+	Coverage ReachCoverage
 }
 
 // Analyse runs the three phases and returns the impact of the request.
-func Analyse(g *Graph, req Request, downInstanceIDs map[string]bool) Result {
-	statuses, lost, totals, reasons := phaseCapacity(g, downInstanceIDs)
+//
+// Phase 0 -- the reachability model -- is linear and runs once, before phase
+// 2 (capacity): no iteration, no recursion, no traversal, so it provably
+// cannot affect the fixed point's termination argument. Inputs.Net == nil (or
+// req.SkipNetwork) makes it inert: every reachability step becomes a no-op
+// and the result is byte-identical to a build that never had this feature.
+func Analyse(g *Graph, req Request, in Inputs) Result {
+	netInput := in.Net
+	if req.SkipNetwork {
+		netInput = nil
+	}
+	net := buildReachModel(netInput, in.DownAssetIDs)
 
-	via, wontRestartIDs, iterations := phasePropagate(g, req, statuses, reasons)
+	// Seam 1. An empty needsNet makes isolation unable to reach the alive
+	// term, so phaseCapacity runs exactly as it did before reachability
+	// existed. The reach model is still built, because the report below needs
+	// it -- what is gated is the effect, not the computation.
+	needsNet := map[string]bool{}
+	if req.ApplyReachability {
+		needsNet = computeNeedsNet(g)
+	}
+
+	statuses, lost, totals, reasons, lostToIsolation, aliveHosts := phaseCapacity(g, in.DownInstanceIDs, net, needsNet)
+
+	coverage := computeCoverage(g, net)
+	// Always computed: Result.Partitions reports these whether or not they are
+	// allowed to move a status.
+	reachOfDep := computeDepReach(g, net, aliveHosts, &coverage)
+	routeMemberReach := computeRouteMemberReach(g, net, aliveHosts)
+
+	// Seam 2. nil maps read as the zero reachLevel, which the downgrade switch
+	// ignores, so Propagate sees the provider status it always saw.
+	appliedDepReach, appliedRouteReach := reachOfDep, routeMemberReach
+	if !req.ApplyReachability {
+		appliedDepReach, appliedRouteReach = nil, nil
+	}
+
+	via, wontRestartIDs, iterations := phasePropagate(g, req, statuses, reasons, appliedDepReach, appliedRouteReach)
 
 	result := Result{Iterations: iterations}
+	existingIDs := map[string]bool{}
 	for id, status := range statuses {
 		fault, willNotRestart := wontRestartIDs[id]
 		if status == domain.StatusOK && !willNotRestart {
@@ -81,14 +176,22 @@ func Analyse(g *Graph, req Request, downInstanceIDs map[string]bool) Result {
 		if svc == nil {
 			continue
 		}
+		cause := CauseCapacity
+		switch {
+		case lostToIsolation[id] > 0 && lostToIsolation[id] == lost[id]:
+			cause = CauseReachability
+		case via[id] != "":
+			cause = CauseDependency
+		}
 		si := ServiceImpact{
 			ServiceID: id, Code: svc.Code, Name: svc.Name, Tier: svc.Tier,
 			Status: status, Reason: reasons[id],
 			LostInstances: lost[id], TotalInstances: totals[id],
-			Via: via[id],
+			Via: via[id], Cause: cause, LostToIsolation: lostToIsolation[id],
 		}
 		if status != domain.StatusOK {
 			result.Services = append(result.Services, si)
+			existingIDs[id] = true
 		}
 		// A service that is already down does not belong on the landmine list.
 		// The whole point of WontRestart is "this is serving now, and you will
@@ -105,6 +208,12 @@ func Analyse(g *Graph, req Request, downInstanceIDs map[string]bool) Result {
 		}
 	}
 
+	// Seam 3: anchor loss, reported and folded into Services only when every
+	// non-local endpoint of a service has lost its anchor. Never written into
+	// statuses, never propagated -- computed after the fixed point on purpose.
+	unreachable := computeUnreachable(g, net, aliveHosts, statuses, &coverage)
+	result.Services = append(result.Services, computeExposureImpacts(g, unreachable, existingIDs)...)
+
 	sortImpacts(result.Services)
 	sortImpacts(result.WontRestart)
 
@@ -118,35 +227,70 @@ func Analyse(g *Graph, req Request, downInstanceIDs map[string]bool) Result {
 	// transmits a full outage, and the shutdown order only ever sees hard
 	// edges.
 	result.Cycles = detectCycles(g, affected)
+
+	result.Isolated = computeIsolated(g, net)
+	result.Partitions = computePartitions(g, g.Deps, reachOfDep)
+	result.Unreachable = unreachable
+	result.RedundancyLost = computeRedundancyLost(netInput, groupStatusesOrNil(net), in.DownAssetIDs)
+	result.Coverage = coverage
+
 	return result
+}
+
+// groupStatusesOrNil exposes the reach model's precomputed group statuses to
+// computeRedundancyLost without leaking the reachModel type any further than
+// it already reaches.
+func groupStatusesOrNil(net *reachModel) map[string]domain.Status {
+	if net == nil {
+		return nil
+	}
+	return net.groupStatus
 }
 
 // phaseCapacity applies each service's availability policy to the instances
 // that survive (HANDOVER §6 phase 2).
-func phaseCapacity(g *Graph, downInstanceIDs map[string]bool) (
+//
+// net and needsNet implement Seam 1: an instance is alive only if it is
+// neither taken down directly nor isolated on a service that actually needs
+// the network. When net is nil this is exactly the pre-M3 computation --
+// net.isolated is defined to return false for a nil receiver, so the
+// isolation term is always false and every byte of output is unchanged.
+func phaseCapacity(g *Graph, downInstanceIDs map[string]bool, net *reachModel, needsNet map[string]bool) (
 	statuses map[string]domain.Status,
 	lost map[string]int,
 	totals map[string]int,
 	reasons map[string]string,
+	lostToIsolation map[string]int,
+	aliveHosts map[string][]string,
 ) {
 	statuses = make(map[string]domain.Status, len(g.Services))
 	lost = make(map[string]int, len(g.Services))
 	totals = make(map[string]int, len(g.Services))
 	reasons = make(map[string]string, len(g.Services))
+	lostToIsolation = make(map[string]int, len(g.Services))
+	aliveHosts = make(map[string][]string, len(g.Services))
 
 	for serviceID, svc := range g.Services {
 		instances := g.Instances[serviceID]
 		health := make([]domain.InstanceHealth, 0, len(instances))
 		lostCount := 0
+		isolationCount := 0
 		for _, inst := range instances {
 			if inst.Disabled {
 				// Not expected to be running, so it is neither capacity nor a
 				// loss.
 				continue
 			}
-			alive := !downInstanceIDs[inst.ID]
+			downByPlacement := downInstanceIDs[inst.ID]
+			isolatedNow := needsNet[serviceID] && net.isolated(inst.HostAssetID, domain.PlaneData)
+			alive := !downByPlacement && !isolatedNow
 			if !alive {
 				lostCount++
+				if !downByPlacement {
+					isolationCount++
+				}
+			} else {
+				aliveHosts[serviceID] = append(aliveHosts[serviceID], inst.HostAssetID)
 			}
 			health = append(health, domain.InstanceHealth{
 				ID: inst.ID, Role: inst.Role, Shard: inst.Shard, Alive: alive,
@@ -157,14 +301,27 @@ func phaseCapacity(g *Graph, downInstanceIDs map[string]bool) (
 		statuses[serviceID] = status
 		lost[serviceID] = lostCount
 		totals[serviceID] = len(health)
+		lostToIsolation[serviceID] = isolationCount
 		if status != domain.StatusOK {
-			reasons[serviceID] = capacityReason(svc, status, lostCount, len(health))
+			reasons[serviceID] = capacityReason(svc, status, lostCount, len(health), isolationCount)
 		}
 	}
-	return statuses, lost, totals, reasons
+	return statuses, lost, totals, reasons, lostToIsolation, aliveHosts
 }
 
-func capacityReason(svc *domain.Service, status domain.Status, lost, total int) string {
+func capacityReason(svc *domain.Service, status domain.Status, lost, total, lostToIsolation int) string {
+	base := capacityReasonBase(svc, status, lost, total)
+	switch {
+	case lostToIsolation == 0:
+		return base
+	case lostToIsolation == lost:
+		return base + " (running, but network-isolated -- not powered off)"
+	default:
+		return fmt.Sprintf("%s (%d of those network-isolated)", base, lostToIsolation)
+	}
+}
+
+func capacityReasonBase(svc *domain.Service, status domain.Status, lost, total int) string {
 	surviving := total - lost
 	switch svc.Availability {
 	case domain.AvailQuorum:
@@ -204,6 +361,8 @@ func phasePropagate(
 	req Request,
 	statuses map[string]domain.Status,
 	reasons map[string]string,
+	reachOfDep map[string]reachLevel,
+	routeMemberReach map[string]reachLevel,
 ) (via map[string]string, wontRestart map[string]startupFault, iterations int) {
 	via = map[string]string{}
 	wontRestart = map[string]startupFault{}
@@ -213,8 +372,9 @@ func phasePropagate(
 
 		// Provider health is recomputed each round because a route's health
 		// derives from its pool, whose members' services may have changed
-		// status in the previous round.
-		routeStatus := routeStatuses(g, statuses)
+		// status in the previous round. routeMemberReach itself is static
+		// (Seam 2's pre-pass), computed once outside this loop.
+		routeStatus := routeStatuses(g, statuses, routeMemberReach)
 
 		for _, dep := range g.Deps {
 			if dep.Lifecycle == domain.LifecycleRetired {
@@ -228,6 +388,16 @@ func phasePropagate(
 			providerStatus, providerName, ok := providerHealth(g, dep, statuses, routeStatus)
 			if !ok {
 				continue
+			}
+
+			// Seam 2: a pairwise partition downgrades the provider's status
+			// before Propagate runs, so the dependency's hard/soft/startup/
+			// async/optional table does all the semantic work unchanged.
+			switch reachOfDep[dep.ID] {
+			case reachDown:
+				providerStatus = domain.StatusDown
+			case reachDegraded:
+				providerStatus = providerStatus.Worse(domain.StatusDegraded)
 			}
 
 			effect := dep.Propagate(providerStatus, req.WindowSeconds)
@@ -290,7 +460,7 @@ func providerHealth(
 // This is what the handover means by "routes are nodes in the graph, not
 // passthroughs": a proxy that is up but whose every backend sits on the host
 // being rebooted is not serving, and only pool-level derivation shows that.
-func routeStatuses(g *Graph, statuses map[string]domain.Status) map[string]domain.Status {
+func routeStatuses(g *Graph, statuses map[string]domain.Status, routeMemberReach map[string]reachLevel) map[string]domain.Status {
 	out := make(map[string]domain.Status, len(g.Routes))
 	for id, r := range g.Routes {
 		// The proxy terminating the route.
@@ -325,7 +495,18 @@ func routeStatuses(g *Graph, statuses map[string]domain.Status) map[string]domai
 				if !ok {
 					continue
 				}
-				switch statuses[ep.ServiceID] {
+				// Seam 2 at pool-member granularity: a member's own status is
+				// downgraded by its reachability from the route's frontend
+				// before it is counted, so "every backend is on the far side
+				// of the break" is caught the same way host loss already is.
+				memberStatus := statuses[ep.ServiceID]
+				switch routeMemberReach[r.ID+"/"+endpointID] {
+				case reachDown:
+					memberStatus = domain.StatusDown
+				case reachDegraded:
+					memberStatus = memberStatus.Worse(domain.StatusDegraded)
+				}
+				switch memberStatus {
 				case domain.StatusDown:
 					// contributes nothing
 				case domain.StatusDegraded:

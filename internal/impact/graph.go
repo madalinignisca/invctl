@@ -25,10 +25,20 @@ type Instance struct {
 }
 
 // Endpoint is a listening socket, reduced to its owning service.
+//
+// BindScope, Exposure and ServiceEnvID are M3 additions, read from the
+// endpoint/service rows LoadGraph already loads -- no extra query. BindScope
+// gates the local exemption (loopback/unix traffic is intra-host by
+// definition); Exposure gates the anchor requirement, 1:1 with
+// net_anchor.scope. The two are deliberately not conflated
+// (docs/reachability-design.md).
 type Endpoint struct {
-	ID        string
-	ServiceID string
-	Name      string
+	ID           string
+	ServiceID    string
+	Name         string
+	BindScope    string
+	Exposure     string
+	ServiceEnvID string
 }
 
 // Route maps a frontend endpoint to a backend pool. It is a node in the graph
@@ -53,16 +63,33 @@ type Graph struct {
 	Routes      map[string]Route
 	PoolMembers map[string][]string // pool id -> endpoint ids
 	Deps        []domain.Dependency
+
+	// ServiceClusterAssetID and ClusterNodes exist for scenario 9's cluster_ip
+	// resolution (reach.go): a k8s_workload instance's rt_k8s.cluster_asset_id
+	// names the cluster, and ClusterNodes lists that cluster's k8s_node
+	// descendants via asset_closure. Both nil/empty when there is no k8s
+	// runtime detail in the estate, which makes the feature inert exactly like
+	// every other M3 addition.
+	ServiceClusterAssetID map[string]string   // service id -> cluster asset id
+	ClusterNodes          map[string][]string // cluster asset id -> k8s_node descendant asset ids
+
+	// Net is the reachability picture LoadGraph loads alongside everything
+	// else, nil whenever the estate has declared no topology at all. Kept on
+	// Graph (rather than threaded separately) so "the whole dependency
+	// picture, loaded once per analysis" stays true of one object.
+	Net *NetGraph
 }
 
 // NewGraph returns an empty graph with its maps ready.
 func NewGraph() *Graph {
 	return &Graph{
-		Services:    map[string]*domain.Service{},
-		Instances:   map[string][]Instance{},
-		Endpoints:   map[string]Endpoint{},
-		Routes:      map[string]Route{},
-		PoolMembers: map[string][]string{},
+		Services:              map[string]*domain.Service{},
+		Instances:             map[string][]Instance{},
+		Endpoints:             map[string]Endpoint{},
+		Routes:                map[string]Route{},
+		PoolMembers:           map[string][]string{},
+		ServiceClusterAssetID: map[string]string{},
+		ClusterNodes:          map[string][]string{},
 	}
 }
 

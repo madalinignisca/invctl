@@ -125,5 +125,105 @@
   </div>
   {{end}}
 
+  {{/* Network reachability -- M3. Everything below this point is
+       informational: it never changed a status above, it only explains
+       *why* in terms of the physical network, or reports a finding the
+       capacity/dependency engine has no way to express (an asset cut off
+       from its network, or a running service with no path to its declared
+       anchor). The honest empty state matters as much as the panels
+       themselves: an estate that has not declared its cabling must not be
+       told the network is fine. */}}
+  <div class="panel">
+    <div class="panel-head">
+      <h2>Network reachability</h2>
+      <span class="panel-note">Informational -- reported, never propagated into the statuses above.</span>
+    </div>
+    <div class="panel-body">
+      {{$cov := .Result.Coverage}}
+      {{$declared := or $cov.Modelled $cov.Inherited}}
+      {{if not $declared}}
+        <div class="empty">
+          <strong>No network topology declared.</strong>
+          Nothing here isolates, partitions or loses redundancy because no forwarder
+          group, uplink, attachment or anchor has been entered for this estate yet.
+          This is silence, not an all-clear: cable the estate in <a href="/network">Network</a>
+          to get a real answer instead.
+        </div>
+      {{else}}
+        <p class="lede" style="margin-bottom:10px">
+          {{$cov.Modelled}} asset(s) modelled directly, {{$cov.Inherited}} more inherited from an
+          ancestor's attachment, {{$cov.Unmodelled}} with no declared attachment anywhere in their
+          containment ancestry -- unmodelled assets are never isolated, never partitioned and never
+          counted against anything.
+        </p>
+
+        {{if .Result.Isolated}}
+        <div class="scroll-x" style="margin-bottom:14px">
+          <table>
+            <thead><tr><th>Asset</th><th>Plane</th><th>Blocked by</th></tr></thead>
+            <tbody>
+              {{range .Result.Isolated}}
+              <tr>
+                <td class="mono">{{.AssetID}}</td>
+                <td>{{.Plane}}</td>
+                <td>{{if .BlockingGroup}}{{.BlockingGroup}}{{else}}—{{end}}</td>
+              </tr>
+              {{end}}
+            </tbody>
+          </table>
+        </div>
+        {{end}}
+
+        {{if .Result.Partitions}}
+        <div class="scroll-x" style="margin-bottom:14px">
+          <table>
+            <thead><tr><th>Consumer</th><th>Provider</th><th>Reach</th></tr></thead>
+            <tbody>
+              {{range .Result.Partitions}}
+              <tr>
+                <td class="mono">{{.ConsumerService}}</td>
+                <td class="mono">{{.ProviderName}}</td>
+                <td>{{.Reach}}</td>
+              </tr>
+              {{end}}
+            </tbody>
+          </table>
+        </div>
+        {{end}}
+
+        {{if .Result.Unreachable}}
+        <div class="scroll-x" style="margin-bottom:14px">
+          <table>
+            <thead><tr><th>Service</th><th>Endpoint</th><th>Scope</th><th>Status</th><th>Blocked by</th></tr></thead>
+            <tbody>
+              {{range .Result.Unreachable}}
+              <tr>
+                <td><a class="id" href="/services/{{.ServiceID}}">{{.Code}}</a></td>
+                <td>{{.EndpointName}}</td>
+                <td>{{.Scope}}</td>
+                <td><span class="{{statusClass .Status}}">{{statusLabel .Status}}</span></td>
+                <td>{{if .BlockingGroup}}{{.BlockingGroup}}{{else}}—{{end}}</td>
+              </tr>
+              {{end}}
+            </tbody>
+          </table>
+        </div>
+        {{end}}
+
+        {{if .Result.RedundancyLost}}
+        <div style="margin-bottom:6px">
+          {{range .Result.RedundancyLost}}
+            <div class="reason">{{.Message}}</div>
+          {{end}}
+        </div>
+        {{end}}
+
+        {{if and (not .Result.Isolated) (not .Result.Partitions) (not .Result.Unreachable) (not .Result.RedundancyLost)}}
+        <div class="empty">Nothing isolated, partitioned or newly at risk on the declared network.</div>
+        {{end}}
+      {{end}}
+    </div>
+  </div>
+
 </div>
 {{end}}

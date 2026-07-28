@@ -92,6 +92,20 @@ func (s Status) Worse(other Status) Status {
 	return s
 }
 
+// Better returns the less severe of two statuses. It is the mirror of Worse,
+// used to fold alternative network paths: two paths, either working, means
+// the asset is reachable, so the fold runs in the opposite direction from
+// propagation's merge. Identity for a Better-fold is StatusDown; identity for
+// a Worse-fold is StatusOK. Stating both is deliberate: getting the
+// initialiser backwards is how a fold silently returns the absorbing element
+// for every input.
+func (s Status) Better(other Status) Status {
+	if other.rank() < s.rank() {
+		return other
+	}
+	return s
+}
+
 // Application groups services under a business-facing name.
 type Application struct {
 	ID        string  `db:"id"`
@@ -239,12 +253,26 @@ const (
 	RoleStandby = "standby"
 )
 
-// EvaluateCapacity applies the service's availability policy to the surviving
-// instances and returns the resulting status (HANDOVER §6 phase 2).
+// AvailabilityPolicy is an availability/min_healthy/failover_mode triple,
+// extracted from Service so that anything else needing the same failure
+// arithmetic -- net_group chief among them -- can reuse it verbatim rather
+// than reimplementing it. An active/passive firewall pair and an
+// active/passive database pair fail identically, and one tested function for
+// both is one set of bugs rather than two.
+type AvailabilityPolicy struct {
+	Availability string
+	MinHealthy   *int
+	FailoverMode *string
+}
+
+// Evaluate applies the policy to the surviving instances and returns the
+// resulting status (HANDOVER §6 phase 2). This is the exact body that used to
+// live in Service.EvaluateCapacity; service_test.go passing unmodified after
+// the extraction is the correctness proof.
 //
 // This is the whole point of modelling availability: without it, any lost
 // instance reads as a lost service.
-func (s *Service) EvaluateCapacity(instances []InstanceHealth) Status {
+func (p AvailabilityPolicy) Evaluate(instances []InstanceHealth) Status {
 	total := len(instances)
 	if total == 0 {
 		// A service with no instances at all cannot be reasoned about; it is
@@ -264,7 +292,7 @@ func (s *Service) EvaluateCapacity(instances []InstanceHealth) Status {
 		return StatusDown
 	}
 
-	switch s.Availability {
+	switch p.Availability {
 	case AvailStandalone:
 		// Any survivor means at least one copy is serving. Reaching here with
 		// 0 < surviving < total implies several instances under a standalone
@@ -280,8 +308,8 @@ func (s *Service) EvaluateCapacity(instances []InstanceHealth) Status {
 
 	case AvailActiveActive:
 		min := 1
-		if s.MinHealthy != nil && *s.MinHealthy > 0 {
-			min = *s.MinHealthy
+		if p.MinHealthy != nil && *p.MinHealthy > 0 {
+			min = *p.MinHealthy
 		}
 		if surviving < min {
 			return StatusDegraded
@@ -317,7 +345,7 @@ func (s *Service) EvaluateCapacity(instances []InstanceHealth) Status {
 		}
 		// Primary is gone but a standby can take over. Automatic promotion is
 		// a blip; manual promotion needs a human, so it is degraded until then.
-		if s.FailoverMode != nil && *s.FailoverMode == FailoverAuto {
+		if p.FailoverMode != nil && *p.FailoverMode == FailoverAuto {
 			return StatusOK
 		}
 		return StatusDegraded
@@ -347,6 +375,14 @@ func (s *Service) EvaluateCapacity(instances []InstanceHealth) Status {
 		return StatusOK
 	}
 	return StatusDegraded
+}
+
+// EvaluateCapacity applies the service's availability policy to the surviving
+// instances and returns the resulting status (HANDOVER §6 phase 2).
+func (s *Service) EvaluateCapacity(instances []InstanceHealth) Status {
+	return AvailabilityPolicy{
+		Availability: s.Availability, MinHealthy: s.MinHealthy, FailoverMode: s.FailoverMode,
+	}.Evaluate(instances)
 }
 
 // Runtime types for a service instance.

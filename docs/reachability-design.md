@@ -1,5 +1,12 @@
 # Reachability design (working reference for M2-M6)
 
+> **M3 gates application behind `Request.ApplyReachability`, default off.** The
+> algorithm below computes and reports in full, but the three seams only move a
+> status when that flag is set. M4 is flipping the default. The flag exists so
+> the "report-only" milestone is a real review checkpoint rather than a
+> description of intent — `TestReachabilityIsGatedAndTheGateIsReal` asserts both
+> directions against a topology that genuinely isolates.
+>
 > **`asset_health` in this document is superseded.** It shows a simple
 > `asset_id PRIMARY KEY` shape; `docs/AUDIT.md` is authoritative and requires
 > `(entity_type, entity_id, reporter)` plus `state_since` and a companion
