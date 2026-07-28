@@ -142,3 +142,17 @@
   {{end}}
 </div>
 {{end}}
+
+
+{{/* Actor plus the kind that produced it.
+
+     These are always rendered together. `change_log.actor` is free text, so a
+     name alone cannot be trusted to be a person -- a reconciler or a monitoring
+     credential writes into the same column. An incident review opens the entity
+     detail pages far more often than the global log, so showing the name
+     without the kind there is where the ambiguity actually bites. */}}
+{{define "actor_cell"}}
+<span class="mono" style="font-size:12px">{{.Actor}}</span>
+<span class="pill {{if eq .ActorKind "user"}}pill-info{{else}}pill-muted{{end}}"
+      title="{{if eq .ActorKind "user"}}a person{{else}}a machine, not a person{{end}}">{{.ActorKind}}</span>
+{{end}}

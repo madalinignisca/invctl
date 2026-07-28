@@ -3,6 +3,8 @@ package store
 import (
 	"context"
 	"fmt"
+	"sort"
+	"strings"
 
 	"github.com/gabriel/invctl/internal/domain"
 )
@@ -180,6 +182,28 @@ func (s *SQLStore) ListAllRoutes(ctx context.Context) ([]RouteRow, error) {
 
 // ---------- dependencies ----------
 
+// dependencyAudit is the audited shape of a dependency: the row itself plus the
+// data classes it carries.
+//
+// Those classes live in a child table, so a change to them produced no diff on
+// the dependency struct and therefore no change_log entry at all -- an edge
+// could acquire `chd` in complete silence, which is the single most
+// scope-relevant event this system records. Folding them into one audited value
+// keeps the edge and what it carries in a single entry, which is also how an
+// auditor wants to read it.
+type dependencyAudit struct {
+	domain.Dependency
+	// Sorted and joined so that re-submitting the same set in a different
+	// order is not reported as a change.
+	DataClasses string `db:"data_classes"`
+}
+
+func auditedDependency(d *domain.Dependency, classes []string) *dependencyAudit {
+	sorted := append([]string(nil), classes...)
+	sort.Strings(sorted)
+	return &dependencyAudit{Dependency: *d, DataClasses: strings.Join(sorted, ",")}
+}
+
 // DependencyRow is a dependency with both ends resolved to names, which is all
 // the two panels on the service page need.
 type DependencyRow struct {
@@ -279,7 +303,7 @@ func (s *SQLStore) CreateDependency(ctx context.Context, actor domain.Actor, d *
 		if err := setDataClasses(ctx, t, d.ID, dataClasses); err != nil {
 			return err
 		}
-		return t.logCreate(ctx, "dependency", d.ID, d)
+		return t.logCreate(ctx, "dependency", d.ID, auditedDependency(d, dataClasses))
 	})
 }
 
@@ -289,6 +313,12 @@ func (s *SQLStore) UpdateDependency(ctx context.Context, actor domain.Actor, d *
 		return err
 	}
 	before, err := s.GetDependency(ctx, d.ID)
+	if err != nil {
+		return err
+	}
+	// Read the existing classes before the write, so a change to them alone
+	// still produces a diff.
+	beforeClasses, err := s.DataClassesFor(ctx, []string{d.ID})
 	if err != nil {
 		return err
 	}
@@ -313,7 +343,14 @@ func (s *SQLStore) UpdateDependency(ctx context.Context, actor domain.Actor, d *
 		if err := setDataClasses(ctx, t, d.ID, dataClasses); err != nil {
 			return err
 		}
-		return t.logUpdate(ctx, "dependency", d.ID, &before.Dependency, d)
+		after := dataClasses
+		if after == nil {
+			// nil means "not managing classes here", so they are unchanged.
+			after = beforeClasses[d.ID]
+		}
+		return t.logUpdate(ctx, "dependency", d.ID,
+			auditedDependency(&before.Dependency, beforeClasses[d.ID]),
+			auditedDependency(d, after))
 	})
 }
 

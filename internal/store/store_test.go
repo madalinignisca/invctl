@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -675,6 +676,184 @@ func TestSpanningAssetsExcludesRetired(t *testing.T) {
 			if len(after) != 0 {
 				t.Errorf("a retired asset is still reported as spanning environments")
 			}
+		})
+	}
+}
+
+// TestSecretRefNeverReachesTheAuditTrail. `snapshotJSON` serialises every
+// db-tagged field, so creating an identity wrote its full Vault path into
+// `change_log.diff` -- a table rendered to every authenticated reader,
+// including read-only ones, and never pruned. A path is not a secret, but a
+// complete permanent map of where every credential lives is a reconnaissance
+// gift, and CLAUDE.md already forbids logging secret_ref.
+func TestSecretRefNeverReachesTheAuditTrail(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			s, ctx := newStore(t, e)
+
+			const path = "kv/prod/orders/db-super-secret-path"
+			identity, err := domain.NewIdentity(NewID(), domain.IdentityServiceAccount, "svc-orders")
+			if err != nil {
+				t.Fatalf("building identity: %v", err)
+			}
+			identity.SecretRef = strPtr(path)
+			if err := s.CreateIdentity(ctx, testActor, identity); err != nil {
+				t.Fatalf("creating identity: %v", err)
+			}
+
+			changes, err := s.ListChangesForEntity(ctx, "identity", identity.ID, 10)
+			if err != nil {
+				t.Fatalf("listing changes: %v", err)
+			}
+			if len(changes) != 1 {
+				t.Fatalf("got %d entries, want 1", len(changes))
+			}
+			if strings.Contains(changes[0].Diff, path) {
+				t.Errorf("the secret path leaked into the audit trail: %s", changes[0].Diff)
+			}
+			if !strings.Contains(changes[0].Diff, domain.Redacted) {
+				t.Errorf("the field is not marked redacted, so a reader cannot tell it exists: %s", changes[0].Diff)
+			}
+
+			// The whole audit trail, not just this entity's slice.
+			all, err := s.ListRecentChanges(ctx, 200)
+			if err != nil {
+				t.Fatalf("listing changes: %v", err)
+			}
+			for _, c := range all {
+				if strings.Contains(c.Diff, path) {
+					t.Errorf("secret path present in a %s %s entry", c.EntityType, c.Action)
+				}
+			}
+		})
+	}
+}
+
+// TestPasswordHashNeverReachesTheAuditTrail: CreateUser redacted by hand, which
+// worked but did not survive contact with a second sensitive column. The
+// redaction is structural now, so assert it at the same level.
+func TestPasswordHashNeverReachesTheAuditTrail(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			s, ctx := newStore(t, e)
+
+			const hash = "$argon2id$v=19$m=65536$UNIQUEHASHVALUE"
+			u, err := domain.NewAppUser(NewID(), "someone", domain.UserSourceLocal, s.Now())
+			if err != nil {
+				t.Fatalf("building user: %v", err)
+			}
+			u.PasswordHash = strPtr(hash)
+			if err := s.CreateUser(ctx, testActor, u); err != nil {
+				t.Fatalf("creating user: %v", err)
+			}
+
+			all, err := s.ListRecentChanges(ctx, 50)
+			if err != nil {
+				t.Fatalf("listing changes: %v", err)
+			}
+			for _, c := range all {
+				if strings.Contains(c.Diff, hash) {
+					t.Errorf("password hash leaked into the audit trail: %s", c.Diff)
+				}
+			}
+		})
+	}
+}
+
+// TestDataClassChangeIsAudited. Data classes live in a child table, so a change
+// to them produced no diff on the dependency struct and therefore no audit
+// entry at all. An edge acquiring 'chd' is the single most scope-relevant event
+// this system records, and it was silent.
+func TestDataClassChangeIsAudited(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			s, ctx := newStore(t, e)
+			envID := mustEnvironment(t, s, ctx, "prod", domain.EnvRoleProduction)
+
+			mkService := func(code string) string {
+				svc, err := domain.NewService(NewID(), domain.ServiceSpec{
+					Code: code, Name: code, Kind: domain.SvcAPI, EnvironmentID: envID,
+					Availability: domain.AvailStandalone, Tier: 1}, s.Now())
+				if err != nil {
+					t.Fatalf("building service: %v", err)
+				}
+				if err := s.CreateService(ctx, testActor, svc); err != nil {
+					t.Fatalf("creating service: %v", err)
+				}
+				return svc.ID
+			}
+			consumer, provider := mkService("consumer"), mkService("provider")
+
+			port := 5432
+			ep, err := domain.NewEndpoint(NewID(), provider, "sql", domain.ProtoTCP, &port, domain.BindHost)
+			if err != nil {
+				t.Fatalf("building endpoint: %v", err)
+			}
+			if err := s.CreateEndpoint(ctx, testActor, ep); err != nil {
+				t.Fatalf("creating endpoint: %v", err)
+			}
+
+			epID := ep.ID
+			dep, err := domain.NewDependency(NewID(), domain.DependencySpec{
+				ConsumerServiceID: consumer, ProviderEndpointID: &epID,
+				Nature: domain.NatureHard, FailureMode: "order writes fail"}, s.Now())
+			if err != nil {
+				t.Fatalf("building dependency: %v", err)
+			}
+			if err := s.CreateDependency(ctx, testActor, dep, []string{"telemetry"}); err != nil {
+				t.Fatalf("creating dependency: %v", err)
+			}
+
+			t.Run("the create entry records what the edge carries", func(t *testing.T) {
+				changes, err := s.ListChangesForEntity(ctx, "dependency", dep.ID, 10)
+				if err != nil {
+					t.Fatalf("listing changes: %v", err)
+				}
+				if !strings.Contains(changes[0].Diff, "telemetry") {
+					t.Errorf("create entry does not record the data classes: %s", changes[0].Diff)
+				}
+			})
+
+			t.Run("acquiring chd is audited", func(t *testing.T) {
+				before, _ := s.ListChangesForEntity(ctx, "dependency", dep.ID, 50)
+
+				row, err := s.GetDependency(ctx, dep.ID)
+				if err != nil {
+					t.Fatalf("getting dependency: %v", err)
+				}
+				updated := row.Dependency
+				// Change ONLY the data classes.
+				if err := s.UpdateDependency(ctx, testActor, &updated, []string{"chd", "pii"}); err != nil {
+					t.Fatalf("updating dependency: %v", err)
+				}
+
+				after, err := s.ListChangesForEntity(ctx, "dependency", dep.ID, 50)
+				if err != nil {
+					t.Fatalf("listing changes: %v", err)
+				}
+				if len(after) == len(before) {
+					t.Fatal("an edge acquired chd with no audit entry")
+				}
+				if !strings.Contains(after[0].Diff, "chd") {
+					t.Errorf("the entry does not name the new class: %s", after[0].Diff)
+				}
+				if !strings.Contains(after[0].Diff, "telemetry") {
+					t.Errorf("the entry does not record what it changed from: %s", after[0].Diff)
+				}
+			})
+
+			t.Run("re-submitting the same set in another order is not a change", func(t *testing.T) {
+				before, _ := s.ListChangesForEntity(ctx, "dependency", dep.ID, 50)
+				row, _ := s.GetDependency(ctx, dep.ID)
+				updated := row.Dependency
+				if err := s.UpdateDependency(ctx, testActor, &updated, []string{"pii", "chd"}); err != nil {
+					t.Fatalf("updating dependency: %v", err)
+				}
+				after, _ := s.ListChangesForEntity(ctx, "dependency", dep.ID, 50)
+				if len(after) != len(before) {
+					t.Errorf("reordering the same classes produced a spurious audit entry: %s", after[0].Diff)
+				}
+			})
 		})
 	}
 }

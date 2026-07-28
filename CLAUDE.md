@@ -52,8 +52,50 @@ Vendor `htmx.min.js` and `alpine.min.js` into `web/static`. This will likely run
 - **`attrs` JSON columns are opaque.** Store as `TEXT`, unmarshal in Go. Never `json_extract` or `->>` in a `WHERE` clause. If you need to filter on it, it isn't an attribute — promote it to a real column.
 - **IP addresses use the four-column pattern** (`addr_text`, `addr_family`, `addr_start`, `addr_end` as `BLOB`). Normalize in Go. See `HANDOVER.md` §4.1.
 - **Containment queries go through `asset_closure`**, never recursive `parent_id` walks in application code.
-- **Every mutation writes a `change_log` row in the same transaction.** No exceptions. If a handler mutates without logging, it's incomplete.
-- **Soft delete only.** Set `lifecycle = 'retired'`. There is no `DELETE FROM` in handler code.
+- **Every mutation of *declared* state writes a `change_log` row in the same transaction.** No exceptions. If a handler mutates declared state without logging, it's incomplete.
+- **Observed state has its own audit obligation — narrower, not absent.** It logs *transitions* to `observed_transition`, never to `change_log`. See "Declared vs observed" below. Reclassifying a column to dodge the audit rule is an architecture decision, not a refactor.
+- **Soft delete only.** Set `lifecycle = 'retired'`. The single permitted `DELETE FROM` in this codebase is the admin-invoked prune of `observed_transition`; there is none in handler code.
+
+### Declared vs observed
+
+Three kinds of fact, three obligations. Full normative rules, the column
+classification table and the required boundary tests are in **`docs/AUDIT.md`** — read
+it before writing any code that accepts input from a monitoring system.
+
+- **Declared** — what somebody asserts *should* be true: an asset exists, this service
+  depends on that endpoint, a human verified this edge. Configuration and intent.
+  Changes rarely, always because a person decided. Every change is a permanent record.
+- **Observed** — what the estate reports about *itself*: reachable, running, last seen.
+  Telemetry. Changes constantly, nobody decided it, most reports repeat the last one.
+- **Provenance** — `source` and `confidence`. Not a fact about the world, a claim about
+  where a fact came from. Laundering provenance is how a fabricated fact becomes an
+  authoritative one, so only a `user` actor may write `source = 'declared'`.
+
+The rules that bite most often:
+
+- Naming does not decide the class. `desired_state` is **declared** (intent);
+  `verified_at` is **declared** (a person's attestation). Consult the table, don't guess.
+- Observed state never becomes intent. Reported `down` never sets `lifecycle`,
+  never sets `desired_state`, never deletes a placement. Only a person retires something.
+- Log the transition, not the heartbeat — and never route an observation through
+  `logUpdate`. `diffJSON` compares every `db`-tagged field except `updated_at`, so a
+  moving `observed_at` would log every poll: the exact unbounded growth the rule exists
+  to prevent. Observed writes call `RecordObservation`, which writes only on a change of
+  `state`.
+- Keep three timestamps and never collapse them: `state_since` (onset — "down since
+  when" is the 03:00 question), `last_report_at` (server), `reported_at` (caller).
+- Attribution is server-derived from the credential, never read from the payload —
+  `change_log.actor` is free TEXT and would otherwise forge a human's entry. Every view
+  rendering `actor` renders `actor_kind` beside it.
+- A monitoring credential is not an `app_user`, never appears in `INV_ADMIN_USERS`, and
+  never reaches `authz.CanWrite`. An observation for an unknown entity is **404, never
+  created** — `ON CONFLICT` would turn a narrow token into an inventory-write vector.
+- `change_log` is append-only: no `UPDATE`, no `DELETE`, ever. Correct a wrong entry by
+  writing a new one. **Never prune on `actor_kind`** — it records who wrote a row, not
+  what kind of fact it is, and this repo already writes declared state as `system` and
+  `agent`.
+- Secret references never enter the audit trail. Redact `identity.secret_ref` in
+  `snapshotJSON`/`diffJSON` the way `CreateUser` already redacts `password_hash`.
 
 ### SQLite specifics
 
@@ -151,7 +193,8 @@ A change is complete when all of these hold:
 
 - [ ] Queries use `?` placeholders and run on both engines
 - [ ] No forbidden Postgres-only feature introduced
-- [ ] Mutation writes a `change_log` row in the same transaction
+- [ ] Mutation of declared state writes a `change_log` row in the same transaction
+- [ ] Observed-state writes are idempotent, log only on transition, and touch no declared column
 - [ ] Domain constructor validates; DB `CHECK` matches the Go constant set
 - [ ] Handler branches correctly on `HX-Request`
 - [ ] Validation failure returns 422 with the form partial re-rendered
@@ -168,7 +211,10 @@ A change is complete when all of these hold:
 - Write `$1` placeholders, or dialect-specific SQL outside `store/sqlite` and `store/postgres`
 - Query inside a JSON column
 - Hard-delete a row
-- Mutate without a `change_log` entry
+- Mutate declared state without a `change_log` entry
+- Let an observed-state writer reach a declared column, or derive `lifecycle` from observed health
+- Put observed transitions in `change_log`, or prune anything on `actor_kind`
+- Let a machine credential write `source = 'declared'`, `verified_by` or `verified_at`
 - Put business logic in a template
 - Return JSON to the UI
 - Store a secret value in the database

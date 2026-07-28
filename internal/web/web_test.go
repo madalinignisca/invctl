@@ -987,3 +987,35 @@ func (b *syncBuffer) Reset() {
 	defer b.mu.Unlock()
 	b.buf.Reset()
 }
+
+// TestAuditTrailAlwaysShowsWhoAndWhatKind. `change_log.actor` is free text and
+// a machine writes into the same column, so a name alone does not establish
+// that a person did something. Three of the four views rendered the name
+// without the kind -- including the entity detail pages, which are what an
+// incident review actually opens.
+func TestAuditTrailAlwaysShowsWhoAndWhatKind(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	assetID := h.refs.Assets["hv-01"]
+	serviceID := h.refs.Services["orders-api"]
+
+	// Every page that renders the change log. The fixture is seeded by a
+	// 'system' actor, so the kind is present to find.
+	for _, path := range []string{
+		"/",                      // dashboard recent-changes panel
+		"/changes",               // the global log
+		"/assets/" + assetID,     // asset history
+		"/services/" + serviceID, // service history
+	} {
+		page := body(t, h.get(path, false))
+		if !strings.Contains(page, "seed") {
+			t.Errorf("GET %s does not render the actor at all", path)
+			continue
+		}
+		if !strings.Contains(page, ">system<") {
+			t.Errorf("GET %s renders an actor without its actor_kind; "+
+				"a machine's entry is indistinguishable from a person's", path)
+		}
+	}
+}

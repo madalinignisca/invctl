@@ -102,3 +102,24 @@ func checkRequired(ve *ValidationError, field, value string) string {
 	}
 	return trimmed
 }
+
+// RedactedFields are database column names whose values must never reach the
+// audit trail, keyed by the `db` tag.
+//
+// The change log is read by more people, and kept far longer, than the tables
+// it describes: it renders to every authenticated reader including read-only
+// ones, and nothing is ever pruned from it. `CreateUser` already redacts a
+// password hash by hand for exactly this reason; doing it structurally means
+// the next sensitive column is covered by default rather than by whoever
+// remembers.
+//
+// `secret_ref` holds a path rather than a secret, but a complete, permanent,
+// widely-readable map of where every credential lives is a reconnaissance gift.
+// The audit trail records *that* it changed, never what to.
+var RedactedFields = map[string]bool{
+	"password_hash": true,
+	"secret_ref":    true,
+}
+
+// Redacted is the placeholder written in place of a sensitive value.
+const Redacted = "[redacted]"

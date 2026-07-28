@@ -87,7 +87,7 @@
           <td class="mono" style="font-size:12px;color:var(--muted)">{{since .At}}</td>
           <td class="mono" style="font-size:12px">{{.EntityType}}</td>
           <td><span class="pill pill-muted">{{.Action}}</span></td>
-          <td class="mono" style="font-size:12px;color:var(--muted)">{{.Actor}}</td>
+          <td>{{template "actor_cell" .}}</td>
         </tr>
         {{end}}
       </tbody>

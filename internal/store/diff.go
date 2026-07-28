@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+
+	"github.com/gabriel/invctl/internal/domain"
 )
 
 // Change log diffs are field-level rather than full-row snapshots (see
@@ -49,6 +51,11 @@ func diffJSON(before, after any) (string, bool, error) {
 		if reflect.DeepEqual(oldVal, newVal) {
 			continue
 		}
+		if domain.RedactedFields[name] {
+			// Record that it changed, never what to.
+			changes[name] = fieldChange{Old: domain.Redacted, New: domain.Redacted}
+			continue
+		}
 		changes[name] = fieldChange{Old: oldVal, New: newVal}
 	}
 
@@ -71,6 +78,10 @@ func snapshotJSON(entity any) (string, error) {
 	for i := 0; i < t.NumField(); i++ {
 		name := t.Field(i).Tag.Get("db")
 		if name == "" || name == "-" {
+			continue
+		}
+		if domain.RedactedFields[name] {
+			fields[name] = domain.Redacted
 			continue
 		}
 		fields[name] = deref(v.Field(i))
