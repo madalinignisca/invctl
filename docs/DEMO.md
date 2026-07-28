@@ -179,3 +179,65 @@ bin/invctl` will not match. Check what is actually listening:
 ```bash
 ss -ltnp 'sport = :8088'
 ```
+
+---
+
+## What the app needs behind a TLS-terminating proxy
+
+The deployment itself is handled separately. These are the application-side
+requirements, established by running the app behind a simulated proxy rather
+than by reading the middleware — two of the three are not hardening, and getting
+them wrong produces a 400 with no useful message.
+
+| What reaches the app | Result |
+|---|---|
+| original `Host` + `X-Forwarded-Proto: https` + browser Referer | **303 — works** |
+| Referer from another origin | 400 — CSRF correctly refuses |
+| **`X-Forwarded-Proto` missing** | **400 — every form post rejected** |
+
+1. **`INV_SECURE_COOKIES=true`.** One switch, three jobs: `Secure` on the
+   session cookie, `Secure` on the CSRF cookie, and — the part that surprises —
+   it is the *only* thing that makes the app trust `X-Forwarded-Proto`. Without
+   it the app believes it is serving plaintext while the browser believes
+   otherwise, and nosurf refuses the mismatch.
+2. **`X-Forwarded-Proto: https` must reach the app.** Without it, logging in
+   fails with a 400 and no explanation. A broken deployment, not a weakened one.
+3. **The original `Host` must be preserved.** The CSRF check compares the
+   Referer against `r.Host`; forward the upstream address instead and every post
+   is rejected as cross-origin.
+
+Also worth setting: `INV_SESSION_KEY`, or a random one is generated per start and
+everyone is signed out whenever the process restarts. And `INV_LISTEN` bound to
+loopback, so the plaintext port is not reachable directly.
+
+HSTS belongs on the proxy — the app cannot know whether every hostname it is
+served under is HTTPS-only.
+
+### The public instance is writable, and that is a decision
+
+`admin` / `demo-password` is in this file and in the `Makefile`, and so are the
+two agent tokens. On a public URL that means **anyone can sign in and write**:
+retire assets, create overrides, run the network derive, POST observations that
+change what the dashboard says.
+
+Accepted deliberately for a short-lived demo. What it costs:
+
+- The estate is whatever visitors leave behind. Re-run `make demo` before
+  showing it to anyone.
+- Someone can make the dashboard say something false while you are presenting.
+
+What it does **not** cost, because the M6 boundaries hold regardless of who
+holds the token: an agent credential still cannot create inventory (unknown
+entities are 404 and queued as drift, capped per reporter), cannot write
+`source = 'declared'`, cannot sign off `verified_by`, cannot set its own
+confidence, cannot reach any route but `POST /observations`, and cannot exceed
+its environment scope.
+
+To close it later, cheapest first:
+
+- Change `INV_ADMIN_PASSWORD` and drop `INV_AGENT_TOKENS` — visitors browse, and
+  nothing writes.
+- Or set `INV_ADMIN_USERS=` empty: every account becomes read-only,
+  `authz.CanWrite` returns false for everyone, and the write routes 403. The
+  closest thing to a safe public demo, at the cost of not being able to
+  demonstrate the override flow live.
