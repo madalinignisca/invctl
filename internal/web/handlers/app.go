@@ -201,6 +201,34 @@ func queryInt(r *http.Request, key string, fallback int) int {
 	return n
 }
 
+// queryStrings reads a repeated query parameter -- ?asset=a&asset=b -- and
+// returns every value, trimmed, with blanks and duplicates dropped and the
+// caller's order kept.
+//
+// Order is preserved because the page that uses this names the set back to the
+// operator in the order they built it. Duplicates are dropped because the same
+// id twice is one thing, and naming it twice under a heading that claims two
+// would be a lie about what was simulated.
+func queryStrings(r *http.Request, key string) []string {
+	return dedupeStrings(r.URL.Query()[key])
+}
+
+// dedupeStrings trims, drops blanks, and keeps the first occurrence of each
+// value in its original order.
+func dedupeStrings(in []string) []string {
+	seen := make(map[string]bool, len(in))
+	out := make([]string, 0, len(in))
+	for _, v := range in {
+		v = strings.TrimSpace(v)
+		if v == "" || seen[v] {
+			continue
+		}
+		seen[v] = true
+		out = append(out, v)
+	}
+	return out
+}
+
 // checkbox reads an HTML checkbox, which is absent rather than false when
 // unticked.
 func checkbox(r *http.Request, key string) bool {

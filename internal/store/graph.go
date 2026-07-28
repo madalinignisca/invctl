@@ -265,6 +265,30 @@ func (s *SQLStore) loadNetGraph(ctx context.Context) (*impact.NetGraph, error) {
 	if net.IsEmpty() {
 		return nil, nil
 	}
+
+	// Labels for the assets reachability can name. Loaded only once the graph
+	// is known to be non-empty, and deliberately NOT counted by IsEmpty, so an
+	// estate with no declared topology still produces Inputs.Net == nil and a
+	// byte-identical answer. Scoped to attached assets and their descendants
+	// rather than the whole asset table, which is the same bound the closure
+	// query above already uses.
+	var labels []struct {
+		ID   string `db:"id"`
+		Kind string `db:"kind"`
+		Name string `db:"name"`
+	}
+	if err := s.read(ctx, &labels, `
+		SELECT DISTINCT a.id, a.kind, a.name
+		FROM asset a
+		JOIN asset_closure c ON c.descendant_id = a.id
+		JOIN net_attachment na ON na.asset_id = c.ancestor_id AND na.lifecycle = ?
+		ORDER BY a.id`, domain.LifecycleActive); err != nil {
+		return nil, fmt.Errorf("loading asset labels for graph: %w", err)
+	}
+	for _, l := range labels {
+		net.AssetNames[l.ID] = impact.AssetLabel{Name: l.Name, Kind: l.Kind}
+	}
+
 	return net, nil
 }
 

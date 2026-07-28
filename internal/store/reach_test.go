@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/gabriel/invctl/internal/domain"
@@ -1061,5 +1062,87 @@ func markMgmt(t *testing.T, s *SQLStore, ctx context.Context, interfaceID string
 	t.Helper()
 	if _, err := s.db.Writer.Exec(s.db.Rebind(`UPDATE interface SET is_mgmt = TRUE WHERE id = ?`), interfaceID); err != nil {
 		t.Fatalf("marking interface as mgmt: %v", err)
+	}
+}
+
+// TestAttachmentPinsReachTheAuditTrail.
+//
+// The pinned chassis set lives in net_attachment_member, so writing it produced
+// no diff on the parent struct and therefore no audit record at all -- the same
+// shape that previously let asset environments and dependency data classes
+// change in silence. It matters more here than a join table usually does:
+// whether a host is pinned to one chassis or two is the single fact that
+// decides whether losing a switch is a redundancy note or four services down,
+// and there is no update path for members, so the create entry is the only
+// chance to record it.
+func TestAttachmentPinsReachTheAuditTrail(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			s, ctx := newStore(t, e)
+
+			core := mustNetGroup(t, s, ctx, "sw-core", domain.NetGroupMCLAG, domain.NetRoleCore, domain.AvailActiveActive)
+			c1 := mustAsset(t, s, ctx, domain.KindSwitch, "sw-core-1", nil)
+			c2 := mustAsset(t, s, ctx, domain.KindSwitch, "sw-core-2", nil)
+			mustNetGroupMember(t, s, ctx, core, c1, "member")
+			mustNetGroupMember(t, s, ctx, core, c2, "member")
+
+			// Two hosts differing ONLY in how many chassis they pin. If the
+			// pins were absent from the trail these two entries would be
+			// byte-identical apart from their ids, which is exactly the
+			// failure: "who declared hv-03 single-homed?" unanswerable.
+			dual := mustAsset(t, s, ctx, domain.KindHypervisor, "hv-dual", nil)
+			single := mustAsset(t, s, ctx, domain.KindHypervisor, "hv-single", nil)
+
+			attach := func(host string, pins ...string) string {
+				t.Helper()
+				na, err := domain.NewNetAttachment(NewID(), host, core, domain.PlaneData, s.Now())
+				if err != nil {
+					t.Fatalf("building attachment: %v", err)
+				}
+				members := make([]domain.NetAttachmentMember, 0, len(pins))
+				for _, p := range pins {
+					members = append(members, domain.NetAttachmentMember{AttachmentID: na.ID, AssetID: p})
+				}
+				if err := s.CreateNetAttachment(ctx, testActor, na, members); err != nil {
+					t.Fatalf("creating attachment for %s: %v", host, err)
+				}
+				return na.ID
+			}
+			dualID := attach(dual, c1, c2)
+			singleID := attach(single, c2)
+
+			diffOf := func(id string) string {
+				t.Helper()
+				changes, err := s.ListChangesForEntity(ctx, "net_attachment", id, 5)
+				if err != nil {
+					t.Fatalf("listing changes: %v", err)
+				}
+				if len(changes) != 1 {
+					t.Fatalf("got %d audit entries for %s, want 1", len(changes), id)
+				}
+				return changes[0].Diff
+			}
+
+			dualDiff, singleDiff := diffOf(dualID), diffOf(singleID)
+			for _, tc := range []struct{ name, diff, want string }{
+				{"dual-homed", dualDiff, c1 + "," + c2},
+				{"single-homed", singleDiff, c2},
+			} {
+				if !strings.Contains(tc.diff, "pinned_members") {
+					t.Errorf("%s: audit entry records no pinned_members at all; the trail cannot say "+
+						"which chassis the cable landed on\n got: %s", tc.name, tc.diff)
+					continue
+				}
+				if !strings.Contains(tc.diff, tc.want) {
+					t.Errorf("%s: audit entry does not name the pinned chassis %q\n got: %s",
+						tc.name, tc.want, tc.diff)
+				}
+			}
+			// The decisive check: single-homing must be distinguishable from
+			// dual-homing in the trail, not merely present in both.
+			if strings.Contains(singleDiff, c1) {
+				t.Errorf("the single-homed attachment's audit entry names %s, which it is not pinned to", c1)
+			}
+		})
 	}
 }

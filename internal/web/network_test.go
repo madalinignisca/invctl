@@ -33,7 +33,10 @@ func mustNetGroupWeb(t *testing.T, h *harness, code, role, availability string) 
 // new M2 write route.
 func TestReadOnlyUserCannotWriteReachabilityTopology(t *testing.T) {
 	h := newHarness(t)
-	groupID := mustNetGroupWeb(t, h, "sw-core", domain.NetRoleCore, domain.AvailStandalone)
+	// A test-scoped code: the seed now declares sw-core/fw-edge/sw-oob and
+	// net_group.code is UNIQUE. This test is about RBAC on the routes, not
+	// about the group's identity, so any code will do.
+	groupID := mustNetGroupWeb(t, h, "rbac-test-group", domain.NetRoleCore, domain.AvailStandalone)
 	h.login("viewer", "viewer-password")
 
 	cases := []struct{ name, path string }{
@@ -125,24 +128,45 @@ func TestNetworkGroupValidationIs422(t *testing.T) {
 // TestNetworkDeriveProposesAndDoesNotWriteThroughUI drives the propose-only
 // contract through the real router: posting to /network/derive must render a
 // proposal and must not create any row anywhere in the topology tables.
+//
+// Since M5 the seed declares an attachment for every cable it lays, so
+// derivation against an untouched fixture correctly proposes nothing -- that
+// is the fixture agreeing with itself, and it would make this test assert
+// nothing. So the test patches in one cable derivation has never seen: a new
+// server into a spare port on sw-core-1, whose group the seed already
+// declares.
+//
+// The propose-only half is asserted as "the count did not change", not as
+// "the count is zero". Repointing it at the seeded group and changing 0 to 3
+// would destroy the guarantee: derivation could then write one extra row and
+// the test would still pass.
 func TestNetworkDeriveProposesAndDoesNotWriteThroughUI(t *testing.T) {
 	h := newHarness(t)
 	h.login("admin", "admin-password")
 	ctx := context.Background()
 
-	// The seed fixture cables hv-01's mgmt NIC to sw-core-1, so a forwarder
-	// group over sw-core-1 makes derivation propose one mgmt attachment.
 	swCoreAssetID := h.refs.Assets["sw-core-1"]
-	if swCoreAssetID == "" {
-		t.Skip("fixture does not have sw-core-1")
+	groupID := h.refs.NetGroups["sw-core"]
+	if swCoreAssetID == "" || groupID == "" {
+		t.Fatal("fixture does not have sw-core-1 in a declared sw-core group")
 	}
-	groupID := mustNetGroupWeb(t, h, "sw-core", domain.NetRoleCore, domain.AvailStandalone)
-	m, err := domain.NewNetGroupMember(groupID, swCoreAssetID, "member", h.store.Now())
+
+	// An undeclared host on an undeclared port. is_mgmt is false on both ends,
+	// so the proposal must come out on the data plane.
+	host := mustServerAssetWeb(t, h, "test-derive-host")
+	hostPort := mustInterfaceWeb(t, h, host, "eno1")
+	switchPort := mustInterfaceWeb(t, h, swCoreAssetID, "Ethernet40")
+	link, err := domain.NewLink(store.NewID(), hostPort, switchPort)
 	if err != nil {
-		t.Fatalf("building member: %v", err)
+		t.Fatalf("building link: %v", err)
 	}
-	if err := h.store.AddNetGroupMember(ctx, domain.SystemActor, m); err != nil {
-		t.Fatalf("adding member: %v", err)
+	if err := h.store.CreateLink(ctx, domain.SystemActor, link); err != nil {
+		t.Fatalf("creating link: %v", err)
+	}
+
+	before, err := h.store.ListNetAttachments(ctx, groupID)
+	if err != nil {
+		t.Fatalf("listing attachments: %v", err)
 	}
 
 	token := h.csrfToken("/network")
@@ -158,15 +182,40 @@ func TestNetworkDeriveProposesAndDoesNotWriteThroughUI(t *testing.T) {
 	if !strings.Contains(text, "Derivation proposal") {
 		t.Error("the response is not the derivation result partial")
 	}
-	if !strings.Contains(text, "hv-01") {
-		t.Error("the proposal does not name hv-01, which the fixture cables to sw-core-1")
+	if !strings.Contains(text, "test-derive-host") {
+		t.Error("the proposal does not name test-derive-host, which this test cables to sw-core-1")
 	}
 
-	rows, err := h.store.ListNetAttachments(ctx, groupID)
+	after, err := h.store.ListNetAttachments(ctx, groupID)
 	if err != nil {
 		t.Fatalf("listing attachments: %v", err)
 	}
-	if len(rows) != 0 {
-		t.Errorf("derivation wrote %d attachment rows through the UI; it must be propose-only", len(rows))
+	if len(after) != len(before) {
+		t.Errorf("derivation changed the attachment count from %d to %d through the UI; "+
+			"it must be propose-only", len(before), len(after))
 	}
+}
+
+func mustServerAssetWeb(t *testing.T, h *harness, name string) string {
+	t.Helper()
+	a, err := domain.NewAsset(store.NewID(), domain.KindServer, name, nil, h.store.Now())
+	if err != nil {
+		t.Fatalf("building asset %s: %v", name, err)
+	}
+	if err := h.store.CreateAsset(context.Background(), domain.SystemActor, a, nil); err != nil {
+		t.Fatalf("creating asset %s: %v", name, err)
+	}
+	return a.ID
+}
+
+func mustInterfaceWeb(t *testing.T, h *harness, assetID, name string) string {
+	t.Helper()
+	i, err := domain.NewInterface(store.NewID(), assetID, name, domain.FFSFP28)
+	if err != nil {
+		t.Fatalf("building interface %s: %v", name, err)
+	}
+	if err := h.store.CreateInterface(context.Background(), domain.SystemActor, i); err != nil {
+		t.Fatalf("creating interface %s: %v", name, err)
+	}
+	return i.ID
 }

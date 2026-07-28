@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/gabriel/invctl/internal/domain"
 )
@@ -411,6 +412,39 @@ const netAttachmentSelect = `
 // target group inside this same transaction: the migration deliberately does
 // not enforce this with a composite FK (it would need group_id denormalised
 // onto net_attachment_member), so Go is the only place this is ever checked.
+// netAttachmentAudit folds the pinned chassis set into the audited value.
+//
+// The pins live in net_attachment_member, so writing them produced no diff on
+// the parent struct and therefore no record at all -- the same failure as asset
+// environments and dependency data classes, and the third time this shape has
+// bitten. It matters more here than the count suggests: whether hv-03 is pinned
+// to one chassis or two is the single fact that turns "lose sw-core-2" from a
+// redundancy note into four services down, and without this the trail cannot
+// answer who declared it single-homed, or when. There is no update path for
+// members -- they can only be set at create -- so this entry is the only chance
+// to record them.
+//
+// Names rather than ids would be friendlier, but resolving them needs a query
+// per member inside the write transaction; the ids are at least present and
+// diffable, which is the property the rule actually requires.
+type netAttachmentAudit struct {
+	domain.NetAttachment
+	PinnedMembers string `db:"pinned_members"`
+}
+
+func auditedNetAttachment(na *domain.NetAttachment, members []domain.NetAttachmentMember) *netAttachmentAudit {
+	pins := make([]string, 0, len(members))
+	for _, m := range members {
+		pin := m.AssetID
+		if m.InterfaceID != nil && *m.InterfaceID != "" {
+			pin += "@" + *m.InterfaceID
+		}
+		pins = append(pins, pin)
+	}
+	sort.Strings(pins)
+	return &netAttachmentAudit{NetAttachment: *na, PinnedMembers: strings.Join(pins, ",")}
+}
+
 func (s *SQLStore) CreateNetAttachment(ctx context.Context, actor domain.Actor, na *domain.NetAttachment, members []domain.NetAttachmentMember) error {
 	if err := na.Validate(); err != nil {
 		return err
@@ -472,7 +506,7 @@ func (s *SQLStore) CreateNetAttachment(ctx context.Context, actor domain.Actor, 
 				return translateWriteErr(err, "adding net attachment member")
 			}
 		}
-		return t.logCreate(ctx, "net_attachment", na.ID, na)
+		return t.logCreate(ctx, "net_attachment", na.ID, auditedNetAttachment(na, members))
 	})
 }
 

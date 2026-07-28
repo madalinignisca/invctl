@@ -154,8 +154,7 @@
     </div>
     <div class="panel-body">
       {{$cov := .Result.Coverage}}
-      {{$declared := or $cov.Modelled $cov.Inherited}}
-      {{if not $declared}}
+      {{if not $cov.TopologyDeclared}}
         <div class="empty">
           <strong>No network topology declared.</strong>
           Nothing here isolates, partitions or loses redundancy because no forwarder
@@ -164,21 +163,37 @@
           to get a real answer instead.
         </div>
       {{else}}
+        {{/* Say which population these numbers describe. They count assets
+             that carry a service instance, not the whole inventory, and a
+             sentence that omits that reads as a coverage claim about the
+             estate. */}}
         <p class="lede" style="margin-bottom:10px">
-          {{$cov.Modelled}} asset(s) modelled directly, {{$cov.Inherited}} more inherited from an
-          ancestor's attachment, {{$cov.Unmodelled}} with no declared attachment anywhere in their
-          containment ancestry -- unmodelled assets are never isolated, never partitioned and never
-          counted against anything.
+          Of the {{add $cov.Modelled $cov.Inherited $cov.Unmodelled}} host(s) carrying a service instance:
+          {{$cov.Modelled}} attach to the network directly,
+          {{$cov.Inherited}} inherit an attachment from an ancestor, and
+          {{$cov.Unmodelled}} have none anywhere in their containment ancestry.
+          An unmodelled host is never isolated, never partitioned and never counted against anything.
+          Assets that host nothing — racks, switches, PDUs — are outside this count.
+          {{if $cov.GroupsWithoutUplinkOrAnchor}}
+          <br><strong>{{$cov.GroupsWithoutUplinkOrAnchor}} forwarder group(s) have neither an uplink nor an anchor</strong>,
+          so nothing beyond them is modelled at all.
+          {{end}}
         </p>
 
         {{if .Result.Isolated}}
         <div class="scroll-x" style="margin-bottom:14px">
           <table>
+            <caption style="caption-side:top;text-align:left;padding:0 0 8px;color:var(--muted);font-size:12.5px">
+              {{pluralise (len .Result.Isolated) "asset cut off from its declared network" "assets cut off from their declared network"}}.
+              A <code>mgmt</code>-plane row means the machine is still serving and cannot be reached to be administered.
+            </caption>
             <thead><tr><th>Asset</th><th>Plane</th><th>Blocked by</th></tr></thead>
             <tbody>
               {{range .Result.Isolated}}
               <tr>
-                <td class="mono">{{.AssetID}}</td>
+                <td><a class="id" href="/assets/{{.AssetID}}">{{.Label}}</a>
+                  {{if .AssetKind}}<div style="color:var(--muted);font-size:12.5px">{{.AssetKind}}</div>{{end}}
+                </td>
                 <td>{{.Plane}}</td>
                 <td>{{if .BlockingGroup}}{{.BlockingGroup}}{{else}}—{{end}}</td>
               </tr>

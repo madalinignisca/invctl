@@ -353,3 +353,101 @@ the build cache hid it.
 
 The fix belongs in the test, not the Makefile: a test named "defaults" must own its
 environment. `pristineEnv` clears every `INV_*` variable `Load` reads.
+
+---
+
+## 2026-07-28 — M5: the fixture, multi-asset outage, and a channel that had never run
+
+### Correction to the M4 entry above
+
+The M4 section states that a mistyped `endpoint.exposure` "can add a row to a report; it
+cannot move a status", and that the design doc's worry about exposure becoming
+load-bearing was therefore resolved. **That was a description of dead code, not of the
+design.** Seam 3 folds exposure findings into `Result.Services` when every non-local
+endpoint of a service has lost its anchor, and always did — the fold simply never fired.
+
+`betterFoldAnchors` called `reach(host, anchor.GroupID)`, but `reach` resolves *both*
+arguments as asset ids through `modelled()`/`netOf()`, which index `net_attachment.asset_id`
+and `asset_closure.descendant_id`. A `net_group` id is neither, so the lookup returned
+`ok=false` for every input in the estate and `computeUnreachable` could never emit a row.
+The exposure channel had been inert since it was written.
+
+Repaired with `reachGroup`, which is the asymmetric question an anchor actually asks: one
+end is an asset that attaches to groups, the other *is* a group. So exposure is
+load-bearing after all, and the review pass over every endpoint's exposure that the design
+doc asked for before M4 is now genuinely owed.
+
+### The demo said "Nothing breaks" about losing the entire edge firewall pair
+
+Two independent causes, both fixed:
+
+- Seam 3 inert, above, so the anchors nothing could reach produced no finding.
+- `computeRedundancyLost` skipped any group whose status was `down`, reasoning it was
+  "already reported down elsewhere". True only for a group something *attaches* to, which
+  surfaces via `Isolated`. Nothing attaches to an edge pair — hosts attach to the core,
+  which uplinks to the edge — so losing both halves deleted the last remaining signal at
+  the moment it mattered most.
+
+The result was a strictly larger outage producing a strictly quieter page, and an
+unqualified all-clear about the loss of the estate's only route out. This is the same
+class of failure that started the whole network work, arriving through the feature built
+to fix it.
+
+### An asset that is down is off, not cut off
+
+`computeIsolated` reported assets that were themselves inside the outage. Losing a rack
+told the operator that nine powered-off machines had lost management reachability. The
+liveness rule spells the guard out — `alive := !down && !(needsNet && isolated)` is one
+`&&` precisely so a loss is charged once — and the *report* never got the same guard.
+
+### Cause must describe whatever decided the status
+
+`Cause` tested the isolation count before the propagation edge, so a service that lost an
+instance to isolation *and absorbed it* still read as a network problem. `vault` lost one
+of three nodes, quorum held, and it went degraded purely through its soft edge to `sso` —
+yet the row said "network path, not the service itself" about `sso`, which was 100% down
+and listed two rows above. `orders-api`, same edge, same provider, byte-identical Reason
+and Via, correctly said dependency. Two consumers of one provider giving contradictory
+guidance is indefensible under any reading.
+
+The propagated cases are now tested first. `via` is set only when a dependency *worsened*
+a service, and status is monotonic, so a non-empty `via` means that edge carried it to the
+status shown.
+
+**The scenario test asserted the old behaviour.** It was written by an agent that did not
+build the fixture, specifically to avoid recording implementation output as if it were
+design — and for this one field it recorded it anyway. The separation caught most of what
+it was meant to catch and not all of it; the independent operator-truth review is what
+found this, with the rendered rows side by side.
+
+### Coverage was answering a different question than it appeared to
+
+The panel read "0 asset(s) modelled directly, 0 with no declared attachment" while
+`hv-01`, `hv-02` and `hv-03` were precisely the assets with direct attachments. The
+numbers count assets that *carry a service instance* — the right denominator for an impact
+report, since an asset hosting nothing cannot change a service's status — but the sentence
+claimed to describe the estate. Reworded to say which population it measures, and
+`GroupsWithoutUplinkOrAnchor` is now rendered rather than computed and withheld.
+
+`TopologyDeclared` was added because "no topology declared" was being inferred from the
+counts being zero, which is also true of a topology attached only to assets that host
+nothing.
+
+### Attachment pins were the third silent set-replacement
+
+`net_attachment_member` holds which chassis a cable actually lands on, and
+`CreateNetAttachment` snapshotted only the parent row. Whether `hv-03` is pinned to one
+chassis or two is the single fact that turns "lose sw-core-2" from a redundancy note into
+four services down, and the trail could not answer who declared it single-homed. Same
+shape as asset environments and dependency data classes, same fix (`netAttachmentAudit`).
+There is no update path for members, so the create entry is the only chance to record them.
+
+### The window and the outage set must re-render together
+
+The window selector swapped only `#impact-result`, so the Remove links and the add-form
+kept the window the page was first loaded with. Change to 8 h, remove an asset, and you
+land on a 3-minute answer under an 8-hour heading — and async dependencies genuinely read
+the window. The Remove link's own comment already reasons this out for its own direction:
+"swapping only the result panel would leave every one of them describing an outage that is
+no longer being simulated." Either every restatement re-renders or none may, so the window
+is now a full navigation too.

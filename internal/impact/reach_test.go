@@ -137,123 +137,117 @@ func scenarioKey(assets []string) string {
 	return joined
 }
 
+// clearSeededTopology retires every forwarder group the fixture arrives with,
+// which cascades that group's members, uplinks, attachments and anchors in the
+// same transaction. loadNetGraph filters retired rows, so afterwards
+// Inputs.Net is nil again and every reachability channel is inert.
+//
+// It exists because M5 moved the demo topology into the seed. Before that, a
+// fresh fixture carried zero net_* rows and "no topology" was simply the state
+// a test found itself in; it is now a state a test has to ask for, and one
+// worth asking for explicitly rather than by accident.
+//
+// Note that net_group.code and net_anchor.code are plain UNIQUE, not partial
+// on lifecycle, so retiring does NOT free the codes. Ad-hoc topology declared
+// by a test still has to use its own, test-scoped codes.
+func clearSeededTopology(t *testing.T, f *fixture) {
+	t.Helper()
+	groups, err := f.store.ListNetGroups(f.ctx)
+	if err != nil {
+		t.Fatalf("listing seeded net groups: %v", err)
+	}
+	if len(groups) == 0 {
+		t.Fatal("the fixture declared no forwarder groups, so this helper is a no-op and " +
+			"every test that depends on it is now asserting against an unknown baseline")
+	}
+	for _, g := range groups {
+		if err := f.store.RetireNetGroup(f.ctx, domain.SystemActor, g.ID); err != nil {
+			t.Fatalf("retiring seeded net group %s: %v", g.Code, err)
+		}
+	}
+	assertNoTopology(t, f)
+}
+
+// assertNoTopology fails unless the engine would genuinely receive
+// Inputs.Net == nil. Every "with no topology..." test rests on this, and
+// without it those tests pass just as happily with a full forwarder graph
+// present.
+func assertNoTopology(t *testing.T, f *fixture) {
+	t.Helper()
+	g, err := f.store.LoadGraph(f.ctx)
+	if err != nil {
+		t.Fatalf("loading graph: %v", err)
+	}
+	if g.Net != nil {
+		t.Fatalf("the fixture still carries %d forwarder groups and %d attachments; "+
+			"this test's premise is that it carries none",
+			len(g.Net.Groups), len(g.Net.Attachments))
+	}
+}
+
+// assertHasTopology is the mirror: a test comparing "with topology" against
+// "without" proves nothing if the first half had none either.
+func assertHasTopology(t *testing.T, f *fixture) {
+	t.Helper()
+	g, err := f.store.LoadGraph(f.ctx)
+	if err != nil {
+		t.Fatalf("loading graph: %v", err)
+	}
+	if g.Net == nil {
+		t.Fatal("the fixture declared no topology at all, so a with/without comparison " +
+			"is comparing two identical runs")
+	}
+}
+
 // TestHeadlineGuaranteeNoTopology is the first half: with zero net_* rows,
 // Inputs.Net is nil and the engine must answer exactly as it did before any of
 // this existed. An estate that has not entered its cabling loses nothing.
 func TestHeadlineGuaranteeNoTopology(t *testing.T) {
 	f := newFixture(t)
+	clearSeededTopology(t, f)
+
 	for _, assets := range headlineScenarios {
 		result, _ := f.simulate(t, 180, assets...)
 		snap := snapshotOf(result)
+		key := scenarioKey(assets)
 		// A basic sanity check that the scenario actually produced a
 		// deterministic, non-exploded answer -- guards against a snapshot
 		// full of zero values passing trivially.
 		if snap.Iterations == 0 && len(snap.Services) > 0 {
-			t.Errorf("%s: %d services affected but Iterations = 0", scenarioKey(assets), len(snap.Services))
+			t.Errorf("%s: %d services affected but Iterations = 0", key, len(snap.Services))
+		}
+		// And that the silence really is the feature being inert, rather than
+		// a topology that happened not to break on this particular scenario.
+		if n := len(result.Isolated) + len(result.Partitions) +
+			len(result.Unreachable) + len(result.RedundancyLost); n > 0 {
+			t.Errorf("%s: %d reachability findings on an estate with no declared topology", key, n)
+		}
+		if cov := result.Coverage; cov.Modelled+cov.Inherited > 0 {
+			t.Errorf("%s: coverage reports %d modelled and %d inherited assets with no topology declared",
+				key, cov.Modelled, cov.Inherited)
 		}
 	}
 }
 
-// TestHeadlineGuaranteeWithTopology is the second half: the same scenarios,
-// re-run after declaring a full, healthy topology (groups, members, an uplink
-// and anchors, nothing taken down). Merely knowing how the estate is cabled
-// must not move a single byte of Services, WontRestart, Cycles, SafeOrder or
-// Iterations -- only a break in that cabling may.
+// TestHeadlineGuaranteeWithTopology is the second half: the same scenarios run
+// on both sides of the topology boundary. Merely knowing how the estate is
+// cabled must not move a single byte of Services, WontRestart, Cycles,
+// SafeOrder or Iterations -- only a break in that cabling may.
+//
+// Since M5 the direction is inverted: the fixture arrives WITH the demo's own
+// forwarder graph, so the snapshot is taken first and the topology is retired
+// afterwards. That is the same assertion it always was, and a stronger one --
+// the subject is now the topology the demo actually ships rather than a
+// hand-built stand-in built to be harmless.
 func TestHeadlineGuaranteeWithTopology(t *testing.T) {
 	f := newFixture(t)
-	before := snapshotAll(t, f)
+	withTopology := snapshotAll(t, f)
 
-	declareHealthyTopology(t, f)
+	clearSeededTopology(t, f)
 
 	for _, assets := range headlineScenarios {
 		result, _ := f.simulate(t, 180, assets...)
-		assertSameSnapshot(t, scenarioKey(assets), before[scenarioKey(assets)], snapshotOf(result))
-	}
-}
-
-// declareHealthyTopology adds a full forwarder graph over the fixture's own
-// network assets (sw-core-1, fw-edge-1) plus a management switch, with
-// nothing taken down. If this changes a single answer above, the design's
-// compositional guarantee is broken.
-func declareHealthyTopology(t *testing.T, f *fixture) {
-	t.Helper()
-	now := f.store.Now()
-
-	sw := f.refs.Assets["sw-core-1"]
-	fw := f.refs.Assets["fw-edge-1"]
-	hv01 := f.refs.Assets["hv-01"]
-	hv02 := f.refs.Assets["hv-02"]
-	hv03 := f.refs.Assets["hv-03"]
-	if sw == "" || fw == "" || hv01 == "" || hv02 == "" || hv03 == "" {
-		t.Fatal("fixture is missing an asset this test depends on")
-	}
-
-	auto := domain.FailoverAuto
-	core, err := domain.NewNetGroup(store.NewID(), domain.NetGroupSpec{
-		Code: "sw-core", Name: "Core switch", Kind: domain.NetGroupStandalone,
-		Role: domain.NetRoleCore, Availability: domain.AvailStandalone,
-	}, now)
-	if err != nil {
-		t.Fatalf("building sw-core group: %v", err)
-	}
-	if err := f.store.CreateNetGroup(f.ctx, domain.SystemActor, core); err != nil {
-		t.Fatalf("creating sw-core group: %v", err)
-	}
-	edge, err := domain.NewNetGroup(store.NewID(), domain.NetGroupSpec{
-		Code: "fw-edge", Name: "Edge firewall", Kind: domain.NetGroupHAPair,
-		Role: domain.NetRoleEdge, Availability: domain.AvailActivePassive, FailoverMode: &auto,
-	}, now)
-	if err != nil {
-		t.Fatalf("building fw-edge group: %v", err)
-	}
-	if err := f.store.CreateNetGroup(f.ctx, domain.SystemActor, edge); err != nil {
-		t.Fatalf("creating fw-edge group: %v", err)
-	}
-
-	member, err := domain.NewNetGroupMember(core.ID, sw, "member", now)
-	if err != nil {
-		t.Fatalf("building sw-core member: %v", err)
-	}
-	if err := f.store.AddNetGroupMember(f.ctx, domain.SystemActor, member); err != nil {
-		t.Fatalf("adding sw-core member: %v", err)
-	}
-	edgeMember, err := domain.NewNetGroupMember(edge.ID, fw, domain.RolePrimary, now)
-	if err != nil {
-		t.Fatalf("building fw-edge member: %v", err)
-	}
-	if err := f.store.AddNetGroupMember(f.ctx, domain.SystemActor, edgeMember); err != nil {
-		t.Fatalf("adding fw-edge member: %v", err)
-	}
-
-	uplink, err := domain.NewNetUplink(store.NewID(), core.ID, edge.ID, domain.PlaneData, now)
-	if err != nil {
-		t.Fatalf("building uplink: %v", err)
-	}
-	if err := f.store.CreateNetUplink(f.ctx, domain.SystemActor, uplink); err != nil {
-		t.Fatalf("creating uplink: %v", err)
-	}
-
-	// hv-03 is deliberately NOT attached here: it lives in rack-b1, while
-	// sw-core-1 (this test's sole "sw-core" member) lives in rack-a1, so
-	// attaching hv-03 to the same group would make the rack-a1 scenario
-	// newly isolate it -- a real and correct finding, but not one this
-	// byte-identical topology is allowed to introduce.
-	for _, hv := range []string{hv01, hv02} {
-		att, err := domain.NewNetAttachment(store.NewID(), hv, core.ID, domain.PlaneData, now)
-		if err != nil {
-			t.Fatalf("building attachment: %v", err)
-		}
-		if err := f.store.CreateNetAttachment(f.ctx, domain.SystemActor, att, nil); err != nil {
-			t.Fatalf("creating attachment: %v", err)
-		}
-	}
-
-	anchor, err := domain.NewNetAnchor(store.NewID(), "internet", "Internet", "external", edge.ID, now)
-	if err != nil {
-		t.Fatalf("building anchor: %v", err)
-	}
-	if err := f.store.CreateNetAnchor(f.ctx, domain.SystemActor, anchor); err != nil {
-		t.Fatalf("creating anchor: %v", err)
+		assertSameSnapshot(t, scenarioKey(assets), withTopology[scenarioKey(assets)], snapshotOf(result))
 	}
 }
 
@@ -265,19 +259,26 @@ func declareHealthyTopology(t *testing.T, f *fixture) {
 // answer never changes -- union-find has no traversal order to be
 // nondeterministic about, but map iteration elsewhere in the pipeline could
 // still leak in if a slice were built by ranging a map without sorting.
+//
+// It runs against the seeded topology, and over two scenarios rather than one:
+// hv-01 moves no group at all, while sw-core-2 leaves the core group OK,
+// exhausts hv-03's pinned member set and isolates it. A run where every group
+// is healthy and every host is in one component would be a weak probe of a
+// component-partitioning algorithm.
 func TestUnionFindDeterministic(t *testing.T) {
 	f := newFixture(t)
-	declareHealthyTopology(t, f)
 
-	var first snapshot
-	for i := 0; i < 5; i++ {
-		result, _ := f.simulate(t, 180, "hv-01")
-		snap := snapshotOf(result)
-		if i == 0 {
-			first = snap
-			continue
+	for _, scenario := range []string{"hv-01", "sw-core-2"} {
+		var first snapshot
+		for i := 0; i < 5; i++ {
+			result, _ := f.simulate(t, 180, scenario)
+			snap := snapshotOf(result)
+			if i == 0 {
+				first = snap
+				continue
+			}
+			assertSameSnapshot(t, "repeated "+scenario+" run", first, snap)
 		}
-		assertSameSnapshot(t, "repeated hv-01 run", first, snap)
 	}
 }
 
@@ -629,52 +630,60 @@ func (f *fixture) simulateWith(t *testing.T, req impact.Request, assetNames ...s
 // Both directions are still asserted, for the same reason they were in M3. A
 // test that only checked the default would pass identically if
 // ReportReachabilityOnly silently did nothing, and a test that only checked
-// ReportReachabilityOnly would pass if the seams had never been wired. The
-// topology genuinely isolates: losing the single core switch cuts off every
-// hypervisor attached to it.
+// ReportReachabilityOnly would pass if the seams had never been wired.
+//
+// The subject is sw-core-2, not sw-core-1, and the difference is the whole
+// point of M5's fixture. Both are members of an active_active group with
+// min_healthy = 1, so losing either leaves the GROUP healthy. Only sw-core-2
+// exhausts a host's pinned member set: hv-03 is single-homed to it, so hv-03
+// is cut off while the core is fine. Pointed at sw-core-1 this test would
+// assert nothing, because the correct answer there is zero services.
+//
+// Every run below happens before the topology is retired; the untopologied
+// baseline is taken last, on the same database, so the comparison never
+// straddles two seeded fixtures.
 func TestReachabilityAppliesByDefault(t *testing.T) {
 	f := newFixture(t)
 
-	// Baseline with no topology at all: losing a switch that hosts nothing
-	// affects nothing, which is the behaviour this whole feature exists to fix.
-	bare := f.simulateWith(t, impact.Request{WindowSeconds: 180}, "sw-core-1")
+	applied := f.simulateWith(t, impact.Request{WindowSeconds: 180}, "sw-core-2")
+	reportOnly := f.simulateWith(t, impact.Request{
+		WindowSeconds: 180, ReportReachabilityOnly: true,
+	}, "sw-core-2")
+
+	// The baseline: the same loss with no declared cabling at all. Losing a
+	// switch that hosts nothing affects nothing, which is the behaviour this
+	// whole feature exists to fix.
+	clearSeededTopology(t, f)
+	bare := f.simulateWith(t, impact.Request{WindowSeconds: 180}, "sw-core-2")
 	if len(bare.Services) != 0 {
 		t.Fatalf("setup: losing an uncabled switch already reported %d services", len(bare.Services))
 	}
 
-	declareHealthyTopology(t, f)
-
 	t.Run("the default request now moves statuses", func(t *testing.T) {
-		got := f.simulateWith(t, impact.Request{WindowSeconds: 180}, "sw-core-1")
-
-		if len(got.Services) == 0 {
-			t.Fatal("losing the only core switch still reported nothing affected -- " +
-				"reachability is not composing into the answer")
+		if len(applied.Services) == 0 {
+			t.Fatal("losing the core chassis that hv-03 is single-homed to still reported " +
+				"nothing affected -- reachability is not composing into the answer")
 		}
 		// And it must be strictly more than the untopologied run, never fewer.
-		if len(got.Services) <= len(bare.Services) {
+		if len(applied.Services) <= len(bare.Services) {
 			t.Errorf("applied run reported %d services, untopologied run %d -- expected the "+
-				"applied run to find strictly more", len(got.Services), len(bare.Services))
+				"applied run to find strictly more", len(applied.Services), len(bare.Services))
 		}
 	})
 
 	t.Run("ReportReachabilityOnly still holds every answer still", func(t *testing.T) {
-		got := f.simulateWith(t, impact.Request{
-			WindowSeconds: 180, ReportReachabilityOnly: true,
-		}, "sw-core-1")
-		assertSameSnapshot(t, "sw-core-1 report-only", snapshotOf(bare), snapshotOf(got))
+		assertSameSnapshot(t, "sw-core-2 report-only", snapshotOf(bare), snapshotOf(reportOnly))
 	})
 
 	t.Run("and reports isolation in either mode", func(t *testing.T) {
 		for _, mode := range []struct {
-			name string
-			req  impact.Request
+			name   string
+			result impact.Result
 		}{
-			{"default", impact.Request{WindowSeconds: 180}},
-			{"report-only", impact.Request{WindowSeconds: 180, ReportReachabilityOnly: true}},
+			{"default", applied},
+			{"report-only", reportOnly},
 		} {
-			got := f.simulateWith(t, mode.req, "sw-core-1")
-			if len(got.Isolated) == 0 {
+			if len(mode.result.Isolated) == 0 {
 				t.Errorf("%s: nothing reported isolated, so the report half is not working "+
 					"and the assertions above prove less than they appear to", mode.name)
 			}
@@ -712,6 +721,17 @@ func declarePartitionableTopology(t *testing.T, f *fixture) {
 func declareSplitTopology(t *testing.T, f *fixture, sideA, sideB []string) {
 	t.Helper()
 	now := f.store.Now()
+
+	// The seeded topology has to go first, and not only because sw-core-1 and
+	// fw-edge-1 are already members of a group (which the partial unique index
+	// on net_group_member(asset_id) would catch loudly). The quieter reason is
+	// net_attachment: its uniqueness is per (asset, group, plane), so a second
+	// data-plane attachment of hv-01 to a DIFFERENT group is accepted with no
+	// error at all -- and hv-01 would then reach hv-03 through the surviving
+	// seeded sw-core group no matter what this topology cut. The partition
+	// would simply never happen, and the failure would surface several layers
+	// away as "sso not affected".
+	clearSeededTopology(t, f)
 
 	// The fixture has two network assets and this topology needs three, so the
 	// second access switch is created here rather than added to the seed --

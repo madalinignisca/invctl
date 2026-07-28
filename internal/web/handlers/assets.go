@@ -2,7 +2,10 @@ package handlers
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
+	"net/url"
+	"strconv"
 
 	"github.com/gabriel/invctl/internal/domain"
 	"github.com/gabriel/invctl/internal/impact"
@@ -350,13 +353,49 @@ func (a *App) renderAssetFormError(w http.ResponseWriter, r *http.Request, messa
 
 // ---------- impact simulation ----------
 
+// maxOutageAssets bounds the simulated set.
+//
+// Every id becomes a placeholder in the closure and instance queries, so an
+// unbounded repeated parameter is a cheap way for any signed-in reader to make
+// the server build an enormous statement. Twenty-five is far more than an
+// honest question needs: the biggest real outage is a rack or a site, and that
+// is one id because containment expands it.
+const maxOutageAssets = 25
+
+// impactAsset is one member of the simulated outage set, with the link that
+// takes it back out again.
+type impactAsset struct {
+	Asset *store.AssetRow
+	// RemoveURL is empty for the last remaining member. Simulating the loss of
+	// nothing answers nothing, and an operator who removed the final entry
+	// would land on a page whose question had silently changed underneath the
+	// answer.
+	RemoveURL string
+}
+
 type impactPage struct {
 	Base
-	Asset   *store.AssetRow
-	Result  impact.Result
-	Window  int
-	Windows []windowOption
-	Subtree []string
+	// Asset is the first member of the set -- the one named in the URL path.
+	// Every link the page builds hangs off it, which is what keeps a
+	// single-asset simulation byte-for-byte what it was before sets existed.
+	Asset *store.AssetRow
+	// Assets is the whole set, in the order it was built. The page renders
+	// every one of them, always: an impact answer read against the wrong
+	// question is worse than no answer, and the only defence is putting the
+	// question next to it.
+	Assets []impactAsset
+	// Extra carries the non-primary ids so both toolbars can round-trip the
+	// set through hidden fields. Without it, changing the outage window would
+	// quietly narrow the simulation back to the one asset in the path and
+	// answer a question nobody asked.
+	Extra []string
+	// Candidates are the assets not already in the set, for the picker that
+	// widens it.
+	Candidates []store.AssetRow
+	Multiple   bool
+	Result     impact.Result
+	Window     int
+	Windows    []windowOption
 	// HasImpact is true when a service is affected. HasNetworkFinding is true
 	// when the network has something to say that no service status carries --
 	// an isolated asset, a partitioned edge, a group left without redundancy.
@@ -383,18 +422,49 @@ var windows = []windowOption{
 	{Seconds: 28800, Label: "8 h (extended outage)"},
 }
 
-// AssetImpact simulates losing an asset and everything it contains.
+// AssetImpact simulates losing one or more assets, and everything they contain.
+//
+// The path id is the primary member; every repeated ?asset= parameter widens
+// the set. Several at once is not a convenience: a redundant pair only tells
+// the truth when both halves can be taken away in the same run, so "what
+// happens once redundancy is exhausted" -- the one question a pair exists to
+// answer -- is unaskable one asset at a time.
+//
+// The engine needed nothing for this. impact.Request.DownAssetIDs has always
+// been a set, and SubtreeIDs already expands several ancestors in one closure
+// query with overlapping subtrees collapsing on their own.
 func (a *App) AssetImpact(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	asset, err := a.Store.GetAsset(r.Context(), id)
-	if err != nil {
-		a.handleStoreError(w, r, err)
+	// The path id goes first, so a bare /assets/{id}/impact is exactly what it
+	// always was, and a ?asset= repeating the path id collapses into it rather
+	// than naming one asset twice.
+	ids := dedupeStrings(append([]string{r.PathValue("id")}, queryStrings(r, "asset")...))
+	if len(ids) > maxOutageAssets {
+		http.Error(w, fmt.Sprintf("An outage simulation covers at most %d assets at once.", maxOutageAssets),
+			http.StatusUnprocessableEntity)
 		return
 	}
-
 	window := queryInt(r, "window", 180)
+
+	assets := make([]impactAsset, 0, len(ids))
+	for i, id := range ids {
+		asset, err := a.Store.GetAsset(r.Context(), id)
+		if err != nil {
+			// An id that resolves to nothing is a 404, never a quietly dropped
+			// parameter. Ignoring it would report the impact of a smaller
+			// outage than the operator asked about, under a heading naming the
+			// outage they wanted -- "nothing breaks" about a scenario nobody
+			// simulated is the most dangerous answer this tool can give.
+			a.handleStoreError(w, r, err)
+			return
+		}
+		assets = append(assets, impactAsset{
+			Asset:     asset,
+			RemoveURL: impactURL(withoutIndex(ids, i), window),
+		})
+	}
+
 	result, err := a.Store.Simulate(r.Context(), impact.Request{
-		DownAssetIDs:  []string{id},
+		DownAssetIDs:  ids,
 		WindowSeconds: window,
 	})
 	if err != nil {
@@ -402,17 +472,78 @@ func (a *App) AssetImpact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	candidates, err := a.Store.ListAssets(r.Context(), store.AssetFilter{})
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
+
 	data := impactPage{
-		Base:      a.base(r, "Impact: "+asset.Name, "assets"),
-		Asset:     asset,
-		Result:    result,
-		Window:    window,
-		Windows:   windows,
-		HasImpact: len(result.Services) > 0 || len(result.WontRestart) > 0,
+		Base:       a.base(r, impactTitle(assets), "assets"),
+		Asset:      assets[0].Asset,
+		Assets:     assets,
+		Extra:      ids[1:],
+		Candidates: excludeAssets(candidates, ids),
+		Multiple:   len(assets) > 1,
+		Result:     result,
+		Window:     window,
+		Windows:    windows,
+		HasImpact:  len(result.Services) > 0 || len(result.WontRestart) > 0,
 		HasNetworkFinding: len(result.Isolated) > 0 || len(result.Partitions) > 0 ||
 			len(result.Unreachable) > 0 || len(result.RedundancyLost) > 0,
 	}
 	a.Render.Respond(w, r, http.StatusOK, "impact", "impact_result", data)
+}
+
+// impactURL builds this page's own address for a given outage set: the first
+// id takes the path, the rest ride as repeated parameters, and the window
+// comes along so changing one half of the question never resets the other.
+func impactURL(ids []string, window int) string {
+	if len(ids) == 0 {
+		return ""
+	}
+	q := url.Values{"window": {strconv.Itoa(window)}}
+	for _, id := range ids[1:] {
+		q.Add("asset", id)
+	}
+	return "/assets/" + url.PathEscape(ids[0]) + "/impact?" + q.Encode()
+}
+
+// withoutIndex returns ids with the element at i removed, leaving the original
+// untouched. A one-element set yields nil, which is what suppresses the remove
+// link on the last member.
+func withoutIndex(ids []string, i int) []string {
+	if len(ids) < 2 {
+		return nil
+	}
+	out := make([]string, 0, len(ids)-1)
+	out = append(out, ids[:i]...)
+	return append(out, ids[i+1:]...)
+}
+
+// excludeAssets drops the ones already being simulated, so the picker only
+// offers something that would actually change the answer.
+func excludeAssets(rows []store.AssetRow, ids []string) []store.AssetRow {
+	chosen := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		chosen[id] = true
+	}
+	out := make([]store.AssetRow, 0, len(rows))
+	for _, row := range rows {
+		if !chosen[row.ID] {
+			out = append(out, row)
+		}
+	}
+	return out
+}
+
+// impactTitle names the set in the browser tab without letting a long one run
+// away with the title bar. The page itself always names every member.
+func impactTitle(assets []impactAsset) string {
+	if len(assets) == 1 {
+		return "Impact: " + assets[0].Asset.Name
+	}
+	return fmt.Sprintf("Impact: %s + %d more", assets[0].Asset.Name, len(assets)-1)
 }
 
 func isConflict(err error) bool {

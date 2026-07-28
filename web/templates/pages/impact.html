@@ -6,21 +6,95 @@
 
 <div class="page-head">
   <div class="eyebrow">Outage simulation</div>
-  <h1>If <span class="mono">{{.Asset.Name}}</span> goes away</h1>
-  <p class="lede">
-    Everything contained by this {{.Asset.Kind}} goes with it. Availability policy is
-    applied first, then failure semantics propagate along the dependency edges until
-    the result stops changing.
-  </p>
+  {{if .Multiple}}
+    <h1>If these {{len .Assets}} assets go away together</h1>
+    <p class="lede">
+      Everything contained by them goes too, and the whole set is taken away in one
+      run — which is the only way to ask what a redundant pair does once both halves
+      are gone. Availability policy is applied first, then failure semantics propagate
+      along the dependency edges until the result stops changing.
+    </p>
+  {{else}}
+    <h1>If <span class="mono">{{.Asset.Name}}</span> goes away</h1>
+    <p class="lede">
+      Everything contained by this {{.Asset.Kind}} goes with it. Availability policy is
+      applied first, then failure semantics propagate along the dependency edges until
+      the result stops changing.
+    </p>
+  {{end}}
+</div>
+
+{{/* The set is named in full, every time, whether it holds one asset or ten.
+     An impact answer read against the wrong question is worse than no answer,
+     and the only defence is showing the question beside it. */}}
+<div class="panel">
+  <div class="panel-head">
+    <h2>Taken away</h2>
+    <span class="panel-note">
+      {{pluralise (len .Assets) "asset" "assets"}}, plus everything each one contains.
+    </span>
+  </div>
+  <div class="panel-body">
+    <div class="checks" id="outage-set" style="margin-bottom:12px">
+      {{range .Assets}}
+      <span class="check">
+        <a class="id" href="/assets/{{.Asset.ID}}">{{.Asset.Name}}</a>
+        <span class="pill pill-muted">{{.Asset.Kind}}</span>
+        {{/* A plain link rather than an hx-get: taking a member out changes the
+             question, and the heading, the breadcrumb and both toolbars all
+             restate it. Swapping only the result panel would leave every one of
+             them describing an outage that is no longer being simulated. The
+             last member has no remove link at all — a simulation of nothing
+             answers nothing. */}}
+        {{if .RemoveURL}}
+          <a class="btn btn-sm btn-danger" href="{{.RemoveURL}}"
+             title="Simulate without {{.Asset.Name}}">Remove</a>
+        {{end}}
+      </span>
+      {{end}}
+    </div>
+
+    {{if .Candidates}}
+    <form class="toolbar" method="get" action="/assets/{{.Asset.ID}}/impact">
+      <input type="hidden" name="window" value="{{.Window}}">
+      {{range .Extra}}<input type="hidden" name="asset" value="{{.}}">{{end}}
+      <div class="field">
+        <label for="add-asset">Take something else away as well</label>
+        <select id="add-asset" name="asset">
+          <option value="">Choose an asset…</option>
+          {{range .Candidates}}
+            <option value="{{.ID}}">{{.Name}} — {{.Kind}}</option>
+          {{end}}
+        </select>
+        <div class="field-hint">
+          A redundant pair only tells the truth when both halves can go at once.
+        </div>
+      </div>
+      <button class="btn" type="submit">Add to the outage</button>
+    </form>
+    {{end}}
+  </div>
 </div>
 
 <div class="panel">
   <div class="panel-body">
     {{/* The outage length is not decoration: an async dependency with a
-         300-second buffer survives a reboot and not a hardware swap. */}}
-    <form class="toolbar" hx-get="/assets/{{.Asset.ID}}/impact"
-          hx-target="#impact-result" hx-swap="outerHTML"
-          hx-push-url="true" hx-trigger="change">
+         300-second buffer survives a reboot and not a hardware swap.
+
+         A full navigation rather than an hx-get swapping #impact-result, for
+         exactly the reason the Remove link above gives. The window is part of
+         the question, and it is restated in three other places on this page:
+         the Remove links, the add-form's hidden field, and the pushed URL.
+         Swapping only the result left all three holding the PREVIOUS window,
+         so changing to 8 h and then removing an asset silently returned a
+         3-minute answer under an 8-hour heading. Either every restatement
+         re-renders or none may. */}}
+    <form class="toolbar" id="impact-window" method="get"
+          action="/assets/{{.Asset.ID}}/impact">
+      {{/* The rest of the set rides along as hidden fields, or changing the
+           window would quietly narrow the simulation back to the one asset in
+           the path and answer a different question under the same heading. */}}
+      {{range .Extra}}<input type="hidden" name="asset" value="{{.}}">{{end}}
       <div class="field">
         <label for="window">How long is it gone?</label>
         <select id="window" name="window">
@@ -30,6 +104,7 @@
         </select>
         <div class="field-hint">Only async dependencies read this.</div>
       </div>
+      <button class="btn" type="submit">Re-run</button>
     </form>
   </div>
 </div>

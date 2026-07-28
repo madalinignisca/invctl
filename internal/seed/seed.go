@@ -30,6 +30,7 @@ type Refs struct {
 	Services     map[string]string // code -> id
 	Endpoints    map[string]string // "service/endpoint" -> id
 	Routes       map[string]string // match value -> id
+	NetGroups    map[string]string // code -> id
 }
 
 // builder threads the store, context and error state through the many small
@@ -64,12 +65,17 @@ func Load(ctx context.Context, s *store.SQLStore) (*Refs, error) {
 			Services:     map[string]string{},
 			Endpoints:    map[string]string{},
 			Routes:       map[string]string{},
+			NetGroups:    map[string]string{},
 		},
 	}
 
 	b.environments()
 	b.physical()
 	b.networking()
+	// topology reads asset ids and interface ids, so it has to follow both of
+	// the phases above. It sits here rather than at the end because the groups
+	// it declares are a reading of the cable plant networking() just laid.
+	b.topology()
 	b.identities()
 	b.services()
 	b.endpoints()
@@ -186,12 +192,41 @@ func (b *builder) physical() {
 		a.OwnerTeam = str("network")
 	})
 
+	// The MC-LAG peer, in the other rack. It carries the same VLANs as
+	// sw-core-1 -- that is what an MC-LAG pair is -- so it belongs to the same
+	// two non-transit environments and is a second, correct entry in the span
+	// report. Declaring it production-only would make the fixture lie to make
+	// a report shorter.
+	b.asset(domain.KindSwitch, "sw-core-2", "rack-b1", []string{"prod", "dev"}, func(a *domain.Asset) {
+		a.Vendor, a.Model = str("Arista"), str("DCS-7050SX3-48YC8")
+		a.Serial, a.AssetTag = str("JPE19140ABC"), str("NET-0002")
+		a.OwnerTeam = str("network")
+	})
+
 	// The firewall spans production and transit. Transit is excluded from
 	// span detection -- brokering between segments is its entire purpose, so
 	// counting it would make every firewall a permanent false positive.
 	b.asset(domain.KindFirewall, "fw-edge-1", "rack-a1", []string{"prod", "transit"}, func(a *domain.Asset) {
 		a.Vendor, a.Model = str("Palo Alto"), str("PA-3220")
 		a.Serial = str("013101006789")
+		a.OwnerTeam = str("network")
+	})
+
+	// The passive half of the firewall pair. It is what makes losing
+	// fw-edge-1 come out DEGRADED rather than DOWN -- and, because the pair's
+	// failover_mode is manual, degraded rather than ok.
+	b.asset(domain.KindFirewall, "fw-edge-2", "rack-b1", []string{"prod", "transit"}, func(a *domain.Asset) {
+		a.Vendor, a.Model = str("Palo Alto"), str("PA-3220")
+		a.Serial = str("013101006790")
+		a.OwnerTeam = str("network")
+	})
+
+	// The out-of-band switch. Nothing on the data plane references it, which
+	// is the point: losing it isolates every hypervisor's management path and
+	// changes no service's status.
+	b.asset(domain.KindSwitch, "sw-oob-1", "rack-a1", []string{"prod"}, func(a *domain.Asset) {
+		a.Vendor, a.Model = str("Aruba"), str("6100-48G")
+		a.Serial, a.AssetTag = str("SG9ZKY1234"), str("NET-0003")
 		a.OwnerTeam = str("network")
 	})
 
@@ -289,11 +324,49 @@ func (b *builder) networking() {
 	ifaces := []iface{
 		{"sw-core-1", "Ethernet1", domain.FFSFP28, "aa:bb:cc:00:01:01", "", 25000, false},
 		{"sw-core-1", "Ethernet2", domain.FFSFP28, "aa:bb:cc:00:01:02", "", 25000, false},
+		{"sw-core-1", "Ethernet47", domain.FFQSFP28, "aa:bb:cc:00:01:03", "", 100000, false},
+		{"sw-core-1", "Ethernet48", domain.FFSFPPlus, "aa:bb:cc:00:01:04", "", 10000, false},
 		{"sw-core-1", "Management1", domain.FFRJ45, "aa:bb:cc:00:01:00", "10.20.10.2", 1000, true},
+
+		{"sw-core-2", "Ethernet1", domain.FFSFP28, "aa:bb:cc:00:03:01", "", 25000, false},
+		{"sw-core-2", "Ethernet2", domain.FFSFP28, "aa:bb:cc:00:03:02", "", 25000, false},
+		{"sw-core-2", "Ethernet3", domain.FFSFP28, "aa:bb:cc:00:03:03", "", 25000, false},
+		{"sw-core-2", "Ethernet47", domain.FFQSFP28, "aa:bb:cc:00:03:04", "", 100000, false},
+		{"sw-core-2", "Ethernet48", domain.FFSFPPlus, "aa:bb:cc:00:03:05", "", 10000, false},
+		{"sw-core-2", "Management1", domain.FFRJ45, "aa:bb:cc:00:03:00", "10.20.10.4", 1000, true},
+
 		{"fw-edge-1", "ethernet1/1", domain.FFSFPPlus, "aa:bb:cc:00:02:01", "10.20.99.1", 10000, false},
+		{"fw-edge-2", "ethernet1/1", domain.FFSFPPlus, "aa:bb:cc:00:04:01", "10.20.99.2", 10000, false},
+
+		// Every port of an out-of-band switch carries management traffic, so
+		// every one of them is is_mgmt. That is not cosmetic: derivation marks
+		// a forwarder-to-forwarder cable as management-plane if EITHER end is
+		// flagged, so if anyone ever patches sw-oob-1 into the core the
+		// proposal comes out as a mgmt uplink instead of quietly joining the
+		// management switch to the data-plane graph.
+		{"sw-oob-1", "Ethernet1", domain.FFRJ45, "aa:bb:cc:00:05:01", "", 1000, true},
+		{"sw-oob-1", "Ethernet2", domain.FFRJ45, "aa:bb:cc:00:05:02", "", 1000, true},
+		{"sw-oob-1", "Ethernet3", domain.FFRJ45, "aa:bb:cc:00:05:03", "", 1000, true},
+		{"sw-oob-1", "Management1", domain.FFRJ45, "aa:bb:cc:00:05:00", "10.20.10.3", 1000, true},
+
+		// eno1 is the management NIC on every hypervisor; eno2 and eno3 are the
+		// data uplinks, one to each core chassis. The is_mgmt flag on the HOST
+		// side is what derivation reads to set an attachment's plane, so a
+		// fixture whose only cables were eno1 (which is what this was before
+		// M5) can only ever produce management-plane attachments -- correct,
+		// and useless as a demonstration of the data plane.
 		{"hv-01", "eno1", domain.FFSFP28, "aa:bb:cc:00:10:01", "10.20.10.11", 25000, true},
 		{"hv-02", "eno1", domain.FFSFP28, "aa:bb:cc:00:10:02", "10.20.10.12", 25000, true},
 		{"hv-03", "eno1", domain.FFSFP28, "aa:bb:cc:00:10:03", "10.20.10.13", 25000, true},
+		{"hv-01", "eno2", domain.FFSFP28, "aa:bb:cc:00:11:01", "", 25000, false},
+		{"hv-02", "eno2", domain.FFSFP28, "aa:bb:cc:00:11:02", "", 25000, false},
+		{"hv-03", "eno2", domain.FFSFP28, "aa:bb:cc:00:11:03", "", 25000, false},
+		{"hv-01", "eno3", domain.FFSFP28, "aa:bb:cc:00:12:01", "", 25000, false},
+		{"hv-02", "eno3", domain.FFSFP28, "aa:bb:cc:00:12:02", "", 25000, false},
+		// hv-03/eno3 exists and is deliberately left uncabled: hv-03 is the
+		// single-homed host the design's scenario 4 turns on, and the spare
+		// port is what makes that a cabling decision rather than a missing NIC.
+		{"hv-03", "eno3", domain.FFSFP28, "aa:bb:cc:00:12:03", "", 25000, false},
 		{"vm-vault-1", "eth0", domain.FFVirtual, "", "10.20.30.11", 10000, false},
 		{"vm-vault-2", "eth0", domain.FFVirtual, "", "10.20.30.12", 10000, false},
 		{"vm-vault-3", "eth0", domain.FFVirtual, "", "10.20.30.13", 10000, false},
@@ -349,22 +422,59 @@ func (b *builder) networking() {
 		}
 	}
 
-	// A couple of cables, so the interface view has a far end to show.
-	cables := []struct{ a, b string }{
-		{"hv-01/eno1", "sw-core-1/Ethernet1"},
-		{"hv-02/eno1", "sw-core-1/Ethernet2"},
+	// The cable plant. Every cable here is backed by a declared attachment or
+	// uplink in topology() below -- run "Propose from cabling" against a fresh
+	// database and it correctly proposes nothing, because the model and the
+	// plant already agree.
+	//
+	// Three shapes are deliberate and load-bearing:
+	//   - hv-01 and hv-02 are dual-homed, one cable to each core chassis;
+	//   - hv-03 lands on sw-core-2 only, so losing sw-core-2 cuts it off even
+	//     though the group survives at 1-of-2;
+	//   - sw-core-1 and sw-core-2 are peered, a cycle in the cable plant that
+	//     union-find has to eat without looping.
+	cables := []struct {
+		a, b, medium string
+		lengthM      int
+	}{
+		{"hv-01/eno2", "sw-core-1/Ethernet1", "DAC", 3},
+		{"hv-01/eno3", "sw-core-2/Ethernet1", "OM4", 20},
+		{"hv-02/eno2", "sw-core-1/Ethernet2", "DAC", 3},
+		{"hv-02/eno3", "sw-core-2/Ethernet2", "OM4", 20},
+		{"hv-03/eno2", "sw-core-2/Ethernet3", "DAC", 3},
+
+		{"sw-core-1/Ethernet47", "sw-core-2/Ethernet47", "OM4", 25},
+		{"sw-core-1/Ethernet48", "fw-edge-1/ethernet1/1", "DAC", 2},
+		{"sw-core-2/Ethernet48", "fw-edge-2/ethernet1/1", "DAC", 2},
+
+		{"hv-01/eno1", "sw-oob-1/Ethernet1", "Cat6", 3},
+		{"hv-02/eno1", "sw-oob-1/Ethernet2", "Cat6", 3},
+		{"hv-03/eno1", "sw-oob-1/Ethernet3", "Cat6", 15},
 	}
 	for _, c := range cables {
 		if !b.ok() {
 			return
 		}
-		link, err := domain.NewLink(store.NewID(), b.interfaceIDs[c.a], b.interfaceIDs[c.b])
+		// A missing key here would otherwise reach NewLink as an empty string
+		// and be reported as "a_interface_id is required", which names the
+		// constraint rather than the typo that caused it.
+		aID, ok := b.interfaceIDs[c.a]
+		if !ok {
+			b.fail(fmt.Errorf("seeding link %s-%s: unknown interface %s", c.a, c.b, c.a))
+			return
+		}
+		bID, ok := b.interfaceIDs[c.b]
+		if !ok {
+			b.fail(fmt.Errorf("seeding link %s-%s: unknown interface %s", c.a, c.b, c.b))
+			return
+		}
+		link, err := domain.NewLink(store.NewID(), aID, bID)
 		if err != nil {
 			b.fail(fmt.Errorf("building link %s-%s: %w", c.a, c.b, err))
 			return
 		}
-		link.Medium = str("DAC")
-		link.LengthM = num(3)
+		link.Medium = str(c.medium)
+		link.LengthM = num(c.lengthM)
 		if err := b.store.CreateLink(b.ctx, Actor, link); err != nil {
 			b.fail(fmt.Errorf("seeding link %s-%s: %w", c.a, c.b, err))
 			return

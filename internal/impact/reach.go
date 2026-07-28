@@ -97,6 +97,20 @@ type NetGraph struct {
 	AttachmentMembers map[string][]NetAttachmentMemberInfo // by attachment id
 	Anchors           []NetAnchorInfo
 	Closure           []ClosureRow
+	// AssetNames resolves an asset id to something a person can act on.
+	// Isolation is reported by id, and an id is the one thing an operator
+	// cannot look up on a rack at three in the morning. Empty is tolerated --
+	// the report falls back to the id rather than omitting the row.
+	AssetNames map[string]AssetLabel
+}
+
+// AssetLabel is the human-facing identity of an asset. Assets have no code
+// column -- name is the identifier operators use ("hv-01", "sw-core-2") -- and
+// kind is carried alongside so a report can say what kind of thing was cut off
+// without a second lookup.
+type AssetLabel struct {
+	Name string
+	Kind string
 }
 
 // NewNetGraph returns an empty net graph with its maps ready.
@@ -105,6 +119,7 @@ func NewNetGraph() *NetGraph {
 		Groups:            map[string]NetGroupInfo{},
 		Members:           map[string][]NetGroupMemberInfo{},
 		AttachmentMembers: map[string][]NetAttachmentMemberInfo{},
+		AssetNames:        map[string]AssetLabel{},
 	}
 }
 
@@ -133,8 +148,20 @@ const (
 // instance liveness by the time a report reaches here.
 type AssetIsolation struct {
 	AssetID       string
+	AssetName     string
+	AssetKind     string
 	Plane         string
 	BlockingGroup string
+}
+
+// Label is what the report should print for this asset: its name when one is
+// known, the raw id when it is not. Never blank, so a row is always readable
+// even if the label lookup ever comes back empty.
+func (a AssetIsolation) Label() string {
+	if a.AssetName != "" {
+		return a.AssetName
+	}
+	return a.AssetID
 }
 
 // EdgePartition names one dependency edge whose reachability, not its
@@ -169,6 +196,11 @@ type GroupFinding struct {
 // ReachCoverage reports how much of the estate has declared topology at all,
 // distinct from what it says about any particular outage.
 type ReachCoverage struct {
+	// TopologyDeclared reports that the estate has declared some topology, as
+	// distinct from every count below happening to be zero. Without it a
+	// topology attached only to assets that host no services reads as "no
+	// network topology declared", which is the opposite of the truth.
+	TopologyDeclared            bool
 	Modelled                    int
 	Inherited                   int
 	Unmodelled                  int
@@ -520,6 +552,50 @@ func (m *reachModel) reach(x, y, plane string) (domain.Status, bool) {
 	return domain.StatusDown, true
 }
 
+// reachGroup answers "can this asset still reach this forwarder group?", which
+// is the question an anchor asks and the one reach() cannot answer.
+//
+// reach() resolves BOTH of its arguments as asset ids, through modelled() and
+// netOf(), which index net_attachment.asset_id and asset_closure.descendant_id.
+// A net_group id is neither, so passing one produced ok=false every single time
+// and the whole exposure channel silently reported nothing -- four declared
+// anchors consumed by no code at all. The asymmetry is real and needs its own
+// function rather than a cast: one end is an asset that attaches to groups, the
+// other IS a group.
+func (m *reachModel) reachGroup(assetID, groupID, plane string) (domain.Status, bool) {
+	if m == nil {
+		return "", false
+	}
+	if !m.modelled(assetID, plane) {
+		return "", false
+	}
+	if _, ok := m.net.Groups[groupID]; !ok {
+		return "", false
+	}
+	// An anchor whose own group has failed is not an anchor any more, and an
+	// asset cut off from every group it attaches to reaches nothing.
+	if m.isolated(assetID, plane) || m.groupStatus[groupID] == domain.StatusDown {
+		return domain.StatusDown, true
+	}
+	from := m.netOf(assetID, plane)
+	compB := m.compPessimistic[plane]
+	for _, g := range from {
+		if compB[g] != "" && compB[g] == compB[groupID] {
+			return domain.StatusOK, true
+		}
+	}
+	// Optimistic includes degraded-but-forwarding groups, so reaching the
+	// anchor only in this pass is exactly "a path exists, but only once
+	// somebody promotes the standby".
+	compA := m.compOptimistic[plane]
+	for _, g := range from {
+		if compA[g] != "" && compA[g] == compA[groupID] {
+			return domain.StatusDegraded, true
+		}
+	}
+	return domain.StatusDown, true
+}
+
 func (m *reachModel) groupCode(groupID string) string {
 	if m == nil {
 		return groupID
@@ -816,7 +892,7 @@ func betterFoldAnchors(net *reachModel, hosts []string, anchors []NetAnchorInfo)
 	blocking := ""
 	for _, h := range hosts {
 		for _, a := range anchors {
-			s, ok := net.reach(h, a.GroupID, domain.PlaneData)
+			s, ok := net.reachGroup(h, a.GroupID, domain.PlaneData)
 			if !ok {
 				continue
 			}
@@ -984,6 +1060,15 @@ func computeIsolated(g *Graph, net *reachModel) []AssetIsolation {
 	}
 	var out []AssetIsolation
 	for _, id := range candidateAssets(g, net.net) {
+		// An asset inside the outage is not isolated, it is off. Charging it
+		// twice is the same double-count the liveness rule exists to prevent
+		// -- `alive := !down && !(needsNet && isolated)` is one && precisely so
+		// a loss is counted once -- and the report simply never got the same
+		// guard. Losing a rack was telling the operator that nine powered-off
+		// machines had lost management reachability.
+		if net.down[id] {
+			continue
+		}
 		for _, p := range planes() {
 			if !net.isolated(id, p) {
 				continue
@@ -992,7 +1077,11 @@ func computeIsolated(g *Graph, net *reachModel) []AssetIsolation {
 			if idxs, ok := net.effectiveAttachments(id, p); ok && len(idxs) > 0 {
 				blocking = net.groupCode(net.net.Attachments[idxs[0]].GroupID)
 			}
-			out = append(out, AssetIsolation{AssetID: id, Plane: p, BlockingGroup: blocking})
+			label := net.net.AssetNames[id]
+			out = append(out, AssetIsolation{
+				AssetID: id, AssetName: label.Name, AssetKind: label.Kind,
+				Plane: p, BlockingGroup: blocking,
+			})
 		}
 	}
 	return out
@@ -1055,9 +1144,6 @@ func computeRedundancyLost(net *NetGraph, groupStatus map[string]domain.Status, 
 	var out []GroupFinding
 	for _, id := range ids {
 		g := net.Groups[id]
-		if groupStatus[id] == domain.StatusDown {
-			continue // already reported down elsewhere; nothing left to lose
-		}
 		total, surviving := 0, 0
 		for _, m := range net.Members[id] {
 			if !installedLifecycle(m.AssetLifecycle) {
@@ -1071,8 +1157,18 @@ func computeRedundancyLost(net *NetGraph, groupStatus map[string]domain.Status, 
 		if total <= 1 || surviving == total {
 			continue
 		}
+		// A fully-down group used to be skipped here on the reasoning that it
+		// was "already reported down elsewhere". That holds only for a group
+		// something attaches to, which surfaces it through Isolated. Nothing
+		// attaches to an edge firewall pair -- hosts attach to the core, which
+		// uplinks to the edge -- so losing both halves made the last remaining
+		// signal disappear at the exact moment it mattered most, and the page
+		// reported a strictly larger outage more quietly than a smaller one.
 		note := "one more loss and this group goes down"
-		if groupStatus[id] == domain.StatusDegraded {
+		switch groupStatus[id] {
+		case domain.StatusDown:
+			note = "the whole group is down"
+		case domain.StatusDegraded:
 			note = "no redundancy remains until a standby is promoted"
 		}
 		out = append(out, GroupFinding{
@@ -1083,11 +1179,18 @@ func computeRedundancyLost(net *NetGraph, groupStatus map[string]domain.Status, 
 	return out
 }
 
+// computeCoverage measures how much of the SERVICE-BEARING estate the network
+// model has an opinion about -- assets that carry a service instance, not every
+// asset in the inventory. That is the right denominator for an impact report,
+// because an asset hosting nothing cannot change a service's status. It is the
+// wrong denominator for a sentence about the estate, so anything rendering
+// these numbers must say which population they describe.
 func computeCoverage(g *Graph, net *reachModel) ReachCoverage {
 	cov := ReachCoverage{NoAnchorForScope: map[string]int{}}
 	if net == nil {
 		return cov
 	}
+	cov.TopologyDeclared = true
 	hostIDs := map[string]bool{}
 	for _, instances := range g.Instances {
 		for _, inst := range instances {

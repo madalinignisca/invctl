@@ -177,18 +177,31 @@ func Analyse(g *Graph, req Request, in Inputs) Result {
 		if svc == nil {
 			continue
 		}
-		// Cause answers "where do I go to fix this?", so a status that arrived
-		// down a dependency edge only because the network cut that edge is
-		// classified as reachability, not dependency -- the provider is fine and
-		// the path is not.
+		// Cause answers "where do I go to fix this?", so it must describe
+		// whatever actually decided the status being reported on this row.
+		//
+		// The propagated cases are tested FIRST, and the order is the whole
+		// correctness argument. A service can lose instances to isolation and
+		// still absorb it -- vault loses one of three nodes and quorum holds --
+		// and then go degraded for an entirely unrelated dependency. Testing
+		// the isolation count first labelled that row "network path, not the
+		// service itself" while its Reason named a provider that was in fact
+		// 100% down and listed two rows above. That is the mirror image of the
+		// defect M4 fixed, pointing the operator away from a broken service
+		// instead of towards a healthy one, and it was unreachable until the
+		// fixture declared topology.
+		//
+		// via[id] is set only when a dependency WORSENED this service, and
+		// status is monotonic, so a non-empty via means the edge is what
+		// carried it to the status shown.
 		cause := CauseCapacity
 		switch {
-		case lostToIsolation[id] > 0 && lostToIsolation[id] == lost[id]:
-			cause = CauseReachability
 		case via[id] != "" && viaPartition[id]:
 			cause = CauseReachability
 		case via[id] != "":
 			cause = CauseDependency
+		case lostToIsolation[id] > 0 && lostToIsolation[id] == lost[id]:
+			cause = CauseReachability
 		}
 		si := ServiceImpact{
 			ServiceID: id, Code: svc.Code, Name: svc.Name, Tier: svc.Tier,
@@ -225,8 +238,16 @@ func Analyse(g *Graph, req Request, in Inputs) Result {
 	// Seam 3: anchor loss, reported and folded into Services only when every
 	// non-local endpoint of a service has lost its anchor. Never written into
 	// statuses, never propagated -- computed after the fixed point on purpose.
+	//
+	// The fold respects ReportReachabilityOnly for the same reason the other
+	// two seams do. Until the anchor lookup was repaired this branch could
+	// never fire, which is why it was previously ungated and why DECISIONS.md
+	// claimed exposure could only ever add a row to a report: that was a
+	// description of dead code, not of the design.
 	unreachable := computeUnreachable(g, net, aliveHosts, statuses, &coverage)
-	result.Services = append(result.Services, computeExposureImpacts(g, unreachable, existingIDs)...)
+	if !req.ReportReachabilityOnly {
+		result.Services = append(result.Services, computeExposureImpacts(g, unreachable, existingIDs)...)
+	}
 
 	sortImpacts(result.Services)
 	sortImpacts(result.WontRestart)

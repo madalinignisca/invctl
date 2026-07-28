@@ -35,8 +35,14 @@ func funcs() template.FuncMap {
 		"title":          titleCase,
 		"pluralise":      pluralise,
 		"queryString":    queryString,
-		"add":            func(a, b int) int { return a + b },
-		"seq":            seq,
+		"add": func(nums ...int) int {
+			total := 0
+			for _, n := range nums {
+				total += n
+			}
+			return total
+		},
+		"seq": seq,
 	}
 }
 
