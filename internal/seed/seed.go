@@ -19,7 +19,7 @@ import (
 
 // Actor attributes seeded rows in the change log, so demo data is instantly
 // distinguishable from anything an operator typed.
-var Actor = domain.Actor{Name: "seed", Kind: "system"}
+var Actor = domain.Actor{ID: "seed", Name: "seed", Kind: "system"}
 
 // Refs holds the ids of the fixture rows the tests need to name. Building it
 // as a return value keeps the tests from hard-coding ids or looking rows up by

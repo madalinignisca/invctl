@@ -216,6 +216,22 @@ type DependencyRow struct {
 	ProviderSvc  string  `db:"provider_service_id"`
 	ProviderCode string  `db:"provider_code"`
 	IdentityName *string `db:"identity_name"`
+	// VerifiedByName resolves the opaque id in verified_by for display. It is
+	// nil when the account was scrubbed or never existed, in which case the UI
+	// falls back to saying only that somebody verified it.
+	VerifiedByName *string `db:"verified_by_name"`
+}
+
+// VerifiedByDisplay names whoever attested to this edge, degrading gracefully
+// when the id no longer resolves.
+func (d *DependencyRow) VerifiedByDisplay() string {
+	if d.VerifiedByName != nil && *d.VerifiedByName != "" {
+		return *d.VerifiedByName
+	}
+	if d.VerifiedBy != nil && *d.VerifiedBy != "" {
+		return "a since-removed account"
+	}
+	return "unknown"
 }
 
 // NatureDescription exposes the failure semantics to templates.
@@ -234,7 +250,8 @@ const dependencySelect = `
 	       COALESCE(pe.port, re.port) AS provider_port,
 	       COALESCE(pes.id, res.id, '') AS provider_service_id,
 	       COALESCE(pes.code, res.code, '') AS provider_code,
-	       idn.name AS identity_name
+	       idn.name AS identity_name,
+	       COALESCE(vu.display_name, vu.username) AS verified_by_name
 	FROM dependency d
 	JOIN service cs ON cs.id = d.consumer_service_id
 	LEFT JOIN endpoint pe ON pe.id = d.provider_endpoint_id
@@ -242,7 +259,8 @@ const dependencySelect = `
 	LEFT JOIN route r ON r.id = d.provider_route_id
 	LEFT JOIN endpoint re ON re.id = r.frontend_endpoint_id
 	LEFT JOIN service res ON res.id = re.service_id
-	LEFT JOIN identity idn ON idn.id = d.identity_id`
+	LEFT JOIN identity idn ON idn.id = d.identity_id
+	LEFT JOIN app_user vu ON vu.id = d.verified_by`
 
 // ListUpstream returns what a service depends on.
 func (s *SQLStore) ListUpstream(ctx context.Context, serviceID string) ([]DependencyRow, error) {
@@ -387,11 +405,11 @@ func (s *SQLStore) VerifyDependency(ctx context.Context, actor domain.Actor, id 
 	return s.write(ctx, actor, func(t *tx) error {
 		if _, err := t.exec(ctx,
 			`UPDATE dependency SET verified_by = ?, verified_at = ?, updated_at = ? WHERE id = ?`,
-			actor.Name, at, at, id); err != nil {
+			actor.ID, at, at, id); err != nil {
 			return translateWriteErr(err, "verifying dependency")
 		}
 		after := before.Dependency
-		after.VerifiedBy = &actor.Name
+		after.VerifiedBy = &actor.ID
 		after.VerifiedAt = &at
 		return t.logUpdate(ctx, "dependency", id, &before.Dependency, &after)
 	})
@@ -469,16 +487,24 @@ func (s *SQLStore) ListIdentities(ctx context.Context) ([]domain.Identity, error
 
 // ---------- change log ----------
 
+// changeLogSelect resolves actor -> app_user.display_name/username with a
+// LEFT JOIN, never an inner one: the seeder and system writes have no
+// app_user row at all, and a scrubbed user must degrade to the raw id rather
+// than break the page (docs/DECISIONS.md, 2026-07-28 decisions).
+const changeLogSelect = `
+	SELECT cl.*, COALESCE(u.display_name, u.username) AS actor_name
+	FROM change_log cl
+	LEFT JOIN app_user u ON u.id = cl.actor`
+
 // ListChangesForEntity returns the audit history of one row, newest first.
 func (s *SQLStore) ListChangesForEntity(ctx context.Context, entityType, entityID string, limit int) ([]domain.ChangeLog, error) {
 	if limit <= 0 {
 		limit = 50
 	}
 	var changes []domain.ChangeLog
-	err := s.read(ctx, &changes, `
-		SELECT * FROM change_log
-		WHERE entity_type = ? AND entity_id = ?
-		ORDER BY at DESC, id DESC
+	err := s.read(ctx, &changes, changeLogSelect+`
+		WHERE cl.entity_type = ? AND cl.entity_id = ?
+		ORDER BY cl.at DESC, cl.id DESC
 		LIMIT ?`, entityType, entityID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("listing changes for %s %s: %w", entityType, entityID, err)
@@ -492,7 +518,7 @@ func (s *SQLStore) ListRecentChanges(ctx context.Context, limit int) ([]domain.C
 		limit = 25
 	}
 	var changes []domain.ChangeLog
-	err := s.read(ctx, &changes, `SELECT * FROM change_log ORDER BY at DESC, id DESC LIMIT ?`, limit)
+	err := s.read(ctx, &changes, changeLogSelect+` ORDER BY cl.at DESC, cl.id DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, fmt.Errorf("listing recent changes: %w", err)
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -11,7 +12,7 @@ import (
 	"github.com/gabriel/invctl/internal/domain"
 )
 
-var testActor = domain.Actor{Name: "tester", Kind: "user"}
+var testActor = domain.Actor{ID: "tester", Name: "tester", Kind: "user"}
 
 func newStore(t *testing.T, e Engine) (*SQLStore, context.Context) {
 	t.Helper()
@@ -218,8 +219,8 @@ func TestEveryMutationWritesChangeLog(t *testing.T) {
 				if changes[0].Action != domain.ActionCreate {
 					t.Errorf("action = %s, want create", changes[0].Action)
 				}
-				if changes[0].Actor != testActor.Name {
-					t.Errorf("actor = %s, want %s", changes[0].Actor, testActor.Name)
+				if changes[0].Actor != testActor.ID {
+					t.Errorf("actor = %s, want %s", changes[0].Actor, testActor.ID)
 				}
 
 				var snapshot map[string]map[string]any
@@ -306,6 +307,79 @@ func TestEveryMutationWritesChangeLog(t *testing.T) {
 				}
 				if changes[0].Action != domain.ActionRetire {
 					t.Errorf("action = %s, want retire", changes[0].Action)
+				}
+			})
+		})
+	}
+}
+
+// TestChangeLogActorIsAnOpaqueID covers docs/DECISIONS.md's 2026-07-28
+// decisions: change_log.actor holds app_user.id, never a username, and the
+// store resolves a display name at read time by joining app_user -- which
+// must degrade to the raw id, not break, once that row is gone.
+func TestChangeLogActorIsAnOpaqueID(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			s, ctx := newStore(t, e)
+
+			user, err := domain.NewAppUser(NewID(), "operator", domain.UserSourceLocal, s.Now())
+			if err != nil {
+				t.Fatalf("building user: %v", err)
+			}
+			display := "Operator One"
+			user.DisplayName = &display
+			if err := s.CreateUser(ctx, domain.SystemActor, user); err != nil {
+				t.Fatalf("creating user: %v", err)
+			}
+
+			env, err := domain.NewEnvironment(NewID(), "actor-id-test", "Actor id test",
+				domain.EnvRoleDev, false, 3, s.Now())
+			if err != nil {
+				t.Fatalf("building environment: %v", err)
+			}
+			if err := s.CreateEnvironment(ctx, domain.UserActor(user), env); err != nil {
+				t.Fatalf("creating environment: %v", err)
+			}
+
+			changes, err := s.ListChangesForEntity(ctx, "environment", env.ID, 5)
+			if err != nil {
+				t.Fatalf("listing changes: %v", err)
+			}
+			if len(changes) != 1 {
+				t.Fatalf("got %d change entries, want 1", len(changes))
+			}
+
+			t.Run("the raw column holds the id, not the username", func(t *testing.T) {
+				if changes[0].Actor != user.ID {
+					t.Errorf("change_log.actor = %q, want the opaque id %q", changes[0].Actor, user.ID)
+				}
+				if changes[0].Actor == user.Username {
+					t.Error("change_log.actor stored the username")
+				}
+			})
+
+			t.Run("the store resolves a display name", func(t *testing.T) {
+				if changes[0].ActorName == nil || *changes[0].ActorName != display {
+					t.Errorf("ActorName = %v, want %q", changes[0].ActorName, display)
+				}
+				if got := changes[0].DisplayActor(); got != display {
+					t.Errorf("DisplayActor() = %q, want %q", got, display)
+				}
+			})
+
+			t.Run("a scrubbed user degrades to the raw id instead of breaking", func(t *testing.T) {
+				if _, err := s.db.Writer.Exec(s.db.Rebind(`DELETE FROM app_user WHERE id = ?`), user.ID); err != nil {
+					t.Fatalf("scrubbing user: %v", err)
+				}
+				after, err := s.ListChangesForEntity(ctx, "environment", env.ID, 5)
+				if err != nil {
+					t.Fatalf("listing changes after scrub: %v", err)
+				}
+				if after[0].ActorName != nil {
+					t.Errorf("ActorName = %v after scrubbing, want nil", after[0].ActorName)
+				}
+				if got := after[0].DisplayActor(); got != user.ID {
+					t.Errorf("DisplayActor() after scrubbing = %q, want the raw id %q", got, user.ID)
 				}
 			})
 		})
@@ -854,6 +928,157 @@ func TestDataClassChangeIsAudited(t *testing.T) {
 					t.Errorf("reordering the same classes produced a spurious audit entry: %s", after[0].Diff)
 				}
 			})
+		})
+	}
+}
+
+// TestVerifiedByIsAnOpaqueID. dependency.verified_by records that a *person*
+// attested to an edge, so it used to hold their username -- which put a name
+// both in the column and, via logUpdate, permanently into change_log.diff.
+// Scrubbing the app_user row would not have removed it, because a diff stores
+// a literal rather than resolving a join, so the erasure story was false.
+func TestVerifiedByIsAnOpaqueID(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			s, ctx := newStore(t, e)
+			envID := mustEnvironment(t, s, ctx, "prod", domain.EnvRoleProduction)
+
+			user, err := domain.NewAppUser(NewID(), "alice", domain.UserSourceLocal, s.Now())
+			if err != nil {
+				t.Fatalf("building user: %v", err)
+			}
+			display := "Alice Example"
+			user.DisplayName = &display
+			if err := s.CreateUser(ctx, domain.SystemActor, user); err != nil {
+				t.Fatalf("creating user: %v", err)
+			}
+
+			mkService := func(code string) string {
+				svc, err := domain.NewService(NewID(), domain.ServiceSpec{
+					Code: code, Name: code, Kind: domain.SvcAPI, EnvironmentID: envID,
+					Availability: domain.AvailStandalone, Tier: 1}, s.Now())
+				if err != nil {
+					t.Fatalf("building service: %v", err)
+				}
+				if err := s.CreateService(ctx, testActor, svc); err != nil {
+					t.Fatalf("creating service: %v", err)
+				}
+				return svc.ID
+			}
+			consumer, provider := mkService("consumer"), mkService("provider")
+
+			port := 443
+			ep, err := domain.NewEndpoint(NewID(), provider, "https", domain.ProtoTCP, &port, domain.BindHost)
+			if err != nil {
+				t.Fatalf("building endpoint: %v", err)
+			}
+			if err := s.CreateEndpoint(ctx, testActor, ep); err != nil {
+				t.Fatalf("creating endpoint: %v", err)
+			}
+			epID := ep.ID
+			dep, err := domain.NewDependency(NewID(), domain.DependencySpec{
+				ConsumerServiceID: consumer, ProviderEndpointID: &epID,
+				Nature: domain.NatureHard, FailureMode: "breaks"}, s.Now())
+			if err != nil {
+				t.Fatalf("building dependency: %v", err)
+			}
+			if err := s.CreateDependency(ctx, testActor, dep, nil); err != nil {
+				t.Fatalf("creating dependency: %v", err)
+			}
+
+			if err := s.VerifyDependency(ctx, domain.UserActor(user), dep.ID); err != nil {
+				t.Fatalf("verifying: %v", err)
+			}
+
+			row, err := s.GetDependency(ctx, dep.ID)
+			if err != nil {
+				t.Fatalf("getting dependency: %v", err)
+			}
+			if row.VerifiedBy == nil {
+				t.Fatal("verified_by was not recorded")
+			}
+			if *row.VerifiedBy == "alice" {
+				t.Error("verified_by stores the username; it must store the opaque id")
+			}
+			if *row.VerifiedBy != user.ID {
+				t.Errorf("verified_by = %q, want the user id %q", *row.VerifiedBy, user.ID)
+			}
+			// It still resolves to a human name for the UI.
+			if got := row.VerifiedByDisplay(); got != display {
+				t.Errorf("VerifiedByDisplay = %q, want %q", got, display)
+			}
+
+			// And the username is nowhere in the audit trail.
+			changes, err := s.ListRecentChanges(ctx, 200)
+			if err != nil {
+				t.Fatalf("listing changes: %v", err)
+			}
+			for _, c := range changes {
+				if strings.Contains(c.Diff, "alice") || strings.Contains(c.Diff, display) {
+					t.Errorf("a username reached change_log.diff: %s", c.Diff)
+				}
+			}
+		})
+	}
+}
+
+// TestCreateLinkIsSerialised. The port-uniqueness rule is a SELECT followed by
+// an INSERT, which at PostgreSQL's default read-committed level lets two
+// concurrent patches both observe a free port and both commit -- reproduced by
+// forcing the interleaving before this was fixed. SQLite never showed it,
+// because its writer pool holds one connection, so the development engine
+// masked a defect that was live on the deployment target.
+func TestCreateLinkIsSerialised(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			s, ctx := newStore(t, e)
+			envID := mustEnvironment(t, s, ctx, "prod", domain.EnvRoleProduction)
+			assetID := mustAsset(t, s, ctx, domain.KindSwitch, "sw-core", nil, envID)
+
+			mkIface := func(name string) string {
+				i, err := domain.NewInterface(NewID(), assetID, name, domain.FFRJ45)
+				if err != nil {
+					t.Fatalf("building interface: %v", err)
+				}
+				if err := s.CreateInterface(ctx, testActor, i); err != nil {
+					t.Fatalf("creating interface: %v", err)
+				}
+				return i.ID
+			}
+			shared := mkIface("shared")
+
+			// Many concurrent attempts to patch the same port to different
+			// far ends. Exactly one may win.
+			const racers = 8
+			done := make(chan error, racers)
+			for i := 0; i < racers; i++ {
+				far := mkIface(fmt.Sprintf("far-%d", i))
+				go func(far string) {
+					l, err := domain.NewLink(NewID(), shared, far)
+					if err != nil {
+						done <- err
+						return
+					}
+					done <- s.CreateLink(ctx, testActor, l)
+				}(far)
+			}
+			succeeded := 0
+			for i := 0; i < racers; i++ {
+				if err := <-done; err == nil {
+					succeeded++
+				}
+			}
+
+			var active int
+			if err := s.readOne(ctx, &active,
+				`SELECT COUNT(*) FROM link WHERE lifecycle = 'active' AND (a_interface_id = ? OR b_interface_id = ?)`,
+				shared, shared); err != nil {
+				t.Fatalf("counting links: %v", err)
+			}
+			if active != 1 {
+				t.Errorf("%d active cables on one port (%d calls reported success), want exactly 1",
+					active, succeeded)
+			}
 		})
 	}
 }

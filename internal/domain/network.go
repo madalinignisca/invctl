@@ -70,13 +70,19 @@ func (i *Interface) SetMAC(mac string) error {
 }
 
 // Link is a cable between two interfaces. Undirected in meaning but stored
-// with an a/b side; the store enforces a single row per pair.
+// with an a/b side; the store enforces a single active row per port.
+//
+// Lifecycle is 'active' or 'retired' (docs/DECISIONS.md, 2026-07-28): cables
+// get unpatched constantly, and soft-delete-only is a hard rule here same as
+// everywhere else. A retired link keeps its row and audit history but is
+// excluded from every far-end lookup.
 type Link struct {
 	ID           string  `db:"id"`
 	AInterfaceID string  `db:"a_interface_id"`
 	BInterfaceID string  `db:"b_interface_id"`
 	Medium       *string `db:"medium"`
 	LengthM      *int    `db:"length_m"`
+	Lifecycle    string  `db:"lifecycle"`
 }
 
 // NewLink validates and constructs a cable.
@@ -90,8 +96,11 @@ func NewLink(id, aID, bID string) (*Link, error) {
 	if err := ve.OrNil(); err != nil {
 		return nil, err
 	}
-	return &Link{ID: id, AInterfaceID: aID, BInterfaceID: bID}, nil
+	return &Link{ID: id, AInterfaceID: aID, BInterfaceID: bID, Lifecycle: LifecycleActive}, nil
 }
+
+// IsRetired reports whether this cable has been unpatched.
+func (l *Link) IsRetired() bool { return l.Lifecycle == LifecycleRetired }
 
 // Prefix is a network. Bounds are stored as big-endian bytes so containment is
 // a range scan (§4.1); the text form is kept for display and uniqueness.

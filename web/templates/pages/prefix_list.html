@@ -1,0 +1,39 @@
+{{define "content"}}
+<div class="page-head">
+  <div class="eyebrow">Layer 1-3</div>
+  <h1>Prefixes</h1>
+  <p class="lede">
+    Enough IP modelling to resolve an address to an asset -- not an IPAM
+    replacement. Utilisation counts addresses actually assigned, not the size
+    of the range.
+  </p>
+</div>
+
+<div class="panel">
+  <div class="panel-head"><h2>{{pluralise (len .Prefixes) "network" "networks"}}</h2></div>
+  {{if .Prefixes}}
+  <div class="scroll-x">
+    <table>
+      <thead><tr><th>CIDR</th><th>VLAN</th><th>Environment</th><th>Role</th><th>Addresses in use</th></tr></thead>
+      <tbody>
+        {{range .Prefixes}}
+        <tr>
+          <td class="mono">{{.CIDRText}}</td>
+          <td class="num">{{if .VLANID}}{{derefInt .VLANID}}{{else}}—{{end}}</td>
+          <td>{{if .EnvironmentCode}}<span class="pill pill-info">{{.EnvironmentCode}}</span>{{else}}—{{end}}</td>
+          <td>{{if .Role}}{{deref .Role}}{{else}}—{{end}}</td>
+          <td class="num">{{.AddressCount}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{else}}
+  <div class="empty"><strong>No networks declared yet.</strong>Enough here to resolve an address to an asset.</div>
+  {{end}}
+</div>
+
+{{if .CanWrite}}
+  {{template "prefix_form" .FormData}}
+{{end}}
+{{end}}

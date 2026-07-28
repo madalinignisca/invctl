@@ -151,15 +151,18 @@ func (a *App) AssetList(w http.ResponseWriter, r *http.Request) {
 
 type assetDetailPage struct {
 	Base
-	Asset        *store.AssetRow
-	Ancestors    []domain.Asset
-	Children     []store.AssetRow
-	Interfaces   []store.InterfaceRow
-	Instances    []store.InstanceRow
-	Changes      []domain.ChangeLog
-	Environments []domain.Environment
-	Kinds        []string
-	Lifecycles   []string
+	Asset         *store.AssetRow
+	Ancestors     []domain.Asset
+	Children      []store.AssetRow
+	Interfaces    []store.InterfaceRow
+	Instances     []store.InstanceRow
+	Changes       []domain.ChangeLog
+	Environments  []domain.Environment
+	Kinds         []string
+	Lifecycles    []string
+	InterfaceForm interfaceFormData
+	IPAddressForm ipAddressFormData
+	LinkForm      linkFormData
 }
 
 // AssetDetail renders one asset with its containment, ports and workloads.
@@ -201,18 +204,30 @@ func (a *App) AssetDetail(w http.ResponseWriter, r *http.Request) {
 		a.serverError(w, r, err)
 		return
 	}
+	// Candidates for the "patch to" dropdown -- every unpatched interface in
+	// the estate, this asset's own ports included. Excluding nothing by asset
+	// keeps the query simple; CreateLink's uniqueness check is what actually
+	// prevents a bad cable.
+	targets, err := a.Store.ListAvailableInterfaces(r.Context(), "")
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
 
 	a.Render.Page(w, http.StatusOK, "asset_detail", assetDetailPage{
-		Base:         a.base(r, asset.Name, "assets"),
-		Asset:        asset,
-		Ancestors:    ancestors,
-		Children:     children,
-		Interfaces:   interfaces,
-		Instances:    instances,
-		Changes:      changes,
-		Environments: envs,
-		Kinds:        domain.AssetKinds,
-		Lifecycles:   domain.AssetLifecycles,
+		Base:          a.base(r, asset.Name, "assets"),
+		Asset:         asset,
+		Ancestors:     ancestors,
+		Children:      children,
+		Interfaces:    interfaces,
+		Instances:     instances,
+		Changes:       changes,
+		Environments:  envs,
+		Kinds:         domain.AssetKinds,
+		Lifecycles:    domain.AssetLifecycles,
+		InterfaceForm: a.newInterfaceForm(r, id, nil),
+		IPAddressForm: a.newIPAddressForm(r, id, nil, interfaces),
+		LinkForm:      a.newLinkForm(r, id, nil, interfaces, targets),
 	})
 }
 

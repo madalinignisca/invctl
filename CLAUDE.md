@@ -56,6 +56,15 @@ Vendor `htmx.min.js` and `alpine.min.js` into `web/static`. This will likely run
 - **Observed state has its own audit obligation — narrower, not absent.** It logs *transitions* to `observed_transition`, never to `change_log`. See "Declared vs observed" below. Reclassifying a column to dodge the audit rule is an architecture decision, not a refactor.
 - **Soft delete only.** Set `lifecycle = 'retired'`. The single permitted `DELETE FROM` in this codebase is the admin-invoked prune of `observed_transition`; there is none in handler code.
 
+### invctl never acts on the estate
+
+This system presents state. It does not push configuration, remediate, restart,
+or open a firewall rule — `HANDOVER.md` §1 lists configuration management as a
+non-goal and that is a rule, not an aspiration. Observed health may inform what
+is *displayed*, labelled as observed with its reporter and age, because showing
+is not acting. Nothing in this codebase may trigger a change outside it. The
+audience is a person during an incident and the output is understanding.
+
 ### Declared vs observed
 
 Three kinds of fact, three obligations. Full normative rules, the column
@@ -84,9 +93,12 @@ The rules that bite most often:
   `state`.
 - Keep three timestamps and never collapse them: `state_since` (onset — "down since
   when" is the 03:00 question), `last_report_at` (server), `reported_at` (caller).
-- Attribution is server-derived from the credential, never read from the payload —
-  `change_log.actor` is free TEXT and would otherwise forge a human's entry. Every view
-  rendering `actor` renders `actor_kind` beside it.
+- **`change_log.actor` holds an opaque id** (`app_user.id`), never a username or email,
+  so the audit trail carries no personal data and can be kept forever with no retention
+  argument. The UI joins to resolve a display name; scrubbing an `app_user` row answers
+  an erasure request while the log keeps its integrity and simply stops resolving.
+  Attribution is server-derived from the credential, never read from a request payload.
+  Every view rendering `actor` renders `actor_kind` beside it.
 - A monitoring credential is not an `app_user`, never appears in `INV_ADMIN_USERS`, and
   never reaches `authz.CanWrite`. An observation for an unknown entity is **404, never
   created** — `ON CONFLICT` would turn a narrow token into an inventory-write vector.

@@ -246,6 +246,14 @@ var ActorKinds = []string{"user", "agent", "system"}
 // Diff holds field-level changes as JSON (see docs/DECISIONS.md Q3):
 // {"field": {"old": ..., "new": ...}} for updates, a full snapshot under "new"
 // for creates.
+//
+// Actor holds an opaque identifier (docs/DECISIONS.md, 2026-07-28 decisions):
+// app_user.id for a person, never a username or email, so the audit trail
+// carries no personal data and can be kept forever with no retention
+// argument. ActorName is resolved at read time by a LEFT JOIN to app_user and
+// is nil when it does not resolve — either because the actor was never a real
+// account (system, seed, ldap) or because the account was scrubbed to satisfy
+// an erasure request. DisplayActor is what a template should render.
 type ChangeLog struct {
 	ID         string  `db:"id"`
 	EntityType string  `db:"entity_type"`
@@ -253,22 +261,44 @@ type ChangeLog struct {
 	Action     string  `db:"action"`
 	Actor      string  `db:"actor"`
 	ActorKind  string  `db:"actor_kind"`
+	ActorName  *string `db:"actor_name"`
 	Diff       string  `db:"diff"`
 	TicketRef  *string `db:"ticket_ref"`
 	At         string  `db:"at"`
 }
 
+// DisplayActor returns a human-readable name for the actor, falling back to
+// the raw stored value -- an opaque id, or a system/seed/ldap literal -- when
+// it does not resolve to an app_user row.
+func (c ChangeLog) DisplayActor() string {
+	if c.ActorName != nil && *c.ActorName != "" {
+		return *c.ActorName
+	}
+	return c.Actor
+}
+
 // Actor identifies who is making a change, for the audit trail.
+//
+// ID is what is written to change_log.actor: an app_user.id for a person, or
+// a fixed non-personal literal ("system", "seed", "ldap") for a writer that
+// is not a person at all. Name is a human-readable label kept for the few
+// declared columns that name an actor directly today (dependency.verified_by)
+// and is never written to change_log.
 type Actor struct {
+	ID   string
 	Name string
 	Kind string
 }
 
-// SystemActor is used by the seeder and migrations.
-var SystemActor = Actor{Name: "system", Kind: "system"}
+// SystemActor is used by the seeder and migrations. "system" is not a
+// person's name, so it needs no opaque id of its own.
+var SystemActor = Actor{ID: "system", Name: "system", Kind: "system"}
 
-// UserActor builds an actor for a logged-in operator.
-func UserActor(username string) Actor { return Actor{Name: username, Kind: "user"} }
+// UserActor builds an actor for a logged-in operator. Only the account's
+// opaque id reaches the audit trail; the username never does.
+func UserActor(user *AppUser) Actor {
+	return Actor{ID: user.ID, Name: user.Username, Kind: "user"}
+}
 
 // AppUser is an operator account. Local users carry an argon2id hash; LDAP
 // users carry none and are upserted on successful bind.

@@ -72,6 +72,35 @@ type dependencyFormData struct {
 	ClassOptions []string
 }
 
+type interfaceFormData struct {
+	Base
+	AssetID     string
+	Errors      map[string]string
+	FormFactors []string
+}
+
+type ipAddressFormData struct {
+	Base
+	AssetID    string
+	Errors     map[string]string
+	Interfaces []store.InterfaceRow
+	Roles      []string
+}
+
+type linkFormData struct {
+	Base
+	AssetID    string
+	Errors     map[string]string
+	Interfaces []store.InterfaceRow    // this asset's unpatched ports, the "from" side
+	Targets    []store.InterfaceOption // candidates across the estate, the "to" side
+}
+
+type prefixFormData struct {
+	Base
+	Errors       map[string]string
+	Environments []domain.Environment
+}
+
 // newAssetForm builds the asset form context. Parents is the same list the
 // table shows, so an asset can be filed under anything already on screen.
 func (a *App) newAssetForm(r *http.Request, errs map[string]string, envs []domain.Environment, parents []store.AssetRow) assetFormData {
@@ -136,6 +165,55 @@ func (a *App) newDependencyForm(r *http.Request, serviceID string, errs map[stri
 		Natures:      domain.Natures,
 		ClassOptions: domain.DataClasses,
 	}
+}
+
+func (a *App) newInterfaceForm(r *http.Request, assetID string, errs map[string]string) interfaceFormData {
+	return interfaceFormData{
+		Base:        a.base(r, "Assets", "assets"),
+		AssetID:     assetID,
+		Errors:      orEmpty(errs),
+		FormFactors: domain.FormFactors,
+	}
+}
+
+func (a *App) newIPAddressForm(r *http.Request, assetID string, errs map[string]string, interfaces []store.InterfaceRow) ipAddressFormData {
+	return ipAddressFormData{
+		Base:       a.base(r, "Assets", "assets"),
+		AssetID:    assetID,
+		Errors:     orEmpty(errs),
+		Interfaces: interfaces,
+		Roles:      domain.IPRoles,
+	}
+}
+
+func (a *App) newLinkForm(r *http.Request, assetID string, errs map[string]string, interfaces []store.InterfaceRow, targets []store.InterfaceOption) linkFormData {
+	return linkFormData{
+		Base:       a.base(r, "Assets", "assets"),
+		AssetID:    assetID,
+		Errors:     orEmpty(errs),
+		Interfaces: unpatchedInterfaces(interfaces),
+		Targets:    targets,
+	}
+}
+
+func (a *App) newPrefixForm(r *http.Request, errs map[string]string, envs []domain.Environment) prefixFormData {
+	return prefixFormData{
+		Base:         a.base(r, "Prefixes", "prefixes"),
+		Errors:       orEmpty(errs),
+		Environments: envs,
+	}
+}
+
+// unpatchedInterfaces filters to ports with no active cable -- the only
+// sensible "from" side of a new patch.
+func unpatchedInterfaces(interfaces []store.InterfaceRow) []store.InterfaceRow {
+	out := make([]store.InterfaceRow, 0, len(interfaces))
+	for _, i := range interfaces {
+		if !i.IsPatched() {
+			out = append(out, i)
+		}
+	}
+	return out
 }
 
 // orEmpty guarantees a non-nil map so a template can index it without a guard.

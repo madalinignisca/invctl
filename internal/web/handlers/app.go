@@ -211,7 +211,7 @@ func checkbox(r *http.Request, key string) bool {
 // actor identifies the signed-in user for the audit trail.
 func actor(r *http.Request) domain.Actor {
 	if user := middleware.UserFrom(r.Context()); user != nil {
-		return domain.UserActor(user.Username)
+		return domain.UserActor(user)
 	}
 	return domain.SystemActor
 }

@@ -83,7 +83,7 @@ func (t *tx) log(ctx context.Context, entityType, entityID, action, diff string)
 	_, err := t.exec(ctx,
 		`INSERT INTO change_log (id, entity_type, entity_id, action, actor, actor_kind, diff, at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		NewID(), entityType, entityID, action, t.actor.Name, t.actor.Kind, diff, t.at)
+		NewID(), entityType, entityID, action, t.actor.ID, t.actor.Kind, diff, t.at)
 	if err != nil {
 		return fmt.Errorf("writing change log for %s %s: %w", entityType, entityID, err)
 	}
@@ -117,7 +117,54 @@ func (t *tx) logUpdate(ctx context.Context, entityType, entityID string, before,
 // On SQLite the writer pool holds a single connection, so concurrent callers
 // queue here rather than colliding on the database lock.
 func (s *SQLStore) write(ctx context.Context, actor domain.Actor, fn func(*tx) error) error {
-	sqlTx, err := s.db.Writer.BeginTxx(ctx, nil)
+	return s.writeTx(ctx, actor, nil, fn)
+}
+
+// writeSerializable runs fn under an isolation level that actually prevents
+// check-then-act races, retrying if the engine aborts the transaction.
+//
+// Use it wherever a write asserts an invariant it just SELECTed -- "this port
+// has no active cable", "this asset is not already attached". At PostgreSQL's
+// default read-committed level two such transactions both see the old state and
+// both commit, which was verified rather than assumed: forcing the interleaving
+// produced two active cables on one port. SQLite never showed the bug because
+// its writer pool holds a single connection, so the primary development engine
+// silently masks a defect that is live on the deployment target.
+func (s *SQLStore) writeSerializable(ctx context.Context, actor domain.Actor, fn func(*tx) error) error {
+	opts := &sql.TxOptions{Isolation: sql.LevelSerializable}
+	if s.db.Driver != DriverPostgres {
+		// SQLite serialises writes already, and modernc rejects an explicit
+		// isolation level it does not implement.
+		opts = nil
+	}
+
+	// A serialization failure means "you raced, try again", not "this is
+	// impossible" -- so retry rather than surfacing it to the operator.
+	const attempts = 3
+	var err error
+	for attempt := 1; attempt <= attempts; attempt++ {
+		err = s.writeTx(ctx, actor, opts, fn)
+		if err == nil || !isSerializationFailure(err) {
+			return err
+		}
+	}
+	return fmt.Errorf("after %d serialization retries: %w", attempts, err)
+}
+
+// isSerializationFailure reports whether the engine aborted the transaction
+// because it could not be serialised. PostgreSQL raises SQLSTATE 40001.
+func isSerializationFailure(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "40001") ||
+		strings.Contains(msg, "could not serialize") ||
+		strings.Contains(msg, "concurrent update")
+}
+
+func (s *SQLStore) writeTx(ctx context.Context, actor domain.Actor, opts *sql.TxOptions, fn func(*tx) error) error {
+	sqlTx, err := s.db.Writer.BeginTxx(ctx, opts)
 	if err != nil {
 		return fmt.Errorf("beginning transaction: %w", err)
 	}

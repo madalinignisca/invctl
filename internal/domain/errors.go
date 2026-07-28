@@ -116,9 +116,41 @@ func checkRequired(ve *ValidationError, field, value string) string {
 // `secret_ref` holds a path rather than a secret, but a complete, permanent,
 // widely-readable map of where every credential lives is a reconnaissance gift.
 // The audit trail records *that* it changed, never what to.
+//
+// `dependency.verified_by` is deliberately absent: it holds an opaque
+// app_user.id, not a username, so it carries no personal data.
 var RedactedFields = map[string]bool{
 	"password_hash": true,
 	"secret_ref":    true,
+}
+
+// RedactedFieldsByEntity covers columns that are sensitive only on certain
+// entities, keyed by the Go type name of the audited value.
+//
+// A column name alone cannot decide this: `display_name` is a person's name on
+// app_user and a Windows service's description on rt_windows. Redacting by name
+// globally would either leak the first or destroy the second.
+//
+// The account's own row keeps id, source and is_active, and the change_log
+// entity_id is the user id — so the entry still says "this account was created"
+// and still resolves to a name while the app_user row exists. Once that row is
+// scrubbed it stops resolving, which is exactly what an erasure request should
+// achieve without rewriting history.
+var RedactedFieldsByEntity = map[string]map[string]bool{
+	"AppUser": {
+		"username":     true,
+		"display_name": true,
+		"email":        true,
+	},
+}
+
+// IsRedacted reports whether a column must be masked in the audit trail.
+// entity is the Go type name of the value being audited.
+func IsRedacted(entity, column string) bool {
+	if RedactedFields[column] {
+		return true
+	}
+	return RedactedFieldsByEntity[entity][column]
 }
 
 // Redacted is the placeholder written in place of a sensitive value.

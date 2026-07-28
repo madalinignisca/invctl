@@ -180,3 +180,75 @@ reconciliation, and the read-only Ansible inventory endpoint. The schema
 carries the columns they need (`source`, `confidence`, `first_seen`,
 `last_seen`, `verified_by`, `verified_at`, `firewall_rule_ref`) so that adding
 them later is not a migration of existing data.
+
+---
+
+## Decisions taken during the network-reachability work (2026-07-28)
+
+### The audit trail carries an opaque identifier, not a name
+
+`change_log.actor` holds `app_user.id` (a UUIDv7), never a username or an email.
+The UI joins to `app_user` to display a name.
+
+This removes the storage-limitation problem at the root rather than managing it: the
+audit trail contains no personal data, so it can be kept forever without a retention
+argument. `app_user` still holds the username and email — it must, to authenticate
+anyone — but that is a small, current, purpose-limited table. An erasure request is
+satisfied by scrubbing the `app_user` row; the audit trail keeps referential integrity
+through the opaque id and simply stops resolving to a name, which is exactly the
+behaviour an append-only log should have.
+
+LDAP-sourced accounts get the same treatment: the directory owns the identity, this
+system stores a local id.
+
+The rule generalises, and review found two places where it had to: **any column that
+records who did something stores an id, never a name.** `dependency.verified_by` is a
+person's attestation and held a username, which `logUpdate` then baked as a literal
+into `change_log.diff` — where scrubbing the `app_user` row would not have reached it,
+because a diff stores a value rather than resolving a join. It now stores the id and
+resolves for display like `actor` does. Separately, creating an account wrote the
+username, display name and email into the create snapshot; those are redacted per
+entity, so the entry still says an account was created and still resolves to a name
+while the account exists.
+
+Redaction is per entity, not per column name, because `display_name` is a person on
+`app_user` and a Windows service's description on `rt_windows` — judging by column name
+alone would either leak the first or destroy the second.
+
+`actor_kind` stays, because "was this a person or a machine" is not personal data and
+is the thing a reader needs at a glance.
+
+### invctl never acts on the estate
+
+This system presents state. It does not push configuration, does not remediate, does
+not restart anything, does not open or close a firewall rule. `HANDOVER.md` §1 already
+lists configuration management as a non-goal; this promotes it to a rule that governs
+every future feature.
+
+The consequence for observed health: it may inform what is *displayed* — an impact
+report may account for what monitoring reports, clearly labelled as observed with its
+reporter and age — because showing is not acting. It may never trigger anything. There
+is no remediation path to build, so the "a lying credential gets a node rebooted" risk
+does not arise: nothing reboots anything.
+
+The audience is a person during an incident, and the output is understanding.
+
+### Agent credentials are an environment allowlist
+
+`INV_AGENT_TOKENS` holds a comma-separated list of `id:token` pairs, matching the
+deliberately trivial POC RBAC of `INV_ADMIN_USERS`. An agent not on the list cannot
+write. Revocation is removing an entry and restarting.
+
+A credential table with hashed tokens, `last_used_at` and `revoked_at` is the right
+answer for a real deployment and is post-POC work. The env allowlist is chosen with
+that trade understood, not by accident.
+
+### Schema churn is free until the POC is signed off
+
+Until the POC is declared done, migrations may be destructive: rewrite tables, move
+columns, drop things. The estate is a fixture and there is no data to preserve.
+
+After sign-off this stops. From that point migrations are additive and reversible,
+every release must upgrade an existing database in place, and a destructive migration
+needs an explicit decision recorded here. Note the boundary when it is crossed — the
+first deployment holding real data is the moment this rule changes.

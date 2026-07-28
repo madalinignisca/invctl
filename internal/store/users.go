@@ -90,7 +90,7 @@ func (s *SQLStore) UpsertLDAPUser(ctx context.Context, username, displayName, em
 	}
 	// The directory is the actor here, not the person logging in: the account
 	// row exists because LDAP said so.
-	if err := s.CreateUser(ctx, domain.Actor{Name: "ldap", Kind: "system"}, u); err != nil {
+	if err := s.CreateUser(ctx, domain.Actor{ID: "ldap", Name: "ldap", Kind: "system"}, u); err != nil {
 		return nil, err
 	}
 	return u, nil

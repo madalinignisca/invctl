@@ -377,3 +377,154 @@
   <button class="btn btn-primary" type="submit">Record dependency</button>
 </form>
 {{end}}
+
+
+{{define "interface_form"}}
+<form id="interface-form" method="post" action="/assets/{{.AssetID}}/interfaces"
+      hx-post="/assets/{{.AssetID}}/interfaces" hx-target="#interface-form" hx-swap="outerHTML">
+  <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+  <div class="field-row">
+    <div class="field">
+      <label for="iface-name">Port name</label>
+      <input id="iface-name" class="mono {{if index .Errors "name"}}invalid{{end}}"
+             type="text" name="name" placeholder="eth0" required>
+      {{with index .Errors "name"}}<div class="field-error">{{.}}</div>{{end}}
+    </div>
+    <div class="field">
+      <label for="iface-form-factor">Form factor</label>
+      <select id="iface-form-factor" name="form_factor">
+        {{range .FormFactors}}<option value="{{.}}">{{.}}</option>{{end}}
+      </select>
+      {{with index .Errors "form_factor"}}<div class="field-error">{{.}}</div>{{end}}
+    </div>
+    <div class="field">
+      <label for="iface-speed">Speed (Mb/s)</label>
+      <input id="iface-speed" type="number" name="speed_mbps" min="0" placeholder="10000">
+    </div>
+    <div class="field">
+      <label for="iface-mac">MAC</label>
+      <input id="iface-mac" class="mono {{if index .Errors "mac"}}invalid{{end}}"
+             type="text" name="mac" placeholder="aa:bb:cc:00:10:01">
+      {{with index .Errors "mac"}}<div class="field-error">{{.}}</div>{{end}}
+    </div>
+    <div class="field">
+      <label for="iface-mtu">MTU</label>
+      <input id="iface-mtu" type="number" name="mtu" min="0" placeholder="1500">
+    </div>
+    <div class="field">
+      <label class="check" style="margin-top:20px">
+        <input type="checkbox" name="is_mgmt"> Management port
+      </label>
+    </div>
+  </div>
+  <button class="btn btn-primary" type="submit">Add interface</button>
+</form>
+{{end}}
+
+
+{{define "ip_address_form"}}
+<form id="ip-address-form" class="panel" method="post" action="/addresses"
+      hx-post="/addresses" hx-target="#ip-address-form" hx-swap="outerHTML">
+  <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+  <input type="hidden" name="asset_id" value="{{.AssetID}}">
+  <div class="panel-head"><h2>Assign an address</h2></div>
+  <div class="panel-body">
+    <div class="field-row">
+      <div class="field">
+        <label for="addr-iface">Interface</label>
+        <select id="addr-iface" name="interface_id">
+          {{range .Interfaces}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
+        </select>
+        {{with index .Errors "a_interface_id"}}<div class="field-error">{{.}}</div>{{end}}
+        {{if not .Interfaces}}<div class="field-hint">Add an interface first.</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="addr-text">Address</label>
+        <input id="addr-text" class="mono {{if index .Errors "addr_text"}}invalid{{end}}"
+               type="text" name="addr_text" placeholder="10.20.30.5" required>
+        {{with index .Errors "addr_text"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="addr-role">Role</label>
+        <select id="addr-role" name="role">
+          {{range .Roles}}<option value="{{.}}">{{.}}</option>{{end}}
+        </select>
+      </div>
+    </div>
+    <button class="btn btn-primary" type="submit" {{if not .Interfaces}}disabled{{end}}>Assign address</button>
+  </div>
+</form>
+{{end}}
+
+
+{{define "link_form"}}
+<form id="link-form" class="panel" method="post" action="/links"
+      hx-post="/links" hx-target="#link-form" hx-swap="outerHTML">
+  <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+  <input type="hidden" name="asset_id" value="{{.AssetID}}">
+  <div class="panel-head"><h2>Patch a cable</h2></div>
+  <div class="panel-body">
+    <div class="field-row">
+      <div class="field">
+        <label for="link-from">From (this asset)</label>
+        <select id="link-from" name="a_interface_id">
+          {{range .Interfaces}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
+        </select>
+        {{if not .Interfaces}}<div class="field-hint">Every port here is already patched, or none exist yet.</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="link-target">To</label>
+        <select id="link-target" name="target_interface_id">
+          {{range .Targets}}<option value="{{.ID}}">{{.AssetName}} / {{.Name}}</option>{{end}}
+        </select>
+        {{with index .Errors "target_interface_id"}}<div class="field-error">{{.}}</div>{{end}}
+        {{with index .Errors "b_interface_id"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="link-medium">Medium</label>
+        <input id="link-medium" type="text" name="medium" placeholder="cat6a">
+      </div>
+      <div class="field">
+        <label for="link-length">Length (m)</label>
+        <input id="link-length" type="number" name="length_m" min="0">
+      </div>
+    </div>
+    <button class="btn btn-primary" type="submit" {{if not .Interfaces}}disabled{{end}}>Patch cable</button>
+  </div>
+</form>
+{{end}}
+
+
+{{define "prefix_form"}}
+<form id="prefix-form" class="panel" method="post" action="/prefixes"
+      hx-post="/prefixes" hx-target="#prefix-form" hx-swap="outerHTML">
+  <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+  <div class="panel-head"><h2>Declare a network</h2></div>
+  <div class="panel-body">
+    <div class="field-row">
+      <div class="field">
+        <label for="prefix-cidr">CIDR</label>
+        <input id="prefix-cidr" class="mono {{if index .Errors "cidr_text"}}invalid{{end}}"
+               type="text" name="cidr_text" placeholder="10.20.30.0/24" required>
+        {{with index .Errors "cidr_text"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="prefix-vlan">VLAN</label>
+        <input id="prefix-vlan" type="number" name="vlan_id" min="1" max="4094" placeholder="30">
+      </div>
+      <div class="field">
+        <label for="prefix-env">Environment</label>
+        <select id="prefix-env" name="environment_id">
+          <option value="">—</option>
+          {{range .Environments}}<option value="{{.ID}}">{{.Code}}</option>{{end}}
+        </select>
+      </div>
+      <div class="field">
+        <label for="prefix-role">Role</label>
+        <input id="prefix-role" type="text" name="role" placeholder="servers">
+      </div>
+    </div>
+    <button class="btn btn-primary" type="submit">Declare network</button>
+  </div>
+</form>
+{{end}}

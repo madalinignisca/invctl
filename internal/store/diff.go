@@ -51,7 +51,7 @@ func diffJSON(before, after any) (string, bool, error) {
 		if reflect.DeepEqual(oldVal, newVal) {
 			continue
 		}
-		if domain.RedactedFields[name] {
+		if domain.IsRedacted(t.Name(), name) {
 			// Record that it changed, never what to.
 			changes[name] = fieldChange{Old: domain.Redacted, New: domain.Redacted}
 			continue
@@ -80,7 +80,7 @@ func snapshotJSON(entity any) (string, error) {
 		if name == "" || name == "-" {
 			continue
 		}
-		if domain.RedactedFields[name] {
+		if domain.IsRedacted(t.Name(), name) {
 			fields[name] = domain.Redacted
 			continue
 		}

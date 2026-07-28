@@ -15,9 +15,13 @@ type InterfaceRow struct {
 	domain.Interface
 	AssetName string `db:"asset_name"`
 	Addresses []domain.IPAddress
+	LinkID    string
 	PeerAsset string
 	PeerPort  string
 }
+
+// IsPatched reports whether this port already carries an active cable.
+func (r InterfaceRow) IsPatched() bool { return r.LinkID != "" }
 
 // ListInterfaces returns the ports on an asset, with addresses attached.
 func (s *SQLStore) ListInterfaces(ctx context.Context, assetID string) ([]InterfaceRow, error) {
@@ -57,39 +61,81 @@ func (s *SQLStore) ListInterfaces(ctx context.Context, assetID string) ([]Interf
 	}
 
 	// The far end of each cable. A link is undirected in meaning but stored
-	// with an a/b side, so both orientations have to be considered.
+	// with an a/b side, so both orientations have to be considered. Retired
+	// links are excluded: an unpatched cable must not still show as a port's
+	// far end (docs/DECISIONS.md, 2026-07-28 decisions).
 	type peer struct {
 		NearID    string `db:"near_id"`
+		LinkID    string `db:"link_id"`
 		PeerPort  string `db:"peer_port"`
 		PeerAsset string `db:"peer_asset"`
 	}
 	var peers []peer
 	err = s.read(ctx, &peers, `
-		SELECT l.a_interface_id AS near_id, bi.name AS peer_port, ba.name AS peer_asset
+		SELECT l.id AS link_id, l.a_interface_id AS near_id, bi.name AS peer_port, ba.name AS peer_asset
 		FROM link l
 		JOIN interface bi ON bi.id = l.b_interface_id
 		JOIN asset ba ON ba.id = bi.asset_id
-		WHERE l.a_interface_id IN (`+placeholders(len(ids))+`)`, anySlice(ids)...)
+		WHERE l.lifecycle = 'active' AND l.a_interface_id IN (`+placeholders(len(ids))+`)`, anySlice(ids)...)
 	if err != nil {
 		return nil, fmt.Errorf("loading link peers (a side): %w", err)
 	}
 	var peersB []peer
 	err = s.read(ctx, &peersB, `
-		SELECT l.b_interface_id AS near_id, ai.name AS peer_port, aa.name AS peer_asset
+		SELECT l.id AS link_id, l.b_interface_id AS near_id, ai.name AS peer_port, aa.name AS peer_asset
 		FROM link l
 		JOIN interface ai ON ai.id = l.a_interface_id
 		JOIN asset aa ON aa.id = ai.asset_id
-		WHERE l.b_interface_id IN (`+placeholders(len(ids))+`)`, anySlice(ids)...)
+		WHERE l.lifecycle = 'active' AND l.b_interface_id IN (`+placeholders(len(ids))+`)`, anySlice(ids)...)
 	if err != nil {
 		return nil, fmt.Errorf("loading link peers (b side): %w", err)
 	}
 	for _, p := range append(peers, peersB...) {
 		if i, ok := index[p.NearID]; ok {
+			rows[i].LinkID = p.LinkID
 			rows[i].PeerAsset = p.PeerAsset
 			rows[i].PeerPort = p.PeerPort
 		}
 	}
 	return rows, nil
+}
+
+// GetInterface loads one interface by id.
+func (s *SQLStore) GetInterface(ctx context.Context, id string) (*domain.Interface, error) {
+	var iface domain.Interface
+	if err := s.readOne(ctx, &iface, `SELECT * FROM interface WHERE id = ?`, id); err != nil {
+		return nil, fmt.Errorf("getting interface %s: %w", id, err)
+	}
+	return &iface, nil
+}
+
+// InterfaceOption is an interface plus its asset's name, for a "choose the
+// far end of the cable" dropdown.
+type InterfaceOption struct {
+	domain.Interface
+	AssetName string `db:"asset_name"`
+}
+
+// ListAvailableInterfaces returns interfaces that are not already the end of
+// an active cable, for the "patch to" dropdown. excludeInterfaceID is left
+// out too, since a port cannot cable to itself.
+func (s *SQLStore) ListAvailableInterfaces(ctx context.Context, excludeInterfaceID string) ([]InterfaceOption, error) {
+	var opts []InterfaceOption
+	err := s.read(ctx, &opts, `
+		SELECT i.*, a.name AS asset_name
+		FROM interface i
+		JOIN asset a ON a.id = i.asset_id
+		WHERE i.id <> ?
+		  AND i.id NOT IN (
+		    SELECT a_interface_id FROM link WHERE lifecycle = 'active'
+		    UNION
+		    SELECT b_interface_id FROM link WHERE lifecycle = 'active'
+		  )
+		ORDER BY a.name, i.name`, excludeInterfaceID)
+	if err != nil {
+		return nil, fmt.Errorf("listing available interfaces: %w", err)
+	}
+	return opts, nil
 }
 
 // CreateInterface inserts a port.
@@ -110,13 +156,22 @@ func (s *SQLStore) CreateInterface(ctx context.Context, actor domain.Actor, i *d
 
 // CreateLink cables two interfaces together.
 func (s *SQLStore) CreateLink(ctx context.Context, actor domain.Actor, l *domain.Link) error {
-	return s.write(ctx, actor, func(t *tx) error {
-		// A port has one cable. Catching the second one here gives a usable
-		// error instead of a silently duplicated topology.
+	if l.Lifecycle == "" {
+		l.Lifecycle = domain.LifecycleActive
+	}
+	// Serializable: the COUNT below asserts an invariant this transaction is
+	// about to break, and at read-committed two concurrent patches both see an
+	// unpatched port and both commit. See writeSerializable.
+	return s.writeSerializable(ctx, actor, func(t *tx) error {
+		// A port has one active cable. Catching the second one here gives a
+		// usable error instead of a silently duplicated topology. A retired
+		// link does not count -- unpatching a port is exactly what frees it up
+		// to be cabled again.
 		var n int
 		err := t.get(ctx, &n, `
 			SELECT COUNT(*) FROM link
-			WHERE a_interface_id IN (?, ?) OR b_interface_id IN (?, ?)`,
+			WHERE lifecycle = 'active'
+			  AND (a_interface_id IN (?, ?) OR b_interface_id IN (?, ?))`,
 			l.AInterfaceID, l.BInterfaceID, l.AInterfaceID, l.BInterfaceID)
 		if err != nil {
 			return fmt.Errorf("checking existing links: %w", err)
@@ -126,13 +181,44 @@ func (s *SQLStore) CreateLink(ctx context.Context, actor domain.Actor, l *domain
 				l.AInterfaceID, l.BInterfaceID, domain.ErrConflict)
 		}
 		_, err = t.exec(ctx,
-			`INSERT INTO link (id, a_interface_id, b_interface_id, medium, length_m)
-			 VALUES (?, ?, ?, ?, ?)`,
-			l.ID, l.AInterfaceID, l.BInterfaceID, l.Medium, l.LengthM)
+			`INSERT INTO link (id, a_interface_id, b_interface_id, medium, length_m, lifecycle)
+			 VALUES (?, ?, ?, ?, ?, ?)`,
+			l.ID, l.AInterfaceID, l.BInterfaceID, l.Medium, l.LengthM, l.Lifecycle)
 		if err != nil {
 			return translateWriteErr(err, "creating link")
 		}
 		return t.logCreate(ctx, "link", l.ID, l)
+	})
+}
+
+// GetLink loads one cable by id.
+func (s *SQLStore) GetLink(ctx context.Context, id string) (*domain.Link, error) {
+	var l domain.Link
+	if err := s.readOne(ctx, &l, `SELECT * FROM link WHERE id = ?`, id); err != nil {
+		return nil, fmt.Errorf("getting link %s: %w", id, err)
+	}
+	return &l, nil
+}
+
+// RetireLink unpatches a cable. The row and its audit history stay; a retired
+// link is simply excluded from every far-end lookup (docs/DECISIONS.md,
+// 2026-07-28 decisions) -- soft-delete-only applies to a cable exactly as it
+// does to everything else, and cables get unpatched constantly.
+func (s *SQLStore) RetireLink(ctx context.Context, actor domain.Actor, id string) error {
+	before, err := s.GetLink(ctx, id)
+	if err != nil {
+		return err
+	}
+	if before.Lifecycle == domain.LifecycleRetired {
+		return nil
+	}
+	return s.write(ctx, actor, func(t *tx) error {
+		if _, err := t.exec(ctx, `UPDATE link SET lifecycle = ? WHERE id = ?`,
+			domain.LifecycleRetired, id); err != nil {
+			return translateWriteErr(err, "retiring link")
+		}
+		diff := fmt.Sprintf(`{"lifecycle":{"old":%q,"new":%q}}`, before.Lifecycle, domain.LifecycleRetired)
+		return t.log(ctx, "link", id, domain.ActionRetire, diff)
 	})
 }
 

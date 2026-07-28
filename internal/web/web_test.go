@@ -230,7 +230,7 @@ func TestAnonymousIsRedirectedToLogin(t *testing.T) {
 	h := newHarness(t)
 
 	protected := []string{
-		"/", "/assets", "/services", "/environments",
+		"/", "/assets", "/services", "/environments", "/prefixes",
 		"/search", "/changes", "/reports/spanning",
 	}
 	for _, path := range protected {
@@ -1017,5 +1017,301 @@ func TestAuditTrailAlwaysShowsWhoAndWhatKind(t *testing.T) {
 			t.Errorf("GET %s renders an actor without its actor_kind; "+
 				"a machine's entry is indistinguishable from a person's", path)
 		}
+	}
+}
+
+// TestChangeLogRendersAResolvedDisplayName. change_log.actor holds an
+// app_user.id, never a username (docs/DECISIONS.md, 2026-07-28 decisions);
+// the UI must still show a human-readable name, resolved by the store.
+func TestChangeLogRendersAResolvedDisplayName(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+	token := h.csrfToken("/prefixes")
+
+	resp := h.post("/prefixes", url.Values{
+		"csrf_token": {token},
+		"cidr_text":  {"10.88.0.0/24"},
+	}, false)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("creating the prefix returned %d, want 303", resp.StatusCode)
+	}
+
+	admin, err := h.store.GetUserByUsername(context.Background(), "admin")
+	if err != nil {
+		t.Fatalf("loading the admin user: %v", err)
+	}
+	changes, err := h.store.ListRecentChanges(context.Background(), 5)
+	if err != nil {
+		t.Fatalf("listing recent changes: %v", err)
+	}
+	if len(changes) == 0 || changes[0].Actor != admin.ID {
+		t.Fatalf("most recent change actor = %+v, want the admin user's opaque id %q", changes, admin.ID)
+	}
+
+	// The store-level TestChangeLogActorIsAnOpaqueID already proves the raw
+	// column holds the id and that resolution degrades gracefully; this only
+	// needs to prove the template actually renders the resolved name rather
+	// than the id it was handed. (The page legitimately contains the raw id
+	// elsewhere -- it is the entity id in the app_user creation entry's own
+	// snapshot -- so this does not assert its absence.)
+	page := body(t, h.get("/changes", false))
+	if !strings.Contains(page, ">admin<") {
+		t.Error("the change log does not resolve the signed-in user's id to their username")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// M1: network topology data entry -- interfaces, links, addresses, prefixes.
+
+// TestReadOnlyUserCannotWriteNetworkTopology extends the authorization model
+// check to the M1 write routes: a route that exists only for the seeder until
+// now is a real product gap, and it must be behind the same RBAC as everything
+// else the moment it gets a handler.
+func TestReadOnlyUserCannotWriteNetworkTopology(t *testing.T) {
+	h := newHarness(t)
+	h.login("viewer", "viewer-password")
+
+	assetID := h.refs.Assets["hv-01"]
+	cases := []struct {
+		name string
+		path string
+	}{
+		{"add interface", "/assets/" + assetID + "/interfaces"},
+		{"assign address", "/addresses"},
+		{"patch cable", "/links"},
+		{"declare prefix", "/prefixes"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			token := h.csrfToken("/assets/" + assetID)
+			resp := h.post(tc.path, url.Values{"csrf_token": {token}}, false)
+			resp.Body.Close()
+			if resp.StatusCode != http.StatusForbidden {
+				t.Errorf("POST %s as viewer returned %d, want 403", tc.path, resp.StatusCode)
+			}
+		})
+	}
+}
+
+// TestCSRFIsEnforcedOnNetworkRoutes: the CSRF middleware wraps the whole mux,
+// but a route added without a form referencing the shared token is exactly
+// the kind of gap that goes unnoticed until it ships.
+func TestCSRFIsEnforcedOnNetworkRoutes(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	resp := h.post("/prefixes", url.Values{
+		"csrf_token": {"not-a-real-token"},
+		"cidr_text":  {"10.99.0.0/24"},
+	}, false)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", resp.StatusCode)
+	}
+	if _, err := h.store.ResolveAddress(context.Background(), "10.99.0.1"); err == nil {
+		t.Error("a prefix was declared despite the CSRF failure")
+	}
+}
+
+// TestInterfaceFormValidationIs422 exercises SetMAC's error path through the
+// handler: a garbled MAC must re-render the form with error state at 422, not
+// silently drop the field or return 200.
+func TestInterfaceFormValidationIs422(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	assetID := h.refs.Assets["hv-01"]
+	path := "/assets/" + assetID
+	token := h.csrfToken(path)
+
+	resp := h.post(path+"/interfaces", url.Values{
+		"csrf_token":  {token},
+		"name":        {"eth9"},
+		"form_factor": {domain.FFRJ45},
+		"mac":         {"not-a-mac"},
+	}, true)
+	text := body(t, resp)
+
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422", resp.StatusCode)
+	}
+	if !strings.Contains(text, `id="interface-form"`) {
+		t.Error("the response is not the interface form partial")
+	}
+	if strings.Contains(text, "<!doctype html>") {
+		t.Error("an HTMX request received a full page")
+	}
+}
+
+// TestUnpatchingACableRemovesItAsAFarEnd drives the full soft-delete path for
+// a cable through the UI: retiring a link must not leave it visible as
+// anyone's far end, on either side, and re-patching an already-patched port
+// must be rejected with a 422.
+func TestUnpatchingACableRemovesItAsAFarEnd(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+	ctx := context.Background()
+
+	assetA := h.refs.Assets["hv-01"]
+	assetB := h.refs.Assets["hv-02"]
+	if assetA == "" || assetB == "" {
+		t.Skip("fixture does not have the two hypervisors this test patches")
+	}
+
+	// Fresh, unpatched interfaces, so this test does not depend on which
+	// fixture ports happen to be cabled already.
+	token := h.csrfToken("/assets/" + assetA)
+	create := h.post("/assets/"+assetA+"/interfaces", url.Values{
+		"csrf_token":  {token},
+		"name":        {"test-patch-a"},
+		"form_factor": {domain.FFRJ45},
+	}, false)
+	create.Body.Close()
+	if create.StatusCode != http.StatusSeeOther {
+		t.Fatalf("creating interface on A returned %d", create.StatusCode)
+	}
+	token = h.csrfToken("/assets/" + assetB)
+	create = h.post("/assets/"+assetB+"/interfaces", url.Values{
+		"csrf_token":  {token},
+		"name":        {"test-patch-b"},
+		"form_factor": {domain.FFRJ45},
+	}, false)
+	create.Body.Close()
+	if create.StatusCode != http.StatusSeeOther {
+		t.Fatalf("creating interface on B returned %d", create.StatusCode)
+	}
+
+	ifaceA := interfaceIDByName(t, h, assetA, "test-patch-a")
+	ifaceB := interfaceIDByName(t, h, assetB, "test-patch-b")
+
+	token = h.csrfToken("/assets/" + assetA)
+	patch := h.post("/links", url.Values{
+		"csrf_token":          {token},
+		"asset_id":            {assetA},
+		"a_interface_id":      {ifaceA},
+		"target_interface_id": {ifaceB},
+	}, false)
+	patch.Body.Close()
+	if patch.StatusCode != http.StatusSeeOther {
+		t.Fatalf("patching the cable returned %d", patch.StatusCode)
+	}
+
+	// The peer cell renders "<asset> · <port>"; this is the marker to look
+	// for, rather than the bare port name, which also appears unconditionally
+	// in the "patch to" dropdown's option list once the port is available
+	// again -- a plain substring check would pass even with a live bug.
+	assetBName := assetName(t, h, assetB)
+	peerMarker := assetBName + " · test-patch-b"
+
+	page := body(t, h.get("/assets/"+assetA, false))
+	if !strings.Contains(page, peerMarker) {
+		t.Fatal("the patched cable is not shown on the asset page")
+	}
+
+	t.Run("patching either end again is rejected", func(t *testing.T) {
+		token := h.csrfToken("/assets/" + assetA)
+		resp := h.post("/links", url.Values{
+			"csrf_token":          {token},
+			"asset_id":            {assetA},
+			"a_interface_id":      {ifaceA},
+			"target_interface_id": {ifaceB},
+		}, true)
+		text := body(t, resp)
+		if resp.StatusCode != http.StatusUnprocessableEntity {
+			t.Fatalf("status = %d, want 422", resp.StatusCode)
+		}
+		if !strings.Contains(text, "already patched") {
+			t.Error("the response does not explain that the port is already patched")
+		}
+	})
+
+	rows, err := h.store.ListInterfaces(ctx, assetA)
+	if err != nil {
+		t.Fatalf("listing A's interfaces: %v", err)
+	}
+	var linkID string
+	for _, r := range rows {
+		if r.Name == "test-patch-a" {
+			linkID = r.LinkID
+		}
+	}
+	if linkID == "" {
+		t.Fatal("the new cable has no link id")
+	}
+
+	token = h.csrfToken("/assets/" + assetA)
+	unpatch := h.post("/links/"+linkID+"/retire", url.Values{
+		"csrf_token": {token},
+		"asset_id":   {assetA},
+	}, false)
+	unpatch.Body.Close()
+	if unpatch.StatusCode != http.StatusSeeOther {
+		t.Fatalf("unpatching returned %d, want 303", unpatch.StatusCode)
+	}
+
+	assetAName := assetName(t, h, assetA)
+	reverseMarker := assetAName + " · test-patch-a"
+
+	after := body(t, h.get("/assets/"+assetA, false))
+	if strings.Contains(after, peerMarker) {
+		t.Error("the retired cable still shows on A's page as the far end")
+	}
+	afterB := body(t, h.get("/assets/"+assetB, false))
+	if strings.Contains(afterB, reverseMarker) {
+		t.Error("the retired cable still shows on B's page as the far end")
+	}
+}
+
+func assetName(t *testing.T, h *harness, assetID string) string {
+	t.Helper()
+	a, err := h.store.GetAsset(context.Background(), assetID)
+	if err != nil {
+		t.Fatalf("getting asset %s: %v", assetID, err)
+	}
+	return a.Name
+}
+
+func interfaceIDByName(t *testing.T, h *harness, assetID, name string) string {
+	t.Helper()
+	rows, err := h.store.ListInterfaces(context.Background(), assetID)
+	if err != nil {
+		t.Fatalf("listing interfaces of %s: %v", assetID, err)
+	}
+	for _, r := range rows {
+		if r.Name == name {
+			return r.ID
+		}
+	}
+	t.Fatalf("no interface named %s on asset %s", name, assetID)
+	return ""
+}
+
+// TestPrefixesPageHTMXBranching: the prefixes list follows the same
+// full-page-vs-fragment rule as every other page in the tool.
+func TestPrefixesPageHTMXBranching(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	full := body(t, h.get("/prefixes", false))
+	if !strings.Contains(full, "<!doctype html>") {
+		t.Error("a browser navigation did not receive a full page")
+	}
+
+	token := h.csrfToken("/prefixes")
+	resp := h.post("/prefixes", url.Values{
+		"csrf_token": {token},
+		"cidr_text":  {"10.77.0.0/24"},
+	}, true)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204 with an HX-Redirect", resp.StatusCode)
+	}
+	if got := resp.Header.Get("HX-Redirect"); got != "/prefixes" {
+		t.Errorf("HX-Redirect = %q, want /prefixes", got)
+	}
+
+	if _, err := h.store.ResolveAddress(context.Background(), "10.77.0.1"); err != nil {
+		t.Errorf("the prefix was not created: %v", err)
 	}
 }
