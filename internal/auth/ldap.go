@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/go-ldap/ldap/v3"
@@ -24,6 +25,21 @@ type LDAPAuthenticator struct {
 
 // NewLDAPAuthenticator builds the LDAP authenticator.
 func NewLDAPAuthenticator(cfg config.LDAPConfig, users UserStore) *LDAPAuthenticator {
+	// SkipVerify is allowed rather than refused, because a lab directory with a
+	// self-signed certificate is a legitimate thing to develop against and the
+	// channel is still encrypted. A plaintext bind is refused outright in
+	// config.validate; this one is a real trade-off rather than a mistake.
+	//
+	// It is announced at startup regardless. An unverified channel means any
+	// host that can answer the connection collects operator passwords, and a
+	// setting that quietly survives from a lab into production is precisely how
+	// that happens.
+	if cfg.SkipVerify {
+		slog.Warn("LDAP certificate verification is disabled",
+			"url", cfg.URL,
+			"consequence", "any host able to answer this connection can collect operator passwords",
+			"setting", "INV_LDAP_SKIP_VERIFY")
+	}
 	return &LDAPAuthenticator{cfg: cfg, users: users}
 }
 

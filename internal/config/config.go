@@ -65,27 +65,44 @@ type LDAPConfig struct {
 	SkipVerify     bool
 }
 
+// Encrypted reports whether the LDAP bind runs over TLS, by either route:
+// ldaps:// is TLS from the first byte, and StartTLS upgrades a plain ldap://
+// connection before the bind is sent.
+func (l LDAPConfig) Encrypted() bool {
+	return l.StartTLS || strings.HasPrefix(strings.ToLower(strings.TrimSpace(l.URL)), "ldaps://")
+}
+
 // Load reads configuration from the environment and validates it.
 func Load() (*Config, error) {
+	// Collected rather than returned inline so an operator with two typos
+	// learns about both on the first start rather than one per restart.
+	var badBools []string
 	cfg := &Config{
 		DBDriver:         envOr("INV_DB_DRIVER", "sqlite"),
 		DBDSN:            envOr("INV_DB_DSN", "file:invctl.db?_txlock=immediate"),
 		Listen:           envOr("INV_LISTEN", ":8080"),
 		SessionTimeout:   envDuration("INV_SESSION_TIMEOUT", 12*time.Hour),
 		AdminUsers:       splitList(os.Getenv("INV_ADMIN_USERS")),
-		AuthLocal:        envBool("INV_AUTH_LOCAL", true),
-		AuthLDAP:         envBool("INV_AUTH_LDAP", false),
-		SeedOnStart:      envBool("INV_SEED", false),
+		AuthLocal:        envBool("INV_AUTH_LOCAL", true, &badBools),
+		AuthLDAP:         envBool("INV_AUTH_LDAP", false, &badBools),
+		SeedOnStart:      envBool("INV_SEED", false, &badBools),
 		DevAdminPassword: os.Getenv("INV_ADMIN_PASSWORD"),
 		AdminUsername:    envOr("INV_ADMIN_USERNAME", "admin"),
 		LogLevel:         envOr("INV_LOG_LEVEL", "info"),
-		SecureCookies:    envBool("INV_SECURE_COOKIES", false),
+		SecureCookies:    envBool("INV_SECURE_COOKIES", false, &badBools),
 		LDAP: LDAPConfig{
 			URL:            os.Getenv("INV_LDAP_URL"),
 			BindDNTemplate: os.Getenv("INV_LDAP_BIND_DN"),
-			StartTLS:       envBool("INV_LDAP_STARTTLS", false),
-			SkipVerify:     envBool("INV_LDAP_SKIP_VERIFY", false),
+			StartTLS:       envBool("INV_LDAP_STARTTLS", false, &badBools),
+			SkipVerify:     envBool("INV_LDAP_SKIP_VERIFY", false, &badBools),
 		},
+	}
+
+	if len(badBools) > 0 {
+		return nil, fmt.Errorf("validating config: %s is not a boolean; use true/false, 1/0 or t/f. "+
+			"Refusing to start rather than falling back to a default, because every flag here "+
+			"decides a security posture and the fallback is the permissive one",
+			strings.Join(badBools, ", "))
 	}
 
 	key, err := sessionKey()
@@ -124,6 +141,20 @@ func (c *Config) validate() error {
 		}
 		if !strings.Contains(c.LDAP.BindDNTemplate, "%s") {
 			return fmt.Errorf("validating config: INV_LDAP_BIND_DN must contain %%s for the username")
+		}
+		// A simple bind sends a real person's password. This is the only place
+		// in the application where a human credential crosses the network, and
+		// it must not do so in clear.
+		//
+		// ldaps:// is TLS from the first byte, so StartTLS is redundant there;
+		// ldap:// without StartTLS is a plaintext bind. Nothing warned about
+		// that, and the default is StartTLS=false, so the obvious
+		// configuration -- set INV_LDAP_URL, set INV_LDAP_BIND_DN, start --
+		// was the unencrypted one.
+		if !c.LDAP.Encrypted() {
+			return fmt.Errorf("validating config: INV_LDAP_URL is %q and INV_LDAP_STARTTLS is off, "+
+				"so the bind would send an operator's password in clear. Use an ldaps:// URL or "+
+				"set INV_LDAP_STARTTLS=true", c.LDAP.URL)
 		}
 	}
 	if err := c.validateAgents(); err != nil {
@@ -184,13 +215,26 @@ func envOr(key, fallback string) string {
 	return fallback
 }
 
-func envBool(key string, fallback bool) bool {
+// envBool parses a boolean, recording anything it could not parse.
+//
+// It used to swallow the error and return the fallback, which fails OPEN for
+// every security-relevant flag here: INV_SECURE_COOKIES=yes is not a value
+// strconv.ParseBool accepts, so an operator who wrote it got insecure cookies
+// and no indication; INV_LDAP_STARTTLS=yes silently gave a plaintext bind
+// carrying a real person's password. "yes"/"no"/"on"/"off" are exactly the
+// spellings somebody reaches for, and the wrong ones.
+//
+// Refusing to start is the right response. A deployment running with an
+// authorization or transport posture that differs from the one somebody wrote
+// down is the state this whole file exists to prevent.
+func envBool(key string, fallback bool, bad *[]string) bool {
 	v := os.Getenv(key)
 	if v == "" {
 		return fallback
 	}
 	parsed, err := strconv.ParseBool(v)
 	if err != nil {
+		*bad = append(*bad, fmt.Sprintf("%s=%q", key, v))
 		return fallback
 	}
 	return parsed

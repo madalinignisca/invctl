@@ -827,16 +827,34 @@ func (o *HealthOverride) Validate() error {
 	// Amend is a cap that can be described as "must not use the other path" --
 	// exactly the shape rule 1 rejects -- and Validate is what the store entry
 	// point actually runs, so a future admin CLI, seeder or bulk
-	// maintenance-window importer building the struct directly would have
-	// bypassed it entirely.
+	// maintenance-window importer building the struct directly would bypass it.
+	//
+	// Measured from the LAST DECISION, not from creation.
+	//
+	// What the rule is protecting against is an override running UNATTENDED for
+	// longer than a day. An amend is a person coming back and deciding again,
+	// which is the opposite of unattended -- so anchoring the window to
+	// CreatedAt made renewal impossible past the first 24 hours and locked an
+	// operator out during exactly the long incident the feature exists for.
+	// Their only route would be to clear the row and write a new one, which
+	// breaks the continuity the row is kept for.
+	//
+	// UpdatedAt moves only on Amend and equals CreatedAt on a fresh row, so
+	// this is the stricter reading for an override nobody has touched and the
+	// workable one for an override somebody keeps renewing. Each renewal is its
+	// own audited decision, so the trail still shows who kept it alive.
 	//
 	// Enforced in Go rather than as a CHECK because timestamp arithmetic is not
 	// portable across both engines; SQL enforces direction only.
-	if created, err := ParseTime(o.CreatedAt); err == nil {
+	baseline := o.CreatedAt
+	if o.UpdatedAt > baseline {
+		baseline = o.UpdatedAt
+	}
+	if decided, err := ParseTime(baseline); err == nil {
 		if expires, err := ParseTime(o.ExpiresAt); err == nil {
-			if expires.Sub(created) > MaxOverrideDuration {
-				ve.Add("expires_at", "is more than %s after creation: an override that outlives an "+
-					"incident hides the next one", MaxOverrideDuration)
+			if expires.Sub(decided) > MaxOverrideDuration {
+				ve.Add("expires_at", "is more than %s after the last decision: an override that "+
+					"outlives an incident hides the next one", MaxOverrideDuration)
 			}
 		}
 	}

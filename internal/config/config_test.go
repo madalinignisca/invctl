@@ -345,3 +345,93 @@ func TestAgentConfigurationRefusesToStart(t *testing.T) {
 func longToken(seed string) string {
 	return seed + strings.Repeat("x", MinAgentTokenLength)
 }
+
+// TestSecurityFlagsFailClosed.
+//
+// envBool used to swallow a parse error and return the fallback, and every
+// boolean here decides a security posture whose fallback is the permissive one.
+// "yes" and "no" are exactly the spellings somebody reaches for and exactly the
+// ones strconv.ParseBool rejects, so INV_SECURE_COOKIES=yes produced insecure
+// cookies with no indication, and INV_LDAP_STARTTLS=yes a plaintext bind
+// carrying a real person's password.
+func TestSecurityFlagsFailClosed(t *testing.T) {
+	t.Run("an unparseable boolean refuses to start", func(t *testing.T) {
+		pristineEnv(t)
+		t.Setenv("INV_ADMIN_USERS", "gabriel")
+		t.Setenv("INV_SECURE_COOKIES", "yes")
+
+		_, err := Load()
+		if err == nil {
+			t.Fatal("INV_SECURE_COOKIES=yes was accepted; it silently yields INSECURE cookies, " +
+				"which is the opposite of what the operator asked for")
+		}
+		if !strings.Contains(err.Error(), "INV_SECURE_COOKIES") {
+			t.Errorf("the error does not name the offending variable: %v", err)
+		}
+	})
+
+	t.Run("every bad boolean is reported at once", func(t *testing.T) {
+		pristineEnv(t)
+		t.Setenv("INV_ADMIN_USERS", "gabriel")
+		t.Setenv("INV_SECURE_COOKIES", "yes")
+		t.Setenv("INV_SEED", "on")
+
+		_, err := Load()
+		if err == nil {
+			t.Fatal("two unparseable booleans were accepted")
+		}
+		for _, want := range []string{"INV_SECURE_COOKIES", "INV_SEED"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("%s is missing from the error; an operator with two typos should learn "+
+					"about both on the first start, not one per restart", want)
+			}
+		}
+	})
+}
+
+// TestLDAPRefusesAPlaintextBind.
+//
+// A simple bind sends an operator's password. It is the only place in this
+// application where a human credential crosses the network, and the default
+// configuration -- set a URL, set a bind DN, start -- used to be the
+// unencrypted one.
+func TestLDAPRefusesAPlaintextBind(t *testing.T) {
+	tests := []struct {
+		name     string
+		url      string
+		startTLS string
+		wantErr  bool
+	}{
+		{name: "plain ldap:// with no StartTLS", url: "ldap://dir.example.com", wantErr: true},
+		{name: "plain ldap:// with StartTLS", url: "ldap://dir.example.com", startTLS: "true"},
+		{name: "ldaps:// needs no StartTLS", url: "ldaps://dir.example.com"},
+		{name: "LDAPS:// is matched case-insensitively", url: "LDAPS://dir.example.com"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			pristineEnv(t)
+			t.Setenv("INV_ADMIN_USERS", "gabriel")
+			t.Setenv("INV_AUTH_LDAP", "true")
+			t.Setenv("INV_LDAP_URL", tc.url)
+			t.Setenv("INV_LDAP_BIND_DN", "uid=%s,ou=users,dc=example,dc=com")
+			if tc.startTLS != "" {
+				t.Setenv("INV_LDAP_STARTTLS", tc.startTLS)
+			}
+
+			_, err := Load()
+			if tc.wantErr {
+				if err == nil {
+					t.Fatal("a plaintext LDAP bind was accepted; an operator's password would " +
+						"cross the network in clear")
+				}
+				if !strings.Contains(err.Error(), "clear") {
+					t.Errorf("the error does not say what is wrong: %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("an encrypted bind was refused: %v", err)
+			}
+		})
+	}
+}

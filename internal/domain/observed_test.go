@@ -592,3 +592,48 @@ func TestAFutureTimestampCannotReserveTheFuture(t *testing.T) {
 		}
 	})
 }
+
+// TestAnOverrideCanBeRenewedThroughALongIncident.
+//
+// Rule 14 caps an override at 24h because a permanent one is how a real outage
+// stays invisible for six weeks. Anchoring that window to CreatedAt made
+// renewal impossible past the first day: an override 26h old could not be
+// extended at all, so the operator's only route during a multi-day incident was
+// to clear the row and write a new one -- losing the continuity the row is kept
+// for, and at the exact moment the feature is most needed.
+//
+// The window is measured from the last decision instead. An amend is a person
+// coming back and deciding again, which is the opposite of the unattended
+// silence the cap protects against.
+func TestAnOverrideCanBeRenewedThroughALongIncident(t *testing.T) {
+	created := time.Date(2026, 7, 28, 0, 0, 0, 0, time.UTC)
+	user := Actor{ID: "u1", Kind: ActorKindUser, Name: "op"}
+	spec := func(expires time.Time) HealthOverrideSpec {
+		return HealthOverrideSpec{
+			EntityType: ObservableAsset, EntityID: "a1", AssertedState: "up",
+			Reason: "probe checks the wrong port, INC-4102", ExpiresAt: expires,
+		}
+	}
+
+	o, err := NewHealthOverride("id-1", spec(created.Add(2*time.Hour)), user, created)
+	if err != nil {
+		t.Fatalf("building the override: %v", err)
+	}
+
+	// Three renewals across three days, each one a fresh human decision.
+	for i := 1; i <= 3; i++ {
+		now := created.Add(time.Duration(i) * 20 * time.Hour)
+		if err := o.Amend(spec(now.Add(4*time.Hour)), user, now); err != nil {
+			t.Fatalf("renewal %d, %s after creation: %v; an operator cannot extend an override "+
+				"through a long incident and must clear and recreate it, losing the trail",
+				i, time.Duration(i)*20*time.Hour, err)
+		}
+	}
+
+	// The cap still bites: no single decision may reach beyond 24h.
+	now := created.Add(80 * time.Hour)
+	if err := o.Amend(spec(now.Add(MaxOverrideDuration+time.Minute)), user, now); err == nil {
+		t.Error("a renewal reaching more than 24h past the decision was accepted; " +
+			"the ceiling has to hold or a renewal is just a permanent override with extra steps")
+	}
+}

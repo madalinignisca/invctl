@@ -612,3 +612,73 @@ would mean one set of options guarding two different risks with the weaker argum
   anchored to the transition row itself.
 
 Both were verified by reproducing the exact perturbation that used to pass.
+
+---
+
+## 2026-07-28 — security scan (Trivy 0.69.3 + Semgrep 1.156.0)
+
+Ran against HEAD 0cc2bf2, weighted toward the M6 credential and webhook surface.
+
+**The M6 surface came back clean.** Verified structurally, not just by tool output: the agent
+token path is reachable from exactly one mount; the handler's store field is the two-method
+`ObservedStore` and `*SQLStore` does not satisfy it; the CSRF exemption is an `ExactPath` built
+from a constant with glob metacharacters refused; the agent route rejects both an established
+user context and a bare session cookie by name; token comparison is SHA-256 then
+`subtle.ConstantTimeCompare` with no early break; body 64 KiB, batch 100,
+`DisallowUnknownFields` rejecting `reporter`/`source`/`confidence`; and no code path logs,
+hashes-and-logs or stringifies a token.
+
+Zero critical, zero high, zero secrets. The one CVE (`GO-2026-5932`, `x/crypto/openpgp`
+unmaintained) is unreachable — nothing imports openpgp; `x/crypto` is pulled indirectly for
+argon2 and by go-ldap. Of 136 Semgrep findings, 132 were template-engine noise: generic HTML
+rules that do not model `html/template`'s contextual escaping, and a Django CSRF rule firing on
+`<form>`.
+
+Three real findings, all outside M6.
+
+### The override renewal bug was mine, from earlier the same day
+
+`Amend` caps at 24h **from now**; the `Validate` cap added a few hours earlier in the M6
+follow-ups capped at 24h **from CreatedAt**. Before that change `Validate` enforced direction
+only, so `Amend` worked as its comment described. Adding the second check made the two
+contradict, and the stricter one wins.
+
+Measured: an override 26h old could not be renewed **at all**. The operator's only route during
+a multi-day incident was to clear the row and write a new one, losing the continuity the row is
+kept for — at exactly the moment the feature exists for.
+
+The window is now measured from the last decision (`UpdatedAt`, which equals `CreatedAt` on a
+fresh row) rather than from creation. What rule 14 protects against is an override running
+**unattended** for more than a day; an amend is a person coming back and deciding again, which
+is the opposite of unattended, and each renewal is separately audited. The ceiling still holds
+per decision, so a renewal is not a permanent override with extra steps.
+
+Worth recording as a pattern: the fix that introduced this was itself closing a "the cap only
+lives in the constructor" finding. Moving an invariant to a more central place is right, and it
+is also when a second copy of the same invariant starts disagreeing with the first.
+
+### `envBool` failed open on every security flag
+
+It swallowed parse errors and returned the fallback. `INV_SECURE_COOKIES=yes` is not a value
+`strconv.ParseBool` accepts, so it silently produced **insecure** cookies; `INV_LDAP_STARTTLS=yes`
+silently produced a **plaintext** bind. "yes"/"no"/"on"/"off" are the spellings somebody reaches
+for and the ones that fail. Now collected and refused at startup, all at once so an operator with
+two typos learns about both on the first start.
+
+### A plaintext LDAP bind was the obvious configuration
+
+`INV_LDAP_STARTTLS` defaults to false, so setting a URL and a bind DN and starting sent an
+operator's password in clear. This is the only place in the application where a human credential
+crosses the network. Refused now unless the channel is encrypted by either route — `ldaps://` is
+TLS from the first byte, StartTLS upgrades a plain `ldap://`.
+
+`INV_LDAP_SKIP_VERIFY` is **allowed but announced loudly at startup** rather than refused. A lab
+directory with a self-signed certificate is a legitimate thing to develop against and the channel
+is still encrypted, so it is a real trade-off rather than a mistake — but an unverified channel
+means any host that can answer the connection collects operator passwords, and settings survive
+from labs into production.
+
+Both are GDPR-relevant in the transport sense: operator passwords and session cookies are
+credentials of identifiable people. Nothing was found leaking personal data at rest —
+`change_log.actor` and `health_override.actor` carry opaque ids, and webhook errors echo only
+environment codes and UUIDv7 ids.
