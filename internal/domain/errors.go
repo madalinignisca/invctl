@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"unicode"
 )
 
 // Sentinel errors. The HTTP layer maps these to status codes; a raw driver
@@ -95,10 +96,65 @@ func oneOf(v string, allowed []string) bool {
 
 // checkEnum validates a TEXT-with-CHECK column against its Go constant set.
 // The DB CHECK constraint is the second line of defence, not the first.
+//
+// This is for BEHAVIOURAL enums only -- the ones whose value selects a code
+// path. `nature` decides how failure propagates, `availability` decides how the
+// impact engine counts capacity, `plane` decides which anchor an attachment
+// folds into. A value no switch handles must never reach the database, because
+// the switch would fall through to its default silently and produce a wrong
+// answer during an incident with nothing in the logs. For those, a new value
+// SHOULD require a release: the release is where the code that understands it
+// gets written. Domain vocabularies use checkVocabulary instead.
 func checkEnum(ve *ValidationError, field, value string, allowed []string) {
 	if !oneOf(value, allowed) {
 		ve.Add(field, "must be one of %s", strings.Join(allowed, ", "))
 	}
+}
+
+// MaxVocabularyCodeLen bounds a lookup-table code. Nothing in the estate needs
+// more; a longer value is a pasted sentence in the wrong field.
+const MaxVocabularyCodeLen = 64
+
+// checkVocabulary validates a column whose permitted values live in a lookup
+// TABLE (migration 00004) rather than in a CHECK constraint.
+//
+// It deliberately does NOT check membership. The lookup tables exist so that a
+// new form factor, asset kind or container engine arrives as an INSERT instead
+// of a migration and a deploy; a constructor holding a fixed Go slice would
+// refuse the new value the instant it was added and defeat the entire change.
+// Existence is the FOREIGN KEY's job, and that is a strengthening rather than a
+// weakening: a FK cannot drift from the list the way a hand-maintained slice
+// can, because it *is* the list. The store additionally reads the table before
+// a write so the operator gets a field-level 422 rather than a driver error --
+// see (*tx).requireVocabulary -- but that read is of the same table the FK
+// points at, not a second copy of it.
+//
+// What is left here is shape. A vocabulary code is a stable machine identifier:
+// it is a primary key, it travels in query strings (`/assets?kind=vm`), and both
+// engines compare it byte for byte. So: present, bounded, and free of the
+// whitespace and control characters that make a code silently unequal to the
+// one that looks identical next to it. Whether `bridge` is a real asset kind is
+// a question only the table can answer.
+func checkVocabulary(ve *ValidationError, field, value string) string {
+	trimmed := strings.TrimSpace(value)
+	switch {
+	case trimmed == "":
+		ve.Add(field, "is required")
+	case len(trimmed) > MaxVocabularyCodeLen:
+		ve.Add(field, "must be %d characters or fewer", MaxVocabularyCodeLen)
+	case !isVocabularyCode(trimmed):
+		ve.Add(field, "must not contain spaces or control characters")
+	}
+	return trimmed
+}
+
+func isVocabularyCode(value string) bool {
+	for _, r := range value {
+		if unicode.IsSpace(r) || !unicode.IsPrint(r) {
+			return false
+		}
+	}
+	return true
 }
 
 func checkRequired(ve *ValidationError, field, value string) string {

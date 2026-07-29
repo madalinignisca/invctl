@@ -46,7 +46,7 @@ CREATE TABLE service_instance_new (
   id             TEXT NOT NULL PRIMARY KEY,
   service_id     TEXT NOT NULL REFERENCES service(id) ON DELETE CASCADE,
   host_asset_id  TEXT NOT NULL REFERENCES asset(id),
-  runtime_type   TEXT NOT NULL CONSTRAINT service_instance_runtime_check
+  runtime_type   TEXT NOT NULL CONSTRAINT service_instance_runtime_type_check
                    CHECK (runtime_type IN
                      ('systemd','windows_service','container','k8s_workload','appliance')),
   role           TEXT,

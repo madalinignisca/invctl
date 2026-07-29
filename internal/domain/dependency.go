@@ -26,10 +26,18 @@ const (
 // Natures is the Go side of the dependency.nature CHECK constraint.
 var Natures = []string{NatureHard, NatureSoft, NatureStartup, NatureAsync, NatureOptional}
 
-// DataClasses are the classes of data carried over a dependency. chd/sad are PCI terms (cardholder
-// data / sensitive authentication data); pii drives GDPR scope. Tracking them
-// on the edge is what lets "which flows carry personal data across a
-// segmentation boundary" be a query rather than an interview.
+// DataClasses are the classes of data this code knows by name. chd/sad are PCI
+// terms (cardholder data / sensitive authentication data); pii drives GDPR
+// scope. Tracking them on the edge is what lets "which flows carry personal
+// data across a segmentation boundary" be a query rather than an interview.
+//
+// It is NOT the permitted set: since migration 00004 that lives in the
+// data_class table and dependency_data_class.data_class is a FOREIGN KEY into
+// it. A new regulatory class is an INSERT. Nothing branches on the value -- the
+// classes are rendered as pills and counted -- and until 00004 the CHECK was
+// the only enforcement anywhere, because the form values reached the driver
+// straight from r.Form with no Go validation at all. The FK now enforces
+// membership and the store checks it first for the error message.
 var DataClasses = []string{"chd", "sad", "pii", "credential", "telemetry", "config", "none"}
 
 // Dependency is a directed edge from a consumer service to a provider endpoint

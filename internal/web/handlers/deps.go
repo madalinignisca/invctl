@@ -123,6 +123,11 @@ func (a *App) renderDependencyForm(w http.ResponseWriter, r *http.Request, consu
 		a.serverError(w, r, err)
 		return
 	}
+	classOptions, err := a.Store.DataClassVocabulary(r.Context())
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
 	a.Render.Partial(w, http.StatusUnprocessableEntity, "dependency_form",
-		a.newDependencyForm(r, consumerID, messages, spec, endpoints, routes, identities))
+		a.newDependencyForm(r, consumerID, messages, spec, endpoints, routes, identities, classOptions))
 }

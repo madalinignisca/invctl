@@ -21,7 +21,12 @@ const (
 	SvcMonitoring = "monitoring"
 )
 
-// ServiceKinds is the Go side of the service.kind CHECK constraint.
+// ServiceKinds are the service kinds this code knows by name. It is NOT the
+// permitted set: since migration 00004 that lives in the service_kind table and
+// service.kind is a FOREIGN KEY into it, so a new kind is an INSERT and appears
+// in this slice never. The constants stay for the seed and the tests. Nothing
+// branches on a service kind -- the impact engine reads Availability, never
+// Kind -- which is why this one was safe to open.
 var ServiceKinds = []string{
 	SvcDB, SvcCache, SvcQueue, SvcWeb, SvcAPI, SvcProxy,
 	SvcAuth, SvcBatch, SvcAgent, SvcStorage, SvcInfra, SvcMonitoring,
@@ -210,7 +215,10 @@ func (s *Service) Validate() error {
 	ve := &ValidationError{}
 	s.Code = strings.ToLower(checkRequired(ve, "code", s.Code))
 	s.Name = checkRequired(ve, "name", s.Name)
-	checkEnum(ve, "kind", s.Kind, ServiceKinds)
+	s.Kind = checkVocabulary(ve, "kind", s.Kind)
+	// availability and lifecycle stay checkEnum: AvailabilityPolicy.Evaluate
+	// and the impact engine's capacity arithmetic both switch on availability,
+	// and lifecycle drives retirement.
 	checkEnum(ve, "availability", s.Availability, Availabilities)
 	checkEnum(ve, "lifecycle", s.Lifecycle, ServiceLifecycles)
 	checkRequired(ve, "environment_id", s.EnvironmentID)

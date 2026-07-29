@@ -36,14 +36,21 @@ func (a *App) EnvironmentList(w http.ResponseWriter, r *http.Request) {
 		a.serverError(w, r, err)
 		return
 	}
+	roles, err := a.Store.EnvironmentRoles(r.Context())
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
 	a.Render.Page(w, http.StatusOK, "environment_list", environmentsPage{
 		Base:         a.base(r, "Environments", "environments"),
 		Environments: envs,
 		FormData: environmentFormData{
 			Base:   a.base(r, "Environments", "environments"),
 			Errors: map[string]string{},
-			Roles:  domain.EnvRoles,
-			Form:   environmentForm{Role: domain.EnvRoleProduction, Criticality: 3},
+			Roles:  roles,
+			// The default is a value the code knows by name, which is a
+			// different thing from the set of values it accepts.
+			Form: environmentForm{Role: domain.EnvRoleProduction, Criticality: 3},
 		},
 	})
 }
@@ -89,10 +96,15 @@ func (a *App) renderEnvironments(w http.ResponseWriter, r *http.Request, status 
 		a.serverError(w, r, err)
 		return
 	}
+	roles, err := a.Store.EnvironmentRoles(r.Context())
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
 	formData := environmentFormData{
 		Base:   a.base(r, "Environments", "environments"),
 		Errors: orEmpty(messages),
-		Roles:  domain.EnvRoles,
+		Roles:  roles,
 		Form:   form,
 	}
 	if render.IsHTMX(r) {
@@ -112,7 +124,7 @@ type assetListPage struct {
 	Base
 	Assets       []store.AssetRow
 	Environments []domain.Environment
-	Kinds        []string
+	Kinds        []store.VocabularyTerm
 	Filter       store.AssetFilter
 	FormData     assetFormData
 }
@@ -138,14 +150,19 @@ func (a *App) AssetList(w http.ResponseWriter, r *http.Request) {
 		a.serverError(w, r, err)
 		return
 	}
+	kinds, err := a.Store.AssetKinds(r.Context())
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
 
 	data := assetListPage{
 		Base:         a.base(r, "Assets", "assets"),
 		Assets:       assets,
 		Environments: envs,
-		Kinds:        domain.AssetKinds,
+		Kinds:        kinds,
 		Filter:       filter,
-		FormData:     a.newAssetForm(r, nil, envs, assets),
+		FormData:     a.newAssetForm(r, nil, envs, kinds, assets),
 	}
 	// Filtering swaps only the table, so typing in the filter box does not
 	// rebuild the page around it.
@@ -173,7 +190,7 @@ type assetDetailPage struct {
 	// answerable from one entity's history.
 	Timeline      []store.TimelineEntry
 	Environments  []domain.Environment
-	Kinds         []string
+	Kinds         []store.VocabularyTerm
 	Lifecycles    []string
 	InterfaceForm interfaceFormData
 	IPAddressForm ipAddressFormData
@@ -245,6 +262,21 @@ func (a *App) AssetDetail(w http.ResponseWriter, r *http.Request) {
 		a.serverError(w, r, err)
 		return
 	}
+	kinds, err := a.Store.AssetKinds(r.Context())
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
+	formFactors, err := a.Store.InterfaceFormFactors(r.Context())
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
+	ipRoles, err := a.Store.IPAddressRoles(r.Context())
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
 
 	a.Render.Page(w, http.StatusOK, "asset_detail", assetDetailPage{
 		Base:           a.base(r, asset.Name, "assets"),
@@ -257,10 +289,10 @@ func (a *App) AssetDetail(w http.ResponseWriter, r *http.Request) {
 		InstanceHealth: instanceHealth,
 		Timeline:       timeline,
 		Environments:   envs,
-		Kinds:          domain.AssetKinds,
+		Kinds:          kinds,
 		Lifecycles:     domain.AssetLifecycles,
-		InterfaceForm:  a.newInterfaceForm(r, id, nil),
-		IPAddressForm:  a.newIPAddressForm(r, id, nil, interfaces),
+		InterfaceForm:  a.newInterfaceForm(r, id, nil, formFactors),
+		IPAddressForm:  a.newIPAddressForm(r, id, nil, interfaces, ipRoles),
 		LinkForm:       a.newLinkForm(r, id, nil, interfaces, linkTargets),
 		OverrideForm:   a.newOverrideForm(r, targets, nil, overrideForm{}),
 	})
@@ -393,8 +425,13 @@ func (a *App) renderAssetFormError(w http.ResponseWriter, r *http.Request, messa
 		a.serverError(w, r, err)
 		return
 	}
+	kinds, err := a.Store.AssetKinds(r.Context())
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
 	a.Render.Partial(w, http.StatusUnprocessableEntity, "asset_form",
-		a.newAssetForm(r, messages, envs, parents))
+		a.newAssetForm(r, messages, envs, kinds, parents))
 }
 
 // ---------- impact simulation ----------

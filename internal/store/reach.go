@@ -454,7 +454,15 @@ func (s *SQLStore) CreateNetAttachment(ctx context.Context, actor domain.Actor, 
 		if err := t.get(ctx, &assetKind, `SELECT kind FROM asset WHERE id = ?`, na.AssetID); err != nil {
 			return fmt.Errorf("looking up asset kind: %w", err)
 		}
-		if !domain.IsAttachable(assetKind) {
+		// Read inside the transaction rather than from the tx: the vocabulary is
+		// declared data that a concurrent writer is not racing us for, and the
+		// alternative is a second requireVocabulary-shaped helper on tx for one
+		// caller.
+		behaviour, bErr := s.AssetKindBehaviour(ctx, assetKind)
+		if bErr != nil {
+			return bErr
+		}
+		if !behaviour.IsAttachable {
 			ve := &domain.ValidationError{}
 			ve.Add("asset_id", "a %s cannot have a network attachment", assetKind)
 			return ve

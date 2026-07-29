@@ -144,6 +144,34 @@ var DeclaredColumns = map[string][]string{
 	"asset_environment": {"asset_id", "environment_id", "note"},
 	"backend_member":    {"pool_id", "endpoint_id", "weight", "is_backup"},
 	"backend_pool":      {"id", "service_id", "name", "lb_algorithm"},
+	// The seven domain vocabularies (migration 00004). Declared, and not a
+	// close call: a lookup row is somebody asserting that a kind of thing
+	// exists in this estate. Nothing observes it, nothing reports it, and it
+	// changes only because a person decided -- which is the definition.
+	//
+	// They are not exempt. ExemptTables is for tables carrying no inventory
+	// fact -- goose bookkeeping, the session store, the derived search index --
+	// and a vocabulary is the opposite of derived: it is the authority the
+	// entity columns' foreign keys point at. Exempting it would mean a future
+	// UI for adding a value could mutate declared state with no change_log row
+	// and no test objecting, which is exactly the gap this census exists to
+	// close. No such UI exists today; values arrive in the migration, and no
+	// migration in this repository writes change_log.
+	//
+	// Consequence to be aware of: ClassifiedTables feeds ChangeEntityTypes, so
+	// all seven appear in the /changes entity filter. They join the other
+	// audited-but-currently-quiet tables already there (asset_closure,
+	// backend_member, rt_k8s); the filter offers what may be audited, not what
+	// happens to have rows.
+	// Declared, including the behaviour flags: what a kind is permitted to do is
+	// something an operator asserts, not something the estate reports.
+	"asset_kind":            {"code", "label", "sort_order", "can_host_instances", "is_attachable"},
+	"service_kind":          {"code", "label", "sort_order"},
+	"interface_form_factor": {"code", "label", "sort_order"},
+	"environment_role":      {"code", "label", "sort_order", "is_transit"},
+	"ip_address_role":       {"code", "label", "sort_order"},
+	"data_class":            {"code", "label", "sort_order"},
+	"container_engine":      {"code", "label", "sort_order"},
 	// The audit trail of declared change is itself declared: it is written by a
 	// person's act and is append-only forever (rule 10).
 	"change_log": {

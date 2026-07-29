@@ -17,7 +17,14 @@ const (
 	EnvRoleDR         = "dr"
 )
 
-// EnvRoles is the Go side of the environment.role CHECK constraint.
+// EnvRoles are the environment roles this code knows by name. It is NOT the
+// permitted set: since migration 00004 that lives in the environment_role
+// table and environment.role is a FOREIGN KEY into it, so a role added there is
+// valid immediately and appears in this slice never. Use it to refer to a role
+// the code has an opinion about -- EnvRoleTransit below is read by IsTransit
+// and by the spanning-assets query -- not as a vocabulary to validate against.
+// Adding a constant here grants it nothing; adding a row to environment_role
+// is what makes a value exist.
 var EnvRoles = []string{
 	EnvRoleProduction, EnvRoleStaging, EnvRoleDev,
 	EnvRoleTransit, EnvRoleShared, EnvRoleDR,
@@ -42,7 +49,7 @@ func NewEnvironment(id, code, name, role string, inScope bool, criticality int, 
 	ve := &ValidationError{}
 	code = checkRequired(ve, "code", code)
 	name = checkRequired(ve, "name", name)
-	checkEnum(ve, "role", role, EnvRoles)
+	role = checkVocabulary(ve, "role", role)
 	if criticality < 1 || criticality > 5 {
 		ve.Add("criticality", "must be between 1 and 5")
 	}
@@ -58,7 +65,10 @@ func NewEnvironment(id, code, name, role string, inScope bool, criticality int, 
 }
 
 // IsTransit reports whether this environment brokers cross-environment traffic.
-func (e *Environment) IsTransit() bool { return e.Role == EnvRoleTransit }
+// IsTransit is likewise decided by the environment_role lookup row, via
+// store.RoleIsTransit and the is_transit flag decorateAssets joins in. The
+// literal comparison that used to live here made every asset spanning a
+// data-added brokering role a false positive on the segmentation report.
 
 // Asset kinds spanning layers 1-3: physical network, physical compute,
 // virtualization.
@@ -77,7 +87,21 @@ const (
 	KindStorage    = "storage"
 )
 
-// AssetKinds is the Go side of the asset.kind CHECK constraint.
+// AssetKinds are the asset kinds this code knows by name. It is NOT the
+// permitted set: since migration 00004 that lives in the asset_kind table and
+// asset.kind is a FOREIGN KEY into it, so a kind added there is valid
+// immediately and appears in this slice never. The constants stay because code
+// genuinely refers to specific kinds -- KindK8sNode in the impact graph's
+// cluster expansion, the AttachableAssetKinds subset in reach.go -- and because
+// the seed and the tests need names rather than string literals.
+//
+// They are well-known members of an open set, and the distinction bites:
+// CanHostInstances and IsAttachable both switch over a hand-listed subset and
+// both answer false for anything they have not heard of. A kind inserted into
+// asset_kind is therefore non-hosting and non-attachable with no diagnostic.
+// That is a known gap, recorded in migration 00004's header comment; closing it
+// means carrying the behaviour as a column on the lookup table, which is an
+// architecture decision and not a refactor.
 var AssetKinds = []string{
 	KindSite, KindRack, KindPDU, KindFirewall, KindSwitch, KindPatchPanel,
 	KindServer, KindHypervisor, KindCluster, KindVM, KindK8sNode, KindStorage,
@@ -125,7 +149,7 @@ type Asset struct {
 func NewAsset(id, kind, name string, parentID *string, now time.Time) (*Asset, error) {
 	ve := &ValidationError{}
 	name = checkRequired(ve, "name", name)
-	checkEnum(ve, "kind", kind, AssetKinds)
+	kind = checkVocabulary(ve, "kind", kind)
 	if parentID != nil && *parentID == id {
 		ve.Add("parent_id", "an asset cannot contain itself")
 	}
@@ -144,7 +168,9 @@ func NewAsset(id, kind, name string, parentID *string, now time.Time) (*Asset, e
 func (a *Asset) Validate() error {
 	ve := &ValidationError{}
 	a.Name = checkRequired(ve, "name", a.Name)
-	checkEnum(ve, "kind", a.Kind, AssetKinds)
+	a.Kind = checkVocabulary(ve, "kind", a.Kind)
+	// lifecycle stays a checkEnum: IsRetired, lifecycleClass and the
+	// spanning/coverage queries all branch on its value.
 	checkEnum(ve, "lifecycle", a.Lifecycle, AssetLifecycles)
 	if a.ParentID != nil && *a.ParentID == a.ID {
 		ve.Add("parent_id", "an asset cannot contain itself")
@@ -158,15 +184,12 @@ func (a *Asset) Validate() error {
 // IsRetired reports whether the asset has been soft-deleted.
 func (a *Asset) IsRetired() bool { return a.Lifecycle == LifecycleRetired }
 
-// CanHostInstances reports whether a service instance may be placed here.
-// Placing a workload on a rack or a patch panel is a data-entry mistake, and
-// catching it here keeps the impact engine's placement phase meaningful.
-func (a *Asset) CanHostInstances() bool {
-	switch a.Kind {
-	case KindServer, KindHypervisor, KindVM, KindK8sNode, KindCluster,
-		KindFirewall, KindSwitch, KindStorage:
-		return true
-	default:
-		return false
-	}
-}
+// Whether a kind may host instances or take a network attachment is NOT
+// decided here any more. It is a column on the asset_kind lookup row
+// (can_host_instances, is_attachable), read by store.AssetKindBehaviour and
+// carried on store.AssetRow.
+//
+// It moved because a switch here could only ever answer for kinds this package
+// had been compiled with, so a kind added by INSERT -- the entire point of the
+// lookup table -- was storable and then silently unusable. Two sources of truth
+// for the same fact is worse than one in the less convenient place.

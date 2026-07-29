@@ -459,30 +459,55 @@ func TestValidationFailureIs422(t *testing.T) {
 	h.login("admin", "admin-password")
 	token := h.csrfToken("/environments")
 
-	resp := h.post("/environments", url.Values{
-		"csrf_token": {token},
-		"code":       {""}, // required
-		"name":       {"No code"},
-		"role":       {"not-a-real-role"},
-	}, true)
-	text := body(t, resp)
+	// Two failures, and since migration 00004 they are caught in two different
+	// places. A missing required field never leaves the constructor. An
+	// unrecognised role is well-formed, so the constructor passes it and the
+	// store rejects it against the environment_role lookup table -- which is
+	// the point of the table, and it must not degrade the response: the
+	// operator still gets 422, the form partial, and the field named. If this
+	// ever comes back as a bare "that request was not valid", the FK is
+	// enforcing the vocabulary but nothing is explaining it.
+	cases := []struct {
+		name   string
+		form   url.Values
+		expect string
+	}{
+		{
+			name:   "a missing required field",
+			form:   url.Values{"code": {""}, "name": {"No code"}, "role": {"production"}},
+			expect: "is required",
+		},
+		{
+			name:   "a role that is not in the lookup table",
+			form:   url.Values{"code": {"nowhere"}, "name": {"Nowhere"}, "role": {"not-a-real-role"}},
+			expect: "must be one of",
+		},
+	}
 
-	if resp.StatusCode != http.StatusUnprocessableEntity {
-		t.Fatalf("status = %d, want 422", resp.StatusCode)
-	}
-	// The form comes back with its error state, ready to resubmit.
-	if !strings.Contains(text, `id="environment-form"`) {
-		t.Error("the response is not the form partial")
-	}
-	if !strings.Contains(text, "is required") {
-		t.Error("the response does not show the field error")
-	}
-	if !strings.Contains(text, "must be one of") {
-		t.Error("the response does not show the enum error")
-	}
-	// A partial, not a whole page swapped into a div.
-	if strings.Contains(text, "<!doctype html>") {
-		t.Error("an HTMX request received a full page")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			form := url.Values{"csrf_token": {token}}
+			for k, v := range tc.form {
+				form[k] = v
+			}
+			resp := h.post("/environments", form, true)
+			text := body(t, resp)
+
+			if resp.StatusCode != http.StatusUnprocessableEntity {
+				t.Fatalf("status = %d, want 422", resp.StatusCode)
+			}
+			// The form comes back with its error state, ready to resubmit.
+			if !strings.Contains(text, `id="environment-form"`) {
+				t.Error("the response is not the form partial")
+			}
+			if !strings.Contains(text, tc.expect) {
+				t.Errorf("the response does not show %q", tc.expect)
+			}
+			// A partial, not a whole page swapped into a div.
+			if strings.Contains(text, "<!doctype html>") {
+				t.Error("an HTMX request received a full page")
+			}
+		})
 	}
 }
 

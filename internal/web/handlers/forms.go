@@ -14,20 +14,27 @@ import (
 // Go rather than assembling a map in the template means a missing field is a
 // compile error instead of "<no value>" in the browser.
 
+// Roles, Kinds, FormFactors and ClassOptions are read from their lookup
+// tables, not from a domain slice. A form fed from a Go slice would offer the
+// values that existed when the binary was built, so a role inserted this
+// morning would be storable and unofferable -- which would make the whole point
+// of the lookup tables (add a value as data, not as a release) quietly false.
 type environmentFormData struct {
 	Base
 	Errors map[string]string
 	Form   environmentForm
-	Roles  []string
+	Roles  []store.VocabularyTerm
 }
 
 type assetFormData struct {
 	Base
 	Errors       map[string]string
 	Environments []domain.Environment
-	Kinds        []string
-	Lifecycles   []string
-	Parents      []store.AssetRow
+	Kinds        []store.VocabularyTerm
+	// Lifecycles stays a domain slice: it is a behavioural enum whose value
+	// selects a code path, so it is still a CHECK with a Go constant set.
+	Lifecycles []string
+	Parents    []store.AssetRow
 }
 
 type serviceFormData struct {
@@ -36,7 +43,7 @@ type serviceFormData struct {
 	Spec           domain.ServiceSpec
 	Environments   []domain.Environment
 	Applications   []domain.Application
-	Kinds          []string
+	Kinds          []store.VocabularyTerm
 	Availabilities []string
 	FailoverModes  []string
 	Lifecycles     []string
@@ -69,14 +76,14 @@ type dependencyFormData struct {
 	AllRoutes    []store.RouteRow
 	Identities   []domain.Identity
 	Natures      []string
-	ClassOptions []string
+	ClassOptions []store.VocabularyTerm
 }
 
 type interfaceFormData struct {
 	Base
 	AssetID     string
 	Errors      map[string]string
-	FormFactors []string
+	FormFactors []store.VocabularyTerm
 }
 
 type ipAddressFormData struct {
@@ -84,7 +91,7 @@ type ipAddressFormData struct {
 	AssetID    string
 	Errors     map[string]string
 	Interfaces []store.InterfaceRow
-	Roles      []string
+	Roles      []store.VocabularyTerm
 }
 
 type linkFormData struct {
@@ -103,18 +110,18 @@ type prefixFormData struct {
 
 // newAssetForm builds the asset form context. Parents is the same list the
 // table shows, so an asset can be filed under anything already on screen.
-func (a *App) newAssetForm(r *http.Request, errs map[string]string, envs []domain.Environment, parents []store.AssetRow) assetFormData {
+func (a *App) newAssetForm(r *http.Request, errs map[string]string, envs []domain.Environment, kinds []store.VocabularyTerm, parents []store.AssetRow) assetFormData {
 	return assetFormData{
 		Base:         a.base(r, "Assets", "assets"),
 		Errors:       orEmpty(errs),
 		Environments: envs,
-		Kinds:        domain.AssetKinds,
+		Kinds:        kinds,
 		Lifecycles:   domain.AssetLifecycles,
 		Parents:      parents,
 	}
 }
 
-func (a *App) newServiceForm(r *http.Request, errs map[string]string, spec domain.ServiceSpec, envs []domain.Environment, apps []domain.Application) serviceFormData {
+func (a *App) newServiceForm(r *http.Request, errs map[string]string, spec domain.ServiceSpec, envs []domain.Environment, apps []domain.Application, kinds []store.VocabularyTerm) serviceFormData {
 	if spec.Tier == 0 {
 		spec.Tier = 3
 	}
@@ -124,7 +131,7 @@ func (a *App) newServiceForm(r *http.Request, errs map[string]string, spec domai
 		Spec:           spec,
 		Environments:   envs,
 		Applications:   apps,
-		Kinds:          domain.ServiceKinds,
+		Kinds:          kinds,
 		Availabilities: domain.Availabilities,
 		FailoverModes:  domain.FailoverModes,
 		Lifecycles:     domain.ServiceLifecycles,
@@ -153,7 +160,7 @@ func (a *App) newEndpointForm(r *http.Request, serviceID string, errs map[string
 	}
 }
 
-func (a *App) newDependencyForm(r *http.Request, serviceID string, errs map[string]string, spec domain.DependencySpec, endpoints []store.EndpointRow, routes []store.RouteRow, identities []domain.Identity) dependencyFormData {
+func (a *App) newDependencyForm(r *http.Request, serviceID string, errs map[string]string, spec domain.DependencySpec, endpoints []store.EndpointRow, routes []store.RouteRow, identities []domain.Identity, classes []store.VocabularyTerm) dependencyFormData {
 	return dependencyFormData{
 		Base:         a.base(r, "Services", "services"),
 		ServiceID:    serviceID,
@@ -163,26 +170,26 @@ func (a *App) newDependencyForm(r *http.Request, serviceID string, errs map[stri
 		AllRoutes:    routes,
 		Identities:   identities,
 		Natures:      domain.Natures,
-		ClassOptions: domain.DataClasses,
+		ClassOptions: classes,
 	}
 }
 
-func (a *App) newInterfaceForm(r *http.Request, assetID string, errs map[string]string) interfaceFormData {
+func (a *App) newInterfaceForm(r *http.Request, assetID string, errs map[string]string, formFactors []store.VocabularyTerm) interfaceFormData {
 	return interfaceFormData{
 		Base:        a.base(r, "Assets", "assets"),
 		AssetID:     assetID,
 		Errors:      orEmpty(errs),
-		FormFactors: domain.FormFactors,
+		FormFactors: formFactors,
 	}
 }
 
-func (a *App) newIPAddressForm(r *http.Request, assetID string, errs map[string]string, interfaces []store.InterfaceRow) ipAddressFormData {
+func (a *App) newIPAddressForm(r *http.Request, assetID string, errs map[string]string, interfaces []store.InterfaceRow, roles []store.VocabularyTerm) ipAddressFormData {
 	return ipAddressFormData{
 		Base:       a.base(r, "Assets", "assets"),
 		AssetID:    assetID,
 		Errors:     orEmpty(errs),
 		Interfaces: interfaces,
-		Roles:      domain.IPRoles,
+		Roles:      roles,
 	}
 }
 

@@ -42,6 +42,7 @@ Naming is a hint, not the rule. `desired_state` contains "state" and is declared
 | `dependency.verified_by`, `.verified_at` | **declared** | a *person's* attestation that an edge is legitimate. A machine credential may never write these — that is a rubber stamp on an undocumented `chd` edge and the firewall rule justified by it |
 | `dependency.lifecycle`, `.nature`, `.identity_id`, `.firewall_rule_ref` | declared | |
 | `app_user.last_login_at` | observed | see rule 11 |
+| `asset_kind.*`, `service_kind.*`, `interface_form_factor.*`, `environment_role.*`, `ip_address_role.*`, `data_class.*`, `container_engine.*` | **declared** | the seven domain vocabularies (migration `00004`). A lookup row is somebody asserting that a kind of thing exists in this estate — nothing observes it, nothing reports it, and it changes only because a person decided. Not exempt: `ExemptTables` is for tables carrying no inventory fact, and a vocabulary is the authority the entity columns' foreign keys point at. Values arrive in the migration today and no migration writes `change_log`; the moment a UI adds one, that write is a declared mutation and takes a `change_log` row like any other |
 | everything else | declared | |
 
 A migration that adds a column classifies it in this table **and** in `domain`. `TestEveryColumnIsClassified` reads the live schema on both engines and fails the build on an unclassified column — so a new column cannot default into the gap.
@@ -95,7 +96,7 @@ Replace the existing list with:
 - [ ] Mutation of **declared** state writes a `change_log` row in the same transaction
 - [ ] Observed write logs only on a transition, is idempotent and monotonic, does not bump `updated_at`, does not reindex, and writes nothing to `change_log`
 - [ ] New columns classified in the table above **and** in `domain.ObservedColumns` / `domain.ProvenanceColumns`
-- [ ] Domain constructor validates; DB `CHECK` matches the Go constant set
+- [ ] Domain constructor validates; DB `CHECK` matches the Go constant set — **for behavioural enums**. The seven domain vocabularies (migration `00004`) are the exception: the constructor checks shape only (`checkVocabulary`), a `FOREIGN KEY` into the lookup table is the authority on existence, and the Go constants are well-known members of an open set rather than the set itself. A lookup table whose values a Go slice still gates would defeat its own purpose
 - [ ] Handler branches correctly on `HX-Request`
 - [ ] Validation failure returns 422 with the form partial re-rendered
 - [ ] Non-GET route is behind CSRF and `RequireAdmin` — **or** is the observed-state webhook and satisfies rule 6 in full

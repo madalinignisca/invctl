@@ -220,3 +220,98 @@ func mustInterfaceWeb(t *testing.T, h *harness, assetID, name string) string {
 	}
 	return i.ID
 }
+
+// TestVocabularyValuesRoundTripThroughAForm covers the two ways migration
+// 00004's lookup tables meet the HTTP layer, both of which are new.
+//
+// The `+` case is the one worth having. `sfp+` and `qsfp+` are the only
+// vocabulary codes containing a character that means something else in a URL:
+// html/template escapes it to `&#43;` in the option's value attribute and
+// form-urlencoding turns a raw `+` into a space, so a code that survives
+// neither would silently become "sfp " and fail the foreign key -- with the
+// dropdown looking perfectly correct. The harness already un-escapes `&#43;`
+// for the CSRF token for the same reason.
+//
+// The unknown-value case asserts the contract the vocabulary change must not
+// cost: the form comes back at 422 with the field named, not a bare "that
+// request was not valid". The list in the message is read from the lookup
+// table, so it is the values that exist now rather than the ones that existed
+// when the binary was built.
+func TestVocabularyValuesRoundTripThroughAForm(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	assetID := mustServerAssetWeb(t, h, "vocab-probe")
+	path := "/assets/" + assetID
+
+	t.Run("a code containing a plus survives the round trip", func(t *testing.T) {
+		resp := h.post(path+"/interfaces", url.Values{
+			"csrf_token":  {h.csrfToken(path)},
+			"name":        {"probe-sfpplus"},
+			"form_factor": {domain.FFSFPPlus},
+		}, false)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusSeeOther {
+			t.Fatalf("status = %d, want 303", resp.StatusCode)
+		}
+
+		interfaces, err := h.store.ListInterfaces(context.Background(), assetID)
+		if err != nil {
+			t.Fatalf("listing interfaces: %v", err)
+		}
+		for _, i := range interfaces {
+			if i.Name != "probe-sfpplus" {
+				continue
+			}
+			if i.FormFactor != domain.FFSFPPlus {
+				t.Fatalf("form_factor = %q, want %q", i.FormFactor, domain.FFSFPPlus)
+			}
+			return
+		}
+		t.Fatal("the interface was not stored")
+	})
+
+	t.Run("a form factor that is not in the lookup table", func(t *testing.T) {
+		resp := h.post(path+"/interfaces", url.Values{
+			"csrf_token":  {h.csrfToken(path)},
+			"name":        {"probe-unknown"},
+			"form_factor": {"osfp800"},
+		}, true)
+		text := body(t, resp)
+
+		if resp.StatusCode != http.StatusUnprocessableEntity {
+			t.Fatalf("status = %d, want 422", resp.StatusCode)
+		}
+		if !strings.Contains(text, `id="interface-form"`) {
+			t.Error("the response is not the interface form partial")
+		}
+		if !strings.Contains(text, "must be one of") {
+			t.Error("the response does not name the vocabulary the value is missing from")
+		}
+	})
+
+	t.Run("the form offers what the table holds, not what Go was built with", func(t *testing.T) {
+		if _, err := h.store.DB().Writer.Exec(h.store.DB().Rebind(
+			`INSERT INTO interface_form_factor (code, label, sort_order) VALUES (?, ?, ?)`),
+			"osfp800", "OSFP 800G", 65); err != nil {
+			t.Fatalf("inserting the new form factor: %v", err)
+		}
+
+		page := body(t, h.get(path, false))
+		if !strings.Contains(page, `value="osfp800"`) {
+			t.Error("the form does not offer a form factor added as data; the lookup table " +
+				"is doing nothing an unfrozen CHECK would not have done")
+		}
+
+		resp := h.post(path+"/interfaces", url.Values{
+			"csrf_token":  {h.csrfToken(path)},
+			"name":        {"probe-osfp"},
+			"form_factor": {"osfp800"},
+		}, false)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusSeeOther {
+			t.Fatalf("status = %d, want 303 -- the value was added and is still unusable",
+				resp.StatusCode)
+		}
+	})
+}

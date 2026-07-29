@@ -192,9 +192,25 @@ func TestNewServiceValidates(t *testing.T) {
 			mutate:    func(s *ServiceSpec) { s.Availability = "best_effort" },
 			wantField: "availability",
 		},
+		// service.kind is a lookup TABLE, not a CHECK, since migration 00004:
+		// the constructor validates shape and the FOREIGN KEY decides
+		// existence. "middleware" is a perfectly well-formed code that this
+		// build has not heard of, and the constructor accepting it is the
+		// whole point -- a kind added as data must not need a Go release.
+		// internal/store/vocabulary_test.go covers the rejection, which now
+		// happens where the list actually lives.
 		{
-			name:      "unknown kind",
-			mutate:    func(s *ServiceSpec) { s.Kind = "middleware" },
+			name:   "an unrecognised kind is the lookup table's business, not the constructor's",
+			mutate: func(s *ServiceSpec) { s.Kind = "middleware" },
+		},
+		{
+			name:      "kind is still required",
+			mutate:    func(s *ServiceSpec) { s.Kind = "  " },
+			wantField: "kind",
+		},
+		{
+			name:      "kind must be a code, not a sentence",
+			mutate:    func(s *ServiceSpec) { s.Kind = "message broker" },
 			wantField: "kind",
 		},
 		{
@@ -274,26 +290,6 @@ func TestStatusWorseIsMonotonic(t *testing.T) {
 	for _, tc := range tests {
 		if got := tc.a.Worse(tc.b); got != tc.want {
 			t.Errorf("%s.Worse(%s) = %s, want %s", tc.a, tc.b, got, tc.want)
-		}
-	}
-}
-
-func TestAssetCanHostInstances(t *testing.T) {
-	// Placing a workload on a rack or a patch panel is a data-entry mistake
-	// that the impact engine would otherwise inherit silently.
-	canHost := []string{KindServer, KindHypervisor, KindVM, KindK8sNode, KindCluster}
-	cannot := []string{KindSite, KindRack, KindPDU, KindPatchPanel}
-
-	for _, kind := range canHost {
-		a := &Asset{Kind: kind}
-		if !a.CanHostInstances() {
-			t.Errorf("a %s should be able to host instances", kind)
-		}
-	}
-	for _, kind := range cannot {
-		a := &Asset{Kind: kind}
-		if a.CanHostInstances() {
-			t.Errorf("a %s should not be able to host instances", kind)
 		}
 	}
 }

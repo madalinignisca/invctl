@@ -14,6 +14,9 @@ import (
 // CreateEnvironment inserts an environment and its audit row.
 func (s *SQLStore) CreateEnvironment(ctx context.Context, actor domain.Actor, env *domain.Environment) error {
 	return s.write(ctx, actor, func(t *tx) error {
+		if err := t.requireVocabulary(ctx, vocabEnvironmentRole, "role", env.Role); err != nil {
+			return err
+		}
 		_, err := t.exec(ctx,
 			`INSERT INTO environment (id, code, name, role, in_scope, criticality, created_at, updated_at)
 			 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -41,6 +44,9 @@ func (s *SQLStore) UpdateEnvironment(ctx context.Context, actor domain.Actor, en
 	env.UpdatedAt = domain.FormatTime(s.now())
 
 	return s.write(ctx, actor, func(t *tx) error {
+		if err := t.requireVocabulary(ctx, vocabEnvironmentRole, "role", env.Role); err != nil {
+			return err
+		}
 		_, err := t.exec(ctx,
 			`UPDATE environment
 			 SET code = ?, name = ?, role = ?, in_scope = ?, criticality = ?, updated_at = ?
@@ -184,7 +190,23 @@ type AssetRow struct {
 	ParentName    string
 	Environments  []domain.Environment
 	InstanceCount int
+	// Behaviour comes from the asset_kind lookup row rather than a switch in
+	// Go, so a kind added by INSERT is usable rather than merely storable.
+	// Populated by decorateAssets; the zero value is "may do nothing", which is
+	// the safe reading for a row whose kind predates its vocabulary entry.
+	Behaviour KindBehaviour
+	// NonTransitEnvironments counts the environments that are NOT transit
+	// zones. Computed here because is_transit lives on environment_role and a
+	// row cannot look it up for itself.
+	NonTransitEnvironments int
 }
+
+// CanHostInstances reports whether a service instance may be placed here.
+func (r *AssetRow) CanHostInstances() bool { return r.Behaviour.CanHostInstances }
+
+// IsAttachable reports whether this asset may be the subject of a
+// net_attachment.
+func (r *AssetRow) IsAttachable() bool { return r.Behaviour.IsAttachable }
 
 // SpansEnvironments reports whether this asset sits in more than one
 // environment -- the query the handover says will be run constantly.
@@ -192,15 +214,7 @@ type AssetRow struct {
 // A transit environment does not count towards the span: brokering traffic
 // between segments is a transit zone's entire purpose, so counting it would
 // make every firewall a permanent false positive (docs/DECISIONS.md Q4).
-func (r *AssetRow) SpansEnvironments() bool {
-	nonTransit := 0
-	for _, env := range r.Environments {
-		if !env.IsTransit() {
-			nonTransit++
-		}
-	}
-	return nonTransit > 1
-}
+func (r *AssetRow) SpansEnvironments() bool { return r.NonTransitEnvironments > 1 }
 
 // decorateAssets attaches parent names and environment membership in two
 // queries rather than one per row.
@@ -220,12 +234,16 @@ func (s *SQLStore) decorateAssets(ctx context.Context, assets []domain.Asset) ([
 	type membership struct {
 		AssetID string `db:"asset_id"`
 		domain.Environment
+		// From environment_role, not from environment: whether a role brokers
+		// between segments is a property of the role.
+		IsTransit bool `db:"is_transit"`
 	}
 	var memberships []membership
 	err := s.read(ctx, &memberships, `
-		SELECT ae.asset_id, e.*
+		SELECT ae.asset_id, e.*, er.is_transit
 		FROM asset_environment ae
 		JOIN environment e ON e.id = ae.environment_id
+		JOIN environment_role er ON er.code = e.role
 		WHERE ae.asset_id IN (`+placeholders(len(ids))+`)
 		ORDER BY e.code`, anySlice(ids)...)
 	if err != nil {
@@ -234,7 +252,28 @@ func (s *SQLStore) decorateAssets(ctx context.Context, assets []domain.Asset) ([
 	for _, m := range memberships {
 		if i, ok := index[m.AssetID]; ok {
 			rows[i].Environments = append(rows[i].Environments, m.Environment)
+			if !m.IsTransit {
+				rows[i].NonTransitEnvironments++
+			}
 		}
+	}
+
+	// What each kind may do. One query for the whole vocabulary rather than one
+	// per asset: it is a dozen rows and every list view needs all of them.
+	var kinds []struct {
+		Code string `db:"code"`
+		KindBehaviour
+	}
+	if err := s.read(ctx, &kinds,
+		`SELECT code, can_host_instances, is_attachable FROM asset_kind`); err != nil {
+		return nil, fmt.Errorf("loading asset kind behaviour: %w", err)
+	}
+	behaviour := make(map[string]KindBehaviour, len(kinds))
+	for _, k := range kinds {
+		behaviour[k.Code] = k.KindBehaviour
+	}
+	for i := range rows {
+		rows[i].Behaviour = behaviour[rows[i].Kind]
 	}
 
 	type parentName struct {
@@ -284,6 +323,9 @@ func (s *SQLStore) CreateAsset(ctx context.Context, actor domain.Actor, a *domai
 		return err
 	}
 	return s.write(ctx, actor, func(t *tx) error {
+		if err := t.requireVocabulary(ctx, vocabAssetKind, "kind", a.Kind); err != nil {
+			return err
+		}
 		_, err := t.exec(ctx,
 			`INSERT INTO asset (id, kind, name, parent_id, serial, asset_tag, vendor, model,
 			                    lifecycle, owner_team, attrs, created_at, updated_at)
@@ -334,6 +376,9 @@ func (s *SQLStore) UpdateAsset(ctx context.Context, actor domain.Actor, a *domai
 	}
 
 	return s.write(ctx, actor, func(t *tx) error {
+		if err := t.requireVocabulary(ctx, vocabAssetKind, "kind", a.Kind); err != nil {
+			return err
+		}
 		_, err := t.exec(ctx,
 			`UPDATE asset SET kind = ?, name = ?, serial = ?, asset_tag = ?, vendor = ?,
 			                  model = ?, lifecycle = ?, owner_team = ?, attrs = ?, updated_at = ?

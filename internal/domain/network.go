@@ -14,7 +14,13 @@ const (
 	FFLoopback = "loopback"
 )
 
-// FormFactors is the Go side of the interface.form_factor CHECK constraint.
+// FormFactors are the form factors this code knows by name. It is NOT the
+// permitted set: since migration 00004 that lives in the interface_form_factor
+// table and interface.form_factor is a FOREIGN KEY into it, so 400G optics land
+// as an INSERT and appear in this slice never. The constants stay because the
+// seed and the tests need names rather than string literals. Nothing branches
+// on a form factor -- it is rendered and passed through -- which is exactly why
+// this vocabulary became a table.
 var FormFactors = []string{
 	FFRJ45, FFSFP, FFSFPPlus, FFSFP28, FFQSFPPlus, FFQSFP28,
 	FFVirtual, FFLAG, FFLoopback,
@@ -44,7 +50,7 @@ func NewInterface(id, assetID, name, formFactor string) (*Interface, error) {
 	ve := &ValidationError{}
 	name = checkRequired(ve, "name", name)
 	checkRequired(ve, "asset_id", assetID)
-	checkEnum(ve, "form_factor", formFactor, FormFactors)
+	formFactor = checkVocabulary(ve, "form_factor", formFactor)
 	if err := ve.OrNil(); err != nil {
 		return nil, err
 	}
@@ -138,7 +144,10 @@ const (
 	IPRoleFloating  = "floating"
 )
 
-// IPRoles is the Go side of the ip_address.role CHECK constraint.
+// IPRoles are the address roles this code knows by name. It is NOT the
+// permitted set: since migration 00004 that lives in the ip_address_role table
+// and ip_address.role is a FOREIGN KEY into it. IPRolePrimary stays because it
+// is the form's default, not because the set is closed.
 var IPRoles = []string{IPRolePrimary, IPRoleSecondary, IPRoleVIP, IPRoleMgmt, IPRoleFloating}
 
 // IPAddress is a single address, optionally bound to an interface. A VIP may
@@ -155,7 +164,7 @@ type IPAddress struct {
 // NewIPAddress parses and normalizes an address into the stored representation.
 func NewIPAddress(id, addr string, interfaceID *string, role string) (*IPAddress, error) {
 	ve := &ValidationError{}
-	checkEnum(ve, "role", role, IPRoles)
+	role = checkVocabulary(ve, "role", role)
 	av, err := ParseAddr(addr)
 	if err != nil {
 		ve.Add("addr_text", "%s", err.Error())

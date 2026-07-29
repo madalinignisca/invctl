@@ -361,8 +361,10 @@ var AttachableAssetKinds = []string{
 	KindServer, KindHypervisor, KindCluster, KindVM, KindK8sNode, KindStorage,
 }
 
-// IsAttachable reports whether kind may be the subject of a net_attachment.
-func IsAttachable(kind string) bool { return oneOf(kind, AttachableAssetKinds) }
+// IsAttachable moved to the asset_kind lookup row for the same reason
+// CanHostInstances did -- see internal/domain/asset.go. AttachableAssetKinds
+// remains as the set the migration seeds is_attachable = TRUE for, so the two
+// cannot silently disagree at install time.
 
 // NetAttachmentMember names which chassis of the group an attachment actually
 // lands on. An empty member set means "attached to the group as a whole,

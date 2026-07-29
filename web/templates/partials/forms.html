@@ -22,7 +22,7 @@
       <div class="field">
         <label for="env-role">Role</label>
         <select id="env-role" name="role">
-          {{range $.Roles}}<option value="{{.}}" {{if eq . $.Form.Role}}selected{{end}}>{{.}}</option>{{end}}
+          {{range $.Roles}}<option value="{{.Code}}" {{if eq .Code $.Form.Role}}selected{{end}}>{{.Label}}</option>{{end}}
         </select>
         {{with index .Errors "role"}}<div class="field-error">{{.}}</div>{{end}}
         <div class="field-hint">A transit environment brokers traffic between the others.</div>
@@ -59,7 +59,7 @@
       <div class="field">
         <label for="asset-kind">Kind</label>
         <select id="asset-kind" name="kind">
-          {{range .Kinds}}<option value="{{.}}">{{.}}</option>{{end}}
+          {{range .Kinds}}<option value="{{.Code}}">{{.Label}}</option>{{end}}
         </select>
         {{with index .Errors "kind"}}<div class="field-error">{{.}}</div>{{end}}
       </div>
@@ -129,7 +129,7 @@
       <div class="field">
         <label for="svc-kind">Kind</label>
         <select id="svc-kind" name="kind">
-          {{range $.Kinds}}<option value="{{.}}" {{if eq . $.Spec.Kind}}selected{{end}}>{{.}}</option>{{end}}
+          {{range $.Kinds}}<option value="{{.Code}}" {{if eq .Code $.Spec.Kind}}selected{{end}}>{{.Label}}</option>{{end}}
         </select>
       </div>
       <div class="field">
@@ -369,7 +369,7 @@
     <label>Data carried</label>
     <div class="checks">
       {{range .ClassOptions}}
-      <label class="check"><input type="checkbox" name="data_class" value="{{.}}"> {{.}}</label>
+      <label class="check"><input type="checkbox" name="data_class" value="{{.Code}}"> {{.Label}}</label>
       {{end}}
     </div>
   </div>
@@ -393,7 +393,7 @@
     <div class="field">
       <label for="iface-form-factor">Form factor</label>
       <select id="iface-form-factor" name="form_factor">
-        {{range .FormFactors}}<option value="{{.}}">{{.}}</option>{{end}}
+        {{range .FormFactors}}<option value="{{.Code}}">{{.Label}}</option>{{end}}
       </select>
       {{with index .Errors "form_factor"}}<div class="field-error">{{.}}</div>{{end}}
     </div>
@@ -447,7 +447,7 @@
       <div class="field">
         <label for="addr-role">Role</label>
         <select id="addr-role" name="role">
-          {{range .Roles}}<option value="{{.}}">{{.}}</option>{{end}}
+          {{range .Roles}}<option value="{{.Code}}">{{.Label}}</option>{{end}}
         </select>
       </div>
     </div>

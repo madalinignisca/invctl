@@ -141,6 +141,9 @@ func (s *SQLStore) ListAvailableInterfaces(ctx context.Context, excludeInterface
 // CreateInterface inserts a port.
 func (s *SQLStore) CreateInterface(ctx context.Context, actor domain.Actor, i *domain.Interface) error {
 	return s.write(ctx, actor, func(t *tx) error {
+		if err := t.requireVocabulary(ctx, vocabInterfaceFormFactor, "form_factor", i.FormFactor); err != nil {
+			return err
+		}
 		_, err := t.exec(ctx, `
 			INSERT INTO interface (id, asset_id, name, form_factor, speed_mbps, mac, mtu,
 			                       lag_parent_id, is_mgmt, enabled)
@@ -227,6 +230,9 @@ func (s *SQLStore) RetireLink(ctx context.Context, actor domain.Actor, id string
 // CreateIPAddress assigns an address.
 func (s *SQLStore) CreateIPAddress(ctx context.Context, actor domain.Actor, a *domain.IPAddress) error {
 	return s.write(ctx, actor, func(t *tx) error {
+		if err := t.requireVocabulary(ctx, vocabIPAddressRole, "role", a.Role); err != nil {
+			return err
+		}
 		_, err := t.exec(ctx,
 			`INSERT INTO ip_address (id, addr_text, addr_family, addr_start, interface_id, role)
 			 VALUES (?, ?, ?, ?, ?, ?)`,

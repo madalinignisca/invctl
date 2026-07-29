@@ -13,7 +13,7 @@ type serviceListPage struct {
 	Services       []store.ServiceRow
 	Environments   []domain.Environment
 	Applications   []domain.Application
-	Kinds          []string
+	Kinds          []store.VocabularyTerm
 	Availabilities []string
 	Filter         store.ServiceFilter
 	FormData       serviceFormData
@@ -45,16 +45,22 @@ func (a *App) ServiceList(w http.ResponseWriter, r *http.Request) {
 		a.serverError(w, r, err)
 		return
 	}
+	kinds, err := a.Store.ServiceKinds(r.Context())
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
 
 	data := serviceListPage{
-		Base:           a.base(r, "Services", "services"),
-		Services:       services,
-		Environments:   envs,
-		Applications:   apps,
-		Kinds:          domain.ServiceKinds,
+		Base:         a.base(r, "Services", "services"),
+		Services:     services,
+		Environments: envs,
+		Applications: apps,
+		Kinds:        kinds,
+		// Availability stays a domain slice: the impact engine switches on it.
 		Availabilities: domain.Availabilities,
 		Filter:         filter,
-		FormData:       a.newServiceForm(r, nil, domain.ServiceSpec{}, envs, apps),
+		FormData:       a.newServiceForm(r, nil, domain.ServiceSpec{}, envs, apps, kinds),
 	}
 	a.Render.Respond(w, r, http.StatusOK, "service_list", "service_table", data)
 }
@@ -169,6 +175,11 @@ func (a *App) ServiceDetail(w http.ResponseWriter, r *http.Request) {
 		a.serverError(w, r, err)
 		return
 	}
+	classOptions, err := a.Store.DataClassVocabulary(r.Context())
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
 
 	b := a.base(r, service.Name, "services")
 	a.Render.Page(w, http.StatusOK, "service_detail", serviceDetailPage{
@@ -183,7 +194,7 @@ func (a *App) ServiceDetail(w http.ResponseWriter, r *http.Request) {
 		Timeline:       timeline,
 		InstanceForm:   a.newInstanceForm(r, id, nil, hostable),
 		EndpointForm:   a.newEndpointForm(r, id, nil),
-		DependencyForm: a.newDependencyForm(r, id, nil, domain.DependencySpec{}, allEndpoints, allRoutes, identities),
+		DependencyForm: a.newDependencyForm(r, id, nil, domain.DependencySpec{}, allEndpoints, allRoutes, identities, classOptions),
 		OverrideForm:   a.newOverrideForm(r, overrideTargets, nil, overrideForm{}),
 	})
 }
@@ -285,8 +296,13 @@ func (a *App) respondServiceFormError(w http.ResponseWriter, r *http.Request, er
 		a.serverError(w, r, listErr)
 		return
 	}
+	kinds, listErr := a.Store.ServiceKinds(r.Context())
+	if listErr != nil {
+		a.serverError(w, r, listErr)
+		return
+	}
 	a.Render.Partial(w, http.StatusUnprocessableEntity, "service_form",
-		a.newServiceForm(r, messages, spec, envs, apps))
+		a.newServiceForm(r, messages, spec, envs, apps, kinds))
 }
 
 // ---------- instances ----------

@@ -445,6 +445,14 @@ func setDataClasses(ctx context.Context, t *tx, dependencyID string, classes []s
 		if c == "" {
 			continue
 		}
+		// The checkbox group reaches here straight from r.Form, so this is the
+		// first and only place a submitted class is validated in Go. Before
+		// migration 00004 the CHECK constraint was the sole enforcement and the
+		// failure was an opaque driver error; now the FK enforces it and this
+		// read makes the message name the field.
+		if err := t.requireVocabulary(ctx, vocabDataClass, "data_class", c); err != nil {
+			return err
+		}
 		_, err := t.exec(ctx,
 			`INSERT INTO dependency_data_class (dependency_id, data_class) VALUES (?, ?)`,
 			dependencyID, c)

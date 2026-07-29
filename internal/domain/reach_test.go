@@ -118,26 +118,6 @@ func TestNewNetAttachmentValidation(t *testing.T) {
 	}
 }
 
-func TestIsAttachable(t *testing.T) {
-	cases := map[string]bool{
-		KindServer:     true,
-		KindHypervisor: true,
-		KindVM:         true,
-		KindK8sNode:    true,
-		KindCluster:    true,
-		KindStorage:    true,
-		KindRack:       false,
-		KindSite:       false,
-		KindSwitch:     false, // a forwarder is a vertex, not a host
-		KindPatchPanel: false,
-	}
-	for kind, want := range cases {
-		if got := IsAttachable(kind); got != want {
-			t.Errorf("IsAttachable(%s) = %v, want %v", kind, got, want)
-		}
-	}
-}
-
 func TestNewNetAnchorValidation(t *testing.T) {
 	if _, err := NewNetAnchor("id-1", "internet", "Internet", "not-a-scope", "group-a", reachNow); !errors.Is(err, ErrInvalid) {
 		t.Errorf("an invalid scope must be rejected: %v", err)

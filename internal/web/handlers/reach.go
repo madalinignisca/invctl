@@ -107,7 +107,7 @@ func (a *App) newNetAnchorForm(r *http.Request, errs map[string]string, groups [
 func attachableAssets(assets []store.AssetRow) []store.AssetRow {
 	out := make([]store.AssetRow, 0, len(assets))
 	for _, a := range assets {
-		if domain.IsAttachable(a.Kind) {
+		if a.IsAttachable() {
 			out = append(out, a)
 		}
 	}

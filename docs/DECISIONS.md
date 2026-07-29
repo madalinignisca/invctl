@@ -864,3 +864,93 @@ stays expressible as a nil pointer in Go.
 did before, and after sign-off "reversible" becomes a rule rather than an aspiration — a
 down migration nobody has run is a claim, not a property. These three are also the first in
 this project to rebuild a table, which is where a down migration goes wrong.
+
+---
+
+## 2026-07-29 — vocabularies: lookup tables and named constraints
+
+Two changes, one before sign-off because both alter shapes that freeze at it.
+
+### Why not just "avoid enums, guard in code"
+
+The stack never used SQL `ENUM` — `CLAUDE.md` forbids it — so the MySQL objections to that
+type (ordinal storage, silent coercion, `ORDER BY` by hidden integer) never applied. What did
+apply is the rigidity: a `CHECK (col IN (...))` is a closed vocabulary baked into DDL, and on
+SQLite an *unnamed* one can never be dropped.
+
+But "guard in code only" inverts the risk for half of these columns, so the split is by what
+the value **does**:
+
+- **Domain vocabularies** describe the estate, grow, and are mostly passed through by code.
+  `asset.kind`, `service.kind`, `interface.form_factor`, `environment.role`,
+  `ip_address.role`, `rt_container.engine`, `dependency_data_class.data_class` → **lookup
+  tables**, keyed on the code already stored so no data migrates and no query changes.
+- **Behavioural enums** select a code path. A value arriving as data makes every Go `switch`
+  fall through silently, which is worse than a rebuild — and this codebase already paid for
+  that once when `service_instance.source` had no CHECK. They keep `TEXT` + `CHECK`, but
+  **every constraint is now named**, so widening one is a one-line `ALTER` instead of a table
+  rebuild.
+
+### The classification error, and where it came from
+
+`asset.kind` and `environment.role` were put in the *domain* bucket on the grounds that code
+passes them through. It does not: `CanHostInstances` and `IsAttachable` switch on the kind,
+and `IsTransit`/`SpanningAssets` on the role. By the split's own criterion they are
+behavioural.
+
+The consequence was measured on both engines: `bridge` added as data could be stored, an
+asset created — and then `CanHostInstances = false`, `IsAttachable = false`, with no
+diagnostic. **The feature the whole change was requested for did not work.** A bridge that
+can carry nothing and take no network attachment is not a bridge.
+
+The brief given to the implementers said "implement it, do not relitigate it". They flagged
+the problem anyway, recorded it in the migration header, and shipped it as instructed. The
+instruction turned a correct objection into a documented defect; the flag should have been
+treated as the stop signal it was.
+
+**Resolved by making the behaviour travel with the vocabulary row** rather than reverting the
+classification: `asset_kind.can_host_instances`, `asset_kind.is_attachable`,
+`environment_role.is_transit`. The Go switches are gone — one authority, in the less
+convenient place, rather than two that can disagree. `domain.AttachableAssetKinds` survives
+only as the set the migration seeds `TRUE` for, so the two cannot drift at install time.
+
+Both flags default `FALSE`, so a value added without thinking is inert rather than quietly
+granted placement rights nobody considered.
+
+### What SQLite can and cannot unfreeze — corrected
+
+Earlier notes said naming a constraint makes it droppable. That is true of a **CHECK** and
+false of a **UNIQUE**: `ALTER TABLE ... DROP CONSTRAINT <name>` on a named UNIQUE returns
+`constraint may not be dropped`. So the ten UNIQUEs this work names gained nothing, and two
+anonymous ones (`application.code`, `backend_pool(service_id, name)`) are equally permanent
+either way.
+
+**For new tables, prefer `CREATE UNIQUE INDEX` over an inline `UNIQUE`** — an index can be
+dropped on both engines, a table constraint cannot on SQLite. Nothing to do about the
+existing ones short of a rebuild, which is not worth it for constraints nobody expects to
+widen.
+
+### The down migration wedged on first use of the feature
+
+Restoring the original vocabulary CHECK failed the moment anyone had added a value — the
+first thing the up migration invites. Because those files are `NO TRANSACTION`, the failure
+left a half-built table behind while goose recorded the version as applied: a database that
+could be migrated neither forward nor back.
+
+The down migrations no longer restore the vocabulary CHECKs. Deleting the rows that used
+added values destroys real inventory to satisfy a development convenience; coercing them puts
+a false fact in the estate. So the column returns as unconstrained TEXT and the down is
+honest about being one-way in that one respect.
+
+### Three test classes that did not exist
+
+Each was found by breaking the thing it now guards:
+
+- **Nothing asserted a constraint had a name.** Stripping every `CONSTRAINT` token from
+  migration 00005 — reducing it to a no-op rebuild of sixteen tables — left the suite green.
+- **Nothing compared constraint names across engines.** Two disagreed
+  (`service_instance_runtime_check` vs `..._runtime_type_check`, and a `source_checked` scar
+  from 00008's column dance), which meant widening either needed two different statements.
+- **Every migration test ran against an empty database**, so the `INSERT ... SELECT` copy at
+  the heart of a rebuild was exercised against zero rows. Removing `owner_team` from a copy
+  list was invisible: twenty assets lost it and the suite stayed green.

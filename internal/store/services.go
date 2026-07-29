@@ -139,6 +139,9 @@ func (s *SQLStore) CreateService(ctx context.Context, actor domain.Actor, svc *d
 		return err
 	}
 	return s.write(ctx, actor, func(t *tx) error {
+		if err := t.requireVocabulary(ctx, vocabServiceKind, "kind", svc.Kind); err != nil {
+			return err
+		}
 		_, err := t.exec(ctx, `
 			INSERT INTO service (id, application_id, code, name, kind, environment_id, availability,
 			                     min_healthy, failover_mode, tier, rto_minutes, rpo_minutes,
@@ -170,6 +173,9 @@ func (s *SQLStore) UpdateService(ctx context.Context, actor domain.Actor, svc *d
 	svc.UpdatedAt = domain.FormatTime(s.now())
 
 	return s.write(ctx, actor, func(t *tx) error {
+		if err := t.requireVocabulary(ctx, vocabServiceKind, "kind", svc.Kind); err != nil {
+			return err
+		}
 		_, err := t.exec(ctx, `
 			UPDATE service SET application_id = ?, code = ?, name = ?, kind = ?, environment_id = ?,
 			                   availability = ?, min_healthy = ?, failover_mode = ?, tier = ?,
@@ -287,7 +293,11 @@ func (s *SQLStore) CreateInstance(ctx context.Context, actor domain.Actor, si *d
 	if err != nil {
 		return err
 	}
-	if !host.CanHostInstances() {
+	hostKind, err := s.AssetKindBehaviour(ctx, host.Kind)
+	if err != nil {
+		return err
+	}
+	if !hostKind.CanHostInstances {
 		ve := &domain.ValidationError{}
 		ve.Add("host_asset_id", "a %s cannot host a service instance", host.Kind)
 		return ve
@@ -404,6 +414,14 @@ func (s *SQLStore) SetRuntimeSystemd(ctx context.Context, actor domain.Actor, rt
 // SetRuntimeContainer upserts the container detail for an instance.
 func (s *SQLStore) SetRuntimeContainer(ctx context.Context, actor domain.Actor, rt *domain.RTContainer) error {
 	return s.write(ctx, actor, func(t *tx) error {
+		// engine is nullable -- "not recorded" is a legitimate state and a NULL
+		// child column is exempt from foreign key checking on both engines --
+		// so only a value present is checked.
+		if rt.Engine != nil {
+			if err := t.requireVocabulary(ctx, vocabContainerEngine, "engine", *rt.Engine); err != nil {
+				return err
+			}
+		}
 		_, err := t.exec(ctx, `
 			INSERT INTO rt_container (instance_id, engine, container_name, compose_project,
 			                          compose_service, image_repo, image_tag, image_digest,

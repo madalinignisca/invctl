@@ -27,7 +27,7 @@
         <label for="sf-kind">Kind</label>
         <select id="sf-kind" name="kind">
           <option value="">any</option>
-          {{range $.Kinds}}<option value="{{.}}" {{if eq . $.Filter.Kind}}selected{{end}}>{{.}}</option>{{end}}
+          {{range $.Kinds}}<option value="{{.Code}}" {{if eq .Code $.Filter.Kind}}selected{{end}}>{{.Label}}</option>{{end}}
         </select>
       </div>
       <div class="field">

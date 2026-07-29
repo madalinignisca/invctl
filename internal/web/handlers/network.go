@@ -40,8 +40,13 @@ func (a *App) InterfaceCreate(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+		formFactors, listErr := a.Store.InterfaceFormFactors(r.Context())
+		if listErr != nil {
+			a.serverError(w, r, listErr)
+			return
+		}
 		a.Render.Partial(w, http.StatusUnprocessableEntity, "interface_form",
-			a.newInterfaceForm(r, assetID, messages))
+			a.newInterfaceForm(r, assetID, messages, formFactors))
 		return
 	}
 
@@ -86,8 +91,13 @@ func (a *App) IPAddressCreate(w http.ResponseWriter, r *http.Request) {
 			a.serverError(w, r, listErr)
 			return
 		}
+		roles, listErr := a.Store.IPAddressRoles(r.Context())
+		if listErr != nil {
+			a.serverError(w, r, listErr)
+			return
+		}
 		a.Render.Partial(w, http.StatusUnprocessableEntity, "ip_address_form",
-			a.newIPAddressForm(r, assetID, messages, interfaces))
+			a.newIPAddressForm(r, assetID, messages, interfaces, roles))
 		return
 	}
 
