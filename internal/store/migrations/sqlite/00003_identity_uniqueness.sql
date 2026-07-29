@@ -64,7 +64,12 @@ ALTER TABLE identity_new RENAME TO identity;
 CREATE UNIQUE INDEX idx_identity_name_active
   ON identity(realm, name) WHERE lifecycle = 'active';
 
-PRAGMA foreign_key_check;
+-- No PRAGMA foreign_key_check here. It reads like a safety net and is not one:
+-- goose runs migration statements with Exec, the pragma reports violations as
+-- result rows, and Exec discards them -- so it finds the problem, throws it
+-- away and reports success. store.verifyForeignKeys runs the same check with
+-- Query after every migration instead, where a violation can actually fail the
+-- run.
 PRAGMA foreign_keys = ON;
 
 -- +goose Down

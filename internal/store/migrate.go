@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
+	"strings"
 
 	"github.com/pressly/goose/v3"
 )
@@ -33,7 +34,64 @@ func Migrate(ctx context.Context, db *DB) error {
 	if err := migrateDir(ctx, db, dialectDir, dialectVersionTable); err != nil {
 		return fmt.Errorf("applying %s migrations: %w", db.Driver, err)
 	}
-	return nil
+	return verifyForeignKeys(ctx, db)
+}
+
+// verifyForeignKeys refuses to report success on a database whose references no
+// longer resolve.
+//
+// It exists because the obvious guard does not work. Several SQLite migrations
+// rebuild a table, which means dropping it, which means turning foreign key
+// enforcement off first -- six tables cascade off service_instance alone, and a
+// DROP with enforcement on silently takes their rows. Those migrations ended
+// with `PRAGMA foreign_key_check`, which reads like a safety net and is not
+// one: goose executes migration statements with Exec, the pragma returns its
+// violations as RESULT ROWS, and Exec discards them. Measured -- on a database
+// holding a known dangling reference, Exec returns nil while Query on the
+// identical statement returns the violation. Every one of those pragmas was
+// decorative, and a rebuild that orphaned half the estate would have reported
+// success.
+//
+// Doing it here rather than in each migration is deliberate: a check a
+// migration has to remember is a check the next migration forgets, and this
+// covers every migration ever added without anyone thinking about it.
+//
+// PostgreSQL needs nothing equivalent. It enforces references continuously and
+// has no mode in which a migration can switch that off.
+func verifyForeignKeys(ctx context.Context, db *DB) error {
+	if db.Driver != DriverSQLite {
+		return nil
+	}
+	type violation struct {
+		Table  string `db:"table"`
+		RowID  *int64 `db:"rowid"`
+		Parent string `db:"parent"`
+		FKID   int    `db:"fkid"`
+	}
+	var found []violation
+	if err := db.Reader.SelectContext(ctx, &found,
+		`SELECT "table", "rowid", "parent", "fkid" FROM pragma_foreign_key_check`); err != nil {
+		return fmt.Errorf("checking foreign keys after migration: %w", err)
+	}
+	if len(found) == 0 {
+		return nil
+	}
+	// Name the first few rather than all of them: a broken rebuild produces
+	// thousands, and the table names are what an operator needs.
+	var detail strings.Builder
+	for i, v := range found {
+		if i == 5 {
+			fmt.Fprintf(&detail, " (and %d more)", len(found)-5)
+			break
+		}
+		if i > 0 {
+			detail.WriteString(", ")
+		}
+		fmt.Fprintf(&detail, "%s -> %s", v.Table, v.Parent)
+	}
+	return fmt.Errorf("migrations left %d unresolved foreign key reference(s): %s: "+
+		"a table rebuild has orphaned rows, and the database must not be used in this state",
+		len(found), detail.String())
 }
 
 func migrateDir(ctx context.Context, db *DB, dir, versionTable string) error {

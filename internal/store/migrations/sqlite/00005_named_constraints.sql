@@ -475,7 +475,12 @@ CREATE UNIQUE INDEX idx_net_uplink_one
   ON net_uplink(group_id, upstream_group_id, plane) WHERE lifecycle = 'active';
 CREATE INDEX idx_net_uplink_up    ON net_uplink(upstream_group_id);
 
-PRAGMA foreign_key_check;
+-- No PRAGMA foreign_key_check here. It reads like a safety net and is not one:
+-- goose runs migration statements with Exec, the pragma reports violations as
+-- result rows, and Exec discards them -- so it finds the problem, throws it
+-- away and reports success. store.verifyForeignKeys runs the same check with
+-- Query after every migration instead, where a violation can actually fail the
+-- run.
 PRAGMA foreign_keys = ON;
 
 -- +goose Down
@@ -866,5 +871,4 @@ SELECT id, username, display_name, email, source, password_hash, is_active, last
 DROP TABLE app_user;
 ALTER TABLE app_user_old RENAME TO app_user;
 
-PRAGMA foreign_key_check;
 PRAGMA foreign_keys = ON;

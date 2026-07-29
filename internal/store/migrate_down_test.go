@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"strings"
 	"testing"
 
 	"github.com/pressly/goose/v3"
@@ -162,6 +163,67 @@ func TestMigrationsPreserveDataOnUpgrade(t *testing.T) {
 				t.Errorf("%d of %d assets kept their owner_team across migration -- a rebuild "+
 					"dropped a column from its copy list, and no other test would notice",
 					survived, len(ids))
+			}
+		})
+	}
+}
+
+// TestMigrateRefusesADatabaseWithBrokenReferences.
+//
+// Several SQLite migrations rebuild a table, which means dropping it, which
+// means turning foreign key enforcement off first -- six tables cascade off
+// service_instance alone. The guard against a rebuild orphaning rows was
+// `PRAGMA foreign_key_check` at the end of each migration, which never worked:
+// goose runs statements with Exec, the pragma reports violations as result
+// rows, and Exec throws them away. It found the problem and reported success.
+//
+// store.verifyForeignKeys now runs the same check with Query after every
+// migration. This proves it fails, by manufacturing exactly what a botched
+// rebuild leaves behind: a child row whose parent is gone.
+func TestMigrateRefusesADatabaseWithBrokenReferences(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			db := e.Open(t)
+			if db.Driver != DriverSQLite {
+				t.Skip("PostgreSQL enforces references continuously; there is no mode to switch off")
+			}
+			ctx := context.Background()
+			if err := Migrate(ctx, db); err != nil {
+				t.Fatalf("initial migrate: %v", err)
+			}
+
+			// Orphan a row the way a rebuild with enforcement off would.
+			w := db.Writer
+			if _, err := w.Exec(`PRAGMA foreign_keys = OFF`); err != nil {
+				t.Fatalf("disabling enforcement: %v", err)
+			}
+			if _, err := w.Exec(w.Rebind(
+				`INSERT INTO asset (id, kind, name, lifecycle, created_at, updated_at, attrs)
+				 VALUES (?, ?, ?, 'active', ?, ?, '{}')`),
+				NewID(), domain.KindServer, "orphan-01",
+				domain.FormatTime(New(db).Now()), domain.FormatTime(New(db).Now())); err != nil {
+				t.Fatalf("seeding a parent: %v", err)
+			}
+			if _, err := w.Exec(w.Rebind(
+				`INSERT INTO interface (id, asset_id, name, form_factor, is_mgmt, enabled)
+				 VALUES (?, ?, ?, ?, FALSE, TRUE)`),
+				NewID(), "no-such-asset", "eth0", "rj45"); err != nil {
+				t.Fatalf("manufacturing the orphan: %v", err)
+			}
+			if _, err := w.Exec(`PRAGMA foreign_keys = ON`); err != nil {
+				t.Fatalf("re-enabling: %v", err)
+			}
+
+			err := Migrate(ctx, db)
+			if err == nil {
+				t.Fatal("migrate reported success on a database with an unresolved reference; " +
+					"a rebuild that orphaned half the estate would look like a clean upgrade")
+			}
+			for _, want := range []string{"foreign key", "interface"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("the error does not mention %q, so an operator cannot tell what broke: %v",
+						want, err)
+				}
 			}
 		})
 	}

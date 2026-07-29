@@ -93,7 +93,12 @@ CREATE UNIQUE INDEX idx_instance_placement_active
 CREATE INDEX idx_instance_service ON service_instance(service_id);
 CREATE INDEX idx_instance_host ON service_instance(host_asset_id);
 
-PRAGMA foreign_key_check;
+-- No PRAGMA foreign_key_check here. It reads like a safety net and is not one:
+-- goose runs migration statements with Exec, the pragma reports violations as
+-- result rows, and Exec discards them -- so it finds the problem, throws it
+-- away and reports success. store.verifyForeignKeys runs the same check with
+-- Query after every migration instead, where a violation can actually fail the
+-- run.
 PRAGMA foreign_keys = ON;
 
 -- +goose Down

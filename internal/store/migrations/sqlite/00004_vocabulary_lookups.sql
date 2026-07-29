@@ -399,7 +399,12 @@ SELECT dependency_id, data_class FROM dependency_data_class;
 DROP TABLE dependency_data_class;
 ALTER TABLE dependency_data_class_new RENAME TO dependency_data_class;
 
-PRAGMA foreign_key_check;
+-- No PRAGMA foreign_key_check here. It reads like a safety net and is not one:
+-- goose runs migration statements with Exec, the pragma reports violations as
+-- result rows, and Exec discards them -- so it finds the problem, throws it
+-- away and reports success. store.verifyForeignKeys runs the same check with
+-- Query after every migration instead, where a violation can actually fail the
+-- run.
 PRAGMA foreign_keys = ON;
 
 -- +goose Down
@@ -587,5 +592,4 @@ DROP TABLE interface_form_factor;
 DROP TABLE service_kind;
 DROP TABLE asset_kind;
 
-PRAGMA foreign_key_check;
 PRAGMA foreign_keys = ON;

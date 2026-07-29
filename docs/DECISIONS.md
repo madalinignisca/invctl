@@ -954,3 +954,26 @@ Each was found by breaking the thing it now guards:
 - **Every migration test ran against an empty database**, so the `INSERT ... SELECT` copy at
   the heart of a rebuild was exercised against zero rows. Removing `owner_team` from a copy
   list was invisible: twenty assets lost it and the suite stayed green.
+
+### The foreign key check that could not fail
+
+Several SQLite migrations rebuild a table, which means dropping it, which means turning
+foreign key enforcement off first — six tables cascade off `service_instance` alone, and a
+`DROP` with enforcement on silently takes their rows. Each of those migrations ended with
+`PRAGMA foreign_key_check`.
+
+It never worked. goose runs migration statements with `Exec`, the pragma reports violations
+as **result rows**, and `Exec` discards them. Measured: on a database holding a known
+dangling reference, `Exec` returns `nil` while `Query` on the identical statement returns the
+violation. Every one of those six pragmas was decorative, and a rebuild that orphaned half the
+estate would have reported a clean upgrade.
+
+Now `store.verifyForeignKeys` runs the same check with `Query`, once, after every migration —
+not in each migration, because a check a migration has to remember is a check the next
+migration forgets. It covers every migration ever added without anyone thinking about it.
+PostgreSQL is skipped: it enforces references continuously and has no mode in which a
+migration can switch that off.
+
+The pragmas are removed rather than left in place, with a comment where the first one was
+saying why. A statement that reads like a safety net and is not one is worse than no
+statement, because the next person reads it and stops looking.
