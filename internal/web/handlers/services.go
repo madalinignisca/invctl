@@ -312,19 +312,25 @@ func (a *App) InstanceCreate(w http.ResponseWriter, r *http.Request) {
 	render.Redirect(w, r, "/services/"+serviceID)
 }
 
-// InstanceDisable is the soft-delete for a placement.
-func (a *App) InstanceDisable(w http.ResponseWriter, r *http.Request) {
+// InstanceRetire withdraws a placement from the estate.
+//
+// The soft delete for a placement, and distinct from stopping one: withdrawing
+// says the service is no longer deployed here, while desired_state says what it
+// should be doing while it is. Those were one column until migration 00002, and
+// the row plus its whole audit history stay either way.
+func (a *App) InstanceRetire(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	instance, err := a.Store.GetInstance(r.Context(), id)
 	if err != nil {
 		a.handleStoreError(w, r, err)
 		return
 	}
-	if err := a.Store.DisableInstance(r.Context(), actor(r), id); err != nil {
+	if err := a.Store.RetireInstance(r.Context(), actor(r), id); err != nil {
 		a.handleStoreError(w, r, err)
 		return
 	}
-	a.setFlash(r, "success", "Instance disabled. It no longer counts as capacity.")
+	a.setFlash(r, "success",
+		"Placement withdrawn. It no longer counts as capacity, and the service can be placed on that host again.")
 	render.Redirect(w, r, "/services/"+instance.ServiceID)
 }
 

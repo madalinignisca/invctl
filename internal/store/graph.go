@@ -27,8 +27,16 @@ func (s *SQLStore) LoadGraph(ctx context.Context) (*impact.Graph, error) {
 		g.Services[services[i].ID] = &services[i]
 	}
 
+	// Withdrawn placements are excluded, not loaded-and-ignored. A retired row
+	// is not capacity the service ever had for this question, so counting it in
+	// TotalInstances would make "2 of 3 lost" out of a service that has two.
+	// Distinct from desired_state='disabled', which stays in the graph: a
+	// disabled placement still exists and is expected back, so it is loaded and
+	// marked Disabled, which is what stops it counting as lost capacity.
 	var instances []domain.ServiceInstance
-	if err := s.read(ctx, &instances, `SELECT * FROM service_instance ORDER BY id`); err != nil {
+	if err := s.read(ctx, &instances,
+		`SELECT * FROM service_instance WHERE lifecycle <> ? ORDER BY id`,
+		domain.LifecycleRetired); err != nil {
 		return nil, fmt.Errorf("loading instances for graph: %w", err)
 	}
 	for _, si := range instances {

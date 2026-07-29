@@ -769,3 +769,98 @@ unreviewed dependency arrives.
 
 That last check found `go.mod` already stale: `argon2id`, `scs`, `go-ldap`, `uuid` and `nosurf`
 are all directly imported and were marked `// indirect`. No new module enters the graph.
+
+---
+
+## 2026-07-29 — the pre-sign-off schema migrations
+
+A schema review before sign-off found 49 things; 24 were claimed expensive-after-sign-off
+and 8 survived adversarial verification. Three are fixed here. The rest are additive and can
+wait, for a reason worth writing down.
+
+### What SQLite can actually alter, measured
+
+The review's own passes disagreed, so it was tested against the pinned driver rather than
+argued. `modernc.org/sqlite v1.54.0` ships SQLite **3.53.3**, and it supports considerably
+more `ALTER TABLE` than this codebase assumed:
+
+| Statement | Result |
+|---|---|
+| `ADD CONSTRAINT <name> CHECK (...)` | works, and validates existing rows |
+| `ALTER COLUMN c SET NOT NULL` | works, and validates existing rows |
+| `DROP CONSTRAINT <name>` | works — **named constraints only** |
+| `DROP CONSTRAINT` on an *unnamed inline* constraint | `no such constraint` |
+| `ADD CONSTRAINT ... FOREIGN KEY` / `UNIQUE`, `ALTER COLUMN ... TYPE` | syntax error |
+
+So the whole "missing CHECK" category is cheap forever, and migration `00008`'s comment
+saying otherwise is stale. Exactly three shapes cannot be fixed later: **an unnamed inline
+constraint, a foreign key's `ON DELETE`, and a column's type.** All three migrations below
+are the first of those.
+
+**From now on, name every constraint.** `CONSTRAINT <name> CHECK (...)` rather than a bare
+inline one. Every constraint written before today is unnamed and therefore permanent;
+naming them costs nothing and retires this entire class of problem.
+
+### `service_instance` gains a lifecycle
+
+A placement was withdrawn by writing `desired_state = 'disabled'` — and `DisableInstance`
+logged that as `ActionRetire`, so the code already meant "this placement is gone" while the
+column said "it is deliberately not running". Two facts in one column, which is the
+intent-collapse AUDIT.md says makes drift undetectable.
+
+The visible consequence: the withdrawn row kept its slot in
+`UNIQUE (service_id, host_asset_id, ordinal)`, so re-recording that service on that host
+failed with a 422 against a field the operator could not resolve. **A rebuilt VM could never
+be recorded where it was.** Reproduced through the store API on both engines before the fix.
+
+Now `lifecycle` (existence) beside `desired_state` (intent), with uniqueness as a partial
+index over live placements. `DisableInstance` becomes `RetireInstance` and the button reads
+*Withdraw*. Every comparable table already had this shape — `net_group_member`,
+`net_uplink`, `net_attachment`, `health_override` — this one was missed.
+
+Withdrawn placements are excluded from the impact graph rather than loaded and ignored: a
+retired row was never capacity for the question being asked, so counting it would make
+"1 of 2 lost" out of a service that has one. A `disabled` placement still loads, because it
+exists and is expected back.
+
+### `change_log` is the table that can never be rebuilt afterwards
+
+Rule 10 makes it append-only, which also removes every ordinary route to altering it — the
+add/copy/drop/rename dance used on `service_instance.source` in `00008` is unavailable
+because its second step is literally `UPDATE change_log`. A full rebuild is the only option,
+and after sign-off rebuilding the audit table is precisely the act the append-only guarantee
+forbids. If it was ever going to be right, it had to be now.
+
+Its `action` CHECK was already too narrow and unnamed, so it could never be widened: rule 10
+records the cost being paid, with the retention prune logging itself as `delete`. Verifying
+a dependency logged as `update`; clearing an override logged as `update`. Now
+`verify`/`clear`/`prune`/`import` exist.
+
+It also had no constraints beyond NOT NULL, which does not stop an empty string —
+`entity_type=''`, `actor=''`, `diff='not json'`, `at='yesterday'` were all accepted by the
+permanent record of who changed what. Now named CHECKs on each, including an `at` pattern
+that catches a timestamp written in some other shape, which would otherwise sort wrongly
+forever in a table ordered by that column.
+
+Every row is carried across verbatim. Verified against a populated table on both engines:
+row count identical, and every id identical, across a down-then-up cycle.
+
+### `identity` uniqueness now fires, and respects the lifecycle
+
+Three defects, one rebuild. `UNIQUE (realm, name)` was inline and undroppable while the
+table carries a lifecycle, so a retired identity reserved its name forever — in the table
+where the natural response to a compromised credential is to retire it and recreate it under
+the same name. `realm` was NULLABLE, and `NULL <> NULL`, so the constraint did not fire at
+all for the realm-less local accounts most likely to collide. And `lifecycle` was the only
+lifecycle column in the schema without a CHECK, so `'retierd'` was storable and silently
+matched no filter.
+
+`realm` is now `NOT NULL DEFAULT ''`, normalised in one place (`realmOrEmpty`) so "no realm"
+stays expressible as a nil pointer in Go.
+
+### Down migrations are now exercised
+
+`TestDownMigrationsRun` runs every down migration on both engines, to zero and back. Nothing
+did before, and after sign-off "reversible" becomes a rule rather than an aspiration — a
+down migration nobody has run is a claim, not a property. These three are also the first in
+this project to rebuild a table, which is where a down migration goes wrong.

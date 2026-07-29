@@ -106,7 +106,7 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	write("POST /services/{id}/endpoints", app.EndpointCreate)
 	write("POST /services/{id}/dependencies", app.DependencyCreate)
 
-	write("POST /instances/{id}/disable", app.InstanceDisable)
+	write("POST /instances/{id}/retire", app.InstanceRetire)
 
 	// Operator overrides of an observation (docs/AUDIT.md rule 14). These are
 	// DECLARED mutations -- a person decided that a reading is wrong -- so they

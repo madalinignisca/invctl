@@ -51,21 +51,29 @@
       <thead><tr><th>Host</th><th>Runtime</th><th>Role</th><th>Shard</th><th>Ordinal</th><th>Desired</th><th>Observed</th>{{if .CanWrite}}<th></th>{{end}}</tr></thead>
       <tbody>
         {{range .Instances}}
-        <tr {{if eq .DesiredState "disabled"}}style="opacity:0.55"{{end}}>
+        <tr {{if .Retired}}style="opacity:0.55"{{end}}>
           <td><a class="id" href="/assets/{{.HostAssetID}}">{{.HostName}}</a>
               <div class="mono" style="color:var(--faint);font-size:11.5px">{{.HostKind}}</div></td>
           <td><span class="pill pill-muted">{{.RuntimeType}}</span></td>
           <td class="mono">{{if .Role}}{{deref .Role}}{{else}}—{{end}}</td>
           <td class="mono">{{if .Shard}}{{deref .Shard}}{{else}}—{{end}}</td>
           <td class="num">{{.Ordinal}}</td>
-          <td class="mono" style="font-size:12px">{{.DesiredState}}</td>
+          {{/* Intent and existence are different facts and the table shows
+               both: a withdrawn placement is struck through whatever it was
+               last asked to do, because "stopped" and "no longer here" send an
+               operator to different places. */}}
+          <td class="mono" style="font-size:12px">
+            {{.DesiredState}}
+            {{if .Retired}}<div class="mono" style="color:var(--faint);font-size:11.5px">withdrawn</div>{{end}}
+          </td>
           <td>{{template "health_cell" (index $.InstanceHealth .ID)}}</td>
           {{if $.CanWrite}}
           <td>
-            {{if ne .DesiredState "disabled"}}
-            <form method="post" action="/instances/{{.ID}}/disable" style="display:inline">
+            {{if not .Retired}}
+            <form method="post" action="/instances/{{.ID}}/retire" style="display:inline">
               <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
-              <button class="btn btn-sm btn-danger" type="submit">Disable</button>
+              <button class="btn btn-sm btn-danger" type="submit"
+                      title="Withdraw this placement. The row and its history stay, and the service can be placed on this host again.">Withdraw</button>
             </form>
             {{end}}
           </td>

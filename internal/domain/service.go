@@ -446,23 +446,43 @@ var ServiceInstanceSources = []string{
 // audit trail attributed the revert to the human. Read health through the
 // observed store; never add a health column back here (docs/AUDIT.md rule 1).
 type ServiceInstance struct {
-	ID           string  `db:"id"`
-	ServiceID    string  `db:"service_id"`
-	HostAssetID  string  `db:"host_asset_id"`
-	RuntimeType  string  `db:"runtime_type"`
-	Role         *string `db:"role"`
-	Shard        *string `db:"shard"`
-	Ordinal      int     `db:"ordinal"`
-	DesiredState string  `db:"desired_state"`
-	Source       string  `db:"source"`
-	CreatedAt    string  `db:"created_at"`
-	UpdatedAt    string  `db:"updated_at"`
+	ID          string  `db:"id"`
+	ServiceID   string  `db:"service_id"`
+	HostAssetID string  `db:"host_asset_id"`
+	RuntimeType string  `db:"runtime_type"`
+	Role        *string `db:"role"`
+	Shard       *string `db:"shard"`
+	Ordinal     int     `db:"ordinal"`
+	// DesiredState is INTENT: what this placement is supposed to be doing.
+	// Lifecycle is EXISTENCE: whether the placement is still part of the
+	// estate. They were one column until 00002, and collapsing them is what
+	// AUDIT.md warns makes drift undetectable -- "observed stopped, therefore
+	// desired stopped" is the same mistake in the other direction.
+	DesiredState string `db:"desired_state"`
+	Lifecycle    string `db:"lifecycle"`
+	Source       string `db:"source"`
+	CreatedAt    string `db:"created_at"`
+	UpdatedAt    string `db:"updated_at"`
 }
+
+// PlacementLifecycles is the Go side of the service_instance.lifecycle CHECK.
+//
+// Deliberately narrower than ServiceLifecycles: a placement either exists or it
+// does not. 'planned' and 'deprecated' are states of the SERVICE, and giving a
+// placement the same vocabulary would invite writing them here, where nothing
+// reads them.
+var PlacementLifecycles = []string{LifecycleActive, LifecycleRetired}
+
+// Retired reports whether this placement has been withdrawn from the estate.
+// Distinct from Disabled, which is intent: a disabled placement still exists
+// and is expected back.
+func (si *ServiceInstance) Retired() bool { return si.Lifecycle == LifecycleRetired }
 
 // NewServiceInstance validates and constructs a placement.
 func NewServiceInstance(id, serviceID, hostAssetID, runtimeType string, ordinal int, now time.Time) (*ServiceInstance, error) {
 	si := &ServiceInstance{
-		ID: id, ServiceID: serviceID, HostAssetID: hostAssetID,
+		Lifecycle: LifecycleActive,
+		ID:        id, ServiceID: serviceID, HostAssetID: hostAssetID,
 		RuntimeType: runtimeType, Ordinal: ordinal,
 		DesiredState: "running", Source: SourceDeclared,
 		CreatedAt: FormatTime(now), UpdatedAt: FormatTime(now),
@@ -480,6 +500,7 @@ func (si *ServiceInstance) Validate() error {
 	checkRequired(ve, "host_asset_id", si.HostAssetID)
 	checkEnum(ve, "runtime_type", si.RuntimeType, RuntimeTypes)
 	checkEnum(ve, "desired_state", si.DesiredState, DesiredStates)
+	checkEnum(ve, "lifecycle", si.Lifecycle, PlacementLifecycles)
 	// The DB CHECK is the second line of defence, not the first: a provenance
 	// value that reaches the driver has already been accepted by a handler.
 	checkEnum(ve, "source", si.Source, ServiceInstanceSources)

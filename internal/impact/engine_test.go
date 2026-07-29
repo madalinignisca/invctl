@@ -352,7 +352,7 @@ func TestDisabledInstanceIsNotCapacity(t *testing.T) {
 	if target == "" {
 		t.Fatal("fixture has no vault instance on vm-vault-3")
 	}
-	if err := f.store.DisableInstance(f.ctx, domain.SystemActor, target); err != nil {
+	if err := f.store.RetireInstance(f.ctx, domain.SystemActor, target); err != nil {
 		t.Fatalf("disabling instance: %v", err)
 	}
 

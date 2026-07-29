@@ -236,7 +236,7 @@ var DeclaredColumns = map[string][]string{
 	// intent-collapse that makes drift undetectable (rule 2).
 	"service_instance": {
 		"id", "service_id", "host_asset_id", "runtime_type", "role", "shard",
-		"ordinal", "desired_state", "created_at", "updated_at",
+		"ordinal", "desired_state", "lifecycle", "created_at", "updated_at",
 	},
 }
 

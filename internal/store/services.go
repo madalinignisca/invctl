@@ -344,25 +344,35 @@ func (s *SQLStore) UpdateInstance(ctx context.Context, actor domain.Actor, si *d
 	})
 }
 
-// DisableInstance is the soft-delete for a placement. service_instance has no
-// lifecycle column, so a decommissioned placement is recorded as disabled --
-// the row and its audit history stay.
-func (s *SQLStore) DisableInstance(ctx context.Context, actor domain.Actor, id string) error {
+// RetireInstance withdraws a placement from the estate.
+//
+// It writes lifecycle, not desired_state. Those were one column until 00002,
+// and this method is why: it always logged domain.ActionRetire, so the intent
+// was "this placement is gone" while the write said "it is deliberately not
+// running". Two different facts, and the audit entry recorded the one the
+// column could not.
+//
+// desired_state is left alone. What somebody last asked this placement to do is
+// part of the record of why it was withdrawn, and overwriting it would destroy
+// that for no gain -- the partial unique index keys on lifecycle, so a retired
+// row no longer reserves its slot whatever its intent says.
+func (s *SQLStore) RetireInstance(ctx context.Context, actor domain.Actor, id string) error {
 	before, err := s.GetInstance(ctx, id)
 	if err != nil {
 		return err
 	}
-	if before.DesiredState == "disabled" {
+	if before.Lifecycle == domain.LifecycleRetired {
 		return nil
 	}
 	at := domain.FormatTime(s.now())
 	return s.write(ctx, actor, func(t *tx) error {
 		if _, err := t.exec(ctx,
-			`UPDATE service_instance SET desired_state = 'disabled', updated_at = ? WHERE id = ?`,
-			at, id); err != nil {
-			return translateWriteErr(err, "disabling service instance")
+			`UPDATE service_instance SET lifecycle = ?, updated_at = ? WHERE id = ?`,
+			domain.LifecycleRetired, at, id); err != nil {
+			return translateWriteErr(err, "retiring service instance")
 		}
-		diff := fmt.Sprintf(`{"desired_state":{"old":%q,"new":"disabled"}}`, before.DesiredState)
+		diff := fmt.Sprintf(`{"lifecycle":{"old":%q,"new":%q}}`,
+			before.Lifecycle, domain.LifecycleRetired)
 		return t.log(ctx, "service_instance", id, domain.ActionRetire, diff)
 	})
 }

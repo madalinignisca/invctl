@@ -184,9 +184,14 @@ var IdentityKinds = []string{
 // If a code path would put an actual secret here, that is a bug to raise, not
 // to work around.
 type Identity struct {
-	ID           string  `db:"id"`
-	Kind         string  `db:"kind"`
-	Name         string  `db:"name"`
+	ID   string `db:"id"`
+	Kind string `db:"kind"`
+	Name string `db:"name"`
+	// NOT NULL with an empty-string default since 00003: a NULL realm made
+	// UNIQUE (realm, name) not fire at all, because NULL <> NULL, so two
+	// realm-less identities with the same name were both accepted. Kept as a
+	// pointer so an unset realm is still expressible in Go, and normalised on
+	// the way to the database rather than at every call site.
 	Realm        *string `db:"realm"`
 	SecretRef    *string `db:"secret_ref"`
 	RotationDays *int    `db:"rotation_days"`

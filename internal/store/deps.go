@@ -480,13 +480,27 @@ func (s *SQLStore) DataClassesFor(ctx context.Context, dependencyIDs []string) (
 // ---------- identities ----------
 
 // CreateIdentity inserts a principal.
+// realmOrEmpty normalises an unset realm to the empty string.
+//
+// identity.realm became NOT NULL in 00003 because a NULL one made
+// UNIQUE (realm, name) silently not fire -- NULL <> NULL, so two realm-less
+// identities called 'svc-orders' were both accepted, which is exactly the pair
+// the constraint existed to stop. Normalising here rather than at every call
+// site keeps "no realm" expressible in Go as a nil pointer.
+func realmOrEmpty(realm *string) string {
+	if realm == nil {
+		return ""
+	}
+	return *realm
+}
+
 func (s *SQLStore) CreateIdentity(ctx context.Context, actor domain.Actor, i *domain.Identity) error {
 	return s.write(ctx, actor, func(t *tx) error {
 		_, err := t.exec(ctx, `
 			INSERT INTO identity (id, kind, name, realm, secret_ref, rotation_days,
 			                      last_rotated, owner_team, lifecycle)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			i.ID, i.Kind, i.Name, i.Realm, i.SecretRef, i.RotationDays,
+			i.ID, i.Kind, i.Name, realmOrEmpty(i.Realm), i.SecretRef, i.RotationDays,
 			i.LastRotated, i.OwnerTeam, i.Lifecycle)
 		if err != nil {
 			return translateWriteErr(err, "creating identity")
