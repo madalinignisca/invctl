@@ -205,6 +205,14 @@ func (b *builder) netAttachments() {
 		{"hv-01", "sw-oob", domain.PlaneMgmt, nil},
 		{"hv-02", "sw-oob", domain.PlaneMgmt, nil},
 		{"hv-03", "sw-oob", domain.PlaneMgmt, nil},
+
+		// srv-backup-proxy-1 gets a management attachment and NO data-plane
+		// one, which is the whole point of it: the console cable is patched
+		// and the data uplink is not. The impact engine therefore makes no
+		// data-plane claim about it at all (it is Unmodelled), and the path
+		// diagram draws its log shipper connected to nothing -- two views,
+		// both honest, agreeing that the box has no production network.
+		{"srv-backup-proxy-1", "sw-oob", domain.PlaneMgmt, nil},
 	}
 
 	for _, spec := range specs {

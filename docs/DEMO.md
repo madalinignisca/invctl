@@ -76,7 +76,7 @@ attachment-member row does all the work.
 Note the wording: *running, but network-isolated — not powered off*. During an
 incident those call for completely different responses.
 
-Contrast with **sw-oob-1 → Impact**: 18 assets unmanageable on the **management**
+Contrast with **sw-oob-1 → Impact**: 19 assets unmanageable on the **management**
 plane, and **no service affected at all**. Both planes are evaluated in the same
 run and only one decides status.
 
@@ -125,6 +125,21 @@ traffic through the console network), and a placement with **no** route stays
 in the picture as a disconnected box — a stranded instance is the finding, not
 clutter. Leave the far end empty and the same page answers *"where does this
 service actually sit"*, down to the chassis its attachment lands on.
+
+**Then ask *log-shipper → pgsql-core*, which is the sharpest thing on the
+page.** Two shippers are declared; one of them runs on `srv-backup-proxy-1`, a
+box that was racked last week with its console cable patched and its data
+uplink still waiting on a remote-hands ticket. The cabled instance gets a
+chain. The other is drawn as **a box connected to nothing**, and the page says
+so in words: *"No data-plane route from: srv-backup-proxy-1."* Nothing is
+tidied away, because a placement that cannot reach what it is supposed to
+reach is the finding.
+
+It also demonstrates the data-plane rule on real data rather than asserting
+it: that box **has** a cable — to the console switch — and still has no path.
+The same asset is the one box with no lines on the prod environment map, and
+`sw-oob-1 → Impact` counts it among the unmanageable while making no
+data-plane claim about it at all.
 
 Finally, **Environments → prod → Map** is the whole environment at once — the
 densest of the three diagrams, which is exactly why the layer toggles exist.

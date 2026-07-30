@@ -116,6 +116,48 @@ func TestPathSaysWhyThereIsNone(t *testing.T) {
 	}
 }
 
+// TestPathNamesAStrandedPlacement.
+//
+// The demo point the fixture's half-installed box exists for: log-shipper runs
+// on two hosts, one properly cabled and one whose data uplink was never
+// patched. The routed instance gets a chain; the stranded one is drawn as a box
+// connected to nothing AND named in a note, because a placement that cannot
+// reach what it is supposed to reach is the finding rather than clutter to
+// tidy away.
+//
+// It also demonstrates the data-plane rule on real data instead of asserting
+// it: srv-backup-proxy-1 HAS a cable -- to the console switch -- and still has
+// no path.
+func TestPathNamesAStrandedPlacement(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	page := body(t, h.get("/paths?from=service:"+h.refs.Services["log-shipper"]+
+		"&to=service:"+h.refs.Services["pgsql-core"], false))
+	svg := mainSVG(t, page)
+	if svg == "" {
+		t.Fatal("no diagram was drawn")
+	}
+
+	// A route exists (from the cabled instance), so the page is not the
+	// no-path case -- and the stranded host is still in the picture.
+	if !strings.Contains(page, "at the shortest") {
+		t.Error("no route reported; the cabled instance should reach the database")
+	}
+	if !strings.Contains(svg, "srv-backup-proxy-1") {
+		t.Error("the stranded host was pruned out of the picture; a placement that " +
+			"cannot reach anything is exactly what must stay visible")
+	}
+	if !strings.Contains(page, "No data-plane route from: srv-backup-proxy-1") {
+		t.Error("the stranded placement is drawn but not named; a reader would have to " +
+			"notice the missing line by eye")
+	}
+	// The console cable must not appear as a path.
+	if strings.Contains(svg, "sw-oob-1") {
+		t.Error("the console switch is on the path; the management plane leaked in")
+	}
+}
+
 func TestPathEntryPoints(t *testing.T) {
 	h := newHarness(t)
 	h.login("admin", "admin-password")

@@ -3,10 +3,10 @@ package seed_test
 import (
 	"context"
 	"path/filepath"
-	"sort"
 	"strings"
 	"testing"
 
+	"github.com/gabriel/invctl/internal/domain"
 	"github.com/gabriel/invctl/internal/seed"
 	"github.com/gabriel/invctl/internal/store"
 )
@@ -201,6 +201,10 @@ func TestSeededAttachmentsPinTheRightChassis(t *testing.T) {
 				"hv-01/mgmt -> ",
 				"hv-02/mgmt -> ",
 				"hv-03/mgmt -> ",
+				// The half-installed box: a management attachment and no
+				// data-plane one, which is what "console patched, uplink not"
+				// looks like once it is declared rather than merely cabled.
+				"srv-backup-proxy-1/mgmt -> ",
 			}},
 			{"fw-edge", nil},
 		}
@@ -222,12 +226,18 @@ func TestSeededAttachmentsPinTheRightChassis(t *testing.T) {
 	})
 }
 
-// TestTheVMsInheritRatherThanDeclare. The 12 VMs and k8s nodes get no
-// attachment row at all: they resolve to their hypervisor's through
-// asset_closure, which is what nearest-ancestor-wins is for. Adding a row per
-// VM would make the fixture stop demonstrating the thing it exists to
-// demonstrate, and would be the easy "fix" for anyone who saw a VM reported as
-// unmodelled and reached for the obvious lever.
+// TestTheVMsInheritRatherThanDeclare. The VMs and k8s nodes get no attachment
+// row at all: they resolve to their hypervisor's through asset_closure, which
+// is what nearest-ancestor-wins is for. Adding a row per VM would make the
+// fixture stop demonstrating the thing it exists to demonstrate, and would be
+// the easy "fix" for anyone who saw a VM reported as unmodelled and reached
+// for the obvious lever.
+//
+// The assertion is on the CLAIM -- no guest declares its own attachment --
+// rather than on a list of names. It was a name census until the fixture
+// gained a bare-metal server with a management attachment of its own, which
+// broke the test while breaking nothing it was protecting. A census fails on
+// any new asset; the claim fails only on the mistake.
 func TestTheVMsInheritRatherThanDeclare(t *testing.T) {
 	eachEngine(t, func(t *testing.T, f *fixture) {
 		attached := map[string]bool{}
@@ -241,14 +251,30 @@ func TestTheVMsInheritRatherThanDeclare(t *testing.T) {
 			}
 		}
 
-		names := make([]string, 0, len(attached))
-		for n := range attached {
-			names = append(names, n)
+		guests := 0
+		for name, id := range f.refs.Assets {
+			a, err := f.store.GetAsset(f.ctx, id)
+			if err != nil {
+				t.Fatalf("reading %s: %v", name, err)
+			}
+			if a.Kind != domain.KindVM && a.Kind != domain.KindK8sNode {
+				continue
+			}
+			guests++
+			if attached[name] {
+				t.Errorf("%s is a %s and declares its own attachment; guests must inherit "+
+					"their host's through asset_closure", name, a.Kind)
+			}
 		}
-		sort.Strings(names)
-		want := []string{"hv-01", "hv-02", "hv-03"}
-		if strings.Join(names, ",") != strings.Join(want, ",") {
-			t.Errorf("assets with their own attachment = %v, want only the three hypervisors %v", names, want)
+		if guests == 0 {
+			t.Fatal("no guests in the fixture, so this proves nothing")
+		}
+		// And the hypervisors, which are what the guests inherit FROM, do
+		// still declare theirs.
+		for _, hv := range []string{"hv-01", "hv-02", "hv-03"} {
+			if !attached[hv] {
+				t.Errorf("%s declares no attachment, so its guests inherit nothing", hv)
+			}
 		}
 	})
 }

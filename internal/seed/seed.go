@@ -259,6 +259,30 @@ func (b *builder) physical() {
 		})
 	}
 
+	// The half-installed box, and it is in the fixture on purpose.
+	//
+	// It is racked, it is in production, its console cable is patched, and its
+	// data-plane NIC is not. That combination is one of the most common real
+	// findings in an estate -- somebody racked and configured a machine, the
+	// remote-hands ticket for the data cabling never closed, and monitoring
+	// says nothing because the box answers on the management network.
+	//
+	// It is what gives every diagram something true and unpleasant to show:
+	// the path view draws the backup agent on it as a box connected to
+	// nothing and names it, and the prod environment map has one box with no
+	// lines. The data-plane rule is demonstrated on real data rather than
+	// asserted -- the machine HAS a cable, and it still has no path, because
+	// that cable is management.
+	b.asset(domain.KindServer, "srv-backup-proxy-1", "rack-b1", []string{"prod"}, func(a *domain.Asset) {
+		a.Vendor, a.Model = str("Dell"), str("PowerEdge R450")
+		a.Serial, a.AssetTag = str("FCH2211V0ZZ"), str("SRV-0009")
+		a.OwnerTeam = str("platform")
+		// attrs is opaque to every query by house rule; it is display detail
+		// only, and here it carries the why so the demo does not have to.
+		a.Attrs = `{"install_note":"data uplink not patched yet -- remote-hands ` +
+			`ticket RH-8821 open; reachable on console only"}`
+	})
+
 	// Placement is the whole point of the fixture. vault is spread across all
 	// three hypervisors so that losing one is survivable and losing a rack is
 	// not; the two backend services deliberately share a host so the
@@ -414,7 +438,15 @@ func (b *builder) networking() {
 		{"sw-oob-1", "Ethernet1", domain.FFRJ45, "aa:bb:cc:00:05:01", "", 1000, true},
 		{"sw-oob-1", "Ethernet2", domain.FFRJ45, "aa:bb:cc:00:05:02", "", 1000, true},
 		{"sw-oob-1", "Ethernet3", domain.FFRJ45, "aa:bb:cc:00:05:03", "", 1000, true},
+		{"sw-oob-1", "Ethernet4", domain.FFRJ45, "aa:bb:cc:00:05:04", "", 1000, true},
 		{"sw-oob-1", "Management1", domain.FFRJ45, "aa:bb:cc:00:05:00", "10.20.10.3", 1000, true},
+
+		// The half-installed box. eno1 is patched to the console switch; eno2
+		// is the data uplink and is deliberately left UNPATCHED -- the port
+		// exists, is enabled, and carries no cable, which is what an open
+		// remote-hands ticket looks like in an inventory.
+		{"srv-backup-proxy-1", "eno1", domain.FFRJ45, "aa:bb:cc:00:20:01", "10.20.10.30", 1000, true},
+		{"srv-backup-proxy-1", "eno2", domain.FFSFP28, "aa:bb:cc:00:20:02", "", 25000, false},
 
 		// eno1 is the management NIC on every hypervisor; eno2 and eno3 are the
 		// data uplinks, one to each core chassis. The is_mgmt flag on the HOST
@@ -543,6 +575,10 @@ func (b *builder) networking() {
 		{"sw-core-1/Ethernet47", "sw-core-2/Ethernet47", "OM4", 25},
 		{"sw-core-1/Ethernet48", "fw-edge-1/ethernet1/1", "DAC", 2},
 		{"sw-core-2/Ethernet48", "fw-edge-2/ethernet1/1", "DAC", 2},
+
+		// Console access, and nothing else. srv-backup-proxy-1/eno2 is left
+		// unpatched on purpose; see the asset comment in physical().
+		{"srv-backup-proxy-1/eno1", "sw-oob-1/Ethernet4", "Cat6", 3},
 
 		{"hv-01/eno1", "sw-oob-1/Ethernet1", "Cat6", 3},
 		{"hv-02/eno1", "sw-oob-1/Ethernet2", "Cat6", 3},

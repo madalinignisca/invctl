@@ -1160,9 +1160,16 @@ func designScenarios() []scenarioCase {
 							"switch in phasePropagate ignores a zero reachLevel")
 					}
 				}
-				if got := s.result.Coverage.Unmodelled; got != 1 {
-					s.broke(t, "Coverage.Unmodelled = %d, want 1 -- the honest report of how much of the "+
-						"estate this run has an opinion about", got)
+				// Two: this scenario's own manufactured host, and the
+				// fixture's half-installed srv-backup-proxy-1, which carries a
+				// log-shipper instance and has a management attachment but no
+				// data-plane one. Both are the honest report of how much of the
+				// estate this run has an opinion about -- and the second is
+				// there precisely so the diagrams have an unmodelled host to
+				// draw.
+				if got := s.result.Coverage.Unmodelled; got != 2 {
+					s.broke(t, "Coverage.Unmodelled = %d, want 2 -- this scenario's host plus "+
+						"the fixture's uncabled one", got)
 				}
 
 				// The trap this scenario exists to record for the next test

@@ -75,6 +75,12 @@ func (b *builder) services() {
 
 		// A Windows service with a run-as account, to exercise rt_windows.
 		{"backup-agent", "Veeam Backup Agent", domain.SvcAgent, "prod", domain.AvailStandalone, 3, 0, "", "platform", 240, 0},
+
+		// Two shippers, one of which runs on a box with no production
+		// cabling. Tier 4 and active/active so the pair is the natural shape
+		// and losing one is survivable -- what is NOT survivable is not
+		// knowing that one of them has never shipped a line.
+		{"log-shipper", "Log Shipper", domain.SvcMonitoring, "prod", domain.AvailActiveActive, 4, 1, "", "observability", 120, 0},
 	}
 
 	for _, spec := range specs {
@@ -147,6 +153,18 @@ func (b *builder) services() {
 		// is exactly the routed-channel case. A demo estate without one would
 		// never show it.
 		{"backup-agent", "hv-01", domain.RuntimeSystemd, "", "", 0, "veeamagent.service"},
+
+		// The stranded pair. Both instances of the log shipper are declared;
+		// only one of them can reach anything. The path view draws the other
+		// as a box connected to nothing and names it, which is the finding.
+		//
+		// A service of its own rather than a second backup-agent: every
+		// existing service's full-loss status is asserted somewhere in the
+		// impact suite, and a surviving sibling on an unmodelled host changes
+		// exactly that -- including hv-01's "6 services", which
+		// reach_guard_test says is "derived, never adjusted".
+		{"log-shipper", "vm-queue-1", domain.RuntimeSystemd, "", "", 0, "vector.service"},
+		{"log-shipper", "srv-backup-proxy-1", domain.RuntimeSystemd, "", "", 1, "vector.service"},
 	}
 
 	for _, spec := range instances {
