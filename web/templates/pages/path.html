@@ -1,0 +1,19 @@
+{{define "content"}}
+<div class="crumbs">
+  <a href="/services">services</a><span class="sep">/</span><span>path</span>
+</div>
+
+<div class="page-head">
+  <div class="eyebrow">Layered connectivity</div>
+  <h1>How does this reach that?</h1>
+  <p class="lede">
+    Pick two ends — a service or an asset — and the picture is the chain
+    between them and nothing else: where each service actually runs, and the
+    union of shortest data-plane routes joining the two sides. Leave the far
+    end empty to see where something sits: its placements, down to the network
+    chassis they attach through. Management cabling is never a path.
+  </p>
+</div>
+
+{{template "path_panel" .}}
+{{end}}

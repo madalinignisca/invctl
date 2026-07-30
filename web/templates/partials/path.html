@@ -1,0 +1,143 @@
+{{/* The path diagram, whole. The same swap discipline as the neighbourhood:
+     the two ends are the QUESTION, restated in the heading, the notes and the
+     table, so the swap target is the whole fragment — either every
+     restatement re-renders or none may. State lives in the URL; the picture
+     can be pasted into a ticket. */}}
+
+{{define "path_panel"}}
+<div id="path">
+
+  <div class="panel">
+    <div class="panel-head">
+      <h2>
+        {{if .View}}
+          <span class="mono">{{.View.FromLabel}}</span> → <span class="mono">{{.View.ToLabel}}</span>
+        {{else}}
+          Pick the two ends
+        {{end}}
+      </h2>
+      <span class="panel-note">
+        {{if .View}}{{if .View.Scene}}{{pluralise .View.Hops "hop" "hops"}} at the shortest —
+        every equally short route is drawn.{{end}}{{else}}
+        A service resolves to the hosts it actually runs on.{{end}}
+      </span>
+    </div>
+    <div class="panel-body">
+
+      {{/* GET to this page's own address: with JavaScript it swaps, without it
+           the browser navigates to exactly the same URL. */}}
+      <form class="toolbar" method="get" action="/paths"
+            hx-get="/paths"
+            hx-target="#path" hx-swap="outerHTML" hx-push-url="true"
+            hx-trigger="change, submit">
+        <div class="field" style="min-width:240px">
+          <label for="path-from">From</label>
+          <select id="path-from" name="from">
+            <option value="">— choose —</option>
+            <optgroup label="Services">
+              {{range .Services}}
+              <option value="service:{{.ID}}" {{if eq (printf "service:%s" .ID) $.From}}selected{{end}}>{{.Code}}</option>
+              {{end}}
+            </optgroup>
+            <optgroup label="Assets">
+              {{range .Assets}}
+              <option value="asset:{{.ID}}" {{if eq (printf "asset:%s" .ID) $.From}}selected{{end}}>{{.Name}}</option>
+              {{end}}
+            </optgroup>
+          </select>
+        </div>
+        <div class="field" style="min-width:240px">
+          <label for="path-to">To</label>
+          <select id="path-to" name="to">
+            <option value="">its data-plane network</option>
+            <optgroup label="Services">
+              {{range .Services}}
+              <option value="service:{{.ID}}" {{if eq (printf "service:%s" .ID) $.To}}selected{{end}}>{{.Code}}</option>
+              {{end}}
+            </optgroup>
+            <optgroup label="Assets">
+              {{range .Assets}}
+              <option value="asset:{{.ID}}" {{if eq (printf "asset:%s" .ID) $.To}}selected{{end}}>{{.Name}}</option>
+              {{end}}
+            </optgroup>
+          </select>
+          <div class="field-hint">
+            Empty asks where the FROM side sits.
+          </div>
+        </div>
+        <button class="btn" type="submit">Draw it</button>
+      </form>
+
+      {{if .View}}
+        {{with .View.Scene}}{{template "diagram_scene" .}}{{end}}
+
+        {{if .View.Empty}}
+        <div class="empty">
+          <strong>No path to draw.</strong>
+          {{.View.Empty}}
+        </div>
+        {{end}}
+
+        {{range .View.Notes}}
+        <div class="diag-note">{{.}}</div>
+        {{end}}
+      {{else}}
+        <div class="empty">
+          <strong>Nothing asked yet.</strong>
+          Choose a FROM end above. "Where does orders-api actually sit" is
+          one pick; "how does it reach its database" is two.
+        </div>
+      {{end}}
+    </div>
+
+    {{if .View}}
+    <div class="panel-body" style="border-top:1px solid var(--line-soft)">
+      {{template "diagram_legend" .}}
+    </div>
+    {{end}}
+  </div>
+
+  {{if .View}}
+  <div class="panel">
+    <div class="panel-head">
+      <h2>Connections</h2>
+      <span class="panel-note">
+        {{pluralise (len .View.Rows) "connection" "connections"}} drawn above,
+        in full.
+      </span>
+    </div>
+    {{if .View.Rows}}
+    <div class="scroll-x">
+      <table>
+        <thead>
+          <tr>
+            <th>Layer</th><th>Kind</th><th>From</th><th>At</th>
+            <th>To</th><th>At</th><th>What it is</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .View.Rows}}
+          <tr>
+            <td><span class="pill pill-muted">{{.Layer}}</span></td>
+            <td><span class="pill pill-muted">{{.Kind}}</span></td>
+            <td class="mono">{{.From}}</td>
+            <td class="mono" style="font-size:12px;color:var(--muted)">{{if .FromAt}}{{.FromAt}}{{else}}—{{end}}</td>
+            <td class="mono">{{.To}}</td>
+            <td class="mono" style="font-size:12px;color:var(--muted)">{{if .ToAt}}{{.ToAt}}{{else}}—{{end}}</td>
+            <td style="font-size:12.5px;color:var(--muted)">{{.Detail}}</td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+    {{else}}
+    <div class="empty">
+      <strong>No connections drawn.</strong>
+      The two sides are in the picture; nothing joins them.
+    </div>
+    {{end}}
+  </div>
+  {{end}}
+
+</div>
+{{end}}

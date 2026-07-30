@@ -189,8 +189,14 @@ func buildScene(layout *diagram.Layout, nodes []viewNode, edges []viewEdge,
 		}
 	}
 
-	scene.Title = "Neighbourhood of " + subject.Name
-	scene.Desc = sceneDescription(layout, subject)
+	// A nil subject is a picture with no anchor -- the path page, whose
+	// question is a pair rather than a centre. It names the scene itself.
+	if subject != nil {
+		scene.Title = "Neighbourhood of " + subject.Name
+		scene.Desc = sceneDescription(layout, "centred on "+subject.Name)
+	} else {
+		scene.Desc = sceneDescription(layout, "of the chain between the two ends")
+	}
 	return scene
 }
 
@@ -269,7 +275,7 @@ func edgePath(e diagram.Edge) string {
 // sceneDescription is what a screen reader is told the picture shows, and what
 // a sighted reader gets on hover. It names the bands and their sizes rather
 // than describing shapes, because the bands are the content.
-func sceneDescription(layout *diagram.Layout, subject *store.AssetRow) string {
+func sceneDescription(layout *diagram.Layout, framing string) string {
 	parts := make([]string, 0, len(layout.Bands))
 	for _, band := range layout.Bands {
 		label := band.Layer.String()
@@ -281,8 +287,8 @@ func sceneDescription(layout *diagram.Layout, subject *store.AssetRow) string {
 		parts = append(parts, fmt.Sprintf("%s in the %s layer",
 			pluraliseCount(len(band.Nodes), "node", "nodes"), label))
 	}
-	return fmt.Sprintf("A layered diagram centred on %s: %s, joined by %s. "+
+	return fmt.Sprintf("A layered diagram %s: %s, joined by %s. "+
 		"The same information is in the table below.",
-		subject.Name, strings.Join(parts, ", "),
+		framing, strings.Join(parts, ", "),
 		pluraliseCount(len(layout.Edges), "connection", "connections"))
 }

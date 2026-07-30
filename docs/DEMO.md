@@ -114,6 +114,18 @@ Things worth pointing at:
 The hover text on every line names the exact ports or endpoints it asserts, and
 the table below the picture carries the same facts for anyone who prefers rows.
 
+Then open **Paths** in the rail (or *"Where does it sit — path diagram"* on any
+service page) and ask *orders-api → pgsql-core*. The picture is the chain and
+nothing else: both database replicas, both hypervisors, both cores — the union
+of every equally short data-plane route, because traffic from the app can land
+on either replica and each host is dual-homed. Two things worth saying out
+loud: **management cabling is never a path** (the OOB switch reaches
+everything, and a naive shortest-path search would happily route production
+traffic through the console network), and a placement with **no** route stays
+in the picture as a disconnected box — a stranded instance is the finding, not
+clutter. Leave the far end empty and the same page answers *"where does this
+service actually sit"*, down to the chassis its attachment lands on.
+
 ## 4. Declared versus observed (3 min)
 
 Back to the **dashboard**.
