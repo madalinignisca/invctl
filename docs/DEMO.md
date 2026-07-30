@@ -230,11 +230,13 @@ ss -ltnp 'sport = :8088'
 
 ### The public instance
 
-`invctl.madalin.me` is a **user systemd unit** on the dev VM — it survives
-crashes and reboots, which a background process demonstrably did not:
+`invctl.madalin.me` terminates TLS in **haproxy-edge on whitebox** — the
+parent host of this VM — which forwards to this VM's IP on **8088**. The app
+itself is a **user systemd unit** here, so it survives crashes and reboots,
+which a background process demonstrably did not:
 
 ```bash
-systemctl --user status invctl-demo        # loopback :8096, TLS terminates upstream
+systemctl --user status invctl-demo        # 0.0.0.0:8088, TLS on whitebox
 ```
 
 Unit: `~/.config/systemd/user/invctl-demo.service`; binary and database in
