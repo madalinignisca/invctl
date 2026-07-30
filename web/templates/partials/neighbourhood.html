@@ -112,7 +112,7 @@
     </div>
 
     <div class="panel-body" style="border-top:1px solid var(--line-soft)">
-      {{template "diagram_legend" .}}
+      {{template "diagram_legend" .View.Layers}}
     </div>
   </div>
 
@@ -164,15 +164,22 @@
 
 {{/* The legend draws the same strokes the picture does, from the same
      stylesheet, so it cannot describe a line the diagram does not draw. */}}
+{{/* Dot is a []layerChoice, not the whole page: the path view has no layer
+     toggles, and passing it the page struct meant carrying a Layers field
+     that was always nil purely to keep this template happy -- which rendered
+     an empty, childless legend div on that page. A nil slice ranges zero
+     times, so the whole block disappears instead. */}}
 {{define "diagram_legend"}}
+{{if .}}
 <div class="diag-legend diag">
-  {{range .View.Layers}}
+  {{range .}}
   <span class="key">
     <span class="pill {{if .On}}pill-info{{else}}pill-muted{{end}}">{{.Label}}</span>
     <span>{{if .Nodes}}{{pluralise .Nodes "node" "nodes"}}{{else}}nothing in this neighbourhood{{end}}</span>
   </span>
   {{end}}
 </div>
+{{end}}
 <div class="diag-legend diag" style="margin-top:10px">
   <span class="key">
     <svg width="26" height="10" aria-hidden="true"><path class="edge edge-cable" d="M 1 5 L 25 5"></path></svg>

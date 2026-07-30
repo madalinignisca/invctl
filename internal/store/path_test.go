@@ -364,3 +364,178 @@ func TestPathIsDeterministic(t *testing.T) {
 		})
 	}
 }
+
+// TestNeighbourhoodDoesNotTransitManagementCabling.
+//
+// The finding this pins was invisible on a small fixture and decisive on a real
+// one: every host has a console cable to the same out-of-band switch, so a walk
+// that transits management cabling puts every host two hops from every other
+// host. Measured on a 5,000-asset estate, an unrestricted two-hop walk reached
+// 5,010 assets against 384 -- and the 60-node budget then serves an
+// alphabetical slice of the estate as "what this touches".
+//
+// The rule is seed-only, not never: the subject's own console switch is
+// something it is plugged into, so it appears at hop 1 with its cable drawn,
+// and dead-ends there.
+//
+// This fixture is reused because it already has the shape: h-1 and h-2 each
+// have a mgmt0 cabled to `oob` and nothing else joins them except the cores.
+func TestNeighbourhoodDoesNotTransitManagementCabling(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newPathFixture(t, e)
+
+			g, err := f.s.Neighbourhood(f.ctx, NeighbourhoodQuery{
+				AssetID: f.assets["h-1"], Hops: 1,
+			})
+			if err != nil {
+				t.Fatalf("Neighbourhood: %v", err)
+			}
+			at := map[string]int{}
+			for _, a := range g.Assets {
+				at[a.Name] = a.Hop
+			}
+			if _, ok := at["oob"]; !ok {
+				t.Error("the subject's own console switch is missing at one hop; " +
+					`"what is this plugged into" includes it`)
+			}
+			// And the cable to it is drawn, because both ends are in the set.
+			var mgmtDrawn bool
+			for _, l := range g.Links {
+				if l.A.IsMgmt || l.B.IsMgmt {
+					mgmtDrawn = true
+				}
+			}
+			if !mgmtDrawn {
+				t.Error("the console cable is not drawn even though both its ends are in " +
+					"the picture; not traversing an edge and not showing it are different things")
+			}
+
+			// Two hops: the cores are legitimately reachable, h-2 through them.
+			// What must NOT happen is h-2 arriving via `oob`, and the way to
+			// tell is a subject whose ONLY route to the far host is management.
+			iso, err := f.s.Neighbourhood(f.ctx, NeighbourhoodQuery{
+				AssetID: f.assets["h-3"], Hops: 4,
+			})
+			if err != nil {
+				t.Fatalf("Neighbourhood of the island: %v", err)
+			}
+			for _, a := range iso.Assets {
+				if a.Name != "h-3" {
+					t.Errorf("h-3 is cabled to nothing at all, yet the walk reached %q at hop %d",
+						a.Name, a.Hop)
+				}
+			}
+		})
+	}
+}
+
+// TestNeighbourhoodStopsAtTheConsoleSwitch is the transitive half: with a
+// management-only path between two hosts, the far host must not appear however
+// many hops are allowed.
+func TestNeighbourhoodStopsAtTheConsoleSwitch(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newPathFixture(t, e)
+			s, ctx := f.s, f.ctx
+
+			// A box whose ONLY cable is to the console switch -- the shape the
+			// seeded estate's srv-backup-proxy-1 has.
+			lonely := mustAsset(t, s, ctx, domain.KindServer, "console-only", nil)
+			iface, err := domain.NewInterface(NewID(), lonely, "mgmt0", domain.FFRJ45)
+			if err != nil {
+				t.Fatalf("building the port: %v", err)
+			}
+			iface.IsMgmt = true
+			if err := s.CreateInterface(ctx, testActor, iface); err != nil {
+				t.Fatalf("creating the port: %v", err)
+			}
+			oobPort, err := domain.NewInterface(NewID(), f.assets["oob"], "p9", domain.FFRJ45)
+			if err != nil {
+				t.Fatalf("building the oob port: %v", err)
+			}
+			oobPort.IsMgmt = true
+			if err := s.CreateInterface(ctx, testActor, oobPort); err != nil {
+				t.Fatalf("creating the oob port: %v", err)
+			}
+			link, err := domain.NewLink(NewID(), iface.ID, oobPort.ID)
+			if err != nil {
+				t.Fatalf("building the console cable: %v", err)
+			}
+			if err := s.CreateLink(ctx, testActor, link); err != nil {
+				t.Fatalf("cabling to the console switch: %v", err)
+			}
+
+			// From h-1, four hops: oob is one hop away, console-only is two --
+			// but only THROUGH oob, which is where the walk must stop.
+			g, err := s.Neighbourhood(ctx, NeighbourhoodQuery{AssetID: f.assets["h-1"], Hops: 4})
+			if err != nil {
+				t.Fatalf("Neighbourhood: %v", err)
+			}
+			for _, a := range g.Assets {
+				if a.Name == "console-only" {
+					t.Errorf("the walk transited the console switch to reach %q at hop %d; "+
+						"every host shares that switch, so this is how the page becomes "+
+						"a picture of the whole estate", a.Name, a.Hop)
+				}
+			}
+		})
+	}
+}
+
+// TestPathDropsRetiredTransit.
+//
+// path.go filters no lifecycle of its own: dataPlaneAdjacency takes any link,
+// pathAssets any asset. That is safe only because of a cross-file invariant --
+// RetireAsset cascade-retires that asset's links, memberships and attachments
+// (assets.go) and RetireNetGroup does the same for a group (reach.go). Nothing
+// in path.go says it leans on that, so a bulk import that wrote rows directly
+// could break it silently. This is the boundary test that would notice.
+func TestPathDropsRetiredTransit(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newPathFixture(t, e)
+
+			before, err := f.s.Path(f.ctx, PathQuery{
+				FromServiceID: f.svc["app"], ToServiceID: f.svc["db"],
+			})
+			if err != nil {
+				t.Fatalf("Path: %v", err)
+			}
+			if !before.Found {
+				t.Fatal("no route before retiring anything")
+			}
+			var hadSW1 bool
+			for _, n := range f.names(before) {
+				if n == "sw-1" {
+					hadSW1 = true
+				}
+			}
+			if !hadSW1 {
+				t.Fatal("sw-1 is not on the path, so retiring it proves nothing")
+			}
+
+			if err := f.s.RetireAsset(f.ctx, testActor, f.assets["sw-1"]); err != nil {
+				t.Fatalf("retiring the switch: %v", err)
+			}
+
+			after, err := f.s.Path(f.ctx, PathQuery{
+				FromServiceID: f.svc["app"], ToServiceID: f.svc["db"],
+			})
+			if err != nil {
+				t.Fatalf("Path after retiring: %v", err)
+			}
+			for _, n := range f.names(after) {
+				if n == "sw-1" {
+					t.Error("a retired switch is still drawn on the path; path.go relies on " +
+						"RetireAsset cascading to its links, and that invariant just broke")
+				}
+			}
+			// The other chassis still carries the traffic, so the answer is a
+			// route through sw-2 rather than no route at all.
+			if !after.Found {
+				t.Error("no route after retiring one of two chassis; the hosts are dual-homed")
+			}
+		})
+	}
+}

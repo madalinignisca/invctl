@@ -40,14 +40,10 @@ type pathView struct {
 	// boxes, so drawing something is not the same as having found a route.
 	Found bool
 	Hops  int
-	// Layers is always empty: the path has no toggles, but the shared legend
-	// template ranges the field, and a chain is small enough that hiding a
-	// band of it would only manufacture the gaps the page exists to rule out.
-	Layers []layerChoice
-	Scene  *svgScene
-	Empty  string
-	Notes  []string
-	Rows   []adjacencyRow
+	Scene *svgScene
+	Empty string
+	Notes []string
+	Rows  []adjacencyRow
 }
 
 // ServicePath renders the chain between two chosen ends. With nothing chosen
@@ -214,6 +210,11 @@ func pathNotes(g *store.PathGraph, view *pathView, selfCabled int) []string {
 	if len(g.Unrouted) > 0 && g.Found {
 		notes = append(notes, "No data-plane route from: "+strings.Join(g.Unrouted, ", ")+
 			" — drawn unconnected, because a stranded placement is a finding, not clutter.")
+	}
+	if g.AssetsElided > 0 {
+		notes = append(notes, pluraliseCount(g.AssetsElided, "further asset", "further assets")+
+			" on the way are not drawn — the picture is capped so a service with hundreds of "+
+			"placements cannot turn one page into a picture of the whole estate. The two ends are always kept.")
 	}
 	if selfCabled > 0 {
 		notes = append(notes, pluraliseCount(selfCabled, "cable", "cables")+

@@ -208,7 +208,8 @@ func (a *App) AssetNeighbourhood(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	view, err := buildDiagramView(graph, asset, selectedLayers(r, assetLayer(asset.Kind)),
+	subjectLayer := assetLayer(asset.Kind)
+	view, err := buildDiagramView(graph, asset, selectedLayers(r, &subjectLayer),
 		assetHealth, instanceHealth)
 	if err != nil {
 		a.serverError(w, r, fmt.Errorf("laying out the neighbourhood of %s: %w", id, err))
@@ -243,9 +244,14 @@ func clampHops(n int) int {
 // clearing the last checkbox would silently turn every layer back on and the
 // page would look like it had ignored the click.
 //
-// The subject's own layer is always included. It is the anchor: a picture built
-// around an asset that is not in it is not a picture of that asset.
-func selectedLayers(r *http.Request, subject diagram.Layer) map[diagram.Layer]bool {
+// The locked layer, when there is one, is always included. It is the anchor: a
+// picture built around an asset that is not in it is not a picture of that
+// asset. Nil means no anchor -- the environment map is a picture of a set
+// rather than of a subject, so every one of its layers is genuinely optional.
+// A pointer rather than a zero Layer: 0 is not a valid diagram.Layer at all
+// (Layer.Valid covers 1..3), and passing it worked only because nothing ever
+// read the entry back.
+func selectedLayers(r *http.Request, locked *diagram.Layer) map[diagram.Layer]bool {
 	on := map[diagram.Layer]bool{}
 	if r.URL.Query().Get("filter") != "1" {
 		for _, l := range diagram.LayersTopDown() {
@@ -260,7 +266,9 @@ func selectedLayers(r *http.Request, subject diagram.Layer) map[diagram.Layer]bo
 			}
 		}
 	}
-	on[subject] = true
+	if locked != nil {
+		on[*locked] = true
+	}
 	return on
 }
 

@@ -158,6 +158,37 @@ func TestPathNamesAStrandedPlacement(t *testing.T) {
 	}
 }
 
+// TestPathDrawsNoEmptyLegend. The stroke legend is shared with the
+// neighbourhood, which drove it from the whole page struct -- so the path view
+// had to carry an always-nil Layers field just to keep the template happy, and
+// rendered an empty childless legend div for its trouble. The legend now takes
+// the slice itself and disappears when there is none.
+func TestPathDrawsNoEmptyLegend(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	page := body(t, h.get("/paths?from=service:"+h.refs.Services["orders-api"]+
+		"&to=service:"+h.refs.Services["pgsql-core"], false))
+
+	// Assert the page RENDERED before asserting what it does not contain. The
+	// first version of this test did not, and passed against a template that
+	// errored out and produced no page at all -- an absence assertion is
+	// satisfied by everything being absent.
+	if mainSVG(t, page) == "" {
+		t.Fatal("no diagram was drawn, so the assertion below would pass vacuously")
+	}
+	if strings.Contains(page, `class="diag-legend diag"`) {
+		t.Error("the path page renders a layer legend; it has no layer toggles, so the " +
+			"legend is an empty box describing controls that are not there")
+	}
+
+	// The neighbourhood, which does have toggles, must still have its legend.
+	nb := body(t, h.get("/assets/"+h.refs.Assets["hv-01"]+"/neighbourhood", false))
+	if !strings.Contains(nb, `class="diag-legend diag"`) {
+		t.Error("the neighbourhood lost its layer legend")
+	}
+}
+
 func TestPathEntryPoints(t *testing.T) {
 	h := newHarness(t)
 	h.login("admin", "admin-password")

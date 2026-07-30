@@ -69,7 +69,14 @@ type PathGraph struct {
 	Hops int
 	// Unrouted names anchor assets with no data-plane route to the far side --
 	// the per-instance finding, distinct from Found which is about any-pair.
+	// Empty when there is no far side at all: "unrouted" would be a claim
+	// about a comparison nobody made. The handler's note is guarded on Found
+	// for the same reason.
 	Unrouted []string
+	// AssetsElided is how many drawn assets the node budget cut. Same contract
+	// as the neighbourhood's: a cut nobody is told about is indistinguishable
+	// from a fact that does not exist, so the page must report it.
+	AssetsElided int
 
 	Assets       []NeighbourAsset
 	Links        []NeighbourLink
@@ -78,6 +85,20 @@ type PathGraph struct {
 	Endpoints    []NeighbourEndpoint
 	Dependencies []NeighbourDependency
 }
+
+// PathDefaultMaxAssets bounds the drawn set.
+//
+// This did not exist until a review measured what happens without it: a
+// service with 2,500 placements on a 5,000-asset estate produced a 46-second
+// request and a 7.4MB page. The SQL was never the problem (a few ms); the cost
+// is one breadth-first search per anchor plus a layout quadratic in edges.
+//
+// The comment this replaces argued the neighbourhood's budget rationale --
+// "every asset id becomes a placeholder in four later statements" -- did not
+// apply here. It was wrong: the drawn set feeds exactly those four statements.
+// Same number as the neighbourhood, for the same reason, and cut ends first so
+// the two anchors always survive.
+const PathDefaultMaxAssets = 60
 
 // Path resolves both ends and walks the data-plane cabling between them.
 func (s *SQLStore) Path(ctx context.Context, q PathQuery) (*PathGraph, error) {
@@ -95,7 +116,7 @@ func (s *SQLStore) Path(ctx context.Context, q PathQuery) (*PathGraph, error) {
 	}
 	networkMode := q.ToServiceID == "" && q.ToAssetID == ""
 	if networkMode {
-		if g.To, err = s.resolveAttachedChassis(ctx, g.From.AssetIDs); err != nil {
+		if g.To, err = s.resolveAttachedChassis(ctx, q.FromServiceID, q.FromAssetID); err != nil {
 			return nil, err
 		}
 	} else if g.To, err = s.resolvePathEnd(ctx, q.ToServiceID, q.ToAssetID); err != nil {
@@ -123,8 +144,14 @@ func (s *SQLStore) Path(ctx context.Context, q PathQuery) (*PathGraph, error) {
 	}
 	distB := bfs(adj, g.To.AssetIDs)
 	for _, id := range g.From.AssetIDs {
-		if _, routed := distB[id]; !routed {
-			g.Unrouted = append(g.Unrouted, id)
+		// Only when there IS a far side. With an unattached FROM end the To
+		// side is empty, every anchor is trivially "unrouted", and saying so
+		// would be a claim about a comparison that was never made -- the
+		// handler says "its network is not modelled yet" instead.
+		if len(g.To.AssetIDs) > 0 {
+			if _, routed := distB[id]; !routed {
+				g.Unrouted = append(g.Unrouted, id)
+			}
 		}
 		drawn[id] = true
 	}
@@ -146,6 +173,45 @@ func (s *SQLStore) Path(ctx context.Context, q PathQuery) (*PathGraph, error) {
 	sort.Strings(ids)
 	if len(ids) == 0 {
 		return g, nil
+	}
+	// The budget. Anchors are kept whatever it says -- they are the question --
+	// and the cut falls on transit, furthest first, so a truncated picture is
+	// still a picture of the two ends.
+	if len(ids) > PathDefaultMaxAssets {
+		anchor := make(map[string]bool, len(g.From.AssetIDs)+len(g.To.AssetIDs))
+		for _, id := range append(append([]string{}, g.From.AssetIDs...), g.To.AssetIDs...) {
+			anchor[id] = true
+		}
+		dist := bfs(adj, g.From.AssetIDs)
+		sort.SliceStable(ids, func(i, j int) bool {
+			ai, aj := anchor[ids[i]], anchor[ids[j]]
+			if ai != aj {
+				return ai
+			}
+			di, okI := dist[ids[i]]
+			dj, okJ := dist[ids[j]]
+			if okI != okJ {
+				return okI
+			}
+			if di != dj {
+				return di < dj
+			}
+			return ids[i] < ids[j]
+		})
+		g.AssetsElided = len(ids) - PathDefaultMaxAssets
+		ids = ids[:PathDefaultMaxAssets]
+		sort.Strings(ids)
+		kept := make(map[string]bool, len(ids))
+		for _, id := range ids {
+			kept[id] = true
+		}
+		filtered := g.Unrouted[:0]
+		for _, id := range g.Unrouted {
+			if kept[id] {
+				filtered = append(filtered, id)
+			}
+		}
+		g.Unrouted = filtered
 	}
 
 	if g.Assets, err = s.pathAssets(ctx, ids, bfs(adj, g.From.AssetIDs)); err != nil {
@@ -175,7 +241,7 @@ func (s *SQLStore) Path(ctx context.Context, q PathQuery) (*PathGraph, error) {
 	}
 
 	if err := s.pathWorkloads(ctx, g, ids); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("decorating the path with its services: %w", err)
 	}
 	return g, nil
 }
@@ -220,22 +286,45 @@ func (s *SQLStore) resolvePathEnd(ctx context.Context, serviceID, assetID string
 // data-plane group the FROM anchors are attached to, their own containment
 // ancestry included -- a VM inherits its hypervisor's attachment exactly the
 // way the impact engine says it does.
-func (s *SQLStore) resolveAttachedChassis(ctx context.Context, fromIDs []string) (PathEnd, error) {
-	if len(fromIDs) == 0 {
-		return PathEnd{}, nil
-	}
+//
+// The anchors arrive as a SUB-SELECT rather than as a spliced list of ids, and
+// that is a measured decision, not a style one. Splicing them flipped SQLite's
+// plan somewhere between 500 and 1000 terms -- from driving the closure index
+// to scanning every attachment for every member for every term -- and the same
+// query went from 31ms to 21 SECONDS on a 5,000-asset estate. PostgreSQL held
+// at 17ms throughout, so a dual-engine suite on a small fixture cannot see it.
+// As a sub-select: 1ms on SQLite, and no placeholder count that grows with the
+// estate.
+func (s *SQLStore) resolveAttachedChassis(ctx context.Context, serviceID, assetID string) (PathEnd, error) {
 	var end PathEnd
-	err := s.read(ctx, &end.AssetIDs, `
-		SELECT DISTINCT m.asset_id
-		FROM asset_closure c
-		JOIN net_attachment na ON na.asset_id = c.ancestor_id
-		JOIN net_group_member m ON m.group_id = na.group_id
-		WHERE c.descendant_id IN (`+placeholders(len(fromIDs))+`)
-		  AND na.lifecycle = ? AND na.plane = ?
-		  AND m.lifecycle = ?
-		ORDER BY m.asset_id`,
-		append(anySlice(fromIDs),
-			domain.LifecycleActive, domain.PlaneData, domain.LifecycleActive)...)
+	var err error
+	if assetID != "" {
+		err = s.read(ctx, &end.AssetIDs, `
+			SELECT DISTINCT m.asset_id
+			FROM asset_closure c
+			JOIN net_attachment na ON na.asset_id = c.ancestor_id
+			JOIN net_group_member m ON m.group_id = na.group_id
+			WHERE c.descendant_id = ?
+			  AND na.lifecycle = ? AND na.plane = ?
+			  AND m.lifecycle = ?
+			ORDER BY m.asset_id`,
+			assetID, domain.LifecycleActive, domain.PlaneData, domain.LifecycleActive)
+	} else {
+		err = s.read(ctx, &end.AssetIDs, `
+			SELECT DISTINCT m.asset_id
+			FROM asset_closure c
+			JOIN net_attachment na ON na.asset_id = c.ancestor_id
+			JOIN net_group_member m ON m.group_id = na.group_id
+			WHERE c.descendant_id IN (
+			        SELECT si.host_asset_id FROM service_instance si
+			        JOIN asset a ON a.id = si.host_asset_id
+			        WHERE si.service_id = ? AND si.lifecycle = ? AND a.lifecycle <> ?)
+			  AND na.lifecycle = ? AND na.plane = ?
+			  AND m.lifecycle = ?
+			ORDER BY m.asset_id`,
+			serviceID, domain.LifecycleActive, domain.LifecycleRetired,
+			domain.LifecycleActive, domain.PlaneData, domain.LifecycleActive)
+	}
 	if err != nil {
 		return PathEnd{}, fmt.Errorf("resolving attached chassis: %w", err)
 	}
@@ -246,25 +335,30 @@ func (s *SQLStore) resolveAttachedChassis(ctx context.Context, fromIDs []string)
 // adjacency, minus anything touching a management port and minus self-loops.
 //
 // The whole estate rather than a bounded walk, deliberately: a shortest path
-// needs global distances, and the link table is the smallest table that grows
-// with an estate -- one row per cable. The neighbourhood's budget arguments do
-// not apply to a query whose output is one pair of ids per row.
+// needs global distances. The read is linear -- one row per cable, plus the
+// interface table hashed twice for the two joins, so O(links + 2*interfaces),
+// measured at 13ms for 15,000 links on PostgreSQL. It is the DRAWN set that
+// needs a budget, and PathDefaultMaxAssets is it.
+//
+// The management and self-loop filters are in the WHERE clause rather than in
+// Go because there is no reason to carry rows across the wire to drop them;
+// there is no ORDER BY because nothing downstream depends on link order (the
+// adjacency lists are sorted below, and collapsing parallel cables to one
+// adjacency is order-insensitive).
 func (s *SQLStore) dataPlaneAdjacency(ctx context.Context) (map[string][]string, error) {
 	type row struct {
-		A     string `db:"a_asset"`
-		B     string `db:"b_asset"`
-		AMgmt bool   `db:"a_mgmt"`
-		BMgmt bool   `db:"b_mgmt"`
+		A string `db:"a_asset"`
+		B string `db:"b_asset"`
 	}
 	var rows []row
 	err := s.read(ctx, &rows, `
-		SELECT ai.asset_id AS a_asset, bi.asset_id AS b_asset,
-		       ai.is_mgmt AS a_mgmt, bi.is_mgmt AS b_mgmt
+		SELECT ai.asset_id AS a_asset, bi.asset_id AS b_asset
 		FROM link l
 		JOIN interface ai ON ai.id = l.a_interface_id
 		JOIN interface bi ON bi.id = l.b_interface_id
 		WHERE l.lifecycle = ?
-		ORDER BY l.id`, domain.LifecycleActive)
+		  AND ai.is_mgmt = FALSE AND bi.is_mgmt = FALSE
+		  AND ai.asset_id <> bi.asset_id`, domain.LifecycleActive)
 	if err != nil {
 		return nil, fmt.Errorf("loading the cable plant: %w", err)
 	}
@@ -272,9 +366,6 @@ func (s *SQLStore) dataPlaneAdjacency(ctx context.Context) (map[string][]string,
 	adj := map[string][]string{}
 	seen := map[[2]string]bool{}
 	for _, r := range rows {
-		if r.AMgmt || r.BMgmt || r.A == r.B {
-			continue
-		}
 		lo, hi := orderPair(r.A, r.B)
 		if seen[[2]string{lo, hi}] {
 			continue // Parallel cables are one adjacency; drawing keeps both.
@@ -417,8 +508,12 @@ func (s *SQLStore) pathAssets(ctx context.Context, ids []string, distFrom map[st
 }
 
 // pathWorkloads decorates the chain with the two services being asked about --
-// and ONLY those two. Every other service on a transit host is somebody else's
-// question; the neighbourhood is the page that answers it.
+// and ONLY those two in the OUTPUT. The query underneath still loads every
+// placement, endpoint and dependency on every drawn host and the filtering
+// happens here, which is the opposite of what the previous version of this
+// comment implied. It is reuse rather than a leak: the same loader serves the
+// neighbourhood, and narrowing it by service id would be a second query shape
+// to keep portable for a saving the node budget already bounds.
 func (s *SQLStore) pathWorkloads(ctx context.Context, g *PathGraph, assetIDs []string) error {
 	wanted := map[string]bool{}
 	if g.From.ServiceID != "" {

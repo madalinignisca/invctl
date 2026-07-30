@@ -90,11 +90,9 @@
       {{end}}
     </div>
 
-    {{if .View}}
-    <div class="panel-body" style="border-top:1px solid var(--line-soft)">
-      {{template "diagram_legend" .}}
-    </div>
-    {{end}}
+    {{/* No layer legend: the path has no toggles, and the stroke legend below
+         the picture is the neighbourhood's. A chain small enough to read does
+         not need a key for bands it never hides. */}}
   </div>
 
   {{if .View}}

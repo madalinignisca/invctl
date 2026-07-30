@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"fmt"
+	"sort"
 
 	"github.com/gabriel/invctl/internal/domain"
 )
@@ -210,9 +211,29 @@ type NeighbourhoodGraph struct {
 //
 // The walk itself is a single recursive CTE and traverses three things:
 //
-//   - an active link, in both orientations, which covers the physical plant and
-//     the virtual adjacency alike -- a veth landing on a bridge is a link row
-//     exactly like a DAC between two switches;
+//   - an active DATA-PLANE link, in both orientations, which covers the
+//     physical plant and the virtual adjacency alike -- a veth landing on a
+//     bridge is a link row exactly like a DAC between two switches.
+//
+//     A management link is followed OUT OF THE SEED and no further, which is
+//     the difference between a useful page and a useless one. Every host has a
+//     console cable to the same out-of-band switch, so transiting them puts
+//     every host two hops from every other host: measured on a 5,000-asset
+//     estate, an unrestricted two-hop walk reached 5,010 assets through the
+//     OOB switch against 384 without it -- and the node budget then serves an
+//     alphabetical slice of the whole estate as "what this touches".
+//     internal/store/path.go refuses management cabling outright for the same
+//     reason ("that is how every naive network diagram lies"); a route and an
+//     adjacency are different claims, and the two pages must not disagree
+//     about adjacency while sharing a renderer.
+//
+//     Seed-only rather than never, because "what is this plugged into" plainly
+//     includes the subject's own console switch. What it does not include is
+//     every other box that happens to share it. The switch therefore appears
+//     at hop 1 and dead-ends there, and because neighbourhoodLinks is
+//     unfiltered the console cable itself is drawn -- not traversing an edge
+//     and not showing it are different things;
+//
 //   - containment UPWARDS only. Bidirectional containment turned three hops
 //     from a guest into the whole rack: up to the rack, then back down into
 //     every sibling of every host in it. Upwards-only keeps the walk on the
@@ -245,6 +266,15 @@ func (s *SQLStore) Neighbourhood(ctx context.Context, q NeighbourhoodQuery) (*Ne
 	if budget := q.maxAssets(); len(assets) > budget {
 		// Ordered by hop then name, so the cut always falls on the furthest
 		// things. The subject is hop 0 and can never be cut.
+		//
+		// Re-sorted in Go before cutting, and that is not belt-and-braces: SQL
+		// ORDER BY name is COLLATION-dependent, so WHICH assets survive the
+		// budget would differ between a byte-ordered SQLite and an ICU- or
+		// glibc-collated PostgreSQL. The dual-engine suite cannot catch it --
+		// the postgres:17-alpine test container is musl-linked and its strcoll
+		// is byte order, so it agrees with SQLite while a production server
+		// would not. Sorting here makes the kept set a function of the data.
+		sortAssetsForBudget(assets)
 		g.AssetsElided = len(assets) - budget
 		assets = assets[:budget]
 	}
@@ -266,9 +296,11 @@ func (s *SQLStore) Neighbourhood(ctx context.Context, q NeighbourhoodQuery) (*Ne
 
 // neighbourhoodAssets is the walk.
 //
-// UNION rather than UNION ALL in the recursive term bounds re-visits, and
-// MIN(hop) collapses the several depths a node can be reached at into the
-// shortest one. The recursive reference appears exactly once, in the FROM of
+// UNION rather than UNION ALL in the recursive term bounds re-visits to one
+// row per (node, hop) -- not one per node, which is what this said before it
+// was measured: a four-hop walk over 5,146 assets produces 10,199 walk rows.
+// Bounded at nodes x hops, never exponential. MIN(hop) then collapses the
+// several depths a node can be reached at into the shortest one. The recursive reference appears exactly once, in the FROM of
 // the recursive term, with no aggregate and no ORDER BY or LIMIT -- the
 // intersection of what SQLite and PostgreSQL each allow.
 func (s *SQLStore) neighbourhoodAssets(ctx context.Context, subjectID string, hops int) ([]NeighbourAsset, error) {
@@ -278,20 +310,22 @@ func (s *SQLStore) neighbourhoodAssets(ctx context.Context, subjectID string, ho
 		seed(asset_id) AS (
 			SELECT c.descendant_id FROM asset_closure c WHERE c.ancestor_id = ?
 		),
-		adj(src_asset_id, dst_asset_id) AS (
-			SELECT ai.asset_id, bi.asset_id
+		adj(src_asset_id, dst_asset_id, is_mgmt) AS (
+			SELECT ai.asset_id, bi.asset_id,
+			       CASE WHEN ai.is_mgmt OR bi.is_mgmt THEN 1 ELSE 0 END
 			FROM link l
 			JOIN interface ai ON ai.id = l.a_interface_id
 			JOIN interface bi ON bi.id = l.b_interface_id
 			WHERE l.lifecycle = ?
 			UNION ALL
-			SELECT bi.asset_id, ai.asset_id
+			SELECT bi.asset_id, ai.asset_id,
+			       CASE WHEN ai.is_mgmt OR bi.is_mgmt THEN 1 ELSE 0 END
 			FROM link l
 			JOIN interface ai ON ai.id = l.a_interface_id
 			JOIN interface bi ON bi.id = l.b_interface_id
 			WHERE l.lifecycle = ?
 			UNION ALL
-			SELECT c.descendant_id, c.ancestor_id
+			SELECT c.descendant_id, c.ancestor_id, 0
 			FROM asset_closure c WHERE c.depth = 1
 		),
 		walk(asset_id, hop) AS (
@@ -301,6 +335,7 @@ func (s *SQLStore) neighbourhoodAssets(ctx context.Context, subjectID string, ho
 			FROM walk
 			JOIN adj ON adj.src_asset_id = walk.asset_id
 			WHERE walk.hop < ?
+			  AND (adj.is_mgmt = 0 OR walk.hop = 0)
 		)
 		SELECT w.asset_id AS id, MIN(w.hop) AS hop, a.kind, a.name, a.lifecycle,
 		       COALESCE(a.parent_id, '') AS parent_id
@@ -511,4 +546,19 @@ func (s *SQLStore) neighbourhoodWorkloads(ctx context.Context, assetIDs []string
 		g.DependenciesOutside++
 	}
 	return nil
+}
+
+// sortAssetsForBudget puts assets in the order a node budget should cut them:
+// nearest first, then by name as BYTES, then by id. Go's string comparison is
+// bytewise, which is the point -- see the call sites.
+func sortAssetsForBudget(assets []NeighbourAsset) {
+	sort.SliceStable(assets, func(i, j int) bool {
+		if assets[i].Hop != assets[j].Hop {
+			return assets[i].Hop < assets[j].Hop
+		}
+		if assets[i].Name != assets[j].Name {
+			return assets[i].Name < assets[j].Name
+		}
+		return assets[i].ID < assets[j].ID
+	})
 }

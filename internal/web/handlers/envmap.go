@@ -55,7 +55,9 @@ func (a *App) EnvironmentMap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	view, err := buildEnvMapView(g, selectedLayers(r, 0), assetHealth, instanceHealth)
+	// nil: no locked layer. This picture has no subject to anchor, so every
+	// band is genuinely optional.
+	view, err := buildEnvMapView(g, selectedLayers(r, nil), assetHealth, instanceHealth)
 	if err != nil {
 		a.serverError(w, r, fmt.Errorf("laying out the %s map: %w", env.Code, err))
 		return

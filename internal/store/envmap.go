@@ -37,6 +37,12 @@ func (s *SQLStore) EnvironmentMap(ctx context.Context, envID string, maxAssets i
 		return nil, fmt.Errorf("loading the assets of %s: %w", envID, err)
 	}
 	if len(assets) > maxAssets {
+		// Sorted in Go before the cut: SQL ORDER BY name is collation-dependent,
+		// so which assets survive the budget must not be decided by the
+		// server's locale. See sortAssetsForBudget in neighbourhood.go. No
+		// LIMIT in the query for the same reason -- it would hand the decision
+		// straight back to the engine.
+		sortAssetsForBudget(assets)
 		g.AssetsElided = len(assets) - maxAssets
 		assets = assets[:maxAssets]
 	}
