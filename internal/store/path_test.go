@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/gabriel/invctl/internal/domain"
@@ -535,6 +536,118 @@ func TestPathDropsRetiredTransit(t *testing.T) {
 			// route through sw-2 rather than no route at all.
 			if !after.Found {
 				t.Error("no route after retiring one of two chassis; the hosts are dual-homed")
+			}
+		})
+	}
+}
+
+// TestPathRefusesADisabledPortAndSaysSo.
+//
+// `enabled` is declared intent -- an operator saying "this port is
+// administratively down" -- so traffic does not cross it and a route through
+// one would be a false claim. But "no path" and "no path because somebody shut
+// this port" send an operator to two different places, so the second must not
+// be flattened into the first.
+func TestPathRefusesADisabledPortAndSaysSo(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newPathFixture(t, e)
+			s, ctx := f.s, f.ctx
+
+			// h-3 is the island. Cable it to sw-1 through a port that is
+			// administratively down, so cabling exists and no route does.
+			port, err := domain.NewInterface(NewID(), f.assets["h-3"], "eno1", domain.FFSFP28)
+			if err != nil {
+				t.Fatalf("building the port: %v", err)
+			}
+			port.Enabled = false
+			if err := s.CreateInterface(ctx, testActor, port); err != nil {
+				t.Fatalf("creating the port: %v", err)
+			}
+			far := mustInterface(t, s, ctx, f.assets["sw-1"], "e9")
+			link, err := domain.NewLink(NewID(), port.ID, far)
+			if err != nil {
+				t.Fatalf("building the cable: %v", err)
+			}
+			if err := s.CreateLink(ctx, testActor, link); err != nil {
+				t.Fatalf("cabling: %v", err)
+			}
+
+			g, err := s.Path(ctx, PathQuery{
+				FromServiceID: f.svc["app"], ToServiceID: f.svc["stranded"],
+			})
+			if err != nil {
+				t.Fatalf("Path: %v", err)
+			}
+			if g.Found {
+				t.Error("a route was found across an administratively disabled port; " +
+					"traffic does not cross one, so that is a false claim")
+			}
+			if len(g.Blocked) == 0 {
+				t.Fatal("no blocking port named: the cabling is there and a port is shut, " +
+					"which is the one answer somebody can act on")
+			}
+			joined := strings.Join(g.Blocked, " ")
+			for _, want := range []string{"h-3", "eno1", "disabled", "sw-1"} {
+				if !strings.Contains(joined, want) {
+					t.Errorf("the blocking port %q does not mention %q; an operator needs "+
+						"the box and the port, and which end to go and look at", joined, want)
+				}
+			}
+
+			// And the ordinary no-cabling case must NOT claim a blocked port.
+			plain, err := s.Path(ctx, PathQuery{
+				FromServiceID: f.svc["app"], ToAssetID: f.assets["oob"],
+			})
+			if err != nil {
+				t.Fatalf("Path to the console switch: %v", err)
+			}
+			if len(plain.Blocked) > 0 {
+				t.Errorf("a genuinely uncabled pair blamed a port: %v", plain.Blocked)
+			}
+		})
+	}
+}
+
+// TestPathToItsOwnNetworkExcludesItself: a forwarder that both attaches to a
+// group and is a member of it must not become its own destination.
+func TestPathToItsOwnNetworkExcludesItself(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newPathFixture(t, e)
+			s, ctx := f.s, f.ctx
+
+			groupID := mustNetGroup(t, s, ctx, "core2", domain.NetGroupMCLAG,
+				domain.NetRoleCore, domain.AvailActiveActive)
+			// h-1 is a member of the group AND attaches to it.
+			mustNetGroupMember(t, s, ctx, groupID, f.assets["h-1"], "member")
+			mustNetGroupMember(t, s, ctx, groupID, f.assets["sw-1"], "member")
+			na, err := domain.NewNetAttachment(NewID(), f.assets["h-1"], groupID,
+				domain.PlaneData, s.Now())
+			if err != nil {
+				t.Fatalf("building attachment: %v", err)
+			}
+			members := []domain.NetAttachmentMember{
+				{AttachmentID: na.ID, AssetID: f.assets["h-1"]},
+				{AttachmentID: na.ID, AssetID: f.assets["sw-1"]},
+			}
+			if err := s.CreateNetAttachment(ctx, testActor, na, members); err != nil {
+				t.Fatalf("creating attachment: %v", err)
+			}
+
+			g, err := s.Path(ctx, PathQuery{FromAssetID: f.assets["h-1"]})
+			if err != nil {
+				t.Fatalf("Path: %v", err)
+			}
+			for _, id := range g.To.AssetIDs {
+				if id == f.assets["h-1"] {
+					t.Error("h-1 is its own destination, which draws a zero-hop path from a " +
+						"box to itself -- a picture of nothing")
+				}
+			}
+			if len(g.To.AssetIDs) == 0 {
+				t.Error("dropping the self-anchor emptied the target; sw-1 is still a " +
+					"chassis it attaches through and is the real answer")
 			}
 		})
 	}

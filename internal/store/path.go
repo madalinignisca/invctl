@@ -31,6 +31,14 @@ import (
 //   - An anchor with no route at all is still IN the picture. A placement that
 //     cannot reach the other side is the finding, and a diagram that silently
 //     dropped it would show a healthy path while an instance is stranded.
+//   - A DISABLED port carries no route. `enabled` is declared intent -- an
+//     operator saying "this port is administratively down" -- and traffic does
+//     not cross it, so a path through one would be a false claim. The
+//     neighbourhood deliberately DRAWS a cabled-but-disabled port ("the wire is
+//     there and the port is down" is the 03:00 answer); asserting a route
+//     through it is a different claim, and this file makes the stricter one.
+//     When the only route runs through a disabled port, that is not "no path"
+//     -- it is a specific, actionable finding, and Blocked names the ports.
 type PathQuery struct {
 	// Exactly one of FromServiceID / FromAssetID.
 	FromServiceID string
@@ -77,6 +85,12 @@ type PathGraph struct {
 	// as the neighbourhood's: a cut nobody is told about is indistinguishable
 	// from a fact that does not exist, so the page must report it.
 	AssetsElided int
+	// Blocked names the administratively-disabled ports that are the ONLY
+	// thing standing between the two sides: set when no live route exists but
+	// one would if those ports were enabled. "No path" and "no path because
+	// somebody shut this port" send an operator to two different places, so
+	// the page must not flatten them.
+	Blocked []string
 
 	Assets       []NeighbourAsset
 	Links        []NeighbourLink
@@ -119,11 +133,20 @@ func (s *SQLStore) Path(ctx context.Context, q PathQuery) (*PathGraph, error) {
 		if g.To, err = s.resolveAttachedChassis(ctx, q.FromServiceID, q.FromAssetID); err != nil {
 			return nil, err
 		}
+		// An anchor cannot be its own destination. A forwarder that both
+		// attaches to a group and is a member of it -- expressible, if not
+		// currently in any fixture -- would otherwise appear on both sides and
+		// produce a zero-hop "path" from a box to itself, which is a picture of
+		// nothing. Dropping it leaves the OTHER chassis, which is the real
+		// answer; if it leaves none, the handler's "its network is not
+		// modelled" wording covers it, because a box that is its own network
+		// has nothing to reach either.
+		g.To.AssetIDs = withoutAnchors(g.To.AssetIDs, g.From.AssetIDs)
 	} else if g.To, err = s.resolvePathEnd(ctx, q.ToServiceID, q.ToAssetID); err != nil {
 		return nil, err
 	}
 
-	adj, err := s.dataPlaneAdjacency(ctx)
+	adj, patched, err := s.dataPlaneAdjacency(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -132,6 +155,13 @@ func (s *SQLStore) Path(ctx context.Context, q PathQuery) (*PathGraph, error) {
 	g.Found = len(marked) > 0
 	if g.Found {
 		g.Hops = pathHops(adj, g.From.AssetIDs, g.To.AssetIDs)
+	} else if blocked, err := s.blockingPorts(ctx, patched, g); err != nil {
+		return nil, err
+	} else {
+		// Only on the failure path, so the ordinary request pays nothing for
+		// it: if a route exists once disabled ports are allowed, the disabled
+		// ports ARE the answer.
+		g.Blocked = blocked
 	}
 
 	// Anchors are always drawn. In network mode the To side is only the
@@ -345,14 +375,16 @@ func (s *SQLStore) resolveAttachedChassis(ctx context.Context, serviceID, assetI
 // there is no ORDER BY because nothing downstream depends on link order (the
 // adjacency lists are sorted below, and collapsing parallel cables to one
 // adjacency is order-insensitive).
-func (s *SQLStore) dataPlaneAdjacency(ctx context.Context) (map[string][]string, error) {
+func (s *SQLStore) dataPlaneAdjacency(ctx context.Context) (live, patched map[string][]string, err error) {
 	type row struct {
-		A string `db:"a_asset"`
-		B string `db:"b_asset"`
+		A       string `db:"a_asset"`
+		B       string `db:"b_asset"`
+		Enabled bool   `db:"both_enabled"`
 	}
 	var rows []row
-	err := s.read(ctx, &rows, `
-		SELECT ai.asset_id AS a_asset, bi.asset_id AS b_asset
+	err = s.read(ctx, &rows, `
+		SELECT ai.asset_id AS a_asset, bi.asset_id AS b_asset,
+		       CASE WHEN ai.enabled AND bi.enabled THEN TRUE ELSE FALSE END AS both_enabled
 		FROM link l
 		JOIN interface ai ON ai.id = l.a_interface_id
 		JOIN interface bi ON bi.id = l.b_interface_id
@@ -360,26 +392,40 @@ func (s *SQLStore) dataPlaneAdjacency(ctx context.Context) (map[string][]string,
 		  AND ai.is_mgmt = FALSE AND bi.is_mgmt = FALSE
 		  AND ai.asset_id <> bi.asset_id`, domain.LifecycleActive)
 	if err != nil {
-		return nil, fmt.Errorf("loading the cable plant: %w", err)
+		return nil, nil, fmt.Errorf("loading the cable plant: %w", err)
 	}
 
-	adj := map[string][]string{}
-	seen := map[[2]string]bool{}
-	for _, r := range rows {
-		lo, hi := orderPair(r.A, r.B)
+	live, patched = map[string][]string{}, map[string][]string{}
+	seenLive := map[[2]string]bool{}
+	seenPatched := map[[2]string]bool{}
+	add := func(adj map[string][]string, seen map[[2]string]bool, a, b string) {
+		lo, hi := orderPair(a, b)
 		if seen[[2]string{lo, hi}] {
-			continue // Parallel cables are one adjacency; drawing keeps both.
+			return // Parallel cables are one adjacency; drawing keeps both.
 		}
 		seen[[2]string{lo, hi}] = true
-		adj[r.A] = append(adj[r.A], r.B)
-		adj[r.B] = append(adj[r.B], r.A)
+		adj[a] = append(adj[a], b)
+		adj[b] = append(adj[b], a)
+	}
+	for _, r := range rows {
+		// patched is every cable; live is only those whose both ends are
+		// administratively up. A parallel pair where one cable is disabled and
+		// the other is not still yields a live adjacency, which is correct --
+		// that is what the second cable is for.
+		add(patched, seenPatched, r.A, r.B)
+		if r.Enabled {
+			add(live, seenLive, r.A, r.B)
+		}
 	}
 	// Sorted neighbours make the BFS -- and therefore the picture -- a pure
 	// function of the data.
-	for _, ns := range adj {
+	for _, ns := range live {
 		sort.Strings(ns)
 	}
-	return adj, nil
+	for _, ns := range patched {
+		sort.Strings(ns)
+	}
+	return live, patched, nil
 }
 
 // bfs is a multi-source breadth-first search; absent key = unreachable.
@@ -551,4 +597,106 @@ func (s *SQLStore) pathWorkloads(ctx context.Context, g *PathGraph, assetIDs []s
 		}
 	}
 	return nil
+}
+
+// blockingPorts answers "would there be a route if nobody had shut a port?"
+//
+// Called only when the live adjacency found nothing. It re-runs the same
+// marking over the patched adjacency -- every cable, disabled or not -- and if
+// that succeeds, names the disabled ports lying on the route it found. Those
+// ports are the difference between the two answers, which makes them the
+// finding rather than a footnote.
+//
+// Returns nil when the two sides are genuinely uncabled, which is the ordinary
+// "no path" and needs no further explanation.
+func (s *SQLStore) blockingPorts(ctx context.Context, patched map[string][]string, g *PathGraph) ([]string, error) {
+	if len(g.From.AssetIDs) == 0 || len(g.To.AssetIDs) == 0 {
+		return nil, nil
+	}
+	marked, edges := shortestUnion(patched, g.From.AssetIDs, g.To.AssetIDs)
+	if len(marked) == 0 {
+		return nil, nil // No cabling either way: nothing to blame on a port.
+	}
+	if len(marked) > PathDefaultMaxAssets {
+		marked = marked[:PathDefaultMaxAssets]
+	}
+	links, err := s.neighbourhoodLinks(ctx, marked)
+	if err != nil {
+		return nil, fmt.Errorf("finding the ports that block the path: %w", err)
+	}
+	// Asset names, because "eno2 (disabled)" without its box is useless at
+	// 03:00. One small query, and only on this path.
+	rows, err := s.pathAssets(ctx, marked, nil)
+	if err != nil {
+		return nil, fmt.Errorf("naming the assets that block the path: %w", err)
+	}
+	name := make(map[string]string, len(rows))
+	for _, a := range rows {
+		name[a.ID] = a.Name
+	}
+
+	// A pair is blocked only if EVERY cable joining it is down -- one live
+	// cable of a parallel pair means that hop was never the problem.
+	type tally struct{ total, down int }
+	byPair := map[[2]string]*tally{}
+	label := map[[2]string][]string{}
+	for _, l := range links {
+		lo, hi := orderPair(l.A.AssetID, l.B.AssetID)
+		key := [2]string{lo, hi}
+		if !edges[key] {
+			continue
+		}
+		t := byPair[key]
+		if t == nil {
+			t = &tally{}
+			byPair[key] = t
+		}
+		t.total++
+		if !l.A.Enabled || !l.B.Enabled {
+			t.down++
+			label[key] = append(label[key],
+				portLabel(name[l.A.AssetID], l.A)+" ↔ "+portLabel(name[l.B.AssetID], l.B))
+		}
+	}
+
+	var out []string
+	for key, t := range byPair {
+		if t.down > 0 && t.down == t.total {
+			out = append(out, label[key]...)
+		}
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+// portLabel names one end of a cable, marking the end that is down -- the
+// operator needs the box AND the port, and needs to know which end to go and
+// look at.
+func portLabel(asset string, p NeighbourPort) string {
+	if asset == "" {
+		asset = "?"
+	}
+	if !p.Enabled {
+		return asset + "/" + p.Name + " (disabled)"
+	}
+	return asset + "/" + p.Name
+}
+
+// withoutAnchors removes ids that are already on the other side of the
+// question. Order is preserved: these lists seed a layout.
+func withoutAnchors(ids, anchors []string) []string {
+	if len(ids) == 0 || len(anchors) == 0 {
+		return ids
+	}
+	drop := make(map[string]bool, len(anchors))
+	for _, a := range anchors {
+		drop[a] = true
+	}
+	out := ids[:0]
+	for _, id := range ids {
+		if !drop[id] {
+			out = append(out, id)
+		}
+	}
+	return out
 }

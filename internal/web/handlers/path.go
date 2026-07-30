@@ -211,6 +211,10 @@ func pathNotes(g *store.PathGraph, view *pathView, selfCabled int) []string {
 		notes = append(notes, "No data-plane route from: "+strings.Join(g.Unrouted, ", ")+
 			" — drawn unconnected, because a stranded placement is a finding, not clutter.")
 	}
+	if len(g.Blocked) > 0 {
+		notes = append(notes, "A disabled port is declared intent, not observed health — "+
+			"nobody reported this down, somebody shut it.")
+	}
 	if g.AssetsElided > 0 {
 		notes = append(notes, pluraliseCount(g.AssetsElided, "further asset", "further assets")+
 			" on the way are not drawn — the picture is capped so a service with hundreds of "+
@@ -226,6 +230,13 @@ func pathNotes(g *store.PathGraph, view *pathView, selfCabled int) []string {
 // pathEmptyReason says why there is no chain, specifically enough to act on.
 func pathEmptyReason(g *store.PathGraph, view *pathView) string {
 	switch {
+	case len(g.Blocked) > 0:
+		// The most actionable answer this page can give: the cabling is
+		// there, and a port is shut. Naming the port turns "there is no path"
+		// into a thing somebody can go and fix.
+		return "The cabling between " + view.FromLabel + " and " + view.ToLabel +
+			" is in place, but every route runs through an administratively disabled port: " +
+			strings.Join(g.Blocked, ", ") + ". Enable the port and the path exists."
 	case g.From.ServiceID != "" && len(g.From.AssetIDs) == 0:
 		return view.FromLabel + " has no active placements. Record where it runs and the path can be drawn."
 	case g.To.ServiceID != "" && len(g.To.AssetIDs) == 0:
