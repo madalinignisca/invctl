@@ -710,10 +710,13 @@ func designScenarios() []scenarioCase {
 
 				// Coverage counts this host as modelled rather than inherited:
 				// it owns a direct data-plane attachment instead of inheriting
-				// its parent's.
-				if got := s.result.Coverage.Modelled; got != 1 {
-					s.broke(t, "Coverage.Modelled = %d, want 1 -- the LAGged host owns a direct data-plane "+
-						"attachment and carries an instance, which is exactly what Modelled counts", got)
+				// its parent's. The second modelled host is hv-01, which
+				// carries the fixture's bare-metal backup agent and its own
+				// attachment.
+				if got := s.result.Coverage.Modelled; got != 2 {
+					s.broke(t, "Coverage.Modelled = %d, want 2 -- the LAGged host and hv-01 each own a "+
+						"direct data-plane attachment and carry an instance, which is exactly what "+
+						"Modelled counts", got)
 				}
 
 				// The mirror: lose the other chassis and the host is fine.
@@ -1163,15 +1166,17 @@ func designScenarios() []scenarioCase {
 				}
 
 				// The trap this scenario exists to record for the next test
-				// author: on a correctly-cabled M5 fixture Coverage.Modelled is
-				// ZERO and Inherited is 12, because computeCoverage iterates
-				// service-instance HOSTS (all VMs) while every attachment hangs
-				// off a hypervisor. A test asserting Modelled > 0 fails against
-				// a correct estate.
-				if s.result.Coverage.Modelled != 0 || s.result.Coverage.Inherited != 12 {
-					s.broke(t, "Coverage says modelled=%d inherited=%d, want 0 and 12: every attachment in "+
-						"the fixture hangs off a hypervisor while every service instance is placed on a VM, "+
-						"so every instance host reaches its network by inheritance",
+				// author: computeCoverage iterates service-instance HOSTS, and
+				// on this fixture almost every one is a VM inheriting its
+				// hypervisor's attachment -- Inherited 12. Modelled is exactly
+				// 1: hv-01 hosts the bare-metal backup agent AND owns its own
+				// attachment, the one placement where the two coincide. A test
+				// asserting Modelled tracks the number of attachments, or of
+				// instances, fails against a correct estate.
+				if s.result.Coverage.Modelled != 1 || s.result.Coverage.Inherited != 12 {
+					s.broke(t, "Coverage says modelled=%d inherited=%d, want 1 and 12: every instance host "+
+						"except hv-01 is a VM reaching its network by inheritance, and hv-01 -- the "+
+						"bare-metal placement -- owns its attachment directly",
 						s.result.Coverage.Modelled, s.result.Coverage.Inherited)
 				}
 

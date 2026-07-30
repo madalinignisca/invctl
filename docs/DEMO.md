@@ -80,7 +80,41 @@ Contrast with **sw-oob-1 → Impact**: 18 assets unmanageable on the **managemen
 plane, and **no service affected at all**. Both planes are evaluated in the same
 run and only one decides status.
 
-## 3. Declared versus observed (3 min)
+## 3. The picture of all of it (2 min)
+
+Open **Assets → hv-01 → Neighbourhood**.
+
+Everything sections 1 and 2 described in words is one drawing here: services on
+top, the virtual layer (bridges, bonds) in the middle, physical hardware at the
+bottom. It is server-rendered SVG — no JavaScript graph library, the same
+`html/template` as every other page — and the whole state of the picture lives
+in the URL, so pasting the link to a colleague on an incident call shows them
+*exactly* what you see, layers and hop count included.
+
+Things worth pointing at:
+
+- **The layer toggles.** Turn the virtual layer off and the bridges drop out;
+  the counts on each toggle say what it would add back. The subject's own layer
+  is locked on — a picture of hv-01 that hides hv-01 is not a picture of it.
+- **The backup agent's line.** `backup-agent` runs directly on the hypervisor —
+  bare metal, no guest in between — so its line spans from the service band to
+  the physical band and threads the *gap between* the virtual-band boxes rather
+  than drawing through them. Every line in the picture obeys that rule, and the
+  test suite measures it on coordinates, not on intent.
+- **Dependency arrows.** The arrowhead sits at the thing depended *on*:
+  `orders-api ⟶ pgsql-core` reads in the direction of the dependency. Cables
+  have no arrows because a wire has no direction.
+- **Same-band connections are rails at distinct depths.** Two cables between
+  the same pair of switches — the MC-LAG peer bond — are two separate lines
+  with two separate hover texts naming their ports, not one line pretending.
+- **The box edges are observed health**, same colour code as everywhere else:
+  the diagram shows what the estate reports, labelled as observed, and acts on
+  nothing.
+
+The hover text on every line names the exact ports or endpoints it asserts, and
+the table below the picture carries the same facts for anyone who prefers rows.
+
+## 4. Declared versus observed (3 min)
 
 Back to the **dashboard**.
 
@@ -125,7 +159,7 @@ record of it. Refused with a 404 and queued as drift rather than created: an
 observation must never be able to create inventory, or a narrow token becomes a
 write vector. An asset the estate has and the inventory does not is a finding.
 
-## 4. The audit trail (2 min)
+## 5. The audit trail (2 min)
 
 Open **vm-queue-1** and scroll to its timeline. It is a merged view of declared
 changes and observed transitions, and it shows a **flap episode**: the entity
@@ -193,6 +227,29 @@ bin/invctl` will not match. Check what is actually listening:
 ```bash
 ss -ltnp 'sport = :8088'
 ```
+
+### The public instance
+
+`invctl.madalin.me` is a **user systemd unit** on the dev VM — it survives
+crashes and reboots, which a background process demonstrably did not:
+
+```bash
+systemctl --user status invctl-demo        # loopback :8096, TLS terminates upstream
+```
+
+Unit: `~/.config/systemd/user/invctl-demo.service`; binary and database in
+`~/apps/invctl-demo/`. The seeder only runs against an empty database, so a
+restart alone keeps visitor changes. To redeploy and/or reset the estate:
+
+```bash
+make build && install bin/invctl ~/apps/invctl-demo/invctl   # redeploy
+systemctl --user stop invctl-demo
+rm ~/apps/invctl-demo/invctl.db*                             # reset (optional)
+systemctl --user start invctl-demo
+```
+
+Reset before presenting — the estate is writable and holds whatever visitors
+left, and the staged telemetry reads "just now" only near seed time.
 
 ---
 

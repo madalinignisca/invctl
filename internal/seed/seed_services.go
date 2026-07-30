@@ -138,6 +138,15 @@ func (b *builder) services() {
 		{"partner-gateway", "vm-k8s-1", domain.RuntimeK8sWorkload, "", "", 0, "partner-gateway"},
 		{"orders-api-dev", "vm-dev-1", domain.RuntimeContainer, "", "", 0, "orders-api-dev"},
 		{"backup-agent", "vm-app-1", domain.RuntimeWindowsService, "", "", 0, "VeeamEndpointBackupSvc"},
+
+		// The same agent directly on the hypervisor -- bare metal, no guest in
+		// between. Estates have these (the box that runs the VMs needs backing
+		// up too), and it is the one placement shape the rest of the fixture
+		// lacked: on the neighbourhood diagram its line spans the service band
+		// to the physical band with the whole virtual band in the way, which
+		// is exactly the routed-channel case. A demo estate without one would
+		// never show it.
+		{"backup-agent", "hv-01", domain.RuntimeSystemd, "", "", 0, "veeamagent.service"},
 	}
 
 	for _, spec := range instances {

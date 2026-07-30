@@ -389,6 +389,7 @@ func (b *builder) networking() {
 	ifaces := []iface{
 		{"sw-core-1", "Ethernet1", domain.FFSFP28, "aa:bb:cc:00:01:01", "", 25000, false},
 		{"sw-core-1", "Ethernet2", domain.FFSFP28, "aa:bb:cc:00:01:02", "", 25000, false},
+		{"sw-core-1", "Ethernet46", domain.FFQSFP28, "aa:bb:cc:00:01:05", "", 100000, false},
 		{"sw-core-1", "Ethernet47", domain.FFQSFP28, "aa:bb:cc:00:01:03", "", 100000, false},
 		{"sw-core-1", "Ethernet48", domain.FFSFPPlus, "aa:bb:cc:00:01:04", "", 10000, false},
 		{"sw-core-1", "Management1", domain.FFRJ45, "aa:bb:cc:00:01:00", "10.20.10.2", 1000, true},
@@ -396,6 +397,7 @@ func (b *builder) networking() {
 		{"sw-core-2", "Ethernet1", domain.FFSFP28, "aa:bb:cc:00:03:01", "", 25000, false},
 		{"sw-core-2", "Ethernet2", domain.FFSFP28, "aa:bb:cc:00:03:02", "", 25000, false},
 		{"sw-core-2", "Ethernet3", domain.FFSFP28, "aa:bb:cc:00:03:03", "", 25000, false},
+		{"sw-core-2", "Ethernet46", domain.FFQSFP28, "aa:bb:cc:00:03:06", "", 100000, false},
 		{"sw-core-2", "Ethernet47", domain.FFQSFP28, "aa:bb:cc:00:03:04", "", 100000, false},
 		{"sw-core-2", "Ethernet48", domain.FFSFPPlus, "aa:bb:cc:00:03:05", "", 10000, false},
 		{"sw-core-2", "Management1", domain.FFRJ45, "aa:bb:cc:00:03:00", "10.20.10.4", 1000, true},
@@ -533,6 +535,11 @@ func (b *builder) networking() {
 		{"hv-02/eno3", "sw-core-2/Ethernet2", "OM4", 20},
 		{"hv-03/eno2", "sw-core-2/Ethernet3", "DAC", 3},
 
+		// The MC-LAG peer bond is TWO cables, as a real one is -- and on the
+		// neighbourhood diagram they are the parallel-edge case: two separate
+		// lines with two separate port pairs in their hover text, not one line
+		// drawn twice. One cable here would demo redundancy that isn't there.
+		{"sw-core-1/Ethernet46", "sw-core-2/Ethernet46", "OM4", 25},
 		{"sw-core-1/Ethernet47", "sw-core-2/Ethernet47", "OM4", 25},
 		{"sw-core-1/Ethernet48", "fw-edge-1/ethernet1/1", "DAC", 2},
 		{"sw-core-2/Ethernet48", "fw-edge-2/ethernet1/1", "DAC", 2},
