@@ -17,7 +17,7 @@
         {{end}}
       </h2>
       <span class="panel-note">
-        {{if .View}}{{if .View.Scene}}{{pluralise .View.Hops "hop" "hops"}} at the shortest —
+        {{if .View}}{{if .View.Found}}{{pluralise .View.Hops "hop" "hops"}} at the shortest —
         every equally short route is drawn.{{end}}{{else}}
         A service resolves to the hosts it actually runs on.{{end}}
       </span>

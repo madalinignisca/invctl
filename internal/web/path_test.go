@@ -99,6 +99,21 @@ func TestPathSaysWhyThereIsNone(t *testing.T) {
 	if !strings.Contains(page, "Data plane only") {
 		t.Error("the one modelling decision that changes the answer is not stated")
 	}
+
+	// And it must not claim a route length at the same time. The stranded
+	// sides ARE boxes, so a scene exists; gating the header on the scene made
+	// the page say "0 hops at the shortest" directly above "no path to draw".
+	// A picture that contradicts itself is worse than no picture.
+	if strings.Contains(page, "at the shortest") {
+		t.Error("the header claims a shortest route on a page that says there is none")
+	}
+
+	// The contrast, on a question that does have an answer.
+	found := body(t, h.get("/paths?from=service:"+h.refs.Services["orders-api"]+
+		"&to=service:"+h.refs.Services["pgsql-core"], false))
+	if !strings.Contains(found, "at the shortest") {
+		t.Error("a real path does not state its length; the gate is too tight")
+	}
 }
 
 func TestPathEntryPoints(t *testing.T) {

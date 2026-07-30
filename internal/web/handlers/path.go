@@ -34,7 +34,12 @@ type pathView struct {
 	// FromLabel and ToLabel are the question in words: "orders-api", "hv-01",
 	// "its data-plane network".
 	FromLabel, ToLabel string
-	Hops               int
+	// Found gates every statement about route length. Without it the header
+	// said "0 hops at the shortest" beside a body saying "no path to draw":
+	// a Scene exists whenever there are boxes, and the two stranded sides are
+	// boxes, so drawing something is not the same as having found a route.
+	Found bool
+	Hops  int
 	// Layers is always empty: the path has no toggles, but the shared legend
 	// template ranges the field, and a chain is small enough that hiding a
 	// band of it would only manufacture the gaps the page exists to rule out.
@@ -112,7 +117,7 @@ func (a *App) buildPathView(r *http.Request, fromKind, fromID, toKind, toID stri
 		return nil, err
 	}
 
-	view := &pathView{Hops: g.Hops}
+	view := &pathView{Found: g.Found, Hops: g.Hops}
 	if view.FromLabel, err = a.pathEndLabel(r, fromKind, fromID); err != nil {
 		return nil, err
 	}
