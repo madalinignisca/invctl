@@ -78,6 +78,7 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	read("GET /reports/spanning", app.SpanningReport)
 
 	read("GET /environments", app.EnvironmentList)
+	read("GET /environments/{id}/map", app.EnvironmentMap)
 	read("GET /assets", app.AssetList)
 	read("GET /assets/{id}", app.AssetDetail)
 	read("GET /assets/{id}/impact", app.AssetImpact)

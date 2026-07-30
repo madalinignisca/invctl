@@ -126,6 +126,10 @@ in the picture as a disconnected box — a stranded instance is the finding, not
 clutter. Leave the far end empty and the same page answers *"where does this
 service actually sit"*, down to the chassis its attachment lands on.
 
+Finally, **Environments → prod → Map** is the whole environment at once — the
+densest of the three diagrams, which is exactly why the layer toggles exist.
+Neighbourhood for one asset, Paths for a pair, the map for the walkthrough.
+
 ## 4. Declared versus observed (3 min)
 
 Back to the **dashboard**.

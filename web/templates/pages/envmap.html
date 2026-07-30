@@ -1,0 +1,18 @@
+{{define "content"}}
+<div class="crumbs">
+  <a href="/environments">environments</a><span class="sep">/</span><span>{{.Environment.Code}}</span><span class="sep">/</span><span>map</span>
+</div>
+
+<div class="page-head">
+  <div class="eyebrow">Layered connectivity</div>
+  <h1>Everything in <span class="mono">{{.Environment.Code}}</span></h1>
+  <p class="lede">
+    The whole environment at once, all three layers. This is the walkthrough
+    view and the densest of the three diagrams — the layer toggles are the
+    steering wheel. For one asset's surroundings use its neighbourhood; for
+    the chain between two things use <a href="/paths">Paths</a>.
+  </p>
+</div>
+
+{{template "envmap_panel" .}}
+{{end}}

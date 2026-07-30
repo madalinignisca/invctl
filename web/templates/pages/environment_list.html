@@ -14,7 +14,7 @@
   {{if .Environments}}
   <div class="scroll-x">
     <table>
-      <thead><tr><th>Code</th><th>Name</th><th>Role</th><th>Criticality</th><th>Audit scope</th></tr></thead>
+      <thead><tr><th>Code</th><th>Name</th><th>Role</th><th>Criticality</th><th>Audit scope</th><th></th></tr></thead>
       <tbody>
         {{range .Environments}}
         <tr>
@@ -25,6 +25,7 @@
           </td>
           <td class="num">{{.Criticality}}</td>
           <td>{{if .InScope}}<span class="pill pill-info">in scope</span>{{else}}<span class="pill pill-muted">out of scope</span>{{end}}</td>
+          <td><a class="btn btn-sm" href="/environments/{{.ID}}/map">Map — all three layers</a></td>
         </tr>
         {{end}}
       </tbody>
