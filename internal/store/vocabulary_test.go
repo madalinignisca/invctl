@@ -25,9 +25,11 @@ import (
 //
 // The check runs one way only, deliberately. Every Go constant must exist as a
 // row; a row need not have a Go constant. That asymmetry IS the change: adding
-// `bridge` to asset_kind must not require a Go release, and a test demanding
-// the two sides match exactly would reimpose exactly the coupling the lookup
-// tables removed.
+// `vrf` to asset_kind must not require a Go release, and a test demanding the
+// two sides match exactly would reimpose exactly the coupling the lookup tables
+// removed. ('bridge' used to be the example here and is now a seeded kind, so
+// it no longer demonstrates anything -- the placeholder has to be a code the
+// migration does NOT ship.)
 var vocabularyReaders = []struct {
 	table     string
 	read      func(*SQLStore, context.Context) ([]VocabularyTerm, error)
@@ -36,7 +38,7 @@ var vocabularyReaders = []struct {
 	// silently truncated seed is caught rather than a shorter dropdown.
 	count int
 }{
-	{"asset_kind", (*SQLStore).AssetKinds, domain.AssetKinds, 12},
+	{"asset_kind", (*SQLStore).AssetKinds, domain.AssetKinds, 13},
 	{"service_kind", (*SQLStore).ServiceKinds, domain.ServiceKinds, 12},
 	{"interface_form_factor", (*SQLStore).InterfaceFormFactors, domain.FormFactors, 9},
 	{"environment_role", (*SQLStore).EnvironmentRoles, domain.EnvRoles, 6},
@@ -151,7 +153,7 @@ func TestVocabularyValueAddedAsDataIsUsableImmediately(t *testing.T) {
 			// Before: the value does not exist, and the store refuses it with a
 			// field-level validation error rather than a driver error, so the
 			// form can re-render at 422 with the field marked.
-			a, err := domain.NewAsset(NewID(), "bridge", "br-01", nil, s.Now())
+			a, err := domain.NewAsset(NewID(), "vrf", "vrf-red", nil, s.Now())
 			if err != nil {
 				t.Fatalf("the constructor rejected a well-formed unknown kind: %v", err)
 			}
@@ -172,12 +174,12 @@ func TestVocabularyValueAddedAsDataIsUsableImmediately(t *testing.T) {
 			// The value arrives as data. No migration, no deploy.
 			if _, err := s.db.Writer.Exec(s.db.Rebind(
 				`INSERT INTO asset_kind (code, label, sort_order) VALUES (?, ?, ?)`),
-				"bridge", "Bridge", 55); err != nil {
+				"vrf", "VRF", 55); err != nil {
 				t.Fatalf("inserting the new kind: %v", err)
 			}
 
 			// After: the same store, in the same process, stores it.
-			b, err := domain.NewAsset(NewID(), "bridge", "br-01", nil, s.Now())
+			b, err := domain.NewAsset(NewID(), "vrf", "vrf-red", nil, s.Now())
 			if err != nil {
 				t.Fatalf("building the asset: %v", err)
 			}
@@ -194,7 +196,7 @@ func TestVocabularyValueAddedAsDataIsUsableImmediately(t *testing.T) {
 			}
 			position := -1
 			for i, k := range kinds {
-				if k.Code == "bridge" {
+				if k.Code == "vrf" {
 					position = i
 				}
 			}
@@ -255,7 +257,7 @@ func TestUnknownVocabularyValueIsRejectedOnEveryColumn(t *testing.T) {
 				}},
 				{"asset.kind", "kind", func() error {
 					a := &domain.Asset{
-						ID: NewID(), Kind: "bridge", Name: "br-1",
+						ID: NewID(), Kind: "vrf", Name: "vrf-1",
 						Lifecycle: domain.LifecycleActive, Attrs: "{}",
 						CreatedAt: domain.FormatTime(s.Now()), UpdatedAt: domain.FormatTime(s.Now()),
 					}
@@ -403,12 +405,15 @@ func TestOnlyTransitRoleBrokers(t *testing.T) {
 // TestAVocabularyAddedAsDataIsUsable is the whole point of the lookup tables,
 // and the case the first attempt failed.
 //
-// A layered network diagram needs a bridge: a thing a veth attaches to, which
-// forwards onto a physical NIC. Adding 'bridge' as a row must therefore produce
-// an asset kind that can take a network attachment and carry a workload -- not
-// merely one that can be stored. Measured before the behaviour columns existed:
-// the INSERT worked, the asset was created, and CanHostInstances and
-// IsAttachable both answered false with no diagnostic, so the kind was inert.
+// The motivating example WAS 'bridge' -- a thing a veth attaches to, which
+// forwards onto a physical NIC -- and this test is why adding it later cost a
+// four-line migration and no code. Now that migration 00006 ships it, the
+// placeholder has to be a kind the migration does not: 'vrf' is the next such
+// construct, and the assertion is unchanged. A kind added as a row must produce
+// one that can take a network attachment and carry a workload, not merely one
+// that can be stored. Measured before the behaviour columns existed: the INSERT
+// worked, the asset was created, and CanHostInstances and IsAttachable both
+// answered false with no diagnostic, so the kind was inert.
 func TestAVocabularyAddedAsDataIsUsable(t *testing.T) {
 	for _, e := range Engines(t) {
 		t.Run(e.Name, func(t *testing.T) {
@@ -418,7 +423,7 @@ func TestAVocabularyAddedAsDataIsUsable(t *testing.T) {
 			// Step 1: an INSERT, not a migration and not a release.
 			if _, err := w.Exec(w.Rebind(
 				`INSERT INTO asset_kind (code, label, sort_order, can_host_instances, is_attachable)
-				 VALUES (?, ?, ?, TRUE, TRUE)`), "bridge", "Virtual bridge", 130); err != nil {
+				 VALUES (?, ?, ?, TRUE, TRUE)`), "vrf", "VRF", 135); err != nil {
 				t.Fatalf("adding a kind as data: %v", err)
 			}
 
@@ -427,14 +432,14 @@ func TestAVocabularyAddedAsDataIsUsable(t *testing.T) {
 			if err != nil {
 				t.Fatalf("listing kinds: %v", err)
 			}
-			if !containsID(Codes(kinds), "bridge") {
+			if !containsID(Codes(kinds), "vrf") {
 				t.Error("the new kind is not offered to an operator; a value nothing can select " +
 					"is not extensibility")
 			}
 
 			// Step 3: an asset of that kind can be created.
 			envID := mustEnvironment(t, s, ctx, "prod", domain.EnvRoleProduction)
-			br, err := domain.NewAsset(NewID(), "bridge", "br0", nil, s.Now())
+			br, err := domain.NewAsset(NewID(), "vrf", "vrf-red", nil, s.Now())
 			if err != nil {
 				t.Fatalf("the domain constructor refused a kind the database accepts: %v", err)
 			}
@@ -444,16 +449,16 @@ func TestAVocabularyAddedAsDataIsUsable(t *testing.T) {
 
 			// Step 4: THE PART THAT USED TO FAIL. It can carry a workload and
 			// take a network attachment.
-			b, err := s.AssetKindBehaviour(ctx, "bridge")
+			b, err := s.AssetKindBehaviour(ctx, "vrf")
 			if err != nil {
 				t.Fatalf("reading behaviour: %v", err)
 			}
 			if !b.CanHostInstances {
-				t.Error("a bridge added as data cannot host a workload; the kind is storable " +
+				t.Error("a kind added as data cannot host a workload; the kind is storable " +
 					"but inert, which is the defect the behaviour columns exist to fix")
 			}
 			if !b.IsAttachable {
-				t.Error("a bridge added as data cannot take a network attachment, so it cannot " +
+				t.Error("a kind added as data cannot take a network attachment, so it cannot " +
 					"appear in the network model it was added for")
 			}
 

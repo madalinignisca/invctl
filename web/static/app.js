@@ -69,6 +69,82 @@ document.addEventListener('alpine:init', () => {
     },
   }));
 
+  // The neighbourhood diagram's zoom and pan.
+  //
+  // Local UI state and nothing else: a scale factor and a drag origin. It
+  // fetches nothing and it holds no fact about the estate -- the picture is
+  // server-rendered SVG and the layer toggles are a round trip on purpose,
+  // because hiding a band client-side would leave a hole in the layout and a
+  // viewBox describing a picture that is no longer drawn.
+  //
+  // scale 0 means "fit to the pane", which is the initial state: the SVG
+  // already fits by CSS, so binding no width at all avoids a visible jump the
+  // moment Alpine wakes up. Zooming starts from whatever is actually on screen.
+  Alpine.data('diagramZoom', () => ({
+    scale: 0,
+    natural: 0,
+    dragging: false,
+    originX: 0,
+    originY: 0,
+    fromLeft: 0,
+    fromTop: 0,
+    init() {
+      this.natural = parseFloat(this.$el.dataset.width) || 0;
+    },
+    get svgStyle() {
+      if (!this.scale || !this.natural) {
+        return '';
+      }
+      return 'width:' + Math.round(this.natural * this.scale) + 'px;max-width:none';
+    },
+    get zoomLabel() {
+      return this.scale ? Math.round(this.scale * 100) + '%' : 'fit';
+    },
+    fitScale() {
+      const pane = this.$refs.pane;
+      if (!pane || !this.natural) {
+        return 1;
+      }
+      return Math.min(1, pane.clientWidth / this.natural);
+    },
+    zoomIn() {
+      this.scale = Math.min((this.scale || this.fitScale()) * 1.25, 4);
+    },
+    zoomOut() {
+      this.scale = Math.max((this.scale || this.fitScale()) / 1.25, 0.25);
+    },
+    reset() {
+      this.scale = 0;
+    },
+    panStart(event) {
+      // A drag that starts on a node is that node's link being clicked, not a
+      // pan. Only empty canvas moves the picture.
+      if (event.target.closest('a')) {
+        return;
+      }
+      const pane = this.$refs.pane;
+      if (!pane) {
+        return;
+      }
+      this.dragging = true;
+      this.originX = event.clientX;
+      this.originY = event.clientY;
+      this.fromLeft = pane.scrollLeft;
+      this.fromTop = pane.scrollTop;
+    },
+    panMove(event) {
+      if (!this.dragging) {
+        return;
+      }
+      const pane = this.$refs.pane;
+      pane.scrollLeft = this.fromLeft - (event.clientX - this.originX);
+      pane.scrollTop = this.fromTop - (event.clientY - this.originY);
+    },
+    panEnd() {
+      this.dragging = false;
+    },
+  }));
+
   // Confirms a destructive action before its form submits. Retiring is
   // reversible in principle -- nothing is ever deleted -- but it still
   // deserves a deliberate second press.

@@ -81,6 +81,9 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	read("GET /assets", app.AssetList)
 	read("GET /assets/{id}", app.AssetDetail)
 	read("GET /assets/{id}/impact", app.AssetImpact)
+	// A view, and only a view: GET, no CSRF, no RequireAdmin, and nothing on
+	// the page it renders can change the estate or the model of it.
+	read("GET /assets/{id}/neighbourhood", app.AssetNeighbourhood)
 	read("GET /services", app.ServiceList)
 	read("GET /services/{id}", app.ServiceDetail)
 	read("GET /prefixes", app.PrefixList)

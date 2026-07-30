@@ -55,13 +55,19 @@ were found by an adversarial review rather than by the test suite.
 
 Open **Assets → sw-core-2 → Impact**. This is one chassis of an MC-LAG core pair.
 
-> 7 services affected · 6 assets isolated on `data`
+> 7 services affected · 7 assets isolated on `data`
 > sso · **down** · *lost 1 of 1 instances (running, but network-isolated — not powered off)*
 > vault · degraded · *soft dependency on sso/https is down*
 
 The MC-LAG group is still **healthy** — one of two chassis is plenty. And yet
 `hv-03` is cut off, because it is single-homed to *this* chassis. `hv-01` and
 `hv-02` have a second cable and are fine.
+
+The seven are `hv-03`, its five guests, and `hv-03-br0` — the Linux bridge the
+guests are cabled to, which is an asset in its own right since the virtual layer
+landed. Everything inside a cut-off host is cut off with it, and nothing here is
+special-cased: all seven inherit the hypervisor's attachment through
+`asset_closure`.
 
 Group health and host reachability are different questions with different
 answers in the same run. No MC-LAG-specific code produces that; the second
@@ -70,7 +76,7 @@ attachment-member row does all the work.
 Note the wording: *running, but network-isolated — not powered off*. During an
 incident those call for completely different responses.
 
-Contrast with **sw-oob-1 → Impact**: 15 assets unmanageable on the **management**
+Contrast with **sw-oob-1 → Impact**: 18 assets unmanageable on the **management**
 plane, and **no service affected at all**. Both planes are evaluated in the same
 run and only one decides status.
 
@@ -153,6 +159,14 @@ permitted traffic. A firewall that is up with a deleted rule, a VLAN that is not
 trunked, an MTU mismatch — the model says the path exists and is silent about
 all of them. Those cause most real network outages. `docs/reachability-design.md`
 lists the known limits, including one place the model is knowingly optimistic.
+
+The virtual layer makes one of those concrete and it is worth showing rather
+than hiding: `hv-03-br0` appears in the segmentation-span report beside the two
+core switches, because the production guests and the development guest on
+`hv-03` are cabled to the same bridge. In a real estate you would separate them
+onto `bond0.30` and `bond0.40`, and `interface` has no VLAN column to say so —
+so the fixture declares the bridge in both environments and lets the report find
+it, which is the honest version of a gap.
 
 **"How is it tested?"** Every query runs unmodified on SQLite and PostgreSQL and
 the suite runs against both. The reachability work has a fourteen-scenario table

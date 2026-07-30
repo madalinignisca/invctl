@@ -357,8 +357,14 @@ func (a *NetAttachment) IsRetired() bool { return a.Lifecycle == LifecycleRetire
 // AttachableAssetKinds is the set of asset kinds a net_attachment may name.
 // A rack or a site is not network-attached; allowing one would let a single
 // row fake full coverage for a subtree.
+// KindBridge is here for the same reason a VM is: a bridge is a network
+// element, and an estate where one lands somewhere its host does not must be
+// able to say so. No bridge in the demo fixture owns an attachment row -- each
+// sits inside a hypervisor that already has one and inherits it by nearest
+// ancestor -- so this widens what MAY be declared and changes nothing that is.
 var AttachableAssetKinds = []string{
-	KindServer, KindHypervisor, KindCluster, KindVM, KindK8sNode, KindStorage,
+	KindServer, KindHypervisor, KindCluster, KindVM, KindK8sNode, KindBridge,
+	KindStorage,
 }
 
 // IsAttachable moved to the asset_kind lookup row for the same reason

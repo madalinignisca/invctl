@@ -17,6 +17,7 @@
 
 <div style="margin-bottom:18px">
   <a class="btn btn-primary" href="/assets/{{.Asset.ID}}/impact">Simulate losing this</a>
+  <a class="btn" href="/assets/{{.Asset.ID}}/neighbourhood">See what it connects to</a>
   {{if .CanWrite}}
     {{if ne .Asset.Lifecycle "retired"}}
     <form method="post" action="/assets/{{.Asset.ID}}/retire" style="display:inline"

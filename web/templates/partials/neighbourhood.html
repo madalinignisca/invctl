@@ -1,0 +1,258 @@
+{{/* The neighbourhood diagram, whole.
+
+     The swap target is this entire fragment and not just the picture, and that
+     is load-bearing rather than convenient. The hop count and the layer set are
+     part of the QUESTION, and the question is restated in the toolbar, the
+     legend, the notes and the table below. Swapping only the picture would
+     leave every one of those describing a neighbourhood nobody is looking at --
+     the same defect the impact page's window selector was rewritten to avoid.
+     Either every restatement re-renders or none may.
+
+     The fragment re-establishes its own swap target on every swap, which is
+     what lets it be rendered standalone. */}}
+
+{{define "neighbourhood_panel"}}
+<div id="neighbourhood">
+
+  <div class="panel">
+    <div class="panel-head">
+      <h2>What {{.Asset.Name}} connects to</h2>
+      <span class="panel-note">
+        Three transport realities, stacked. A line in the service layer resolves
+        down to a line in the physical one.
+      </span>
+    </div>
+    <div class="panel-body">
+
+      {{/* A GET form that submits to this page's own address, so the state is
+           always in the URL and a diagram can be pasted into a ticket. It
+           carries both method/action and hx-get: with JavaScript it swaps, and
+           without it the browser navigates to exactly the same place. */}}
+      <form class="toolbar" method="get"
+            action="/assets/{{.Asset.ID}}/neighbourhood"
+            hx-get="/assets/{{.Asset.ID}}/neighbourhood"
+            hx-target="#neighbourhood" hx-swap="outerHTML" hx-push-url="true"
+            hx-trigger="change, submit">
+        {{/* Present whenever the toolbar submits, and absent from a bare link.
+             It is the difference between "the caller said nothing about layers"
+             and "the caller unticked every box" -- without it, clearing the last
+             checkbox would turn every layer back on and the page would look
+             like it had ignored the click. */}}
+        <input type="hidden" name="filter" value="1">
+
+        <div class="field">
+          <label for="hops">How far out</label>
+          <select id="hops" name="hops">
+            {{range $.View.HopChoices}}
+              <option value="{{.}}" {{if eq . $.View.Hops}}selected{{end}}>
+                {{pluralise . "hop" "hops"}}
+              </option>
+            {{end}}
+          </select>
+          <div class="field-hint">
+            Counted from this asset and everything inside it.
+          </div>
+        </div>
+
+        <div class="field">
+          <label>Layers</label>
+          <div class="checks">
+            {{range .View.Layers}}
+            <label class="check" title="{{.Label}}: {{.Note}} — {{pluralise .Nodes "node" "nodes"}}, {{pluralise .Edges "connection" "connections"}}">
+              {{/* The subject's own layer is locked on. A picture built around
+                   an asset that is not in it is not a picture of that asset,
+                   and the server puts it back regardless -- so the control says
+                   so rather than appearing to be ignored. */}}
+              <input type="checkbox" name="layer" value="{{.Name}}"
+                     {{if .On}}checked{{end}} {{if .Locked}}disabled{{end}}>
+              <span>{{.Label}}</span>
+              <span class="pill pill-muted">{{.Nodes}}</span>
+            </label>
+            {{end}}
+          </div>
+          <div class="field-hint">
+            A layer with nothing in it collapses rather than leaving an empty
+            band. The count is what is there to show.
+          </div>
+        </div>
+
+        <button class="btn" type="submit">Redraw</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head">
+      <h2>Diagram</h2>
+      <span class="panel-note">
+        {{if .View.Scene}}
+          Hover anything for its full name. Nothing on this page changes the
+          estate — it is a view.
+        {{else}}
+          Nothing to draw.
+        {{end}}
+      </span>
+    </div>
+    <div class="panel-body">
+
+      {{with .View.Scene}}
+      {{/* Alpine holds the zoom factor and the drag offset. That is all it
+           holds: it fetches nothing, and it knows no fact about the estate.
+           The layer toggles above are a round trip on purpose — hiding a band
+           client-side would leave a hole in the layout and a viewBox describing
+           a picture that is no longer drawn. */}}
+      <div class="diag" x-data="diagramZoom" data-width="{{coord .Width}}">
+        <div class="diag-controls" x-cloak>
+          <button class="btn btn-sm" type="button" x-on:click="zoomOut" title="Zoom out">−</button>
+          <span class="mono diag-zoom" x-text="zoomLabel">fit</span>
+          <button class="btn btn-sm" type="button" x-on:click="zoomIn" title="Zoom in">+</button>
+          <button class="btn btn-sm" type="button" x-on:click="reset" title="Back to fitting the panel">Reset</button>
+          <span class="panel-note">Drag the canvas to pan.</span>
+        </div>
+
+        <div class="diag-pane" x-ref="pane"
+             x-on:pointerdown="panStart" x-on:pointermove="panMove"
+             x-on:pointerup="panEnd" x-on:pointercancel="panEnd"
+             x-on:pointerleave="panEnd">
+          {{/* role="img" with a title and a description, because this would
+               otherwise be the one thing on the site a screen reader gets
+               nothing at all from. The table underneath carries the same graph
+               in full. */}}
+          <svg viewBox="0 0 {{coord .Width}} {{coord .Height}}"
+               width="{{coord .Width}}" height="{{coord .Height}}"
+               role="img" aria-labelledby="diagram-title diagram-desc"
+               x-bind:style="svgStyle">
+            <title id="diagram-title">{{.Title}}</title>
+            <desc id="diagram-desc">{{.Desc}}</desc>
+
+            {{range .Bands}}
+              <text class="band-label" x="2" y="{{coord .LabelY}}">{{.Label}}</text>
+            {{end}}
+
+            {{/* Edges first, so a line never covers the box it lands on. */}}
+            {{range .Edges}}
+              <path class="{{.Class}}" d="{{.D}}"><title>{{.Title}}</title></path>
+            {{end}}
+
+            {{range .Nodes}}
+              <a class="{{.Class}}" href="{{.Href}}">
+                <title>{{.Title}}</title>
+                <rect class="node-box" x="{{coord .X}}" y="{{coord .Y}}"
+                      width="{{coord .W}}" height="{{coord .H}}" rx="4"></rect>
+                <rect class="node-rail" x="{{coord .X}}" y="{{coord .Y}}"
+                      width="{{coord .RailW}}" height="{{coord .H}}" rx="1.5"></rect>
+                <text class="node-label" x="{{coord .CenterX}}" y="{{coord .LabelY}}">{{.Label}}</text>
+                <text class="node-caption" x="{{coord .CenterX}}" y="{{coord .CaptionY}}">{{.Caption}}</text>
+              </a>
+            {{end}}
+          </svg>
+        </div>
+      </div>
+      {{end}}
+
+      {{if .View.Empty}}
+      <div class="empty">
+        <strong>Nothing to draw here.</strong>
+        {{.View.Empty}}
+      </div>
+      {{end}}
+
+      {{/* Every cut is stated. A silently missing node is indistinguishable
+           from a fact that does not exist. */}}
+      {{range .View.Notes}}
+      <div class="diag-note">{{.}}</div>
+      {{end}}
+    </div>
+
+    <div class="panel-body" style="border-top:1px solid var(--line-soft)">
+      {{template "diagram_legend" .}}
+    </div>
+  </div>
+
+  {{/* The same graph as text: every name in full rather than truncated to fit
+       a box, readable by a screen reader, and pasteable into an incident
+       ticket. A diagram that replaced this table would be a regression. */}}
+  <div class="panel">
+    <div class="panel-head">
+      <h2>Connections</h2>
+      <span class="panel-note">
+        {{pluralise (len .View.Rows) "connection" "connections"}} drawn above,
+        in full.
+      </span>
+    </div>
+    {{if .View.Rows}}
+    <div class="scroll-x">
+      <table>
+        <thead>
+          <tr>
+            <th>Layer</th><th>Kind</th><th>From</th><th>At</th>
+            <th>To</th><th>At</th><th>What it is</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .View.Rows}}
+          <tr>
+            <td><span class="pill pill-muted">{{.Layer}}</span></td>
+            <td><span class="pill pill-muted">{{.Kind}}</span></td>
+            <td class="mono">{{.From}}</td>
+            <td class="mono" style="font-size:12px;color:var(--muted)">{{if .FromAt}}{{.FromAt}}{{else}}—{{end}}</td>
+            <td class="mono">{{.To}}</td>
+            <td class="mono" style="font-size:12px;color:var(--muted)">{{if .ToAt}}{{.ToAt}}{{else}}—{{end}}</td>
+            <td style="font-size:12.5px;color:var(--muted)">{{.Detail}}</td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+    {{else}}
+    <div class="empty">
+      <strong>No connections at this hop count.</strong>
+      Nothing joins the assets in this neighbourhood to each other.
+    </div>
+    {{end}}
+  </div>
+
+</div>
+{{end}}
+
+{{/* The legend draws the same strokes the picture does, from the same
+     stylesheet, so it cannot describe a line the diagram does not draw. */}}
+{{define "diagram_legend"}}
+<div class="diag-legend diag">
+  {{range .View.Layers}}
+  <span class="key">
+    <span class="pill {{if .On}}pill-info{{else}}pill-muted{{end}}">{{.Label}}</span>
+    <span>{{if .Nodes}}{{pluralise .Nodes "node" "nodes"}}{{else}}nothing in this neighbourhood{{end}}</span>
+  </span>
+  {{end}}
+</div>
+<div class="diag-legend diag" style="margin-top:10px">
+  <span class="key">
+    <svg width="26" height="10" aria-hidden="true"><path class="edge edge-cable" d="M 1 5 L 25 5"></path></svg>
+    <span>a cable or a veth</span>
+  </span>
+  <span class="key">
+    <svg width="26" height="10" aria-hidden="true"><path class="edge edge-descent edge-cross" d="M 1 5 L 25 5"></path></svg>
+    <span>a socket resolving down to what carries it</span>
+  </span>
+  <span class="key">
+    <svg width="26" height="10" aria-hidden="true"><path class="edge edge-local" d="M 1 5 L 25 5"></path></svg>
+    <span>runs here; the socket never leaves the box</span>
+  </span>
+  <span class="key">
+    <svg width="26" height="10" aria-hidden="true"><path class="edge edge-dependency nature-hard" d="M 1 5 L 25 5"></path></svg>
+    <span>a declared dependency, dashed by how much it transmits</span>
+  </span>
+  <span class="key">
+    <svg width="26" height="10" aria-hidden="true"><path class="edge edge-contains" d="M 1 5 L 25 5"></path></svg>
+    <span>containment — why a box is here, not a path</span>
+  </span>
+  <span class="key">
+    <svg width="14" height="14" aria-hidden="true" class="state-down">
+      <rect class="node-box" x="0.5" y="0.5" width="13" height="13" rx="3"></rect>
+      <rect class="node-rail" x="0.5" y="0.5" width="3" height="13" rx="1.5"></rect>
+    </svg>
+    <span>the coloured edge is observed health, exactly as elsewhere</span>
+  </span>
+</div>
+{{end}}

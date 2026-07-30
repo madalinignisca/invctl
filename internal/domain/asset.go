@@ -84,6 +84,7 @@ const (
 	KindCluster    = "cluster"
 	KindVM         = "vm"
 	KindK8sNode    = "k8s_node"
+	KindBridge     = "bridge"
 	KindStorage    = "storage"
 )
 
@@ -104,7 +105,8 @@ const (
 // architecture decision and not a refactor.
 var AssetKinds = []string{
 	KindSite, KindRack, KindPDU, KindFirewall, KindSwitch, KindPatchPanel,
-	KindServer, KindHypervisor, KindCluster, KindVM, KindK8sNode, KindStorage,
+	KindServer, KindHypervisor, KindCluster, KindVM, KindK8sNode, KindBridge,
+	KindStorage,
 }
 
 // Lifecycle values. Nothing is ever hard-deleted (HANDOVER §3.7); retirement

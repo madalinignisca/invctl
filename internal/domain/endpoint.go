@@ -30,6 +30,18 @@ var BindScopes = []string{
 	BindLoopback, BindHost, BindVIP, BindClusterIP, BindNodePort, BindIngress, BindUnix,
 }
 
+// IsLocalBind reports whether a socket's traffic never leaves the host it is on.
+//
+// It lives here rather than in one consumer because two of them now depend on
+// it agreeing with itself. The impact engine exempts these binds from network
+// reasoning entirely -- a loopback listener cannot be partitioned from anything
+// -- and the neighbourhood diagram must not draw a line implying traversal for
+// the same socket. A second copy of this rule anywhere would eventually let the
+// picture contradict the engine, which is the worst failure either can have.
+func IsLocalBind(scope string) bool {
+	return scope == BindLoopback || scope == BindUnix
+}
+
 // TLSModes is the Go side of the endpoint.tls_mode CHECK constraint.
 var TLSModes = []string{"none", "tls", "mtls", "starttls"}
 

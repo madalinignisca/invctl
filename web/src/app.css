@@ -709,3 +709,175 @@ form.htmx-request .btn-primary { opacity: 0.6; pointer-events: none; }
 /* Wide content scrolls inside its own container rather than making the page
    scroll sideways. */
 .scroll-x { overflow-x: auto; }
+
+/* Alpine hides these until it has initialised, so a control that only works
+   with JavaScript is never offered to a browser that will not run it. */
+[x-cloak] { display: none !important; }
+
+/* ---------------------------------------------------------------------------
+   Neighbourhood diagram
+   ---------------------------------------------------------------------------
+   Three rules decide everything below.
+
+   POSITION carries the layer. A band is a transport reality, and which band a
+   node is in is the whole answer to "where does this connection live" -- so no
+   layer has a colour, and turning one off changes the layout rather than
+   hiding a stripe.
+
+   STROKE carries the kind of connection. A cable, a containment, a socket
+   descending to the port that carries it and a declared dependency are four
+   different claims, and a layered diagram whose adjacency and whose descent
+   share a stroke is three unrelated pictures with lines on top.
+
+   HUE carries status and nothing else. There are four hues in this palette and
+   statusClass, healthClass and natureClass have already claimed all of them for
+   health; spending one on a layer would make a down service in the virtual band
+   ambiguous. Crimson and amber never appear on an edge, because an operator
+   reads them as a fault and an edge has no health to report.
+
+   No hex values, and no fill= or stroke= presentation attributes on the
+   elements themselves: var() is not valid inside an SVG presentation attribute
+   -- fill="var(--crimson)" renders black -- so every colour is a class and
+   every rule is here, which is also what makes the light-mode remap work
+   without a second design.
+
+   Nothing here sets a size on node text. The box widths were computed in Go
+   from the diagram package's constants; a font-size here that disagreed would
+   make every box in the picture the wrong width. */
+
+.diag { margin-bottom: 12px; }
+
+.diag-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.diag-zoom {
+  color: var(--muted);
+  font-size: 11.5px;
+  min-width: 4em;
+  text-align: center;
+}
+
+.diag-pane {
+  overflow: auto;
+  max-height: 72vh;
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+  background: var(--ink);
+  touch-action: pan-x pan-y;
+}
+
+.diag-pane svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+.diag text {
+  font-family: var(--font-mono);
+  fill: var(--text);
+  font-variant-ligatures: none;
+}
+
+.diag .band-label {
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  fill: var(--faint);
+}
+
+.diag .node-label  { font-size: 11.5px; text-anchor: middle; }
+.diag .node-caption { font-size: 10px; text-anchor: middle; fill: var(--muted); }
+
+.diag .node-box {
+  fill: var(--surface);
+  stroke: var(--line);
+  stroke-width: 1;
+}
+
+/* The signature device, in a box rather than a table row: a 3px coloured left
+   edge over a neutral body. Healthy is quiet -- an "ok" rail is the same line
+   colour as the border, so a picture of a healthy estate is grey and the eye is
+   spent on whatever is not. */
+.diag .node-rail          { fill: var(--line); }
+.diag .state-unknown  .node-rail { fill: var(--line-soft); }
+.diag .state-degraded .node-rail { fill: var(--amber); }
+.diag .state-down     .node-rail { fill: var(--crimson); }
+
+.diag .is-subject .node-box {
+  stroke: var(--aqua);
+  stroke-width: 1.5;
+}
+
+.diag a { text-decoration: none; }
+.diag a:hover .node-box { stroke: var(--muted); }
+.diag a:hover .node-label { fill: var(--aqua); }
+.diag a:focus-visible .node-box { stroke: var(--aqua); stroke-width: 1.5; }
+
+.diag .edge {
+  fill: none;
+  stroke: var(--muted);
+  stroke-width: 1.4;
+  vector-effect: non-scaling-stroke;
+}
+
+/* Containment is not a transport reality. It is drawn faintly because it is
+   there to explain why a box is in the picture, never to suggest that traffic
+   flows along it. */
+.diag .edge-contains {
+  stroke: var(--line);
+  stroke-width: 1;
+  stroke-dasharray: 1 4;
+}
+
+/* The descent: a listening socket resolving down to the host or the port that
+   carries it. It is the line this whole feature exists to draw, so it is the
+   one that catches the eye -- in aqua, which is the palette's "look here"
+   colour and never its fault colour. */
+.diag .edge-descent { stroke: var(--aqua); }
+
+/* A placement whose sockets never leave the box: loopback, a unix path, or no
+   listening socket at all. It says "this runs here" and makes no claim
+   whatsoever about a path a packet takes. */
+.diag .edge-local {
+  stroke: var(--line);
+  stroke-width: 1;
+  stroke-dasharray: 4 4;
+}
+
+/* Dependency nature is failure semantics, so it is a dash pattern: a hard edge
+   transmits everything and is solid, an optional one transmits nothing and is
+   barely there. */
+.diag .edge-dependency  { stroke-width: 1.2; }
+.diag .nature-hard      { stroke-width: 1.6; }
+.diag .nature-soft,
+.diag .nature-async     { stroke-dasharray: 5 3; }
+.diag .nature-startup   { stroke-dasharray: 2 3; }
+.diag .nature-optional  { stroke-dasharray: 1 4; stroke: var(--line); }
+
+.diag-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.diag-legend .key {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* A 22px sample of the same stroke the picture uses, so the legend cannot
+   describe a line the diagram does not draw. */
+.diag-legend svg { display: block; }
+
+.diag-note {
+  color: var(--amber);
+  font-size: 12.5px;
+  margin-top: 8px;
+}

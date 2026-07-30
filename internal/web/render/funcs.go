@@ -45,8 +45,20 @@ func funcs() template.FuncMap {
 			}
 			return total
 		},
-		"seq": seq,
+		"seq":   seq,
+		"coord": coord,
 	}
+}
+
+// coord formats an SVG coordinate.
+//
+// One decimal place, always: Go's default float formatting would put
+// `1.0000000000000002` in an attribute, and a diagram whose numbers are
+// rendered differently on two machines is not the same diagram. Rounding is
+// safe because the layout's own metrics are whole pixels -- this is
+// presentation, and the arithmetic that decided the number happened in Go.
+func coord(v float64) string {
+	return strconv.FormatFloat(v, 'f', 1, 64)
 }
 
 // seq returns 0..n-1 so a template can repeat an element a computed number of

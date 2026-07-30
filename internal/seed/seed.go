@@ -78,6 +78,12 @@ func Load(ctx context.Context, s *store.SQLStore) (*Refs, error) {
 	b.environments()
 	b.physical()
 	b.networking()
+	// The bridges hang off the hypervisors physical() built and land on the
+	// bonds networking() declared, so it follows both. It sits ahead of
+	// topology() only for readability -- a bridge takes no topology row and
+	// inherits its host's attachment through asset_closure, which is the same
+	// thing every guest already does.
+	b.virtual()
 	// topology reads asset ids and interface ids, so it has to follow both of
 	// the phases above. It sits here rather than at the end because the groups
 	// it declares are a reading of the cable plant networking() just laid.
@@ -244,12 +250,7 @@ func (b *builder) physical() {
 		a.OwnerTeam = str("network")
 	})
 
-	hypervisors := []struct{ name, rack, serial string }{
-		{"hv-01", "rack-a1", "FCH2033V0YR"},
-		{"hv-02", "rack-a1", "FCH2033V0YS"},
-		{"hv-03", "rack-b1", "FCH2033V0YT"},
-	}
-	for _, h := range hypervisors {
+	for _, h := range hypervisors() {
 		hh := h
 		b.asset(domain.KindHypervisor, hh.name, hh.rack, []string{"prod"}, func(a *domain.Asset) {
 			a.Vendor, a.Model = str("Dell"), str("PowerEdge R650")
@@ -262,31 +263,56 @@ func (b *builder) physical() {
 	// three hypervisors so that losing one is survivable and losing a rack is
 	// not; the two backend services deliberately share a host so the
 	// route-as-node case has something to prove.
-	vms := []struct{ name, host, kind string }{
-		{"vm-vault-1", "hv-01", domain.KindVM},
-		{"vm-db-1", "hv-01", domain.KindVM},
-		{"vm-app-1", "hv-01", domain.KindVM},
-		{"vm-vault-2", "hv-02", domain.KindVM},
-		{"vm-db-2", "hv-02", domain.KindVM},
-		{"vm-proxy-1", "hv-02", domain.KindVM},
-		{"vm-queue-1", "hv-02", domain.KindVM},
-		{"vm-vault-3", "hv-03", domain.KindVM},
-		{"vm-sso-1", "hv-03", domain.KindVM},
-		{"vm-k8s-1", "hv-03", domain.KindK8sNode},
-		{"vm-k8s-2", "hv-03", domain.KindK8sNode},
-	}
-	for _, vm := range vms {
-		b.asset(vm.kind, vm.name, vm.host, []string{"prod"}, func(a *domain.Asset) {
-			a.OwnerTeam = str("platform")
+	//
+	// The development VM at the end of the list sits on production hardware but
+	// in the development environment -- which is exactly the kind of thing this
+	// tool exists to make visible.
+	for _, g := range guests() {
+		gg := g
+		b.asset(gg.kind, gg.name, gg.host, []string{gg.env}, func(a *domain.Asset) {
+			a.OwnerTeam = str(gg.team)
 		})
 	}
+}
 
-	// The development VM sits on production hardware but in the development
-	// environment -- which is exactly the kind of thing this tool exists to
-	// make visible.
-	b.asset(domain.KindVM, "vm-dev-1", "hv-03", []string{"dev"}, func(a *domain.Asset) {
-		a.OwnerTeam = str("developers")
-	})
+// hypervisor is one physical compute host.
+type hypervisor struct{ name, rack, serial string }
+
+// hypervisors is the compute inventory, shared by physical() and by the virtual
+// layer that hangs a bridge off each one.
+func hypervisors() []hypervisor {
+	return []hypervisor{
+		{"hv-01", "rack-a1", "FCH2033V0YR"},
+		{"hv-02", "rack-a1", "FCH2033V0YS"},
+		{"hv-03", "rack-b1", "FCH2033V0YT"},
+	}
+}
+
+// guest is one VM or k8s node and where it runs.
+type guest struct{ name, host, kind, env, team string }
+
+// guests is the placement table.
+//
+// It is a function rather than two literals inside physical() because the
+// virtual layer has to cable exactly these guests to exactly their host's
+// bridge, in this order. Two copies of the placement table would drift, and the
+// symptom would be a guest whose veth lands on another hypervisor's bridge --
+// a diagram that confidently draws a wire that does not exist.
+func guests() []guest {
+	return []guest{
+		{"vm-vault-1", "hv-01", domain.KindVM, "prod", "platform"},
+		{"vm-db-1", "hv-01", domain.KindVM, "prod", "platform"},
+		{"vm-app-1", "hv-01", domain.KindVM, "prod", "platform"},
+		{"vm-vault-2", "hv-02", domain.KindVM, "prod", "platform"},
+		{"vm-db-2", "hv-02", domain.KindVM, "prod", "platform"},
+		{"vm-proxy-1", "hv-02", domain.KindVM, "prod", "platform"},
+		{"vm-queue-1", "hv-02", domain.KindVM, "prod", "platform"},
+		{"vm-vault-3", "hv-03", domain.KindVM, "prod", "platform"},
+		{"vm-sso-1", "hv-03", domain.KindVM, "prod", "platform"},
+		{"vm-k8s-1", "hv-03", domain.KindK8sNode, "prod", "platform"},
+		{"vm-k8s-2", "hv-03", domain.KindK8sNode, "prod", "platform"},
+		{"vm-dev-1", "hv-03", domain.KindVM, "dev", "developers"},
+	}
 }
 
 // ---------- networking ----------
@@ -335,6 +361,31 @@ func (b *builder) networking() {
 		speed                              int
 		mgmt                               bool
 	}
+	// masters enslaves a port to a bond, keyed and valued as "asset/interface".
+	// Kept beside the table rather than as an eighth positional field, because
+	// six ports have a master and every other row in the table below would
+	// carry an empty string apiece to say so.
+	//
+	// This is the first thing in the repository to write interface.lag_parent_id
+	// with intent. CreateInterface has always persisted the column and nothing
+	// has ever set it, so the self-referencing foreign key it declares had never
+	// been exercised by any fixture on either engine.
+	//
+	// A master must be created BEFORE its members, since the id is resolved out
+	// of b.interfaceIDs -- hence bond0 sitting above eno2/eno3 below.
+	masters := map[string]string{
+		"hv-01/eno2": "hv-01/bond0",
+		"hv-01/eno3": "hv-01/bond0",
+		"hv-02/eno2": "hv-02/bond0",
+		"hv-02/eno3": "hv-02/bond0",
+		"hv-03/eno2": "hv-03/bond0",
+		// hv-03/eno3 is a configured member of hv-03's bond and carries no
+		// cable, which is exactly what "the bond has two slots and one is
+		// patched" looks like in a real estate. Enslaving it keeps hv-03's
+		// single-homing a cabling decision rather than a missing NIC, which is
+		// what the comment on the port itself has always claimed.
+		"hv-03/eno3": "hv-03/bond0",
+	}
 	ifaces := []iface{
 		{"sw-core-1", "Ethernet1", domain.FFSFP28, "aa:bb:cc:00:01:01", "", 25000, false},
 		{"sw-core-1", "Ethernet2", domain.FFSFP28, "aa:bb:cc:00:01:02", "", 25000, false},
@@ -372,6 +423,23 @@ func (b *builder) networking() {
 		{"hv-01", "eno1", domain.FFSFP28, "aa:bb:cc:00:10:01", "10.20.10.11", 25000, true},
 		{"hv-02", "eno1", domain.FFSFP28, "aa:bb:cc:00:10:02", "10.20.10.12", 25000, true},
 		{"hv-03", "eno1", domain.FFSFP28, "aa:bb:cc:00:10:03", "10.20.10.13", 25000, true},
+
+		// The bond each hypervisor's data NICs are enslaved to, and the port a
+		// bridge actually lands on. A host dual-homed into an MC-LAG pair does
+		// not hand a bridge one of its two cables -- it bonds them and gives the
+		// bridge the bond -- so this had to exist before the bridges in
+		// seed_virtual.go could be modelled at all. Speed is the aggregate of
+		// the CABLED members: 2x25G on hv-01 and hv-02, 25G on hv-03, whose
+		// second slot is configured and unpatched.
+		//
+		// No MAC. Linux clones a bond's address from its first member rather
+		// than assigning one, so a distinct value here would be a fabricated
+		// fact and the member's own value would put one address on two rows;
+		// every other virtual port in this fixture leaves it empty too.
+		{"hv-01", "bond0", domain.FFLAG, "", "", 50000, false},
+		{"hv-02", "bond0", domain.FFLAG, "", "", 50000, false},
+		{"hv-03", "bond0", domain.FFLAG, "", "", 25000, false},
+
 		{"hv-01", "eno2", domain.FFSFP28, "aa:bb:cc:00:11:01", "", 25000, false},
 		{"hv-02", "eno2", domain.FFSFP28, "aa:bb:cc:00:11:02", "", 25000, false},
 		{"hv-03", "eno2", domain.FFSFP28, "aa:bb:cc:00:11:03", "", 25000, false},
@@ -411,6 +479,14 @@ func (b *builder) networking() {
 		}
 		iface.SpeedMbps = num(i.speed)
 		iface.IsMgmt = i.mgmt
+		if master, ok := masters[i.asset+"/"+i.name]; ok {
+			masterID, ok := b.interfaceIDs[master]
+			if !ok {
+				b.fail(fmt.Errorf("seeding interface %s/%s: unknown master %s", i.asset, i.name, master))
+				return
+			}
+			iface.LagParentID = &masterID
+		}
 		if i.mac != "" {
 			if err := iface.SetMAC(i.mac); err != nil {
 				b.fail(fmt.Errorf("setting mac on %s/%s: %w", i.asset, i.name, err))

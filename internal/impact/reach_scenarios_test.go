@@ -602,10 +602,29 @@ func designScenarios() []scenarioCase {
 						Via: "orders-api/http", Lost: 0, Total: 1, ToIsolation: 0},
 				})
 
-				// The six the design names by hand: hv-03 plus the five guests
-				// that own no attachment row and inherit through asset_closure.
+				// The six the design names by hand -- hv-03 plus the five guests
+				// that own no attachment row and inherit through asset_closure --
+				// and, since the virtual layer landed, hv-03's bridge as well.
+				//
+				// hv-03-br0 is here because it is a real asset contained by
+				// hv-03, and the guarantee this scenario defends says "hv-03 AND
+				// EVERYTHING IT CONTAINS is isolated". Nothing about the engine
+				// changed; the estate gained a seventh asset behind the same
+				// exhausted pin, and it inherits the attachment by exactly the
+				// mechanism the five guests do. The list is a census of the
+				// fixture, not a design constant, so it grows when the fixture
+				// does.
+				//
+				// Worth a second look at some point, and deliberately NOT
+				// changed here: a bridge is neither a workload host nor a
+				// forwarder anyone can go and touch, so listing it beside the
+				// hypervisor it lives inside adds a row an operator cannot act
+				// on. Narrowing computeIsolated -- to assets that host instances
+				// or own an attachment, say -- would drop it and keep all six
+				// originals, but that is an impact-engine semantics change and
+				// belongs in its own decision, not in a seed change.
 				s.assertIsolated(t, domain.PlaneData, "sw-core", []string{
-					"hv-03", "vm-vault-3", "vm-sso-1", "vm-k8s-1", "vm-k8s-2", "vm-dev-1",
+					"hv-03", "hv-03-br0", "vm-vault-3", "vm-sso-1", "vm-k8s-1", "vm-k8s-2", "vm-dev-1",
 				})
 
 				// This is isolation, not partition: the host has no surviving
@@ -1240,9 +1259,10 @@ func designScenarios() []scenarioCase {
 				}
 
 				// And the cycle changed nothing: the second edge joins two
-				// groups that were already in one component.
+				// groups that were already in one component. Same census as
+				// scenario 4, hv-03's bridge included -- see the note there.
 				s.assertIsolated(t, domain.PlaneData, "sw-core", []string{
-					"hv-03", "vm-vault-3", "vm-sso-1", "vm-k8s-1", "vm-k8s-2", "vm-dev-1",
+					"hv-03", "hv-03-br0", "vm-vault-3", "vm-sso-1", "vm-k8s-1", "vm-k8s-2", "vm-dev-1",
 				})
 			},
 		},

@@ -12,20 +12,20 @@ import (
 // FAILED before the change.
 //
 // A lookup table exists so that a value can be added as data. A constructor
-// that hard-fails against a fixed Go slice defeats that entirely: insert
-// `bridge` into asset_kind and NewAsset would still refuse it, so the operator
-// would have added a row that nothing can use. Every constructor below must
+// that hard-fails against a fixed Go slice defeats that entirely: insert `vrf`
+// into asset_kind and NewAsset would still refuse it, so the operator would
+// have added a row that nothing can use. Every constructor below must
 // therefore accept a well-formed code it has never heard of, and leave
 // existence to the foreign key.
 func TestConstructorsAcceptUnknownVocabularyValues(t *testing.T) {
 	now := time.Now()
 
 	t.Run("asset kind", func(t *testing.T) {
-		a, err := NewAsset("id", "bridge", "br-01", nil, now)
+		a, err := NewAsset("id", "vrf", "vrf-red", nil, now)
 		if err != nil {
 			t.Fatalf("NewAsset rejected an unknown kind: %v", err)
 		}
-		if a.Kind != "bridge" {
+		if a.Kind != "vrf" {
 			t.Errorf("kind = %q, want it stored unchanged", a.Kind)
 		}
 	})
@@ -151,9 +151,9 @@ func TestBehaviouralEnumsStayClosed(t *testing.T) {
 // A vocabulary code is a stable machine identifier: it is a primary key, it
 // travels in query strings, and both engines compare it byte for byte. Shape is
 // what a constructor can still usefully assert without knowing the list --
-// whether `bridge` is a real asset kind is a question only the table can
-// answer, but " bridge\n" is wrong whatever the table says, because it looks
-// identical to a code it is not equal to.
+// whether `vrf` is a real asset kind is a question only the table can answer,
+// but " vrf\n" is wrong whatever the table says, because it looks identical to
+// a code it is not equal to.
 func TestVocabularyShapeRules(t *testing.T) {
 	cases := []struct {
 		name    string

@@ -1,0 +1,27 @@
+{{define "content"}}
+<div class="crumbs">
+  <a href="/assets">assets</a>
+  {{range .Ancestors}}<span class="sep">/</span><a href="/assets/{{.ID}}">{{.Name}}</a>{{end}}
+  <span class="sep">/</span><a href="/assets/{{.Asset.ID}}">{{.Asset.Name}}</a>
+  <span class="sep">/</span><span>neighbourhood</span>
+</div>
+
+<div class="page-head">
+  <div class="eyebrow">Layered connectivity</div>
+  <h1>What <span class="mono">{{.Asset.Name}}</span> is plugged into</h1>
+  <p class="lede">
+    One asset and what it actually touches, out to a few hops — not the whole
+    estate, which is unreadable at any size. The three bands are three different
+    transport realities: services listening on sockets, the virtual adjacency
+    inside a host, and the wires between ports. They stack, so a line in the
+    service layer can be followed down to a line in the physical one.
+  </p>
+</div>
+
+<div style="margin-bottom:18px">
+  <a class="btn" href="/assets/{{.Asset.ID}}">Back to {{.Asset.Name}}</a>
+  <a class="btn" href="/assets/{{.Asset.ID}}/impact">Simulate losing this</a>
+</div>
+
+{{template "neighbourhood_panel" .}}
+{{end}}

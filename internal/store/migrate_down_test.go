@@ -92,10 +92,10 @@ func TestDownSurvivesAVocabularyValueAddedAsData(t *testing.T) {
 			w := db.Writer
 			if _, err := w.Exec(w.Rebind(
 				`INSERT INTO asset_kind (code, label, sort_order, can_host_instances, is_attachable)
-				 VALUES (?, ?, ?, TRUE, TRUE)`), "bridge", "Virtual bridge", 130); err != nil {
+				 VALUES (?, ?, ?, TRUE, TRUE)`), "vrf", "VRF", 135); err != nil {
 				t.Fatalf("adding the kind: %v", err)
 			}
-			br, err := domain.NewAsset(NewID(), "bridge", "br0", nil, s.Now())
+			br, err := domain.NewAsset(NewID(), "vrf", "vrf-red", nil, s.Now())
 			if err != nil {
 				t.Fatalf("building the asset: %v", err)
 			}

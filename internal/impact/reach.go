@@ -611,9 +611,11 @@ func (m *reachModel) groupCode(groupID string) string {
 // Seam 1 -- needs-network
 // ---------------------------------------------------------------------------
 
-func isLocalBind(scope string) bool {
-	return scope == domain.BindLoopback || scope == domain.BindUnix
-}
+// isLocalBind delegates to the domain rule rather than restating it. The
+// neighbourhood diagram asks the same question -- "does this socket's traffic
+// leave the box?" -- and a second copy here would let the picture and the
+// engine drift into contradicting each other about the same endpoint.
+func isLocalBind(scope string) bool { return domain.IsLocalBind(scope) }
 
 // providerEndpointForDep resolves whatever a dependency points at down to the
 // endpoint whose bind scope actually matters: the frontend endpoint of a
