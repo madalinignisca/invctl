@@ -125,13 +125,31 @@
             <title id="diagram-title">{{.Title}}</title>
             <desc id="diagram-desc">{{.Desc}}</desc>
 
+            {{/* Arrowheads for dependency edges: the consumer's line ends in an
+                 arrow at its provider, so "depends on" reads along the line.
+                 Two defs because an optional dependency is drawn in the faint
+                 line colour and its arrow has to match -- fills are in app.css
+                 with the rest of the edge palette. */}}
+            <defs>
+              <marker id="arrow-dep" viewBox="0 0 8 8" refX="6.5" refY="4"
+                      markerWidth="7" markerHeight="7"
+                      markerUnits="userSpaceOnUse" orient="auto">
+                <path d="M 0 0 L 8 4 L 0 8 Z"></path>
+              </marker>
+              <marker id="arrow-dep-faint" viewBox="0 0 8 8" refX="6.5" refY="4"
+                      markerWidth="7" markerHeight="7"
+                      markerUnits="userSpaceOnUse" orient="auto">
+                <path d="M 0 0 L 8 4 L 0 8 Z"></path>
+              </marker>
+            </defs>
+
             {{range .Bands}}
               <text class="band-label" x="2" y="{{coord .LabelY}}">{{.Label}}</text>
             {{end}}
 
             {{/* Edges first, so a line never covers the box it lands on. */}}
             {{range .Edges}}
-              <path class="{{.Class}}" d="{{.D}}"><title>{{.Title}}</title></path>
+              <path class="{{.Class}}" d="{{.D}}"{{if .Marker}} marker-end="url(#{{.Marker}})"{{end}}><title>{{.Title}}</title></path>
             {{end}}
 
             {{range .Nodes}}
@@ -240,8 +258,8 @@
     <span>runs here; the socket never leaves the box</span>
   </span>
   <span class="key">
-    <svg width="26" height="10" aria-hidden="true"><path class="edge edge-dependency nature-hard" d="M 1 5 L 25 5"></path></svg>
-    <span>a declared dependency, dashed by how much it transmits</span>
+    <svg width="26" height="10" aria-hidden="true"><path class="edge edge-dependency nature-hard" d="M 1 5 L 21 5" marker-end="url(#arrow-dep)"></path></svg>
+    <span>a declared dependency, the arrow at what it depends on</span>
   </span>
   <span class="key">
     <svg width="26" height="10" aria-hidden="true"><path class="edge edge-contains" d="M 1 5 L 25 5"></path></svg>

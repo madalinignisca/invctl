@@ -152,7 +152,7 @@ type Edge struct {
 	// FromLayer and ToLayer are the layers of the two endpoints.
 	FromLayer, ToLayer Layer
 	// SameBand reports whether both endpoints landed in the same band. A
-	// same-band edge is drawn as an arc in that band's arc lane; a cross-band
+	// same-band edge is drawn as a rail in that band's arc lane; a cross-band
 	// edge is drawn as a line through the gutter. They must not look alike --
 	// a layered diagram whose adjacency and whose descent share a stroke is
 	// three unrelated pictures with lines on top.
@@ -162,27 +162,24 @@ type Edge struct {
 	// of which end is higher up the page.
 	X1, Y1, X2, Y2 float64
 
-	// Depth is how far below the row a same-band arc dips at its lowest point,
-	// and 0 for a cross-band edge. Nested arcs get increasing depths so that a
-	// span drawn inside another span is visible as a separate line.
+	// Depth is how far below the row a same-band rail runs, and 0 for a
+	// cross-band edge. Overlapping spans get distinct depths, nested spans
+	// strictly increasing ones, so a span drawn inside another is a separate
+	// visible line and never pokes through its container -- see arcDepths.
 	Depth float64
-	// CX, CY is the control point for a quadratic curve through that dip:
-	// "M X1 Y1 Q CX CY X2 Y2". It is a control point and not a point on the
-	// curve, so CY sits twice Depth below the row. Zero for a cross-band edge,
-	// which is a straight line.
-	CX, CY float64
 
 	// Waypoints are points the edge must pass through, in draw order, between
-	// its two anchors. Empty for a same-band arc and for a cross-band edge
-	// between adjacent bands, both of which reach their far end without
-	// entering a row of boxes.
+	// its two anchors. The renderer joins them with straight segments; only a
+	// cross-band edge between adjacent bands has none, because the gutter it
+	// crosses is empty by construction.
 	//
-	// An edge spanning more than one band cannot: a service instance placed
-	// directly on bare metal joins band 3 to band 1, and the straight line
-	// between them goes through band 2's row. So it is routed through a
-	// channel -- the gap between two boxes -- in each band it passes, which is
-	// what keeps the guarantee in place's doc comment true rather than nearly
-	// true. Points come in pairs, one just outside each side of the row.
+	// A same-band edge carries exactly two: the ends of its rail, Depth below
+	// the row. An edge spanning more than one band carries a pair per
+	// intervening band: a service instance placed directly on bare metal
+	// joins band 3 to band 1, and the straight line between them goes through
+	// band 2's row, so it is routed through a channel -- the gap between two
+	// boxes -- in each band it passes. Both are what keep the guarantee in
+	// place's doc comment true rather than nearly true.
 	Waypoints []Point
 
 	// Parallel is this edge's index among the edges joining the same pair of
@@ -217,13 +214,16 @@ func (b Band) Bottom() float64 { return b.Y + b.Height + b.ArcLane }
 // Crossings reports how many pairs of edges cross, before and after ordering,
 // so a test can assert the heuristic earned its place.
 //
-// The count is defined per band pair: two edges are compared only when they
-// join the same two bands (or both live inside the same band), because that is
-// where the comparison is exact -- within a band pair, slot order and x order
-// agree, so an inversion is a crossing and nothing else is. An edge that skips
-// a band is not counted against the edges of the band it passes behind. The
-// number is therefore a comparable objective rather than a pixel census, and
-// it is the objective the ordering actually minimises.
+// The count is defined where slot arithmetic is exact: two edges joining the
+// same two bands (or both inside one band) cross on an inversion, and a
+// same-band rail is pierced by a cross-band edge leaving a box strictly
+// inside its span -- both are facts of the ordering alone. An edge that skips
+// a band entirely is not counted against that band's rails, because its
+// crossing point is a channel chosen at placement, which the ordering cannot
+// see. The number is therefore a comparable objective rather than a pixel
+// census, and it is the objective the ordering actually minimises;
+// Layout.DrawnCrossings is the census, and the two agree everywhere the
+// objective claims to count.
 //
 // Before is measured on the seed ordering, which is the caller's node order
 // with the subject already moved to the middle of its band; After is the

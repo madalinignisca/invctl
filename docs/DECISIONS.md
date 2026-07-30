@@ -977,3 +977,46 @@ migration can switch that off.
 The pragmas are removed rather than left in place, with a comment where the first one was
 saying why. A statement that reads like a safety net and is not one is worse than no
 statement, because the next person reads it and stops looking.
+
+## 2026-07-30 — Same-band edges are rails, not curves
+
+The neighbourhood diagram drew a same-band connection as a quadratic arc dipping
+into its band's lane, nested spans at increasing depths. The depth system's whole
+purpose was that a span drawn inside another stays inside it. For curves that is
+unachievable: near a shared endpoint the long arc is necessarily shallower than
+the short one — its control point is far away — so the short arc dips below and
+must come back through, whatever depths are assigned. Holding the containment
+would need depth superlinear in span, which no lane can afford. This is a property
+of the curve family, not a bug in the depth assignment.
+
+Measured over 4000 generated neighbourhoods, the curves drew 36,608 crossings
+between arcs sharing an endpoint — none counted by anything, because both the
+ordering model and the tests treated a shared endpoint as a junction.
+
+So same-band edges are now **rails**: straight down from the anchor, along at the
+assigned depth, straight up. Flat profiles make "deeper" mean *below at every
+shared x*, and three consequences follow:
+
+- **Depths became a real interval colouring.** Overlapping spans must not share a
+  depth (collinear runs read as one line); contained spans must be strictly
+  shallower than their container. The old level cap is gone — the lane is sized
+  from what is assigned, and the level only grows with real nesting or a real
+  overlap clique.
+- **Anchors fan along the box edge**, deepest innermost, step shrinking so every
+  rail keeps a distinct vertical even on a hub (a clamped shared anchor was
+  measured to reintroduce 255 crossings; the shrinking step reintroduces zero).
+- **The drawn geometry now equals the ordering model for same-band pairs by
+  construction** — interleave crosses exactly once, nesting and disjointness
+  cross zero times — so the model gained a term it could finally afford: a rail
+  pierced by a cross-band edge leaving a box strictly inside its span. The sweep
+  now minimises piercings it previously created freely (8,534 → 5,818 drawn on
+  the corpus). `Layout.DrawnCrossings` measures the placed polylines and is the
+  number a legibility claim must cite; the slot model remains the optimiser's
+  objective, and the residual gaps between them are enumerated in measure.go.
+
+Corpus totals: 56,142 drawn crossings with curves, 17,020 with rails; the
+shared-endpoint class went to zero. On the seeded 27-asset estate: 1,415 → 773.
+
+Dependency edges also gained an arrowhead at the provider end (`marker-end`,
+two defs so an optional dependency's arrow matches its faint stroke) — direction
+was previously carried only in hover text.

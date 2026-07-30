@@ -117,18 +117,31 @@ func TestEdgePathFollowsItsWaypoints(t *testing.T) {
 	}
 }
 
-// TestEdgePathWithoutWaypointsIsUnchanged guards the ordinary cases against the
-// waypoint branch: the overwhelming majority of edges have no waypoints, and a
-// straight line between adjacent bands should stay a straight line.
-func TestEdgePathWithoutWaypointsIsUnchanged(t *testing.T) {
+// TestEdgePathDrawsTheLayoutsPolyline guards the two shapes against each
+// other: an adjacent-band line stays the straight line the layout placed, and
+// a rail is drawn exactly along its waypoints -- with no parallel fan, because
+// parallel rails were already pulled apart by depth and anchor, and fanning
+// them sideways would slant the verticals out of their boxes.
+func TestEdgePathDrawsTheLayoutsPolyline(t *testing.T) {
 	cross := diagram.Edge{X1: 100, Y1: 58, X2: 200, Y2: 130}
 	if got, want := edgePath(cross), "M 100.0 58.0 L 200.0 130.0"; got != want {
 		t.Errorf("adjacent-band edge = %q, want %q", got, want)
 	}
 
-	arc := diagram.Edge{SameBand: true, X1: 100, Y1: 58, X2: 300, Y2: 58, CX: 200, CY: 86, Depth: 14}
-	if got, want := edgePath(arc), "M 100.0 58.0 Q 200.0 86.0 300.0 58.0"; got != want {
-		t.Errorf("same-band arc = %q, want %q", got, want)
+	rail := diagram.Edge{
+		SameBand: true, X1: 100, Y1: 58, X2: 300, Y2: 58, Depth: 14,
+		Waypoints: []diagram.Point{{X: 100, Y: 72}, {X: 300, Y: 72}},
+	}
+	want := "M 100.0 58.0 L 100.0 72.0 L 300.0 72.0 L 300.0 58.0"
+	if got := edgePath(rail); got != want {
+		t.Errorf("rail = %q, want %q", got, want)
+	}
+
+	parallelRail := rail
+	parallelRail.Parallel, parallelRail.ParallelCount = 1, 2
+	if got := edgePath(parallelRail); got != want {
+		t.Errorf("a parallel rail = %q, want it drawn unfanned at %q -- the layout "+
+			"already separated parallels by depth", got, want)
 	}
 
 	fanned := cross
@@ -136,6 +149,21 @@ func TestEdgePathWithoutWaypointsIsUnchanged(t *testing.T) {
 	if got := edgePath(fanned); !strings.Contains(got, "Q") {
 		t.Errorf("a fanned adjacent-band edge = %q, want a curve so the pair does not "+
 			"read as one line", got)
+	}
+}
+
+// TestDependencyMarker: the arrow matches the stroke it sits on. An optional
+// dependency is drawn in the faint line colour; giving it the standard arrow
+// would promote the least consequential edge in the picture.
+func TestDependencyMarker(t *testing.T) {
+	for nature, want := range map[string]string{
+		"hard": "arrow-dep", "soft": "arrow-dep", "async": "arrow-dep",
+		"startup": "arrow-dep", "": "arrow-dep",
+		"optional": "arrow-dep-faint",
+	} {
+		if got := dependencyMarker(nature); got != want {
+			t.Errorf("dependencyMarker(%q) = %q, want %q", nature, got, want)
+		}
 	}
 }
 

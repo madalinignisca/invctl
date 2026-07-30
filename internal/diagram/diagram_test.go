@@ -313,25 +313,87 @@ func checkInvariants(t *testing.T, l *Layout, in Input) {
 		if !ok {
 			t.Fatalf("edge %d references %q, which Layout.Node cannot find", i, e.To)
 		}
-		if math.Abs(e.X1-from.CenterX()) > eps || math.Abs(e.X2-to.CenterX()) > eps {
-			t.Errorf("edge %d does not anchor on its own endpoints' centres", i)
-		}
 		if e.SameBand != (from.Layer == to.Layer) {
 			t.Errorf("edge %d reports SameBand=%v for layers %s and %s",
 				i, e.SameBand, from.Layer, to.Layer)
 		}
 		if !e.SameBand {
+			// A cross-band edge anchors dead centre; only rails are fanned.
+			if math.Abs(e.X1-from.CenterX()) > eps || math.Abs(e.X2-to.CenterX()) > eps {
+				t.Errorf("edge %d does not anchor on its own endpoints' centres", i)
+			}
 			if e.Depth != 0 {
 				t.Errorf("edge %d crosses bands and should not dip, got Depth=%v", i, e.Depth)
 			}
 			checkClearsEveryBox(t, l, i, e)
 			continue
 		}
+		// A rail hangs from anywhere along its boxes' bottom edges -- the fan
+		// is the point -- but never outside them, or the vertical would drop
+		// through open space and read as unanchored.
+		if e.X1 < from.X-eps || e.X1 > from.Right()+eps ||
+			e.X2 < to.X-eps || e.X2 > to.Right()+eps {
+			t.Errorf("edge %d anchors at x=%v and x=%v, outside its boxes (%v..%v and %v..%v)",
+				i, e.X1, e.X2, from.X, from.Right(), to.X, to.Right())
+		}
+		if len(e.Waypoints) != 2 {
+			t.Fatalf("same-band edge %d has %d waypoints, want the 2 ends of its rail",
+				i, len(e.Waypoints))
+		}
+		rail := from.Bottom() + e.Depth
+		for w, p := range e.Waypoints {
+			if math.Abs(p.Y-rail) > eps {
+				t.Errorf("edge %d waypoint %d is at y=%v, off its rail at %v", i, w, p.Y, rail)
+			}
+		}
+		if math.Abs(e.Waypoints[0].X-e.X1) > eps || math.Abs(e.Waypoints[1].X-e.X2) > eps {
+			t.Errorf("edge %d's rail runs x=%v..%v but its anchors are at %v and %v; "+
+				"the verticals would be slanted", i,
+				e.Waypoints[0].X, e.Waypoints[1].X, e.X1, e.X2)
+		}
 		band := l.Bands[bandIndexOf(l, from.Layer)]
 		if e.Depth+ArcPad > band.ArcLane+eps {
 			t.Errorf("edge %d dips %v into a lane only %v deep", i, e.Depth, band.ArcLane)
 		}
 		checkClearsEveryBox(t, l, i, e)
+	}
+
+	// The lane guarantees are pairwise too: no two overlapping same-band spans
+	// share a rail, and a contained span is always above its container. These
+	// are what make the drawn geometry equal to the ordering model for rails,
+	// so they are invariants, not implementation details.
+	for i := range l.Edges {
+		for j := i + 1; j < len(l.Edges); j++ {
+			a, b := l.Edges[i], l.Edges[j]
+			if !a.SameBand || !b.SameBand {
+				continue
+			}
+			fa, _ := l.Node(a.From)
+			fb, _ := l.Node(b.From)
+			if fa.Layer != fb.Layer {
+				continue
+			}
+			loA, hiA := math.Min(a.X1, a.X2), math.Max(a.X1, a.X2)
+			loB, hiB := math.Min(b.X1, b.X2), math.Max(b.X1, b.X2)
+			if loA >= hiB || loB >= hiA {
+				continue // Disjoint spans may share a depth freely.
+			}
+			if math.Abs(a.Depth-b.Depth) < eps {
+				t.Errorf("edges %d and %d overlap (x %v..%v and %v..%v) and share depth %v, "+
+					"so their rails are collinear and two connections read as one",
+					i, j, loA, hiA, loB, hiB, a.Depth)
+			}
+			if loB >= loA && hiB <= hiA && b.Depth > a.Depth-eps {
+				t.Errorf("edge %d (depth %v) contains edge %d (depth %v) but does not run "+
+					"below it, so the contained rail pokes through its container",
+					i, a.Depth, j, b.Depth)
+			}
+			if loA >= loB && hiA <= hiB && a.Depth > b.Depth-eps {
+				t.Errorf("edge %d (depth %v) contains edge %d (depth %v) but does not run "+
+					"below it, so the contained rail pokes through its container",
+					j, b.Depth, i, a.Depth)
+			}
+		}
 	}
 
 	if in.Subject != "" {
@@ -371,23 +433,9 @@ func checkClearsEveryBox(t *testing.T, l *Layout, i int, e Edge) {
 	// ends ON a box boundary, and an exact-touch is not a crossing.
 	const inset = 0.25
 
-	route := []Point{{X: e.X1, Y: e.Y1}}
-	if e.SameBand {
-		// Sample the quadratic. It is convex and shallow, so chords track it
-		// closely; the real guarantee for these is the arc lane, checked above.
-		const steps = 64
-		for s := 1; s < steps; s++ {
-			u := float64(s) / steps
-			m := 1 - u
-			route = append(route, Point{
-				X: m*m*e.X1 + 2*m*u*e.CX + u*u*e.X2,
-				Y: m*m*e.Y1 + 2*m*u*e.CY + u*u*e.Y2,
-			})
-		}
-	} else {
-		route = append(route, e.Waypoints...)
-	}
-	route = append(route, Point{X: e.X2, Y: e.Y2})
+	// Anchors plus waypoints IS the drawn line now -- rails and channel
+	// routes alike -- so the check is exact rather than sampled.
+	route := edgePolyline(e)
 
 	for _, p := range route {
 		if p.X < -eps || p.X > l.Width+eps || p.Y < -eps || p.Y > l.Height+eps {
@@ -588,6 +636,24 @@ func recount(t *testing.T, l *Layout) int {
 		for j := i + 1; j < len(ends); j++ {
 			u1, l1 := ends[i][0], ends[i][1]
 			u2, l2 := ends[j][0], ends[j][1]
+
+			// One rail, one cross-band edge: pierced when the line leaves a
+			// box strictly inside the rail's span. Mirrors crosses().
+			same1, same2 := u1.band == l1.band, u2.band == l2.band
+			if same1 != same2 {
+				arcU, arcL, drop := u1, l1, u2
+				if same2 {
+					arcU, arcL, drop = u2, l2, u1
+				}
+				if arcU.band == drop.band && drop.slot != arcU.slot && drop.slot != arcL.slot {
+					lo, hi := minMax(arcU.slot, arcL.slot)
+					if lo < drop.slot && drop.slot < hi {
+						total++
+					}
+				}
+				continue
+			}
+
 			if u1.band != u2.band || l1.band != l2.band {
 				continue
 			}
@@ -919,10 +985,11 @@ func TestNestedArcsGetDifferentDepths(t *testing.T) {
 	if outer.Depth+ArcPad > band.ArcLane+eps {
 		t.Errorf("deepest arc %v does not fit its lane of %v", outer.Depth, band.ArcLane)
 	}
-	// The control point sits at twice the depth, because a quadratic reaches
-	// half way to it.
-	if want := band.Y + NodeHeight + 2*outer.Depth; math.Abs(outer.CY-want) > eps {
-		t.Errorf("control point at y=%v, want %v", outer.CY, want)
+	// The rail runs at exactly the assigned depth: the flat profile is what
+	// makes "deeper" mean below at EVERY shared x, which is the property the
+	// depth assignment exists to buy.
+	if want := band.Y + NodeHeight + outer.Depth; math.Abs(outer.Waypoints[0].Y-want) > eps {
+		t.Errorf("outer rail at y=%v, want %v", outer.Waypoints[0].Y, want)
 	}
 }
 

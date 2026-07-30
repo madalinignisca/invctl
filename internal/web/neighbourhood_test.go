@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -571,6 +572,40 @@ func pathTitles(svg string) []string {
 		}
 		out = append(out, rest[open+len("<title>"):end])
 		rest = rest[end:]
+	}
+}
+
+// TestDependencyEdgesCarryAnArrowhead.
+//
+// A dependency has a direction and, until this, the picture carried it only in
+// hover text -- two services joined by a plain line read as "related", not as
+// "orders-api depends on pgsql-core". The consumer's line now ends in an
+// arrowhead at its provider. Only dependencies get one: a cable is undirected,
+// and an arrow on it would assert a flow direction that is not in the
+// database.
+func TestDependencyEdgesCarryAnArrowhead(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	// hv-01 at two hops pulls in the service band with its declared
+	// dependencies -- the fixture's orders-api chain.
+	page := body(t, h.get("/assets/"+h.refs.Assets["hv-01"]+"/neighbourhood?hops=2", false))
+	svg := mainSVG(t, page)
+	if svg == "" {
+		t.Fatal("no diagram was drawn")
+	}
+
+	if !strings.Contains(svg, `<marker id="arrow-dep"`) {
+		t.Error("the arrowhead def is missing; every marker-end reference dangles")
+	}
+	if !strings.Contains(svg, `marker-end="url(#arrow-dep`) {
+		t.Error("no dependency edge references an arrowhead; direction is only in hover text again")
+	}
+	for _, m := range regexp.MustCompile(`class="([^"]*)"[^>]*marker-end`).FindAllStringSubmatch(svg, -1) {
+		if !strings.Contains(m[1], "edge-dependency") {
+			t.Errorf("an edge of class %q carries an arrowhead; only a dependency has "+
+				"a direction the geometry does not already show", m[1])
+		}
 	}
 }
 

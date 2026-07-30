@@ -90,6 +90,23 @@ type svgEdge struct {
 	D     string
 	Class string
 	Title string
+	// Marker names the arrowhead def this line ends in, empty for none. Only a
+	// dependency gets one: it is the one edge kind with a direction that the
+	// geometry does not already show. A descent reads top-down because the
+	// bands do; a cable is undirected and an arrow on it would assert a flow
+	// direction that is not in the database.
+	Marker string
+}
+
+// dependencyMarker picks the arrowhead for a dependency's failure semantics.
+// Two defs rather than CSS on one, because an optional dependency's stroke is
+// drawn in the faint line colour and its arrow must match -- an arrow darker
+// than its own line would promote the edge it sits on.
+func dependencyMarker(nature string) string {
+	if nature == "optional" {
+		return "arrow-dep-faint"
+	}
+	return "arrow-dep"
 }
 
 // buildScene positions everything the renderer needs.
@@ -159,10 +176,15 @@ func buildScene(layout *diagram.Layout, nodes []viewNode, edges []viewEdge,
 		}
 	} else {
 		for i, e := range layout.Edges {
+			marker := ""
+			if edges[i].edge.Kind == edgeDependency {
+				marker = dependencyMarker(edges[i].nature)
+			}
 			scene.Edges = append(scene.Edges, svgEdge{
-				D:     edgePath(e),
-				Class: edgeClass(e, edges[i].nature),
-				Title: edges[i].title,
+				D:      edgePath(e),
+				Class:  edgeClass(e, edges[i].nature),
+				Title:  edges[i].title,
+				Marker: marker,
 			})
 		}
 	}
@@ -204,33 +226,35 @@ func edgeClass(e diagram.Edge, nature string) string {
 	return class
 }
 
-// edgePath is the line itself.
+// edgePath is the line itself: the layout's polyline, drawn verbatim.
 //
-// A same-band edge curves through its band's own arc lane, which the layout
-// reserved for it, so it can never cross a box. A cross-band edge between
-// adjacent bands runs straight through the gutter, which is empty. One spanning
-// further than that carries waypoints, and follows them: the layout picked them
-// to miss the boxes in between, so this is the one case where the renderer has
-// no freedom about where the line goes.
+// A same-band edge runs as a rail through its band's arc lane; an edge
+// spanning more than one band threads a channel through each row in its way.
+// Both arrive here as waypoints the layout chose to miss every box, so the
+// renderer follows them exactly -- Layout.DrawnCrossings measures the same
+// polyline, and the freedom to differ from it is the freedom to make that
+// measurement a lie.
 //
-// Parallel edges are fanned sideways rather than deeper, because sideways is
-// free and deeper would leave the lane the layout sized. A routed edge is fanned
-// too, but only within its channel -- ChannelSpread is how much room that is.
+// The one liberty left is fanning cross-band parallels sideways, so two
+// descents between the same pair of boxes do not read as one line. A routed
+// edge is fanned only within its channel -- ChannelSpread is how much room
+// that is -- and a rail is not fanned at all: parallel rails were already
+// pulled apart by depth and anchor, which is what frees the lane from
+// sideways clutter.
 func edgePath(e diagram.Edge) string {
 	offset := 0.0
-	if e.ParallelCount > 1 {
+	if e.ParallelCount > 1 && !e.SameBand {
 		offset = (float64(e.Parallel) - float64(e.ParallelCount-1)/2) * parallelSpread
 	}
-	if e.SameBand {
-		return fmt.Sprintf("M %.1f %.1f Q %.1f %.1f %.1f %.1f",
-			e.X1, e.Y1, e.CX+offset, e.CY, e.X2, e.Y2)
-	}
 	if len(e.Waypoints) > 0 {
+		if e.SameBand {
+			offset = 0
+		}
+		offset = min(max(offset, -diagram.ChannelSpread), diagram.ChannelSpread)
 		var b strings.Builder
 		fmt.Fprintf(&b, "M %.1f %.1f", e.X1, e.Y1)
 		for _, p := range e.Waypoints {
-			fmt.Fprintf(&b, " L %.1f %.1f",
-				p.X+min(max(offset, -diagram.ChannelSpread), diagram.ChannelSpread), p.Y)
+			fmt.Fprintf(&b, " L %.1f %.1f", p.X+offset, p.Y)
 		}
 		fmt.Fprintf(&b, " L %.1f %.1f", e.X2, e.Y2)
 		return b.String()

@@ -211,6 +211,36 @@ func (s *state) countCrossings() int {
 func (s *state) crosses(e1, e2 [2]int) bool {
 	u1, l1 := s.upperLower(e1)
 	u2, l2 := s.upperLower(e2)
+
+	// A rail and a line leaving its band. A same-band rail dips into the arc
+	// lane below its row; a cross-band edge whose UPPER endpoint is in that
+	// band leaves the bottom of its box and falls straight through that lane.
+	// If it leaves from a box strictly inside the rail's span it cannot get
+	// out without piercing it: the region between the row and the rail is
+	// closed below by the rail and at the sides by the rail's own verticals.
+	// For most of this package's life these pairs were silently declared
+	// non-crossing, which let the sweep buy one counted crossing by selling
+	// several uncounted piercings -- measured at 8528 drawn-but-uncounted
+	// crossings over 4000 generated neighbourhoods.
+	//
+	// The lower endpoint's band needs no term: the line arrives at the TOP of
+	// a box there and never enters that band's lane. A two-band edge falling
+	// through an intervening band is still uncounted -- its channel is chosen
+	// at placement, which the ordering cannot see -- and DrawnCrossings is
+	// the measurement that keeps that gap honest.
+	same1, same2 := s.bandOf[u1] == s.bandOf[l1], s.bandOf[u2] == s.bandOf[l2]
+	if same1 != same2 {
+		arcU, arcL, dropU := u1, l1, u2
+		if same2 {
+			arcU, arcL, dropU = u2, l2, u1
+		}
+		if s.bandOf[arcU] != s.bandOf[dropU] || dropU == arcU || dropU == arcL {
+			return false
+		}
+		lo, hi := minMax(s.pos[arcU], s.pos[arcL])
+		return lo < s.pos[dropU] && s.pos[dropU] < hi
+	}
+
 	if s.bandOf[u1] != s.bandOf[u2] || s.bandOf[l1] != s.bandOf[l2] {
 		return false
 	}
