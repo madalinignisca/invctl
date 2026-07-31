@@ -1371,3 +1371,74 @@ start.
 Amortising acquisition over acquisition → EOL, as its own labelled line, never
 folded into the run rate. It needs an acquisition date the model does not have.
 Deferred until the three totals have been read by somebody who wants it.
+
+---
+
+## 2026-07-31 — Amortisation, and the acquisition date that was already there
+
+The deferred half of the cost entry above. It needed **no migration**, which is
+the part worth recording.
+
+### The acquisition date already existed
+
+A one-off cost line's `valid_from` *is* the day it was paid — that is what the
+field means for a `once` line — and the end-of-support date landed on `asset` and
+`service` in the EOL entry. Adding an `acquired_on` column would have created a
+second field holding the same fact, and the two would disagree the first time
+somebody edited either. So amortisation is arithmetic over two columns that were
+already there and already audited, and the only schema-adjacent change is that
+`asset_cost` and `service_cost` now join their parent to read `eol_date`.
+
+`project_cost` deliberately has no such join. A project has no end-of-support,
+and a setup fee for a SaaS subscription bought nothing with a life — so a
+project-level one-off is counted as unamortisable rather than silently dropped.
+
+### Straight line, to the month, and never in the run rate
+
+Straight line from acquisition to end-of-support. Declining balance, salvage
+values and part-months are accounting rather than inventory, and this is not the
+system of record for any of them — the figure exists to make a run rate honest and
+to be checkable on the back of an envelope.
+
+**It is never added into `MonthlyMinor`.** A run rate is what leaves the bank this
+month; amortisation is an accounting view of money that already did. Adding them
+silently would double-count every purchase. `TotalMonthlyMinor()` exists for the
+one sentence on each page that says it is adding them.
+
+Two boundaries that a reading would get wrong and a test caught:
+
+- **The last day of a life is outside it.** An asset supported until the 1st is
+  not still depreciating on the 1st.
+- **A life under a month is not capital to spread**, and neither is something
+  bought after it was already unsupportable. Dividing by something near zero turns
+  a small purchase into an enormous monthly figure.
+
+Only a one-off amortises. A monthly bill is already a run rate and spreading it
+again would count it twice.
+
+### Amortisable is not the same as contributing
+
+`AmortisedMonthlyMinor` returns a figure *and* whether the line could be spread at
+all, because they are different questions. A fully depreciated switch is
+amortisable and contributes nothing; a switch with no EOL date is not amortisable
+at all. `CostTotals` therefore carries both an `Amortisable` and an
+`Unamortisable` count, and every page renders the second: a figure covering two of
+nine purchases must not look like a figure covering nine.
+
+`Add` grew two parameters rather than gaining a second method to call afterwards.
+A two-call API where the second call is optional is a two-call API where the
+second call gets forgotten, and the symptom would be an amortisation figure that
+is silently zero.
+
+### The fixture acquires things in the past
+
+Every one-off in the seed now carries an acquisition date relative to the seeding
+clock: the hypervisors bought roughly three years ago, the core switches long
+enough ago to be fully written off, `hv-03` bought later and carrying **no** EOL
+date so the unamortisable counter has something real to report. A fixture where
+everything was acquired this morning would show every asset at the very start of
+its life and prove nothing about the arithmetic.
+
+Three mutations confirmed the tests bite: folding amortisation into the run rate,
+treating "no EOL date" as amortisable-with-zero, and dropping the parent join each
+fail a specific assertion.

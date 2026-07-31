@@ -25,8 +25,8 @@ import (
 
 // The three cost surfaces. Values, not strings from a caller.
 var (
-	costOnAsset   = costTable{name: "asset_cost", column: "asset_id", entity: "asset_cost"}
-	costOnService = costTable{name: "service_cost", column: "service_id", entity: "service_cost"}
+	costOnAsset   = costTable{name: "asset_cost", column: "asset_id", entity: "asset_cost", parent: "asset"}
+	costOnService = costTable{name: "service_cost", column: "service_id", entity: "service_cost", parent: "service"}
 	costOnProject = costTable{name: "project_cost", column: "project_id", entity: "project_cost"}
 )
 
@@ -34,6 +34,12 @@ type costTable struct {
 	name   string
 	column string
 	entity string // change_log entity_type
+	// parent is the table holding the thing this cost is attached to, joined
+	// only to read its eol_date. Empty for project_cost: a project has no
+	// end-of-support, so a one-off attached to one can never be amortised --
+	// which is correct. A setup fee for a SaaS subscription bought nothing with
+	// a life.
+	parent string
 }
 
 // CostRow is a cost line with the label of its kind resolved, so a list view
@@ -42,15 +48,26 @@ type CostRow struct {
 	domain.Cost
 	OwnerID   string `db:"owner_id"`
 	KindLabel string `db:"kind_label"`
+	// OwnerEOLDate is the end-of-support of the thing this cost is attached to,
+	// carried here so a one-off can be amortised over its life without a second
+	// query per row. Always nil for a project cost.
+	OwnerEOLDate *string `db:"owner_eol_date"`
 }
 
 func (t costTable) selectSQL() string {
+	eol, join := `NULL AS owner_eol_date`, ``
+	if t.parent != "" {
+		eol = `p.eol_date AS owner_eol_date`
+		join = `
+		LEFT JOIN ` + t.parent + ` p ON p.id = c.` + t.column
+	}
 	return `
 		SELECT c.id, c.` + t.column + ` AS owner_id, c.kind, c.period, c.amount_minor,
 		       c.note, c.valid_from, c.valid_until, c.lifecycle, c.created_at, c.updated_at,
-		       COALESCE(k.label, c.kind) AS kind_label
+		       COALESCE(k.label, c.kind) AS kind_label,
+		       ` + eol + `
 		FROM ` + t.name + ` c
-		LEFT JOIN cost_kind k ON k.code = c.kind`
+		LEFT JOIN cost_kind k ON k.code = c.kind` + join
 }
 
 // ListAssetCosts returns every cost line on an asset, retired ones included.
@@ -251,13 +268,14 @@ func (s *SQLStore) getCost(ctx context.Context, t costTable, id string) (*CostRo
 	return &row, nil
 }
 
-// TotalCosts folds a set of lines into the three numbers, counting only what is
-// in force on the given date.
+// TotalCosts folds a set of lines into the totals, counting only what is in
+// force on the given date and amortising each one-off over the life of the thing
+// it bought.
 func TotalCosts(rows []CostRow, on string) domain.CostTotals {
 	var totals domain.CostTotals
 	for i := range rows {
 		if rows[i].AppliesOn(on) {
-			totals.Add(&rows[i].Cost)
+			totals.Add(&rows[i].Cost, rows[i].OwnerEOLDate, on)
 		}
 	}
 	return totals

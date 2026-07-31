@@ -36,6 +36,26 @@
       <div class="v">{{money .Totals.AnnualMinor}}</div>
     </div>
   </div>
+  {{if .Totals.HasAmortisation}}
+  <div class="panel-body" style="border-bottom:1px solid var(--line-soft)">
+    {{if .Totals.Amortisable}}
+    <p class="panel-note" style="margin:0">
+      Spreading the capital over the life of what it bought adds
+      <strong>{{money .Totals.AmortisedMonthlyMinor}} a month</strong>, so the real
+      monthly cost of ownership is {{money .Totals.TotalMonthlyMinor}}. Straight line
+      from the day it was paid to the day it stops being supported; not part of the
+      run rate above.
+    </p>
+    {{end}}
+    {{if .Totals.Unamortisable}}
+    <p class="panel-note" style="margin:6px 0 0">
+      {{pluralise .Totals.Unamortisable "one-off cost has" "one-off costs have"}} no
+      end-of-support date to spread against, so {{if eq .Totals.Unamortisable 1}}it is{{else}}they are{{end}}
+      absent from that figure.
+    </p>
+    {{end}}
+  </div>
+  {{end}}
   {{end}}
 
   {{if .Costs}}
@@ -96,7 +116,7 @@
       <div class="field">
         <label for="cost-from-{{.Slug}}">From</label>
         <input id="cost-from-{{.Slug}}" type="date" name="valid_from">
-        <div class="field-hint">Defaults to today.</div>
+        <div class="field-hint">Defaults to today. For a one-off this is when it was paid — amortisation runs from here.</div>
       </div>
       <div class="field">
         <label for="cost-until-{{.Slug}}">Until</label>
@@ -154,6 +174,22 @@
         project itself rather than to any asset or service.
       {{end}}
     </p>
+
+    {{if .Costs.Own.Amortisable}}
+    <p class="panel-note" style="margin-bottom:10px">
+      Spreading the capital over the life of what it bought adds
+      <strong>{{money .Costs.Own.AmortisedMonthlyMinor}} a month</strong> — so the real
+      monthly cost of ownership is {{money .Costs.Own.TotalMonthlyMinor}}. Straight line
+      from the day each thing was paid for to the day it stops being supported, and
+      deliberately kept out of the run rate above: a run rate is what leaves the bank
+      this month.
+      {{if .Costs.Own.Unamortisable}}
+        {{pluralise .Costs.Own.Unamortisable "purchase has" "purchases have"}} no
+        end-of-support date and {{if eq .Costs.Own.Unamortisable 1}}is{{else}}are{{end}}
+        not in that figure.
+      {{end}}
+    </p>
+    {{end}}
 
     {{if not .Costs.Elsewhere.IsZero}}
     <div class="diag-note">

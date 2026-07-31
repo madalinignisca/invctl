@@ -74,6 +74,11 @@ type Cost struct {
 	// open-ended, which is the ordinary case. The window exists from the first
 	// release even though only "current" is queried, because without it a
 	// renewal at a new price overwrites its predecessor and the history is gone.
+	//
+	// FOR A ONE-OFF, ValidFrom IS THE ACQUISITION DATE -- the day it was paid.
+	// That is what amortisation measures from, and it is why no `acquired_on`
+	// column exists: a second field holding the same fact would disagree with
+	// this one the first time somebody edited either.
 	ValidFrom  string  `db:"valid_from"`
 	ValidUntil *string `db:"valid_until"`
 	Lifecycle  string  `db:"lifecycle"`
@@ -221,6 +226,70 @@ func (c *Cost) AnnualMinor() int64 {
 	}
 }
 
+// AmortisedMonthlyMinor spreads a one-off over the life of the thing it bought:
+// straight line from the day it was paid to the day that thing stops being
+// supportable.
+//
+// The second return says whether the line CAN be amortised at all, which is a
+// different question from how much it contributes this month. A fully
+// depreciated switch is amortisable and contributes nothing; a switch with no
+// EOL date is not amortisable, and the page has to say so rather than quietly
+// leaving it out of a figure labelled "the capital, spread".
+//
+// Only a one-off amortises. A monthly hosting bill is already a run rate, and
+// spreading it again would count it twice.
+//
+// STRAIGHT LINE, TO THE MONTH. Declining balance, salvage values and partial
+// months are accounting rather than inventory, and this is not the system of
+// record for any of them -- it is a number that makes a run rate honest, and one
+// somebody can check on the back of an envelope.
+func (c *Cost) AmortisedMonthlyMinor(eolDate *string, on string) (int64, bool) {
+	if c.Period != CostOnce || !c.AppliesOn(on) {
+		return 0, false
+	}
+	if eolDate == nil || *eolDate == "" {
+		return 0, false
+	}
+	start, err := ParseDate(c.ValidFrom)
+	if err != nil {
+		return 0, false
+	}
+	end, err := ParseDate(*eolDate)
+	if err != nil {
+		return 0, false
+	}
+	months := monthsBetween(start, end)
+	if months <= 0 {
+		// Bought after it was already unsupportable, or a life under a month.
+		// Either way it is an expense rather than capital to spread, and
+		// claiming otherwise would divide by something near zero.
+		return 0, false
+	}
+
+	today, err := ParseDate(on)
+	if err != nil {
+		return 0, false
+	}
+	// Outside its life it contributes nothing, but it is still amortisable --
+	// the counter that tells a reader how much of the capital this figure
+	// covers must not lose it.
+	if today.Before(start) || !today.Before(end) {
+		return 0, true
+	}
+	return divRound(c.AmountMinor, int64(months)), true
+}
+
+// monthsBetween counts whole months from a to b, so a purchase on the 20th and
+// an end-of-support on the 5th does not round up to a month that has not
+// happened.
+func monthsBetween(a, b time.Time) int {
+	months := (b.Year()-a.Year())*12 + int(b.Month()) - int(a.Month())
+	if b.Day() < a.Day() {
+		months--
+	}
+	return months
+}
+
 // CostTotals is the answer, and it is deliberately three numbers.
 //
 // A single "this project costs X" is where a cost report dies, because somebody
@@ -236,29 +305,74 @@ type CostTotals struct {
 	// AnnualMinor: the same run rate over a year, accumulated exactly rather
 	// than as twelve times the monthly. See Cost.AnnualMinor.
 	AnnualMinor int64
+
+	// AmortisedMonthlyMinor is the capital spread over the life of what it
+	// bought. NEVER added into MonthlyMinor: a run rate is what leaves the bank
+	// this month, and amortisation is an accounting view of money that already
+	// did. Reported beside it, added only where a page says it is adding them.
+	AmortisedMonthlyMinor int64
+	// Amortisable and Unamortisable count the one-off lines that could and
+	// could not be spread -- the second because the thing they bought carries
+	// no end-of-support date. Without the pair, a figure covering two of nine
+	// purchases looks like a figure covering all nine.
+	Amortisable   int
+	Unamortisable int
+
 	// Lines is how many cost lines produced these numbers. A total over zero
 	// lines and a total of zero are different answers.
 	Lines int
+}
+
+// TotalMonthlyMinor is the run rate with amortisation folded in: what owning
+// this actually costs per month once the hardware is paid for over its life.
+// A page that shows it must say it is doing so.
+func (t CostTotals) TotalMonthlyMinor() int64 {
+	return t.MonthlyMinor + t.AmortisedMonthlyMinor
+}
+
+// HasAmortisation reports whether there is anything to say about spreading.
+func (t CostTotals) HasAmortisation() bool {
+	return t.Amortisable > 0 || t.Unamortisable > 0
 }
 
 // IsZero reports whether anything at all was recorded.
 func (t CostTotals) IsZero() bool { return t.Lines == 0 }
 
 // Add folds one line into the totals.
-func (t *CostTotals) Add(c *Cost) {
+//
+// eolDate is the end-of-support of the THING the line is attached to, and `on`
+// is the date the totals are for. Both are parameters rather than a second
+// method to call afterwards: a two-call API where the second call is optional
+// is a two-call API where the second call gets forgotten, and the symptom would
+// be an amortisation figure that is silently zero.
+func (t *CostTotals) Add(c *Cost, eolDate *string, on string) {
 	t.CapitalMinor += c.CapitalMinor()
 	t.MonthlyMinor += c.MonthlyMinor()
 	t.AnnualMinor += c.AnnualMinor()
 	t.Lines++
+
+	if c.Period != CostOnce {
+		return
+	}
+	amortised, canAmortise := c.AmortisedMonthlyMinor(eolDate, on)
+	if !canAmortise {
+		t.Unamortisable++
+		return
+	}
+	t.Amortisable++
+	t.AmortisedMonthlyMinor += amortised
 }
 
 // Plus merges two sets of totals.
 func (t CostTotals) Plus(other CostTotals) CostTotals {
 	return CostTotals{
-		CapitalMinor: t.CapitalMinor + other.CapitalMinor,
-		MonthlyMinor: t.MonthlyMinor + other.MonthlyMinor,
-		AnnualMinor:  t.AnnualMinor + other.AnnualMinor,
-		Lines:        t.Lines + other.Lines,
+		CapitalMinor:          t.CapitalMinor + other.CapitalMinor,
+		MonthlyMinor:          t.MonthlyMinor + other.MonthlyMinor,
+		AnnualMinor:           t.AnnualMinor + other.AnnualMinor,
+		AmortisedMonthlyMinor: t.AmortisedMonthlyMinor + other.AmortisedMonthlyMinor,
+		Amortisable:           t.Amortisable + other.Amortisable,
+		Unamortisable:         t.Unamortisable + other.Unamortisable,
+		Lines:                 t.Lines + other.Lines,
 	}
 }
 

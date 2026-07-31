@@ -30,6 +30,40 @@ func (f *projectFixture) priceProject(t *testing.T, code, kind, period string, m
 	}, kind, period, minor)
 }
 
+// setAssetEOLOn dates an asset to a fixed day, for tests whose arithmetic is
+// stated in absolute dates rather than offsets.
+func (f *projectFixture) setAssetEOLOn(t *testing.T, name, date string) {
+	t.Helper()
+	row, err := f.s.GetAsset(f.ctx, f.assets[name])
+	if err != nil {
+		t.Fatalf("reading %s: %v", name, err)
+	}
+	a := row.Asset
+	a.EOLDate = &date
+	envIDs := make([]string, len(row.Environments))
+	for i, env := range row.Environments {
+		envIDs[i] = env.ID
+	}
+	if err := f.s.UpdateAsset(f.ctx, testActor, &a, envIDs); err != nil {
+		t.Fatalf("dating %s: %v", name, err)
+	}
+}
+
+// priceAssetFrom is priceAsset with an explicit acquisition date -- which for a
+// one-off is what ValidFrom means.
+func (f *projectFixture) priceAssetFrom(t *testing.T, name, kind, period string, minor int64, from string) {
+	t.Helper()
+	c, err := domain.NewCost(NewID(), domain.CostSpec{
+		Kind: kind, Period: period, AmountMinor: minor, ValidFrom: &from,
+	}, f.s.Now())
+	if err != nil {
+		t.Fatalf("building the cost: %v", err)
+	}
+	if err := f.s.AddAssetCost(f.ctx, testActor, f.assets[name], c); err != nil {
+		t.Fatalf("attaching the cost: %v", err)
+	}
+}
+
 func (f *projectFixture) price(t *testing.T, attach func(*domain.Cost) error,
 	kind, period string, minor int64) string {
 	t.Helper()
@@ -361,6 +395,87 @@ func TestACostKindMustExist(t *testing.T) {
 			}
 			if err := f.s.AddAssetCost(f.ctx, testActor, f.assets["hv-01"], c); err == nil {
 				t.Error("a cost kind that is not in the lookup table was accepted")
+			}
+		})
+	}
+}
+
+// TestAmortisationReadsTheEOLDateOfWhatWasBought.
+//
+// The join is the whole feature at this layer: a cost line has no end date of
+// its own, and the life it is spread over belongs to the asset or service it is
+// attached to. Without the join every one-off would count as unamortisable and
+// the figure would be silently zero on a page that still rendered it.
+func TestAmortisationReadsTheEOLDateOfWhatWasBought(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newProjectFixture(t, e)
+
+			// Two years of life, bought a year ago: 240000/24 = 10000 a month.
+			f.setAssetEOLOn(t, "hv-01", "2027-08-01")
+			f.priceAssetFrom(t, "hv-01", "acquisition", domain.CostOnce, 240_00, "2025-08-01")
+			// The control: same purchase, no EOL date on what it bought.
+			f.priceAssetFrom(t, "sw-core-1", "acquisition", domain.CostOnce, 240_00, "2025-08-01")
+
+			hv, err := f.s.ListAssetCosts(f.ctx, f.assets["hv-01"])
+			if err != nil {
+				t.Fatalf("listing: %v", err)
+			}
+			if len(hv) != 1 || hv[0].OwnerEOLDate == nil {
+				t.Fatalf("the asset's EOL date did not reach the cost row: %+v", hv)
+			}
+			got := TotalCosts(hv, "2026-07-31")
+			if got.AmortisedMonthlyMinor != 10_00 {
+				t.Errorf("amortised = %d, want 1000", got.AmortisedMonthlyMinor)
+			}
+			if got.Amortisable != 1 || got.Unamortisable != 0 {
+				t.Errorf("counters = %d/%d, want 1/0", got.Amortisable, got.Unamortisable)
+			}
+			// And the run rate is untouched: a one-off is not a run rate.
+			if got.MonthlyMinor != 0 {
+				t.Errorf("run rate = %d, want 0", got.MonthlyMinor)
+			}
+
+			sw, err := f.s.ListAssetCosts(f.ctx, f.assets["sw-core-1"])
+			if err != nil {
+				t.Fatalf("listing the control: %v", err)
+			}
+			if sw[0].OwnerEOLDate != nil {
+				t.Fatalf("an undated asset reported an EOL date: %v", *sw[0].OwnerEOLDate)
+			}
+			control := TotalCosts(sw, "2026-07-31")
+			if control.Amortisable != 0 || control.Unamortisable != 1 {
+				t.Errorf("control counters = %d/%d, want 0/1",
+					control.Amortisable, control.Unamortisable)
+			}
+		})
+	}
+}
+
+// A project's own cost lines can never be amortised: a project has no
+// end-of-support, and a setup fee for a SaaS subscription bought nothing with a
+// life. The join is absent for project_cost by construction, so this asserts the
+// absence is deliberate rather than an oversight.
+func TestProjectCostsAreNeverAmortised(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newProjectFixture(t, e)
+
+			f.priceProject(t, "orders", "subscription", domain.CostOnce, 500_00)
+			rows, err := f.s.ListProjectCosts(f.ctx, f.projects["orders"])
+			if err != nil {
+				t.Fatalf("listing: %v", err)
+			}
+			if rows[0].OwnerEOLDate != nil {
+				t.Errorf("a project cost carried an EOL date: %v", *rows[0].OwnerEOLDate)
+			}
+			got := TotalCosts(rows, "2026-07-31")
+			if got.Amortisable != 0 {
+				t.Errorf("a project cost was amortised")
+			}
+			if got.Unamortisable != 1 {
+				t.Errorf("unamortisable = %d, want 1 — the one-off was not counted at all",
+					got.Unamortisable)
 			}
 		})
 	}

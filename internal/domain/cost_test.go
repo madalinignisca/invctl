@@ -69,10 +69,10 @@ func TestYearlyIsTwelfthedWithRoundingToNearest(t *testing.T) {
 
 func TestTotalsKeepTheThreeNumbersApart(t *testing.T) {
 	var totals CostTotals
-	totals.Add(cost(t, CostOnce, 840000))   // capital only
-	totals.Add(cost(t, CostMonthly, 38000)) // 380.00/month
-	totals.Add(cost(t, CostYearly, 120000)) // 100.00/month
-	totals.Add(cost(t, CostOnce, 520000))   // capital only
+	totals.Add(cost(t, CostOnce, 840000), nil, "2026-07-31")   // capital only
+	totals.Add(cost(t, CostMonthly, 38000), nil, "2026-07-31") // 380.00/month
+	totals.Add(cost(t, CostYearly, 120000), nil, "2026-07-31") // 100.00/month
+	totals.Add(cost(t, CostOnce, 520000), nil, "2026-07-31")   // capital only
 
 	if totals.CapitalMinor != 1360000 {
 		t.Errorf("capital = %d, want 1360000", totals.CapitalMinor)
@@ -202,7 +202,7 @@ func TestNewCostRejectsWhatWouldSilentlyDistortATotal(t *testing.T) {
 // carries the rounding, because that is the figure that genuinely has some.
 func TestTheYearIsExactEvenWhenTheMonthCannotBe(t *testing.T) {
 	var totals CostTotals
-	totals.Add(cost(t, CostYearly, 94000))
+	totals.Add(cost(t, CostYearly, 94000), nil, "2026-07-31")
 
 	if totals.AnnualMinor != 94000 {
 		t.Errorf("annual = %d, want 94000 exactly", totals.AnnualMinor)
@@ -212,5 +212,152 @@ func TestTheYearIsExactEvenWhenTheMonthCannotBe(t *testing.T) {
 	}
 	if derived := totals.MonthlyMinor * 12; derived == totals.AnnualMinor {
 		t.Skip("this input no longer distinguishes the two, pick another")
+	}
+}
+
+// Amortisation: spreading a one-off over the life of what it bought.
+//
+// The acquisition date is the line's own ValidFrom -- for a one-off that IS the
+// day it was paid -- and the end is the EOL date of the thing it is attached to.
+// No third column holds either, which is the point: two fields that mean the
+// same thing disagree the first time somebody edits one.
+func TestAmortisationSpreadsAOneOffOverItsLife(t *testing.T) {
+	eol := func(s string) *string { return &s }
+
+	cases := []struct {
+		name         string
+		period       string
+		amountMinor  int64
+		from         string
+		eol          *string
+		on           string
+		wantMonthly  int64
+		wantPossible bool
+	}{
+		// 24 months from 2025-08-01 to 2027-08-01: 240000/24 = 10000.
+		{"a two-year life", CostOnce, 240000, "2025-08-01", eol("2027-08-01"), "2026-07-31", 10000, true},
+
+		// Only a one-off amortises. A monthly bill is already a run rate, and
+		// spreading it again would count it twice.
+		{"a monthly line", CostMonthly, 240000, "2025-08-01", eol("2027-08-01"), "2026-07-31", 0, false},
+		{"a yearly line", CostYearly, 240000, "2025-08-01", eol("2027-08-01"), "2026-07-31", 0, false},
+
+		// No EOL date: NOT amortisable, which is different from contributing
+		// zero. The page counts these rather than hiding them.
+		{"nothing to spread against", CostOnce, 240000, "2025-08-01", nil, "2026-07-31", 0, false},
+		{"an empty EOL", CostOnce, 240000, "2025-08-01", eol(""), "2026-07-31", 0, false},
+
+		// Past its end: fully written off. Amortisable -- it counts towards
+		// what the figure covers -- and contributing nothing more.
+		{"fully depreciated", CostOnce, 240000, "2019-01-01", eol("2024-01-01"), "2026-07-31", 0, true},
+		// The last day of the life is already outside it: an asset supported
+		// until the 1st is not still depreciating on the 1st.
+		{"the day it ends", CostOnce, 240000, "2025-08-01", eol("2027-08-01"), "2027-08-01", 0, true},
+		{"the day before it ends", CostOnce, 240000, "2025-08-01", eol("2027-08-01"), "2027-07-31", 10000, true},
+
+		// A life under a month, or bought after it was already unsupportable.
+		// Dividing by something near zero would produce a gigantic monthly
+		// figure from a small purchase.
+		{"bought after its EOL", CostOnce, 240000, "2027-01-01", eol("2026-01-01"), "2027-02-01", 0, false},
+		{"a life of days", CostOnce, 240000, "2026-07-01", eol("2026-07-20"), "2026-07-10", 0, false},
+
+		// The day count matters: bought on the 20th, supported to the 5th, so
+		// the last month has not happened.
+		{"a partial month does not round up", CostOnce, 110000, "2025-08-20", eol("2026-08-05"), "2026-01-01", 10000, true},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			from := c.from
+			line, err := NewCost("c1", CostSpec{
+				Kind: "acquisition", Period: c.period, AmountMinor: c.amountMinor,
+				ValidFrom: &from,
+			}, costNow)
+			if err != nil {
+				t.Fatalf("building the cost: %v", err)
+			}
+			got, possible := line.AmortisedMonthlyMinor(c.eol, c.on)
+			if possible != c.wantPossible {
+				t.Fatalf("amortisable = %v, want %v", possible, c.wantPossible)
+			}
+			if got != c.wantMonthly {
+				t.Errorf("monthly = %d, want %d", got, c.wantMonthly)
+			}
+		})
+	}
+}
+
+// Amortisation is NEVER folded into the run rate. A run rate is what leaves the
+// bank this month; amortisation is an accounting view of money that already did.
+// Adding them silently would double-count every purchase.
+func TestAmortisationStaysOutOfTheRunRate(t *testing.T) {
+	eol := "2027-08-01"
+	from := "2025-08-01"
+
+	once, err := NewCost("c1", CostSpec{
+		Kind: "acquisition", Period: CostOnce, AmountMinor: 240000, ValidFrom: &from,
+	}, costNow)
+	if err != nil {
+		t.Fatalf("building: %v", err)
+	}
+	monthly, err := NewCost("c2", CostSpec{
+		Kind: "support", Period: CostMonthly, AmountMinor: 5000, ValidFrom: &from,
+	}, costNow)
+	if err != nil {
+		t.Fatalf("building: %v", err)
+	}
+
+	var totals CostTotals
+	totals.Add(once, &eol, "2026-07-31")
+	totals.Add(monthly, &eol, "2026-07-31")
+
+	if totals.MonthlyMinor != 5000 {
+		t.Errorf("run rate = %d, want 5000 — amortisation leaked into it", totals.MonthlyMinor)
+	}
+	if totals.AmortisedMonthlyMinor != 10000 {
+		t.Errorf("amortised = %d, want 10000", totals.AmortisedMonthlyMinor)
+	}
+	// The combined figure exists, but only where a page asks for it by name.
+	if totals.TotalMonthlyMinor() != 15000 {
+		t.Errorf("total monthly = %d, want 15000", totals.TotalMonthlyMinor())
+	}
+	// The annual run rate is likewise untouched: 5000*12.
+	if totals.AnnualMinor != 60000 {
+		t.Errorf("annual = %d, want 60000", totals.AnnualMinor)
+	}
+	if totals.Amortisable != 1 || totals.Unamortisable != 0 {
+		t.Errorf("counters = %d/%d, want 1/0", totals.Amortisable, totals.Unamortisable)
+	}
+}
+
+// The counters are what stop the figure being flattering. A total covering two
+// of nine purchases must not look like a total covering nine.
+func TestUnamortisablePurchasesAreCounted(t *testing.T) {
+	from := "2025-08-01"
+	eol := "2027-08-01"
+
+	priced := func(id string) *Cost {
+		c, err := NewCost(id, CostSpec{
+			Kind: "acquisition", Period: CostOnce, AmountMinor: 240000, ValidFrom: &from,
+		}, costNow)
+		if err != nil {
+			t.Fatalf("building: %v", err)
+		}
+		return c
+	}
+
+	var totals CostTotals
+	totals.Add(priced("c1"), &eol, "2026-07-31") // has a life
+	totals.Add(priced("c2"), nil, "2026-07-31")  // has none
+	totals.Add(priced("c3"), nil, "2026-07-31")
+
+	if totals.Amortisable != 1 {
+		t.Errorf("amortisable = %d, want 1", totals.Amortisable)
+	}
+	if totals.Unamortisable != 2 {
+		t.Errorf("unamortisable = %d, want 2 — purchases with no EOL date vanished", totals.Unamortisable)
+	}
+	if totals.AmortisedMonthlyMinor != 10000 {
+		t.Errorf("amortised = %d, want 10000", totals.AmortisedMonthlyMinor)
 	}
 }
