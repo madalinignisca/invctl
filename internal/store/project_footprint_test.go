@@ -83,7 +83,7 @@ func TestFootprintFollowsOwnershipOnly(t *testing.T) {
 		t.Run(e.Name, func(t *testing.T) {
 			f := newFootprintFixture(t, e)
 
-			fp, err := f.s.ProjectFootprint(f.ctx, f.projects["orders"], 0)
+			fp, err := f.s.ProjectFootprint(f.ctx, f.projects["orders"])
 			if err != nil {
 				t.Fatalf("ProjectFootprint: %v", err)
 			}
@@ -130,7 +130,7 @@ func TestFootprintInventsNoRows(t *testing.T) {
 			}
 			beforeAudit := f.changeRows(t, "project_asset")
 
-			if _, err := f.s.ProjectFootprint(f.ctx, f.projects["orders"], 0); err != nil {
+			if _, err := f.s.ProjectFootprint(f.ctx, f.projects["orders"]); err != nil {
 				t.Fatalf("ProjectFootprint: %v", err)
 			}
 
@@ -161,7 +161,7 @@ func TestFootprintReportsAConflictRatherThanAbsorbing(t *testing.T) {
 			// platform owns vm-db-1, which lives inside orders' hv-01.
 			f.mustLinkAsset(t, "platform", "vm-db-1", domain.ProjectOwns)
 
-			fp, err := f.s.ProjectFootprint(f.ctx, f.projects["orders"], 0)
+			fp, err := f.s.ProjectFootprint(f.ctx, f.projects["orders"])
 			if err != nil {
 				t.Fatalf("ProjectFootprint: %v", err)
 			}
@@ -175,7 +175,7 @@ func TestFootprintReportsAConflictRatherThanAbsorbing(t *testing.T) {
 			}
 			// And the control: with no competing owner there is no conflict, so
 			// the report is not just always non-empty.
-			plain, err := f.s.ProjectFootprint(f.ctx, f.projects["platform"], 0)
+			plain, err := f.s.ProjectFootprint(f.ctx, f.projects["platform"])
 			if err != nil {
 				t.Fatalf("ProjectFootprint: %v", err)
 			}
@@ -188,9 +188,17 @@ func TestFootprintReportsAConflictRatherThanAbsorbing(t *testing.T) {
 	}
 }
 
-// TestFootprintBudgetIsReported: a cut nobody is told about is
-// indistinguishable from a fact that does not exist.
-func TestFootprintBudgetIsReported(t *testing.T) {
+// TestTheNodeBudgetCutsThePictureAndNotTheFootprint.
+//
+// The budget used to live on ProjectFootprint, which made it a rendering limit
+// leaking into an accounting one: everything downstream -- conflicts, implied
+// services, and then the cost rollup -- inherited a cap that exists so an SVG
+// stays legible. The symptom was a total that was simply wrong, with nothing on
+// the page to say so.
+//
+// So both halves are asserted together, because they are one rule: the map cuts
+// and reports the cut, and the footprint does not cut at all.
+func TestTheNodeBudgetCutsThePictureAndNotTheFootprint(t *testing.T) {
 	for _, e := range Engines(t) {
 		t.Run(e.Name, func(t *testing.T) {
 			f := newFootprintFixture(t, e)
@@ -199,15 +207,26 @@ func TestFootprintBudgetIsReported(t *testing.T) {
 				mustAsset(t, f.s, f.ctx, domain.KindVM, n, &hv, f.env)
 			}
 
-			fp, err := f.s.ProjectFootprint(f.ctx, f.projects["orders"], 2)
+			fp, err := f.s.ProjectFootprint(f.ctx, f.projects["orders"])
 			if err != nil {
 				t.Fatalf("ProjectFootprint: %v", err)
 			}
-			if len(fp.ImpliedAssets) != 2 {
-				t.Errorf("kept %d implied assets, want the budget of 2", len(fp.ImpliedAssets))
+			if len(fp.ImpliedAssets) != 5 {
+				t.Errorf("the footprint holds %d implied assets, want all 5 — it must not "+
+					"apply a drawing budget to an accounting question", len(fp.ImpliedAssets))
 			}
-			if fp.AssetsElided != 3 {
-				t.Errorf("AssetsElided = %d, want the 3 that were cut", fp.AssetsElided)
+
+			g, err := f.s.ProjectMap(f.ctx, f.projects["orders"], 2)
+			if err != nil {
+				t.Fatalf("ProjectMap: %v", err)
+			}
+			if len(g.Assets) != 2 {
+				t.Errorf("the map drew %d assets, want the budget of 2", len(g.Assets))
+			}
+			// A cut nobody is told about is indistinguishable from a fact that
+			// does not exist.
+			if g.AssetsElided == 0 {
+				t.Error("the map cut assets without reporting how many")
 			}
 		})
 	}
@@ -283,7 +302,7 @@ func TestHiddenDependenciesAreClassified(t *testing.T) {
 			dep("orders-api", "orphan")     // owned by nobody
 			dep("orders-api", "shared-bus") // declared as used
 
-			fp, err := s.ProjectFootprint(ctx, f.projects["orders"], 0)
+			fp, err := s.ProjectFootprint(ctx, f.projects["orders"])
 			if err != nil {
 				t.Fatalf("footprint: %v", err)
 			}
@@ -346,7 +365,7 @@ func TestUsedServicesDoNotDragInTheirDependencies(t *testing.T) {
 				t.Fatalf("creating dependency: %v", err)
 			}
 
-			fp, err := s.ProjectFootprint(ctx, f.projects["orders"], 0)
+			fp, err := s.ProjectFootprint(ctx, f.projects["orders"])
 			if err != nil {
 				t.Fatalf("footprint: %v", err)
 			}

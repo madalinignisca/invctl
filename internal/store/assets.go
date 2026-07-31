@@ -171,8 +171,8 @@ func (s *SQLStore) ListAssets(ctx context.Context, f AssetFilter) ([]AssetRow, e
 		// list page's filter box, not the global search, and it has to work
 		// identically on both engines. LOWER() on both sides keeps it
 		// case-insensitive on PostgreSQL, where LIKE is case-sensitive.
-		where = append(where, `(LOWER(a.name) LIKE ? OR LOWER(COALESCE(a.serial, '')) LIKE ?)`)
-		pattern := "%" + lower(f.Query) + "%"
+		where = append(where, `(LOWER(a.name) LIKE ? ESCAPE '\' OR LOWER(COALESCE(a.serial, '')) LIKE ? ESCAPE '\')`)
+		pattern := "%" + escapeLike(lower(f.Query)) + "%"
 		args = append(args, pattern, pattern)
 	}
 	query += whereClause(where) + ` ORDER BY a.kind, a.name`

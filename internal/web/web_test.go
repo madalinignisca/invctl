@@ -1446,3 +1446,35 @@ func firstAssetLink(t *testing.T, page string) string {
 	}
 	return m[1]
 }
+
+// TestVocabularyValidationRerendersTheForm.
+//
+// From a review. The store's two required-field checks returned a plain wrapped
+// ErrInvalid rather than a *ValidationError, so validationErrors() did not
+// recognise them and the handler fell through to a bare
+// "That request was not valid." — 422 with no form, no field highlighted and
+// whatever was typed lost. The template's per-field hooks were unreachable.
+//
+// The HTML `required` attributes are client-side only, so this is one curl away.
+func TestVocabularyValidationRerendersTheForm(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	resp := h.post("/vocabularies", url.Values{
+		"csrf_token": {h.csrfToken("/vocabularies?table=cost_kind")},
+		"table":      {"cost_kind"},
+		"code":       {"rent"},
+		"label":      {""}, // the field the store rejects
+	}, false)
+	page := body(t, resp)
+
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("a term with no label returned %d, want 422", resp.StatusCode)
+	}
+	if !strings.Contains(page, `class="field-error"`) {
+		t.Error("the response is not the re-rendered form: no field error on the page")
+	}
+	if !strings.Contains(page, "rent") {
+		t.Error("the re-rendered form lost the code that was typed")
+	}
+}

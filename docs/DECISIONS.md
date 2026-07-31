@@ -1521,3 +1521,105 @@ The ranker returns a `less` function rather than sorting, because the callers
 hold different slice types. An earlier attempt passed a hand-rolled
 `sort.Interface` to `sort.SliceStable`, which compiles — the parameter is `any` —
 and panics at run time on anything that is not a slice.
+
+---
+
+## 2026-07-31 — Three reviews, and what they found
+
+Security (automated tooling plus a manual read), Go code quality, and a database
+review against a live PostgreSQL 17, over `c75318c..HEAD` — 24 commits and ~14.8k
+insertions, none of it previously reviewed.
+
+**Clean:** 0 critical and 0 high CVEs, no secrets in the working tree or in 44
+commits of history, no IaC misconfiguration. Every new mutating route sits behind
+CSRF and `RequireAdmin`; every new read behind `RequireAuth`. The runtime-assembled
+cost table names cannot be reached from a request. Index coverage for every new
+query shape is index-driven on both engines — the closure walks, the expiry
+joins, the `IN (...)` cost fetch. The partial unique indexes were verified
+empirically across all eight ownership state transitions on both engines.
+
+### The cost rollup was reporting a wrong number
+
+`ProjectFootprint` took the neighbourhood node budget — 60, chosen so an SVG stays
+legible — and truncated its implied assets to it **before** conflicts, implied
+services or costs were computed. A rendering limit leaking into an accounting one.
+
+Measured: a project owning a rack of eighty priced guests reported **€60 a month
+against a real €80**. The twenty past the budget were not costed, not counted as
+unpriced, and mentioned nowhere. A total a reader cannot trace is the exact
+failure this feature is arranged to avoid.
+
+The budget now lives in `ProjectMap`, the only caller that draws anything, and it
+reports what it cut. The footprint is complete. There is no extra database work —
+`impliedAssets` already fetched every row and cut the slice in Go afterwards.
+
+That change made the id lists unbounded, so the five queries they feed are now
+chunked at 500. Both drivers refuse past a limit and at different points —
+measured, SQLite at 32,767 bound parameters and pgx at 65,536 — each surfacing as
+an opaque driver error with nothing an operator can act on.
+
+### `"1.-5"` was €0.95
+
+`strconv.ParseInt` accepts a leading sign, so the fraction `-5` parsed to 5 and
+was *subtracted* from the whole part. Silently wrong money, no error, and nobody
+would ever look. The fraction is digits-only now. The overflow cap also only
+covered the stored value and not `AnnualMinor()`'s ×12, so a figure that fit the
+column wrapped negative a page later; it is `MaxInt64/12/100`.
+
+### Two schema divergences the constraint test could not see
+
+- **`amount_minor INTEGER` is `int4` on PostgreSQL** — a €21,474,836.47 ceiling —
+  and 64-bit on SQLite. A data-centre acquisition above it saved on one engine and
+  returned `integer out of range` on the other, which `translateWriteErr` does not
+  recognise, so it reached HTTP as a 500 carrying a raw driver error. Now `BIGINT`.
+- **`id TEXT PRIMARY KEY` is nullable on SQLite.** Only an `INTEGER PRIMARY KEY`
+  is implicitly `NOT NULL`; SQLite treats NULLs as distinct in a unique index, so
+  several such rows can coexist, each invisible to every statement keyed on
+  `WHERE id = ?` while still counted by every aggregate.
+
+`TestConstraintNamesMatchAcrossEngines` compares a flat *set* of CHECK names, so
+it can see neither nullability, nor which table a constraint sits on, nor an
+expression. `TestColumnShapesMatchAcrossEngines` is the missing half — and it
+immediately showed the nullable-primary-key problem was **estate-wide, 30
+columns**, not the four in `00012`. Migration `00013` fixes all of them.
+
+Measured on the pinned driver: `ALTER COLUMN … SET NOT NULL` succeeds, *validates
+existing rows*, needs no rebuild, and `DROP NOT NULL` reverses it. The stored DDL
+text does not change — the constraint is enforced without appearing in
+`sqlite_master`, which is why the shape test asks `pragma_table_info` rather than
+parsing DDL. `00013`'s down path is deliberately asymmetric: SQLite drops the
+constraints because there the previous state genuinely was nullable, and
+PostgreSQL does nothing because there a primary key always implied `NOT NULL` and
+the engine refuses to pretend otherwise (`SQLSTATE 42P16`).
+
+### Smaller, all real
+
+- `ListProjects` was the one list filter without `LOWER()`. SQLite's `LIKE` is
+  case-insensitive for ASCII and PostgreSQL's is not, so a search that worked on
+  the demo returned nothing on PostgreSQL.
+- `UpsertVocabularyTerm`'s required-field checks returned a wrapped sentinel
+  rather than a `*ValidationError`, so the handler answered 422 with a bare
+  string instead of the re-rendered form — the template's per-field hooks were
+  unreachable from that path.
+- `retireCost` selected on the cost id alone, ignoring the parent in the URL: an
+  admin could retire a cost on one asset through another asset's URL, with a
+  correct `change_log` entry and an incorrect redirect.
+- LIKE metacharacters were unescaped in four filters. Parameterised throughout,
+  so never an injection — but an asset tag containing `_` matched any character.
+- `dynamicTargetAllowlist` exempted a **file**, so any future dynamic-table write
+  added to one of the four would inherit the exemption silently. Each now carries
+  an exact expected count; adding a fifth write to `costs.go` fails until somebody
+  says so.
+- Migration `00010` would abort mid-flight on an empty application code, and gave
+  a *retired* service an active `owns` link — invisible in the UI while occupying
+  the single owner slot, so nobody could own that service and no screen said why.
+
+### Noted, not acted on
+
+The test PostgreSQL container is Alpine/musl, which does not implement locale
+collation and therefore byte-orders. Every `ORDER BY <text>` agrees across engines
+*here* and would not on a glibc PostgreSQL. Nothing today depends on it — the
+orderings are display-only and every truncation decision re-sorts in Go — but the
+comments claim collation-independence that this environment cannot falsify.
+Pinning the container to glibc, or creating the test database `LC_COLLATE=C`,
+would put the claim under test.

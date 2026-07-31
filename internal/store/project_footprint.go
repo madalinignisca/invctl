@@ -50,10 +50,6 @@ type ProjectFootprint struct {
 	// inside our hypervisor that the platform team owns is not ours to count,
 	// and silently absorbing it would double-count it the day cost lands.
 	Conflicts []FootprintConflict
-
-	// AssetsElided is how many implied assets the node budget cut. Reported
-	// rather than silently dropped, like every other cut in this codebase.
-	AssetsElided int
 }
 
 // FootprintConflict is an implied asset with a declared owner elsewhere.
@@ -119,10 +115,23 @@ func (f *ProjectFootprint) responsibleServiceIDs() []string {
 }
 
 // ProjectFootprint computes what a project consists of.
-func (s *SQLStore) ProjectFootprint(ctx context.Context, projectID string, maxAssets int) (*ProjectFootprint, error) {
-	if maxAssets <= 0 {
-		maxAssets = NeighbourhoodDefaultMaxAssets
-	}
+//
+// COMPLETE, AND DELIBERATELY UNBUDGETED. It used to take a node budget and
+// truncate the implied assets to it, which was a rendering limit leaking into an
+// accounting one: NeighbourhoodDefaultMaxAssets exists so an SVG stays legible,
+// and everything downstream -- the conflict panel, the implied services, and
+// then the cost rollup -- silently inherited a diagram's readability cap.
+//
+// The symptom was a wrong number with nothing to indicate it. A project owning a
+// rack with eighty guests reported EUR 60 a month against a real EUR 80: the
+// twenty assets past the budget were not costed, not counted as unpriced, and
+// not mentioned anywhere in the summary. A total a reader cannot trace is the
+// exact failure this whole feature is arranged to avoid.
+//
+// The budget now lives where it belongs, in ProjectMap, which is the only caller
+// that draws anything. There is no extra database work: impliedAssets already
+// fetched every row and cut the slice in Go afterwards.
+func (s *SQLStore) ProjectFootprint(ctx context.Context, projectID string) (*ProjectFootprint, error) {
 	f := &ProjectFootprint{ProjectID: projectID}
 
 	assets, err := s.ListProjectAssets(ctx, projectID)
@@ -149,7 +158,7 @@ func (s *SQLStore) ProjectFootprint(ctx context.Context, projectID string, maxAs
 	}
 
 	if len(f.OwnedAssetIDs) > 0 {
-		if err := s.impliedAssets(ctx, f, maxAssets); err != nil {
+		if err := s.impliedAssets(ctx, f); err != nil {
 			return nil, err
 		}
 	}
@@ -165,7 +174,7 @@ func (s *SQLStore) ProjectFootprint(ctx context.Context, projectID string, maxAs
 // MIN(depth) collapses the several paths a descendant can be reached by, the
 // same way neighbourhoodAssets collapses hops -- an asset inside two owned
 // racks is one asset, not two.
-func (s *SQLStore) impliedAssets(ctx context.Context, f *ProjectFootprint, maxAssets int) error {
+func (s *SQLStore) impliedAssets(ctx context.Context, f *ProjectFootprint) error {
 	list := placeholders(len(f.OwnedAssetIDs))
 	args := append(anySlice(f.OwnedAssetIDs), domain.LifecycleRetired)
 
@@ -197,16 +206,7 @@ func (s *SQLStore) impliedAssets(ctx context.Context, f *ProjectFootprint, maxAs
 			kept = append(kept, r)
 		}
 	}
-	rows = kept
-
-	if len(rows) > maxAssets {
-		// Sorted in Go before the cut, so which assets survive does not depend
-		// on the server's collation. See sortAssetsForBudget.
-		sortAssetsForBudget(rows)
-		f.AssetsElided = len(rows) - maxAssets
-		rows = rows[:maxAssets]
-	}
-	f.ImpliedAssets = rows
+	f.ImpliedAssets = kept
 
 	return s.footprintConflicts(ctx, f)
 }
@@ -220,21 +220,25 @@ func (s *SQLStore) footprintConflicts(ctx context.Context, f *ProjectFootprint) 
 	for i, a := range f.ImpliedAssets {
 		ids[i] = a.ID
 	}
-	args := append(anySlice(ids),
-		domain.ProjectOwns, domain.LifecycleActive, domain.LifecycleRetired, f.ProjectID)
+	for _, chunk := range chunkIDs(ids) {
+		args := append(anySlice(chunk),
+			domain.ProjectOwns, domain.LifecycleActive, domain.LifecycleRetired, f.ProjectID)
 
-	err := s.read(ctx, &f.Conflicts, `
-		SELECT pa.asset_id, a.name AS asset_name,
-		       p.id AS project_id, p.code AS project_code, p.name AS project_name
-		FROM project_asset pa
-		JOIN asset a   ON a.id = pa.asset_id
-		JOIN project p ON p.id = pa.project_id
-		WHERE pa.asset_id IN (`+placeholders(len(ids))+`)
-		  AND pa.relation = ? AND pa.lifecycle = ?
-		  AND p.lifecycle <> ? AND pa.project_id <> ?
-		ORDER BY a.name, pa.asset_id`, args...)
-	if err != nil {
-		return fmt.Errorf("checking footprint conflicts: %w", err)
+		var found []FootprintConflict
+		err := s.read(ctx, &found, `
+			SELECT pa.asset_id, a.name AS asset_name,
+			       p.id AS project_id, p.code AS project_code, p.name AS project_name
+			FROM project_asset pa
+			JOIN asset a   ON a.id = pa.asset_id
+			JOIN project p ON p.id = pa.project_id
+			WHERE pa.asset_id IN (`+placeholders(len(chunk))+`)
+			  AND pa.relation = ? AND pa.lifecycle = ?
+			  AND p.lifecycle <> ? AND pa.project_id <> ?
+			ORDER BY a.name, pa.asset_id`, args...)
+		if err != nil {
+			return fmt.Errorf("checking footprint conflicts: %w", err)
+		}
+		f.Conflicts = append(f.Conflicts, found...)
 	}
 	return nil
 }
@@ -326,9 +330,11 @@ func (s *SQLStore) ProjectExternalDependencies(ctx context.Context, f *ProjectFo
 		return report, nil
 	}
 
-	args := append([]any{domain.LifecycleActive}, anySlice(consumers)...)
 	var edges []ExternalDependency
-	err := s.read(ctx, &edges, `
+	for _, chunk := range chunkIDs(consumers) {
+		args := append([]any{domain.LifecycleActive}, anySlice(chunk)...)
+		var part []ExternalDependency
+		err := s.read(ctx, &part, `
 		SELECT d.id AS dependency_id, d.nature,
 		       CASE WHEN d.provider_route_id IS NULL THEN 'endpoint' ELSE 'route' END AS via,
 		       d.consumer_service_id AS consumer_id, cs.code AS consumer_code, cs.name AS consumer_name,
@@ -345,10 +351,12 @@ func (s *SQLStore) ProjectExternalDependencies(ctx context.Context, f *ProjectFo
 		LEFT JOIN endpoint re ON re.id  = r.frontend_endpoint_id
 		LEFT JOIN service res ON res.id = re.service_id
 		WHERE d.lifecycle = ?
-		  AND d.consumer_service_id IN (`+placeholders(len(consumers))+`)
+		  AND d.consumer_service_id IN (`+placeholders(len(chunk))+`)
 		ORDER BY d.id`, args...)
-	if err != nil {
-		return nil, fmt.Errorf("loading the dependencies of %s: %w", f.ProjectID, err)
+		if err != nil {
+			return nil, fmt.Errorf("loading the dependencies of %s: %w", f.ProjectID, err)
+		}
+		edges = append(edges, part...)
 	}
 
 	// Which project owns each provider. One query, then the classification
@@ -403,25 +411,27 @@ func (s *SQLStore) ownersOfServices(ctx context.Context, serviceIDs []string) (m
 	if len(serviceIDs) == 0 {
 		return map[string]ProjectLinkRow{}, nil
 	}
-	args := append(anySlice(serviceIDs),
-		domain.ProjectOwns, domain.LifecycleActive, domain.LifecycleRetired)
-
-	var rows []ProjectLinkRow
-	err := s.read(ctx, &rows, `
-		SELECT ps.service_id AS entity_id, ps.project_id, ps.relation, p.code, p.name
-		FROM project_service ps
-		JOIN project p ON p.id = ps.project_id
-		WHERE ps.service_id IN (`+placeholders(len(serviceIDs))+`)
-		  AND ps.relation = ? AND ps.lifecycle = ? AND p.lifecycle <> ?
-		ORDER BY ps.service_id`, args...)
-	if err != nil {
-		return nil, fmt.Errorf("resolving service owners: %w", err)
-	}
 	// At most one owner per service, by the partial unique index, so the last
 	// write wins is not a question that can arise.
-	out := make(map[string]ProjectLinkRow, len(rows))
-	for _, r := range rows {
-		out[r.EntityID] = r
+	out := make(map[string]ProjectLinkRow, len(serviceIDs))
+	for _, chunk := range chunkIDs(serviceIDs) {
+		args := append(anySlice(chunk),
+			domain.ProjectOwns, domain.LifecycleActive, domain.LifecycleRetired)
+
+		var rows []ProjectLinkRow
+		err := s.read(ctx, &rows, `
+			SELECT ps.service_id AS entity_id, ps.project_id, ps.relation, p.code, p.name
+			FROM project_service ps
+			JOIN project p ON p.id = ps.project_id
+			WHERE ps.service_id IN (`+placeholders(len(chunk))+`)
+			  AND ps.relation = ? AND ps.lifecycle = ? AND p.lifecycle <> ?
+			ORDER BY ps.service_id`, args...)
+		if err != nil {
+			return nil, fmt.Errorf("resolving service owners: %w", err)
+		}
+		for _, r := range rows {
+			out[r.EntityID] = r
+		}
 	}
 	return out, nil
 }
@@ -438,13 +448,26 @@ func (s *SQLStore) ownersOfServices(ctx context.Context, serviceIDs []string) (m
 // picture even though it is part of its reality -- the neighbourhood is the
 // page that crosses that boundary.
 func (s *SQLStore) ProjectMap(ctx context.Context, projectID string, maxAssets int) (*NeighbourhoodGraph, error) {
-	f, err := s.ProjectFootprint(ctx, projectID, maxAssets)
+	if maxAssets <= 0 {
+		maxAssets = NeighbourhoodDefaultMaxAssets
+	}
+	f, err := s.ProjectFootprint(ctx, projectID)
 	if err != nil {
 		return nil, err
 	}
-	g := &NeighbourhoodGraph{AssetsElided: f.AssetsElided}
+	g := &NeighbourhoodGraph{}
 
+	// The node budget applies HERE and only here. A picture with four hundred
+	// boxes is not a picture, but a sum over four hundred ids is a correct sum,
+	// so the cut belongs to the thing being drawn rather than to the thing
+	// being counted.
 	ids := f.AllAssetIDs()
+	if len(ids) > maxAssets {
+		// Sorted in Go before the cut, so which assets survive does not depend
+		// on the server's collation.
+		g.AssetsElided = len(ids) - maxAssets
+		ids = ids[:maxAssets]
+	}
 	if len(ids) == 0 {
 		return g, nil
 	}

@@ -20,11 +20,25 @@
 -- somebody adds by INSERT would be storable and silently uncomputable. That is
 -- the same line migration 00004 drew between service_kind and availability.
 --
--- AMOUNTS ARE MINOR UNITS IN INTEGER. Never a float, never NUMERIC or MONEY:
+-- AMOUNTS ARE MINOR UNITS IN BIGINT. Never a float, never NUMERIC or MONEY:
 -- their arithmetic differs across the two engines and the whole portability
 -- constraint rests on it not doing that. One currency for the estate, held in
 -- configuration -- summing mixed currencies needs FX rates with valuation dates,
 -- which is a subsystem rather than a column, and is a stated non-goal.
+--
+-- BIGINT rather than INTEGER, and the difference is not cosmetic: PostgreSQL
+-- maps INTEGER to int4, which caps at 2,147,483,647 minor units -- EUR
+-- 21,474,836.47 -- while SQLite's INTEGER affinity is 64-bit. A data centre
+-- acquisition above that saved on SQLite and returned "integer out of range" on
+-- PostgreSQL, which translateWriteErr does not recognise, so it reached the HTTP
+-- layer as a 500 carrying a raw driver error. Measured on both engines; found by
+-- a database review.
+--
+-- EVERY PRIMARY KEY IS SPELLED NOT NULL. `id TEXT PRIMARY KEY` leaves the column
+-- NULLABLE on SQLite, and because SQLite treats NULLs as distinct in a unique
+-- index, several rows can hold one. Such a row is invisible to every statement
+-- keyed on `WHERE id = ?` -- it can never be edited or retired -- and still
+-- counts towards every total. Migration 00009 spells it out; this one did not.
 --
 -- THE VALIDITY WINDOW IS HERE FROM DAY ONE even though the first release only
 -- ever queries "current". Without it a renewal at a new price overwrites its
@@ -40,7 +54,7 @@
 
 -- +goose Up
 CREATE TABLE cost_kind (
-  code        TEXT PRIMARY KEY,
+  code        TEXT NOT NULL PRIMARY KEY,
   label       TEXT NOT NULL,
   sort_order  INTEGER NOT NULL DEFAULT 0,
   description TEXT
@@ -56,11 +70,11 @@ INSERT INTO cost_kind (code, label, sort_order, description) VALUES
 
 -- Assets.
 CREATE TABLE asset_cost (
-  id           TEXT PRIMARY KEY,
+  id           TEXT NOT NULL PRIMARY KEY,
   asset_id     TEXT NOT NULL REFERENCES asset(id),
   kind         TEXT NOT NULL REFERENCES cost_kind(code),
   period       TEXT NOT NULL,
-  amount_minor INTEGER NOT NULL,
+  amount_minor BIGINT NOT NULL,
   note         TEXT,
   valid_from   TEXT NOT NULL,
   valid_until  TEXT,
@@ -82,11 +96,11 @@ CREATE INDEX idx_asset_cost_asset ON asset_cost(asset_id);
 
 -- Services.
 CREATE TABLE service_cost (
-  id           TEXT PRIMARY KEY,
+  id           TEXT NOT NULL PRIMARY KEY,
   service_id   TEXT NOT NULL REFERENCES service(id),
   kind         TEXT NOT NULL REFERENCES cost_kind(code),
   period       TEXT NOT NULL,
-  amount_minor INTEGER NOT NULL,
+  amount_minor BIGINT NOT NULL,
   note         TEXT,
   valid_from   TEXT NOT NULL,
   valid_until  TEXT,
@@ -109,11 +123,11 @@ CREATE INDEX idx_service_cost_service ON service_cost(service_id);
 -- project total is systematically low in a way nobody notices until somebody
 -- reconciles it against an invoice and stops believing the page.
 CREATE TABLE project_cost (
-  id           TEXT PRIMARY KEY,
+  id           TEXT NOT NULL PRIMARY KEY,
   project_id   TEXT NOT NULL REFERENCES project(id),
   kind         TEXT NOT NULL REFERENCES cost_kind(code),
   period       TEXT NOT NULL,
-  amount_minor INTEGER NOT NULL,
+  amount_minor BIGINT NOT NULL,
   note         TEXT,
   valid_from   TEXT NOT NULL,
   valid_until  TEXT,

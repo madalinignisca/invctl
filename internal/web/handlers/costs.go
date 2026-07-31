@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"math"
 	"net/http"
 	"sort"
 	"strconv"
@@ -53,19 +54,19 @@ func (a *App) CostAddToProject(w http.ResponseWriter, r *http.Request) {
 
 // CostRetireOnAsset soft-deletes a line on an asset.
 func (a *App) CostRetireOnAsset(w http.ResponseWriter, r *http.Request) {
-	err := a.Store.RetireAssetCost(r.Context(), actor(r), r.PathValue("costID"))
+	err := a.Store.RetireAssetCost(r.Context(), actor(r), r.PathValue("id"), r.PathValue("costID"))
 	a.afterCostWrite(w, r, err, "/assets/"+r.PathValue("id"))
 }
 
 // CostRetireOnService soft-deletes a line on a service.
 func (a *App) CostRetireOnService(w http.ResponseWriter, r *http.Request) {
-	err := a.Store.RetireServiceCost(r.Context(), actor(r), r.PathValue("costID"))
+	err := a.Store.RetireServiceCost(r.Context(), actor(r), r.PathValue("id"), r.PathValue("costID"))
 	a.afterCostWrite(w, r, err, "/services/"+r.PathValue("id"))
 }
 
 // CostRetireOnProject soft-deletes a line on a project.
 func (a *App) CostRetireOnProject(w http.ResponseWriter, r *http.Request) {
-	err := a.Store.RetireProjectCost(r.Context(), actor(r), r.PathValue("costID"))
+	err := a.Store.RetireProjectCost(r.Context(), actor(r), r.PathValue("id"), r.PathValue("costID"))
 	a.afterCostWrite(w, r, err, "/projects/"+r.PathValue("id"))
 }
 
@@ -145,6 +146,14 @@ func parseAmountMinor(raw string) (int64, error) {
 	}
 	var minor int64
 	if split {
+		// Digits only. ParseInt accepts a leading sign, so without this "1.-5"
+		// parses to 95 minor units and "1.+5" to 105 -- silently wrong money,
+		// no error, and nobody would ever look. Found by a security review.
+		for _, r := range frac {
+			if r < '0' || r > '9' {
+				return 0, amountError("must be a number, like 1200 or 1200.50")
+			}
+		}
 		switch len(frac) {
 		case 0:
 			// "1200." is a person mid-typing, not an error.
@@ -162,7 +171,11 @@ func parseAmountMinor(raw string) (int64, error) {
 	}
 	// Overflow would wrap silently into a negative amount, which the domain
 	// then rejects with a message about negatives that would baffle anybody.
-	const maxMajor = (1 << 62) / 100
+	//
+	// The cap covers the ANNUALISED figure, not just the stored one: a monthly
+	// amount is multiplied by twelve to produce the yearly total, so a value
+	// that fits here and not there wraps a page later instead of at the form.
+	const maxMajor = math.MaxInt64 / 12 / 100
 	if major > maxMajor {
 		return 0, amountError("is larger than this system can hold")
 	}

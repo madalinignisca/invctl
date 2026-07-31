@@ -106,8 +106,13 @@ func (s *SQLStore) ListProjects(ctx context.Context, f ProjectFilter) ([]Project
 		args = append(args, domain.LifecycleRetired)
 	}
 	if f.Query != "" {
-		where = append(where, `(p.code LIKE ? OR p.name LIKE ?)`)
-		like := "%" + f.Query + "%"
+		// LOWER on both sides, like every other filter in this codebase.
+		// SQLite's LIKE is case-insensitive for ASCII and PostgreSQL's is not,
+		// so without this a search for "Orders" found the project on the demo
+		// and nothing at all on PostgreSQL. This was the one filter that missed
+		// it; found by a database review.
+		where = append(where, `(LOWER(p.code) LIKE ? ESCAPE '' OR LOWER(p.name) LIKE ? ESCAPE '')`)
+		like := "%" + escapeLike(lower(f.Query)) + "%"
 		args = append(args, like, like)
 	}
 	if len(where) > 0 {
@@ -199,21 +204,23 @@ func (s *SQLStore) projectsFor(ctx context.Context, table, column string, ids []
 	if len(ids) == 0 {
 		return map[string][]ProjectLinkRow{}, nil
 	}
-	var rows []ProjectLinkRow
-	err := s.read(ctx, &rows, `
-		SELECT l.`+column+` AS entity_id, l.project_id, l.relation, p.code, p.name
-		FROM `+table+` l
-		JOIN project p ON p.id = l.project_id
-		WHERE l.`+column+` IN (`+placeholders(len(ids))+`)
-		  AND l.lifecycle = ? AND p.lifecycle <> ?
-		ORDER BY l.relation, p.code`,
-		append(anySlice(ids), domain.LifecycleActive, domain.LifecycleRetired)...)
-	if err != nil {
-		return nil, fmt.Errorf("loading project links: %w", err)
-	}
-	out := make(map[string][]ProjectLinkRow, len(rows))
-	for _, r := range rows {
-		out[r.EntityID] = append(out[r.EntityID], r)
+	out := make(map[string][]ProjectLinkRow, len(ids))
+	for _, chunk := range chunkIDs(ids) {
+		var rows []ProjectLinkRow
+		err := s.read(ctx, &rows, `
+			SELECT l.`+column+` AS entity_id, l.project_id, l.relation, p.code, p.name
+			FROM `+table+` l
+			JOIN project p ON p.id = l.project_id
+			WHERE l.`+column+` IN (`+placeholders(len(chunk))+`)
+			  AND l.lifecycle = ? AND p.lifecycle <> ?
+			ORDER BY l.relation, p.code`,
+			append(anySlice(chunk), domain.LifecycleActive, domain.LifecycleRetired)...)
+		if err != nil {
+			return nil, fmt.Errorf("loading project links: %w", err)
+		}
+		for _, r := range rows {
+			out[r.EntityID] = append(out[r.EntityID], r)
+		}
 	}
 	return out, nil
 }

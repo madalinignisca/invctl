@@ -222,6 +222,38 @@ func translateWriteErr(err error, what string) error {
 // placeholders builds "?, ?, ?" for an IN clause of n values. sqlx.In would do
 // this, but it also rewrites the argument list, and several queries here mix a
 // slice with scalar arguments.
+// idChunkSize bounds an IN (...) list.
+//
+// Every bound value in a statement counts against a driver limit, and the two
+// engines fail at different points: measured with the pinned drivers, SQLite
+// refuses at 32,767 parameters ("too many SQL variables") and pgx at 65,536
+// ("extended protocol limited to 65535 parameters"). Both surface as an opaque
+// driver error with nothing an operator can act on.
+//
+// That was unreachable while the project footprint carried a node budget. It is
+// reachable now that the footprint is complete -- correctly, since a rendering
+// cap must not truncate a sum -- so the id lists it feeds are chunked instead.
+// 500 is far below either limit and leaves room for the handful of other bound
+// values each of these statements carries.
+const idChunkSize = 500
+
+// chunkIDs splits an id list for IN (...) use. A single chunk is returned
+// unwrapped so the common case allocates nothing extra.
+func chunkIDs(ids []string) [][]string {
+	if len(ids) <= idChunkSize {
+		return [][]string{ids}
+	}
+	chunks := make([][]string, 0, (len(ids)+idChunkSize-1)/idChunkSize)
+	for start := 0; start < len(ids); start += idChunkSize {
+		end := start + idChunkSize
+		if end > len(ids) {
+			end = len(ids)
+		}
+		chunks = append(chunks, ids[start:end])
+	}
+	return chunks
+}
+
 func placeholders(n int) string {
 	if n <= 0 {
 		return "NULL"

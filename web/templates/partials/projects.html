@@ -168,11 +168,6 @@
       <div class="empty"><strong>Nothing implied.</strong>
         Either this project owns no hosts, or nothing runs inside what it owns.</div>
       {{end}}
-      {{if .Footprint.AssetsElided}}
-      <div class="diag-note">{{pluralise .Footprint.AssetsElided "further asset" "further assets"}}
-        not shown — the derived list is capped so one project owning a site cannot
-        turn this page into a picture of the whole estate.</div>
-      {{end}}
       {{range .Footprint.Conflicts}}
       <div class="diag-note">
         <span class="mono">{{.AssetName}}</span> sits inside something this project owns,

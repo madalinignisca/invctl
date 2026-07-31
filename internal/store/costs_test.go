@@ -1,6 +1,8 @@
 package store
 
 import (
+	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -81,7 +83,7 @@ func (f *projectFixture) price(t *testing.T, attach func(*domain.Cost) error,
 
 func (f *projectFixture) costs(t *testing.T, code string) *ProjectCostSummary {
 	t.Helper()
-	footprint, err := f.s.ProjectFootprint(f.ctx, f.projects[code], 0)
+	footprint, err := f.s.ProjectFootprint(f.ctx, f.projects[code])
 	if err != nil {
 		t.Fatalf("deriving the footprint: %v", err)
 	}
@@ -277,7 +279,7 @@ func TestRetiringACostLineRemovesItFromTotalsButNotFromTheList(t *testing.T) {
 				t.Fatalf("monthly before = %d, want 10500", got.MonthlyMinor)
 			}
 
-			if err := f.s.RetireAssetCost(f.ctx, testActor, id); err != nil {
+			if err := f.s.RetireAssetCost(f.ctx, testActor, f.assets["hv-01"], id); err != nil {
 				t.Fatalf("retiring: %v", err)
 			}
 			after, err := f.s.ListAssetCosts(f.ctx, f.assets["hv-01"])
@@ -370,7 +372,7 @@ func TestCostMutationsAreAudited(t *testing.T) {
 				t.Errorf("updating: change_log = %d, want %d", after, before+2)
 			}
 
-			if err := f.s.RetireAssetCost(f.ctx, testActor, id); err != nil {
+			if err := f.s.RetireAssetCost(f.ctx, testActor, f.assets["hv-01"], id); err != nil {
 				t.Fatalf("retiring: %v", err)
 			}
 			if after := f.changeRows(t, "asset_cost"); after != before+3 {
@@ -476,6 +478,168 @@ func TestProjectCostsAreNeverAmortised(t *testing.T) {
 			if got.Unamortisable != 1 {
 				t.Errorf("unamortisable = %d, want 1 — the one-off was not counted at all",
 					got.Unamortisable)
+			}
+		})
+	}
+}
+
+// TestCostsCoverTheWholeFootprintNotJustWhatFitsOnADiagram.
+//
+// Regression, from a review. ProjectFootprint used to take the neighbourhood
+// node budget -- 60, chosen so an SVG stays legible -- and truncate its implied
+// assets to it before conflicts, implied services or costs were computed. A
+// project owning a rack with eighty priced guests therefore reported EUR 60 a
+// month against a real EUR 80: the twenty past the budget were not costed, not
+// counted as unpriced, and mentioned nowhere in the summary.
+//
+// Eighty is deliberately above the old default. At sixty-one this test would
+// pass against the bug for anyone who later raised the constant, and a
+// regression test that a constant can silence is not a regression test.
+func TestCostsCoverTheWholeFootprintNotJustWhatFitsOnADiagram(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newProjectFixture(t, e)
+
+			rack := mustAsset(t, f.s, f.ctx, domain.KindRack, "rack-z", nil, f.env)
+			f.assets["rack-z"] = rack
+			const guests = 80
+			for i := 0; i < guests; i++ {
+				name := fmt.Sprintf("vm-z-%02d", i)
+				f.assets[name] = mustAsset(t, f.s, f.ctx, domain.KindVM, name, &rack, f.env)
+				f.priceAsset(t, name, "operating", domain.CostMonthly, 1_00)
+			}
+			if err := f.link(t, "platform", "rack-z", domain.ProjectOwns); err != nil {
+				t.Fatalf("owning the rack: %v", err)
+			}
+
+			got := f.costs(t, "platform")
+			if got.Own.MonthlyMinor != guests*1_00 {
+				t.Errorf("monthly = %d, want %d — the rollup inherited a drawing budget",
+					got.Own.MonthlyMinor, guests*1_00)
+			}
+			if got.Priced != guests {
+				t.Errorf("priced = %d, want %d", got.Priced, guests)
+			}
+		})
+	}
+}
+
+// TestRetiringACostRequiresTheRightOwner.
+//
+// From a security review. The route is /assets/{id}/costs/{costID}/retire and
+// the store used to select on {costID} alone, so an admin could retire a cost
+// belonging to one asset through a URL naming another: the change_log entry
+// would be correct and the operator's belief about what they had just done
+// would not.
+func TestRetiringACostRequiresTheRightOwner(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newProjectFixture(t, e)
+
+			id := f.priceAsset(t, "hv-01", "support", domain.CostMonthly, 100_00)
+
+			// The same cost, reached through a different asset's URL.
+			err := f.s.RetireAssetCost(f.ctx, testActor, f.assets["sw-core-1"], id)
+			if !errors.Is(err, domain.ErrNotFound) {
+				t.Fatalf("retiring through the wrong owner returned %v, want ErrNotFound", err)
+			}
+			rows, err := f.s.ListAssetCosts(f.ctx, f.assets["hv-01"])
+			if err != nil {
+				t.Fatalf("listing: %v", err)
+			}
+			if rows[0].Lifecycle != domain.LifecycleActive {
+				t.Error("the cost was retired through another asset's URL")
+			}
+
+			// The control: through its own owner it retires.
+			if err := f.s.RetireAssetCost(f.ctx, testActor, f.assets["hv-01"], id); err != nil {
+				t.Fatalf("retiring through the right owner: %v", err)
+			}
+		})
+	}
+}
+
+// TestAForeignOwnedAssetIsCountedElsewhereNotShared.
+//
+// The last untested dedup path, from a review: an asset that is implied (inside
+// something this project owns), owned outright by ANOTHER project, and also
+// declared with a `uses` link from this one. All three are true at once, and the
+// fold order decides which bucket wins.
+//
+// It must be Elsewhere. "Somebody else owns this and it is sitting on my
+// estate" is a different conversation from "I declared that I use this", and
+// counting it under Shared would file the subsidy under things already
+// accounted for -- where nobody looks.
+func TestAForeignOwnedAssetIsCountedElsewhereNotShared(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newProjectFixture(t, e)
+
+			if err := f.link(t, "platform", "hv-01", domain.ProjectOwns); err != nil {
+				t.Fatalf("owning hv-01: %v", err)
+			}
+			// orders owns the guest inside it...
+			if err := f.link(t, "orders", "vm-app-1", domain.ProjectOwns); err != nil {
+				t.Fatalf("owning vm-app-1: %v", err)
+			}
+			// ...and platform ALSO declared that it uses that guest.
+			if err := f.link(t, "platform", "vm-app-1", domain.ProjectUses); err != nil {
+				t.Fatalf("also using vm-app-1: %v", err)
+			}
+			f.priceAsset(t, "vm-app-1", "licence", domain.CostMonthly, 7_00)
+
+			got := f.costs(t, "platform")
+			if got.Elsewhere.MonthlyMinor != 7_00 {
+				t.Errorf("elsewhere = %d, want 700", got.Elsewhere.MonthlyMinor)
+			}
+			if got.Shared.MonthlyMinor != 0 {
+				t.Errorf("shared = %d, want 0 — a subsidy was filed under things already "+
+					"accounted for, where nobody looks", got.Shared.MonthlyMinor)
+			}
+			if got.Own.MonthlyMinor != 0 {
+				t.Errorf("own = %d, want 0 — it absorbed another project's asset",
+					got.Own.MonthlyMinor)
+			}
+		})
+	}
+}
+
+// TestAFootprintLargerThanTheDriverParameterLimit.
+//
+// From a database review. Removing the node budget from the footprint was right
+// -- a rendering cap must not truncate a sum -- but it left the id lists fed to
+// costsFor, footprintConflicts, ownersOfServices, projectsFor and
+// neighbourhoodWorkloads bounded only by the estate. Both drivers refuse past a
+// limit, at different points and with opaque errors: SQLite at 32,767 bound
+// parameters, pgx at 65,536.
+//
+// 600 guests is above idChunkSize and far below either limit, so this exercises
+// the chunk boundary without a minute of setup. The assertion that matters is
+// the total: chunking must not lose or double-count a row at the seam.
+func TestAFootprintLargerThanTheDriverParameterLimit(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newProjectFixture(t, e)
+
+			rack := mustAsset(t, f.s, f.ctx, domain.KindRack, "rack-big", nil, f.env)
+			f.assets["rack-big"] = rack
+			const guests = 600
+			for i := 0; i < guests; i++ {
+				name := fmt.Sprintf("vm-big-%03d", i)
+				f.assets[name] = mustAsset(t, f.s, f.ctx, domain.KindVM, name, &rack, f.env)
+				f.priceAsset(t, name, "operating", domain.CostMonthly, 1_00)
+			}
+			if err := f.link(t, "platform", "rack-big", domain.ProjectOwns); err != nil {
+				t.Fatalf("owning the rack: %v", err)
+			}
+
+			got := f.costs(t, "platform")
+			if got.Own.MonthlyMinor != guests*1_00 {
+				t.Errorf("monthly = %d, want %d — a chunk boundary lost or repeated rows",
+					got.Own.MonthlyMinor, guests*1_00)
+			}
+			if got.Priced != guests {
+				t.Errorf("priced = %d, want %d", got.Priced, guests)
 			}
 		})
 	}

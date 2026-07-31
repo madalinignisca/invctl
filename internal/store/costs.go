@@ -110,15 +110,17 @@ func (s *SQLStore) costsFor(ctx context.Context, t costTable, ownerIDs []string)
 	if len(ownerIDs) == 0 {
 		return out, nil
 	}
-	var rows []CostRow
-	query := t.selectSQL() + ` WHERE c.` + t.column + ` IN (` + placeholders(len(ownerIDs)) + `)
-		AND c.lifecycle = ? ORDER BY c.` + t.column + `, c.kind, c.id`
-	args := append(anySlice(ownerIDs), domain.LifecycleActive)
-	if err := s.read(ctx, &rows, query, args...); err != nil {
-		return nil, fmt.Errorf("loading %s: %w", t.name, err)
-	}
-	for _, r := range rows {
-		out[r.OwnerID] = append(out[r.OwnerID], r)
+	for _, chunk := range chunkIDs(ownerIDs) {
+		var rows []CostRow
+		query := t.selectSQL() + ` WHERE c.` + t.column + ` IN (` + placeholders(len(chunk)) + `)
+			AND c.lifecycle = ? ORDER BY c.` + t.column + `, c.kind, c.id`
+		args := append(anySlice(chunk), domain.LifecycleActive)
+		if err := s.read(ctx, &rows, query, args...); err != nil {
+			return nil, fmt.Errorf("loading %s: %w", t.name, err)
+		}
+		for _, r := range rows {
+			out[r.OwnerID] = append(out[r.OwnerID], r)
+		}
 	}
 	return out, nil
 }
@@ -202,19 +204,20 @@ func (s *SQLStore) updateCost(ctx context.Context, actor domain.Actor, t costTab
 	})
 }
 
-// RetireAssetCost soft-deletes a line on an asset.
-func (s *SQLStore) RetireAssetCost(ctx context.Context, actor domain.Actor, id string) error {
-	return s.retireCost(ctx, actor, costOnAsset, id)
+// RetireAssetCost soft-deletes a line on an asset. ownerID is the asset the
+// caller believes it belongs to; a mismatch is a 404 rather than a retirement.
+func (s *SQLStore) RetireAssetCost(ctx context.Context, actor domain.Actor, ownerID, id string) error {
+	return s.retireCost(ctx, actor, costOnAsset, ownerID, id)
 }
 
 // RetireServiceCost soft-deletes a line on a service.
-func (s *SQLStore) RetireServiceCost(ctx context.Context, actor domain.Actor, id string) error {
-	return s.retireCost(ctx, actor, costOnService, id)
+func (s *SQLStore) RetireServiceCost(ctx context.Context, actor domain.Actor, ownerID, id string) error {
+	return s.retireCost(ctx, actor, costOnService, ownerID, id)
 }
 
 // RetireProjectCost soft-deletes a line on a project.
-func (s *SQLStore) RetireProjectCost(ctx context.Context, actor domain.Actor, id string) error {
-	return s.retireCost(ctx, actor, costOnProject, id)
+func (s *SQLStore) RetireProjectCost(ctx context.Context, actor domain.Actor, ownerID, id string) error {
+	return s.retireCost(ctx, actor, costOnProject, ownerID, id)
 }
 
 // retireCost soft-deletes, like every other entity here.
@@ -224,10 +227,19 @@ func (s *SQLStore) RetireProjectCost(ctx context.Context, actor domain.Actor, id
 // window is the other correct answer and is what an operator should reach for
 // when a contract ends on a known date; retiring is for a line that should never
 // have been entered.
-func (s *SQLStore) retireCost(ctx context.Context, actor domain.Actor, t costTable, id string) error {
+//
+// The line must belong to ownerID. Without that check the route
+// /assets/{id}/costs/{costID}/retire ignores {id} entirely, so an admin can
+// retire a cost on one asset through a URL naming another -- the change_log
+// entry would be correct while the redirect and the operator's belief about
+// what they just did would not. Found by a security review.
+func (s *SQLStore) retireCost(ctx context.Context, actor domain.Actor, t costTable, ownerID, id string) error {
 	before, err := s.getCost(ctx, t, id)
 	if err != nil {
 		return err
+	}
+	if before.OwnerID != ownerID {
+		return fmt.Errorf("cost line %s does not belong to %s: %w", id, ownerID, domain.ErrNotFound)
 	}
 	if before.Lifecycle == domain.LifecycleRetired {
 		return nil

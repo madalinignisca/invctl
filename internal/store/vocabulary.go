@@ -276,11 +276,21 @@ func (s *SQLStore) UpsertVocabularyTerm(ctx context.Context, actor domain.Actor,
 	term.Code = strings.ToLower(strings.TrimSpace(term.Code))
 	term.Label = strings.TrimSpace(term.Label)
 	term.Description = strings.TrimSpace(term.Description)
+	// A *ValidationError, not a wrapped sentinel. validationErrors() extracts
+	// field messages with errors.As and only recognises this type; a plain
+	// wrapped ErrInvalid falls through to handleStoreError, which answers 422
+	// with the bare string "That request was not valid." -- no form, no field
+	// highlighted, and whatever was typed lost. The template already has the
+	// per-field hooks; they were unreachable from this path. Found by review.
+	ve := &domain.ValidationError{}
 	if term.Code == "" {
-		return fmt.Errorf("vocabulary term needs a code: %w", domain.ErrInvalid)
+		ve.Add("code", "is required")
 	}
 	if term.Label == "" {
-		return fmt.Errorf("vocabulary term %q needs a label: %w", term.Code, domain.ErrInvalid)
+		ve.Add("label", "is required")
+	}
+	if err := ve.OrNil(); err != nil {
+		return err
 	}
 
 	return s.write(ctx, actor, func(t *tx) error {

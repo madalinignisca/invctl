@@ -132,7 +132,7 @@ func (a *App) renderProject(w http.ResponseWriter, r *http.Request, status int, 
 		a.serverError(w, r, err)
 		return
 	}
-	footprint, err := a.Store.ProjectFootprint(r.Context(), id, 0)
+	footprint, err := a.Store.ProjectFootprint(r.Context(), id)
 	if err != nil {
 		a.serverError(w, r, err)
 		return
@@ -349,6 +349,15 @@ func (a *App) ProjectMap(w http.ResponseWriter, r *http.Request) {
 	view.Heading = "What " + project.Name + " consists of"
 	view.Note = "Everything the project declared, plus what that implies — not a walk, " +
 		"so somebody else's estate is absent however it is cabled."
+	// The node budget lives here now rather than in the footprint, so this is
+	// the only place a cut can happen -- and a cut nobody is told about is
+	// indistinguishable from a fact that does not exist. The totals on the
+	// overview are computed over the WHOLE footprint and are unaffected.
+	if g.AssetsElided > 0 {
+		view.Note += fmt.Sprintf(" %s not drawn, because a picture with that many boxes "+
+			"is not a picture; the costs and counts on the overview still cover them.",
+			pluraliseCount(g.AssetsElided, "further asset is", "further assets are"))
+	}
 
 	a.Render.Respond(w, r, http.StatusOK, "project_map", "project_map_panel", projectMapPage{
 		Base:    a.base(r, "Map: "+project.Code, "projects"),

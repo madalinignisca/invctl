@@ -440,11 +440,12 @@ func (s *SQLStore) searchText(ctx context.Context, query string, limit int) ([]S
 	if s.db.Driver == DriverPostgres {
 		// Trigram similarity rather than tsvector: the queries that matter
 		// here are identifier fragments, which word-stemming handles badly.
-		pattern := "%" + lower(query) + "%"
+		pattern := "%" + escapeLike(lower(query)) + "%"
 		err := s.read(ctx, &results, `
 			SELECT entity_type, entity_id, title, subtitle, body
 			FROM search_index
-			WHERE LOWER(title) LIKE ? OR LOWER(subtitle) LIKE ? OR LOWER(body) LIKE ?
+			WHERE LOWER(title) LIKE ? ESCAPE '\' OR LOWER(subtitle) LIKE ? ESCAPE '\'
+			   OR LOWER(body) LIKE ? ESCAPE '\' 
 			ORDER BY similarity(title, ?) DESC, title ASC
 			LIMIT ?`, pattern, pattern, pattern, query, limit)
 		if err != nil {
@@ -463,6 +464,20 @@ func (s *SQLStore) searchText(ctx context.Context, query string, limit int) ([]S
 		return nil, fmt.Errorf("searching: %w", err)
 	}
 	return results, nil
+}
+
+// escapeLike neutralises the two LIKE metacharacters so a query containing them
+// matches them literally.
+//
+// Not a security fix -- the pattern is a bound parameter either way -- but a
+// correctness one: an asset tag containing an underscore is a real thing, and
+// searching for it currently matches any character in that position. The
+// backslash escape is spelled out with ESCAPE at the call site because SQLite
+// has no default escape character and PostgreSQL's is backslash only when
+// standard_conforming_strings is off.
+func escapeLike(s string) string {
+	r := strings.NewReplacer(`\`, `\\`, "%", `\%`, "_", `\_`)
+	return r.Replace(s)
 }
 
 // fts5Query turns user input into a safe FTS5 prefix query.

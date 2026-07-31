@@ -269,6 +269,14 @@ func TestOnlyTheObservedPathWritesTheObservedTables(t *testing.T) {
 // dynamicTargetAllowlist is every file permitted to name its table at run time,
 // with the reason. Listed individually so a second one is a deliberate edit and
 // a conversation, rather than a diff nobody reads.
+//
+// KEYED BY FILE, BUDGETED BY COUNT. A per-file exemption means any FUTURE
+// dynamic-table write added anywhere in one of these four files is silently
+// exempt -- which is the exact drift this test exists to catch, inside the four
+// files most likely to grow one. A security review pointed that out. Matching on
+// the enclosing function would be tighter still, but the count is the cheap
+// version of the same guarantee: add a fifth dynamic write to costs.go and this
+// fails until somebody says so out loud.
 var dynamicTargetAllowlist = map[string]string{
 	// retireRows(ctx, t, table, ids, at) predates M6 and is the shared cascade
 	// helper behind every net_* retirement. Every caller passes a literal, and
@@ -313,8 +321,20 @@ var dynamicTargetAllowlist = map[string]string{
 	"internal/store/costs.go": "updateCost/retireCost: three package-level costTable values, never a caller's string",
 }
 
+// dynamicTargetBudget is how many dynamic non-insert writes each allowlisted
+// file is expected to contain. Exact, not a maximum: a write that DISAPPEARS is
+// worth knowing about too, because it usually means the statement moved
+// somewhere that is not on this list.
+var dynamicTargetBudget = map[string]int{
+	"internal/store/reach.go":      1, // retireRows
+	"internal/store/vocabulary.go": 1, // UpsertVocabularyTerm; its INSERT is exempt, only the UPDATE counts
+	"internal/store/projects.go":   2, // releaseLinks, retireLink
+	"internal/store/costs.go":      2, // updateCost, retireCost
+}
+
 func TestNoAssembledWriteReachesChangeLog(t *testing.T) {
 	root := repoRoot(t)
+	dynamicSeen := map[string]int{}
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -341,6 +361,7 @@ func TestNoAssembledWriteReachesChangeLog(t *testing.T) {
 
 				case w.table == dynamicTable && w.verb != "insert":
 					if _, ok := dynamicTargetAllowlist[rel]; ok {
+						dynamicSeen[rel]++
 						continue
 					}
 					t.Errorf("%s:%d builds a %s target at run time:\n\t%s\n"+
@@ -355,6 +376,19 @@ func TestNoAssembledWriteReachesChangeLog(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("walking the tree: %v", err)
+	}
+
+	// The allowlist exempts a FILE, so without this a future dynamic write
+	// added anywhere in one of them inherits the exemption silently -- the
+	// exact drift this test exists to catch.
+	for file, want := range dynamicTargetBudget {
+		if got := dynamicSeen[file]; got != want {
+			t.Errorf("%s has %d dynamic write statements, expected %d (%s).\n"+
+				"A NEW one inherits the file's allowlist entry without anybody "+
+				"reading it; one that DISAPPEARED usually moved somewhere that is "+
+				"not on the list. Either way, say so here on purpose.",
+				file, got, want, dynamicTargetAllowlist[file])
+		}
 	}
 }
 

@@ -450,20 +450,28 @@ func (s *SQLStore) neighbourhoodWorkloads(ctx context.Context, assetIDs []string
 		Tier         int    `db:"tier"`
 		Lifecycle    string `db:"lifecycle"`
 	}
-	args := append([]any{domain.LifecycleRetired, domain.LifecycleRetired}, anySlice(assetIDs)...)
+	// Chunked: the map callers pass a budgeted list, but the project footprint
+	// passes everything inside what a project owns, which has no ceiling below
+	// the driver's parameter limit. The dedup below runs once over the merged
+	// rows, so a service spanning two chunks is still listed once.
 	var rows []row
-	err := s.read(ctx, &rows, `
-		SELECT si.id AS instance_id, si.host_asset_id, COALESCE(si.role, '') AS role,
-		       si.desired_state,
-		       s.id AS service_id, s.code, s.name, s.kind, s.availability, s.tier,
-		       s.lifecycle
-		FROM service_instance si
-		JOIN service s ON s.id = si.service_id
-		WHERE si.lifecycle <> ? AND s.lifecycle <> ?
-		  AND si.host_asset_id IN (`+placeholders(len(assetIDs))+`)
-		ORDER BY s.code, si.id`, args...)
-	if err != nil {
-		return fmt.Errorf("loading neighbourhood workloads: %w", err)
+	for _, chunk := range chunkIDs(assetIDs) {
+		args := append([]any{domain.LifecycleRetired, domain.LifecycleRetired}, anySlice(chunk)...)
+		var part []row
+		err := s.read(ctx, &part, `
+			SELECT si.id AS instance_id, si.host_asset_id, COALESCE(si.role, '') AS role,
+			       si.desired_state,
+			       s.id AS service_id, s.code, s.name, s.kind, s.availability, s.tier,
+			       s.lifecycle
+			FROM service_instance si
+			JOIN service s ON s.id = si.service_id
+			WHERE si.lifecycle <> ? AND s.lifecycle <> ?
+			  AND si.host_asset_id IN (`+placeholders(len(chunk))+`)
+			ORDER BY s.code, si.id`, args...)
+		if err != nil {
+			return fmt.Errorf("loading neighbourhood workloads: %w", err)
+		}
+		rows = append(rows, part...)
 	}
 
 	seen := make(map[string]bool, len(rows))

@@ -32,13 +32,28 @@
 -- leaving it to be inferred.
 
 -- +goose Up
+-- COALESCE(NULLIF(...)) because `project` carries project_code_check and
+-- project_name_check (CHECK col <> '') and `application` never did -- it was
+-- NOT NULL and nothing more. An empty code in the source would abort the whole
+-- migration mid-flight with a constraint violation naming a table the operator
+-- did not touch. Unlikely in a fixture; free to make impossible.
 INSERT INTO project (id, code, name, description, owner_team, lifecycle, created_at, updated_at)
-SELECT id, code, name, NULL, owner_team, 'active', created_at, updated_at FROM application;
+SELECT id,
+       COALESCE(NULLIF(code, ''), 'app-' || id),
+       COALESCE(NULLIF(name, ''), NULLIF(code, ''), 'app-' || id),
+       NULL, owner_team, 'active', created_at, updated_at
+FROM application;
 
 -- A service belonging to an application is that project OWNING it: it existed
 -- for that application, which is exactly what `owns` means.
+-- A RETIRED service takes a retired link. ListProjectServices filters retired
+-- services out, so an active link to one would be invisible in the UI while
+-- still occupying the single owner slot in idx_project_service_owner -- nobody
+-- could then own that service, and no screen would say why.
 INSERT INTO project_service (project_id, service_id, relation, note, lifecycle, created_at, updated_at)
-SELECT s.application_id, s.id, 'owns', NULL, 'active', s.created_at, s.updated_at
+SELECT s.application_id, s.id, 'owns', NULL,
+       CASE WHEN s.lifecycle = 'retired' THEN 'retired' ELSE 'active' END,
+       s.created_at, s.updated_at
 FROM service s WHERE s.application_id IS NOT NULL;
 
 -- The search index follows the rename, or a search for the old name returns a

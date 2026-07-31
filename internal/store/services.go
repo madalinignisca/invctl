@@ -82,8 +82,8 @@ func (s *SQLStore) ListServices(ctx context.Context, f ServiceFilter) ([]Service
 		args = append(args, f.Tier)
 	}
 	if f.Query != "" {
-		where = append(where, `(LOWER(s.name) LIKE ? OR LOWER(s.code) LIKE ?)`)
-		pattern := "%" + lower(f.Query) + "%"
+		where = append(where, `(LOWER(s.name) LIKE ? ESCAPE '\' OR LOWER(s.code) LIKE ? ESCAPE '\')`)
+		pattern := "%" + escapeLike(lower(f.Query)) + "%"
 		args = append(args, pattern, pattern)
 	}
 	if !f.IncludeRetired {
