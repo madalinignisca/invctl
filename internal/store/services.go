@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 
 	"github.com/gabriel/invctl/internal/domain"
 )
@@ -94,6 +95,13 @@ func (s *SQLStore) ListServices(ctx context.Context, f ServiceFilter) ([]Service
 	query := serviceSelect + whereClause(where) + ` ORDER BY s.tier ASC, s.code ASC`
 	if err := s.read(ctx, &rows, query, args...); err != nil {
 		return nil, fmt.Errorf("listing services: %w", err)
+	}
+	// Tier order is the right BROWSE order and the wrong search order: somebody
+	// who typed a code wants that service, not the most critical thing whose
+	// code happens to contain the string. The code is what they typed, so it is
+	// what is ranked.
+	if f.Query != "" {
+		sort.SliceStable(rows, rankNames(f.Query, func(i int) string { return rows[i].Code }))
 	}
 	return rows, nil
 }

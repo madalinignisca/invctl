@@ -213,3 +213,105 @@ func TestSearchKeepsBodyOnlyMatchesButRanksThemLast(t *testing.T) {
 		})
 	}
 }
+
+// TestListFiltersRankTheTypedNameFirst.
+//
+// A filtered list is a search whatever the box is called, and the two list
+// pages order for BROWSING: assets by kind, services by tier. Both are right
+// until somebody types a name, at which point `ORDER BY kind` reliably puts the
+// bridge `hv-01-br0` above the host `hv-01`, because `bridge` sorts before
+// `hypervisor`. That is the same complaint as the global search had, on the
+// page a reader is far more likely to be on.
+func TestListFiltersRankTheTypedNameFirst(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			s, ctx := newStore(t, e)
+			env := mustEnvironment(t, s, ctx, "prod", domain.EnvRoleProduction)
+			hv := mustAsset(t, s, ctx, domain.KindHypervisor, "hv-01", nil, env)
+			mustAsset(t, s, ctx, domain.KindBridge, "hv-01-br0", &hv, env)
+			mustAsset(t, s, ctx, domain.KindBridge, "hv-01-br1", &hv, env)
+
+			rows, err := s.ListAssets(ctx, AssetFilter{Query: "hv-01"})
+			if err != nil {
+				t.Fatalf("listing: %v", err)
+			}
+			if len(rows) != 3 {
+				t.Fatalf("got %d rows, want 3", len(rows))
+			}
+			if rows[0].Name != "hv-01" {
+				names := make([]string, len(rows))
+				for i, r := range rows {
+					names[i] = r.Name
+				}
+				t.Errorf("first row is %q, want hv-01 (order: %v)", rows[0].Name, names)
+			}
+
+			// Without a query the browse order stands: kind, then name. The
+			// ranking must not quietly become the list page's permanent sort.
+			all, err := s.ListAssets(ctx, AssetFilter{})
+			if err != nil {
+				t.Fatalf("listing unfiltered: %v", err)
+			}
+			if all[0].Kind != domain.KindBridge {
+				t.Errorf("the unfiltered list starts with %s/%s; browse order is by kind",
+					all[0].Kind, all[0].Name)
+			}
+		})
+	}
+}
+
+// The same, for services, where the browse order is by tier -- so a tier-1
+// service whose code merely contains the string outranks the exact match.
+func TestServiceFilterRanksTheExactCodeFirst(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			s, ctx := newStore(t, e)
+			env := mustEnvironment(t, s, ctx, "prod", domain.EnvRoleProduction)
+
+			for _, spec := range []struct {
+				code string
+				tier int
+			}{
+				{"orders-api", 3},          // the exact match, and the least critical
+				{"orders-api-critical", 1}, // sorts first by tier
+				{"orders-api-dev", 4},
+			} {
+				svc, err := domain.NewService(NewID(), domain.ServiceSpec{
+					Code: spec.code, Name: spec.code, Kind: domain.SvcAPI,
+					EnvironmentID: env, Availability: domain.AvailStandalone, Tier: spec.tier,
+				}, s.Now())
+				if err != nil {
+					t.Fatalf("building %s: %v", spec.code, err)
+				}
+				if err := s.CreateService(ctx, testActor, svc); err != nil {
+					t.Fatalf("creating %s: %v", spec.code, err)
+				}
+			}
+
+			rows, err := s.ListServices(ctx, ServiceFilter{Query: "orders-api"})
+			if err != nil {
+				t.Fatalf("listing: %v", err)
+			}
+			if len(rows) != 3 {
+				t.Fatalf("got %d rows, want 3", len(rows))
+			}
+			if rows[0].Code != "orders-api" {
+				codes := make([]string, len(rows))
+				for i, r := range rows {
+					codes[i] = r.Code
+				}
+				t.Errorf("first row is %q, want orders-api — tier order beat the exact "+
+					"code (order: %v)", rows[0].Code, codes)
+			}
+
+			// Unfiltered, tier order stands.
+			all, err := s.ListServices(ctx, ServiceFilter{})
+			if err != nil {
+				t.Fatalf("listing unfiltered: %v", err)
+			}
+			if all[0].Tier != 1 {
+				t.Errorf("the unfiltered list starts at tier %d; browse order is by tier", all[0].Tier)
+			}
+		})
+	}
+}

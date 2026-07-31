@@ -181,7 +181,17 @@ func (s *SQLStore) ListAssets(ctx context.Context, f AssetFilter) ([]AssetRow, e
 	if err := s.read(ctx, &assets, query, args...); err != nil {
 		return nil, fmt.Errorf("listing assets: %w", err)
 	}
-	return s.decorateAssets(ctx, assets)
+	rows, err := s.decorateAssets(ctx, assets)
+	if err != nil {
+		return nil, err
+	}
+	// A filtered list is a search, whatever the box is called. Somebody who
+	// typed `hv-01` wants the host, not the bridge named after it -- and
+	// ORDER BY kind puts `bridge` ahead of `hypervisor` every time.
+	if f.Query != "" {
+		sort.SliceStable(rows, rankNames(f.Query, func(i int) string { return rows[i].Name }))
+	}
+	return rows, nil
 }
 
 // AssetRow is an asset plus the denormalised bits every list view needs.

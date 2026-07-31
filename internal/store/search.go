@@ -384,19 +384,53 @@ const (
 )
 
 func rankOf(r SearchResult, q string) int {
-	title, subtitle := lower(r.Title), lower(r.Subtitle)
-	switch {
-	case title == q:
-		return rankExactTitle
 	// A service's subtitle is its code, which is what an operator types.
-	case subtitle == q:
+	if rank := nameRank(r.Title, q); rank != rankOther {
+		return rank
+	}
+	if lower(r.Subtitle) == q {
 		return rankExactSubtitle
-	case strings.HasPrefix(title, q):
+	}
+	return rankOther
+}
+
+// nameRank scores one name against a lowercased query. Shared with the list
+// filters, which face the same question the moment somebody types in their
+// search box -- a filtered list IS a search, whatever the box is called, and
+// two different answers to "which of these did you mean" on two pages of the
+// same application is worse than either answer alone.
+func nameRank(name, q string) int {
+	name = lower(name)
+	switch {
+	case name == q:
+		return rankExactTitle
+	case strings.HasPrefix(name, q):
 		return rankTitlePrefix
-	case strings.Contains(title, q):
+	case strings.Contains(name, q):
 		return rankTitleContains
 	default:
 		return rankOther
+	}
+}
+
+// rankNames orders a filtered list so the thing somebody named comes first.
+//
+// It returns a less function rather than sorting, because the two callers hold
+// different slice types and reflection to paper over that would be a panic
+// waiting for the first caller who passes something that is not a slice.
+//
+// The list pages order for BROWSING -- assets by kind, services by tier -- which
+// is right until a query is typed, at which point the reader is not browsing.
+// sort.SliceStable keeps the browse order as the tie-break, so a query matching
+// fifty things equally still reads the way the page always does.
+func rankNames(query string, nameAt func(int) string) func(i, j int) bool {
+	q := lower(strings.TrimSpace(query))
+	return func(i, j int) bool {
+		ri, rj := nameRank(nameAt(i), q), nameRank(nameAt(j), q)
+		if ri != rj {
+			return ri < rj
+		}
+		return len(nameAt(i)) < len(nameAt(j))
 	}
 }
 

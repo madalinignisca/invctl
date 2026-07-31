@@ -1501,3 +1501,23 @@ rewritten to isolate their mechanism:
 Both tests give the hypervisor a long indexed body on purpose. Without it bm25
 does not rank it last, and the tests would pass against an implementation that
 does no ranking at all.
+
+### The list filters had the same bug, on a page people use more
+
+Fixing the global search and then checking the estate showed `/assets?q=hv-01`
+still leading with the bridge. It is a different code path and a worse one: the
+list pages order for **browsing** — assets by `kind`, services by `tier` — and
+`bridge` sorts before `hypervisor` every single time, so the wrong answer was
+not even luck.
+
+A filtered list *is* a search whatever the box is called, so both now apply the
+same `nameRank`, on the field the operator actually typed: an asset's name, a
+service's code. `sort.SliceStable` keeps the browse order as the tie-break, so a
+query matching fifty things equally still reads the way the page always does, and
+an unfiltered list is untouched — asserted, because a ranking that quietly became
+the permanent sort would be a different bug wearing this fix's clothes.
+
+The ranker returns a `less` function rather than sorting, because the callers
+hold different slice types. An earlier attempt passed a hand-rolled
+`sort.Interface` to `sort.SliceStable`, which compiles — the parameter is `any` —
+and panics at run time on anything that is not a slice.
