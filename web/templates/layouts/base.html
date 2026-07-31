@@ -13,7 +13,7 @@
 {{/* The CSRF token is injected once here, so every non-GET HTMX request
      carries it without each form having to remember. */}}
 <body hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
-<div class="shell" x-data="{ helpOpen: false }">
+<div class="shell" x-data="helpDrawer">
 
   <nav class="rail">
     <div class="rail-brand">
@@ -36,7 +36,7 @@
            since the question is always about the page you are already on. */}}
       <a class="rail-link" href="/help"
          hx-get="/help" hx-target="#help-panel" hx-swap="innerHTML"
-         x-on:click="helpOpen = true">Help</a>
+         x-on:click="show">Help</a>
 
       <div class="rail-section">Analysis</div>
       <a class="rail-link" href="/reports/spanning" {{if eq .Nav "reports"}}aria-current="page"{{end}}>Environment spans</a>
@@ -81,11 +81,11 @@
        exactly the "local UI state only" boundary the house rules draw: it
        fetches nothing and knows no fact about the estate. HTMX fills it; the
        server decides what is in it. */}}
-  <aside class="help-drawer" x-bind:class="helpOpen ? 'is-open' : ''"
+  <aside class="help-drawer" x-bind:class="panelClass"
          x-cloak aria-label="Help">
     <div class="help-drawer-head">
       <strong>Help</strong>
-      <button class="btn btn-sm" type="button" x-on:click="helpOpen = false"
+      <button class="btn btn-sm" type="button" x-on:click="hide"
               aria-label="Close help">Close</button>
     </div>
     <div id="help-panel" class="help-drawer-body"></div>

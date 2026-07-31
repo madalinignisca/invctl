@@ -255,7 +255,7 @@
         {{range .Protos}}<option value="{{.}}">{{.}}</option>{{end}}
       </select>
     </div>
-    <div class="field" x-show="!isUnix">
+    <div class="field" x-show="notUnix">
       <label for="ep-port">Port</label>
       <input id="ep-port" type="number" name="port" min="1" max="65535" placeholder="8443">
       {{with index .Errors "port"}}<div class="field-error">{{.}}</div>{{end}}
@@ -304,7 +304,7 @@
       </select>
       <div class="field-hint">A route resolves through its pool, so its health follows the backends.</div>
     </div>
-    <div class="field" x-show="!usesRoute">
+    <div class="field" x-show="notRoute">
       <label for="dep-endpoint">Provider endpoint</label>
       <select id="dep-endpoint" name="provider_endpoint_id">
         <option value="">—</option>

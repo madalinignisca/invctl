@@ -30,6 +30,13 @@ document.addEventListener('alpine:init', () => {
     get isUnix() {
       return this.proto === 'unix';
     },
+    // The complement as its own getter, because the CSP build cannot evaluate
+    // `!isUnix` in an attribute -- it warns and the directive does nothing, so
+    // the port field stayed visible for a unix socket for as long as this form
+    // has existed.
+    get notUnix() {
+      return !this.isUnix;
+    },
     setProto(event) {
       this.proto = event.target.value;
     },
@@ -45,6 +52,10 @@ document.addEventListener('alpine:init', () => {
     },
     get usesRoute() {
       return this.providerKind === 'route';
+    },
+    // Same reason as endpointForm.notUnix: a negation is an expression.
+    get notRoute() {
+      return !this.usesRoute;
     },
     setNature(event) {
       this.nature = event.target.value;
@@ -148,6 +159,26 @@ document.addEventListener('alpine:init', () => {
   // Confirms a destructive action before its form submits. Retiring is
   // reversible in principle -- nothing is ever deleted -- but it still
   // deserves a deliberate second press.
+  // The help drawer. A component rather than an inline expression because the
+  // CSP build of Alpine is what `script-src 'self'` requires, and it evaluates
+  // NO expressions -- only registered components, method references and
+  // property getters. `x-data="{ open: false }"` and `x-on:click="open = true"`
+  // are silently inert under it, which is exactly how this drawer shipped
+  // doing nothing at all.
+  Alpine.data('helpDrawer', () => ({
+    open: false,
+    show() {
+      this.open = true;
+    },
+    hide() {
+      this.open = false;
+    },
+    // Bound to the aside's class. A getter, not a ternary in the attribute.
+    get panelClass() {
+      return this.open ? 'is-open' : '';
+    },
+  }));
+
   Alpine.data('confirmAction', (message = 'Are you sure?') => ({
     confirm(event) {
       if (!window.confirm(message)) {
