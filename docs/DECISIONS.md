@@ -1972,3 +1972,108 @@ an audit trail that looks complete and is empty.
 certificate's key location is what an operator needs during a renewal, and the
 authorization model today is read versus read-write with no finer grain. If cost
 visibility ever gets its own permission, this belongs behind the same one.
+
+---
+
+## 2026-07-31 — The database review: a guard that could not protect its own commit
+
+### `00016`'s deliverable was unprotected by the guard written in the same commit
+
+`TestIndexesMatchAcrossEngines` compared index **names**. `00016` reshapes three
+indexes from `(team_id)` to `(team_id, lifecycle)` — and the names do not change.
+A database review reverted the shape on one dialect half and the entire suite
+stayed green. I reproduced it before believing it.
+
+The guard's own comment was honest about the limitation — *"names are compared,
+not definitions… the failure mode this exists for is a whole index going missing
+rather than one drifting a column"* — but the very next migration's failure mode
+was the other one. **A guard that cannot protect the commit that adds it is not
+yet a guard.**
+
+It now compares the tuple `(name, table, ordered columns, partial)`, and includes
+primary keys and unique constraints, which were excluded from both halves before
+— so a `UNIQUE` could vanish from one engine and only a functional test that
+happened to exist would catch it. Constraint-backed indexes are keyed by
+table+columns rather than by name, because SQLite calls them `sqlite_autoindex_*`
+and PostgreSQL names them after the constraint.
+
+Two mutations that previously passed now fail with the shapes named: the
+`(team_id, lifecycle)` revert, and dropping `WHERE not_after IS NOT NULL` from
+`idx_certificate_expiry`.
+
+Known gap, stated rather than pretended away: two constraints with the same name
+and different expressions still pass. Normalising PostgreSQL's
+`pg_get_constraintdef` against SQLite's raw CHECK text is real work and nothing
+has diverged that way yet.
+
+### Migration `00017`: two indexes added, three removed, all measured
+
+Every read of the two link tables pairs `certificate_id = ?` with
+`lifecycle = 'active'`, and lifecycle was not in the primary key. Measured on
+60,000 certificates and 180,000 deployments:
+
+| | PostgreSQL | SQLite |
+|---|---|---|
+| `expiryCertificateReach` before | 590 ms | 87 ms |
+| after `(certificate_id, lifecycle)` | **136 ms** | 68 ms |
+
+The reach loop was costing roughly **seven times the rest of the expiry report put
+together**. No code change; both engines get an index-only scan.
+
+Three indexes go: `idx_certificate_san_name`, `idx_certificate_asset_asset` and
+`idx_certificate_service_service` index the *non-leading* column of each table,
+and nothing queries in that direction — the host filter runs in Go because a
+wildcard match is not a LIKE, search resolves through `search_index`, and no page
+looks up certificates from an asset. They were built for reverse lookups that
+were never written. An index nothing uses is a claim about a query that does not
+exist.
+
+`idx_certificate_team` is deliberately **not** reshaped the way `00016` reshaped
+its three. Measured: identical plan, identical buffers. The teams case gained
+because `teamSelect`'s subqueries are COUNTs answerable from the index alone;
+`certificateSelect` is `SELECT c.*` and must visit the heap regardless. Applying a
+previous migration's conclusion mechanically is how a schema fills with indexes
+nobody measured.
+
+### The ordering agreement in CI is an artefact of the container
+
+`ListCertificates` used `ORDER BY … subject_cn` and did not re-sort in Go. The
+PostgreSQL container is Alpine/**musl**, which implements no locale collation, so
+`en_US.utf8` degenerates to byte order and happens to match SQLite. On a glibc or
+ICU-collated database the list orders differently. `expiry.go` already states the
+rule this query broke — *"which of two rows sharing a date comes first must not
+depend on the server's collation"*. Now sorted in Go, along with the SAN display
+order.
+
+### Smaller
+
+- `expiryCertificateReach` had **no test at all** — `expiry_test.go` contained the
+  word "certificate" zero times. Unexercised: the `ServiceCount` reuse, the
+  `SUM(COUNT(*))` that returns `numeric` on PostgreSQL and INTEGER on SQLite, and
+  the two-IN-list argument ordering its own comment worries about. The new test
+  uses asymmetric counts (two assets, one service) so transposing the halves
+  changes the answer; mutating the argument order fails it.
+- `TestColumnShapesMatchAcrossEngines` iterated the SQLite side only, so a column
+  added to the PostgreSQL half was invisible to it — caught previously by an
+  unrelated boundary test, by accident. Now symmetric.
+- The `ON DELETE CASCADE` on `certificate_san` is the only cascade in the schema
+  and is very nearly dead: nothing deletes a certificate, and the two link tables
+  use NO ACTION, so it can fire only for a certificate deployed nowhere. Kept as a
+  data-repair backstop, documented so no reader concludes that deleting a
+  certificate is something the application does, and now pinned by a test — the
+  review showed removing it from one half was invisible.
+- `certificate.fingerprint` is UNIQUE and nullable, and both engines treat NULLs
+  as distinct, so several certificates with no fingerprint is a legitimate state.
+  PostgreSQL 15+ offers `UNIQUE NULLS NOT DISTINCT`; the migration now says it
+  must never be used, because SQLite has no equivalent.
+
+### Recorded, not fixed
+
+Searching by `issuer` is **ASCII-only** and the engines diverge beyond that:
+`lower` folds A–Z to match SQLite's `LOWER()`, while PostgreSQL's is locale-aware
+and folds the whole string, so the two sides fold asymmetrically there. Measured —
+issuer `Bundesdruckerei ÖCA` searched for `ÖCA` matches on SQLite and not on
+PostgreSQL. A subject is a hostname and ASCII in practice; an issuer is a CA's
+display name, and for an EU estate umlauts are ordinary. `strings.ToLower` does
+not fix it, it moves the failure to the other engine. A folded shadow column
+would, and is not worth a column yet.

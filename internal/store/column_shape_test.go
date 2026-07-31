@@ -1,6 +1,7 @@
 package store
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 	"testing"
@@ -145,6 +146,15 @@ func TestColumnShapesMatchAcrossEngines(t *testing.T) {
 		if pg == nil {
 			continue // SQLite-only shadow table; the exempt map covers the rest
 		}
+		// Symmetric. Iterating the SQLite side alone meant a column added to the
+		// PostgreSQL half only was invisible here -- it was caught by an
+		// unrelated boundary test, by accident. A database review pointed that
+		// out.
+		for column := range pg {
+			if _, ok := sqlite[column]; !ok {
+				t.Errorf("%s.%s exists on PostgreSQL and not on SQLite", table, column)
+			}
+		}
 		for column, want := range sqlite {
 			got, ok := pg[column]
 			if !ok {
@@ -187,18 +197,22 @@ var exemptFromShapeComparison = map[string]struct{}{
 
 // TestIndexesMatchAcrossEngines.
 //
-// The third guard, and a database review proved it was needed by DELETING an
-// index from one dialect half and watching the entire suite stay green. That is
-// the same class of invisible divergence the other two were written for — one
-// engine gets a covering scan and the other a sequential one, and nothing says
-// so until somebody profiles the slow deployment.
+// The third guard. Its first version compared index NAMES, which caught an index
+// disappearing from one engine — and missed the thing the very next migration
+// did. `00016` reshapes three indexes from `(team_id)` to `(team_id, lifecycle)`
+// and the names do not change, so reverting the shape on one half left the whole
+// suite green. A database review proved it by doing exactly that.
 //
-// Names are compared, not definitions. Every index in this schema is named by
-// convention and named identically in both halves, so a set comparison catches
-// an index that is missing, renamed or added on one side. Comparing the column
-// lists would be stronger; it would also mean normalising two very different
-// catalogue shapes, and the failure mode this exists for is a whole index going
-// missing rather than one drifting a column.
+// So the comparison is now the TUPLE: name, table, ordered column list, and
+// whether it is partial. Primary keys and unique constraints are included too —
+// they were excluded from both halves before, which meant a UNIQUE could vanish
+// from one engine and only a functional test that happened to exist would catch
+// it.
+//
+// Known gap, stated rather than pretended away: two constraints with the same
+// name and different expressions still pass. Normalising PostgreSQL's
+// pg_get_constraintdef against SQLite's raw CHECK text is real work and nothing
+// has diverged that way yet.
 // indexesByDesign exist on one engine only, with the reason. Listed
 // individually so a second one is a deliberate edit and a conversation.
 //
@@ -211,69 +225,116 @@ var indexesByDesign = map[string]string{
 	"idx_search_body_trgm":  "pg_trgm index for the PostgreSQL search path; SQLite uses FTS5",
 }
 
+type indexShape struct {
+	Name    string `db:"idx_name"`
+	Table   string `db:"tbl_name"`
+	Columns string `db:"cols"`
+	Partial int    `db:"partial"`
+}
+
+func (i indexShape) String() string {
+	return fmt.Sprintf("%s on %s(%s) partial=%d", i.Name, i.Table, i.Columns, i.Partial)
+}
+
+func liveIndexShapes(t *testing.T, db *DB) map[string]indexShape {
+	t.Helper()
+	var rows []indexShape
+
+	switch db.Driver {
+	case DriverSQLite:
+		// origin 'c' is CREATE INDEX, 'pk' a primary key, 'u' a UNIQUE
+		// constraint. All three, because all three can diverge.
+		if err := db.Reader.Select(&rows, `
+			SELECT il.name AS idx_name, m.name AS tbl_name,
+			       (SELECT group_concat(ii.name, ',') FROM pragma_index_info(il.name) ii) AS cols,
+			       il.partial
+			FROM sqlite_master m
+			JOIN pragma_index_list(m.name) il
+			WHERE m.type = 'table' AND m.name NOT LIKE 'sqlite_%'`); err != nil {
+			t.Fatalf("reading sqlite index shapes: %v", err)
+		}
+	case DriverPostgres:
+		if err := db.Reader.Select(&rows, `
+			SELECT c.relname AS idx_name, t.relname AS tbl_name,
+			       (SELECT string_agg(a.attname, ',' ORDER BY k.ord)
+			          FROM unnest(i.indkey) WITH ORDINALITY AS k(attnum, ord)
+			          JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum) AS cols,
+			       (i.indpred IS NOT NULL)::int AS partial
+			FROM pg_index i
+			JOIN pg_class c ON c.oid = i.indexrelid
+			JOIN pg_class t ON t.oid = i.indrelid
+			JOIN pg_namespace n ON n.oid = c.relnamespace
+			WHERE n.nspname = current_schema()`); err != nil {
+			t.Fatalf("reading postgres index shapes: %v", err)
+		}
+	}
+
+	out := make(map[string]indexShape, len(rows))
+	for _, r := range rows {
+		// Tables owned by a library or private to FTS5, exempted by the same
+		// list the column comparison uses: goose names its bookkeeping index
+		// differently per engine, and the FTS5 shadow tables exist on SQLite
+		// only. Neither is this repository's schema.
+		if _, exempt := exemptFromShapeComparison[r.Table]; exempt {
+			continue
+		}
+		// SQLite names its implicit constraint indexes sqlite_autoindex_*;
+		// PostgreSQL names them after the constraint. Compared by SHAPE under a
+		// table+columns key so the naming difference does not matter.
+		key := r.Name
+		if strings.HasPrefix(r.Name, "sqlite_autoindex_") || isConstraintIndexName(r.Name) {
+			key = "constraint:" + r.Table + "(" + r.Columns + ")"
+			r.Name = key
+		}
+		out[key] = r
+	}
+	return out
+}
+
+// isConstraintIndexName reports whether PostgreSQL generated this name for a
+// primary key or unique constraint rather than a CREATE INDEX.
+func isConstraintIndexName(name string) bool {
+	return strings.HasSuffix(name, "_pkey") || strings.HasSuffix(name, "_key")
+}
+
 func TestIndexesMatchAcrossEngines(t *testing.T) {
 	engines := Engines(t)
 	if len(engines) < 2 {
 		t.Skip("both engines are required to compare them")
 	}
 
-	perEngine := map[string]map[string]bool{}
+	shapes := map[string]map[string]indexShape{}
 	for _, e := range engines {
-		db := e.Open(t)
-		found := map[string]bool{}
-
-		var names []string
-		switch db.Driver {
-		case DriverSQLite:
-			// Explicitly created indexes only: sqlite_autoindex_* are the
-			// engine's own for UNIQUE and PRIMARY KEY, which PostgreSQL names
-			// differently and which the column-shape test already covers.
-			if err := db.Reader.Select(&names, `
-				SELECT name FROM sqlite_master
-				WHERE type = 'index' AND sql IS NOT NULL AND name NOT LIKE 'sqlite_%'`); err != nil {
-				t.Fatalf("listing sqlite indexes: %v", err)
-			}
-		case DriverPostgres:
-			// Likewise: constraint-backed indexes carry the constraint's name
-			// and are compared by TestConstraintNamesMatchAcrossEngines.
-			if err := db.Reader.Select(&names, `
-				SELECT i.indexname FROM pg_indexes i
-				JOIN pg_class c ON c.relname = i.indexname
-				LEFT JOIN pg_constraint con ON con.conindid = c.oid
-				WHERE i.schemaname = current_schema() AND con.oid IS NULL`); err != nil {
-				t.Fatalf("listing postgres indexes: %v", err)
-			}
-		}
-		for _, n := range names {
-			found[n] = true
-		}
-		perEngine[e.Name] = found
+		shapes[e.Name] = liveIndexShapes(t, e.Open(t))
 	}
 
-	only := func(a, b string) []string {
-		var out []string
-		for name := range perEngine[a] {
-			if !perEngine[b][name] {
-				if _, ok := indexesByDesign[name]; ok {
-					continue
-				}
-				out = append(out, name)
+	report := func(a, b string) {
+		var problems []string
+		for key, want := range shapes[a] {
+			if _, ok := indexesByDesign[want.Name]; ok {
+				continue
+			}
+			got, present := shapes[b][key]
+			if !present {
+				problems = append(problems, fmt.Sprintf("%s exists on %s and not on %s",
+					want, a, b))
+				continue
+			}
+			if want.Columns != got.Columns || want.Partial != got.Partial {
+				problems = append(problems, fmt.Sprintf("%s is %q on %s and %q on %s",
+					key, want.String(), a, got.String(), b))
 			}
 		}
-		sort.Strings(out)
-		return out
+		sort.Strings(problems)
+		for _, p := range problems {
+			t.Errorf("%s\nOne engine gets a covering scan and the other does not, and "+
+				"nothing says so until somebody profiles the slow deployment.", p)
+		}
 	}
-	if extra := only("sqlite", "postgres"); len(extra) > 0 {
-		t.Errorf("indexes on SQLite and not on PostgreSQL:\n  %s\n"+
-			"One engine gets a covering scan and the other a sequential one, and "+
-			"nothing says so until somebody profiles the slow deployment.",
-			strings.Join(extra, "\n  "))
-	}
-	if extra := only("postgres", "sqlite"); len(extra) > 0 {
-		t.Errorf("indexes on PostgreSQL and not on SQLite:\n  %s",
-			strings.Join(extra, "\n  "))
-	}
-	if len(perEngine["sqlite"]) == 0 {
+	report("sqlite", "postgres")
+	report("postgres", "sqlite")
+
+	if len(shapes["sqlite"]) == 0 {
 		t.Error("no indexes found at all; the comparison above was vacuous")
 	}
 }

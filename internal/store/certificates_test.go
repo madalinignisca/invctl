@@ -495,3 +495,163 @@ func TestAnUnknownRoleOnACertificateIsAFieldError(t *testing.T) {
 		})
 	}
 }
+
+// TestTheCascadeOnCertificateNamesIsRealButUnreachable.
+//
+// certificate_san carries the only ON DELETE CASCADE in the schema, and a
+// database review showed that removing it from one dialect half was invisible to
+// the entire suite. It pins both halves of a deliberate decision: the cascade
+// works, and nothing in the application can reach it.
+func TestTheCascadeOnCertificateNamesIsRealButUnreachable(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			s, ctx := newStore(t, e)
+			env := mustEnvironment(t, s, ctx, "prod", domain.EnvRoleProduction)
+
+			// Deployed nowhere: the only case the cascade can fire for.
+			loose := mustCertificate(t, s, ctx, "loose.example.com",
+				[]string{"alt.example.com"}, "2027-01-01")
+			if _, err := s.db.Writer.Exec(s.db.Writer.Rebind(
+				`DELETE FROM certificate WHERE id = ?`), loose); err != nil {
+				t.Fatalf("a certificate deployed nowhere could not be deleted: %v", err)
+			}
+			n, err := s.countOne(ctx,
+				`SELECT COUNT(*) FROM certificate_san WHERE certificate_id = ?`, loose)
+			if err != nil {
+				t.Fatalf("counting: %v", err)
+			}
+			if n != 0 {
+				t.Errorf("%d names outlived their certificate; the cascade did not fire", n)
+			}
+
+			// Deployed anywhere: NO ACTION on the link tables makes the delete
+			// impossible, so the cascade is unreachable for any certificate the
+			// estate actually uses.
+			used := mustCertificate(t, s, ctx, "used.example.com", nil, "2027-01-01")
+			asset := mustAsset(t, s, ctx, domain.KindServer, "lb-01", nil, env)
+			if err := s.DeployCertificateToAsset(ctx, testActor, used, asset, nil); err != nil {
+				t.Fatalf("deploying: %v", err)
+			}
+			if _, err := s.db.Writer.Exec(s.db.Writer.Rebind(
+				`DELETE FROM certificate WHERE id = ?`), used); err == nil {
+				t.Error("a deployed certificate was deleted; the link tables should refuse it")
+			}
+		})
+	}
+}
+
+// Several certificates may have no fingerprint recorded. Both engines treat
+// NULLs as distinct in a UNIQUE index, and normaliseFingerprint stores NULL
+// rather than "" for a blank field — if it stored the empty string, the SECOND
+// blank certificate would be refused on both engines.
+func TestSeveralCertificatesMayHaveNoFingerprint(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			s, ctx := newStore(t, e)
+			for _, subject := range []string{"a.example.com", "b.example.com", "c.example.com"} {
+				blank := ""
+				c, err := domain.NewCertificate(NewID(), domain.CertificateSpec{
+					SubjectCN: subject, Fingerprint: &blank,
+				}, s.Now())
+				if err != nil {
+					t.Fatalf("building %s: %v", subject, err)
+				}
+				if c.Fingerprint != nil {
+					t.Fatalf("a blank fingerprint became %q rather than nothing; the second "+
+						"such certificate would be refused", *c.Fingerprint)
+				}
+				if err := s.CreateCertificate(ctx, testActor, c); err != nil {
+					t.Fatalf("creating %s with no fingerprint: %v", subject, err)
+				}
+			}
+		})
+	}
+}
+
+// TestExpiryCountsEveryPlaceACertificateIsDeployed.
+//
+// expiryCertificateReach had no test at all — `expiry_test.go` contained the word
+// "certificate" zero times. Three things were unexercised: the ServiceCount
+// reuse, the SUM(COUNT(*)) that returns numeric on PostgreSQL and INTEGER on
+// SQLite, and the two-IN-list argument ordering its own comment worries about
+// ("one edit away from silently swapping an id for a lifecycle"). Nothing would
+// have caught that swap.
+//
+// Asymmetric counts on purpose: two assets and one service, so transposing the
+// two halves of the UNION changes the answer.
+func TestExpiryCountsEveryPlaceACertificateIsDeployed(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			s, ctx := newStore(t, e)
+			env := mustEnvironment(t, s, ctx, "prod", domain.EnvRoleProduction)
+
+			soon := expiryDate(20)
+			id := mustCertificate(t, s, ctx, "orders.example.com", nil, soon)
+
+			for _, name := range []string{"lb-01", "lb-02"} {
+				asset := mustAsset(t, s, ctx, domain.KindServer, name, nil, env)
+				if err := s.DeployCertificateToAsset(ctx, testActor, id, asset, nil); err != nil {
+					t.Fatalf("deploying to %s: %v", name, err)
+				}
+			}
+			svc, err := domain.NewService(NewID(), domain.ServiceSpec{
+				Code: "orders-web", Name: "Orders Web", Kind: domain.SvcWeb,
+				EnvironmentID: env, Availability: domain.AvailStandalone, Tier: 2,
+			}, s.Now())
+			if err != nil {
+				t.Fatalf("building the service: %v", err)
+			}
+			if err := s.CreateService(ctx, testActor, svc); err != nil {
+				t.Fatalf("creating the service: %v", err)
+			}
+			if err := s.DeployCertificateToService(ctx, testActor, id, svc.ID, nil); err != nil {
+				t.Fatalf("deploying to the service: %v", err)
+			}
+
+			report, err := s.Expiring(ctx, expiryNow, 12)
+			if err != nil {
+				t.Fatalf("running the report: %v", err)
+			}
+
+			var found bool
+			for _, row := range report.Rows {
+				if row.EntityType != "certificate" {
+					continue
+				}
+				found = true
+				// Two assets plus one service. A transposed UNION would give a
+				// different number, and so would counting one table only.
+				if row.ServiceCount != 3 {
+					t.Errorf("the certificate reports %d deployments, want 3 "+
+						"(two assets and one service)", row.ServiceCount)
+				}
+				if row.Name != "orders.example.com" {
+					t.Errorf("the row is named %q", row.Name)
+				}
+			}
+			if !found {
+				t.Fatal("the expiring certificate is not in the report at all")
+			}
+
+			// A RETIRED deployment stops counting: an expiring certificate that
+			// was taken off a box is not still an outage there.
+			assets, err := s.ListCertificateAssets(ctx, id)
+			if err != nil {
+				t.Fatalf("listing: %v", err)
+			}
+			if err := s.UndeployCertificateFromAsset(ctx, testActor, id, assets[0].EntityID); err != nil {
+				t.Fatalf("undeploying: %v", err)
+			}
+			after, err := s.Expiring(ctx, expiryNow, 12)
+			if err != nil {
+				t.Fatalf("re-running: %v", err)
+			}
+			for _, row := range after.Rows {
+				if row.EntityType == "certificate" && row.ServiceCount != 2 {
+					t.Errorf("after retiring one deployment the count is %d, want 2",
+						row.ServiceCount)
+				}
+			}
+		})
+	}
+}

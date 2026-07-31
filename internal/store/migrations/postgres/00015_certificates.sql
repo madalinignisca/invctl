@@ -41,6 +41,11 @@ CREATE TABLE certificate (
   -- Lowercase hex, no colons, normalised in Go. Unique because it IS the
   -- certificate's identity: two rows with one fingerprint are one certificate
   -- entered twice, and the totals and expiry counts would double.
+  -- UNIQUE and nullable: several certificates with no fingerprint recorded is a
+  -- legitimate state, and both engines treat NULLs as distinct here (verified,
+  -- PostgreSQL reports indnullsnotdistinct = false). PostgreSQL 15+ offers
+  -- UNIQUE NULLS NOT DISTINCT and it must never be used -- SQLite has no
+  -- equivalent, so it would silently mean different things on the two engines.
   fingerprint  TEXT UNIQUE,
   serial       TEXT,
   not_before   TEXT,
@@ -74,6 +79,20 @@ CREATE INDEX idx_certificate_team   ON certificate(team_id)   WHERE team_id IS N
 -- The names it covers. One row per name so a hostname is searchable, and the
 -- common name is repeated here at insert time: a reader asking "what covers
 -- this" should not have to know that one of the names lives in another column.
+-- ON DELETE CASCADE, and it is very nearly dead. Nothing in this codebase
+-- deletes a certificate -- RetireCertificate sets a lifecycle -- and the two
+-- link tables reference certificate(id) with NO ACTION, so a certificate that
+-- was ever deployed anywhere cannot be deleted at all. The cascade can fire only
+-- for a certificate deployed nowhere, and only from a manual DELETE during data
+-- repair.
+--
+-- Kept rather than dropped, as a backstop for exactly that repair: a hand
+-- deletion that left orphaned names behind would be worse than one that did not.
+-- It is the only cascade in the schema, so this note exists to stop a reader
+-- concluding that deleting a certificate is a thing the application does. A
+-- database review measured that removing it from one dialect half was invisible
+-- to the whole suite; TestTheCascadeOnCertificateNamesIsRealButUnreachable now
+-- pins both halves of that.
 CREATE TABLE certificate_san (
   certificate_id TEXT NOT NULL REFERENCES certificate(id) ON DELETE CASCADE,
   name           TEXT NOT NULL,

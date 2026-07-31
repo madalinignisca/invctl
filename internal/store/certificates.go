@@ -71,6 +71,19 @@ func (s *SQLStore) ListCertificates(ctx context.Context, f CertificateFilter) ([
 		args = append(args, f.TeamID)
 	}
 	if f.Query != "" {
+		// ASCII-ONLY MATCHING, and `issuer` is the first field in this codebase
+		// where that is likely to bite. `lower` folds bytes A-Z to match
+		// SQLite's LOWER(); PostgreSQL's is locale-aware and folds the whole
+		// string, so the two sides of the comparison fold asymmetrically there.
+		// Measured by a database review: issuer "Bundesdruckerei ÖCA" searched
+		// for "ÖCA" matches on SQLite and not on PostgreSQL.
+		//
+		// A subject is a hostname and ASCII in practice. An issuer is a CA's
+		// display name, and for an EU estate D-TRUST, Bundesdruckerei and
+		// SwissSign-style names with umlauts are ordinary. Swapping in
+		// strings.ToLower does not fix it -- it moves the failure to SQLite,
+		// whose LOWER() is ASCII-only either way. A folded shadow column would,
+		// and is not worth a column yet. Stated rather than claimed away.
 		where = append(where, `(LOWER(c.subject_cn) LIKE ? ESCAPE '\' OR LOWER(COALESCE(c.issuer, '')) LIKE ? ESCAPE '\')`)
 		like := "%" + escapeLike(lower(f.Query)) + "%"
 		args = append(args, like, like)
@@ -102,6 +115,30 @@ func (s *SQLStore) ListCertificates(ctx context.Context, f CertificateFilter) ([
 		}
 		rows = kept
 	}
+	// SORTED IN GO, and the SQL ORDER BY above is a hint rather than the
+	// authority. expiry.go already states the rule -- "which of two rows sharing
+	// a date comes first must not depend on the server's collation" -- and this
+	// query did not follow it. The agreement observed in CI is an artefact of the
+	// Alpine/musl PostgreSQL image, which implements no locale collation and so
+	// degenerates to byte order; on a glibc or ICU-collated database this list
+	// would order differently from SQLite. A database review ran the comparison
+	// under three collations to show it.
+	sort.SliceStable(rows, func(i, j int) bool {
+		a, b := rows[i], rows[j]
+		// Undated last: not the least urgent thing in the estate, but the one
+		// this ordering cannot rank.
+		aNull, bNull := a.NotAfter == nil, b.NotAfter == nil
+		if aNull != bNull {
+			return !aNull
+		}
+		if !aNull && derefOr(a.NotAfter, "") != derefOr(b.NotAfter, "") {
+			return derefOr(a.NotAfter, "") < derefOr(b.NotAfter, "")
+		}
+		if a.SubjectCN != b.SubjectCN {
+			return a.SubjectCN < b.SubjectCN
+		}
+		return a.ID < b.ID
+	})
 	if f.Query != "" {
 		sort.SliceStable(rows, rankNames(f.Query, func(i int) string { return rows[i].SubjectCN }))
 	}
@@ -148,6 +185,11 @@ func (s *SQLStore) attachSANs(ctx context.Context, rows []CertificateRow) error 
 				rows[i].SANs = append(rows[i].SANs, r.Name)
 			}
 		}
+	}
+	// Sorted here rather than trusted from the ORDER BY, for the same collation
+	// reason as the list itself: this decides display order.
+	for i := range rows {
+		sort.Strings(rows[i].SANs)
 	}
 	return nil
 }
