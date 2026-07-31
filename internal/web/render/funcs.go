@@ -323,3 +323,57 @@ func humanDays(days int) string {
 		return fmt.Sprintf("%d years", days/365)
 	}
 }
+
+// Money formatting.
+//
+// A deliberately locale-FREE format: symbol, comma thousands, period decimal,
+// always two places. Rendering EUR as 1.234,56 for one reader and 1,234.56 for
+// another means the same page shows two different-looking numbers depending on
+// who opens it, and an operator reading over somebody's shoulder during an
+// incident is the audience this whole application is written for. Unambiguous
+// beats idiomatic here.
+//
+// Two decimal places is an assumption, and it holds for every currency this is
+// plausibly deployed in (EUR, RON, USD, GBP, CHF). A zero-decimal currency like
+// JPY would render 100 yen as ¥1.00, which is why the assumption is written down
+// rather than left in the arithmetic.
+var currencySymbols = map[string]string{
+	"EUR": "€", "USD": "$", "GBP": "£", "CHF": "CHF ", "RON": "lei ",
+}
+
+func moneyFormatter(currency string) func(int64) string {
+	symbol, ok := currencySymbols[strings.ToUpper(currency)]
+	if !ok {
+		// An unknown code renders as the code itself. Better a reader sees
+		// "SEK 1,234.56" than a bare number whose unit they have to guess.
+		symbol = strings.ToUpper(currency) + " "
+	}
+	return func(minor int64) string {
+		sign := ""
+		if minor < 0 {
+			sign, minor = "-", -minor
+		}
+		whole, cents := minor/100, minor%100
+		return fmt.Sprintf("%s%s%s.%02d", sign, symbol, groupThousands(whole), cents)
+	}
+}
+
+// groupThousands inserts a comma every three digits, from the right.
+func groupThousands(n int64) string {
+	digits := strconv.FormatInt(n, 10)
+	if len(digits) <= 3 {
+		return digits
+	}
+	var b strings.Builder
+	lead := len(digits) % 3
+	if lead > 0 {
+		b.WriteString(digits[:lead])
+	}
+	for i := lead; i < len(digits); i += 3 {
+		if b.Len() > 0 {
+			b.WriteByte(',')
+		}
+		b.WriteString(digits[i : i+3])
+	}
+	return b.String()
+}

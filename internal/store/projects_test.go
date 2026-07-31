@@ -72,6 +72,17 @@ func (f *projectFixture) link(t *testing.T, project, asset, relation string) err
 	return f.s.LinkProjectAsset(f.ctx, testActor, l)
 }
 
+// linkService is the service half of link, added when the cost rollup needed
+// to prove a service's price reaches its project's total.
+func (f *projectFixture) linkService(t *testing.T, project, service, relation string) error {
+	t.Helper()
+	l, err := domain.NewProjectServiceLink(f.projects[project], f.services[service], relation, nil, f.s.Now())
+	if err != nil {
+		t.Fatalf("building service link: %v", err)
+	}
+	return f.s.LinkProjectService(f.ctx, testActor, l)
+}
+
 func (f *projectFixture) changeRows(t *testing.T, entityType string) int64 {
 	t.Helper()
 	n, err := f.s.countOne(f.ctx,

@@ -33,8 +33,11 @@ type Renderer struct {
 }
 
 // New parses the template tree.
-func New(fsys fs.FS, dev bool) (*Renderer, error) {
+func New(fsys fs.FS, dev bool, currency string) (*Renderer, error) {
 	r := &Renderer{dev: dev, fsys: fsys, funcs: funcs()}
+	// The estate's single currency, bound once here rather than threaded
+	// through every page struct that shows an amount.
+	r.funcs["money"] = moneyFormatter(currency)
 	// Registered before parse, because the templates call it.
 	r.assets = newAssets(fsys, dev)
 	r.funcs["asset"] = r.assetURL

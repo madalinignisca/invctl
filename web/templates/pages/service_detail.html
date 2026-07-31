@@ -211,5 +211,12 @@
   {{end}}
 </div>
 
+{{template "cost_panel" dict
+    "Action" (printf "/services/%s/costs" .Service.ID) "Slug" "service"
+    "Costs" .Costs "Totals" .CostTotals "Kinds" .CostKinds "Periods" .CostPeriods
+    "CSRF" .CSRF "CanWrite" .CanWrite "CanSeeCosts" .CanSeeCosts
+    "Heading" "What it costs"
+    "Note" "Attached to this service: a licence, a support contract, a hosted plan."}}
+
 {{template "timeline_panel" .Timeline}}
 {{end}}

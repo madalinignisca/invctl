@@ -103,6 +103,9 @@ func Load(ctx context.Context, s *store.SQLStore) (*Refs, error) {
 	// and it must not run before projects() or the report would have nobody to
 	// attribute an expiring box to.
 	b.lifetimes()
+	// Prices last of all: they attach to assets, services AND projects, so
+	// every one of those has to exist, and nothing else reads them.
+	b.costs()
 
 	// Last, and only when asked. Observations are telemetry rather than
 	// inventory, so a deployment gets the honest empty state unless somebody is

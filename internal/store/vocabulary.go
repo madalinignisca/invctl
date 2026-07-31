@@ -37,6 +37,7 @@ const (
 	vocabIPAddressRole       = "ip_address_role"
 	vocabDataClass           = "data_class"
 	vocabContainerEngine     = "container_engine"
+	vocabCostKind            = "cost_kind"
 )
 
 // VocabularyTerm is one row of a lookup table.
@@ -80,6 +81,7 @@ var vocabularyQueries = map[string]string{
 	vocabIPAddressRole:       `SELECT code, label, sort_order, description FROM ip_address_role ORDER BY sort_order, code`,
 	vocabDataClass:           `SELECT code, label, sort_order, description FROM data_class ORDER BY sort_order, code`,
 	vocabContainerEngine:     `SELECT code, label, sort_order, description FROM container_engine ORDER BY sort_order, code`,
+	vocabCostKind:            `SELECT code, label, sort_order, description FROM cost_kind ORDER BY sort_order, code`,
 }
 
 // AssetKinds returns the asset.kind vocabulary in display order.
@@ -127,6 +129,13 @@ func (s *SQLStore) DataClassVocabulary(ctx context.Context) ([]VocabularyTerm, e
 // current list instead of hardcoding two values.
 func (s *SQLStore) ContainerEngines(ctx context.Context) ([]VocabularyTerm, error) {
 	return s.listVocabulary(ctx, vocabContainerEngine)
+}
+
+// CostKinds lists the kinds of spend. Descriptive rather than behavioural: no
+// code branches on which kind a line is, so a new one is data. The PERIOD is the
+// half the code reads, and it is a CHECK with a Go constant set.
+func (s *SQLStore) CostKinds(ctx context.Context) ([]VocabularyTerm, error) {
+	return s.listVocabulary(ctx, vocabCostKind)
 }
 
 func (s *SQLStore) listVocabulary(ctx context.Context, table string) ([]VocabularyTerm, error) {

@@ -1252,3 +1252,122 @@ comma-separated list of admins; adding acquisition prices and licence costs make
 the estate commercially sensitive in a way it is not now. Whether cost visibility
 is a third permission rather than a property of read access is easier to settle
 before a client's numbers are in it than after.
+
+---
+
+## 2026-07-31 — Costs: what is billed, and never one number
+
+The second half of the financials work, on the shape the EOL entry above recorded.
+Migration `00012` adds `cost_kind` plus `asset_cost`, `service_cost` and
+`project_cost`; the project overview totals them.
+
+### Cost attaches to what is billed, and does not inherit
+
+A VM's cost is not inherited from its hypervisor — it is a *share* of it, and
+three guests each inheriting the host's monthly figure report three times one box.
+The double-count is silent, compounds, and is found by the first person to
+reconcile the page against an invoice, after which no number on it is believed
+again. It is the same failure the footprint conflict panel catches one layer up.
+
+So a cost line goes on the thing that appears on an invoice, and the existing
+footprint derivation does the rest. Nothing in the code divides, spreads or
+apportions. Splitting a shared thing is **allocation**; it needs a driver and a
+policy, every choice is arguable, and when it arrives it will be a share somebody
+*declared* on a `uses` link rather than a number the system invented.
+
+The rollup therefore reports the same three buckets the dependency panel already
+uses, because they are the same three conversations: **yours** (owned, plus what
+owning implies, minus anything another project owns outright), **on your estate
+but not yours** (shown, never added, and it names who carries it), and **you use,
+they pay**. Only the first is a number the project is answerable for.
+
+### Three totals, and the year is the exact one
+
+Capital committed, monthly run rate, annual. A single "this project costs X" is
+where a cost report dies, because somebody finds the switch bought once inside a
+monthly figure and is right to stop reading. A one-off contributes **nothing** to
+a run rate, which is the single most important line in `domain/cost.go`.
+
+The annual figure is accumulated in its own right rather than as twelve times the
+monthly, and that changed after seeing it rendered: a €940 yearly contract has no
+exact monthly share, and twelve of 78.33 is 939.96. Telling a reader their €940
+contract costs €939.96 a year invites them to check the arithmetic instead of the
+estate. **The year is exact and the month carries the rounding** — the right way
+round, since a yearly figure can always be stated exactly and a monthly share of
+it sometimes cannot. The month rounds to nearest rather than truncating, or every
+figure in the estate would read low, always in the same direction.
+
+### Shape
+
+**Kind × period.** "One-time acquisition / yearly support / monthly operating" is
+two dimensions wearing one coat. `kind` is a lookup table because it is
+descriptive — a new kind of spend is data, and `/vocabularies` can add one.
+`period` is a `CHECK` with a matching Go constant set because it is *behavioural*:
+Go divides a yearly figure by twelve, so a period added by `INSERT` would be
+storable and silently uncomputable. Same line migration `00004` drew between
+`service_kind` and `availability`.
+
+**Minor units in INTEGER, one currency in config** (`INV_CURRENCY`, default EUR).
+Never a float, never `NUMERIC`/`MONEY` — their arithmetic differs across engines.
+Mixed currencies need FX rates with valuation dates: a subsystem, not a column,
+and a stated non-goal.
+
+**Three tables, not one polymorphic one**, mirroring `project_asset` /
+`project_service`. Real foreign keys, so a typo in an import cannot invent a row
+that inflates a total and belongs to nothing. Project-level lines exist because
+SaaS, retainers and domains attach to no box and no service; without them a
+project total is systematically low in a way nobody notices.
+
+**The validity window ships from day one** though only "current" is queried. A
+renewal at a new price would otherwise overwrite its predecessor, leaving only
+`change_log` — an audit trail, not something to query.
+
+### Visibility follows read access, deliberately
+
+Anyone who can log in sees costs; the split stays read versus read-write. This
+application is not yet aimed at an audience some of whom must be kept from
+commercial figures, and a permission nobody has thought through is worse than
+none because it looks like protection.
+
+`authz.CanSeeCosts` exists anyway and returns exactly what `CanRead` does. Cost
+visibility is the most likely *first* thing a real deployment separates from
+ordinary read access, and when that day comes the change should be one function
+body rather than every template that renders an amount — the same argument that
+made `CanWrite` a one-liner.
+
+### Three guard tests fired, and one test of mine was worthless
+
+- `TestNoAssembledWriteReachesChangeLog` flagged `updateCost`/`retireCost` for
+  building their table name at run time. The names are three package-level
+  `costTable` values and never a caller's string — which is also why the routes
+  are `/assets/{id}/costs` rather than `/costs/{type}/{id}` — so they are on the
+  allowlist with that reasoning written out.
+- `TestEveryColumnIsClassified` required the four new tables in `domain` and in
+  `AUDIT.md` before it would go green.
+- `golangci-lint` found `priceService` unused, which was not a style problem: the
+  **service path through the rollup had no test at all**. It has one now.
+- **`TestProjectCostsCountAnAssetOnce` passed with the dedup guard deleted.**
+  `impliedAssets` already excludes a project's own declared assets, so nothing in
+  that test was ever reachable twice and the assertion could not fail. The real
+  duplicate is an asset that is *implied* and *also* declared with a `uses` link —
+  what a project looks like when somebody wrote the `uses` link before the
+  ownership above it existed. Rewritten around that, it fails when the guard is
+  removed. A test that cannot fail is worse than no test: it reports coverage
+  that is not there.
+
+### What the fixture now says
+
+Prices on the racks, the transit, the three hypervisors, the out-of-support
+network kit, two closed-source services and a database support contract, plus
+SaaS on the projects. The structural finding falls out of the ownership links
+rather than being staged: **the platform team pays for nearly everything, and the
+project that ships the product owns one VM and appears to cost almost nothing.**
+Reading its small run rate beside "€X a month sits on this project's footprint
+that Platform & Core Services owns" is the conversation the feature exists to
+start.
+
+### Still open
+
+Amortising acquisition over acquisition → EOL, as its own labelled line, never
+folded into the run rate. It needs an acquisition date the model does not have.
+Deferred until the three totals have been read by somebody who wants it.

@@ -8,7 +8,7 @@ import (
 	"github.com/gabriel/invctl/internal/web/render"
 )
 
-// Vocabulary administration: the seven lookup tables an estate owns.
+// Vocabulary administration: the lookup tables an estate owns.
 //
 // Admin-only and audited, because a vocabulary term is declared state that
 // other rows point at with a foreign key -- adding or rewording one changes

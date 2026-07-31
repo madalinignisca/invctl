@@ -119,6 +119,16 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	write("POST /projects/{id}/assets/{assetID}/retire", app.ProjectAssetRetire)
 	write("POST /projects/{id}/services", app.ProjectServiceLink)
 	write("POST /projects/{id}/services/{serviceID}/retire", app.ProjectServiceRetire)
+
+	// Cost lines. One route per surface rather than a generic
+	// /costs/{type}/{id}: an entity type arriving in a URL is an entity type
+	// arriving from a request, and it would select a table name.
+	write("POST /assets/{id}/costs", app.CostAddToAsset)
+	write("POST /assets/{id}/costs/{costID}/retire", app.CostRetireOnAsset)
+	write("POST /services/{id}/costs", app.CostAddToService)
+	write("POST /services/{id}/costs/{costID}/retire", app.CostRetireOnService)
+	write("POST /projects/{id}/costs", app.CostAddToProject)
+	write("POST /projects/{id}/costs/{costID}/retire", app.CostRetireOnProject)
 	write("POST /vocabularies", app.VocabularyUpsert)
 	write("POST /services/{id}", app.ServiceUpdate)
 	write("POST /services/{id}/retire", app.ServiceRetire)

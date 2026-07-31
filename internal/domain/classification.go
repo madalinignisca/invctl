@@ -237,6 +237,23 @@ var DeclaredColumns = map[string][]string{
 	// Projects are declared through and through: somebody asserts that a thing
 	// belongs to a project. Nothing here is ever written by an observation, and
 	// the derived footprint is computed at read time and stored nowhere.
+	// The three cost surfaces (migration 00012). Declared without argument:
+	// somebody read an invoice and typed it. Nothing observes a price and
+	// nothing derives one -- the ROLLUPS are derived, and they are computed at
+	// read time and stored nowhere for exactly that reason.
+	"asset_cost": {
+		"id", "asset_id", "kind", "period", "amount_minor", "note",
+		"valid_from", "valid_until", "lifecycle", "created_at", "updated_at",
+	},
+	"service_cost": {
+		"id", "service_id", "kind", "period", "amount_minor", "note",
+		"valid_from", "valid_until", "lifecycle", "created_at", "updated_at",
+	},
+	"project_cost": {
+		"id", "project_id", "kind", "period", "amount_minor", "note",
+		"valid_from", "valid_until", "lifecycle", "created_at", "updated_at",
+	},
+	"cost_kind": {"code", "label", "sort_order", "description"},
 	"project": {
 		"id", "code", "name", "description", "owner_team", "lifecycle",
 		"created_at", "updated_at",

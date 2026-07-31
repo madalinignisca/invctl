@@ -140,7 +140,7 @@ func newHarnessWith(t *testing.T, creds []config.AgentCredential) *harness {
 	// prove nothing about the deployment.
 	sessions.Cookie.Name = "invctl_session"
 
-	renderer, err := render.New(webassets.FS, false)
+	renderer, err := render.New(webassets.FS, false, "EUR")
 	if err != nil {
 		t.Fatalf("parsing templates: %v", err)
 	}

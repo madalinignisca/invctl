@@ -296,6 +296,21 @@ var dynamicTargetAllowlist = map[string]string{
 	// That trades a guard for a copy-paste pair which will diverge the first
 	// time somebody fixes one of them, which is the worse failure.
 	"internal/store/projects.go": "releaseLinks/retireLink: called only with the two literal project link tables",
+
+	// updateCost and retireCost name asset_cost, service_cost or project_cost.
+	// The three are package-level VALUES (costOnAsset, costOnService,
+	// costOnProject), not strings a caller supplies, and each public method
+	// names its own -- the entity type never travels in from a request, which
+	// is also why the routes are three URLs rather than /costs/{type}/{id}.
+	// Both statements set lifecycle/amount_minor/valid_from, none of which
+	// change_log has, so the audit table is unreachable in fact as well as by
+	// construction.
+	//
+	// The alternative was three near-identical copies of each statement. They
+	// would diverge the first time somebody fixed one of them, and a rollup
+	// that totals three subtly different shapes is a worse failure than a
+	// generated table name whose inputs are three constants.
+	"internal/store/costs.go": "updateCost/retireCost: three package-level costTable values, never a caller's string",
 }
 
 func TestNoAssembledWriteReachesChangeLog(t *testing.T) {

@@ -1,0 +1,191 @@
+{{/*
+  cost_panel renders the cost lines on one thing, plus the form to add another.
+
+  Standalone, like every partial here: it takes a dict rather than reading a
+  page struct, so the asset, service and project pages can each hand it their
+  own action URL without three near-identical copies drifting apart.
+
+  Expects: Action, Costs, Totals, Kinds, Periods, CSRF, CanWrite, CanSeeCosts,
+           Heading, Note.
+*/}}
+{{define "cost_panel"}}
+{{if .CanSeeCosts}}
+<div class="panel">
+  <div class="panel-head">
+    <h2>{{.Heading}}</h2>
+    <span class="panel-note">{{.Note}}</span>
+  </div>
+
+  {{if .Totals.IsZero}}
+  <div class="empty">
+    <strong>Nothing recorded.</strong>
+    A blank here means nobody has written the figure down, not that it is free.
+  </div>
+  {{else}}
+  <div class="stat-row" style="margin:0;border:none;border-bottom:1px solid var(--line)">
+    <div class="stat">
+      <div class="k">capital, once</div>
+      <div class="v">{{money .Totals.CapitalMinor}}</div>
+    </div>
+    <div class="stat">
+      <div class="k">per month</div>
+      <div class="v">{{money .Totals.MonthlyMinor}}</div>
+    </div>
+    <div class="stat">
+      <div class="k">per year</div>
+      <div class="v">{{money .Totals.AnnualMinor}}</div>
+    </div>
+  </div>
+  {{end}}
+
+  {{if .Costs}}
+  <div class="scroll-x">
+    <table>
+      <thead>
+        <tr><th>What</th><th>How often</th><th>Amount</th><th>From</th><th>Until</th><th>Note</th>{{if .CanWrite}}<th></th>{{end}}</tr>
+      </thead>
+      <tbody>
+        {{range .Costs}}
+        <tr {{if eq .Lifecycle "retired"}}style="opacity:.5"{{end}}>
+          <td><span class="pill pill-muted">{{.KindLabel}}</span></td>
+          <td class="mono" style="font-size:12px">{{.Period}}</td>
+          <td class="num">{{money .AmountMinor}}</td>
+          <td class="mono" style="font-size:12px">{{.ValidFrom}}</td>
+          <td class="mono" style="font-size:12px">
+            {{if .ValidUntil}}{{deref .ValidUntil}}{{else}}<span style="color:var(--faint)">open</span>{{end}}
+          </td>
+          <td style="color:var(--muted);font-size:12.5px">{{if .Note}}{{deref .Note}}{{end}}</td>
+          {{if $.CanWrite}}
+          <td>
+            {{if ne .Lifecycle "retired"}}
+            <form method="post" action="{{$.Action}}/{{.ID}}/retire"
+                  hx-post="{{$.Action}}/{{.ID}}/retire" style="display:inline">
+              <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+              <button class="btn btn-sm btn-danger" type="submit">Remove</button>
+            </form>
+            {{end}}
+          </td>
+          {{end}}
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{end}}
+
+  {{if .CanWrite}}
+  <form class="panel-body" method="post" action="{{.Action}}" hx-post="{{.Action}}">
+    <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+    <div class="field-row">
+      <div class="field">
+        <label for="cost-kind-{{.Slug}}">What for</label>
+        <select id="cost-kind-{{.Slug}}" name="kind">
+          {{range .Kinds}}<option value="{{.Code}}">{{.Label}}</option>{{end}}
+        </select>
+      </div>
+      <div class="field">
+        <label for="cost-period-{{.Slug}}">How often</label>
+        <select id="cost-period-{{.Slug}}" name="period">
+          {{range .Periods}}<option value="{{.}}">{{.}}</option>{{end}}
+        </select>
+      </div>
+      <div class="field">
+        <label for="cost-amount-{{.Slug}}">Amount</label>
+        <input id="cost-amount-{{.Slug}}" class="mono" type="text" name="amount" placeholder="1200.00">
+      </div>
+      <div class="field">
+        <label for="cost-from-{{.Slug}}">From</label>
+        <input id="cost-from-{{.Slug}}" type="date" name="valid_from">
+        <div class="field-hint">Defaults to today.</div>
+      </div>
+      <div class="field">
+        <label for="cost-until-{{.Slug}}">Until</label>
+        <input id="cost-until-{{.Slug}}" type="date" name="valid_until">
+        <div class="field-hint">Leave blank for open-ended.</div>
+      </div>
+    </div>
+    <div class="field">
+      <label for="cost-note-{{.Slug}}">Note</label>
+      <input id="cost-note-{{.Slug}}" type="text" name="note" placeholder="contract reference, what it covers">
+    </div>
+    <button class="btn btn-primary" type="submit">Add cost</button>
+  </form>
+  {{end}}
+</div>
+{{end}}
+{{end}}
+
+{{/*
+  project_cost_summary is the rollup: three buckets, three totals each, and the
+  buckets are never added together.
+*/}}
+{{define "project_cost_summary"}}
+{{if .CanSeeCosts}}
+<div class="panel">
+  <div class="panel-head">
+    <h2>What it costs</h2>
+    <span class="panel-note">
+      Derived from what this project owns, as at <span class="mono">{{.Costs.On}}</span> — nobody typed these totals.
+    </span>
+  </div>
+
+  {{if .Costs.HasAnything}}
+  <div class="stat-row" style="margin:0;border:none;border-bottom:1px solid var(--line)">
+    <div class="stat">
+      <div class="k">capital committed</div>
+      <div class="v">{{money .Costs.Own.CapitalMinor}}</div>
+    </div>
+    <div class="stat">
+      <div class="k">per month</div>
+      <div class="v">{{money .Costs.Own.MonthlyMinor}}</div>
+    </div>
+    <div class="stat">
+      <div class="k">per year</div>
+      <div class="v">{{money .Costs.Own.AnnualMinor}}</div>
+    </div>
+  </div>
+
+  <div class="panel-body">
+    <p class="panel-note" style="margin-bottom:10px">
+      Capital is what has already been spent once and is never part of a run rate —
+      a switch bought two years ago is not what this month costs.
+      {{if not .Costs.Direct.IsZero}}
+        {{money .Costs.Direct.MonthlyMinor}} a month of the run rate is attached to the
+        project itself rather than to any asset or service.
+      {{end}}
+    </p>
+
+    {{if not .Costs.Elsewhere.IsZero}}
+    <div class="diag-note">
+      <strong>{{money .Costs.Elsewhere.MonthlyMinor}} a month</strong> is spent on things inside
+      this project's footprint that {{join .Costs.ElsewhereOwners ", "}}
+      {{if eq (len .Costs.ElsewhereOwners) 1}}owns{{else}}own{{end}} —
+      not counted above, because it is not this project's to carry.
+    </div>
+    {{end}}
+
+    {{if not .Costs.Shared.IsZero}}
+    <p class="panel-note" style="margin-top:10px">
+      A further {{money .Costs.Shared.MonthlyMinor}} a month sits on things this project
+      declared it <em>uses</em> and somebody else pays for. Shown for context, never added.
+    </p>
+    {{end}}
+
+    {{if .Costs.Unpriced}}
+    <p class="panel-note" style="margin-top:10px">
+      {{.Costs.Priced}} of {{add .Costs.Priced .Costs.Unpriced}} things in this footprint carry a
+      price. The rest are absent from these totals because nothing is recorded for them —
+      which makes this a floor, not a budget.
+    </p>
+    {{end}}
+  </div>
+  {{else}}
+  <div class="empty">
+    <strong>No costs recorded anywhere in this footprint.</strong>
+    Add them on an asset, a service, or on the project itself for the things that
+    belong to no box.
+  </div>
+  {{end}}
+</div>
+{{end}}
+{{end}}

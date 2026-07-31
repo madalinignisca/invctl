@@ -37,6 +37,13 @@ type projectPage struct {
 	// Derived, and labelled as such everywhere it is shown.
 	Footprint *store.ProjectFootprint
 	Depends   *store.ProjectDependencyReport
+	Costs     *store.ProjectCostSummary
+
+	// The project's own cost lines -- the money attached to no box and no
+	// service -- and what a form needs to add one.
+	CostLines   []store.CostRow
+	CostKinds   []store.VocabularyTerm
+	CostPeriods []string
 
 	// Pickers for the link forms.
 	AllAssets   []store.AssetRow
@@ -135,6 +142,21 @@ func (a *App) renderProject(w http.ResponseWriter, r *http.Request, status int, 
 		a.serverError(w, r, err)
 		return
 	}
+	costs, err := a.Store.ProjectCosts(r.Context(), footprint, a.Store.Now())
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
+	costLines, err := a.Store.ListProjectCosts(r.Context(), id)
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
+	costKinds, err := a.Store.CostKinds(r.Context())
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
 
 	allAssets, err := a.Store.ListAssets(r.Context(), store.AssetFilter{})
 	if err != nil {
@@ -155,6 +177,10 @@ func (a *App) renderProject(w http.ResponseWriter, r *http.Request, status int, 
 		Services:    services,
 		Footprint:   footprint,
 		Depends:     depends,
+		Costs:       costs,
+		CostLines:   costLines,
+		CostKinds:   costKinds,
+		CostPeriods: domain.CostPeriods,
 		AllAssets:   allAssets,
 		AllServices: allServices,
 		Relations:   domain.ProjectRelations,

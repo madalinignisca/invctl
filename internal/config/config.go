@@ -30,6 +30,15 @@ type Config struct {
 	// grants write access, everyone else is read-only.
 	AdminUsers []string
 
+	// Currency is the symbol every amount is rendered with, estate-wide.
+	//
+	// ONE CURRENCY, deliberately. Amounts are stored as minor units in an
+	// INTEGER and summed; adding two currencies together needs exchange rates
+	// with a valuation date, which is a subsystem rather than a column, and is
+	// a stated non-goal. A per-row currency field would let mixed values in and
+	// produce totals that are wrong without looking wrong.
+	Currency string
+
 	// AgentCredentials are the monitoring credentials (docs/AUDIT.md rule 6).
 	// They are a different principal type entirely: not app_user rows, never in
 	// AdminUsers, and never seen by authz.CanWrite. Empty means no
@@ -90,6 +99,7 @@ func Load() (*Config, error) {
 		Listen:           envOr("INV_LISTEN", ":8080"),
 		SessionTimeout:   envDuration("INV_SESSION_TIMEOUT", 12*time.Hour),
 		AdminUsers:       splitList(os.Getenv("INV_ADMIN_USERS")),
+		Currency:         envOr("INV_CURRENCY", "EUR"),
 		AuthLocal:        envBool("INV_AUTH_LOCAL", true, &badBools),
 		AuthLDAP:         envBool("INV_AUTH_LDAP", false, &badBools),
 		SeedOnStart:      envBool("INV_SEED", false, &badBools),

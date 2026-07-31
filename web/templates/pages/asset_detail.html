@@ -170,5 +170,12 @@
   {{end}}
 </div>
 
+{{template "cost_panel" dict
+    "Action" (printf "/assets/%s/costs" .Asset.ID) "Slug" "asset"
+    "Costs" .Costs "Totals" .CostTotals "Kinds" .CostKinds "Periods" .CostPeriods
+    "CSRF" .CSRF "CanWrite" .CanWrite "CanSeeCosts" .CanSeeCosts
+    "Heading" "What it costs"
+    "Note" "Attached to this asset, because this is what the invoice names."}}
+
 {{template "timeline_panel" .Timeline}}
 {{end}}

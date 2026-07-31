@@ -1,0 +1,277 @@
+package domain
+
+import (
+	"strings"
+	"time"
+)
+
+// What things cost, and the one rule that governs the whole feature:
+//
+// COST ATTACHES TO WHAT IS BILLED, AND DOES NOT INHERIT. You pay for the
+// hypervisor, not for each VM inside it; for the Vault licence, not for each
+// replica. A guest's cost is not inherited from its host, it is a SHARE of it,
+// and three guests each inheriting the host's monthly figure report three times
+// one box. That double-count is silent, compounds, and is discovered by the
+// first person to reconcile the page against an invoice -- after which nobody
+// believes any number on it again.
+//
+// So nothing here divides, spreads or apportions. Splitting a shared thing is
+// ALLOCATION; it needs a driver (vCPU, RAM, equal shares) and a policy, every
+// choice is arguable, and when it arrives it will be a share somebody DECLARED
+// on a `uses` link rather than a number this package invented.
+
+// Cost periods. A CHECK constraint with a matching constant set rather than a
+// lookup table, because these are BEHAVIOURAL: MonthlyMinor divides a yearly
+// figure by twelve and excludes a one-off entirely. A period added by INSERT
+// would be storable and silently uncomputable, which is exactly the line
+// migration 00004 drew between service_kind and availability.
+const (
+	// CostOnce is paid once and never again. It is NEVER part of a run rate.
+	CostOnce = "once"
+	// CostMonthly is the natural unit of a run rate.
+	CostMonthly = "monthly"
+	// CostYearly is divided by twelve for the run rate, in Go, because integer
+	// division rounds differently across the two engines and because how to
+	// round money is a decision rather than an accident.
+	CostYearly = "yearly"
+)
+
+// CostPeriods is the Go side of the three period CHECK constraints.
+var CostPeriods = []string{CostOnce, CostMonthly, CostYearly}
+
+// CostPeriodDescription is the help text for each, engine-defined the same way
+// the availability policies are: the code branches on these values, so what they
+// mean is a property of this package rather than a row somebody can reword.
+func CostPeriodDescription(period string) string {
+	switch period {
+	case CostOnce:
+		return "Paid once. Counted as capital committed and never as a run rate — " +
+			"a switch bought two years ago is not part of what this month costs."
+	case CostMonthly:
+		return "Paid every month. The natural unit of a run rate."
+	case CostYearly:
+		return "Paid every year. Divided by twelve for the monthly run rate, so a " +
+			"yearly support contract and a monthly hosting bill can be added together."
+	}
+	return ""
+}
+
+// Cost is one line of spend against one thing. The entity it belongs to is not
+// a field here: it is the parent table's foreign key, and the three parent
+// tables are separate so that a typo cannot invent a row that inflates a total
+// and belongs to nothing.
+type Cost struct {
+	ID   string `db:"id"`
+	Kind string `db:"kind"`
+	// Period decides how AmountMinor enters a total. See MonthlyMinor.
+	Period string `db:"period"`
+	// AmountMinor is minor units -- cents -- as an integer. Never a float:
+	// money in binary floating point is wrong in ways that only show up once
+	// the numbers are large enough to matter.
+	AmountMinor int64   `db:"amount_minor"`
+	Note        *string `db:"note"`
+	// ValidFrom and ValidUntil bound when this line applies. ValidUntil nil is
+	// open-ended, which is the ordinary case. The window exists from the first
+	// release even though only "current" is queried, because without it a
+	// renewal at a new price overwrites its predecessor and the history is gone.
+	ValidFrom  string  `db:"valid_from"`
+	ValidUntil *string `db:"valid_until"`
+	Lifecycle  string  `db:"lifecycle"`
+	CreatedAt  string  `db:"created_at"`
+	UpdatedAt  string  `db:"updated_at"`
+}
+
+// CostSpec is what a caller supplies.
+type CostSpec struct {
+	Kind        string
+	Period      string
+	AmountMinor int64
+	Note        *string
+	ValidFrom   *string
+	ValidUntil  *string
+}
+
+// NewCost validates and constructs a cost line.
+func NewCost(id string, spec CostSpec, now time.Time) (*Cost, error) {
+	ve := &ValidationError{}
+	c := &Cost{
+		ID:          id,
+		Kind:        checkVocabulary(ve, "kind", spec.Kind),
+		Period:      strings.ToLower(strings.TrimSpace(spec.Period)),
+		AmountMinor: spec.AmountMinor,
+		Note:        spec.Note,
+		Lifecycle:   LifecycleActive,
+		CreatedAt:   FormatTime(now),
+		UpdatedAt:   FormatTime(now),
+	}
+	checkEnum(ve, "period", c.Period, CostPeriods)
+
+	// A negative cost is a credit, and a credit is an accounting concept this
+	// system has no way to report honestly -- it would simply subtract from a
+	// total and make an estate look cheaper than it is.
+	if c.AmountMinor < 0 {
+		ve.Add("amount", "cannot be negative")
+	}
+
+	// An undated line defaults to starting today rather than being rejected.
+	// Most costs are entered when they begin, and demanding a date for the
+	// common case buys nothing.
+	from := checkDate(ve, "valid_from", spec.ValidFrom)
+	if from == nil {
+		today := FormatDate(now)
+		from = &today
+	}
+	c.ValidFrom = *from
+	c.ValidUntil = checkDate(ve, "valid_until", spec.ValidUntil)
+
+	// A window that closes before it opens never matches anything, so the cost
+	// vanishes from every total with no visible symptom.
+	if c.ValidUntil != nil && *c.ValidUntil < c.ValidFrom {
+		ve.Add("valid_until", "cannot be before the date it starts")
+	}
+	if err := ve.OrNil(); err != nil {
+		return nil, err
+	}
+	return c, nil
+}
+
+// Validate re-checks a cost after field updates.
+func (c *Cost) Validate() error {
+	ve := &ValidationError{}
+	c.Kind = checkVocabulary(ve, "kind", c.Kind)
+	checkEnum(ve, "period", c.Period, CostPeriods)
+	checkEnum(ve, "lifecycle", c.Lifecycle, []string{LifecycleActive, LifecycleRetired})
+	if c.AmountMinor < 0 {
+		ve.Add("amount", "cannot be negative")
+	}
+	from := checkDate(ve, "valid_from", &c.ValidFrom)
+	if from == nil {
+		ve.Add("valid_from", "is required")
+	} else {
+		c.ValidFrom = *from
+	}
+	c.ValidUntil = checkDate(ve, "valid_until", c.ValidUntil)
+	if c.ValidUntil != nil && *c.ValidUntil < c.ValidFrom {
+		ve.Add("valid_until", "cannot be before the date it starts")
+	}
+	return ve.OrNil()
+}
+
+// AppliesOn reports whether this line is in force on a given date.
+func (c *Cost) AppliesOn(date string) bool {
+	if c.Lifecycle == LifecycleRetired {
+		return false
+	}
+	if date < c.ValidFrom {
+		return false
+	}
+	return c.ValidUntil == nil || date <= *c.ValidUntil
+}
+
+// MonthlyMinor is this line's contribution to a monthly run rate.
+//
+// A one-off contributes NOTHING, and that is the single most important line in
+// this file. Amortising it here would fold capital into a run rate silently;
+// amortisation is a separate, labelled figure or it is a lie.
+//
+// A yearly figure is divided by twelve with rounding to nearest, so twelve
+// months of a yearly contract differ from the contract by at most six cents
+// rather than by eleven. Truncation would make every annualised total read
+// slightly low, always in the same direction, which is the kind of error that
+// survives review because it looks like rounding.
+func (c *Cost) MonthlyMinor() int64 {
+	switch c.Period {
+	case CostMonthly:
+		return c.AmountMinor
+	case CostYearly:
+		return divRound(c.AmountMinor, 12)
+	default:
+		return 0
+	}
+}
+
+// CapitalMinor is this line's contribution to capital committed: the one-offs,
+// and only the one-offs.
+func (c *Cost) CapitalMinor() int64 {
+	if c.Period == CostOnce {
+		return c.AmountMinor
+	}
+	return 0
+}
+
+// AnnualMinor is this line's contribution to a year of run rate.
+//
+// Accumulated in its own right rather than computed as twelve times the monthly,
+// and the difference is visible to a reader: a EUR 940 yearly contract has a
+// monthly share of 78.33, and twelve of those is 939.96. Showing "per year
+// EUR 939.96" next to a contract everybody knows costs 940 reads as a bug and
+// invites somebody to check the arithmetic instead of the estate.
+//
+// So the YEAR is exact and the MONTH is the approximation, which is the right
+// way round: a yearly figure can always be stated exactly, a monthly share of it
+// sometimes cannot.
+func (c *Cost) AnnualMinor() int64 {
+	switch c.Period {
+	case CostMonthly:
+		return c.AmountMinor * 12
+	case CostYearly:
+		return c.AmountMinor
+	default:
+		return 0
+	}
+}
+
+// CostTotals is the answer, and it is deliberately three numbers.
+//
+// A single "this project costs X" is where a cost report dies, because somebody
+// always finds the switch bought once inside a monthly figure and is right to
+// stop reading. Capital, run rate and annual answer three different questions
+// and are never added to each other.
+type CostTotals struct {
+	// CapitalMinor: what has been spent once. Sunk, not a rate.
+	CapitalMinor int64
+	// MonthlyMinor: what it costs to keep running, per month. The only figure
+	// here that can carry a rounding error, and it carries all of it.
+	MonthlyMinor int64
+	// AnnualMinor: the same run rate over a year, accumulated exactly rather
+	// than as twelve times the monthly. See Cost.AnnualMinor.
+	AnnualMinor int64
+	// Lines is how many cost lines produced these numbers. A total over zero
+	// lines and a total of zero are different answers.
+	Lines int
+}
+
+// IsZero reports whether anything at all was recorded.
+func (t CostTotals) IsZero() bool { return t.Lines == 0 }
+
+// Add folds one line into the totals.
+func (t *CostTotals) Add(c *Cost) {
+	t.CapitalMinor += c.CapitalMinor()
+	t.MonthlyMinor += c.MonthlyMinor()
+	t.AnnualMinor += c.AnnualMinor()
+	t.Lines++
+}
+
+// Plus merges two sets of totals.
+func (t CostTotals) Plus(other CostTotals) CostTotals {
+	return CostTotals{
+		CapitalMinor: t.CapitalMinor + other.CapitalMinor,
+		MonthlyMinor: t.MonthlyMinor + other.MonthlyMinor,
+		AnnualMinor:  t.AnnualMinor + other.AnnualMinor,
+		Lines:        t.Lines + other.Lines,
+	}
+}
+
+// divRound divides rounding half away from zero. Amounts are non-negative here,
+// but the negative branch is written rather than assumed: a helper that is only
+// correct for the inputs its first caller happened to pass is a trap for the
+// second.
+func divRound(n, d int64) int64 {
+	if d == 0 {
+		return 0
+	}
+	if n >= 0 {
+		return (n + d/2) / d
+	}
+	return -((-n + d/2) / d)
+}

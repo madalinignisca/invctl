@@ -47,8 +47,13 @@ type Base struct {
 	Nav      string
 	User     *domain.AppUser
 	CanWrite bool
-	CSRF     string
-	Flash    *Flash
+	// CanSeeCosts is CanWrite's read-only sibling for money. It is true for
+	// every authenticated user today; it exists so that the day a deployment
+	// needs to hide commercial figures from part of its audience, the change is
+	// one function body rather than every template that renders an amount.
+	CanSeeCosts bool
+	CSRF        string
+	Flash       *Flash
 }
 
 const (
@@ -60,11 +65,12 @@ const (
 func (a *App) base(r *http.Request, title, nav string) Base {
 	user := middleware.UserFrom(r.Context())
 	b := Base{
-		Title:    title,
-		Nav:      nav,
-		User:     user,
-		CanWrite: a.Authz.CanWrite(user),
-		CSRF:     nosurf.Token(r),
+		Title:       title,
+		Nav:         nav,
+		User:        user,
+		CanWrite:    a.Authz.CanWrite(user),
+		CanSeeCosts: a.Authz.CanSeeCosts(user),
+		CSRF:        nosurf.Token(r),
 	}
 	if kind, text := a.takeFlash(r); text != "" {
 		b.Flash = &Flash{Kind: kind, Text: text}

@@ -175,3 +175,21 @@ func (a *Authorizer) CanWrite(user *domain.AppUser) bool {
 func (a *Authorizer) CanRead(user *domain.AppUser) bool {
 	return user != nil && user.IsActive
 }
+
+// CanSeeCosts reports whether a user may see money: acquisition prices, support
+// contract values, project totals.
+//
+// It returns exactly what CanRead does, and that is a DECISION rather than an
+// oversight. This application is not yet aimed at an audience some of whom must
+// be kept away from commercial figures, so gating them now would be inventing a
+// requirement -- and a permission nobody has thought through is worse than none,
+// because it looks like protection.
+//
+// It exists as its own function anyway, for the same reason CanWrite is a
+// one-liner: cost visibility is the most likely FIRST thing a real deployment
+// wants to separate from ordinary read access, and when that day comes the whole
+// change should be this function's body rather than every handler and template
+// that renders an amount.
+func (a *Authorizer) CanSeeCosts(user *domain.AppUser) bool {
+	return a.CanRead(user)
+}

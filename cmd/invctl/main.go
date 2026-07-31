@@ -142,7 +142,7 @@ func run() error {
 		return err
 	}
 
-	renderer, err := render.New(webassets.FS, *devMode)
+	renderer, err := render.New(webassets.FS, *devMode, cfg.Currency)
 	if err != nil {
 		return err
 	}
