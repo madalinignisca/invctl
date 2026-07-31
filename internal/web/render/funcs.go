@@ -358,6 +358,21 @@ func moneyFormatter(currency string) func(int64) string {
 	}
 }
 
+// amountMinor renders a figure for an INPUT rather than for a reader.
+//
+// Deliberately not `money`. That formatter groups thousands with a comma and
+// prefixes a symbol, and parseAmountMinor rejects a value carrying both a comma
+// and a point as genuinely ambiguous -- so a form pre-filled with "€8,400.00"
+// offers the operator a value the same application refuses to take back. The
+// round trip has to close: what a field renders, its own parser must accept.
+func amountMinor(minor int64) string {
+	sign := ""
+	if minor < 0 {
+		sign, minor = "-", -minor
+	}
+	return fmt.Sprintf("%s%d.%02d", sign, minor/100, minor%100)
+}
+
 // groupThousands inserts a comma every three digits, from the right.
 func groupThousands(n int64) string {
 	digits := strconv.FormatInt(n, 10)

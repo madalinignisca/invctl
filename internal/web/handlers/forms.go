@@ -3,6 +3,7 @@ package handlers
 import (
 	"log/slog"
 	"net/http"
+	"strconv"
 
 	"github.com/gabriel/invctl/internal/domain"
 	"github.com/gabriel/invctl/internal/store"
@@ -63,12 +64,56 @@ type instanceFormData struct {
 
 type endpointFormData struct {
 	Base
-	ServiceID  string
-	Errors     map[string]string
+	ServiceID string
+	Errors    map[string]string
+	// Endpoint is the line being corrected, or nil when adding a new one. One
+	// partial serves both so the two cannot drift into offering different
+	// fields -- which is how a form ends up quietly unable to set something.
+	Endpoint   *domain.Endpoint
+	Action     string
+	Submit     string
+	Prefix     string
 	Protos     []string
 	BindScopes []string
 	Exposures  []string
 	TLSModes   []string
+}
+
+// Value returns what a field should be pre-filled with: the stored endpoint
+// when correcting one, the zero value when adding. Called from the template so
+// the two modes share every input.
+func (f endpointFormData) Value(field string) string {
+	if f.Endpoint == nil {
+		return ""
+	}
+	e := f.Endpoint
+	switch field {
+	case "name":
+		return e.Name
+	case "l4_proto":
+		return e.L4Proto
+	case "port":
+		if e.Port == nil {
+			return ""
+		}
+		return strconv.Itoa(*e.Port)
+	case "unix_path":
+		return orBlank(e.UnixPath)
+	case "bind_scope":
+		return e.BindScope
+	case "exposure":
+		return e.Exposure
+	case "tls_mode":
+		return e.TLSMode
+	}
+	return ""
+}
+
+func orBlank(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
 
 type dependencyFormData struct {
@@ -196,11 +241,28 @@ func (a *App) newEndpointForm(r *http.Request, serviceID string, errs map[string
 		Base:       a.base(r, "Services", "services"),
 		ServiceID:  serviceID,
 		Errors:     orEmpty(errs),
+		Action:     "/services/" + serviceID + "/endpoints",
+		Submit:     "Add endpoint",
+		Prefix:     "ep-new",
 		Protos:     domain.L4Protos,
 		BindScopes: domain.BindScopes,
 		Exposures:  domain.Exposures,
 		TLSModes:   domain.TLSModes,
 	}
+}
+
+// newEndpointEditForm is the same form pointed at an existing socket. The
+// service it belongs to is NOT among the fields: moving an endpoint to another
+// service moves every dependency that resolves through it, which is a different
+// act with different consequences and does not belong behind a Save button
+// labelled the same way.
+func (a *App) newEndpointEditForm(r *http.Request, e *domain.Endpoint, errs map[string]string) endpointFormData {
+	f := a.newEndpointForm(r, e.ServiceID, errs)
+	f.Endpoint = e
+	f.Action = "/endpoints/" + e.ID
+	f.Submit = "Save endpoint"
+	f.Prefix = "ep-" + e.ID
+	return f
 }
 
 func (a *App) newDependencyForm(r *http.Request, serviceID string, errs map[string]string, spec domain.DependencySpec, endpoints []store.EndpointRow, routes []store.RouteRow, identities []domain.Identity, classes []store.VocabularyTerm) dependencyFormData {

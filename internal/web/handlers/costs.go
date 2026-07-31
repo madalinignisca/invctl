@@ -1,8 +1,11 @@
 package handlers
 
 import (
+	"context"
+	"fmt"
 	"math"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -52,6 +55,76 @@ func (a *App) CostAddToProject(w http.ResponseWriter, r *http.Request) {
 	a.afterCostWrite(w, r, err, "/projects/"+id)
 }
 
+// CostEditOnAsset corrects a cost line on an asset.
+//
+// CORRECTING, NOT REPLACING. Retiring a wrong line and adding a new one loses
+// the fact that it was a correction and starts a fresh validity window, which is
+// how "what did we pay in March" stops being answerable. The store's update path
+// has existed since costs landed; only the route was missing.
+func (a *App) CostEditOnAsset(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	costID := r.PathValue("costID")
+	err := a.editCost(r, costID,
+		a.Store.GetAssetCost, a.Store.UpdateAssetCost, id)
+	a.afterCostEdit(w, r, err, "/assets/"+id, costID)
+}
+
+// CostEditOnService corrects a cost line on a service.
+func (a *App) CostEditOnService(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	costID := r.PathValue("costID")
+	err := a.editCost(r, costID,
+		a.Store.GetServiceCost, a.Store.UpdateServiceCost, id)
+	a.afterCostEdit(w, r, err, "/services/"+id, costID)
+}
+
+// CostEditOnProject corrects a cost line on a project.
+func (a *App) CostEditOnProject(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	costID := r.PathValue("costID")
+	err := a.editCost(r, costID,
+		a.Store.GetProjectCost, a.Store.UpdateProjectCost, id)
+	a.afterCostEdit(w, r, err, "/projects/"+id, costID)
+}
+
+// editCost is shared by the three above. The getter and setter are passed in
+// rather than selected from a string, so no entity type travels in from a
+// request -- the same construction the deploy routes use.
+//
+// The line must belong to the owner named in the URL, for the reason
+// retireCost checks the same thing: without it an operator can edit a cost on
+// one asset through another asset's URL and the redirect lies about what
+// happened.
+func (a *App) editCost(r *http.Request, costID string,
+	get func(context.Context, string) (*store.CostRow, error),
+	update func(context.Context, domain.Actor, *domain.Cost) error,
+	ownerID string) error {
+
+	existing, err := get(r.Context(), costID)
+	if err != nil {
+		return err
+	}
+	if existing.OwnerID != ownerID {
+		return fmt.Errorf("cost line %s does not belong to %s: %w",
+			costID, ownerID, domain.ErrNotFound)
+	}
+
+	amount, amountErr := parseAmountMinor(formValue(r, "amount"))
+	if amountErr != nil {
+		return amountErr
+	}
+
+	updated := existing.Cost
+	updated.Kind = formValue(r, "kind")
+	updated.Period = formValue(r, "period")
+	updated.AmountMinor = amount
+	updated.Note = optional(formValue(r, "note"))
+	updated.ValidFrom = formValue(r, "valid_from")
+	updated.ValidUntil = optionalString(r, "valid_until")
+
+	return update(r.Context(), actor(r), &updated)
+}
+
 // CostRetireOnAsset soft-deletes a line on an asset.
 func (a *App) CostRetireOnAsset(w http.ResponseWriter, r *http.Request) {
 	err := a.Store.RetireAssetCost(r.Context(), actor(r), r.PathValue("id"), r.PathValue("costID"))
@@ -90,6 +163,19 @@ func (a *App) afterCostWrite(w http.ResponseWriter, r *http.Request, err error, 
 		return
 	}
 	render.Redirect(w, r, back)
+}
+
+// afterCostEdit is afterCostWrite for a correction: a refused edit reopens the
+// row it refused. Sending the operator back to a closed table with only a flash
+// makes them find the line again to retype one character, and the commonest
+// reason to be here at all is a typo.
+func (a *App) afterCostEdit(w http.ResponseWriter, r *http.Request, err error, back, costID string) {
+	if err != nil {
+		if _, ok := validationErrors(err); ok {
+			back += "?edit=" + url.QueryEscape(costID)
+		}
+	}
+	a.afterCostWrite(w, r, err, back)
 }
 
 // costFromForm reads a cost line out of a submitted form.

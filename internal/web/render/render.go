@@ -38,6 +38,7 @@ func New(fsys fs.FS, dev bool, currency string) (*Renderer, error) {
 	// The estate's single currency, bound once here rather than threaded
 	// through every page struct that shows an amount.
 	r.funcs["money"] = moneyFormatter(currency)
+	r.funcs["amount"] = amountMinor
 	// Registered before parse, because the templates call it.
 	r.assets = newAssets(fsys, dev)
 	r.funcs["asset"] = r.assetURL

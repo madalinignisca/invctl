@@ -54,6 +54,8 @@ type Base struct {
 	CanSeeCosts bool
 	CSRF        string
 	Flash       *Flash
+	// EditRow is the id of the one row the operator opened for editing.
+	EditRow string
 }
 
 const (
@@ -71,6 +73,12 @@ func (a *App) base(r *http.Request, title, nav string) Base {
 		CanWrite:    a.Authz.CanWrite(user),
 		CanSeeCosts: a.Authz.CanSeeCosts(user),
 		CSRF:        nosurf.Token(r),
+		// Which row the operator asked to edit, if any. In the query string
+		// rather than in HTMX state so that an edit form is a plain link: the
+		// page re-renders either way, which it must, because correcting an
+		// amount moves the totals at the top of the same panel. A fragment swap
+		// would leave those stale and stale money is worse than a page load.
+		EditRow: r.URL.Query().Get("edit"),
 	}
 	if kind, text := a.takeFlash(r); text != "" {
 		b.Flash = &Flash{Kind: kind, Text: text}

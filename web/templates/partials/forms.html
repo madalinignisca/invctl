@@ -268,54 +268,66 @@
 {{end}}
 
 
+{{/*
+  endpoint_form both adds a socket and corrects one. .Endpoint is nil in the
+  first case and the stored row in the second; .Value pre-fills from it, so a
+  field added here appears in both modes and neither can quietly lose one.
+
+  The SERVICE is not a field. Moving an endpoint to another service moves every
+  dependency that resolves through it, and that is not a correction.
+*/}}
 {{define "endpoint_form"}}
-<form id="endpoint-form" method="post" action="/services/{{.ServiceID}}/endpoints"
-      hx-post="/services/{{.ServiceID}}/endpoints" hx-target="#endpoint-form" hx-swap="outerHTML"
+<form id="{{.Prefix}}-form" method="post" action="{{.Action}}"
+      hx-post="{{.Action}}" hx-target="#{{.Prefix}}-form" hx-swap="outerHTML"
       x-data="endpointForm">
   <input type="hidden" name="csrf_token" value="{{.CSRF}}">
   <div class="field-row">
     <div class="field">
-      <label for="ep-name">Name</label>
-      <input id="ep-name" class="mono {{if index .Errors "name"}}invalid{{end}}"
-             type="text" name="name" placeholder="https" required>
+      <label for="{{.Prefix}}-name">Name</label>
+      <input id="{{.Prefix}}-name" class="mono {{if index .Errors "name"}}invalid{{end}}"
+             type="text" name="name" placeholder="https" value="{{.Value "name"}}" required>
       {{with index .Errors "name"}}<div class="field-error">{{.}}</div>{{end}}
     </div>
     <div class="field">
-      <label for="ep-proto">Protocol</label>
-      <select id="ep-proto" name="l4_proto" x-on:change="setProto">
-        {{range .Protos}}<option value="{{.}}">{{.}}</option>{{end}}
+      <label for="{{.Prefix}}-proto">Protocol</label>
+      {{$f := .}}
+      <select id="{{.Prefix}}-proto" name="l4_proto" x-on:change="setProto">
+        {{range .Protos}}<option value="{{.}}" {{if eq . ($f.Value "l4_proto")}}selected{{end}}>{{.}}</option>{{end}}
       </select>
     </div>
     <div class="field" x-show="notUnix">
-      <label for="ep-port">Port</label>
-      <input id="ep-port" type="number" name="port" min="1" max="65535" placeholder="8443">
+      <label for="{{.Prefix}}-port">Port</label>
+      <input id="{{.Prefix}}-port" type="number" name="port" min="1" max="65535"
+             placeholder="8443" value="{{.Value "port"}}">
       {{with index .Errors "port"}}<div class="field-error">{{.}}</div>{{end}}
     </div>
     <div class="field" x-show="isUnix">
-      <label for="ep-path">Socket path</label>
-      <input id="ep-path" class="mono" type="text" name="unix_path" placeholder="/var/run/app.sock">
+      <label for="{{.Prefix}}-path">Socket path</label>
+      <input id="{{.Prefix}}-path" class="mono" type="text" name="unix_path"
+             placeholder="/var/run/app.sock" value="{{.Value "unix_path"}}">
       {{with index .Errors "unix_path"}}<div class="field-error">{{.}}</div>{{end}}
     </div>
     <div class="field">
-      <label for="ep-bind">Bind scope</label>
-      <select id="ep-bind" name="bind_scope">
-        {{range .BindScopes}}<option value="{{.}}">{{.}}</option>{{end}}
+      <label for="{{.Prefix}}-bind">Bind scope</label>
+      <select id="{{.Prefix}}-bind" name="bind_scope">
+        {{range .BindScopes}}<option value="{{.}}" {{if eq . ($f.Value "bind_scope")}}selected{{end}}>{{.}}</option>{{end}}
       </select>
     </div>
     <div class="field">
-      <label for="ep-exposure">Exposure</label>
-      <select id="ep-exposure" name="exposure">
-        {{range .Exposures}}<option value="{{.}}">{{.}}</option>{{end}}
+      <label for="{{.Prefix}}-exposure">Exposure</label>
+      <select id="{{.Prefix}}-exposure" name="exposure">
+        {{range .Exposures}}<option value="{{.}}" {{if eq . ($f.Value "exposure")}}selected{{end}}>{{.}}</option>{{end}}
       </select>
     </div>
     <div class="field">
-      <label for="ep-tls">TLS</label>
-      <select id="ep-tls" name="tls_mode">
-        {{range .TLSModes}}<option value="{{.}}">{{.}}</option>{{end}}
+      <label for="{{.Prefix}}-tls">TLS</label>
+      <select id="{{.Prefix}}-tls" name="tls_mode">
+        {{range .TLSModes}}<option value="{{.}}" {{if eq . ($f.Value "tls_mode")}}selected{{end}}>{{.}}</option>{{end}}
       </select>
     </div>
   </div>
-  <button class="btn btn-primary" type="submit">Add endpoint</button>
+  <button class="btn btn-primary" type="submit">{{.Submit}}</button>
+  {{if .Endpoint}}<a class="btn" href="/services/{{.ServiceID}}#endpoints">Cancel</a>{{end}}
 </form>
 {{end}}
 

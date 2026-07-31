@@ -346,6 +346,15 @@ func (s *SQLStore) UpdateInstance(ctx context.Context, actor domain.Actor, si *d
 	if err != nil {
 		return err
 	}
+	// A WITHDRAWN PLACEMENT IS HISTORY. It records that the service was once
+	// deployed here and no longer is; amending what it was asked to do says
+	// something about a deployment that has stopped existing. The same call
+	// would also set lifecycle back to active, un-withdrawing it with no
+	// record of a withdrawal. Place it again instead -- that is a new fact and
+	// gets a new row.
+	if before.Lifecycle == domain.LifecycleRetired {
+		return fmt.Errorf("placement %s is withdrawn and cannot be amended: %w", si.ID, domain.ErrConflict)
+	}
 	si.CreatedAt = before.CreatedAt
 	si.UpdatedAt = domain.FormatTime(s.now())
 

@@ -48,7 +48,7 @@
   </div>
 </div>
 
-<div class="panel">
+<div class="panel" id="instances">
   <div class="panel-head">
     <h2>Instances</h2>
     <span class="panel-note">Where this service actually runs. Placement lives here; everything logical lives above.</span>
@@ -64,6 +64,37 @@
       <thead><tr><th>Host</th><th>Runtime</th><th>Role</th><th>Shard</th><th>Ordinal</th><th>Desired</th><th>Observed</th>{{if .CanWrite}}<th></th>{{end}}</tr></thead>
       <tbody>
         {{range .Instances}}
+        {{$si := .}}
+        {{/* Correcting a placement in the row, because here the fields ARE the
+             columns. The host is not among them: moving a service to another
+             box is a migration, and both placements are facts worth keeping. */}}
+        {{if and $.CanWrite (not .Retired) (eq .ID $.EditRow)}}
+        <tr class="row-editing">
+          <td><a class="id" href="/assets/{{.HostAssetID}}">{{.HostName}}</a>
+              <div class="mono" style="color:var(--faint);font-size:11.5px">host is fixed</div></td>
+          <td>
+            <select form="si-{{.ID}}" name="runtime_type" aria-label="Runtime">
+              {{range $.RuntimeTypes}}<option value="{{.}}" {{if eq . $si.RuntimeType}}selected{{end}}>{{.}}</option>{{end}}
+            </select>
+          </td>
+          <td><input form="si-{{.ID}}" class="mono" type="text" name="role" value="{{deref .Role}}" aria-label="Role" style="width:8em"></td>
+          <td><input form="si-{{.ID}}" class="mono" type="text" name="shard" value="{{deref .Shard}}" aria-label="Shard" style="width:7em"></td>
+          <td><input form="si-{{.ID}}" type="number" name="ordinal" value="{{.Ordinal}}" min="0" aria-label="Ordinal" style="width:5em"></td>
+          <td>
+            <select form="si-{{.ID}}" name="desired_state" aria-label="Desired state">
+              {{range $.DesiredStates}}<option value="{{.}}" {{if eq . $si.DesiredState}}selected{{end}}>{{.}}</option>{{end}}
+            </select>
+          </td>
+          <td>{{template "health_cell" (index $.InstanceHealth .ID)}}</td>
+          <td style="white-space:nowrap">
+            <form id="si-{{.ID}}" method="post" action="/instances/{{.ID}}" style="display:inline">
+              <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+              <button class="btn btn-sm btn-primary" type="submit">Save</button>
+            </form>
+            <a class="btn btn-sm" href="/services/{{$.Service.ID}}#instances">Cancel</a>
+          </td>
+        </tr>
+        {{else}}
         <tr {{if .Retired}}style="opacity:0.55"{{end}}>
           <td><a class="id" href="/assets/{{.HostAssetID}}">{{.HostName}}</a>
               <div class="mono" style="color:var(--faint);font-size:11.5px">{{.HostKind}}</div></td>
@@ -81,8 +112,9 @@
           </td>
           <td>{{template "health_cell" (index $.InstanceHealth .ID)}}</td>
           {{if $.CanWrite}}
-          <td>
+          <td style="white-space:nowrap">
             {{if not .Retired}}
+            <a class="btn btn-sm" href="/services/{{$.Service.ID}}?edit={{.ID}}#instances">Edit</a>
             <form method="post" action="/instances/{{.ID}}/retire" style="display:inline">
               <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
               <button class="btn btn-sm btn-danger" type="submit"
@@ -92,6 +124,7 @@
           </td>
           {{end}}
         </tr>
+        {{end}}
         {{end}}
       </tbody>
     </table>
@@ -108,7 +141,7 @@
 
 {{template "overrides_panel" .OverrideForm}}
 
-<div class="panel">
+<div class="panel" id="endpoints">
   <div class="panel-head">
     <h2>Endpoints</h2>
     <span class="panel-note">The sockets other services connect to.</span>
@@ -116,10 +149,10 @@
   {{if .Endpoints}}
   <div class="scroll-x">
     <table>
-      <thead><tr><th>Name</th><th>Address</th><th>Bind scope</th><th>TLS</th><th>Exposure</th></tr></thead>
+      <thead><tr><th>Name</th><th>Address</th><th>Bind scope</th><th>TLS</th><th>Exposure</th>{{if .CanWrite}}<th></th>{{end}}</tr></thead>
       <tbody>
         {{range .Endpoints}}
-        <tr>
+        <tr {{if and $.EndpointEdit (eq .ID $.EndpointEdit.Endpoint.ID)}}class="row-editing"{{end}}>
           <td class="mono">{{.Name}}</td>
           <td class="mono">{{.Addr}}{{if .AddrText}} <span style="color:var(--faint)">on {{.AddrText}}</span>{{end}}</td>
           <td><span class="pill pill-muted">{{.BindScope}}</span></td>
@@ -127,6 +160,9 @@
           <td>
             <span class="pill {{if eq .Exposure "external"}}pill-down{{else if eq .Exposure "cross_env"}}pill-degraded{{else}}pill-muted{{end}}">{{.Exposure}}</span>
           </td>
+          {{if $.CanWrite}}
+          <td><a class="btn btn-sm" href="/services/{{$.Service.ID}}?edit={{.ID}}#endpoints">Edit</a></td>
+          {{end}}
         </tr>
         {{end}}
       </tbody>
@@ -137,7 +173,18 @@
   {{end}}
   {{if .CanWrite}}
   <div class="panel-body" style="border-top:1px solid var(--line-soft)">
-    {{template "endpoint_form" .EndpointForm}}
+    {{/* One form, one purpose at a time: correcting a socket replaces the add
+         form rather than sitting beside it, so there is never a question about
+         which of two identical field rows is about to be submitted. */}}
+    {{if .EndpointEdit}}
+      <p class="panel-note" style="margin:0 0 10px">
+        Correcting <span class="mono">{{.EndpointEdit.Endpoint.Name}}</span>. The service it belongs to
+        is not editable here — moving an endpoint moves everything that depends on it.
+      </p>
+      {{template "endpoint_form" .EndpointEdit}}
+    {{else}}
+      {{template "endpoint_form" .EndpointForm}}
+    {{end}}
   </div>
   {{end}}
 </div>
@@ -217,6 +264,7 @@
 
 {{template "cost_panel" dict
     "Action" (printf "/services/%s/costs" .Service.ID) "Slug" "service"
+    "Return" (printf "/services/%s" .Service.ID) "EditID" .EditRow
     "Costs" .Costs "Totals" .CostTotals "Kinds" .CostKinds "Periods" .CostPeriods
     "CSRF" .CSRF "CanWrite" .CanWrite "CanSeeCosts" .CanSeeCosts
     "Heading" "What it costs"

@@ -27,6 +27,16 @@ document.addEventListener('alpine:init', () => {
   // operator filling in a field that is about to be rejected.
   Alpine.data('endpointForm', () => ({
     proto: 'tcp',
+    // Read the initial value off the select rather than assuming tcp. The form
+    // now also renders pre-filled -- correcting an existing endpoint, and
+    // re-rendering after a 422 -- and a unix socket opened for editing showed
+    // the port field and hid the path it actually has.
+    init() {
+      const proto = this.$el.querySelector('select[name="l4_proto"]');
+      if (proto) {
+        this.proto = proto.value;
+      }
+    },
     get isUnix() {
       return this.proto === 'unix';
     },

@@ -140,10 +140,13 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	// /costs/{type}/{id}: an entity type arriving in a URL is an entity type
 	// arriving from a request, and it would select a table name.
 	write("POST /assets/{id}/costs", app.CostAddToAsset)
+	write("POST /assets/{id}/costs/{costID}", app.CostEditOnAsset)
 	write("POST /assets/{id}/costs/{costID}/retire", app.CostRetireOnAsset)
 	write("POST /services/{id}/costs", app.CostAddToService)
+	write("POST /services/{id}/costs/{costID}", app.CostEditOnService)
 	write("POST /services/{id}/costs/{costID}/retire", app.CostRetireOnService)
 	write("POST /projects/{id}/costs", app.CostAddToProject)
+	write("POST /projects/{id}/costs/{costID}", app.CostEditOnProject)
 	write("POST /projects/{id}/costs/{costID}/retire", app.CostRetireOnProject)
 	write("POST /vocabularies", app.VocabularyUpsert)
 	write("POST /services/{id}", app.ServiceUpdate)
@@ -153,6 +156,12 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	write("POST /services/{id}/dependencies", app.DependencyCreate)
 
 	write("POST /instances/{id}/retire", app.InstanceRetire)
+	// Correcting what a thing IS. Nothing here moves a thing: an endpoint stays
+	// on its service, a placement stays on its host. Those re-point the graph
+	// and have their own flows.
+	write("POST /endpoints/{id}", app.EndpointUpdate)
+	write("POST /instances/{id}", app.InstanceUpdate)
+	write("POST /environments/{id}", app.EnvironmentUpdate)
 
 	// Operator overrides of an observation (docs/AUDIT.md rule 14). These are
 	// DECLARED mutations -- a person decided that a reading is wrong -- so they

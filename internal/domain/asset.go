@@ -46,22 +46,35 @@ type Environment struct {
 // NewEnvironment validates and constructs. The DB CHECK is a backstop; this is
 // where a bad value is supposed to be caught.
 func NewEnvironment(id, code, name, role string, inScope bool, criticality int, now time.Time) (*Environment, error) {
-	ve := &ValidationError{}
-	code = checkRequired(ve, "code", code)
-	name = checkRequired(ve, "name", name)
-	role = checkVocabulary(ve, "role", role)
-	if criticality < 1 || criticality > 5 {
-		ve.Add("criticality", "must be between 1 and 5")
-	}
-	if err := ve.OrNil(); err != nil {
-		return nil, err
-	}
 	ts := FormatTime(now)
-	return &Environment{
-		ID: id, Code: strings.ToLower(code), Name: name, Role: role,
+	env := &Environment{
+		ID: id, Code: code, Name: name, Role: role,
 		InScope: inScope, Criticality: criticality,
 		CreatedAt: ts, UpdatedAt: ts,
-	}, nil
+	}
+	if err := env.Validate(); err != nil {
+		return nil, err
+	}
+	return env, nil
+}
+
+// Validate checks an environment against its business rules, and normalises the
+// code the way the constructor always has.
+//
+// SEPARATE FROM THE CONSTRUCTOR because an update has to run the same rules and
+// could not: the checks lived inside NewEnvironment, so UpdateEnvironment wrote
+// whatever it was handed and the table CHECK was the only thing standing
+// between a form and a blank name. Every other entity here validates on the
+// value; this one now does too.
+func (e *Environment) Validate() error {
+	ve := &ValidationError{}
+	e.Code = strings.ToLower(checkRequired(ve, "code", e.Code))
+	e.Name = checkRequired(ve, "name", e.Name)
+	e.Role = checkVocabulary(ve, "role", e.Role)
+	if e.Criticality < 1 || e.Criticality > 5 {
+		ve.Add("criticality", "must be between 1 and 5")
+	}
+	return ve.OrNil()
 }
 
 // IsTransit reports whether this environment brokers cross-environment traffic.

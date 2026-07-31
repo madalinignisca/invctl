@@ -36,6 +36,9 @@ func (s *SQLStore) CreateEnvironment(ctx context.Context, actor domain.Actor, en
 
 // UpdateEnvironment persists a modified environment.
 func (s *SQLStore) UpdateEnvironment(ctx context.Context, actor domain.Actor, env *domain.Environment) error {
+	if err := env.Validate(); err != nil {
+		return err
+	}
 	before, err := s.GetEnvironment(ctx, env.ID)
 	if err != nil {
 		return err

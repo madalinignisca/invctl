@@ -333,6 +333,17 @@ tbody tr:hover {
   background: var(--raised);
 }
 
+/* The one row being corrected. A left edge rather than a fill: the row is
+   already carrying input controls, and a second signal competing with them
+   makes a dense table harder to read at the moment it matters most. */
+tr.row-editing > td {
+  background: var(--raised);
+}
+
+tr.row-editing > td:first-child {
+  box-shadow: inset 2px 0 0 var(--aqua);
+}
+
 .num {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;

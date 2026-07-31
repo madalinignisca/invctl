@@ -17,6 +17,44 @@
       <thead><tr><th>Code</th><th>Name</th><th>Role</th><th>Criticality</th><th>Audit scope</th><th></th></tr></thead>
       <tbody>
         {{range .Environments}}
+        {{$env := .}}
+        {{if and $.CanWrite (eq .ID $.EditRow)}}
+        <tr class="row-editing">
+          {{/* The code is editable. Nothing resolves an environment by it --
+               every reference in the schema is by id -- so a rename moves no
+               edge; it is still what other systems will quote, hence the note. */}}
+          <td><input form="env-{{.ID}}" class="mono" type="text" name="code" value="{{.Code}}"
+                     aria-label="Code" required style="width:7em"></td>
+          <td><input form="env-{{.ID}}" type="text" name="name" value="{{.Name}}" aria-label="Name" required></td>
+          <td>
+            {{/* .FormData.Roles, not a second field on the page. This page has
+                 two render paths -- the plain list and the 422 re-render -- and
+                 a page-level Roles field was populated by only one of them, so
+                 the picker rendered empty and a save would have blanked the
+                 role. html/template resolves a missing field to the zero value
+                 without complaining, which is why nothing said so. One source
+                 both paths already fill cannot go out of step. */}}
+            <select form="env-{{.ID}}" name="role" aria-label="Role">
+              {{range $.FormData.Roles}}<option value="{{.Code}}" {{if eq .Code $env.Role}}selected{{end}}>{{.Label}}</option>{{end}}
+            </select>
+          </td>
+          <td><input form="env-{{.ID}}" type="number" name="criticality" value="{{.Criticality}}"
+                     min="1" max="5" aria-label="Criticality" style="width:4.5em"></td>
+          <td>
+            <label class="mono" style="font-size:12px">
+              <input form="env-{{.ID}}" type="checkbox" name="in_scope" value="true" {{if .InScope}}checked{{end}}>
+              in scope
+            </label>
+          </td>
+          <td style="white-space:nowrap">
+            <form id="env-{{.ID}}" method="post" action="/environments/{{.ID}}" style="display:inline">
+              <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+              <button class="btn btn-sm btn-primary" type="submit">Save</button>
+            </form>
+            <a class="btn btn-sm" href="/environments">Cancel</a>
+          </td>
+        </tr>
+        {{else}}
         <tr>
           <td class="mono">{{.Code}}</td>
           <td>{{.Name}}</td>
@@ -25,8 +63,12 @@
           </td>
           <td class="num">{{.Criticality}}</td>
           <td>{{if .InScope}}<span class="pill pill-info">in scope</span>{{else}}<span class="pill pill-muted">out of scope</span>{{end}}</td>
-          <td><a class="btn btn-sm" href="/environments/{{.ID}}/map">Map — all three layers</a></td>
+          <td style="white-space:nowrap">
+            <a class="btn btn-sm" href="/environments/{{.ID}}/map">Map — all three layers</a>
+            {{if $.CanWrite}}<a class="btn btn-sm" href="/environments?edit={{.ID}}">Edit</a>{{end}}
+          </td>
         </tr>
+        {{end}}
         {{end}}
       </tbody>
     </table>

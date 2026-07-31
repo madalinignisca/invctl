@@ -3,6 +3,7 @@ package web_test
 import (
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -133,4 +134,178 @@ func TestCostsAreReadableByEveryoneAndWritableByAdminsOnly(t *testing.T) {
 	if resp.StatusCode == http.StatusSeeOther || resp.StatusCode == http.StatusOK {
 		t.Errorf("a read-only user added a cost line (%d)", resp.StatusCode)
 	}
+}
+
+// CORRECTING A LINE, which is a different act from retiring one and adding
+// another. A wrong figure is usually a typo, not a change of commercial reality,
+// and the two must not look the same afterwards: retire-and-re-add starts a
+// fresh validity window and loses the fact that the old number was never true.
+func TestCorrectingACostLine(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	id := h.refs.Assets["hv-01"]
+	costID := firstCostFormID(t, body(t, h.get("/assets/"+id, false)))
+
+	// The table is read-only until a row is asked for by id, so a reader is
+	// never handed a screenful of input boxes.
+	if strings.Contains(body(t, h.get("/assets/"+id, false)), `<form id="cost-`) {
+		t.Error("a cost row is editable without being asked for")
+	}
+	page := body(t, h.get("/assets/"+id+"?edit="+costID, false))
+
+	// THE FORM MUST SHOW WHAT IS STORED. Every field is submitted on save, so a
+	// select that renders with nothing marked `selected` silently posts its
+	// first option: correcting an amount would also rewrite the kind, and the
+	// operator would have no way to see it happen. The row for the €8,400
+	// acquisition must come back as `acquisition`/`once` and not as whatever
+	// happens to be first in the vocabulary.
+	row := rowContaining(t, page, costID)
+	for _, want := range []string{
+		`value="acquisition" selected`,
+		`value="once" selected`,
+		`value="8400.00"`,
+	} {
+		if !strings.Contains(row, want) {
+			t.Errorf("the edit row does not show the stored value %s", want)
+		}
+	}
+	// The negative control: nothing ELSE may be preselected in those two
+	// selects, or the browser posts the last one and the assertion above is
+	// satisfied by a form that is still wrong.
+	if n := strings.Count(row, " selected>"); n != 2 {
+		t.Errorf("the row preselects %d options, want exactly 2 (kind and period)", n)
+	}
+
+	resp := h.post("/assets/"+id+"/costs/"+costID, url.Values{
+		"csrf_token": {h.csrfToken("/assets/" + id)},
+		"kind":       {"acquisition"}, "period": {"once"},
+		"amount": {"9000"}, "valid_from": {"2024-01-01"},
+		"note": {"corrected against the invoice"},
+	}, false)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("correcting a cost returned %d, want a redirect", resp.StatusCode)
+	}
+
+	after := body(t, h.get("/assets/"+id, false))
+	if !strings.Contains(after, "€9,000.00") {
+		t.Error("the corrected amount is not shown")
+	}
+	if strings.Contains(after, "€8,400.00") {
+		t.Error("the old amount is still on the page: a correction added a line instead of amending one")
+	}
+	if !strings.Contains(after, "corrected against the invoice") {
+		t.Error("the note did not survive the correction")
+	}
+
+	// It is a mutation of declared state, so it is in the audit trail.
+	log := body(t, h.get("/changes", false))
+	if !strings.Contains(log, "asset_cost") {
+		t.Error("correcting a cost line wrote no change_log entry")
+	}
+}
+
+// The URL names the owner as well as the line, and the handler must believe the
+// line rather than the URL. Without the check an admin could reach any cost row
+// in the estate through an asset they happen to be looking at, and the audit
+// entry would name the wrong parent.
+func TestACostLineCannotBeEditedThroughAnotherAssetsURL(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	owner := h.refs.Assets["hv-01"]
+	other := h.refs.Assets["vm-app-1"]
+	costID := firstCostFormID(t, body(t, h.get("/assets/"+owner, false)))
+
+	resp := h.post("/assets/"+other+"/costs/"+costID, url.Values{
+		"csrf_token": {h.csrfToken("/assets/" + other)},
+		"kind":       {"operating"}, "period": {"monthly"},
+		"amount": {"1"}, "valid_from": {"2024-01-01"},
+	}, false)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("editing hv-01's cost line through vm-app-1 returned %d, want 404", resp.StatusCode)
+	}
+	if page := body(t, h.get("/assets/"+owner, false)); !strings.Contains(page, "€8,400.00") {
+		t.Error("the cost line was changed through the wrong asset's URL")
+	}
+}
+
+// The edit row is asked for by URL, so the guard has to be on the permission
+// and not merely on whether a link was drawn. A reader who types the query
+// parameter gets the same read-only table.
+func TestAReadOnlyUserGetsNoEditableCostRow(t *testing.T) {
+	// ONE harness, two logins. Two harnesses seed two databases with two sets
+	// of UUIDs, so the admin's cost id names nothing in the viewer's estate and
+	// the row could not have rendered whatever the permission said. The test
+	// passed with the permission check deleted; found by mutating it.
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+	id := h.refs.Assets["hv-01"]
+	costID := firstCostFormID(t, body(t, h.get("/assets/"+id, false)))
+
+	h.logout()
+	h.login("viewer", "viewer-password")
+	page := body(t, h.get("/assets/"+id+"?edit="+costID, false))
+	if strings.Contains(page, `<form id="cost-`) || strings.Contains(page, `name="amount"`) {
+		t.Error("a read-only user asking for the edit row by id was given one")
+	}
+	if !strings.Contains(page, "€8,400.00") {
+		t.Error("a read-only user cannot read the cost at all")
+	}
+}
+
+// A retired line is history: readable, not amendable. Editing one would rewrite
+// a figure that was already withdrawn, and the withdrawal is itself a fact.
+func TestARetiredCostLineCannotBeEdited(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	id := h.refs.Assets["hv-01"]
+	costID := firstCostFormID(t, body(t, h.get("/assets/"+id, false)))
+	retire := h.post("/assets/"+id+"/costs/"+costID+"/retire", url.Values{
+		"csrf_token": {h.csrfToken("/assets/" + id)},
+	}, false)
+	retire.Body.Close()
+
+	if page := body(t, h.get("/assets/"+id+"?edit="+costID, false)); strings.Contains(page, `<form id="cost-`) {
+		t.Error("a retired cost line was offered for editing")
+	}
+	resp := h.post("/assets/"+id+"/costs/"+costID, url.Values{
+		"csrf_token": {h.csrfToken("/assets/" + id)},
+		"kind":       {"acquisition"}, "period": {"once"},
+		"amount": {"1"}, "valid_from": {"2024-01-01"},
+	}, false)
+	resp.Body.Close()
+	after := body(t, h.get("/assets/"+id, false))
+	if strings.Contains(after, "€1.00") {
+		t.Error("a retired cost line was amended through a direct POST")
+	}
+}
+
+// firstCostFormID pulls a cost line's id out of the Edit link on the table.
+func firstCostFormID(t *testing.T, page string) string {
+	t.Helper()
+	m := regexp.MustCompile(`\?edit=([0-9a-f-]+)`).FindStringSubmatch(page)
+	if m == nil {
+		t.Fatal("no cost row offers an edit link")
+	}
+	return m[1]
+}
+
+// rowContaining returns the <tr> holding a given cost id, so an assertion about
+// one line cannot be satisfied by markup belonging to another.
+func rowContaining(t *testing.T, page, costID string) string {
+	t.Helper()
+	i := strings.Index(page, `form="cost-`+costID+`"`)
+	if i < 0 {
+		t.Fatalf("no row for cost %s", costID)
+	}
+	start := strings.LastIndex(page[:i], "<tr")
+	end := strings.Index(page[i:], "</tr>")
+	if start < 0 || end < 0 {
+		t.Fatal("cost row is not inside a table row")
+	}
+	return page[start : i+end]
 }

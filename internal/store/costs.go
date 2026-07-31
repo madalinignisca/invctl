@@ -184,6 +184,19 @@ func (s *SQLStore) updateCost(ctx context.Context, actor domain.Actor, t costTab
 	if err != nil {
 		return err
 	}
+	// HISTORY IS NOT AMENDABLE. A retired line records a figure that was
+	// withdrawn, and both the figure and the withdrawal are facts somebody may
+	// be reading. Amending one silently rewrites what the estate cost in a
+	// period that is already closed -- and the same call could set lifecycle
+	// back to active, un-retiring it with no trace of a retirement.
+	//
+	// Here rather than in the handler so that a second caller cannot miss it:
+	// the UI hides the button, which stops nobody who can type a URL. Correct a
+	// retired line by adding the right one, the way change_log is corrected by
+	// a further entry.
+	if before.Lifecycle == domain.LifecycleRetired {
+		return fmt.Errorf("cost line %s is retired and cannot be amended: %w", c.ID, domain.ErrConflict)
+	}
 	c.CreatedAt = before.CreatedAt
 	c.UpdatedAt = domain.FormatTime(s.now())
 

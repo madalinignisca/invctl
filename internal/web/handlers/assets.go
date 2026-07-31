@@ -90,6 +90,48 @@ func (a *App) EnvironmentCreate(w http.ResponseWriter, r *http.Request) {
 	render.Redirect(w, r, "/environments")
 }
 
+// EnvironmentUpdate corrects an environment.
+//
+// Every field is editable here, including the code, and that is a deliberate
+// exception to "an identifier is not a description". Nothing in a request path
+// resolves an environment by code -- every reference in the schema is by id,
+// and GetEnvironmentByCode is used only by the seed -- so a rename moves no
+// edge and orphans no row. It is still the handle other systems will quote,
+// which is why the form says so rather than the code being quietly immutable.
+func (a *App) EnvironmentUpdate(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	existing, err := a.Store.GetEnvironment(r.Context(), id)
+	if err != nil {
+		a.handleStoreError(w, r, err)
+		return
+	}
+
+	updated := *existing
+	updated.Code = formValue(r, "code")
+	updated.Name = formValue(r, "name")
+	updated.Role = formValue(r, "role")
+	updated.InScope = checkbox(r, "in_scope")
+	updated.Criticality = intValue(r, "criticality", existing.Criticality)
+
+	if err := a.Store.UpdateEnvironment(r.Context(), actor(r), &updated); err != nil {
+		if messages, ok := validationErrors(err); ok {
+			a.setFlash(r, "error", "That environment was not accepted: "+joinMessages(messages))
+			render.Redirect(w, r, "/environments?edit="+id)
+			return
+		}
+		if isConflict(err) {
+			a.setFlash(r, "error", "Another environment already uses that code.")
+			render.Redirect(w, r, "/environments?edit="+id)
+			return
+		}
+		a.handleStoreError(w, r, err)
+		return
+	}
+
+	a.setFlash(r, "success", "Environment "+updated.Code+" updated.")
+	render.Redirect(w, r, "/environments")
+}
+
 func (a *App) renderEnvironments(w http.ResponseWriter, r *http.Request, status int, messages map[string]string, form environmentForm) {
 	envs, err := a.Store.ListEnvironments(r.Context())
 	if err != nil {

@@ -87,9 +87,19 @@ type serviceDetailPage struct {
 	// Timeline folds this service's declared history with its one-hop declared
 	// neighbours' -- its placements, the hosts under them, its endpoints, its
 	// dependencies -- and with the observed transitions for the same rows.
-	Timeline       []store.TimelineEntry
-	InstanceForm   instanceFormData
-	EndpointForm   endpointFormData
+	Timeline     []store.TimelineEntry
+	InstanceForm instanceFormData
+	EndpointForm endpointFormData
+	// EndpointEdit is set when ?edit names one of THIS service's endpoints. The
+	// ownership check matters: without it the id in the query string chooses
+	// which row the page renders a form for, and any endpoint in the estate
+	// could be opened -- and saved -- from any service's page.
+	EndpointEdit *endpointFormData
+	// RuntimeTypes and DesiredStates feed the inline placement editor. From the
+	// domain rather than a lookup table because both are CHECK-constrained
+	// enums with a Go constant set beside them.
+	RuntimeTypes   []string
+	DesiredStates  []string
 	DependencyForm dependencyFormData
 	OverrideForm   overrideFormData
 }
@@ -97,7 +107,29 @@ type serviceDetailPage struct {
 // ServiceDetail is the page the whole tool builds towards: header, placement,
 // endpoints, and the two dependency panels.
 func (a *App) ServiceDetail(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
+	a.renderServiceDetail(w, r, http.StatusOK, r.PathValue("id"), endpointFormState{})
+}
+
+// endpointFormState carries a rejected endpoint back to the page it came from.
+// failed nil means the errors belong to the ADD form; otherwise they belong to
+// the correction form for that endpoint.
+type endpointFormState struct {
+	errs   map[string]string
+	failed *domain.Endpoint
+}
+
+// renderServiceDetail draws the page, at any status.
+//
+// SEPARATE FROM ServiceDetail because a validation failure has to redraw the
+// whole page when the request did not come from HTMX, and could not: the 422
+// path handed the "service_detail" template an endpointFormData, which carries
+// none of the fields a service page reads. Submitting an endpoint form with
+// JavaScript off returned 500 -- for corrections, and for additions since the
+// form was written. A form that only works with JavaScript is not what the rest
+// of this codebase does; the row editors are plain forms precisely so they work
+// without it, and this was the one path that did not.
+func (a *App) renderServiceDetail(w http.ResponseWriter, r *http.Request, status int,
+	id string, epState endpointFormState) {
 
 	service, err := a.Store.GetService(r.Context(), id)
 	if err != nil {
@@ -204,7 +236,7 @@ func (a *App) ServiceDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	a.Render.Page(w, http.StatusOK, "service_detail", serviceDetailPage{
+	a.Render.Page(w, status, "service_detail", serviceDetailPage{
 		Base:           b,
 		Service:        service,
 		Certificates:   certificates,
@@ -220,10 +252,46 @@ func (a *App) ServiceDetail(w http.ResponseWriter, r *http.Request) {
 		InstanceHealth: instanceHealth,
 		Timeline:       timeline,
 		InstanceForm:   a.newInstanceForm(r, id, nil, hostable),
-		EndpointForm:   a.newEndpointForm(r, id, nil),
+		EndpointForm:   a.newEndpointForm(r, id, addEndpointErrs(epState)),
+		EndpointEdit:   a.endpointEditForm(r, b, endpoints, epState),
+		RuntimeTypes:   domain.RuntimeTypes,
+		DesiredStates:  domain.DesiredStates,
 		DependencyForm: a.newDependencyForm(r, id, nil, domain.DependencySpec{}, allEndpoints, allRoutes, identities, classOptions),
 		OverrideForm:   a.newOverrideForm(r, overrideTargets, nil, overrideForm{}),
 	})
+}
+
+// endpointEditForm builds the correction form for the one endpoint the operator
+// opened, or nil. The endpoint must be one this page already lists -- an id
+// naming somebody else's socket is simply not found, not a form.
+// addEndpointErrs returns the messages that belong to the add form, which is
+// only when nothing was being corrected.
+func addEndpointErrs(s endpointFormState) map[string]string {
+	if s.failed != nil {
+		return nil
+	}
+	return s.errs
+}
+
+func (a *App) endpointEditForm(r *http.Request, b Base, endpoints []store.EndpointRow,
+	state endpointFormState) *endpointFormData {
+
+	// A rejected correction wins over the query string: the operator is looking
+	// at the values they just typed, not at what is stored.
+	if state.failed != nil {
+		f := a.newEndpointEditForm(r, state.failed, state.errs)
+		return &f
+	}
+	if b.EditRow == "" || !b.CanWrite {
+		return nil
+	}
+	for i := range endpoints {
+		if endpoints[i].ID == b.EditRow {
+			f := a.newEndpointEditForm(r, &endpoints[i].Endpoint, nil)
+			return &f
+		}
+	}
+	return nil
 }
 
 // ServiceCreate adds a service.
@@ -360,6 +428,51 @@ func (a *App) InstanceCreate(w http.ResponseWriter, r *http.Request) {
 	render.Redirect(w, r, "/services/"+serviceID)
 }
 
+// InstanceUpdate corrects a placement.
+//
+// The HOST is not a field. Moving a service to another box is a migration: it
+// changes what an outage of either machine reaches, and the placement's history
+// on the old host is part of why somebody would look. Withdraw and place again,
+// which leaves both facts.
+//
+// SOURCE is not a field either, for a harder reason. It is provenance -- a
+// claim about where a fact came from -- and CheckProvenanceWrite exists to stop
+// a caller asserting one. Reading it from a form would let a request choose its
+// own authority, so it is carried over from the stored row and never parsed.
+func (a *App) InstanceUpdate(w http.ResponseWriter, r *http.Request) {
+	existing, err := a.Store.GetInstance(r.Context(), r.PathValue("id"))
+	if err != nil {
+		a.handleStoreError(w, r, err)
+		return
+	}
+
+	updated := existing.ServiceInstance
+	updated.RuntimeType = formValue(r, "runtime_type")
+	updated.Role = optionalString(r, "role")
+	updated.Shard = optionalString(r, "shard")
+	updated.Ordinal = intValue(r, "ordinal", existing.Ordinal)
+	updated.DesiredState = formValue(r, "desired_state")
+
+	if err := a.Store.UpdateInstance(r.Context(), actor(r), &updated); err != nil {
+		if messages, ok := validationErrors(err); ok {
+			a.setFlash(r, "error", "That placement was not accepted: "+joinMessages(messages))
+			render.Redirect(w, r, "/services/"+existing.ServiceID+"?edit="+existing.ID)
+			return
+		}
+		if isConflict(err) {
+			a.setFlash(r, "error",
+				"That placement could not be amended: another instance already has that ordinal on that host, or the placement has been withdrawn.")
+			render.Redirect(w, r, "/services/"+existing.ServiceID)
+			return
+		}
+		a.handleStoreError(w, r, err)
+		return
+	}
+
+	a.setFlash(r, "success", "Placement corrected.")
+	render.Redirect(w, r, "/services/"+existing.ServiceID)
+}
+
 // InstanceRetire withdraws a placement from the estate.
 //
 // The soft delete for a placement, and distinct from stopping one: withdrawing
@@ -405,6 +518,57 @@ func (a *App) respondInstanceError(w http.ResponseWriter, r *http.Request, servi
 
 // ---------- endpoints ----------
 
+// EndpointUpdate corrects a listening socket.
+//
+// WHAT IS NOT HERE IS THE POINT. service_id, ip_address_id and certificate_id
+// are carried over untouched from the stored row: each of them decides what the
+// endpoint is ATTACHED to, and moving an endpoint takes every dependency that
+// resolves through it along with it. Correcting a port is a correction;
+// re-pointing a socket is a different act and needs its own flow with its own
+// warning. l7_proto is absent for a duller reason -- the add form does not
+// offer it either, and a field on one and not the other is how the two drift.
+func (a *App) EndpointUpdate(w http.ResponseWriter, r *http.Request) {
+	existing, err := a.Store.GetEndpoint(r.Context(), r.PathValue("id"))
+	if err != nil {
+		a.handleStoreError(w, r, err)
+		return
+	}
+
+	updated := existing.Endpoint
+	updated.Name = formValue(r, "name")
+	updated.L4Proto = formValue(r, "l4_proto")
+	updated.Port = optionalInt(r, "port")
+	updated.UnixPath = optionalString(r, "unix_path")
+	updated.BindScope = formValue(r, "bind_scope")
+	updated.TLSMode = formValue(r, "tls_mode")
+	updated.Exposure = formValue(r, "exposure")
+
+	if err := a.Store.UpdateEndpoint(r.Context(), actor(r), &updated); err != nil {
+		messages, ok := validationErrors(err)
+		if !ok {
+			if isConflict(err) {
+				messages = map[string]string{
+					"port": "this service already has an endpoint on that port and protocol",
+				}
+			} else {
+				a.handleStoreError(w, r, err)
+				return
+			}
+		}
+		if render.IsHTMX(r) {
+			a.Render.Partial(w, http.StatusUnprocessableEntity, "endpoint_form",
+				a.newEndpointEditForm(r, &updated, messages))
+			return
+		}
+		a.renderServiceDetail(w, r, http.StatusUnprocessableEntity, existing.ServiceID,
+			endpointFormState{errs: messages, failed: &updated})
+		return
+	}
+
+	a.setFlash(r, "success", "Endpoint corrected.")
+	render.Redirect(w, r, "/services/"+existing.ServiceID)
+}
+
 // EndpointCreate adds a listening socket to a service.
 func (a *App) EndpointCreate(w http.ResponseWriter, r *http.Request) {
 	serviceID := r.PathValue("id")
@@ -432,8 +596,17 @@ func (a *App) EndpointCreate(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		a.Render.Partial(w, http.StatusUnprocessableEntity, "endpoint_form",
-			a.newEndpointForm(r, serviceID, messages))
+		// Without HTMX this used to answer a form post with a bare form
+		// fragment -- no layout, no navigation, no way back. The whole page,
+		// with the errors on the form, is what a browser submitting a form
+		// expects.
+		if render.IsHTMX(r) {
+			a.Render.Partial(w, http.StatusUnprocessableEntity, "endpoint_form",
+				a.newEndpointForm(r, serviceID, messages))
+			return
+		}
+		a.renderServiceDetail(w, r, http.StatusUnprocessableEntity, serviceID,
+			endpointFormState{errs: messages})
 		return
 	}
 

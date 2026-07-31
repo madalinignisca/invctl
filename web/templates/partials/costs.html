@@ -5,12 +5,12 @@
   page struct, so the asset, service and project pages can each hand it their
   own action URL without three near-identical copies drifting apart.
 
-  Expects: Action, Costs, Totals, Kinds, Periods, CSRF, CanWrite, CanSeeCosts,
-           Heading, Note.
+  Expects: Action, Return, EditID, Costs, Totals, Kinds, Periods, CSRF,
+           CanWrite, CanSeeCosts, Heading, Note.
 */}}
 {{define "cost_panel"}}
 {{if .CanSeeCosts}}
-<div class="panel">
+<div class="panel" id="costs">
   <div class="panel-head">
     <h2>{{.Heading}}</h2>
     <span class="panel-note">{{.Note}}</span>
@@ -72,6 +72,46 @@
       </thead>
       <tbody>
         {{range .Costs}}
+        {{$row := .}}
+        {{/* One row at a time is editable, and only when the operator asked:
+             a table of input boxes is unreadable, and reading is what this
+             table is for. `?edit=<id>` rather than a fragment swap, because
+             saving moves the totals above and they must not go stale. */}}
+        {{if and $.CanWrite (ne .Lifecycle "retired") (eq .ID $.EditID)}}
+        <tr class="row-editing">
+          <td>
+            {{/* $row, not $: inside the inner range the dot is the vocabulary
+                 term and $ is the panel, so neither can see the line's own
+                 kind. Getting this wrong renders every select unset, and the
+                 first option is then posted over the stored one on save. */}}
+            <select form="cost-{{.ID}}" name="kind" aria-label="What for">
+              {{range $.Kinds}}<option value="{{.Code}}" {{if eq .Code $row.Kind}}selected{{end}}>{{.Label}}</option>{{end}}
+            </select>
+          </td>
+          <td>
+            <select form="cost-{{.ID}}" name="period" aria-label="How often">
+              {{range $.Periods}}<option value="{{.}}" {{if eq . $row.Period}}selected{{end}}>{{.}}</option>{{end}}
+            </select>
+          </td>
+          {{/* `amount`, not `money`: the grouped, symbol-prefixed form carries
+               both a comma and a point, which the parser refuses as ambiguous.
+               A field must render what its own parser accepts. */}}
+          <td><input form="cost-{{.ID}}" class="mono" type="text" name="amount"
+                     value="{{amount .AmountMinor}}" aria-label="Amount" style="width:7em"></td>
+          <td><input form="cost-{{.ID}}" type="date" name="valid_from" value="{{.ValidFrom}}" aria-label="From"></td>
+          <td><input form="cost-{{.ID}}" type="date" name="valid_until" value="{{deref .ValidUntil}}" aria-label="Until"></td>
+          <td><input form="cost-{{.ID}}" type="text" name="note" value="{{deref .Note}}" aria-label="Note" style="width:100%"></td>
+          <td style="white-space:nowrap">
+            {{/* The row is a form via the form= attribute rather than a nested
+                 <form>, which HTML does not allow inside a table row. */}}
+            <form id="cost-{{.ID}}" method="post" action="{{$.Action}}/{{.ID}}" style="display:inline">
+              <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+              <button class="btn btn-sm btn-primary" type="submit">Save</button>
+            </form>
+            <a class="btn btn-sm" href="{{$.Return}}#costs">Cancel</a>
+          </td>
+        </tr>
+        {{else}}
         <tr {{if eq .Lifecycle "retired"}}style="opacity:.5"{{end}}>
           <td><span class="pill pill-muted">{{.KindLabel}}</span></td>
           <td class="mono" style="font-size:12px">{{.Period}}</td>
@@ -82,8 +122,11 @@
           </td>
           <td style="color:var(--muted);font-size:12.5px">{{if .Note}}{{deref .Note}}{{end}}</td>
           {{if $.CanWrite}}
-          <td>
+          <td style="white-space:nowrap">
+            {{/* A retired line is history. It can be read and not amended:
+                 editing one would rewrite a fact that was already withdrawn. */}}
             {{if ne .Lifecycle "retired"}}
+            <a class="btn btn-sm" href="{{$.Return}}?edit={{.ID}}#costs">Edit</a>
             <form method="post" action="{{$.Action}}/{{.ID}}/retire"
                   hx-post="{{$.Action}}/{{.ID}}/retire" style="display:inline">
               <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
@@ -93,6 +136,7 @@
           </td>
           {{end}}
         </tr>
+        {{end}}
         {{end}}
       </tbody>
     </table>
