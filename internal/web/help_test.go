@@ -2,6 +2,7 @@ package web_test
 
 import (
 	"net/http"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -107,5 +108,46 @@ func TestHelpAccessAndUnknownTopic(t *testing.T) {
 	missing.Body.Close()
 	if missing.StatusCode != http.StatusNotFound {
 		t.Errorf("an unknown topic returned %d, want 404", missing.StatusCode)
+	}
+}
+
+// TestStaticAssetsAreFingerprinted.
+//
+// The static handler sets a four-hour Cache-Control, and a CDN in front of it
+// honours that literally: measured on the public demo, Cloudflare served a
+// four-hour-old app.js from its edge while the origin already had the fix. A
+// correct change looked broken, and would have kept looking broken for hours.
+//
+// Fingerprinting is what makes a deploy visible. The URL must carry a version
+// that changes with the file's content -- so this asserts the query is there
+// and that it is the same on two renders (a per-request random value would
+// bust the cache on every page load, which is the opposite failure).
+func TestStaticAssetsAreFingerprinted(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	page := body(t, h.get("/", false))
+	re := regexp.MustCompile(`/static/(app\.js|app\.css|alpine\.min\.js|htmx\.min\.js)\?v=([0-9a-f]{6,})`)
+	found := re.FindAllStringSubmatch(page, -1)
+	if len(found) < 4 {
+		t.Fatalf("only %d of the four static assets are fingerprinted; an unversioned "+
+			"asset is one a CDN will keep serving after a deploy", len(found))
+	}
+
+	// The login page has its own standalone layout rather than using base.html,
+	// and it was missed the first time precisely because this test only looked
+	// at an authenticated page. Any page carrying a static asset must version it.
+	login := body(t, h.get("/login", false))
+	if strings.Contains(login, `"/static/app.css"`) {
+		t.Error("the login page references an unversioned stylesheet; it has its own " +
+			"layout, so fixing base.html did not fix it")
+	}
+
+	second := body(t, h.get("/", false))
+	for _, m := range found {
+		if !strings.Contains(second, m[0]) {
+			t.Errorf("%s changed between two renders; the version must follow the file's "+
+				"content, not the request, or every page load misses the cache", m[1])
+		}
 	}
 }

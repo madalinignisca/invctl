@@ -29,11 +29,15 @@ type Renderer struct {
 	dev      bool
 	fsys     fs.FS
 	funcs    template.FuncMap
+	assets   *assets
 }
 
 // New parses the template tree.
 func New(fsys fs.FS, dev bool) (*Renderer, error) {
 	r := &Renderer{dev: dev, fsys: fsys, funcs: funcs()}
+	// Registered before parse, because the templates call it.
+	r.assets = newAssets(fsys, dev)
+	r.funcs["asset"] = r.assetURL
 	if err := r.parse(); err != nil {
 		return nil, err
 	}
@@ -217,4 +221,13 @@ func writeBuffered(w io.Writer, buf *bytes.Buffer) {
 	if _, err := buf.WriteTo(w); err != nil {
 		slog.Debug("response body truncated", "error", err)
 	}
+}
+
+// assetURL fingerprints a static asset so a deploy invalidates it everywhere.
+// See assets.go for why this is not optional in front of a CDN.
+func (r *Renderer) assetURL(name string) string {
+	if v := r.assets.version("static/" + name); v != "" {
+		return "/static/" + name + "?v=" + v
+	}
+	return "/static/" + name
 }
