@@ -335,6 +335,16 @@ func (t CostTotals) HasAmortisation() bool {
 	return t.Amortisable > 0 || t.Unamortisable > 0
 }
 
+// FullyWrittenOff reports that every purchase which could be spread has been:
+// the capital is spent and the life it was spread over has ended.
+//
+// Worth its own sentence rather than rendering "adds EUR 0.00 a month", which is
+// true and reads like a missing number. It is also the more interesting state:
+// kit that costs nothing per month is usually kit that nobody supports either.
+func (t CostTotals) FullyWrittenOff() bool {
+	return t.Amortisable > 0 && t.AmortisedMonthlyMinor == 0
+}
+
 // IsZero reports whether anything at all was recorded.
 func (t CostTotals) IsZero() bool { return t.Lines == 0 }
 

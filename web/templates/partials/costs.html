@@ -38,7 +38,13 @@
   </div>
   {{if .Totals.HasAmortisation}}
   <div class="panel-body" style="border-bottom:1px solid var(--line-soft)">
-    {{if .Totals.Amortisable}}
+    {{if .Totals.FullyWrittenOff}}
+    <p class="panel-note" style="margin:0">
+      Fully written off: the capital is spent and the life it was spread over has
+      ended, so it adds nothing to a monthly figure. Kit that costs nothing per
+      month is usually kit nobody supports either — see when it expires above.
+    </p>
+    {{else if .Totals.Amortisable}}
     <p class="panel-note" style="margin:0">
       Spreading the capital over the life of what it bought adds
       <strong>{{money .Totals.AmortisedMonthlyMinor}} a month</strong>, so the real
@@ -175,7 +181,12 @@
       {{end}}
     </p>
 
-    {{if .Costs.Own.Amortisable}}
+    {{if .Costs.Own.FullyWrittenOff}}
+    <p class="panel-note" style="margin-bottom:10px">
+      Every purchase in this footprint that could be spread is fully written off:
+      the capital is spent and the life it was spread over has ended.
+    </p>
+    {{else if .Costs.Own.Amortisable}}
     <p class="panel-note" style="margin-bottom:10px">
       Spreading the capital over the life of what it bought adds
       <strong>{{money .Costs.Own.AmortisedMonthlyMinor}} a month</strong> — so the real

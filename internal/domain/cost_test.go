@@ -361,3 +361,46 @@ func TestUnamortisablePurchasesAreCounted(t *testing.T) {
 		t.Errorf("amortised = %d, want 10000", totals.AmortisedMonthlyMinor)
 	}
 }
+
+// A fully depreciated purchase says so rather than rendering "adds €0.00 a
+// month", which is true and reads like a missing number.
+func TestFullyWrittenOffIsDistinctFromNothingToSpread(t *testing.T) {
+	from, eol := "2019-01-01", "2024-01-01"
+	old, err := NewCost("c1", CostSpec{
+		Kind: "acquisition", Period: CostOnce, AmountMinor: 520000, ValidFrom: &from,
+	}, costNow)
+	if err != nil {
+		t.Fatalf("building: %v", err)
+	}
+
+	var done CostTotals
+	done.Add(old, &eol, "2026-07-31")
+	if !done.FullyWrittenOff() {
+		t.Error("a purchase past the end of its life did not report as written off")
+	}
+
+	// A purchase with no life at all is NOT written off -- nothing was ever
+	// spread, and saying otherwise would claim knowledge the estate lacks.
+	var unknown CostTotals
+	unknown.Add(old, nil, "2026-07-31")
+	if unknown.FullyWrittenOff() {
+		t.Error("a purchase with no EOL date reported as fully written off")
+	}
+	if !unknown.HasAmortisation() {
+		t.Error("an unamortisable purchase left the panel with nothing to say")
+	}
+
+	// And one still within its life is neither.
+	live := "2027-01-01"
+	fresh, err := NewCost("c2", CostSpec{
+		Kind: "acquisition", Period: CostOnce, AmountMinor: 520000, ValidFrom: &from,
+	}, costNow)
+	if err != nil {
+		t.Fatalf("building: %v", err)
+	}
+	var running CostTotals
+	running.Add(fresh, &live, "2026-07-31")
+	if running.FullyWrittenOff() {
+		t.Error("a purchase still inside its life reported as written off")
+	}
+}
