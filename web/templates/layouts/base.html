@@ -22,15 +22,25 @@
     </div>
 
     <div class="rail-nav">
+      {{/* Ordered from the business question down to the wire: what is this
+           for, who owns it, where does it run, what is it, what does it serve,
+           what carries it, what addresses it, how does it get there. Somebody
+           opening this during an incident starts at whichever rung they were
+           handed, and the ones above it explain why the one below matters. */}}
       <div class="rail-section">Inventory</div>
       <a class="rail-link" href="/" {{if eq .Nav "dashboard"}}aria-current="page"{{end}}>Overview</a>
-      <a class="rail-link" href="/assets" {{if eq .Nav "assets"}}aria-current="page"{{end}}>Assets</a>
       <a class="rail-link" href="/projects" {{if eq .Nav "projects"}}aria-current="page"{{end}}>Projects</a>
-      <a class="rail-link" href="/services" {{if eq .Nav "services"}}aria-current="page"{{end}}>Services</a>
       <a class="rail-link" href="/environments" {{if eq .Nav "environments"}}aria-current="page"{{end}}>Environments</a>
+      <a class="rail-link" href="/assets" {{if eq .Nav "assets"}}aria-current="page"{{end}}>Assets</a>
+      <a class="rail-link" href="/services" {{if eq .Nav "services"}}aria-current="page"{{end}}>Services</a>
+      <a class="rail-link" href="/network" {{if eq .Nav "network"}}aria-current="page"{{end}}>Networks</a>
       <a class="rail-link" href="/prefixes" {{if eq .Nav "prefixes"}}aria-current="page"{{end}}>Prefixes</a>
-      <a class="rail-link" href="/network" {{if eq .Nav "network"}}aria-current="page"{{end}}>Network</a>
       <a class="rail-link" href="/paths" {{if eq .Nav "paths"}}aria-current="page"{{end}}>Paths</a>
+
+      <div class="rail-section">Analysis</div>
+      <a class="rail-link" href="/changes" {{if eq .Nav "changes"}}aria-current="page"{{end}}>Change log</a>
+      <a class="rail-link" href="/reports/spanning" {{if eq .Nav "reports"}}aria-current="page"{{end}}>Environment spans</a>
+      <a class="rail-link" href="/vocabularies" {{if eq .Nav "vocabularies"}}aria-current="page"{{end}}>Vocabularies</a>
       {{/* The help drawer. A plain link, so it works with JavaScript off (it
            navigates to the full /help page); with HTMX it fills the aside
            instead and the page underneath is left alone -- which is the point,
@@ -38,11 +48,6 @@
       <a class="rail-link" href="/help"
          hx-get="/help" hx-target="#help-panel" hx-swap="innerHTML"
          x-on:click="show">Help</a>
-
-      <div class="rail-section">Analysis</div>
-      <a class="rail-link" href="/reports/spanning" {{if eq .Nav "reports"}}aria-current="page"{{end}}>Environment spans</a>
-      <a class="rail-link" href="/vocabularies" {{if eq .Nav "vocabularies"}}aria-current="page"{{end}}>Vocabularies</a>
-      <a class="rail-link" href="/changes" {{if eq .Nav "changes"}}aria-current="page"{{end}}>Change log</a>
     </div>
 
     <div class="rail-foot">
