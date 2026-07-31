@@ -2077,3 +2077,42 @@ PostgreSQL. A subject is a hostname and ASCII in practice; an issuer is a CA's
 display name, and for an EU estate umlauts are ordinary. `strings.ToLower` does
 not fix it, it moves the failure to the other engine. A folded shadow column
 would, and is not worth a column yet.
+
+---
+
+## 2026-07-31 — The reverse view, and an index that came back shaped for it
+
+A pass over the running demo to check every feature was actually reachable found
+one real gap: **an asset or service page did not show the certificates deployed
+on it.**
+
+A certificate page already listed where it was deployed. The question during an
+incident runs the other way — *this box is serving a certificate error, what is on
+it* — and that direction did not exist. A team's page had the same shape: the
+platform team renews two certificates and its own page did not say so.
+
+### The index came back shaped for the query, exactly as promised
+
+Migration `00017` dropped `idx_certificate_asset_asset` and
+`idx_certificate_service_service` because nothing queried in that direction, and
+said: *"if a reverse lookup is ever added, the index comes back shaped for it
+rather than guessed at now."*
+
+`00018` is that. The query the pages now run is
+`WHERE asset_id = ? AND lifecycle = 'active'`, so lifecycle is the **second
+column** — not absent, which is what the dropped indexes had and what would have
+sent both engines to the heap for it. That is the same correction `00016` and
+`00017` each had to make. Guessing the shape a year early would have produced the
+wrong index *and* the appearance of having thought about it.
+
+### The count test caught its own page changing
+
+Adding a certificate column to the team list broke
+`TestTeamCountsAgreeWithWhatTheTeamPageLists`, which reads the numeric cells and
+expects a fixed number of them. That is the test working: the fix was to extend it
+to four counts rather than to loosen it, so the new column is now covered by the
+same list-versus-page agreement as the other three.
+
+The reverse view's own test asserts absences in both directions — a certificate
+deployed elsewhere must not appear, and a team that does not renew one must not
+list it. Removing the `WHERE asset_id = ?` clause fails it.

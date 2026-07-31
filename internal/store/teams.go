@@ -25,6 +25,9 @@ type TeamRow struct {
 	AssetCount   int `db:"asset_count"`
 	ServiceCount int `db:"service_count"`
 	ProjectCount int `db:"project_count"`
+	// A team renews certificates, and an expiring one is the most urgent thing
+	// it can be answerable for -- so the count belongs beside the others.
+	CertificateCount int `db:"certificate_count"`
 }
 
 const teamSelect = `
@@ -34,7 +37,9 @@ const teamSelect = `
 	       (SELECT COUNT(*) FROM service s
 	         WHERE s.team_id = t.id AND s.lifecycle <> 'retired')   AS service_count,
 	       (SELECT COUNT(*) FROM project p
-	         WHERE p.team_id = t.id AND p.lifecycle <> 'retired')   AS project_count
+	         WHERE p.team_id = t.id AND p.lifecycle <> 'retired')   AS project_count,
+	       (SELECT COUNT(*) FROM certificate c
+	         WHERE c.team_id = t.id AND c.lifecycle <> 'retired')   AS certificate_count
 	FROM team t`
 
 // TeamFilter narrows a team list.

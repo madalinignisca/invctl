@@ -172,6 +172,9 @@ func (a *App) AssetList(w http.ResponseWriter, r *http.Request) {
 type assetDetailPage struct {
 	Base
 	Asset *store.AssetRow
+	// What TLS is on it. The incident question runs this way round: the
+	// certificate page already says where it is deployed.
+	Certificates []store.DeployedCertificate
 	// Costs are the lines attached to this asset, retired ones included so the
 	// page can show them struck through. Totalling excludes them.
 	Costs       []store.CostRow
@@ -284,6 +287,11 @@ func (a *App) AssetDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	certificates, err := a.Store.CertificatesOnAsset(r.Context(), id)
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
 	costs, err := a.Store.ListAssetCosts(r.Context(), id)
 	if err != nil {
 		a.serverError(w, r, err)
@@ -298,6 +306,7 @@ func (a *App) AssetDetail(w http.ResponseWriter, r *http.Request) {
 	a.Render.Page(w, http.StatusOK, "asset_detail", assetDetailPage{
 		Base:           a.base(r, asset.Name, "assets"),
 		Asset:          asset,
+		Certificates:   certificates,
 		Costs:          costs,
 		CostTotals:     store.TotalCosts(costs, domain.FormatDate(a.Store.Now())),
 		CostKinds:      costKinds,

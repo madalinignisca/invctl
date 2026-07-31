@@ -31,6 +31,9 @@ type teamPage struct {
 	Assets     []store.AssetRow
 	Services   []store.ServiceRow
 	Projects   []store.ProjectRow
+	// What it renews. An expiring certificate is the most urgent thing a team
+	// can be answerable for, so it belongs on the team's own page.
+	Certificates []store.CertificateRow
 }
 
 // TeamList shows every team and the form to add one.
@@ -107,15 +110,21 @@ func (a *App) renderTeam(w http.ResponseWriter, r *http.Request, status int, err
 		a.serverError(w, r, err)
 		return
 	}
+	certificates, err := a.Store.ListCertificates(r.Context(), store.CertificateFilter{TeamID: id})
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
 
 	a.Render.Respond(w, r, status, "team_detail", "team_panel", teamPage{
-		Base:       a.base(r, "Team: "+team.Name, "teams"),
-		Errors:     orEmpty(errs),
-		Team:       team,
-		Lifecycles: domain.TeamLifecycles,
-		Assets:     assets,
-		Services:   services,
-		Projects:   projects,
+		Certificates: certificates,
+		Base:         a.base(r, "Team: "+team.Name, "teams"),
+		Errors:       orEmpty(errs),
+		Team:         team,
+		Lifecycles:   domain.TeamLifecycles,
+		Assets:       assets,
+		Services:     services,
+		Projects:     projects,
 	})
 }
 

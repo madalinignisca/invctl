@@ -173,6 +173,8 @@
   {{end}}
 </div>
 
+{{template "deployed_certificates" .}}
+
 {{template "cost_panel" dict
     "Action" (printf "/assets/%s/costs" .Asset.ID) "Slug" "asset"
     "Costs" .Costs "Totals" .CostTotals "Kinds" .CostKinds "Periods" .CostPeriods

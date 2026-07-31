@@ -340,3 +340,43 @@
   {{end}}
 </div>
 {{end}}
+
+{{define "deployed_certificates"}}
+{{if .Certificates}}
+<div class="panel">
+  <div class="panel-head">
+    <h2>TLS certificates here</h2>
+    <span class="panel-note">
+      {{pluralise (len .Certificates) "certificate is" "certificates are"}} deployed on this —
+      each one an outage when it expires.
+    </span>
+  </div>
+  <div class="scroll-x">
+    <table>
+      <thead><tr><th>Expires</th><th>Subject</th><th>Issuer</th><th>Renewed by</th><th>Note</th></tr></thead>
+      <tbody>
+        {{range .Certificates}}
+        <tr>
+          <td>
+            {{with expiry .NotAfter}}
+              <span class="{{.Class}}">{{.Date}}</span>
+              <div style="color:var(--muted);font-size:11.5px">{{.Label}}</div>
+            {{else}}
+              <span class="pill pill-degraded">not recorded</span>
+            {{end}}
+          </td>
+          <td><a class="id" href="/certificates/{{.ID}}">{{.SubjectCN}}</a></td>
+          <td style="color:var(--muted);font-size:12.5px">{{if .Issuer}}{{deref .Issuer}}{{end}}</td>
+          <td>
+            {{if .TeamName}}<a class="id" href="/teams/{{deref .TeamID}}">{{.TeamName}}</a>
+            {{else}}<span class="pill pill-degraded">unassigned</span>{{end}}
+          </td>
+          <td style="color:var(--muted);font-size:12.5px">{{if .Note}}{{deref .Note}}{{end}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+</div>
+{{end}}
+{{end}}

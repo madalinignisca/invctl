@@ -85,32 +85,33 @@ func TestTeamCountsAgreeWithWhatTheTeamPageLists(t *testing.T) {
 
 	for _, code := range []string{"platform", "network", "observability", "commerce"} {
 		t.Run(code, func(t *testing.T) {
-			assets, services, projects := teamCounts(t, list, code)
+			counts := teamCounts(t, list, code)
 			page := body(t, h.get("/teams/"+h.refs.Teams[code], false))
 
-			if got := rowsInSection(page, "<h2>Assets</h2>"); got != assets {
-				t.Errorf("the list says %d assets, the page lists %d", assets, got)
-			}
-			if got := rowsInSection(page, "<h2>Services</h2>"); got != services {
-				t.Errorf("the list says %d services, the page lists %d", services, got)
-			}
-			if got := rowsInSection(page, "<h2>Projects</h2>"); got != projects {
-				t.Errorf("the list says %d projects, the page lists %d", projects, got)
+			for i, section := range []string{"<h2>Assets</h2>", "<h2>Services</h2>",
+				"<h2>Projects</h2>", "<h2>Certificates</h2>"} {
+				if got := rowsInSection(page, section); got != counts[i] {
+					t.Errorf("the list says %d for %s, the page lists %d",
+						counts[i], section, got)
+				}
 			}
 		})
 	}
 
 	// The control: at least one team must have a non-zero count of each kind,
 	// or every assertion above is satisfied by a count query that returns zero.
-	assets, services, projects := teamCounts(t, list, "platform")
-	if assets == 0 || services == 0 || projects == 0 {
-		t.Errorf("platform reports %d/%d/%d; a count stuck at zero would pass every "+
-			"comparison above", assets, services, projects)
+	counts := teamCounts(t, list, "platform")
+	for i, kind := range []string{"assets", "services", "projects", "certificates"} {
+		if counts[i] == 0 {
+			t.Errorf("platform reports zero %s; a count stuck at zero would pass every "+
+				"comparison above", kind)
+		}
 	}
 }
 
-// teamCounts reads the three numeric cells from a team's row in the list.
-func teamCounts(t *testing.T, page, code string) (int, int, int) {
+// teamCounts reads the numeric cells from a team's row in the list, in column
+// order: assets, services, projects, certificates.
+func teamCounts(t *testing.T, page, code string) [4]int {
 	t.Helper()
 	i := strings.Index(page, ">"+code+"</a>")
 	if i < 0 {
@@ -121,10 +122,10 @@ func teamCounts(t *testing.T, page, code string) (int, int, int) {
 		t.Fatalf("could not isolate the row for %s", code)
 	}
 	nums := regexp.MustCompile(`<td class="num">(\d+)</td>`).FindAllStringSubmatch(page[i:i+end], -1)
-	if len(nums) != 3 {
-		t.Fatalf("expected three counts in the %s row, found %d", code, len(nums))
+	if len(nums) != 4 {
+		t.Fatalf("expected four counts in the %s row, found %d", code, len(nums))
 	}
-	out := make([]int, 3)
+	var out [4]int
 	for k, m := range nums {
 		n, err := strconv.Atoi(m[1])
 		if err != nil {
@@ -132,7 +133,7 @@ func teamCounts(t *testing.T, page, code string) (int, int, int) {
 		}
 		out[k] = n
 	}
-	return out[0], out[1], out[2]
+	return out
 }
 
 // rowsInSection counts the table rows under a heading on a team detail page.

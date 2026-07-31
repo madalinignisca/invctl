@@ -415,6 +415,65 @@ func (s *SQLStore) ListCertificateServices(ctx context.Context, certificateID st
 	return rows, nil
 }
 
+// DeployedCertificate is one certificate as seen FROM the thing it sits on.
+//
+// The reverse of CertificateDeployment: that answers "where is this certificate",
+// this answers "what is on this box". The second is the incident question.
+type DeployedCertificate struct {
+	ID        string  `db:"id"`
+	SubjectCN string  `db:"subject_cn"`
+	Issuer    *string `db:"issuer"`
+	NotAfter  *string `db:"not_after"`
+	Note      *string `db:"note"`
+	TeamID    *string `db:"team_id"`
+	TeamName  string  `db:"team_name"`
+}
+
+// CertificatesOnAsset lists the certificates deployed to an asset.
+func (s *SQLStore) CertificatesOnAsset(ctx context.Context, assetID string) ([]DeployedCertificate, error) {
+	return s.certificatesOn(ctx, "certificate_asset", "asset_id", assetID)
+}
+
+// CertificatesOnService lists the certificates deployed to a service.
+func (s *SQLStore) CertificatesOnService(ctx context.Context, serviceID string) ([]DeployedCertificate, error) {
+	return s.certificatesOn(ctx, "certificate_service", "service_id", serviceID)
+}
+
+// certificatesOn is shared by the two above. Table and column come from those
+// two call sites and never from a request.
+//
+// Ordered by expiry with undated last, and sorted in Go rather than trusted from
+// the ORDER BY, for the collation reason ListCertificates documents.
+func (s *SQLStore) certificatesOn(ctx context.Context, table, column, entityID string) ([]DeployedCertificate, error) {
+	var rows []DeployedCertificate
+	err := s.read(ctx, &rows, `
+		SELECT c.id, c.subject_cn, c.issuer, c.not_after, l.note, c.team_id,
+		       COALESCE(tm.name, '') AS team_name
+		FROM `+table+` l
+		JOIN certificate c ON c.id = l.certificate_id
+		LEFT JOIN team tm ON tm.id = c.team_id
+		WHERE l.`+column+` = ? AND l.lifecycle = ? AND c.lifecycle <> ?`,
+		entityID, domain.LifecycleActive, domain.LifecycleRetired)
+	if err != nil {
+		return nil, fmt.Errorf("listing the certificates on %s: %w", entityID, err)
+	}
+	sort.SliceStable(rows, func(i, j int) bool {
+		a, b := rows[i], rows[j]
+		aNull, bNull := a.NotAfter == nil, b.NotAfter == nil
+		if aNull != bNull {
+			return !aNull
+		}
+		if !aNull && derefOr(a.NotAfter, "") != derefOr(b.NotAfter, "") {
+			return derefOr(a.NotAfter, "") < derefOr(b.NotAfter, "")
+		}
+		if a.SubjectCN != b.SubjectCN {
+			return a.SubjectCN < b.SubjectCN
+		}
+		return a.ID < b.ID
+	})
+	return rows, nil
+}
+
 // DeployCertificateToAsset records that a certificate is used on an asset.
 func (s *SQLStore) DeployCertificateToAsset(ctx context.Context, actor domain.Actor,
 	certificateID, assetID string, note *string) error {

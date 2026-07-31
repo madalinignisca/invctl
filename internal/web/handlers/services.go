@@ -68,16 +68,17 @@ func (a *App) ServiceList(w http.ResponseWriter, r *http.Request) {
 
 type serviceDetailPage struct {
 	Base
-	Service     *store.ServiceRow
-	Costs       []store.CostRow
-	CostTotals  domain.CostTotals
-	CostKinds   []store.VocabularyTerm
-	CostPeriods []string
-	Instances   []store.InstanceRow
-	Endpoints   []store.EndpointRow
-	Routes      []store.RouteRow
-	Upstream    []depRowData
-	Downstream  []depRowData
+	Service      *store.ServiceRow
+	Certificates []store.DeployedCertificate
+	Costs        []store.CostRow
+	CostTotals   domain.CostTotals
+	CostKinds    []store.VocabularyTerm
+	CostPeriods  []string
+	Instances    []store.InstanceRow
+	Endpoints    []store.EndpointRow
+	Routes       []store.RouteRow
+	Upstream     []depRowData
+	Downstream   []depRowData
 	// InstanceHealth is what the estate reports about each placement, keyed by
 	// instance id, with staleness applied and any override alongside rather
 	// than merged in. A service has no health of its own -- only the places it
@@ -187,6 +188,11 @@ func (a *App) ServiceDetail(w http.ResponseWriter, r *http.Request) {
 	}
 
 	b := a.base(r, service.Name, "services")
+	certificates, err := a.Store.CertificatesOnService(r.Context(), id)
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
 	costs, err := a.Store.ListServiceCosts(r.Context(), id)
 	if err != nil {
 		a.serverError(w, r, err)
@@ -201,6 +207,7 @@ func (a *App) ServiceDetail(w http.ResponseWriter, r *http.Request) {
 	a.Render.Page(w, http.StatusOK, "service_detail", serviceDetailPage{
 		Base:           b,
 		Service:        service,
+		Certificates:   certificates,
 		Costs:          costs,
 		CostTotals:     store.TotalCosts(costs, domain.FormatDate(a.Store.Now())),
 		CostKinds:      costKinds,

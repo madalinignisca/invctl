@@ -196,3 +196,63 @@ func firstCertificateLink(t *testing.T, page string) string {
 	}
 	return rest[:end]
 }
+
+// TestAnAssetAndAServiceShowTheCertificatesOnThem.
+//
+// The reverse view. A certificate page already listed where it was deployed; the
+// question during an incident runs the other way — this box is serving a
+// certificate error, what is on it — and that direction did not exist until now.
+func TestAnAssetAndAServiceShowTheCertificatesOnThem(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	// vm-proxy-1 carries the wildcard and the partner certificate.
+	asset := body(t, h.get("/assets/"+h.refs.Assets["vm-proxy-1"], false))
+	if !strings.Contains(asset, "TLS certificates here") {
+		t.Error("the asset page has no certificates panel")
+	}
+	for _, subject := range []string{"*.example.com", "partners.example.com"} {
+		if !strings.Contains(asset, subject) {
+			t.Errorf("the asset page does not list %s, which is deployed on it", subject)
+		}
+	}
+	// The negative: a certificate deployed elsewhere must not appear here.
+	if strings.Contains(asset, "vault.internal") {
+		t.Error("a certificate deployed on another box appears on this one")
+	}
+
+	// The service side of the same link table.
+	svc := body(t, h.get("/services/"+h.refs.Services["sso"], false))
+	if !strings.Contains(svc, "sso.example.com") {
+		t.Error("the service page does not list the certificate deployed on it")
+	}
+	if strings.Contains(svc, "vault.internal") {
+		t.Error("an unrelated certificate appears on the service page")
+	}
+
+	// An asset with no certificates renders no panel rather than an empty one.
+	bare := body(t, h.get("/assets/"+h.refs.Assets["sw-core-1"], false))
+	if strings.Contains(bare, "TLS certificates here") {
+		t.Error("an asset with no certificates still renders the panel")
+	}
+}
+
+// A team's own page says what it renews, and the count in the list agrees.
+func TestATeamShowsTheCertificatesItRenews(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	page := body(t, h.get("/teams/"+h.refs.Teams["platform"], false))
+	if !strings.Contains(page, "<h2>Certificates</h2>") {
+		t.Fatal("the team page has no certificates section")
+	}
+	for _, subject := range []string{"vault.internal", "sso.example.com"} {
+		if !strings.Contains(page, subject) {
+			t.Errorf("the platform team's page does not list %s, which it renews", subject)
+		}
+	}
+	// The negative: the network team renews the wildcard, not platform.
+	if strings.Contains(page, "*.example.com") {
+		t.Error("a certificate another team renews is on the platform page")
+	}
+}

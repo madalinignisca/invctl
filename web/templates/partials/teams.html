@@ -9,7 +9,8 @@
     <table>
       <thead>
         <tr><th>Code</th><th>Name</th><th>Contact</th><th class="num">Assets</th>
-            <th class="num">Services</th><th class="num">Projects</th><th>State</th></tr>
+            <th class="num">Services</th><th class="num">Projects</th>
+            <th class="num">Certs</th><th>State</th></tr>
       </thead>
       <tbody>
         {{range .Teams}}
@@ -22,6 +23,7 @@
           <td class="num">{{.AssetCount}}</td>
           <td class="num">{{.ServiceCount}}</td>
           <td class="num">{{.ProjectCount}}</td>
+          <td class="num">{{.CertificateCount}}</td>
           <td><span class="{{lifecycleClass .Lifecycle}}">{{.Lifecycle}}</span></td>
         </tr>
         {{end}}
@@ -100,6 +102,33 @@
     <div class="empty"><strong>No services.</strong></div>
     {{end}}
   </div>
+
+  {{if .Certificates}}
+  <div class="panel">
+    <div class="panel-head">
+      <h2>Certificates</h2>
+      <span class="panel-note">What this team renews. Soonest expiry first.</span>
+    </div>
+    <div class="scroll-x">
+      <table>
+        <thead><tr><th>Expires</th><th>Subject</th><th>Deployed</th></tr></thead>
+        <tbody>
+          {{range .Certificates}}
+          <tr>
+            <td>
+              {{with expiry .NotAfter}}<span class="{{.Class}}">{{.Date}}</span>
+                <div style="color:var(--muted);font-size:11.5px">{{.Label}}</div>
+              {{else}}<span class="pill pill-degraded">not recorded</span>{{end}}
+            </td>
+            <td><a class="id" href="/certificates/{{.ID}}">{{.SubjectCN}}</a></td>
+            <td class="num">{{add .AssetCount .ServiceCount}}</td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {{end}}
 
   {{if .Projects}}
   <div class="panel">
