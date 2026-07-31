@@ -43,7 +43,12 @@ func (b *builder) services() {
 		// `lb` rather than `proxy`: this takes traffic IN and spreads it over a
 		// pool, which is the kind that owns routes. A forward proxy is the
 		// other direction and owns none of this.
-		{"haproxy-edge", "HAProxy (edge)", domain.SvcLB, "prod", domain.AvailActiveActive, 1, 1, "", "network", 10, 0},
+		// Deliberately looked after by NOBODY, which sharpens a finding the
+		// fixture already makes: no project owns the edge either. The service
+		// every partner order crosses has no team to escalate to and no budget
+		// holder, and both pages have to be able to say so plainly rather than
+		// rendering a blank cell that reads like a bug.
+		{"haproxy-edge", "HAProxy (edge)", domain.SvcLB, "prod", domain.AvailActiveActive, 1, 1, "", "", 10, 0},
 
 		// Two backend services that both happen to live on vm-app-1. Nothing
 		// about their individual definitions says that; only placement does.
@@ -91,7 +96,11 @@ func (b *builder) services() {
 			def.FailoverMode = str(spec.failover)
 		}
 		if spec.owner != "" {
-			def.OwnerTeam = str(spec.owner)
+			def.TeamID = b.team(spec.owner)
+			// Every seeded service names an operator: the fixture's point is
+			// that somebody runs these, and a team with no capacity recorded
+			// reads as half-filled-in.
+			def.ManagerRole = str("operator")
 		}
 		if spec.rto > 0 {
 			def.RTOMinutes = num(spec.rto)

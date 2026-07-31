@@ -141,7 +141,9 @@ type Asset struct {
 	Vendor    *string `db:"vendor"`
 	Model     *string `db:"model"`
 	Lifecycle string  `db:"lifecycle"`
-	OwnerTeam *string `db:"owner_team"`
+	// Who looks after it, and in what capacity. Both optional; see team.go.
+	TeamID      *string `db:"team_id"`
+	ManagerRole *string `db:"manager_role"`
 	// EOLDate is when this stops being supportable. Declared, optional, and
 	// nothing in this codebase acts on it passing -- see eol.go.
 	EOLDate   *string `db:"eol_date"`
@@ -181,6 +183,7 @@ func (a *Asset) Validate() error {
 		ve.Add("parent_id", "an asset cannot contain itself")
 	}
 	a.EOLDate = checkDate(ve, "eol_date", a.EOLDate)
+	a.TeamID, a.ManagerRole = checkResponsibility(ve, a.TeamID, a.ManagerRole)
 	if strings.TrimSpace(a.Attrs) == "" {
 		a.Attrs = "{}"
 	}

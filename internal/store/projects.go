@@ -39,11 +39,15 @@ type ProjectRow struct {
 	UsedAssets    int `db:"used_assets"`
 	OwnedServices int `db:"owned_services"`
 	UsedServices  int `db:"used_services"`
+	// Who looks after the project itself. Empty is a real answer.
+	TeamCode string `db:"team_code"`
+	TeamName string `db:"team_name"`
 }
 
 // ProjectFilter narrows a project list.
 type ProjectFilter struct {
-	Query string
+	TeamID string
+	Query  string
 	// IncludeRetired defaults false: a retired project is kept forever and is
 	// noise in day-to-day lists, exactly like a retired asset.
 	IncludeRetired bool
@@ -86,6 +90,8 @@ type ProjectLinkRow struct {
 
 const projectSelect = `
 	SELECT p.*,
+	       COALESCE(tm.code, '') AS team_code,
+	       COALESCE(tm.name, '') AS team_name,
 	       (SELECT COUNT(*) FROM project_asset pa
 	         WHERE pa.project_id = p.id AND pa.relation = 'owns' AND pa.lifecycle = 'active') AS owned_assets,
 	       (SELECT COUNT(*) FROM project_asset pa
@@ -94,7 +100,8 @@ const projectSelect = `
 	         WHERE ps.project_id = p.id AND ps.relation = 'owns' AND ps.lifecycle = 'active') AS owned_services,
 	       (SELECT COUNT(*) FROM project_service ps
 	         WHERE ps.project_id = p.id AND ps.relation = 'uses' AND ps.lifecycle = 'active') AS used_services
-	FROM project p`
+	FROM project p
+	LEFT JOIN team tm ON tm.id = p.team_id`
 
 // ListProjects returns projects in code order.
 func (s *SQLStore) ListProjects(ctx context.Context, f ProjectFilter) ([]ProjectRow, error) {
@@ -104,6 +111,10 @@ func (s *SQLStore) ListProjects(ctx context.Context, f ProjectFilter) ([]Project
 	if !f.IncludeRetired {
 		where = append(where, `p.lifecycle <> ?`)
 		args = append(args, domain.LifecycleRetired)
+	}
+	if f.TeamID != "" {
+		where = append(where, `p.team_id = ?`)
+		args = append(args, f.TeamID)
 	}
 	if f.Query != "" {
 		// LOWER on both sides, like every other filter in this codebase.
@@ -232,9 +243,9 @@ func (s *SQLStore) projectsFor(ctx context.Context, table, column string, ids []
 func (s *SQLStore) CreateProject(ctx context.Context, actor domain.Actor, p *domain.Project) error {
 	return s.write(ctx, actor, func(t *tx) error {
 		_, err := t.exec(ctx, `
-			INSERT INTO project (id, code, name, description, owner_team, lifecycle, created_at, updated_at)
+			INSERT INTO project (id, code, name, description, team_id, lifecycle, created_at, updated_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-			p.ID, p.Code, p.Name, p.Description, p.OwnerTeam, p.Lifecycle, p.CreatedAt, p.UpdatedAt)
+			p.ID, p.Code, p.Name, p.Description, p.TeamID, p.Lifecycle, p.CreatedAt, p.UpdatedAt)
 		if err != nil {
 			return translateWriteErr(err, "creating project")
 		}
@@ -243,7 +254,7 @@ func (s *SQLStore) CreateProject(ctx context.Context, actor domain.Actor, p *dom
 		}
 		return s.indexEntity(ctx, t, searchDoc{
 			EntityType: "project", EntityID: p.ID,
-			Title: p.Name, Subtitle: p.Code, Body: strDeref(p.OwnerTeam),
+			Title: p.Name, Subtitle: p.Code, Body: strDeref(p.TeamID),
 		})
 	})
 }
@@ -260,10 +271,10 @@ func (s *SQLStore) UpdateProject(ctx context.Context, actor domain.Actor, p *dom
 		}
 		p.CreatedAt = before.CreatedAt
 		_, err := t.exec(ctx, `
-			UPDATE project SET code = ?, name = ?, description = ?, owner_team = ?,
+			UPDATE project SET code = ?, name = ?, description = ?, team_id = ?,
 			                   lifecycle = ?, updated_at = ?
 			WHERE id = ?`,
-			p.Code, p.Name, p.Description, p.OwnerTeam, p.Lifecycle, p.UpdatedAt, p.ID)
+			p.Code, p.Name, p.Description, p.TeamID, p.Lifecycle, p.UpdatedAt, p.ID)
 		if err != nil {
 			return translateWriteErr(err, "updating project")
 		}
@@ -272,7 +283,7 @@ func (s *SQLStore) UpdateProject(ctx context.Context, actor domain.Actor, p *dom
 		}
 		return s.indexEntity(ctx, t, searchDoc{
 			EntityType: "project", EntityID: p.ID,
-			Title: p.Name, Subtitle: p.Code, Body: strDeref(p.OwnerTeam),
+			Title: p.Name, Subtitle: p.Code, Body: strDeref(p.TeamID),
 		})
 	})
 }

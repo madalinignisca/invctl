@@ -111,7 +111,7 @@ func (b *builder) bridges() {
 			// No vendor, model or serial. A Linux bridge is a kernel object,
 			// not a part somebody bought, and filling those fields in to make
 			// the row look complete would be the fixture inventing provenance.
-			a.OwnerTeam = str("platform")
+			a.TeamID = b.team("platform")
 		})
 	}
 }

@@ -38,6 +38,7 @@ const (
 	vocabDataClass           = "data_class"
 	vocabContainerEngine     = "container_engine"
 	vocabCostKind            = "cost_kind"
+	vocabResponsibilityRole  = "responsibility_role"
 )
 
 // VocabularyTerm is one row of a lookup table.
@@ -82,6 +83,7 @@ var vocabularyQueries = map[string]string{
 	vocabDataClass:           `SELECT code, label, sort_order, description FROM data_class ORDER BY sort_order, code`,
 	vocabContainerEngine:     `SELECT code, label, sort_order, description FROM container_engine ORDER BY sort_order, code`,
 	vocabCostKind:            `SELECT code, label, sort_order, description FROM cost_kind ORDER BY sort_order, code`,
+	vocabResponsibilityRole:  `SELECT code, label, sort_order, description FROM responsibility_role ORDER BY sort_order, code`,
 }
 
 // AssetKinds returns the asset.kind vocabulary in display order.

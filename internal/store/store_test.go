@@ -1174,7 +1174,7 @@ func TestAuditSnapshotIsComplete(t *testing.T) {
 				// The entity's own columns, plus the folded-in set.
 				for _, want := range []string{
 					"id", "kind", "name", "lifecycle", "serial", "vendor",
-					"owner_team", "attrs", "created_at", "environments",
+					"team_id", "manager_role", "attrs", "created_at", "environments",
 				} {
 					if _, ok := snap.New[want]; !ok {
 						t.Errorf("asset snapshot is missing %q: %v", want, snap.New)

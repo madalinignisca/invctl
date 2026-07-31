@@ -34,7 +34,7 @@ func TestTimelineFoldsBothLedgersInOneOrdering(t *testing.T) {
 				t.Fatalf("getting asset: %v", err)
 			}
 			updated := asset.Asset
-			updated.OwnerTeam = strptr("platform")
+			updated.Vendor = strptr("Dell")
 			if err := f.store.UpdateAsset(f.ctx, testActor, &updated, nil); err != nil {
 				t.Fatalf("updating asset: %v", err)
 			}
@@ -414,7 +414,7 @@ func TestObservedNoiseCannotEvictDeclaredHistory(t *testing.T) {
 			if err != nil {
 				t.Fatalf("reading asset: %v", err)
 			}
-			a.OwnerTeam = strptr("platform")
+			a.Vendor = strptr("Dell")
 			if err := s.UpdateAsset(ctx, testActor, &a.Asset, nil); err != nil {
 				t.Fatalf("updating asset: %v", err)
 			}

@@ -134,6 +134,7 @@ type AssetFilter struct {
 	Lifecycle     string
 	EnvironmentID string
 	ParentID      string
+	TeamID        string
 	Query         string
 	// IncludeRetired defaults false: retired assets are kept forever but are
 	// noise in day-to-day lists.
@@ -166,6 +167,10 @@ func (s *SQLStore) ListAssets(ctx context.Context, f AssetFilter) ([]AssetRow, e
 		where = append(where, `a.parent_id = ?`)
 		args = append(args, f.ParentID)
 	}
+	if f.TeamID != "" {
+		where = append(where, `a.team_id = ?`)
+		args = append(args, f.TeamID)
+	}
 	if f.Query != "" {
 		// LIKE with a leading wildcard, not a full-text match: this is the
 		// list page's filter box, not the global search, and it has to work
@@ -197,9 +202,14 @@ func (s *SQLStore) ListAssets(ctx context.Context, f AssetFilter) ([]AssetRow, e
 // AssetRow is an asset plus the denormalised bits every list view needs.
 type AssetRow struct {
 	domain.Asset
-	ParentName    string
-	Environments  []domain.Environment
-	InstanceCount int
+	ParentName string
+	// Who looks after it. Resolved here rather than joined per row, the same
+	// way environments and kind behaviour already are.
+	TeamCode        string
+	TeamName        string
+	ManagerRoleName string
+	Environments    []domain.Environment
+	InstanceCount   int
 	// Behaviour comes from the asset_kind lookup row rather than a switch in
 	// Go, so a kind added by INSERT is usable rather than merely storable.
 	// Populated by decorateAssets; the zero value is "may do nothing", which is
@@ -228,6 +238,50 @@ func (r *AssetRow) SpansEnvironments() bool { return r.NonTransitEnvironments > 
 
 // decorateAssets attaches parent names and environment membership in two
 // queries rather than one per row.
+// decorateResponsibility fills in the team and role labels for a page of assets.
+func (s *SQLStore) decorateResponsibility(ctx context.Context, rows []AssetRow) error {
+	var teams []struct {
+		ID   string `db:"id"`
+		Code string `db:"code"`
+		Name string `db:"name"`
+	}
+	if err := s.read(ctx, &teams, `SELECT id, code, name FROM team`); err != nil {
+		return fmt.Errorf("loading teams: %w", err)
+	}
+	byID := make(map[string]struct{ code, name string }, len(teams))
+	for _, t := range teams {
+		byID[t.ID] = struct{ code, name string }{t.Code, t.Name}
+	}
+
+	roles, err := s.listVocabulary(ctx, vocabResponsibilityRole)
+	if err != nil {
+		return err
+	}
+	roleLabel := make(map[string]string, len(roles))
+	for _, r := range roles {
+		roleLabel[r.Code] = r.Label
+	}
+
+	for i := range rows {
+		if rows[i].TeamID != nil {
+			if t, ok := byID[*rows[i].TeamID]; ok {
+				rows[i].TeamCode, rows[i].TeamName = t.code, t.name
+			}
+		}
+		if rows[i].ManagerRole != nil {
+			// Falls back to the raw code: a role removed from the vocabulary
+			// after rows referenced it should still render as something rather
+			// than silently as nothing.
+			if label, ok := roleLabel[*rows[i].ManagerRole]; ok {
+				rows[i].ManagerRoleName = label
+			} else {
+				rows[i].ManagerRoleName = *rows[i].ManagerRole
+			}
+		}
+	}
+	return nil
+}
+
 func (s *SQLStore) decorateAssets(ctx context.Context, assets []domain.Asset) ([]AssetRow, error) {
 	rows := make([]AssetRow, len(assets))
 	ids := make([]string, 0, len(assets))
@@ -266,6 +320,13 @@ func (s *SQLStore) decorateAssets(ctx context.Context, assets []domain.Asset) ([
 				rows[i].NonTransitEnvironments++
 			}
 		}
+	}
+
+	// Who looks after each of them. One query for the teams in play rather than
+	// a join on every asset select -- there are a handful of teams and the same
+	// two labels are wanted by every list view.
+	if err := s.decorateResponsibility(ctx, rows); err != nil {
+		return nil, err
 	}
 
 	// What each kind may do. One query for the whole vocabulary rather than one
@@ -338,10 +399,11 @@ func (s *SQLStore) CreateAsset(ctx context.Context, actor domain.Actor, a *domai
 		}
 		_, err := t.exec(ctx,
 			`INSERT INTO asset (id, kind, name, parent_id, serial, asset_tag, vendor, model,
-			                    lifecycle, owner_team, eol_date, attrs, created_at, updated_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			                    lifecycle, team_id, manager_role, eol_date, attrs,
+			                    created_at, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			a.ID, a.Kind, a.Name, a.ParentID, a.Serial, a.AssetTag, a.Vendor, a.Model,
-			a.Lifecycle, a.OwnerTeam, a.EOLDate, a.Attrs, a.CreatedAt, a.UpdatedAt)
+			a.Lifecycle, a.TeamID, a.ManagerRole, a.EOLDate, a.Attrs, a.CreatedAt, a.UpdatedAt)
 		if err != nil {
 			return translateWriteErr(err, "creating asset")
 		}
@@ -391,11 +453,11 @@ func (s *SQLStore) UpdateAsset(ctx context.Context, actor domain.Actor, a *domai
 		}
 		_, err := t.exec(ctx,
 			`UPDATE asset SET kind = ?, name = ?, serial = ?, asset_tag = ?, vendor = ?,
-			                  model = ?, lifecycle = ?, owner_team = ?, eol_date = ?,
-			                  attrs = ?, updated_at = ?
+			                  model = ?, lifecycle = ?, team_id = ?, manager_role = ?,
+			                  eol_date = ?, attrs = ?, updated_at = ?
 			 WHERE id = ?`,
 			a.Kind, a.Name, a.Serial, a.AssetTag, a.Vendor, a.Model,
-			a.Lifecycle, a.OwnerTeam, a.EOLDate, a.Attrs, a.UpdatedAt, a.ID)
+			a.Lifecycle, a.TeamID, a.ManagerRole, a.EOLDate, a.Attrs, a.UpdatedAt, a.ID)
 		if err != nil {
 			return translateWriteErr(err, "updating asset")
 		}

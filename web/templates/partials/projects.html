@@ -22,7 +22,7 @@
           <tr>
             <td class="mono"><a href="/projects/{{.ID}}">{{.Code}}</a></td>
             <td>{{.Name}}</td>
-            <td>{{if .OwnerTeam}}{{deref .OwnerTeam}}{{else}}<span style="color:var(--faint)">unassigned</span>{{end}}</td>
+            <td>{{if .TeamName}}<a class="id" href="/teams/{{deref .TeamID}}">{{.TeamCode}}</a>{{else}}<span style="color:var(--faint)">nobody recorded</span>{{end}}</td>
             <td class="num">{{add .OwnedAssets .OwnedServices}}</td>
             <td class="num">{{add .UsedAssets .UsedServices}}</td>
             <td><span class="{{lifecycleClass .Lifecycle}}">{{.Lifecycle}}</span></td>
@@ -60,7 +60,10 @@
         </div>
         <div class="field">
           <label for="p-team">Owning team</label>
-          <input id="p-team" type="text" name="owner_team">
+          <select id="p-team" name="team_id">
+            <option value="">—</option>
+            {{range $.Teams}}<option value="{{.ID}}">{{.Code}}</option>{{end}}
+          </select>
         </div>
       </div>
       <div class="field">

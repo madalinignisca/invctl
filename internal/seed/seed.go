@@ -28,6 +28,7 @@ type Refs struct {
 	Environments map[string]string // code -> id
 	Assets       map[string]string // name -> id
 	Services     map[string]string // code -> id
+	Teams        map[string]string // code -> id
 	Projects     map[string]string // code -> id
 	Endpoints    map[string]string // "service/endpoint" -> id
 	Routes       map[string]string // match value -> id
@@ -70,6 +71,7 @@ func Load(ctx context.Context, s *store.SQLStore) (*Refs, error) {
 			Environments: map[string]string{},
 			Assets:       map[string]string{},
 			Services:     map[string]string{},
+			Teams:        map[string]string{},
 			Projects:     map[string]string{},
 			Endpoints:    map[string]string{},
 			Routes:       map[string]string{},
@@ -78,6 +80,9 @@ func Load(ctx context.Context, s *store.SQLStore) (*Refs, error) {
 	}
 
 	b.environments()
+	// Teams first: assets, services, projects and identities all point at one,
+	// and a foreign key does not care that this is a fixture.
+	b.teams()
 	b.physical()
 	b.networking()
 	// The bridges hang off the hypervisors physical() built and land on the
@@ -222,7 +227,7 @@ func (b *builder) physical() {
 	b.asset(domain.KindSwitch, "sw-core-1", "rack-a1", []string{"prod", "dev"}, func(a *domain.Asset) {
 		a.Vendor, a.Model = str("Arista"), str("DCS-7050SX3-48YC8")
 		a.Serial, a.AssetTag = str("JPE19140XYZ"), str("NET-0001")
-		a.OwnerTeam = str("network")
+		a.TeamID = b.team("network")
 	})
 
 	// The MC-LAG peer, in the other rack. It carries the same VLANs as
@@ -233,7 +238,7 @@ func (b *builder) physical() {
 	b.asset(domain.KindSwitch, "sw-core-2", "rack-b1", []string{"prod", "dev"}, func(a *domain.Asset) {
 		a.Vendor, a.Model = str("Arista"), str("DCS-7050SX3-48YC8")
 		a.Serial, a.AssetTag = str("JPE19140ABC"), str("NET-0002")
-		a.OwnerTeam = str("network")
+		a.TeamID = b.team("network")
 	})
 
 	// The firewall spans production and transit. Transit is excluded from
@@ -242,7 +247,7 @@ func (b *builder) physical() {
 	b.asset(domain.KindFirewall, "fw-edge-1", "rack-a1", []string{"prod", "transit"}, func(a *domain.Asset) {
 		a.Vendor, a.Model = str("Palo Alto"), str("PA-3220")
 		a.Serial = str("013101006789")
-		a.OwnerTeam = str("network")
+		a.TeamID = b.team("network")
 	})
 
 	// The passive half of the firewall pair. It is what makes losing
@@ -251,7 +256,7 @@ func (b *builder) physical() {
 	b.asset(domain.KindFirewall, "fw-edge-2", "rack-b1", []string{"prod", "transit"}, func(a *domain.Asset) {
 		a.Vendor, a.Model = str("Palo Alto"), str("PA-3220")
 		a.Serial = str("013101006790")
-		a.OwnerTeam = str("network")
+		a.TeamID = b.team("network")
 	})
 
 	// The out-of-band switch. Nothing on the data plane references it, which
@@ -260,7 +265,7 @@ func (b *builder) physical() {
 	b.asset(domain.KindSwitch, "sw-oob-1", "rack-a1", []string{"prod"}, func(a *domain.Asset) {
 		a.Vendor, a.Model = str("Aruba"), str("6100-48G")
 		a.Serial, a.AssetTag = str("SG9ZKY1234"), str("NET-0003")
-		a.OwnerTeam = str("network")
+		a.TeamID = b.team("network")
 	})
 
 	for _, h := range hypervisors() {
@@ -268,7 +273,7 @@ func (b *builder) physical() {
 		b.asset(domain.KindHypervisor, hh.name, hh.rack, []string{"prod"}, func(a *domain.Asset) {
 			a.Vendor, a.Model = str("Dell"), str("PowerEdge R650")
 			a.Serial = str(hh.serial)
-			a.OwnerTeam = str("platform")
+			a.TeamID = b.team("platform")
 		})
 	}
 
@@ -289,7 +294,7 @@ func (b *builder) physical() {
 	b.asset(domain.KindServer, "srv-backup-proxy-1", "rack-b1", []string{"prod"}, func(a *domain.Asset) {
 		a.Vendor, a.Model = str("Dell"), str("PowerEdge R450")
 		a.Serial, a.AssetTag = str("FCH2211V0ZZ"), str("SRV-0009")
-		a.OwnerTeam = str("platform")
+		a.TeamID = b.team("platform")
 		// attrs is opaque to every query by house rule; it is display detail
 		// only, and here it carries the why so the demo does not have to.
 		a.Attrs = `{"install_note":"data uplink not patched yet -- remote-hands ` +
@@ -307,7 +312,7 @@ func (b *builder) physical() {
 	for _, g := range guests() {
 		gg := g
 		b.asset(gg.kind, gg.name, gg.host, []string{gg.env}, func(a *domain.Asset) {
-			a.OwnerTeam = str(gg.team)
+			a.TeamID = b.team(gg.team)
 		})
 	}
 }
@@ -650,7 +655,7 @@ func (b *builder) identities() {
 		// whole database would become a secret store, which it must not be.
 		identity.SecretRef = str(i.secretRef)
 		identity.RotationDays = num(90)
-		identity.OwnerTeam = str("platform")
+		identity.TeamID = b.team("platform")
 		if err := b.store.CreateIdentity(b.ctx, Actor, identity); err != nil {
 			b.fail(fmt.Errorf("seeding identity %s: %w", i.name, err))
 			return

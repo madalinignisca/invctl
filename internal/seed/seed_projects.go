@@ -91,7 +91,7 @@ func (b *builder) projects() {
 		p, err := domain.NewProject(store.NewID(), domain.ProjectSpec{
 			Code: spec.code, Name: spec.name,
 			Description: str(spec.description),
-			OwnerTeam:   str(spec.owner),
+			TeamID:      b.team(spec.owner),
 			Lifecycle:   domain.LifecycleActive,
 		}, b.now)
 		if err != nil {

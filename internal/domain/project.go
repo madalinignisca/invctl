@@ -49,7 +49,7 @@ type Project struct {
 	// Description is prose for a human deciding whether this is the project
 	// they meant. Not a vocabulary, not parsed, never queried.
 	Description *string `db:"description"`
-	OwnerTeam   *string `db:"owner_team"`
+	TeamID      *string `db:"team_id"`
 	Lifecycle   string  `db:"lifecycle"`
 	CreatedAt   string  `db:"created_at"`
 	UpdatedAt   string  `db:"updated_at"`
@@ -60,7 +60,7 @@ type ProjectSpec struct {
 	Code        string
 	Name        string
 	Description *string
-	OwnerTeam   *string
+	TeamID      *string
 	Lifecycle   string
 }
 
@@ -87,7 +87,7 @@ func NewProject(id string, spec ProjectSpec, now time.Time) (*Project, error) {
 		Code:        code,
 		Name:        name,
 		Description: spec.Description,
-		OwnerTeam:   spec.OwnerTeam,
+		TeamID:      blankToNil(spec.TeamID),
 		Lifecycle:   lifecycle,
 		CreatedAt:   FormatTime(now),
 		UpdatedAt:   FormatTime(now),

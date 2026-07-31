@@ -75,7 +75,7 @@ func (s *SQLStore) indexEntity(ctx context.Context, t *tx, doc searchDoc) error 
 // people genuinely arrive with.
 func (s *SQLStore) indexAsset(ctx context.Context, t *tx, a *domain.Asset) error {
 	body := []string{a.Kind}
-	for _, v := range []*string{a.Serial, a.AssetTag, a.Vendor, a.Model, a.OwnerTeam} {
+	for _, v := range []*string{a.Serial, a.AssetTag, a.Vendor, a.Model} {
 		if v != nil && *v != "" {
 			body = append(body, *v)
 		}

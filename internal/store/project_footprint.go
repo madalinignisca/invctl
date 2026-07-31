@@ -341,7 +341,7 @@ func (s *SQLStore) ProjectExternalDependencies(ctx context.Context, f *ProjectFo
 		       COALESCE(pes.id, res.id, '')         AS provider_id,
 		       COALESCE(pes.code, res.code, '')     AS provider_code,
 		       COALESCE(pes.name, res.name, '')     AS provider_name,
-		       COALESCE(pes.owner_team, res.owner_team, '') AS provider_team,
+		       COALESCE(pt.name, rt.name, '') AS provider_team,
 		       COALESCE(pe.name, re.name, '')       AS provider_endpoint
 		FROM dependency d
 		JOIN service cs       ON cs.id  = d.consumer_service_id
@@ -350,6 +350,8 @@ func (s *SQLStore) ProjectExternalDependencies(ctx context.Context, f *ProjectFo
 		LEFT JOIN route r     ON r.id   = d.provider_route_id
 		LEFT JOIN endpoint re ON re.id  = r.frontend_endpoint_id
 		LEFT JOIN service res ON res.id = re.service_id
+		LEFT JOIN team pt     ON pt.id = pes.team_id
+		LEFT JOIN team rt     ON rt.id = res.team_id
 		WHERE d.lifecycle = ?
 		  AND d.consumer_service_id IN (`+placeholders(len(chunk))+`)
 		ORDER BY d.id`, args...)

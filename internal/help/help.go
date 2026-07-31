@@ -129,6 +129,27 @@ var Topics = []Topic{
 		},
 	},
 	{
+		Key:   "responsibility",
+		Title: "Team and role",
+		Intro: "Who looks after a thing, and in what capacity. Both are optional: a small " +
+			"estate where everyone looks after everything gains nothing from filling them in. " +
+			"Neither is a permission — this is who to call, not who the application will let " +
+			"through.",
+		Terms: []Term{
+			{Code: "team", Label: "Team", Description: "The group answerable for it. Teams, never " +
+				"people: a team survives the people in it, and a database kept forever with an " +
+				"append-only audit trail should carry nothing anybody could ask to have erased. " +
+				"A team's contact is a group address, a queue or a channel — never an individual."},
+			{Code: "role", Label: "Managed as", Description: "In what capacity that team is " +
+				"answerable: owner, operator, approver, on call, data custodian, vendor managed. " +
+				"A role needs a team, because a capacity floating free of the group that holds it " +
+				"means nothing. Add your own at Vocabularies."},
+			{Code: "unrecorded", Label: "Nobody recorded", Description: "A real answer, and the " +
+				"one most rows start with. It is shown plainly rather than as a blank, because a " +
+				"gap somebody has not filled in and a gap nobody noticed look identical otherwise."},
+		},
+	},
+	{
 		Key:   "project_relation",
 		Title: "Project relation",
 		Intro: "How a project claims a thing. Two relations, and the asymmetry between " +

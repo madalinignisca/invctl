@@ -1,0 +1,18 @@
+{{define "content"}}
+<div class="crumbs">
+  <a href="/teams">teams</a><span class="sep">/</span><span>{{.Team.Code}}</span>
+</div>
+
+<div class="page-head">
+  <div class="eyebrow">team</div>
+  <h1>{{.Team.Name}}</h1>
+  <div class="tag-list" style="margin-top:8px">
+    <span class="mono pill pill-muted">{{.Team.Code}}</span>
+    <span class="{{lifecycleClass .Team.Lifecycle}}">{{.Team.Lifecycle}}</span>
+    {{if .Team.ContactRef}}<span class="mono pill pill-info">{{deref .Team.ContactRef}}</span>{{end}}
+  </div>
+  {{if .Team.Description}}<p class="lede">{{deref .Team.Description}}</p>{{end}}
+</div>
+
+{{template "team_panel" .}}
+{{end}}

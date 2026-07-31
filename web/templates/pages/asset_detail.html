@@ -39,7 +39,10 @@
         <dt>Model</dt><dd class="mono">{{if .Asset.Model}}{{deref .Asset.Model}}{{else}}—{{end}}</dd>
         <dt>Serial</dt><dd class="mono">{{if .Asset.Serial}}{{deref .Asset.Serial}}{{else}}—{{end}}</dd>
         <dt>Asset tag</dt><dd class="mono">{{if .Asset.AssetTag}}{{deref .Asset.AssetTag}}{{else}}—{{end}}</dd>
-        <dt>Owner team</dt><dd>{{if .Asset.OwnerTeam}}{{deref .Asset.OwnerTeam}}{{else}}—{{end}}</dd>
+        <dt>Looked after by</dt>
+        <dd>{{if .Asset.TeamName}}<a href="/teams/{{deref .Asset.TeamID}}">{{.Asset.TeamName}}</a>{{if .Asset.ManagerRoleName}}
+              <span style="color:var(--muted)">as {{.Asset.ManagerRoleName}}</span>{{end}}
+            {{else}}<span style="color:var(--faint)">nobody recorded</span>{{end}}</dd>
         <dt>Supported until</dt>
         <dd>{{with expiry .Asset.EOLDate}}<span class="{{.Class}}">{{.Date}}</span>
           <span style="color:var(--muted)">{{.Label}}</span>{{else}}—{{end}}</dd>

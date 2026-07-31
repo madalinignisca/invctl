@@ -1,0 +1,161 @@
+{{define "team_list_panel"}}
+<div id="team-list" class="panel">
+  <div class="panel-head">
+    <h2>{{pluralise (len .Teams) "team" "teams"}}</h2>
+    <span class="panel-note">Counts cover what each team is answerable for.</span>
+  </div>
+  {{if .Teams}}
+  <div class="scroll-x">
+    <table>
+      <thead>
+        <tr><th>Code</th><th>Name</th><th>Contact</th><th class="num">Assets</th>
+            <th class="num">Services</th><th class="num">Projects</th><th>State</th></tr>
+      </thead>
+      <tbody>
+        {{range .Teams}}
+        <tr>
+          <td><a class="id" href="/teams/{{.ID}}">{{.Code}}</a></td>
+          <td>{{.Name}}</td>
+          <td class="mono" style="font-size:12px">
+            {{if .ContactRef}}{{deref .ContactRef}}{{else}}<span style="color:var(--faint)">—</span>{{end}}
+          </td>
+          <td class="num">{{.AssetCount}}</td>
+          <td class="num">{{.ServiceCount}}</td>
+          <td class="num">{{.ProjectCount}}</td>
+          <td><span class="{{lifecycleClass .Lifecycle}}">{{.Lifecycle}}</span></td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{else}}
+  <div class="empty">
+    <strong>No teams recorded.</strong>
+    Assets and services can say who looks after them once there is a team to name.
+  </div>
+  {{end}}
+</div>
+{{end}}
+
+{{define "team_panel"}}
+<div id="team">
+  {{if eq .Team.Lifecycle "retired"}}
+  <div class="callout callout-warn">
+    <h2>This team is disbanded</h2>
+    <p style="margin-top:6px">
+      What it looked after still points at it, deliberately: that is the estate saying
+      nobody has picked these up. Reassign them rather than expecting the list to empty.
+    </p>
+  </div>
+  {{end}}
+
+  <div class="panel">
+    <div class="panel-head">
+      <h2>Assets</h2>
+      <span class="panel-note">{{pluralise (len .Assets) "asset" "assets"}} this team looks after</span>
+    </div>
+    {{if .Assets}}
+    <div class="scroll-x">
+      <table>
+        <thead><tr><th>Name</th><th>Kind</th><th>Capacity</th><th>State</th></tr></thead>
+        <tbody>
+          {{range .Assets}}
+          <tr>
+            <td><a class="id" href="/assets/{{.ID}}">{{.Name}}</a></td>
+            <td><span class="pill pill-muted">{{.Kind}}</span></td>
+            <td>{{if .ManagerRoleName}}{{.ManagerRoleName}}{{else}}<span style="color:var(--faint)">not recorded</span>{{end}}</td>
+            <td><span class="{{lifecycleClass .Lifecycle}}">{{.Lifecycle}}</span></td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+    {{else}}
+    <div class="empty"><strong>No assets.</strong> Nothing names this team.</div>
+    {{end}}
+  </div>
+
+  <div class="panel">
+    <div class="panel-head">
+      <h2>Services</h2>
+      <span class="panel-note">{{pluralise (len .Services) "service" "services"}} this team looks after</span>
+    </div>
+    {{if .Services}}
+    <div class="scroll-x">
+      <table>
+        <thead><tr><th>Code</th><th>Name</th><th>Capacity</th><th>Tier</th></tr></thead>
+        <tbody>
+          {{range .Services}}
+          <tr>
+            <td><a class="id" href="/services/{{.ID}}">{{.Code}}</a></td>
+            <td>{{.Name}}</td>
+            <td>{{if .ManagerRoleName}}{{.ManagerRoleName}}{{else}}<span style="color:var(--faint)">not recorded</span>{{end}}</td>
+            <td><span class="{{tierClass .Tier}}">tier {{.Tier}}</span></td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+    {{else}}
+    <div class="empty"><strong>No services.</strong></div>
+    {{end}}
+  </div>
+
+  {{if .Projects}}
+  <div class="panel">
+    <div class="panel-head"><h2>Projects</h2></div>
+    <div class="scroll-x">
+      <table>
+        <thead><tr><th>Code</th><th>Name</th></tr></thead>
+        <tbody>
+          {{range .Projects}}
+          <tr>
+            <td><a class="id" href="/projects/{{.ID}}">{{.Code}}</a></td>
+            <td>{{.Name}}</td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {{end}}
+
+  {{if .CanWrite}}
+  <div class="panel">
+    <div class="panel-head"><h2>Edit</h2></div>
+    <form class="panel-body" method="post" action="/teams/{{.Team.ID}}"
+          hx-post="/teams/{{.Team.ID}}">
+      <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+      <div class="field-row">
+        <div class="field">
+          <label for="te-code">Code</label>
+          <input id="te-code" class="mono" type="text" name="code" value="{{.Team.Code}}" required>
+          {{with index .Errors "code"}}<div class="field-error">{{.}}</div>{{end}}
+        </div>
+        <div class="field">
+          <label for="te-name">Name</label>
+          <input id="te-name" type="text" name="name" value="{{.Team.Name}}" required>
+          {{with index .Errors "name"}}<div class="field-error">{{.}}</div>{{end}}
+        </div>
+        <div class="field">
+          <label for="te-contact">Contact</label>
+          <input id="te-contact" class="mono" type="text" name="contact_ref" value="{{deref .Team.ContactRef}}">
+          <div class="field-hint">A group address or queue — <strong>never a person</strong>.</div>
+        </div>
+        <div class="field">
+          <label for="te-life">Lifecycle</label>
+          <select id="te-life" name="lifecycle">
+            {{range $.Lifecycles}}<option value="{{.}}" {{if eq . $.Team.Lifecycle}}selected{{end}}>{{.}}</option>{{end}}
+          </select>
+        </div>
+      </div>
+      <div class="field">
+        <label for="te-desc">Description</label>
+        <input id="te-desc" type="text" name="description" value="{{deref .Team.Description}}">
+      </div>
+      <button class="btn btn-primary" type="submit">Save</button>
+    </form>
+  </div>
+  {{end}}
+</div>
+{{end}}

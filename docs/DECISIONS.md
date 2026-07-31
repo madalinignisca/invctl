@@ -1623,3 +1623,79 @@ orderings are display-only and every truncation decision re-sorts in Go — but 
 comments claim collation-independence that this environment cannot falsify.
 Pinning the container to glibc, or creating the test database `LC_COLLATE=C`,
 would put the claim under test.
+
+---
+
+## 2026-07-31 — Teams and roles, and the free text they replace
+
+Migration `00009`'s own header named this gap: *"`owner_team` is free text on four
+tables with no referential integrity at all."* This closes it. `team` becomes a
+first-class entity, `responsibility_role` a vocabulary, and the four free-text
+columns are gone.
+
+### Two axes, deliberately separate
+
+`team_id` says **who** looks after a thing; `manager_role` says **in what
+capacity**. A team without a role is "the platform team's box, nobody has said
+who in it" — common, and fine. A role without a team is **rejected**: it claims a
+capacity is held and refuses to say by whom, which reads as recorded when it is
+not.
+
+Both optional, because a small estate where everyone looks after everything gains
+nothing from filling them in, and a field people are forced to complete is a field
+full of noise. Absent renders as *"nobody recorded"* rather than a blank cell — a
+gap somebody has not filled in and a gap nobody noticed look identical otherwise.
+
+### Why team is a table and role is a lookup
+
+A team is an organisational fact with a life: it forms, owns things, is disbanded,
+and its rows must survive that as `retired` so `change_log` keeps resolving. Every
+lookup in this schema is a closed vocabulary whose rows are never retired, so a
+team is not one. A role is the opposite — descriptive, nothing branches on its
+value, and an estate wanting `dpo` should add one as data. The same line migration
+`00004` drew between `service_kind` and `availability`.
+
+**Retiring a team does not clear it from what it looked after.** A disbanded team
+still named by live assets is the estate saying "this was theirs and nobody has
+picked it up", which is a finding; nulling the column would erase the question
+along with the answer, and silently.
+
+### Role is documentation, not authorization
+
+"Who can manage it" means who to call, not who the application will let through.
+Nothing reads `manager_role` to decide anything and `authz.CanWrite` does not
+consult it. That separation is the remit — this system presents state. When LDAP
+group roles land this column is where they will look, which is an argument for
+recording it accurately now and none at all for enforcing it yet.
+
+### Teams, never people
+
+No individual is named anywhere. `contact_ref` holds a group address, a ticket
+queue or a channel; the application cannot tell that from a person's mailbox and
+does not try, so the rule lives in the field hint, the help topic and
+`docs/AUDIT.md` — exactly as `identity.secret_ref` is documented to hold a path
+and never a secret. A CMDB kept for the life of an estate, with an append-only
+`change_log`, must carry nothing anybody could ask to have erased. That is the
+same argument that made `change_log.actor` an opaque id.
+
+A test asserts the warning is on both the create and the edit form. If it ever
+disappears, the only thing keeping personal data out of this database has
+disappeared with it.
+
+### The four columns are dropped and NOT backfilled
+
+That is a choice, not an oversight. A backfill has to invent an id per distinct
+string, and this repository generates every id as a UUIDv7 in Go and never in SQL
+— a rule worth more than the contents of a fixture. Building the two-phase runner
+that would let Go do it between two migrations is machinery this POC does not
+need: the only estates in existence are the test fixture and a demo database
+rebuilt on every deploy, and the seed creates the six teams properly. A deployment
+with real data would need that second phase, and would be past the point where
+this file calls a destructive migration free.
+
+### The fixture
+
+Six teams, each with a group contact. `haproxy-edge` is now looked after by
+**nobody**, which sharpens a finding the fixture already made: no project owns the
+edge either. The service every partner order crosses has no team to escalate to
+and no budget holder, and both pages say so plainly.

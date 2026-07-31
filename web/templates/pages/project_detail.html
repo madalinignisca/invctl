@@ -4,7 +4,7 @@
 </div>
 
 <div class="page-head">
-  <div class="eyebrow">{{if .Project.OwnerTeam}}{{deref .Project.OwnerTeam}}{{else}}no owning team recorded{{end}}</div>
+  <div class="eyebrow">{{if .Project.TeamName}}{{.Project.TeamName}}{{else}}no team recorded{{end}}</div>
   <h1>{{.Project.Name}}</h1>
   <div class="tag-list" style="margin-top:8px">
     <span class="mono pill pill-muted">{{.Project.Code}}</span>

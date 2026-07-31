@@ -24,7 +24,7 @@
           <td><a class="id" href="/assets/{{.ID}}">{{.Name}}</a></td>
           <td><span class="pill pill-muted">{{.Kind}}</span></td>
           <td><div class="tag-list">{{range .Environments}}<span class="pill pill-info">{{.Code}}</span>{{end}}</div></td>
-          <td>{{if .OwnerTeam}}{{deref .OwnerTeam}}{{else}}—{{end}}</td>
+          <td>{{if .TeamName}}<a href="/teams/{{deref .TeamID}}">{{.TeamName}}</a>{{else}}—{{end}}</td>
           <td><span class="{{lifecycleClass .Lifecycle}}">{{.Lifecycle}}</span></td>
         </tr>
         {{end}}

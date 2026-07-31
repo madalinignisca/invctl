@@ -119,8 +119,10 @@ func TestDownSurvivesAVocabularyValueAddedAsData(t *testing.T) {
 // entirely invisible: twenty assets lost their owner_team and the suite stayed
 // green.
 //
-// owner_team is the subject because it is nullable and nothing else asserts on
-// it -- exactly the shape a rebuild drops without anyone noticing.
+// team_id is the subject because it is nullable and nothing else asserts on it
+// -- exactly the shape a rebuild drops without anyone noticing. It replaced
+// owner_team here when migration 00014 absorbed that column; the property that
+// made owner_team the right subject is the property team_id now has.
 func TestMigrationsPreserveDataOnUpgrade(t *testing.T) {
 	for _, e := range Engines(t) {
 		t.Run(e.Name, func(t *testing.T) {
@@ -132,7 +134,16 @@ func TestMigrationsPreserveDataOnUpgrade(t *testing.T) {
 			s := New(db)
 			envID := mustEnvironment(t, s, ctx, "prod", domain.EnvRoleProduction)
 
-			const team = "platform-team"
+			tm, err := domain.NewTeam(NewID(), domain.TeamSpec{
+				Code: "platform-team", Name: "Platform Team",
+			}, s.Now())
+			if err != nil {
+				t.Fatalf("building the team: %v", err)
+			}
+			if err := s.CreateTeam(ctx, testActor, tm); err != nil {
+				t.Fatalf("creating the team: %v", err)
+			}
+
 			ids := make([]string, 0, 8)
 			for i := range 8 {
 				id := mustAsset(t, s, ctx, domain.KindServer, fmt.Sprintf("srv-%02d", i), nil, envID)
@@ -140,10 +151,10 @@ func TestMigrationsPreserveDataOnUpgrade(t *testing.T) {
 				if err != nil {
 					t.Fatalf("reading back: %v", err)
 				}
-				owner := team
-				a.OwnerTeam = &owner
+				owner := tm.ID
+				a.TeamID = &owner
 				if err := s.UpdateAsset(ctx, testActor, &a.Asset, []string{envID}); err != nil {
-					t.Fatalf("setting owner_team: %v", err)
+					t.Fatalf("setting team_id: %v", err)
 				}
 				ids = append(ids, id)
 			}
@@ -155,12 +166,12 @@ func TestMigrationsPreserveDataOnUpgrade(t *testing.T) {
 			}
 
 			survived, err := s.countOne(ctx,
-				`SELECT COUNT(*) FROM asset WHERE owner_team = ?`, team)
+				`SELECT COUNT(*) FROM asset WHERE team_id = ?`, tm.ID)
 			if err != nil {
 				t.Fatalf("counting: %v", err)
 			}
 			if survived != int64(len(ids)) {
-				t.Errorf("%d of %d assets kept their owner_team across migration -- a rebuild "+
+				t.Errorf("%d of %d assets kept their team across migration -- a rebuild "+
 					"dropped a column from its copy list, and no other test would notice",
 					survived, len(ids))
 			}

@@ -137,7 +137,7 @@ var DeclaredColumns = map[string][]string{
 	},
 	"asset": {
 		"id", "kind", "name", "parent_id", "serial", "asset_tag", "vendor",
-		"model", "lifecycle", "owner_team", "eol_date", "attrs",
+		"model", "lifecycle", "team_id", "manager_role", "eol_date", "attrs",
 		"created_at", "updated_at",
 	},
 	"asset_closure":     {"ancestor_id", "descendant_id", "depth"},
@@ -203,7 +203,7 @@ var DeclaredColumns = map[string][]string{
 	},
 	"identity": {
 		"id", "kind", "name", "realm", "secret_ref", "rotation_days",
-		"last_rotated", "owner_team", "lifecycle",
+		"last_rotated", "team_id", "lifecycle",
 	},
 	"interface": {
 		"id", "asset_id", "name", "form_factor", "speed_mbps", "mac", "mtu",
@@ -255,9 +255,18 @@ var DeclaredColumns = map[string][]string{
 	},
 	"cost_kind": {"code", "label", "sort_order", "description"},
 	"project": {
-		"id", "code", "name", "description", "owner_team", "lifecycle",
+		"id", "code", "name", "description", "team_id", "lifecycle",
 		"created_at", "updated_at",
 	},
+	// Who looks after what (migration 00014). Declared without argument:
+	// somebody decided that this team is answerable for this box. Nothing
+	// observes it and nothing derives it -- and `manager_role` is documentation
+	// rather than authorization, so no code path branches on its value.
+	"team": {
+		"id", "code", "name", "description", "contact_ref", "lifecycle",
+		"created_at", "updated_at",
+	},
+	"responsibility_role": {"code", "label", "sort_order", "description"},
 	"project_asset": {
 		"project_id", "asset_id", "relation", "note", "lifecycle",
 		"created_at", "updated_at",
@@ -289,7 +298,7 @@ var DeclaredColumns = map[string][]string{
 	"service": {
 		"id", "code", "name", "kind", "environment_id",
 		"availability", "min_healthy", "failover_mode", "tier", "rto_minutes",
-		"rpo_minutes", "owner_team", "lifecycle", "eol_date", "attrs",
+		"rpo_minutes", "team_id", "manager_role", "lifecycle", "eol_date", "attrs",
 		"created_at", "updated_at",
 	},
 	// desired_state is DECLARED and stays here after 00008 moved observed_state

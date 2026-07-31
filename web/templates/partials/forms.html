@@ -86,8 +86,20 @@
         <input id="asset-serial" class="mono" type="text" name="serial">
       </div>
       <div class="field">
-        <label for="asset-owner">Owner team</label>
-        <input id="asset-owner" type="text" name="owner_team">
+        <label for="asset-team">Team</label>
+        <select id="asset-team" name="team_id">
+          <option value="">—</option>
+          {{range .Teams}}<option value="{{.ID}}">{{.Code}}</option>{{end}}
+        </select>
+        <div class="field-hint">Optional. Who looks after it.</div>
+      </div>
+      <div class="field">
+        <label for="asset-role">Managed as</label>
+        <select id="asset-role" name="manager_role">
+          <option value="">—</option>
+          {{range .Roles}}<option value="{{.Code}}">{{.Label}}</option>{{end}}
+        </select>
+        <div class="field-hint">Optional, and needs a team. Who to call, not a permission.</div>
       </div>
       <div class="field">
         <label for="asset-eol">Supported until</label>
@@ -176,8 +188,20 @@
 
     <div class="field-row">
       <div class="field">
-        <label for="svc-owner">Owner team</label>
-        <input id="svc-owner" type="text" name="owner_team" value="{{deref .Spec.OwnerTeam}}">
+        <label for="svc-team">Team</label>
+        <select id="svc-team" name="team_id">
+          <option value="">—</option>
+          {{range .Teams}}<option value="{{.ID}}">{{.Code}}</option>{{end}}
+        </select>
+        <div class="field-hint">Optional. Who looks after it.</div>
+      </div>
+      <div class="field">
+        <label for="svc-role">Managed as</label>
+        <select id="svc-role" name="manager_role">
+          <option value="">—</option>
+          {{range .Roles}}<option value="{{.Code}}">{{.Label}}</option>{{end}}
+        </select>
+        <div class="field-hint">Optional, and needs a team. Who to call, not a permission.</div>
       </div>
       <div class="field">
         <label for="svc-eol">Supported until</label>

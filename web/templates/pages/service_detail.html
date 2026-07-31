@@ -31,8 +31,10 @@
         {{if .Service.MinHealthy}}<span style="color:var(--muted)"> — needs at least {{.Service.MinHealthy}} healthy</span>{{end}}
         {{if .Service.FailoverMode}}<span style="color:var(--muted)"> — {{deref .Service.FailoverMode}} failover</span>{{end}}
       </dd>
-      <dt>Owner</dt>
-      <dd>{{if .Service.OwnerTeam}}{{deref .Service.OwnerTeam}}{{else}}<span style="color:var(--faint)">unassigned</span>{{end}}</dd>
+      <dt>Looked after by</dt>
+      <dd>{{if .Service.TeamName}}<a href="/teams/{{deref .Service.TeamID}}">{{.Service.TeamName}}</a>{{if .Service.ManagerRoleName}}
+            <span style="color:var(--muted)">as {{.Service.ManagerRoleName}}</span>{{end}}
+          {{else}}<span style="color:var(--faint)">nobody recorded</span>{{end}}</dd>
       <dt>Supported until</dt>
       <dd>{{with expiry .Service.EOLDate}}<span class="{{.Class}}">{{.Date}}</span>
         <span style="color:var(--muted)">{{.Label}}</span>{{else}}—{{end}}</dd>

@@ -506,10 +506,10 @@ func (s *SQLStore) CreateIdentity(ctx context.Context, actor domain.Actor, i *do
 	return s.write(ctx, actor, func(t *tx) error {
 		_, err := t.exec(ctx, `
 			INSERT INTO identity (id, kind, name, realm, secret_ref, rotation_days,
-			                      last_rotated, owner_team, lifecycle)
+			                      last_rotated, team_id, lifecycle)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			i.ID, i.Kind, i.Name, realmOrEmpty(i.Realm), i.SecretRef, i.RotationDays,
-			i.LastRotated, i.OwnerTeam, i.Lifecycle)
+			i.LastRotated, i.TeamID, i.Lifecycle)
 		if err != nil {
 			return translateWriteErr(err, "creating identity")
 		}

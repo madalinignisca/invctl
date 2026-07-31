@@ -208,7 +208,7 @@ type Identity struct {
 	SecretRef    *string `db:"secret_ref"`
 	RotationDays *int    `db:"rotation_days"`
 	LastRotated  *string `db:"last_rotated"`
-	OwnerTeam    *string `db:"owner_team"`
+	TeamID       *string `db:"team_id"`
 	Lifecycle    string  `db:"lifecycle"`
 }
 

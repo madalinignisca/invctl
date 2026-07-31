@@ -138,7 +138,8 @@ type Service struct {
 	Tier          int     `db:"tier"`
 	RTOMinutes    *int    `db:"rto_minutes"`
 	RPOMinutes    *int    `db:"rpo_minutes"`
-	OwnerTeam     *string `db:"owner_team"`
+	TeamID        *string `db:"team_id"`
+	ManagerRole   *string `db:"manager_role"`
 	Lifecycle     string  `db:"lifecycle"`
 	// EOLDate is when this stops being supportable -- a licence that will not
 	// renew, a release past its support window. Declared, optional, inert.
@@ -167,7 +168,8 @@ type ServiceSpec struct {
 	FailoverMode  *string
 	RTOMinutes    *int
 	RPOMinutes    *int
-	OwnerTeam     *string
+	TeamID        *string
+	ManagerRole   *string
 	EOLDate       *string
 }
 
@@ -189,7 +191,8 @@ func NewService(id string, spec ServiceSpec, now time.Time) (*Service, error) {
 		Tier:          spec.Tier,
 		RTOMinutes:    spec.RTOMinutes,
 		RPOMinutes:    spec.RPOMinutes,
-		OwnerTeam:     spec.OwnerTeam,
+		TeamID:        spec.TeamID,
+		ManagerRole:   spec.ManagerRole,
 		EOLDate:       spec.EOLDate,
 		Lifecycle:     LifecycleActive,
 		Attrs:         "{}",
@@ -221,6 +224,7 @@ func (s *Service) Validate() error {
 		checkEnum(ve, "failover_mode", *s.FailoverMode, FailoverModes)
 	}
 	s.EOLDate = checkDate(ve, "eol_date", s.EOLDate)
+	s.TeamID, s.ManagerRole = checkResponsibility(ve, s.TeamID, s.ManagerRole)
 	// active_active is the only policy where min_healthy carries meaning: the
 	// others derive their threshold from the instance count or the role.
 	if s.Availability == AvailActiveActive {

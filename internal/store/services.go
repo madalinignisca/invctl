@@ -16,6 +16,7 @@ type ServiceFilter struct {
 	EnvironmentID  string
 	Kind           string
 	ProjectID      string
+	TeamID         string
 	Availability   string
 	Tier           int
 	Query          string
@@ -33,7 +34,11 @@ type ServiceRow struct {
 	// exists to surface, not a gap in the data.
 	OwningProjectID   string `db:"owning_project_id"`
 	OwningProjectName string `db:"owning_project_name"`
-	InstanceCount     int    `db:"instance_count"`
+	// Who looks after it. Empty is a real answer, rendered as such.
+	TeamCode        string `db:"team_code"`
+	TeamName        string `db:"team_name"`
+	ManagerRoleName string `db:"manager_role_name"`
+	InstanceCount   int    `db:"instance_count"`
 }
 
 // The owner join cannot fan a service out into several rows: idx_project_service_owner
@@ -46,12 +51,17 @@ const serviceSelect = `
 	       e.role AS environment_role,
 	       COALESCE(p.id, '') AS owning_project_id,
 	       COALESCE(p.name, '') AS owning_project_name,
+	       COALESCE(tm.code, '') AS team_code,
+	       COALESCE(tm.name, '') AS team_name,
+	       COALESCE(rr.label, s.manager_role, '') AS manager_role_name,
 	       (SELECT COUNT(*) FROM service_instance si WHERE si.service_id = s.id) AS instance_count
 	FROM service s
 	JOIN environment e ON e.id = s.environment_id
 	LEFT JOIN project_service ps
 	       ON ps.service_id = s.id AND ps.relation = 'owns' AND ps.lifecycle = 'active'
-	LEFT JOIN project p ON p.id = ps.project_id`
+	LEFT JOIN project p ON p.id = ps.project_id
+	LEFT JOIN team tm ON tm.id = s.team_id
+	LEFT JOIN responsibility_role rr ON rr.code = s.manager_role`
 
 // ListServices returns services matching the filter.
 func (s *SQLStore) ListServices(ctx context.Context, f ServiceFilter) ([]ServiceRow, error) {
@@ -72,6 +82,10 @@ func (s *SQLStore) ListServices(ctx context.Context, f ServiceFilter) ([]Service
 	if f.ProjectID != "" {
 		where = append(where, `ps.project_id = ?`)
 		args = append(args, f.ProjectID)
+	}
+	if f.TeamID != "" {
+		where = append(where, `s.team_id = ?`)
+		args = append(args, f.TeamID)
 	}
 	if f.Availability != "" {
 		where = append(where, `s.availability = ?`)
@@ -136,11 +150,13 @@ func (s *SQLStore) CreateService(ctx context.Context, actor domain.Actor, svc *d
 		_, err := t.exec(ctx, `
 			INSERT INTO service (id, code, name, kind, environment_id, availability,
 			                     min_healthy, failover_mode, tier, rto_minutes, rpo_minutes,
-			                     owner_team, lifecycle, eol_date, attrs, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			                     team_id, manager_role, lifecycle, eol_date, attrs,
+			                     created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			svc.ID, svc.Code, svc.Name, svc.Kind, svc.EnvironmentID, svc.Availability,
 			svc.MinHealthy, svc.FailoverMode, svc.Tier, svc.RTOMinutes, svc.RPOMinutes,
-			svc.OwnerTeam, svc.Lifecycle, svc.EOLDate, svc.Attrs, svc.CreatedAt, svc.UpdatedAt)
+			svc.TeamID, svc.ManagerRole, svc.Lifecycle, svc.EOLDate, svc.Attrs,
+			svc.CreatedAt, svc.UpdatedAt)
 		if err != nil {
 			return translateWriteErr(err, "creating service")
 		}
@@ -170,12 +186,12 @@ func (s *SQLStore) UpdateService(ctx context.Context, actor domain.Actor, svc *d
 		_, err := t.exec(ctx, `
 			UPDATE service SET code = ?, name = ?, kind = ?, environment_id = ?,
 			                   availability = ?, min_healthy = ?, failover_mode = ?, tier = ?,
-			                   rto_minutes = ?, rpo_minutes = ?, owner_team = ?, lifecycle = ?,
-			                   eol_date = ?, attrs = ?, updated_at = ?
+			                   rto_minutes = ?, rpo_minutes = ?, team_id = ?, manager_role = ?,
+			                   lifecycle = ?, eol_date = ?, attrs = ?, updated_at = ?
 			WHERE id = ?`,
 			svc.Code, svc.Name, svc.Kind, svc.EnvironmentID,
 			svc.Availability, svc.MinHealthy, svc.FailoverMode, svc.Tier,
-			svc.RTOMinutes, svc.RPOMinutes, svc.OwnerTeam, svc.Lifecycle,
+			svc.RTOMinutes, svc.RPOMinutes, svc.TeamID, svc.ManagerRole, svc.Lifecycle,
 			svc.EOLDate, svc.Attrs, svc.UpdatedAt, svc.ID)
 		if err != nil {
 			return translateWriteErr(err, "updating service")
@@ -209,9 +225,6 @@ func (s *SQLStore) RetireService(ctx context.Context, actor domain.Actor, id str
 
 func (s *SQLStore) indexService(ctx context.Context, t *tx, svc *domain.Service) error {
 	body := svc.Kind + " " + svc.Availability
-	if svc.OwnerTeam != nil {
-		body += " " + *svc.OwnerTeam
-	}
 	return s.indexEntity(ctx, t, searchDoc{
 		EntityType: "service", EntityID: svc.ID,
 		Title: svc.Name, Subtitle: svc.Code, Body: body,

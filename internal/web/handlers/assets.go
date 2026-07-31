@@ -348,7 +348,8 @@ func (a *App) AssetCreate(w http.ResponseWriter, r *http.Request) {
 		asset.AssetTag = optionalString(r, "asset_tag")
 		asset.Vendor = optionalString(r, "vendor")
 		asset.Model = optionalString(r, "model")
-		asset.OwnerTeam = optionalString(r, "owner_team")
+		asset.TeamID = optionalString(r, "team_id")
+		asset.ManagerRole = optionalString(r, "manager_role")
 		asset.EOLDate = optionalString(r, "eol_date")
 		err = a.Store.CreateAsset(r.Context(), actor(r), asset, submittedEnvironments(r))
 	}
@@ -386,7 +387,8 @@ func (a *App) AssetUpdate(w http.ResponseWriter, r *http.Request) {
 	updated.AssetTag = optionalString(r, "asset_tag")
 	updated.Vendor = optionalString(r, "vendor")
 	updated.Model = optionalString(r, "model")
-	updated.OwnerTeam = optionalString(r, "owner_team")
+	updated.TeamID = optionalString(r, "team_id")
+	updated.ManagerRole = optionalString(r, "manager_role")
 	updated.EOLDate = optionalString(r, "eol_date")
 
 	if err := a.Store.UpdateAsset(r.Context(), actor(r), &updated, submittedEnvironments(r)); err != nil {

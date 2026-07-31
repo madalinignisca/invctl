@@ -1,0 +1,59 @@
+{{define "content"}}
+<div class="page-head">
+  <div class="eyebrow">inventory</div>
+  <h1>Teams</h1>
+  <p class="lede">
+    Who looks after part of the estate. Teams, never people — a team survives the
+    people in it, and it is the more useful answer at three in the morning.
+  </p>
+</div>
+
+<div class="panel">
+  <div class="panel-body">
+    <form class="toolbar" hx-get="/teams" hx-target="#team-list" hx-swap="outerHTML"
+          hx-push-url="true" hx-trigger="keyup changed delay:250ms, search">
+      <div class="field" style="margin-bottom:0">
+        <label for="tq">Find</label>
+        <input id="tq" type="search" name="q" value="{{.Query}}" placeholder="code or name">
+      </div>
+    </form>
+  </div>
+</div>
+
+{{template "team_list_panel" .}}
+
+{{if .CanWrite}}
+<div class="panel">
+  <div class="panel-head"><h2>Add a team</h2></div>
+  <form class="panel-body" method="post" action="/teams" hx-post="/teams">
+    <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+    <div class="field-row">
+      <div class="field">
+        <label for="t-code">Code</label>
+        <input id="t-code" class="mono" type="text" name="code" value="{{.Spec.Code}}" required>
+        {{with index .Errors "code"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="t-name">Name</label>
+        <input id="t-name" type="text" name="name" value="{{.Spec.Name}}" required>
+        {{with index .Errors "name"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="t-contact">Contact</label>
+        <input id="t-contact" class="mono" type="text" name="contact_ref"
+               placeholder="platform@example.com · #platform-oncall · QUEUE-INFRA">
+        <div class="field-hint">
+          A group address, a queue or a channel — <strong>never a person</strong>.
+          This database is kept forever and its audit trail cannot be edited.
+        </div>
+      </div>
+    </div>
+    <div class="field">
+      <label for="t-desc">Description</label>
+      <input id="t-desc" type="text" name="description" placeholder="what this team is answerable for">
+    </div>
+    <button class="btn btn-primary" type="submit">Add team</button>
+  </form>
+</div>
+{{end}}
+{{end}}

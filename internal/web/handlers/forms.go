@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"log/slog"
 	"net/http"
 
 	"github.com/gabriel/invctl/internal/domain"
@@ -35,6 +36,8 @@ type assetFormData struct {
 	// selects a code path, so it is still a CHECK with a Go constant set.
 	Lifecycles []string
 	Parents    []store.AssetRow
+	Teams      []store.TeamRow
+	Roles      []store.VocabularyTerm
 }
 
 type serviceFormData struct {
@@ -42,6 +45,8 @@ type serviceFormData struct {
 	Errors         map[string]string
 	Spec           domain.ServiceSpec
 	Environments   []domain.Environment
+	Teams          []store.TeamRow
+	Roles          []store.VocabularyTerm
 	Kinds          []store.VocabularyTerm
 	Availabilities []string
 	FailoverModes  []string
@@ -110,6 +115,7 @@ type prefixFormData struct {
 // newAssetForm builds the asset form context. Parents is the same list the
 // table shows, so an asset can be filed under anything already on screen.
 func (a *App) newAssetForm(r *http.Request, errs map[string]string, envs []domain.Environment, kinds []store.VocabularyTerm, parents []store.AssetRow) assetFormData {
+	teams, roles := a.responsibilityOptions(r)
 	return assetFormData{
 		Base:         a.base(r, "Assets", "assets"),
 		Errors:       orEmpty(errs),
@@ -117,7 +123,30 @@ func (a *App) newAssetForm(r *http.Request, errs map[string]string, envs []domai
 		Kinds:        kinds,
 		Lifecycles:   domain.AssetLifecycles,
 		Parents:      parents,
+		Teams:        teams,
+		Roles:        roles,
 	}
+}
+
+// responsibilityOptions loads the two pickers every entity form carries.
+//
+// Loaded here rather than threaded through each caller's signature: they are two
+// small tables that every form wants and no caller varies. A failure degrades to
+// empty pickers and is logged rather than returned, because a form that renders
+// without its optional dropdowns is far better than a detail page that 500s over
+// a field nobody is required to fill in.
+func (a *App) responsibilityOptions(r *http.Request) ([]store.TeamRow, []store.VocabularyTerm) {
+	teams, err := a.Store.ListTeams(r.Context(), store.TeamFilter{})
+	if err != nil {
+		slog.Error("loading teams for a form", "error", err)
+		teams = nil
+	}
+	roles, err := a.Store.ResponsibilityRoles(r.Context())
+	if err != nil {
+		slog.Error("loading responsibility roles for a form", "error", err)
+		roles = nil
+	}
+	return teams, roles
 }
 
 // A service form has no project picker. Ownership is a link with a relation on
@@ -128,8 +157,11 @@ func (a *App) newServiceForm(r *http.Request, errs map[string]string, spec domai
 	if spec.Tier == 0 {
 		spec.Tier = 3
 	}
+	teams, roles := a.responsibilityOptions(r)
 	return serviceFormData{
 		Base:           a.base(r, "Services", "services"),
+		Teams:          teams,
+		Roles:          roles,
 		Errors:         orEmpty(errs),
 		Spec:           spec,
 		Environments:   envs,

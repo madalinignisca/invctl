@@ -232,7 +232,8 @@ func (a *App) ServiceCreate(w http.ResponseWriter, r *http.Request) {
 		FailoverMode:  optionalString(r, "failover_mode"),
 		RTOMinutes:    optionalInt(r, "rto_minutes"),
 		RPOMinutes:    optionalInt(r, "rpo_minutes"),
-		OwnerTeam:     optionalString(r, "owner_team"),
+		TeamID:        optionalString(r, "team_id"),
+		ManagerRole:   optionalString(r, "manager_role"),
 		EOLDate:       optionalString(r, "eol_date"),
 	}
 
@@ -269,7 +270,8 @@ func (a *App) ServiceUpdate(w http.ResponseWriter, r *http.Request) {
 	updated.FailoverMode = optionalString(r, "failover_mode")
 	updated.RTOMinutes = optionalInt(r, "rto_minutes")
 	updated.RPOMinutes = optionalInt(r, "rpo_minutes")
-	updated.OwnerTeam = optionalString(r, "owner_team")
+	updated.TeamID = optionalString(r, "team_id")
+	updated.ManagerRole = optionalString(r, "manager_role")
 	updated.EOLDate = optionalString(r, "eol_date")
 	updated.Lifecycle = formValue(r, "lifecycle")
 

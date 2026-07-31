@@ -57,21 +57,17 @@ func TestAbsorbApplicationsMovesEveryApplicationToAProject(t *testing.T) {
 			// before the absorb still point at 'app1', and they resolve only
 			// if the project kept the id.
 			var got struct {
-				Code      string  `db:"code"`
-				Name      string  `db:"name"`
-				OwnerTeam *string `db:"owner_team"`
-				Lifecycle string  `db:"lifecycle"`
-				CreatedAt string  `db:"created_at"`
+				Code      string `db:"code"`
+				Name      string `db:"name"`
+				Lifecycle string `db:"lifecycle"`
+				CreatedAt string `db:"created_at"`
 			}
 			if err := db.Reader.Get(&got,
-				`SELECT code, name, owner_team, lifecycle, created_at FROM project WHERE id = 'app1'`); err != nil {
+				`SELECT code, name, lifecycle, created_at FROM project WHERE id = 'app1'`); err != nil {
 				t.Fatalf("the application did not become a project: %v", err)
 			}
 			if got.Code != "orders" || got.Name != "Orders Platform" || got.Lifecycle != "active" {
 				t.Errorf("project app1 = %+v, want code=orders name=\"Orders Platform\" lifecycle=active", got)
-			}
-			if got.OwnerTeam == nil || *got.OwnerTeam != "commerce" {
-				t.Errorf("owner_team = %v, want commerce", got.OwnerTeam)
 			}
 			// The application's own timestamps travel with it. Stamping "now"
 			// would say the project was created during a deployment.

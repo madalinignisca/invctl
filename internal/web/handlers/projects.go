@@ -23,6 +23,7 @@ type projectListPage struct {
 	Base
 	Errors   map[string]string
 	Projects []store.ProjectRow
+	Teams    []store.TeamRow
 	Spec     domain.ProjectSpec
 }
 
@@ -72,10 +73,12 @@ func (a *App) renderProjectList(w http.ResponseWriter, r *http.Request, status i
 		a.serverError(w, r, err)
 		return
 	}
+	teams, _ := a.responsibilityOptions(r)
 	a.Render.Respond(w, r, status, "project_list", "project_list_panel", projectListPage{
 		Base:     a.base(r, "Projects", "projects"),
 		Errors:   orEmpty(errs),
 		Projects: projects,
+		Teams:    teams,
 		Spec:     spec,
 	})
 }
@@ -86,7 +89,7 @@ func (a *App) ProjectCreate(w http.ResponseWriter, r *http.Request) {
 		Code:        formValue(r, "code"),
 		Name:        formValue(r, "name"),
 		Description: optional(formValue(r, "description")),
-		OwnerTeam:   optional(formValue(r, "owner_team")),
+		TeamID:      optional(formValue(r, "team_id")),
 		Lifecycle:   formValue(r, "lifecycle"),
 	}
 	p, err := domain.NewProject(store.NewID(), spec, a.Store.Now())
@@ -199,7 +202,7 @@ func (a *App) ProjectUpdate(w http.ResponseWriter, r *http.Request) {
 		Code:        formValue(r, "code"),
 		Name:        formValue(r, "name"),
 		Description: optional(formValue(r, "description")),
-		OwnerTeam:   optional(formValue(r, "owner_team")),
+		TeamID:      optional(formValue(r, "team_id")),
 		Lifecycle:   formValue(r, "lifecycle"),
 	}
 	updated, err := domain.NewProject(id, spec, a.Store.Now())
