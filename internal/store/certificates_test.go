@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -19,7 +21,7 @@ func mustCertificate(t *testing.T, s *SQLStore, ctx context.Context, subject str
 	if err != nil {
 		t.Fatalf("building certificate %s: %v", subject, err)
 	}
-	if err := s.CreateCertificate(ctx, testActor, c, sans); err != nil {
+	if err := s.CreateCertificate(ctx, testActor, c); err != nil {
 		t.Fatalf("creating certificate %s: %v", subject, err)
 	}
 	return c.ID
@@ -131,7 +133,8 @@ func TestChangingTheNamesIsAudited(t *testing.T) {
 			// ONLY the names change; every column on the certificate itself is
 			// untouched. Without the fold this update produces an empty diff.
 			c := row.Certificate
-			if err := s.UpdateCertificate(ctx, testActor, &c, []string{"www.example.com"}); err != nil {
+			c.SANs = []string{"orders.example.com", "www.example.com"}
+			if err := s.UpdateCertificate(ctx, testActor, &c); err != nil {
 				t.Fatalf("updating the names: %v", err)
 			}
 
@@ -173,7 +176,7 @@ func TestAKeyReferenceNeverReachesTheAuditTrail(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building: %v", err)
 			}
-			if err := s.CreateCertificate(ctx, testActor, c, nil); err != nil {
+			if err := s.CreateCertificate(ctx, testActor, c); err != nil {
 				t.Fatalf("creating: %v", err)
 			}
 
@@ -181,6 +184,12 @@ func TestAKeyReferenceNeverReachesTheAuditTrail(t *testing.T) {
 			if err := s.read(ctx, &diffs,
 				`SELECT diff FROM change_log WHERE entity_type = ?`, "certificate"); err != nil {
 				t.Fatalf("reading: %v", err)
+			}
+			// Without this the loop below iterates nothing and the test passes
+			// against a store that writes no audit entry at all -- the exact
+			// shape a review found in this very test.
+			if len(diffs) == 0 {
+				t.Fatal("no audit entry was written; this test would pass over anything")
 			}
 			for _, d := range diffs {
 				if strings.Contains(d, secret) {
@@ -261,7 +270,7 @@ func TestAFingerprintIsAnIdentity(t *testing.T) {
 				if err != nil {
 					t.Fatalf("building: %v", err)
 				}
-				err = s.CreateCertificate(ctx, testActor, c, nil)
+				err = s.CreateCertificate(ctx, testActor, c)
 				if i == 0 && err != nil {
 					t.Fatalf("the first certificate was refused: %v", err)
 				}
@@ -301,7 +310,7 @@ func TestTheCertificateSnapshotIsComplete(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building: %v", err)
 			}
-			if err := s.CreateCertificate(ctx, testActor, c, []string{"www.example.com"}); err != nil {
+			if err := s.CreateCertificate(ctx, testActor, c); err != nil {
 				t.Fatalf("creating: %v", err)
 			}
 
@@ -334,6 +343,154 @@ func TestTheCertificateSnapshotIsComplete(t *testing.T) {
 			if !strings.Contains(diff, "[redacted]") {
 				t.Error("the key reference is absent rather than redacted; the trail should " +
 					"say that a key reference exists without saying what it is")
+			}
+		})
+	}
+}
+
+// TestAnAuditStructMayNotEmbedAPointer.
+//
+// The certificate audit embedded *domain.Certificate and produced entries with
+// every column missing, because auditFields matched neither the anonymous-struct
+// branch nor the db-tag one. It was invisible for a week and surfaced only by
+// mutating an unrelated rule.
+//
+// auditFields now panics on the shape. This asserts the panic exists and that it
+// says what to do, because the failure it replaces — an audit trail that looks
+// complete and is empty — is the worst kind this codebase can have.
+func TestAnAuditStructMayNotEmbedAPointer(t *testing.T) {
+	type badAudit struct {
+		*domain.Certificate
+		Extra string `db:"extra"`
+	}
+
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("an anonymous pointer embed did not panic, so the silent-empty-audit " +
+				"bug can be written again and nothing will say so")
+		}
+		message, _ := r.(string)
+		if !strings.Contains(message, "embed it by value") {
+			t.Errorf("the panic does not say how to fix it: %v", r)
+		}
+	}()
+
+	auditFields(reflect.ValueOf(badAudit{Certificate: &domain.Certificate{}}),
+		map[string]auditField{})
+}
+
+// TestUndeployingSomethingThatWasNeverDeployed.
+//
+// From a security review. The retire path used to log unconditionally, so
+// POSTing it with two ids that had never been deployed together wrote a removal
+// into the append-only trail and reported success — a fabricated fact, which is
+// worse than a missing one.
+func TestUndeployingSomethingThatWasNeverDeployed(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			s, ctx := newStore(t, e)
+			env := mustEnvironment(t, s, ctx, "prod", domain.EnvRoleProduction)
+			asset := mustAsset(t, s, ctx, domain.KindServer, "lb-01", nil, env)
+			id := mustCertificate(t, s, ctx, "orders.example.com", nil, "2027-01-01")
+
+			before, err := s.countOne(ctx,
+				`SELECT COUNT(*) FROM change_log WHERE entity_type = ?`, "certificate")
+			if err != nil {
+				t.Fatalf("counting: %v", err)
+			}
+
+			err = s.UndeployCertificateFromAsset(ctx, testActor, id, asset)
+			if !errors.Is(err, domain.ErrNotFound) {
+				t.Errorf("retiring a deployment that never existed returned %v, want ErrNotFound", err)
+			}
+
+			after, err := s.countOne(ctx,
+				`SELECT COUNT(*) FROM change_log WHERE entity_type = ?`, "certificate")
+			if err != nil {
+				t.Fatalf("counting after: %v", err)
+			}
+			if after != before {
+				t.Errorf("change_log gained %d entries for a removal that never happened",
+					after-before)
+			}
+		})
+	}
+}
+
+// Re-recording a deployment that is already there, unchanged, writes nothing.
+// An audit trail full of entries saying nothing changed is worse than one
+// without them — the rule logUpdate enforces and a hand-built diff opts out of.
+func TestRedeployingUnchangedWritesNoAuditEntry(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			s, ctx := newStore(t, e)
+			env := mustEnvironment(t, s, ctx, "prod", domain.EnvRoleProduction)
+			asset := mustAsset(t, s, ctx, domain.KindServer, "lb-01", nil, env)
+			id := mustCertificate(t, s, ctx, "orders.example.com", nil, "2027-01-01")
+
+			note := "the https listener"
+			if err := s.DeployCertificateToAsset(ctx, testActor, id, asset, &note); err != nil {
+				t.Fatalf("deploying: %v", err)
+			}
+			before, _ := s.countOne(ctx,
+				`SELECT COUNT(*) FROM change_log WHERE entity_type = ?`, "certificate")
+
+			// The same deployment, the same note.
+			if err := s.DeployCertificateToAsset(ctx, testActor, id, asset, &note); err != nil {
+				t.Fatalf("re-deploying: %v", err)
+			}
+			same, _ := s.countOne(ctx,
+				`SELECT COUNT(*) FROM change_log WHERE entity_type = ?`, "certificate")
+			if same != before {
+				t.Errorf("re-recording an unchanged deployment wrote %d audit entries", same-before)
+			}
+
+			// The control: a CHANGED note is a change and must be recorded, or
+			// the no-op check has become a silence.
+			other := "moved to the management listener"
+			if err := s.DeployCertificateToAsset(ctx, testActor, id, asset, &other); err != nil {
+				t.Fatalf("changing the note: %v", err)
+			}
+			changed, _ := s.countOne(ctx,
+				`SELECT COUNT(*) FROM change_log WHERE entity_type = ?`, "certificate")
+			if changed != same+1 {
+				t.Errorf("changing a deployment note wrote %d entries, want 1", changed-same)
+			}
+		})
+	}
+}
+
+// An unknown role must come back as a field error, not as a foreign-key
+// violation the handler can only render as a bare 422.
+func TestAnUnknownRoleOnACertificateIsAFieldError(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			s, ctx := newStore(t, e)
+			team, err := domain.NewTeam(NewID(), domain.TeamSpec{Code: "net", Name: "Network"}, s.Now())
+			if err != nil {
+				t.Fatalf("building the team: %v", err)
+			}
+			if err := s.CreateTeam(ctx, testActor, team); err != nil {
+				t.Fatalf("creating the team: %v", err)
+			}
+
+			role := "chief-certificate-officer"
+			c, err := domain.NewCertificate(NewID(), domain.CertificateSpec{
+				SubjectCN: "orders.example.com", TeamID: &team.ID, ManagerRole: &role,
+			}, s.Now())
+			if err != nil {
+				t.Fatalf("the constructor rejected the shape rather than the store rejecting the value: %v", err)
+			}
+			err = s.CreateCertificate(ctx, testActor, c)
+			if err == nil {
+				t.Fatal("a role that is not in the lookup table was accepted")
+			}
+			if ve, ok := domain.AsValidation(err); !ok {
+				t.Errorf("the error is %T, not a *ValidationError, so the form cannot "+
+					"highlight the field: %v", err, err)
+			} else if _, named := ve.Messages()["manager_role"]; !named {
+				t.Errorf("the error does not name manager_role: %v", ve.Messages())
 			}
 		})
 	}

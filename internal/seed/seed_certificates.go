@@ -137,7 +137,7 @@ func (b *builder) certificates() {
 			b.fail(fmt.Errorf("building certificate %s: %w", spec.subject, err))
 			return
 		}
-		if err := b.store.CreateCertificate(b.ctx, Actor, c, def.SANs); err != nil {
+		if err := b.store.CreateCertificate(b.ctx, Actor, c); err != nil {
 			b.fail(fmt.Errorf("seeding certificate %s: %w", spec.subject, err))
 			return
 		}

@@ -50,9 +50,13 @@ func TestCoversHostMatchesTheWayAClientDoes(t *testing.T) {
 }
 
 func TestNormaliseSANsAlwaysIncludesTheSubject(t *testing.T) {
-	got := NormaliseSANs("Orders.Example.com", []string{
+	ve := &ValidationError{}
+	got := checkSANs(ve, "orders.example.com", []string{
 		"www.example.com", "ORDERS.example.com", " api.example.com. ", "", "www.example.com",
 	})
+	if err := ve.OrNil(); err != nil {
+		t.Fatalf("valid names were rejected: %v", err)
+	}
 
 	want := []string{"orders.example.com", "www.example.com", "api.example.com"}
 	if len(got) != len(want) {
@@ -161,5 +165,135 @@ func TestNewCertificateRejectsWhatWouldMislead(t *testing.T) {
 	// out rather than the constructor refusing it.
 	if _, err := NewCertificate("c1", CertificateSpec{SubjectCN: "x.example.com"}, certNow); err != nil {
 		t.Errorf("a certificate with no recorded expiry was rejected: %v", err)
+	}
+}
+
+// TestTheNamesFieldRefusesAPaste.
+//
+// From a security review, and it is the finding that mattered most. The SAN
+// field is what an operator pastes into, and everything accepted there is
+// stored, indexed for search, AND folded into the audited value — so anything
+// that gets in becomes permanent in an append-only log. A pasted PEM block
+// became seven searchable rows and an unerasable change_log entry.
+//
+// This codebase's own migration header named the threat — "a column that accepts
+// certificate-shaped text is where a key eventually gets pasted" — and then left
+// the field open. Each token must now look like a hostname or an IP.
+func TestTheNamesFieldRefusesAPaste(t *testing.T) {
+	pem := []string{
+		"-----BEGIN", "PRIVATE", "KEY-----",
+		"MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQ",
+		"-----END", "PRIVATE", "KEY-----",
+	}
+	ve := &ValidationError{}
+	got := checkSANs(ve, "orders.example.com", pem)
+
+	if err := ve.OrNil(); err == nil {
+		t.Fatal("a pasted private key was accepted as a list of names")
+	}
+	// NOTHING is kept, not even the tokens that happen to parse. A PEM block
+	// splits into armour lines that fail and base64 lines that are, letter for
+	// letter, valid single-label hostnames -- so keeping the valid-looking ones
+	// stores half a key. The operator fixes the field and resubmits.
+	if len(got) != 0 {
+		t.Errorf("kept %v; a submission containing a paste stores nothing at all", got)
+	}
+	// And the error must not echo the key back onto the screen in full.
+	for _, f := range ve.Fields {
+		if len(f.Message) > 200 {
+			t.Errorf("the error message is %d characters; a pasted key in an error "+
+				"message is a pasted key on a screen", len(f.Message))
+		}
+	}
+}
+
+func TestNamesMustLookLikeNames(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		ok   bool
+	}{
+		{"a hostname", "orders.example.com", true},
+		{"a wildcard", "*.example.com", true},
+		{"an underscore label", "_acme-challenge.example.com", true},
+		{"a single label", "localhost", true},
+		{"an IPv4 address", "10.20.30.5", true},
+		{"an IPv6 address", "2001:db8::1", true},
+
+		{"a wildcard in the middle", "a.*.example.com", false},
+		{"a bare wildcard", "*", false},
+		{"a space", "orders example.com", false},
+		{"a slash", "https://orders.example.com", false},
+		{"a PEM header", "-----BEGIN", false},
+		{"base64", "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQ", false},
+		{"an email address", "alice@example.com", false},
+		{"a label starting with a hyphen", "-bad.example.com", false},
+		{"an empty label", "a..example.com", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := validSANName(c.in); got != c.ok {
+				t.Errorf("validSANName(%q) = %v, want %v", c.in, got, c.ok)
+			}
+		})
+	}
+
+	// Over the DNS limit.
+	long := ""
+	for len(long) < 300 {
+		long += "abcdefgh."
+	}
+	if validSANName(long) {
+		t.Error("a name longer than a DNS name is allowed")
+	}
+}
+
+// Free-text fields are capped, because everything here is snapshotted into an
+// append-only log and an unbounded field is where a paste becomes permanent.
+func TestFreeTextFieldsAreCapped(t *testing.T) {
+	huge := make([]byte, 4096)
+	for i := range huge {
+		huge[i] = 'a'
+	}
+	big := string(huge)
+
+	for _, field := range []string{"issuer", "serial", "key_ref"} {
+		t.Run(field, func(t *testing.T) {
+			spec := CertificateSpec{SubjectCN: "orders.example.com"}
+			switch field {
+			case "issuer":
+				spec.Issuer = &big
+			case "serial":
+				spec.Serial = &big
+			case "key_ref":
+				spec.KeyRef = &big
+			}
+			if _, err := NewCertificate("c1", spec, certNow); err == nil {
+				t.Errorf("a 4096-character %s was accepted", field)
+			}
+		})
+	}
+
+	// A NUL byte saves on SQLite and errors on PostgreSQL, so it is refused
+	// before it can become a cross-engine 500.
+	if _, err := NewCertificate("c1", CertificateSpec{
+		SubjectCN: "orders.example.com", Issuer: strptr("Internal\x00CA"),
+	}, certNow); err == nil {
+		t.Error("a NUL byte was accepted into a text field")
+	}
+}
+
+// An all-separator fingerprint is absent, not invalid: somebody clearing the
+// field leaves colons behind more often than they leave letters.
+func TestAnAllSeparatorFingerprintIsAbsent(t *testing.T) {
+	for _, in := range []string{"::::", "   ", "-- --", ""} {
+		ve := &ValidationError{}
+		got := normaliseFingerprint(ve, &in)
+		if err := ve.OrNil(); err != nil {
+			t.Errorf("%q was rejected rather than treated as absent: %v", in, err)
+		}
+		if got != nil {
+			t.Errorf("%q became %q rather than nothing", in, *got)
+		}
 	}
 }

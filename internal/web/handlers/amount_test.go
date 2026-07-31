@@ -83,3 +83,45 @@ func itoa(v int64) string {
 	}
 	return string(b)
 }
+
+// TestSplitNamesStripsOnlyKnownPrefixes.
+//
+// From a security review. Cutting at the FIRST colon of any token mangled every
+// value that legitimately contains one: a bare IPv6 address 2001:db8::1 became
+// db8::1 and host:443 became 443. A wrong stored name makes "what covers this
+// address" answer wrongly, and silently.
+func TestSplitNamesStripsOnlyKnownPrefixes(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want []string
+	}{
+		{"an openssl paste", "DNS:orders.example.com, DNS:www.example.com",
+			[]string{"orders.example.com", "www.example.com"}},
+		{"newlines", "orders.example.com\nwww.example.com",
+			[]string{"orders.example.com", "www.example.com"}},
+		{"case-insensitive prefixes", "dns:a.example.com DNS:b.example.com",
+			[]string{"a.example.com", "b.example.com"}},
+
+		// The three the old version mangled.
+		{"a bare IPv6 address", "2001:db8::1", []string{"2001:db8::1"}},
+		{"a host and port survives intact", "host:443", []string{"host:443"}},
+		{"an IP prefix is stripped, the address is not",
+			"IP Address:2001:db8::1", []string{"2001:db8::1"}},
+
+		{"empty", "", nil},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := splitNames(c.in)
+			if len(got) != len(c.want) {
+				t.Fatalf("splitNames(%q) = %v, want %v", c.in, got, c.want)
+			}
+			for i := range c.want {
+				if got[i] != c.want[i] {
+					t.Errorf("position %d is %q, want %q (full: %v)", i, got[i], c.want[i], got)
+				}
+			}
+		})
+	}
+}

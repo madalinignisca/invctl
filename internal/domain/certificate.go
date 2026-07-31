@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"net"
 	"strings"
 	"time"
 )
@@ -47,6 +48,13 @@ type Certificate struct {
 	Attrs       string  `db:"attrs"`
 	CreatedAt   string  `db:"created_at"`
 	UpdatedAt   string  `db:"updated_at"`
+
+	// SANs are every name this certificate covers, subject included, validated
+	// and normalised. Not a column -- they live in certificate_san -- but they
+	// are carried HERE rather than passed to the store beside the certificate,
+	// because a separate parameter is a seam through which an unvalidated name
+	// can reach the database. The constructor fills this in; the store reads it.
+	SANs []string `db:"-"`
 }
 
 // CertificateLifecycles reuses the estate-wide set.
@@ -78,14 +86,15 @@ func NewCertificate(id string, spec CertificateSpec, now time.Time) (*Certificat
 	c := &Certificate{
 		ID:        id,
 		SubjectCN: strings.ToLower(checkRequired(ve, "subject_cn", spec.SubjectCN)),
-		Issuer:    blankToNil(spec.Issuer),
-		Serial:    blankToNil(spec.Serial),
-		KeyRef:    blankToNil(spec.KeyRef),
+		Issuer:    checkTextField(ve, "issuer", blankToNil(spec.Issuer), maxIssuer),
+		Serial:    checkTextField(ve, "serial", blankToNil(spec.Serial), maxSerial),
+		KeyRef:    checkTextField(ve, "key_ref", blankToNil(spec.KeyRef), maxKeyRef),
 		Attrs:     "{}",
 		CreatedAt: FormatTime(now),
 		UpdatedAt: FormatTime(now),
 	}
 
+	c.SANs = checkSANs(ve, c.SubjectCN, spec.SANs)
 	c.Fingerprint = normaliseFingerprint(ve, spec.Fingerprint)
 	c.NotBefore = checkDate(ve, "not_before", spec.NotBefore)
 	c.NotAfter = checkDate(ve, "not_after", spec.NotAfter)
@@ -114,12 +123,16 @@ func NewCertificate(id string, spec CertificateSpec, now time.Time) (*Certificat
 func (c *Certificate) Validate() error {
 	ve := &ValidationError{}
 	c.SubjectCN = strings.ToLower(checkRequired(ve, "subject_cn", c.SubjectCN))
+	c.SANs = checkSANs(ve, c.SubjectCN, c.SANs)
 	c.Fingerprint = normaliseFingerprint(ve, c.Fingerprint)
 	c.NotBefore = checkDate(ve, "not_before", c.NotBefore)
 	c.NotAfter = checkDate(ve, "not_after", c.NotAfter)
 	if c.NotBefore != nil && c.NotAfter != nil && *c.NotAfter < *c.NotBefore {
 		ve.Add("not_after", "cannot be before the date it becomes valid")
 	}
+	c.Issuer = checkTextField(ve, "issuer", c.Issuer, maxIssuer)
+	c.Serial = checkTextField(ve, "serial", c.Serial, maxSerial)
+	c.KeyRef = checkTextField(ve, "key_ref", c.KeyRef, maxKeyRef)
 	c.TeamID, c.ManagerRole = checkResponsibility(ve, c.TeamID, c.ManagerRole)
 	checkEnum(ve, "lifecycle", c.Lifecycle, CertificateLifecycles)
 	if strings.TrimSpace(c.Attrs) == "" {
@@ -180,29 +193,147 @@ func normaliseFingerprint(ve *ValidationError, raw *string) *string {
 	return &cleaned
 }
 
-// NormaliseSANs cleans and de-duplicates the names a certificate covers,
-// ensuring the subject is among them.
+// Field limits. Generous enough that no real certificate is refused, tight
+// enough that none of these becomes a place to paste a document.
+const (
+	// 253 is the maximum length of a DNS name.
+	maxHostname = 253
+	maxIssuer   = 256
+	maxSerial   = 128
+	maxKeyRef   = 512
+	// MaxSANs bounds one certificate's name set. Real certificates run to a few
+	// dozen; a hundred is beyond anything legitimate and short of anything that
+	// would make one transaction expensive on the single SQLite writer.
+	MaxSANs = 100
+)
+
+// checkTextField caps a free-text field and rejects control characters.
 //
-// Lowercased because DNS is case-insensitive and `Orders.example.com` and
-// `orders.example.com` are one name; storing both would make "which certificate
-// covers this host" depend on how somebody typed it.
-func NormaliseSANs(subject string, sans []string) []string {
+// The cap is not tidiness. Everything here is snapshotted into the append-only
+// change_log, so an unbounded field is a place where a pasted document -- a
+// private key, somebody's email, a support thread -- becomes permanent and
+// unerasable. A limit is the only thing standing between a paste and forever.
+//
+// NUL is rejected specifically: PostgreSQL refuses it in TEXT and SQLite does
+// not, so a NUL-carrying value is a row that saves on one engine and 500s on
+// the other.
+func checkTextField(ve *ValidationError, field string, value *string, max int) *string {
+	if value == nil {
+		return nil
+	}
+	v := strings.TrimSpace(*value)
+	if v == "" {
+		return nil
+	}
+	if len(v) > max {
+		ve.Add(field, "is longer than %d characters", max)
+		return value
+	}
+	for _, r := range v {
+		if r == 0 || (r < 0x20 && r != '\t') {
+			ve.Add(field, "contains a control character")
+			return value
+		}
+	}
+	return &v
+}
+
+// checkSANs validates and normalises the names a certificate covers.
+//
+// VALIDATION, NOT JUST CLEANING. This is the field an operator pastes into, and
+// a paste is how key material gets into a database that swore it would hold
+// none: the SAN set is stored, indexed for search, AND folded into the audited
+// value, so anything accepted here is permanent. A security review demonstrated
+// it -- a pasted PEM block became seven searchable rows and an unerasable
+// change_log entry. Each token must now look like a hostname or an IP address.
+//
+// Lowercased because DNS is case-insensitive: `Orders.example.com` and
+// `orders.example.com` are one name, and storing both would make "which
+// certificate covers this host" depend on how somebody typed it.
+func checkSANs(ve *ValidationError, subject string, sans []string) []string {
 	seen := map[string]bool{}
 	out := make([]string, 0, len(sans)+1)
+	var rejected bool
+
 	add := func(name string) {
 		name = strings.ToLower(strings.TrimSpace(name))
 		name = strings.TrimSuffix(name, ".") // a trailing dot is the same host
 		if name == "" || seen[name] {
 			return
 		}
+		if len(out) >= MaxSANs {
+			ve.Add("sans", "more than %d names; a certificate with that many is not "+
+				"what this field is for", MaxSANs)
+			return
+		}
+		if !validSANName(name) {
+			rejected = true
+			ve.Add("sans", "%q is not a hostname or an IP address. This field takes the "+
+				"names a certificate covers -- never a key, a certificate body or a note",
+				truncateForMessage(name))
+			return
+		}
 		seen[name] = true
 		out = append(out, name)
 	}
+
 	add(subject)
 	for _, name := range sans {
 		add(name)
 	}
+
+	// ALL OR NOTHING. Keeping the tokens that happen to parse while rejecting
+	// the rest is how a paste gets in piecemeal: a PEM block splits into armour
+	// lines that fail and base64 lines that are, letter for letter, valid
+	// single-label hostnames. Half a key stored is still a key stored, and the
+	// operator has to fix the field and resubmit either way.
+	if rejected {
+		return nil
+	}
 	return out
+}
+
+// validSANName reports whether a name is a hostname or an IP address.
+//
+// A leading `*.` wildcard label is allowed and nothing else is: a wildcard
+// anywhere but the first label is not something any client honours.
+func validSANName(name string) bool {
+	if len(name) > maxHostname {
+		return false
+	}
+	if net.ParseIP(name) != nil {
+		return true
+	}
+	rest := strings.TrimPrefix(name, "*.")
+	if rest == "" || rest != name && strings.Contains(rest, "*") {
+		return false
+	}
+	labels := strings.Split(rest, ".")
+	for _, label := range labels {
+		if label == "" || len(label) > 63 {
+			return false
+		}
+		if label[0] == '-' || label[len(label)-1] == '-' {
+			return false
+		}
+		for _, r := range label {
+			isLetter := (r >= 'a' && r <= 'z')
+			isDigit := r >= '0' && r <= '9'
+			if !isLetter && !isDigit && r != '-' && r != '_' {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// truncateForMessage keeps a rejected value short enough to render. A pasted
+// key in an error message is a pasted key on a screen.
+func truncateForMessage(s string) string {
+	if len(s) <= 40 {
+		return s
+	}
+	return s[:40] + "…"
 }
 
 // CoversHost reports whether a name matches one of a certificate's names,

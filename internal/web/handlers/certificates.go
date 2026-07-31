@@ -76,7 +76,7 @@ func (a *App) CertificateCreate(w http.ResponseWriter, r *http.Request) {
 	spec := certificateSpecFromForm(r)
 	c, err := domain.NewCertificate(store.NewID(), spec, a.Store.Now())
 	if err == nil {
-		err = a.Store.CreateCertificate(r.Context(), actor(r), c, spec.SANs)
+		err = a.Store.CreateCertificate(r.Context(), actor(r), c)
 	}
 	if err != nil {
 		if errs, ok := validationErrors(err); ok {
@@ -160,8 +160,10 @@ func (a *App) CertificateUpdate(w http.ResponseWriter, r *http.Request) {
 	updated.TeamID = submittedString(r, "team_id", existing.TeamID)
 	updated.ManagerRole = submittedString(r, "manager_role", existing.ManagerRole)
 	updated.Lifecycle = formValue(r, "lifecycle")
+	// The names arrive with the form; Validate checks them.
+	updated.SANs = spec.SANs
 
-	if err := a.Store.UpdateCertificate(r.Context(), actor(r), &updated, spec.SANs); err != nil {
+	if err := a.Store.UpdateCertificate(r.Context(), actor(r), &updated); err != nil {
 		if errs, ok := validationErrors(err); ok {
 			a.renderCertificate(w, r, http.StatusUnprocessableEntity, errs)
 			return
@@ -247,19 +249,44 @@ func certificateSpecFromForm(r *http.Request) domain.CertificateSpec {
 // as newlines or commas depending on how they cleaned it up. Accepting both is
 // one line here and saves an operator a fight with a form.
 func splitNames(raw string) []string {
-	fields := strings.FieldsFunc(raw, func(r rune) bool {
-		return r == ',' || r == '\n' || r == '\r' || r == ' ' || r == '\t' || r == ';'
+	// LINES FIRST, then prefixes, then spaces. openssl prints `IP Address:`
+	// with a space IN the prefix, so splitting on whitespace up front tore that
+	// label in half and the prefix could never match. One line is one entry;
+	// what is left after its prefix may still be several space-separated names.
+	lines := strings.FieldsFunc(raw, func(r rune) bool {
+		return r == ',' || r == '\n' || r == '\r' || r == ';'
 	})
-	out := make([]string, 0, len(fields))
-	for _, f := range fields {
-		// `DNS:orders.example.com` is what openssl prints; taking the name
-		// after the type prefix means a paste works unedited.
-		if _, name, ok := strings.Cut(f, ":"); ok {
-			f = name
-		}
-		if f != "" {
-			out = append(out, f)
+	var out []string
+	for _, line := range lines {
+		// Stripped at both levels: once for the line, because `IP Address:`
+		// carries a space, and once per name, because several prefixed names
+		// can share a line.
+		line = stripSANPrefix(strings.TrimSpace(line))
+		for _, name := range strings.Fields(line) {
+			if name = stripSANPrefix(name); name != "" {
+				out = append(out, name)
+			}
 		}
 	}
 	return out
+}
+
+// sanPrefixes are what openssl prints in front of a name. Only these are
+// stripped.
+//
+// Cutting at the FIRST colon of any token -- the previous behaviour -- mangled
+// every value that legitimately contains one: a bare IPv6 address 2001:db8::1
+// was stored as db8::1, and host:443 as 443. A wrong stored name makes "what
+// covers this address" answer wrongly, and it does so silently. Found by a
+// security review.
+var sanPrefixes = []string{"dns:", "ip address:", "ip:", "uri:", "email:"}
+
+func stripSANPrefix(token string) string {
+	lower := strings.ToLower(token)
+	for _, prefix := range sanPrefixes {
+		if strings.HasPrefix(lower, prefix) {
+			return token[len(prefix):]
+		}
+	}
+	return token
 }

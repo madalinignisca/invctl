@@ -38,9 +38,28 @@ func auditFields(v reflect.Value, out map[string]auditField) {
 	t := v.Type()
 	for i := 0; i < t.NumField(); i++ {
 		field := t.Field(i)
-		if field.Anonymous && field.Type.Kind() == reflect.Struct {
-			auditFields(v.Field(i), out)
-			continue
+		if field.Anonymous {
+			// An anonymous POINTER embed is the shape that made the certificate
+			// audit record nothing at all: it silently matched neither this
+			// branch nor the db-tag one below, so every column of the embedded
+			// struct vanished from change_log while an entry was still written.
+			// The bug was invisible for a week and was found by mutating an
+			// unrelated redaction rule.
+			//
+			// A panic rather than a silent deref, because this is a programming
+			// error in a struct literal that only ever appears at compile time
+			// in this package -- and the failure it replaces is the worst kind:
+			// an audit trail that looks complete and is empty. Embed by value.
+			if field.Type.Kind() == reflect.Ptr {
+				panic(fmt.Sprintf(
+					"audit struct %s embeds *%s by pointer: embed it by value, or "+
+						"its columns are silently absent from every change_log entry",
+					t.Name(), field.Type.Elem().Name()))
+			}
+			if field.Type.Kind() == reflect.Struct {
+				auditFields(v.Field(i), out)
+				continue
+			}
 		}
 		name := field.Tag.Get("db")
 		if name == "" || name == "-" {

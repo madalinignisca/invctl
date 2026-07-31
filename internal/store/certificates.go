@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -21,8 +23,6 @@ import (
 // CertificateRow is a certificate plus what a list view needs.
 type CertificateRow struct {
 	domain.Certificate
-	// SANs are every name it covers, subject included, in stored order.
-	SANs []string
 	// Where it is deployed. Counted for the list; listed on the detail page.
 	AssetCount   int `db:"asset_count"`
 	ServiceCount int `db:"service_count"`
@@ -184,13 +184,24 @@ func auditedCertificate(c *domain.Certificate, sans []string) *certificateAudit 
 }
 
 // CreateCertificate inserts a certificate and its names.
-func (s *SQLStore) CreateCertificate(ctx context.Context, actor domain.Actor, c *domain.Certificate, sans []string) error {
+func (s *SQLStore) CreateCertificate(ctx context.Context, actor domain.Actor, c *domain.Certificate) error {
 	if err := c.Validate(); err != nil {
 		return err
 	}
-	names := domain.NormaliseSANs(c.SubjectCN, sans)
+	// c.SANs, never a separate parameter: Validate has just checked them, and a
+	// second argument is a seam through which an unvalidated name reaches the
+	// database. A security review demonstrated what gets in through that seam.
+	names := c.SANs
 
 	return s.write(ctx, actor, func(t *tx) error {
+		// The same check assets and services make. Without it an unknown role
+		// reaches the foreign key, and SQLite reports that as "FOREIGN KEY
+		// constraint failed" with no column in it -- a bare 422 with no field
+		// highlighted and the form contents lost. Certificates skipped it and a
+		// review caught the omission.
+		if err := requireRole(ctx, t, c.ManagerRole); err != nil {
+			return err
+		}
 		_, err := t.exec(ctx, `
 			INSERT INTO certificate (id, subject_cn, issuer, fingerprint, serial,
 			                         not_before, not_after, key_ref, team_id, manager_role,
@@ -213,7 +224,7 @@ func (s *SQLStore) CreateCertificate(ctx context.Context, actor domain.Actor, c 
 }
 
 // UpdateCertificate persists field and name changes.
-func (s *SQLStore) UpdateCertificate(ctx context.Context, actor domain.Actor, c *domain.Certificate, sans []string) error {
+func (s *SQLStore) UpdateCertificate(ctx context.Context, actor domain.Actor, c *domain.Certificate) error {
 	if err := c.Validate(); err != nil {
 		return err
 	}
@@ -223,9 +234,12 @@ func (s *SQLStore) UpdateCertificate(ctx context.Context, actor domain.Actor, c 
 	}
 	c.CreatedAt = before.CreatedAt
 	c.UpdatedAt = domain.FormatTime(s.now())
-	names := domain.NormaliseSANs(c.SubjectCN, sans)
+	names := c.SANs
 
 	return s.write(ctx, actor, func(t *tx) error {
+		if err := requireRole(ctx, t, c.ManagerRole); err != nil {
+			return err
+		}
 		_, err := t.exec(ctx, `
 			UPDATE certificate SET subject_cn = ?, issuer = ?, fingerprint = ?, serial = ?,
 			                       not_before = ?, not_after = ?, key_ref = ?, team_id = ?,
@@ -378,29 +392,45 @@ func (s *SQLStore) deployCertificate(ctx context.Context, actor domain.Actor,
 
 	at := domain.FormatTime(s.now())
 	return s.write(ctx, actor, func(t *tx) error {
-		// Re-deploying somewhere it was retired from reactivates the row rather
-		// than failing on the primary key: the operator's intent is "it is here
-		// now", and a second row cannot exist to say so.
-		res, err := t.exec(ctx,
-			`UPDATE `+table+` SET lifecycle = ?, note = ?, updated_at = ?
-			 WHERE certificate_id = ? AND `+column+` = ?`,
-			domain.LifecycleActive, note, at, certificateID, entityID)
-		if err != nil {
-			return translateWriteErr(err, "recording a certificate deployment")
+		// What is there now, so a no-op can be recognised. An audit trail full
+		// of entries saying nothing changed is worse than one without them --
+		// the rule logUpdate enforces everywhere else, which a hand-built diff
+		// string quietly opts out of. Both reviews caught this.
+		var before struct {
+			Lifecycle string  `db:"lifecycle"`
+			Note      *string `db:"note"`
 		}
-		if n, err := res.RowsAffected(); err == nil && n > 0 {
-			return t.log(ctx, "certificate", certificateID, domain.ActionUpdate,
-				fmt.Sprintf(`{"deployment":{"new":%q}}`, entityID))
+		err := t.get(ctx, &before,
+			`SELECT lifecycle, note FROM `+table+`
+			 WHERE certificate_id = ? AND `+column+` = ?`, certificateID, entityID)
+		exists := err == nil
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("reading the existing deployment: %w", err)
 		}
 
-		if _, err := t.exec(ctx,
+		if exists && before.Lifecycle == domain.LifecycleActive && sameNote(before.Note, note) {
+			// Already deployed here, with the same note. Nothing happened.
+			return nil
+		}
+
+		if exists {
+			// Re-deploying somewhere it was retired from reactivates the row
+			// rather than failing on the primary key: the operator's intent is
+			// "it is here now", and a second row cannot exist to say so.
+			if _, err := t.exec(ctx,
+				`UPDATE `+table+` SET lifecycle = ?, note = ?, updated_at = ?
+				 WHERE certificate_id = ? AND `+column+` = ?`,
+				domain.LifecycleActive, note, at, certificateID, entityID); err != nil {
+				return translateWriteErr(err, "recording a certificate deployment")
+			}
+		} else if _, err := t.exec(ctx,
 			`INSERT INTO `+table+` (certificate_id, `+column+`, note, lifecycle, created_at, updated_at)
 			 VALUES (?, ?, ?, ?, ?, ?)`,
 			certificateID, entityID, note, domain.LifecycleActive, at, at); err != nil {
 			return translateWriteErr(err, "recording a certificate deployment")
 		}
 		return t.log(ctx, "certificate", certificateID, domain.ActionUpdate,
-			fmt.Sprintf(`{"deployment":{"new":%q}}`, entityID))
+			fmt.Sprintf(`{"deployment":{"new":%q,"note":%q}}`, entityID, derefOr(note, "")))
 	})
 }
 
@@ -421,13 +451,38 @@ func (s *SQLStore) undeployCertificate(ctx context.Context, actor domain.Actor,
 
 	at := domain.FormatTime(s.now())
 	return s.write(ctx, actor, func(t *tx) error {
-		if _, err := t.exec(ctx,
+		res, err := t.exec(ctx,
 			`UPDATE `+table+` SET lifecycle = ?, updated_at = ?
-			 WHERE certificate_id = ? AND `+column+` = ?`,
-			domain.LifecycleRetired, at, certificateID, entityID); err != nil {
+			 WHERE certificate_id = ? AND `+column+` = ? AND lifecycle = ?`,
+			domain.LifecycleRetired, at, certificateID, entityID, domain.LifecycleActive)
+		if err != nil {
 			return translateWriteErr(err, "retiring a certificate deployment")
+		}
+		// Zero rows means there was nothing here to retire. The previous version
+		// logged regardless, so POSTing the retire route with two ids that had
+		// never been deployed together FABRICATED a removal in the permanent
+		// trail and reported success. Found by a security review.
+		n, err := res.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("checking the retirement: %w", err)
+		}
+		if n == 0 {
+			return fmt.Errorf("no active deployment of %s on %s: %w",
+				certificateID, entityID, domain.ErrNotFound)
 		}
 		return t.log(ctx, "certificate", certificateID, domain.ActionUpdate,
 			fmt.Sprintf(`{"deployment":{"old":%q}}`, entityID))
 	})
+}
+
+// sameNote compares two optional notes, treating nil and empty as one value.
+func sameNote(a, b *string) bool {
+	return derefOr(a, "") == derefOr(b, "")
+}
+
+func derefOr(s *string, fallback string) string {
+	if s == nil {
+		return fallback
+	}
+	return *s
 }

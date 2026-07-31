@@ -334,11 +334,13 @@ var dynamicTargetAllowlist = map[string]string{
 // worth knowing about too, because it usually means the statement moved
 // somewhere that is not on this list.
 var dynamicTargetBudget = map[string]int{
-	"internal/store/reach.go":        1, // retireRows
-	"internal/store/vocabulary.go":   1, // UpsertVocabularyTerm; its INSERT is exempt, only the UPDATE counts
-	"internal/store/projects.go":     2, // releaseLinks, retireLink
-	"internal/store/costs.go":        2, // updateCost, retireCost
-	"internal/store/certificates.go": 2, // deployCertificate's reactivation UPDATE, undeployCertificate
+	"internal/store/reach.go":      1, // retireRows
+	"internal/store/vocabulary.go": 2, // UpsertVocabularyTerm: its INSERT and its UPDATE
+	"internal/store/projects.go":   2, // releaseLinks, retireLink
+	"internal/store/costs.go":      3, // addCost's INSERT, updateCost, retireCost
+	// deployCertificate: the existence SELECT is not a write; its reactivation
+	// UPDATE and its INSERT are, and undeployCertificate's UPDATE makes three.
+	"internal/store/certificates.go": 3,
 }
 
 func TestNoAssembledWriteReachesChangeLog(t *testing.T) {
@@ -368,7 +370,13 @@ func TestNoAssembledWriteReachesChangeLog(t *testing.T) {
 						"anywhere, ever. Correcting a wrong entry means writing a new one, and "+
 						"the rule 10 prune targets observed_transition only.", rel, stmt.line, w.verb)
 
-				case w.table == dynamicTable && w.verb != "insert":
+				// INSERT is checked too. The switch used to exempt it, which
+				// defended DELETION of history and not FABRICATION of it: a
+				// runtime-assembled INSERT aimed at change_log would forge audit
+				// rows and the whole suite would stay green. A security review
+				// pointed out that certificates.go already contains such an
+				// INSERT -- safe today, invisible to the test either way.
+				case w.table == dynamicTable:
 					if _, ok := dynamicTargetAllowlist[rel]; ok {
 						dynamicSeen[rel]++
 						continue

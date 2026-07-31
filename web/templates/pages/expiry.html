@@ -22,7 +22,7 @@
   </div>
   <div class="stat">
     <div class="k">no date recorded</div>
-    <div class="v">{{add .Report.UndatedAssets .Report.UndatedServices}}</div>
+    <div class="v">{{add .Report.UndatedAssets .Report.UndatedServices .Report.UndatedCertificates}}</div>
   </div>
 </div>
 
@@ -113,7 +113,7 @@
   {{end}}
 </div>
 
-{{if or .Report.UndatedAssets .Report.UndatedServices}}
+{{if or .Report.UndatedAssets .Report.UndatedServices .Report.UndatedCertificates}}
 <div class="callout callout-warn">
   <h2>What this report cannot see</h2>
   <p style="margin-top:6px">

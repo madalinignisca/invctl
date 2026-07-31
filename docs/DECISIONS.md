@@ -1883,3 +1883,92 @@ used `strings.Map` with a negative sentinel to mark invalid characters.
 came back as the empty string and was then treated as no fingerprint at all.
 Silently discarding what somebody typed is the worst of the three possible
 behaviours.
+
+---
+
+## 2026-07-31 — The certificate reviews: a paste that would have been permanent
+
+Three reviews over the certificate feature. The security one found the thing this
+feature's own migration header had named as the threat and then left open.
+
+### The SAN field would store a pasted private key, forever
+
+`splitNames` accepted any token. Paste a PEM block into the "also covers"
+textarea and each line became a `certificate_san` row, FTS-indexed, **and** folded
+into the audited value — so it landed in the append-only `change_log`, where it is
+unerasable by design. The rows and the index are correctable by an edit; the
+audit row is not.
+
+Verified before fixing: a pasted key split into seven stored names.
+
+Names are now validated as hostnames or IP addresses — a leading `*.` label
+allowed and nothing else — with the free-text fields capped (`issuer` 256,
+`serial` 128, `key_ref` 512) and control characters and NUL refused. NUL
+specifically, because PostgreSQL rejects it in TEXT and SQLite does not, so a
+NUL-carrying value is a row that saves on one engine and 500s on the other.
+
+**All or nothing.** My first fix kept the tokens that parsed and rejected the
+rest — and my own test caught that a PEM block splits into armour lines that fail
+and base64 lines that are, letter for letter, valid single-label hostnames. Half a
+key stored is still a key stored. A submission containing anything invalid now
+stores nothing at all.
+
+The names also moved onto the `Certificate` struct rather than travelling beside
+it as a second store parameter, because that parameter was the seam through which
+an unvalidated name could reach the database.
+
+### `IP Address:2001:db8::1` became `ip` and `2001:db8::1`
+
+Cutting at the first colon of any token mangled every value that legitimately
+contains one: a bare IPv6 address `2001:db8::1` was stored as `db8::1`, and
+`host:443` as `443`. A wrong stored name makes "what covers this address" answer
+wrongly, and silently. Only known prefixes are stripped now — and per *line*
+before per *name*, because openssl's `IP Address:` carries a space that
+whitespace-splitting tore in half.
+
+### Fabricated audit entries
+
+`undeployCertificate` logged unconditionally, so POSTing the retire route with two
+ids that had never been deployed together wrote a removal into the permanent trail
+and reported success — a fabricated fact, which is worse than a missing one. It
+now returns `ErrNotFound` on zero rows affected. `deployCertificate` likewise
+wrote a fresh entry every time an unchanged deployment was re-submitted; it now
+compares before and after, which is the rule `logUpdate` enforces everywhere else
+and that a hand-built diff string quietly opts out of.
+
+### The root cause of the empty-audit bug is closed
+
+`auditFields` recursed only into anonymous **struct** embeds, so an anonymous
+**pointer** embed was silently skipped — the shape that made `certificateAudit`
+record nothing. Only certificates had a completeness test, so the next audit
+struct could have regressed unnoticed. It now panics with a message saying to
+embed by value. A panic rather than a silent deref because this is a struct
+literal in one package, resolved at compile time, and the failure it replaces is
+an audit trail that looks complete and is empty.
+
+### Smaller, all real
+
+- Certificates never called `requireRole`, reintroducing in one file the bug fixed
+  in three others the same day: an unknown role reached the foreign key, and
+  SQLite reports that with no column name, so the operator got a bare 422 with
+  nothing highlighted and a lost form.
+- The expiry report's "what this report cannot see" callout was gated on
+  `or UndatedAssets UndatedServices`, ignoring certificates entirely — and the
+  top "no date recorded" stat summed only those two. My test passed by
+  coincidence: the fixture leaves `hv-03` undated, which kept the `or` true.
+- `TestAKeyReferenceNeverReachesTheAuditTrail` iterated a slice without asserting
+  it was non-empty, so it passed against a store that wrote no audit entry at all
+  — the fifth test-that-cannot-fail this session, and the review found it in the
+  very file whose sibling test exists *because* of that pattern.
+- The guard test exempted dynamic INSERTs, defending deletion of history but not
+  fabrication of it: an assembled `INSERT INTO <var>` aimed at `change_log` would
+  forge audit rows with the suite green. It now counts INSERTs, which immediately
+  corrected two stale per-file budgets.
+
+### Decided, not changed
+
+`key_ref` renders to every authenticated session, including read-only, while
+`secret_ref` appears in no template at all. The asymmetry is deliberate: a
+certificate's key location is what an operator needs during a renewal, and the
+authorization model today is read versus read-write with no finer grain. If cost
+visibility ever gets its own permission, this belongs behind the same one.
