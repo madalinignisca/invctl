@@ -85,6 +85,9 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	// A view, and only a view: GET, no CSRF, no RequireAdmin, and nothing on
 	// the page it renders can change the estate or the model of it.
 	read("GET /assets/{id}/neighbourhood", app.AssetNeighbourhood)
+	read("GET /projects", app.ProjectList)
+	read("GET /projects/{id}", app.ProjectOverview)
+	read("GET /projects/{id}/map", app.ProjectMap)
 	read("GET /vocabularies", app.VocabularyList)
 	read("GET /help", app.Help)
 	read("GET /help/{topic}", app.Help)
@@ -108,6 +111,13 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	write("POST /assets/{id}/parent", app.AssetReparent)
 
 	write("POST /services", app.ServiceCreate)
+	write("POST /projects", app.ProjectCreate)
+	write("POST /projects/{id}", app.ProjectUpdate)
+	write("POST /projects/{id}/retire", app.ProjectRetire)
+	write("POST /projects/{id}/assets", app.ProjectAssetLink)
+	write("POST /projects/{id}/assets/{assetID}/retire", app.ProjectAssetRetire)
+	write("POST /projects/{id}/services", app.ProjectServiceLink)
+	write("POST /projects/{id}/services/{serviceID}/retire", app.ProjectServiceRetire)
 	write("POST /vocabularies", app.VocabularyUpsert)
 	write("POST /services/{id}", app.ServiceUpdate)
 	write("POST /services/{id}/retire", app.ServiceRetire)

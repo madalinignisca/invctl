@@ -1,0 +1,12 @@
+{{/* The project map is a membership map with a project's name on it. The body
+     lives in membership_map.html, shared with the environment map.
+
+     This wrapper exists because the HTMX path renders the partial directly
+     with the PAGE as dot, while the full-page path renders it through the
+     page template. Without the wrapper the two paths disagree about the shape
+     of dot, and the swap silently produces nothing -- which is exactly what
+     happened, and what the layer-toggle test caught. */}}
+
+{{define "project_map_panel"}}
+{{template "membership_map_panel" .View}}
+{{end}}

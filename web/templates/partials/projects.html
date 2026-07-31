@@ -1,0 +1,286 @@
+{{/* Projects: the list, and the overview a product owner reads.
+
+     The overview's discipline is that every number is either DECLARED by a
+     person or labelled DERIVED, with nothing in between. A manager who cannot
+     tell which is which stops trusting all of it. */}}
+
+{{define "project_list_panel"}}
+<div id="projects">
+  <div class="panel">
+    <div class="panel-head">
+      <h2>Projects</h2>
+      <span class="panel-note">{{pluralise (len .Projects) "project" "projects"}}</span>
+    </div>
+    {{if .Projects}}
+    <div class="scroll-x">
+      <table>
+        <thead>
+          <tr><th>Code</th><th>Name</th><th>Owner</th><th class="num">Owns</th><th class="num">Uses</th><th>State</th></tr>
+        </thead>
+        <tbody>
+          {{range .Projects}}
+          <tr>
+            <td class="mono"><a href="/projects/{{.ID}}">{{.Code}}</a></td>
+            <td>{{.Name}}</td>
+            <td>{{if .OwnerTeam}}{{deref .OwnerTeam}}{{else}}<span style="color:var(--faint)">unassigned</span>{{end}}</td>
+            <td class="num">{{add .OwnedAssets .OwnedServices}}</td>
+            <td class="num">{{add .UsedAssets .UsedServices}}</td>
+            <td><span class="{{lifecycleClass .Lifecycle}}">{{.Lifecycle}}</span></td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+    {{else}}
+    <div class="empty">
+      <strong>No projects yet.</strong>
+      A project is a business grouping — what a team is responsible for — cutting
+      across environments and racks rather than nesting inside them.
+    </div>
+    {{end}}
+  </div>
+
+  <div class="panel">
+    <div class="panel-head"><h2>Add a project</h2></div>
+    <form class="panel-body" method="post" action="/projects"
+          hx-post="/projects" hx-target="#projects" hx-swap="outerHTML">
+      <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+      <div class="field-row">
+        <div class="field">
+          <label for="p-code">Code</label>
+          <input id="p-code" class="mono {{if index .Errors "code"}}invalid{{end}}" type="text"
+                 name="code" value="{{.Spec.Code}}" required>
+          {{with index .Errors "code"}}<div class="field-error">{{.}}</div>{{end}}
+        </div>
+        <div class="field">
+          <label for="p-name">Name</label>
+          <input id="p-name" type="text" name="name" value="{{.Spec.Name}}"
+                 class="{{if index .Errors "name"}}invalid{{end}}" required>
+          {{with index .Errors "name"}}<div class="field-error">{{.}}</div>{{end}}
+        </div>
+        <div class="field">
+          <label for="p-team">Owning team</label>
+          <input id="p-team" type="text" name="owner_team">
+        </div>
+      </div>
+      <div class="field">
+        <label for="p-desc">What is it for?</label>
+        <textarea id="p-desc" name="description" rows="2"
+                  placeholder="One sentence, for somebody deciding whether this is the project they meant."></textarea>
+      </div>
+      <button class="btn btn-primary" type="submit">Add project</button>
+    </form>
+  </div>
+</div>
+{{end}}
+
+{{define "project_panel"}}
+<div id="project">
+
+  {{/* 1. What it consists of, as somebody declared it. */}}
+  <div class="grid-2">
+    <div class="panel">
+      <div class="panel-head">
+        <h2>Assets</h2>
+        <span class="panel-note">declared</span>
+      </div>
+      {{if .Assets}}
+      <div class="scroll-x">
+        <table>
+          <thead><tr><th>Asset</th><th>Kind</th><th>Relation</th><th></th></tr></thead>
+          <tbody>
+            {{range .Assets}}
+            <tr>
+              <td><a href="/assets/{{.AssetID}}">{{.Name}}</a></td>
+              <td><span class="pill pill-muted">{{.Kind}}</span></td>
+              <td><span class="pill {{if eq .Relation "owns"}}pill-info{{else}}pill-muted{{end}}">{{.Relation}}</span></td>
+              <td>
+                <form method="post" action="/projects/{{.ProjectID}}/assets/{{.AssetID}}/retire"
+                      hx-post="/projects/{{.ProjectID}}/assets/{{.AssetID}}/retire"
+                      hx-target="#project" hx-swap="outerHTML">
+                  <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+                  <button class="btn btn-sm btn-danger" type="submit">Unlink</button>
+                </form>
+              </td>
+            </tr>
+            {{end}}
+          </tbody>
+        </table>
+      </div>
+      {{else}}
+      <div class="empty"><strong>No assets linked.</strong> Nothing is recorded as belonging to this project yet.</div>
+      {{end}}
+    </div>
+
+    <div class="panel">
+      <div class="panel-head">
+        <h2>Services</h2>
+        <span class="panel-note">declared</span>
+      </div>
+      {{if .Services}}
+      <div class="scroll-x">
+        <table>
+          <thead><tr><th>Service</th><th>Tier</th><th>Relation</th><th></th></tr></thead>
+          <tbody>
+            {{range .Services}}
+            <tr>
+              <td><a href="/services/{{.ServiceID}}">{{.Code}}</a></td>
+              <td><span class="{{tierClass .Tier}}">tier {{.Tier}}</span></td>
+              <td><span class="pill {{if eq .Relation "owns"}}pill-info{{else}}pill-muted{{end}}">{{.Relation}}</span></td>
+              <td>
+                <form method="post" action="/projects/{{.ProjectID}}/services/{{.ServiceID}}/retire"
+                      hx-post="/projects/{{.ProjectID}}/services/{{.ServiceID}}/retire"
+                      hx-target="#project" hx-swap="outerHTML">
+                  <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+                  <button class="btn btn-sm btn-danger" type="submit">Unlink</button>
+                </form>
+              </td>
+            </tr>
+            {{end}}
+          </tbody>
+        </table>
+      </div>
+      {{else}}
+      <div class="empty"><strong>No services linked.</strong></div>
+      {{end}}
+    </div>
+  </div>
+
+  {{/* 2. What that implies. Labelled derived in the heading AND in the prose,
+       because this is the section a manager is most likely to quote. */}}
+  <div class="panel">
+    <div class="panel-head">
+      <h2>What that implies</h2>
+      <span class="panel-note">derived — nobody declared these</span>
+    </div>
+    <div class="panel-body">
+      <p class="panel-note" style="margin-bottom:12px">
+        Owning a host means owning what runs inside it. These are computed from
+        containment and placement each time this page is opened; no record says
+        they belong to the project, and none is written.
+      </p>
+      {{if or .Footprint.ImpliedAssets .Footprint.ImpliedServices}}
+      <div class="tag-list">
+        {{range .Footprint.ImpliedAssets}}<span class="pill pill-muted mono">{{.Name}}</span>{{end}}
+        {{range .Footprint.ImpliedServices}}<span class="pill pill-info mono">{{.Code}}</span>{{end}}
+      </div>
+      {{else}}
+      <div class="empty"><strong>Nothing implied.</strong>
+        Either this project owns no hosts, or nothing runs inside what it owns.</div>
+      {{end}}
+      {{if .Footprint.AssetsElided}}
+      <div class="diag-note">{{pluralise .Footprint.AssetsElided "further asset" "further assets"}}
+        not shown — the derived list is capped so one project owning a site cannot
+        turn this page into a picture of the whole estate.</div>
+      {{end}}
+      {{range .Footprint.Conflicts}}
+      <div class="diag-note">
+        <span class="mono">{{.AssetName}}</span> sits inside something this project owns,
+        but <a href="/projects/{{.ProjectID}}">{{.ProjectName}}</a> owns it outright —
+        so it counts as theirs, not yours.
+      </div>
+      {{end}}
+    </div>
+  </div>
+
+  {{/* 3. The finding. */}}
+  <div class="panel">
+    <div class="panel-head">
+      <h2>What it depends on that it does not own</h2>
+      <span class="panel-note">{{pluralise (len .Depends.External) "dependency" "dependencies"}} on another team</span>
+    </div>
+    <div class="panel-body">
+      {{if or .Depends.External .Depends.Unowned}}
+        {{if .Depends.External}}
+        <div class="scroll-x">
+          <table>
+            <thead><tr><th>This project's</th><th>depends on</th><th>owned by</th><th>How badly</th></tr></thead>
+            <tbody>
+              {{range .Depends.External}}
+              <tr>
+                <td class="mono">{{.ConsumerCode}}</td>
+                <td class="mono">{{.ProviderCode}}{{if .ProviderEndpoint}}<span style="color:var(--muted)">/{{.ProviderEndpoint}}</span>{{end}}</td>
+                <td><a href="/projects/{{.OwningProjectID}}">{{.OwningProjectName}}</a></td>
+                <td><span class="pill pill-muted">{{.Nature}}</span></td>
+              </tr>
+              {{end}}
+            </tbody>
+          </table>
+        </div>
+        {{end}}
+        {{range .Depends.Unowned}}
+        <div class="diag-note">
+          <span class="mono">{{.ConsumerCode}}</span> depends on
+          <span class="mono">{{.ProviderCode}}</span>, which <strong>no project owns</strong> —
+          there is nobody to ask about it.
+        </div>
+        {{end}}
+      {{else}}
+      <div class="empty">
+        <strong>Nothing outside the project.</strong>
+        Everything its services depend on, it owns or has declared that it uses.
+      </div>
+      {{end}}
+      {{if .Depends.Shared}}
+      <p class="panel-note" style="margin-top:12px">
+        {{pluralise (len .Depends.Shared) "further dependency is" "further dependencies are"}}
+        on things this project already declared it uses — known, so not listed as a finding.
+      </p>
+      {{end}}
+    </div>
+  </div>
+
+  {{/* 4. Linking. */}}
+  <div class="grid-2">
+    <div class="panel">
+      <div class="panel-head"><h2>Link an asset</h2></div>
+      <form class="panel-body" method="post" action="/projects/{{.Project.ID}}/assets"
+            hx-post="/projects/{{.Project.ID}}/assets" hx-target="#project" hx-swap="outerHTML">
+        <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+        <div class="field">
+          <label for="l-asset">Asset</label>
+          <select id="l-asset" name="asset_id" class="{{if index .Errors "asset_id"}}invalid{{end}}">
+            {{range .AllAssets}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
+          </select>
+          {{with index .Errors "asset_id"}}<div class="field-error">{{.}}</div>{{end}}
+        </div>
+        <div class="field">
+          <label for="l-rel">Relation</label>
+          <select id="l-rel" name="relation">
+            {{range .Relations}}<option value="{{.}}">{{.}}</option>{{end}}
+          </select>
+          <div class="field-hint">
+            <strong>owns</strong>: it exists for this project, and no other project may own it.
+            <strong>uses</strong>: shared with others.
+            <a href="/help/project_relation">What is the difference?</a>
+          </div>
+        </div>
+        <button class="btn btn-primary" type="submit">Link asset</button>
+      </form>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head"><h2>Link a service</h2></div>
+      <form class="panel-body" method="post" action="/projects/{{.Project.ID}}/services"
+            hx-post="/projects/{{.Project.ID}}/services" hx-target="#project" hx-swap="outerHTML">
+        <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+        <div class="field">
+          <label for="l-svc">Service</label>
+          <select id="l-svc" name="service_id" class="{{if index .Errors "service_id"}}invalid{{end}}">
+            {{range .AllServices}}<option value="{{.ID}}">{{.Code}}</option>{{end}}
+          </select>
+          {{with index .Errors "service_id"}}<div class="field-error">{{.}}</div>{{end}}
+        </div>
+        <div class="field">
+          <label for="l-svc-rel">Relation</label>
+          <select id="l-svc-rel" name="relation">
+            {{range .Relations}}<option value="{{.}}">{{.}}</option>{{end}}
+          </select>
+        </div>
+        <button class="btn btn-primary" type="submit">Link service</button>
+      </form>
+    </div>
+  </div>
+
+</div>
+{{end}}

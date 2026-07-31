@@ -129,6 +129,17 @@ var Topics = []Topic{
 		},
 	},
 	{
+		Key:   "project_relation",
+		Title: "Project relation",
+		Intro: "How a project claims a thing. Two relations, and the asymmetry between " +
+			"them is what lets this tool say whose estate a box belongs to — and, once " +
+			"cost measurement lands, whose budget it lands on.",
+		Terms: []Term{
+			{"owns", "Owns", "The thing exists FOR this project. At most one project may own a given asset or service, so it is the anchor a cost model can attribute the whole of something to. Ownership also derives the footprint: what is inside an owned asset, and what runs on it, is this project's concern."},
+			{"uses", "Uses", "The project depends on it but shares it with others. Any number of projects may use one thing, and nothing is derived from a `uses` link — what is inside somebody else's hypervisor is their footprint, not yours."},
+		},
+	},
+	{
 		Key:   "lifecycle",
 		Title: "Lifecycle",
 		Intro: "Whether a row describes something that exists. Nothing is ever deleted here — " +

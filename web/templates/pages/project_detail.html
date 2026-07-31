@@ -1,0 +1,21 @@
+{{define "content"}}
+<div class="crumbs">
+  <a href="/projects">projects</a><span class="sep">/</span><span>{{.Project.Code}}</span>
+</div>
+
+<div class="page-head">
+  <div class="eyebrow">{{if .Project.OwnerTeam}}{{deref .Project.OwnerTeam}}{{else}}no owning team recorded{{end}}</div>
+  <h1>{{.Project.Name}}</h1>
+  <div class="tag-list" style="margin-top:8px">
+    <span class="mono pill pill-muted">{{.Project.Code}}</span>
+    <span class="{{lifecycleClass .Project.Lifecycle}}">{{.Project.Lifecycle}}</span>
+  </div>
+  {{if .Project.Description}}<p class="lede">{{deref .Project.Description}}</p>{{end}}
+</div>
+
+<div style="margin-bottom:18px">
+  <a class="btn btn-primary" href="/projects/{{.Project.ID}}/map">See how it fits together</a>
+</div>
+
+{{template "project_panel" .}}
+{{end}}

@@ -1,0 +1,101 @@
+{{/* A membership picture: everything in a named set, in three bands. Shared by
+     the environment map and the project map, which differ only in where the
+     layer toolbar posts and what the heading calls the set.
+
+     Dot is a diagramView, not the page — so a page needs no particular shape
+     to render one, and the two callers cannot drift apart the way two copies
+     of ninety lines would. */}}
+
+{{define "membership_map_panel"}}
+<div id="membership-map">
+
+  <div class="panel">
+    <div class="panel-head">
+      <h2>{{.Heading}}</h2>
+      <span class="panel-note">
+        {{.Note}}
+      </span>
+    </div>
+    <div class="panel-body">
+
+      <form class="toolbar" method="get"
+            action="{{.Action}}"
+            hx-get="{{.Action}}"
+            hx-target="#membership-map" hx-swap="outerHTML" hx-push-url="true"
+            hx-trigger="change, submit">
+        <input type="hidden" name="filter" value="1">
+        <div class="field">
+          <label>Layers</label>
+          <div class="checks">
+            {{range .Layers}}
+            <label class="check" title="{{.Label}}: {{.Note}} — {{pluralise .Nodes "node" "nodes"}}, {{pluralise .Edges "connection" "connections"}}">
+              <input type="checkbox" name="layer" value="{{.Name}}" {{if .On}}checked{{end}}>
+              <span>{{.Label}}</span>
+              <span class="pill pill-muted">{{.Nodes}}</span>
+            </label>
+            {{end}}
+          </div>
+        </div>
+      </form>
+
+      {{with .Scene}}{{template "diagram_scene" .}}{{end}}
+
+      {{if .Empty}}
+      <div class="empty">
+        <strong>Nothing to draw.</strong>
+        {{.Empty}}
+      </div>
+      {{end}}
+
+      {{range .Notes}}
+      <div class="diag-note">{{.}}</div>
+      {{end}}
+    </div>
+
+    <div class="panel-body" style="border-top:1px solid var(--line-soft)">
+      {{template "diagram_legend" .Layers}}
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head">
+      <h2>Connections</h2>
+      <span class="panel-note">
+        {{pluralise (len .Rows) "connection" "connections"}} drawn above,
+        in full.
+      </span>
+    </div>
+    {{if .Rows}}
+    <div class="scroll-x">
+      <table>
+        <thead>
+          <tr>
+            <th>Layer</th><th>Kind</th><th>From</th><th>At</th>
+            <th>To</th><th>At</th><th>What it is</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .Rows}}
+          <tr>
+            <td><span class="pill pill-muted">{{.Layer}}</span></td>
+            <td><span class="pill pill-muted">{{.Kind}}</span></td>
+            <td class="mono">{{.From}}</td>
+            <td class="mono" style="font-size:12px;color:var(--muted)">{{if .FromAt}}{{.FromAt}}{{else}}—{{end}}</td>
+            <td class="mono">{{.To}}</td>
+            <td class="mono" style="font-size:12px;color:var(--muted)">{{if .ToAt}}{{.ToAt}}{{else}}—{{end}}</td>
+            <td style="font-size:12.5px;color:var(--muted)">{{.Detail}}</td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+    {{else}}
+    <div class="empty">
+      <strong>No connections drawn.</strong>
+      Nothing joins the assets shown, at these layers.
+    </div>
+    {{end}}
+  </div>
+
+</div>
+{{end}}

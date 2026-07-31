@@ -1,0 +1,19 @@
+{{define "content"}}
+<div class="crumbs">
+  <a href="/projects">projects</a><span class="sep">/</span>
+  <a href="/projects/{{.Project.ID}}">{{.Project.Code}}</a><span class="sep">/</span><span>map</span>
+</div>
+
+<div class="page-head">
+  <div class="eyebrow">Layered connectivity</div>
+  <h1>{{.Project.Name}}</h1>
+  <p class="lede">
+    Everything this project declared, plus what that implies — services on top,
+    the virtual layer in the middle, hardware at the bottom. It is a picture of
+    membership rather than a walk, so another team's estate is absent however it
+    happens to be cabled.
+  </p>
+</div>
+
+{{template "project_map_panel" .}}
+{{end}}

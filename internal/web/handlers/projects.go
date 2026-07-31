@@ -1,0 +1,341 @@
+package handlers
+
+import (
+	"fmt"
+	"net/http"
+
+	"github.com/gabriel/invctl/internal/domain"
+	"github.com/gabriel/invctl/internal/store"
+	"github.com/gabriel/invctl/internal/web/render"
+)
+
+// Projects: the business view, written for whoever signs off the budget rather
+// than for whoever holds the pager.
+//
+// The overview answers four questions in the order a manager asks them: what
+// does this project consist of, what does that imply, what is it standing on
+// that somebody else owns, and what does it look like. Everything on it is
+// either declared by a person or clearly labelled as derived — there is no
+// third category, because a number a manager cannot trace is a number they
+// will stop believing.
+
+type projectListPage struct {
+	Base
+	Errors   map[string]string
+	Projects []store.ProjectRow
+	Spec     domain.ProjectSpec
+}
+
+type projectPage struct {
+	Base
+	Errors  map[string]string
+	Project *store.ProjectRow
+
+	// Declared.
+	Assets   []store.ProjectAssetRow
+	Services []store.ProjectServiceRow
+	// Derived, and labelled as such everywhere it is shown.
+	Footprint *store.ProjectFootprint
+	Depends   *store.ProjectDependencyReport
+
+	// Pickers for the link forms.
+	AllAssets   []store.AssetRow
+	AllServices []store.ServiceRow
+	Relations   []string
+}
+
+type projectMapPage struct {
+	Base
+	Project *store.ProjectRow
+	View    diagramView
+}
+
+// ProjectList shows every project and the form to create one.
+func (a *App) ProjectList(w http.ResponseWriter, r *http.Request) {
+	a.renderProjectList(w, r, http.StatusOK, nil, domain.ProjectSpec{})
+}
+
+func (a *App) renderProjectList(w http.ResponseWriter, r *http.Request, status int,
+	errs map[string]string, spec domain.ProjectSpec) {
+
+	projects, err := a.Store.ListProjects(r.Context(), store.ProjectFilter{
+		Query: r.URL.Query().Get("q"),
+	})
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
+	a.Render.Respond(w, r, status, "project_list", "project_list_panel", projectListPage{
+		Base:     a.base(r, "Projects", "projects"),
+		Errors:   orEmpty(errs),
+		Projects: projects,
+		Spec:     spec,
+	})
+}
+
+// ProjectCreate stores a new project.
+func (a *App) ProjectCreate(w http.ResponseWriter, r *http.Request) {
+	spec := domain.ProjectSpec{
+		Code:        formValue(r, "code"),
+		Name:        formValue(r, "name"),
+		Description: optional(formValue(r, "description")),
+		OwnerTeam:   optional(formValue(r, "owner_team")),
+		Lifecycle:   formValue(r, "lifecycle"),
+	}
+	p, err := domain.NewProject(store.NewID(), spec, a.Store.Now())
+	if err != nil {
+		if errs, ok := validationErrors(err); ok {
+			a.renderProjectList(w, r, http.StatusUnprocessableEntity, errs, spec)
+			return
+		}
+		a.serverError(w, r, err)
+		return
+	}
+	if err := a.Store.CreateProject(r.Context(), actor(r), p); err != nil {
+		if errs, ok := validationErrors(err); ok {
+			a.renderProjectList(w, r, http.StatusUnprocessableEntity, errs, spec)
+			return
+		}
+		a.handleStoreError(w, r, err)
+		return
+	}
+	render.Redirect(w, r, "/projects/"+p.ID)
+}
+
+// ProjectOverview is the page a product owner or a CTO opens.
+func (a *App) ProjectOverview(w http.ResponseWriter, r *http.Request) {
+	a.renderProject(w, r, http.StatusOK, nil)
+}
+
+func (a *App) renderProject(w http.ResponseWriter, r *http.Request, status int, errs map[string]string) {
+	id := r.PathValue("id")
+	project, err := a.Store.GetProject(r.Context(), id)
+	if err != nil {
+		a.handleStoreError(w, r, err)
+		return
+	}
+
+	assets, err := a.Store.ListProjectAssets(r.Context(), id)
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
+	services, err := a.Store.ListProjectServices(r.Context(), id)
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
+	footprint, err := a.Store.ProjectFootprint(r.Context(), id, 0)
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
+	depends, err := a.Store.ProjectExternalDependencies(r.Context(), footprint)
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
+
+	allAssets, err := a.Store.ListAssets(r.Context(), store.AssetFilter{})
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
+	allServices, err := a.Store.ListServices(r.Context(), store.ServiceFilter{})
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
+
+	a.Render.Respond(w, r, status, "project_detail", "project_panel", projectPage{
+		Base:        a.base(r, "Project: "+project.Name, "projects"),
+		Errors:      orEmpty(errs),
+		Project:     project,
+		Assets:      assets,
+		Services:    services,
+		Footprint:   footprint,
+		Depends:     depends,
+		AllAssets:   allAssets,
+		AllServices: allServices,
+		Relations:   domain.ProjectRelations,
+	})
+}
+
+// ProjectUpdate edits a project's own fields.
+func (a *App) ProjectUpdate(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	existing, err := a.Store.GetProject(r.Context(), id)
+	if err != nil {
+		a.handleStoreError(w, r, err)
+		return
+	}
+	spec := domain.ProjectSpec{
+		Code:        formValue(r, "code"),
+		Name:        formValue(r, "name"),
+		Description: optional(formValue(r, "description")),
+		OwnerTeam:   optional(formValue(r, "owner_team")),
+		Lifecycle:   formValue(r, "lifecycle"),
+	}
+	updated, err := domain.NewProject(id, spec, a.Store.Now())
+	if err != nil {
+		if errs, ok := validationErrors(err); ok {
+			a.renderProject(w, r, http.StatusUnprocessableEntity, errs)
+			return
+		}
+		a.serverError(w, r, err)
+		return
+	}
+	updated.CreatedAt = existing.CreatedAt
+	if err := a.Store.UpdateProject(r.Context(), actor(r), updated); err != nil {
+		if errs, ok := validationErrors(err); ok {
+			a.renderProject(w, r, http.StatusUnprocessableEntity, errs)
+			return
+		}
+		a.handleStoreError(w, r, err)
+		return
+	}
+	render.Redirect(w, r, "/projects/"+id)
+}
+
+// ProjectRetire soft-deletes a project and releases its links.
+func (a *App) ProjectRetire(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if err := a.Store.RetireProject(r.Context(), actor(r), id); err != nil {
+		a.handleStoreError(w, r, err)
+		return
+	}
+	render.Redirect(w, r, "/projects")
+}
+
+// ProjectAssetLink links an asset, or changes how it is linked.
+//
+// A conflict here is a 422 rather than a 409, and the distinction is not
+// pedantry: the operator picked a valid asset and a valid relation, and what
+// is wrong is the combination — which is a field-level problem they can fix on
+// the form in front of them. The store's error already names the current owner.
+func (a *App) ProjectAssetLink(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	link, err := domain.NewProjectAssetLink(id, formValue(r, "asset_id"),
+		formValue(r, "relation"), optional(formValue(r, "note")), a.Store.Now())
+	if err != nil {
+		a.linkFailed(w, r, err, "asset_id")
+		return
+	}
+	if err := a.Store.LinkProjectAsset(r.Context(), actor(r), link); err != nil {
+		a.linkFailed(w, r, err, "asset_id")
+		return
+	}
+	render.Redirect(w, r, "/projects/"+id)
+}
+
+// ProjectServiceLink links a service, or changes how it is linked.
+func (a *App) ProjectServiceLink(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	link, err := domain.NewProjectServiceLink(id, formValue(r, "service_id"),
+		formValue(r, "relation"), optional(formValue(r, "note")), a.Store.Now())
+	if err != nil {
+		a.linkFailed(w, r, err, "service_id")
+		return
+	}
+	if err := a.Store.LinkProjectService(r.Context(), actor(r), link); err != nil {
+		a.linkFailed(w, r, err, "service_id")
+		return
+	}
+	render.Redirect(w, r, "/projects/"+id)
+}
+
+// linkFailed re-renders the overview with the problem against the field the
+// operator can act on.
+func (a *App) linkFailed(w http.ResponseWriter, r *http.Request, err error, field string) {
+	if errs, ok := validationErrors(err); ok {
+		a.renderProject(w, r, http.StatusUnprocessableEntity, errs)
+		return
+	}
+	if isConflict(err) {
+		a.renderProject(w, r, http.StatusUnprocessableEntity, map[string]string{
+			field: err.Error(),
+		})
+		return
+	}
+	a.handleStoreError(w, r, err)
+}
+
+// ProjectAssetRetire releases one asset link.
+func (a *App) ProjectAssetRetire(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if err := a.Store.RetireProjectAsset(r.Context(), actor(r), id, r.PathValue("assetID")); err != nil {
+		a.handleStoreError(w, r, err)
+		return
+	}
+	render.Redirect(w, r, "/projects/"+id)
+}
+
+// ProjectServiceRetire releases one service link.
+func (a *App) ProjectServiceRetire(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if err := a.Store.RetireProjectService(r.Context(), actor(r), id, r.PathValue("serviceID")); err != nil {
+		a.handleStoreError(w, r, err)
+		return
+	}
+	render.Redirect(w, r, "/projects/"+id)
+}
+
+// ProjectMap draws the project's asset surface, through the same pipeline as
+// the environment map.
+func (a *App) ProjectMap(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	project, err := a.Store.GetProject(r.Context(), id)
+	if err != nil {
+		a.handleStoreError(w, r, err)
+		return
+	}
+	g, err := a.Store.ProjectMap(r.Context(), id, 0)
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
+
+	assetIDs := make([]string, len(g.Assets))
+	for i, n := range g.Assets {
+		assetIDs[i] = n.ID
+	}
+	assetHealth, err := a.Store.EntityHealthFor(r.Context(), domain.ObservableAsset, assetIDs)
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
+	instanceIDs := make([]string, len(g.Placements))
+	for i, p := range g.Placements {
+		instanceIDs[i] = p.InstanceID
+	}
+	instanceHealth, err := a.Store.EntityHealthFor(r.Context(), domain.ObservableServiceInstance, instanceIDs)
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
+
+	view, err := buildEnvMapView(g, selectedLayers(r, nil), assetHealth, instanceHealth)
+	if err != nil {
+		a.serverError(w, r, fmt.Errorf("laying out the %s map: %w", project.Code, err))
+		return
+	}
+	view.Action = "/projects/" + id + "/map"
+	view.Heading = "What " + project.Name + " consists of"
+	view.Note = "Everything the project declared, plus what that implies — not a walk, " +
+		"so somebody else's estate is absent however it is cabled."
+
+	a.Render.Respond(w, r, http.StatusOK, "project_map", "project_map_panel", projectMapPage{
+		Base:    a.base(r, "Map: "+project.Code, "projects"),
+		Project: project,
+		View:    view,
+	})
+}
+
+// optional turns an empty form field into a nil rather than a pointer to "".
+// A blank description is the absence of one, not the presence of nothing.
+func optional(v string) *string {
+	if v == "" {
+		return nil
+	}
+	return &v
+}

@@ -62,6 +62,10 @@ func (a *App) EnvironmentMap(w http.ResponseWriter, r *http.Request) {
 		a.serverError(w, r, fmt.Errorf("laying out the %s map: %w", env.Code, err))
 		return
 	}
+	view.Action = "/environments/" + env.ID + "/map"
+	view.Heading = "The " + env.Code + " estate"
+	view.Note = "Three transport realities, stacked — every asset in the environment, " +
+		"not a walk from anywhere."
 
 	a.Render.Respond(w, r, http.StatusOK, "envmap", "envmap_panel", envMapPage{
 		Base:        a.base(r, "Map: "+env.Code, "environments"),

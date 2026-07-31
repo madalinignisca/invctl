@@ -121,6 +121,14 @@ type diagramView struct {
 	HopChoices []int
 	Layers     []layerChoice
 
+	// Action, Heading and Note parameterise the shared membership_map partial,
+	// which the environment map and the project map both render. They are the
+	// only three things those two pictures disagree about: where the layer
+	// toolbar posts, and what to call what it is showing.
+	Action  string
+	Heading string
+	Note    string
+
 	// Scene is nil when there is nothing to draw, in which case Empty says why
 	// in words. A blank canvas is not an answer.
 	Scene *svgScene
