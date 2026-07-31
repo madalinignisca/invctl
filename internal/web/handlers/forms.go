@@ -132,18 +132,27 @@ func (a *App) newAssetForm(r *http.Request, errs map[string]string, envs []domai
 //
 // Loaded here rather than threaded through each caller's signature: they are two
 // small tables that every form wants and no caller varies. A failure degrades to
-// empty pickers and is logged rather than returned, because a form that renders
-// without its optional dropdowns is far better than a detail page that 500s over
-// a field nobody is required to fill in.
+// empty pickers rather than a 500, because a page that refuses to render over a
+// field nobody is required to fill in is worse than one that renders without it.
+//
+// BUT IT SAYS SO. An empty picker and "no teams exist yet" look identical, and a
+// review pointed out that the worst moment for that ambiguity is the 422
+// re-render — where the rule most likely to have just fired is the one about
+// these very fields. So the failure raises a flash as well as a log line. The
+// dangerous half of this degradation, a blank picker reading as an operator
+// clearing the field, is closed separately by submittedString.
 func (a *App) responsibilityOptions(r *http.Request) ([]store.TeamRow, []store.VocabularyTerm) {
-	teams, err := a.Store.ListTeams(r.Context(), store.TeamFilter{})
+	teams, err := a.Store.TeamOptions(r.Context())
 	if err != nil {
 		slog.Error("loading teams for a form", "error", err)
+		a.setFlash(r, "error", "The team list could not be loaded, so that picker is empty. "+
+			"It is not that no teams exist.")
 		teams = nil
 	}
 	roles, err := a.Store.ResponsibilityRoles(r.Context())
 	if err != nil {
 		slog.Error("loading responsibility roles for a form", "error", err)
+		a.setFlash(r, "error", "The role list could not be loaded, so that picker is empty.")
 		roles = nil
 	}
 	return teams, roles

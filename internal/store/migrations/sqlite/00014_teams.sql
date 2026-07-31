@@ -37,6 +37,20 @@
 -- a CMDB kept forever should carry nothing that anybody could ever ask to have
 -- erased.
 --
+-- BEFORE YOU RUN THIS ON ANYTHING REAL, check what it will discard:
+--
+--   SELECT 'asset' AS t, owner_team, COUNT(*) FROM asset    WHERE owner_team IS NOT NULL GROUP BY owner_team
+--   UNION ALL SELECT 'service',      owner_team, COUNT(*) FROM service  WHERE owner_team IS NOT NULL GROUP BY owner_team
+--   UNION ALL SELECT 'project',      owner_team, COUNT(*) FROM project  WHERE owner_team IS NOT NULL GROUP BY owner_team
+--   UNION ALL SELECT 'identity',     owner_team, COUNT(*) FROM identity WHERE owner_team IS NOT NULL GROUP BY owner_team;
+--
+-- If that returns rows you care about, create the teams first and set `team_id`
+-- before applying this. The migration cannot check for you -- neither engine can
+-- abort portably on a row count -- so this is a runbook step and it is written
+-- here rather than somewhere nobody would look. A review asked for the
+-- trip-wire and was right to: "we believe there is no real data" and "we
+-- checked" are different statements.
+--
 -- THE FOUR `owner_team` COLUMNS GO, AND ARE NOT BACKFILLED. That is a real
 -- choice and not an oversight. A backfill has to invent an id per distinct
 -- string, and this repository generates every id as a UUIDv7 in Go and never in

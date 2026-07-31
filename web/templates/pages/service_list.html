@@ -54,6 +54,7 @@
   {{template "service_form" dict
       "CSRF" .CSRF "Errors" (dict) "Spec" (dict)
       "Environments" .Environments
-      "Kinds" .Kinds "Availabilities" .Availabilities}}
+      "Kinds" .Kinds "Availabilities" .Availabilities
+      "Teams" .FormData.Teams "Roles" .FormData.Roles}}
 {{end}}
 {{end}}

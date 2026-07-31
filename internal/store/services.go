@@ -147,6 +147,9 @@ func (s *SQLStore) CreateService(ctx context.Context, actor domain.Actor, svc *d
 		if err := t.requireVocabulary(ctx, vocabServiceKind, "kind", svc.Kind); err != nil {
 			return err
 		}
+		if err := requireRole(ctx, t, svc.ManagerRole); err != nil {
+			return err
+		}
 		_, err := t.exec(ctx, `
 			INSERT INTO service (id, code, name, kind, environment_id, availability,
 			                     min_healthy, failover_mode, tier, rto_minutes, rpo_minutes,
@@ -181,6 +184,9 @@ func (s *SQLStore) UpdateService(ctx context.Context, actor domain.Actor, svc *d
 
 	return s.write(ctx, actor, func(t *tx) error {
 		if err := t.requireVocabulary(ctx, vocabServiceKind, "kind", svc.Kind); err != nil {
+			return err
+		}
+		if err := requireRole(ctx, t, svc.ManagerRole); err != nil {
 			return err
 		}
 		_, err := t.exec(ctx, `

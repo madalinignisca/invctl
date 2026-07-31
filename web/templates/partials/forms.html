@@ -189,9 +189,13 @@
     <div class="field-row">
       <div class="field">
         <label for="svc-team">Team</label>
+        {{/* `selected` on re-render, like every other select in this form.
+             Without it a 422 -- most likely the role-needs-a-team rule this
+             very field introduced -- comes back with both pickers blank and
+             nothing to say which one was wrong. */}}
         <select id="svc-team" name="team_id">
           <option value="">—</option>
-          {{range .Teams}}<option value="{{.ID}}">{{.Code}}</option>{{end}}
+          {{range .Teams}}<option value="{{.ID}}" {{if eq .ID (deref $.Spec.TeamID)}}selected{{end}}>{{.Code}}</option>{{end}}
         </select>
         <div class="field-hint">Optional. Who looks after it.</div>
       </div>
@@ -199,7 +203,7 @@
         <label for="svc-role">Managed as</label>
         <select id="svc-role" name="manager_role">
           <option value="">—</option>
-          {{range .Roles}}<option value="{{.Code}}">{{.Label}}</option>{{end}}
+          {{range .Roles}}<option value="{{.Code}}" {{if eq .Code (deref $.Spec.ManagerRole)}}selected{{end}}>{{.Label}}</option>{{end}}
         </select>
         <div class="field-hint">Optional, and needs a team. Who to call, not a permission.</div>
       </div>

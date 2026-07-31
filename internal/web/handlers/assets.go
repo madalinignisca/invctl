@@ -387,8 +387,10 @@ func (a *App) AssetUpdate(w http.ResponseWriter, r *http.Request) {
 	updated.AssetTag = optionalString(r, "asset_tag")
 	updated.Vendor = optionalString(r, "vendor")
 	updated.Model = optionalString(r, "model")
-	updated.TeamID = optionalString(r, "team_id")
-	updated.ManagerRole = optionalString(r, "manager_role")
+	// submittedString, not optionalString: a picker that failed to render must
+	// not read as an operator clearing the field. See its doc comment.
+	updated.TeamID = submittedString(r, "team_id", updated.TeamID)
+	updated.ManagerRole = submittedString(r, "manager_role", updated.ManagerRole)
 	updated.EOLDate = optionalString(r, "eol_date")
 
 	if err := a.Store.UpdateAsset(r.Context(), actor(r), &updated, submittedEnvironments(r)); err != nil {

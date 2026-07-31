@@ -270,8 +270,10 @@ func (a *App) ServiceUpdate(w http.ResponseWriter, r *http.Request) {
 	updated.FailoverMode = optionalString(r, "failover_mode")
 	updated.RTOMinutes = optionalInt(r, "rto_minutes")
 	updated.RPOMinutes = optionalInt(r, "rpo_minutes")
-	updated.TeamID = optionalString(r, "team_id")
-	updated.ManagerRole = optionalString(r, "manager_role")
+	// submittedString, not optionalString: a picker that failed to render must
+	// not read as an operator clearing the field. See its doc comment.
+	updated.TeamID = submittedString(r, "team_id", updated.TeamID)
+	updated.ManagerRole = submittedString(r, "manager_role", updated.ManagerRole)
 	updated.EOLDate = optionalString(r, "eol_date")
 	updated.Lifecycle = formValue(r, "lifecycle")
 
@@ -281,6 +283,10 @@ func (a *App) ServiceUpdate(w http.ResponseWriter, r *http.Request) {
 			EnvironmentID: updated.EnvironmentID, Availability: updated.Availability,
 			Tier: updated.Tier, MinHealthy: updated.MinHealthy, FailoverMode: updated.FailoverMode,
 			EOLDate: updated.EOLDate,
+			// Carried back, or the re-rendered form cannot show what was picked
+			// -- and the rule most likely to have caused the 422 is the one
+			// about these two fields.
+			TeamID: updated.TeamID, ManagerRole: updated.ManagerRole,
 		})
 		return
 	}

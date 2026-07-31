@@ -267,6 +267,19 @@ var DeclaredColumns = map[string][]string{
 		"created_at", "updated_at",
 	},
 	"responsibility_role": {"code", "label", "sort_order", "description"},
+	// Certificates (migration 00015). Declared: somebody asserts that this
+	// certificate, with this expiry, is deployed here. What a scanner finds
+	// actually being served is a different fact for the observed side, and the
+	// disagreement between the two is the interesting part. `key_ref` is a path
+	// and is redacted from the audit trail like secret_ref.
+	"certificate": {
+		"id", "subject_cn", "issuer", "fingerprint", "serial",
+		"not_before", "not_after", "key_ref", "team_id", "manager_role",
+		"lifecycle", "attrs", "created_at", "updated_at",
+	},
+	"certificate_san":     {"certificate_id", "name"},
+	"certificate_asset":   {"certificate_id", "asset_id", "note", "lifecycle", "created_at", "updated_at"},
+	"certificate_service": {"certificate_id", "service_id", "note", "lifecycle", "created_at", "updated_at"},
 	"project_asset": {
 		"project_id", "asset_id", "relation", "note", "lifecycle",
 		"created_at", "updated_at",

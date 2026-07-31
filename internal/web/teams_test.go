@@ -3,37 +3,158 @@ package web_test
 import (
 	"net/http"
 	"net/url"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 )
 
 // Teams through the real router.
 
+// TestTeamsShowWhatTheyAreAnswerableFor.
+//
+// EVERY POSITIVE HAS A NEGATIVE, and that is not decoration. The first version
+// of this test asserted only that hv-01 and vault appeared on the platform
+// team's page — and it passed with BOTH TeamID filters deleted from the store,
+// because an unfiltered list contains them too. It proved the page rendered and
+// nothing whatsoever about filtering. A review caught it; a mutation confirmed
+// it. The absences below are the assertions that matter.
+//
+// The pairs run in both directions, so a filter that hardcoded one team, or one
+// that filtered assets but not services, is caught either way.
 func TestTeamsShowWhatTheyAreAnswerableFor(t *testing.T) {
 	h := newHarness(t)
 	h.login("admin", "admin-password")
 
 	list := body(t, h.get("/teams", false))
-	for _, code := range []string{"platform", "commerce", "observability"} {
+	for _, code := range []string{"platform", "commerce", "network", "observability"} {
 		if !strings.Contains(list, code) {
 			t.Errorf("the team list is missing %s", code)
 		}
 	}
 
-	id := h.refs.Teams["platform"]
-	page := body(t, h.get("/teams/"+id, false))
-	// What it looks after, from both directions: the hypervisors it owns and
-	// the services it runs.
-	if !strings.Contains(page, "hv-01") {
-		t.Error("the team page does not list the assets it looks after")
+	platform := body(t, h.get("/teams/"+h.refs.Teams["platform"], false))
+	if !strings.Contains(platform, "hv-01") {
+		t.Error("the platform page does not list the hypervisor it looks after")
 	}
-	if !strings.Contains(page, "vault") {
-		t.Error("the team page does not list the services it looks after")
+	if !strings.Contains(platform, "vault") {
+		t.Error("the platform page does not list the service it looks after")
 	}
 	// A capacity, not just a name.
-	if !strings.Contains(page, "Operator") {
+	if !strings.Contains(platform, "Operator") {
 		t.Error("the team page does not say in what capacity it looks after them")
 	}
+	// The negatives: the network team's switch and the commerce team's API.
+	if strings.Contains(platform, "sw-core-1") {
+		t.Error("the network team's switch is on the platform page — assets are not filtered")
+	}
+	if strings.Contains(platform, "orders-api") {
+		t.Error("the commerce team's service is on the platform page — services are not filtered")
+	}
+	// And a service nobody looks after belongs on no team page at all.
+	if strings.Contains(platform, "haproxy-edge") {
+		t.Error("a service with no team appears under one")
+	}
+
+	// The other direction.
+	network := body(t, h.get("/teams/"+h.refs.Teams["network"], false))
+	if !strings.Contains(network, "sw-core-1") {
+		t.Error("the network team is missing the switch it looks after")
+	}
+	if strings.Contains(network, "hv-01") {
+		t.Error("the platform team's hypervisor is on the network page")
+	}
+}
+
+// TestTeamCountsAgreeWithWhatTheTeamPageLists.
+//
+// The three correlated subqueries in teamSelect had no direct test: only
+// AssetCount was ever read, and only incidentally. A count that double-counts,
+// forgets to exclude retired rows, or references the wrong column would have
+// gone unnoticed — and the number is the whole reason a row is worth clicking.
+//
+// Asserted against the DETAIL PAGE rather than against figures copied from the
+// fixture, so the two can never drift and an unrelated seed change cannot make
+// this fail spuriously. The count and the list are two paths to one answer; if
+// they disagree, one of them is wrong.
+func TestTeamCountsAgreeWithWhatTheTeamPageLists(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	list := body(t, h.get("/teams", false))
+
+	for _, code := range []string{"platform", "network", "observability", "commerce"} {
+		t.Run(code, func(t *testing.T) {
+			assets, services, projects := teamCounts(t, list, code)
+			page := body(t, h.get("/teams/"+h.refs.Teams[code], false))
+
+			if got := rowsInSection(page, "<h2>Assets</h2>"); got != assets {
+				t.Errorf("the list says %d assets, the page lists %d", assets, got)
+			}
+			if got := rowsInSection(page, "<h2>Services</h2>"); got != services {
+				t.Errorf("the list says %d services, the page lists %d", services, got)
+			}
+			if got := rowsInSection(page, "<h2>Projects</h2>"); got != projects {
+				t.Errorf("the list says %d projects, the page lists %d", projects, got)
+			}
+		})
+	}
+
+	// The control: at least one team must have a non-zero count of each kind,
+	// or every assertion above is satisfied by a count query that returns zero.
+	assets, services, projects := teamCounts(t, list, "platform")
+	if assets == 0 || services == 0 || projects == 0 {
+		t.Errorf("platform reports %d/%d/%d; a count stuck at zero would pass every "+
+			"comparison above", assets, services, projects)
+	}
+}
+
+// teamCounts reads the three numeric cells from a team's row in the list.
+func teamCounts(t *testing.T, page, code string) (int, int, int) {
+	t.Helper()
+	i := strings.Index(page, ">"+code+"</a>")
+	if i < 0 {
+		t.Fatalf("no row for %s", code)
+	}
+	end := strings.Index(page[i:], "</tr>")
+	if end < 0 {
+		t.Fatalf("could not isolate the row for %s", code)
+	}
+	nums := regexp.MustCompile(`<td class="num">(\d+)</td>`).FindAllStringSubmatch(page[i:i+end], -1)
+	if len(nums) != 3 {
+		t.Fatalf("expected three counts in the %s row, found %d", code, len(nums))
+	}
+	out := make([]int, 3)
+	for k, m := range nums {
+		n, err := strconv.Atoi(m[1])
+		if err != nil {
+			t.Fatalf("unreadable count %q: %v", m[1], err)
+		}
+		out[k] = n
+	}
+	return out[0], out[1], out[2]
+}
+
+// rowsInSection counts the table rows under a heading on a team detail page.
+//
+// Bounded at the NEXT heading before anything else. An empty section renders an
+// "empty" block rather than a table, so a search that only stopped at </table>
+// ran on into the following panel and counted its rows -- which is how the first
+// version of this reported two assets for a team that has none.
+func rowsInSection(page, heading string) int {
+	i := strings.Index(page, heading)
+	if i < 0 {
+		return 0
+	}
+	rest := page[i+len(heading):]
+	if next := strings.Index(rest, "<h2>"); next >= 0 {
+		rest = rest[:next]
+	}
+	body := strings.Index(rest, "<tbody>")
+	if body < 0 {
+		return 0 // an empty section: no table at all
+	}
+	return strings.Count(rest[body:], "<tr>")
 }
 
 // The rule the schema cannot enforce has to be visible where somebody is about
@@ -132,4 +253,105 @@ func TestTeamWritesRequireAdmin(t *testing.T) {
 	if resp.StatusCode == http.StatusSeeOther || resp.StatusCode == http.StatusOK {
 		t.Errorf("a read-only user created a team (%d)", resp.StatusCode)
 	}
+}
+
+// TestAnAbsentPickerDoesNotClearTheTeam.
+//
+// From a security review. responsibilityOptions degrades to EMPTY pickers when
+// its store read fails, and the update handlers used to assign team_id and
+// manager_role unconditionally from the form — so a form rendered without those
+// fields turned a save of some unrelated field into "this asset no longer has a
+// team", written to change_log under the name of whoever pressed the button.
+//
+// The post below omits both fields entirely, which is exactly what a degraded
+// form submits.
+func TestAnAbsentPickerDoesNotClearTheTeam(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	id := h.refs.Assets["hv-01"]
+	before := body(t, h.get("/assets/"+id, false))
+	if !strings.Contains(before, "Platform") {
+		t.Fatal("the fixture asset has no team; this test would prove nothing")
+	}
+
+	resp := h.post("/assets/"+id, url.Values{
+		"csrf_token": {h.csrfToken("/assets/" + id)},
+		"name":       {"hv-01"}, "kind": {"hypervisor"}, "lifecycle": {"active"},
+		// team_id and manager_role deliberately absent.
+	}, false)
+	resp.Body.Close()
+
+	after := body(t, h.get("/assets/"+id, false))
+	if !strings.Contains(after, "Platform") {
+		t.Error("a form that omitted the team picker silently cleared the team")
+	}
+
+	// The control: a form that DOES carry the field, blank, is an operator
+	// choosing the empty option and must still clear it.
+	cleared := h.post("/assets/"+id, url.Values{
+		"csrf_token": {h.csrfToken("/assets/" + id)},
+		"name":       {"hv-01"}, "kind": {"hypervisor"}, "lifecycle": {"active"},
+		"team_id": {""}, "manager_role": {""},
+	}, false)
+	cleared.Body.Close()
+
+	final := body(t, h.get("/assets/"+id, false))
+	if !strings.Contains(final, "nobody recorded") {
+		t.Error("an explicitly blank picker did not clear the team; clearing must stay possible")
+	}
+}
+
+// TestTheTeamPickersAreActuallyPopulated.
+//
+// From a database review, and it is the test this feature most needed. The list
+// pages build their form context with an explicit dict, and both omitted Teams
+// and Roles — html/template resolves a missing key to the zero value without
+// erroring, so {{range .Teams}} iterated nothing and every picker rendered with
+// only its "—" placeholder.
+//
+// The effect was that no human could set a team on an asset or a service at
+// all: only the seeder wrote those columns. Every other test passed, because
+// they all read seeded data or the 422 path, which passes a real struct.
+//
+// Counting the options is the assertion. "The page contains a team code"
+// would also pass on a page that merely lists teams somewhere else.
+func TestTheTeamPickersAreActuallyPopulated(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	for _, page := range []string{"/assets", "/services", "/projects"} {
+		t.Run(page, func(t *testing.T) {
+			html := body(t, h.get(page, false))
+			if got := optionCount(t, html, "team_id"); got < 2 {
+				t.Errorf("the team picker on %s has %d options — only the placeholder, "+
+					"so nobody can assign a team here", page, got)
+			}
+		})
+	}
+
+	// The role picker exists only where a role can be set.
+	for _, page := range []string{"/assets", "/services"} {
+		t.Run(page+" role", func(t *testing.T) {
+			html := body(t, h.get(page, false))
+			if got := optionCount(t, html, "manager_role"); got < 2 {
+				t.Errorf("the role picker on %s has %d options", page, got)
+			}
+		})
+	}
+}
+
+// optionCount counts the <option> elements in the named select.
+func optionCount(t *testing.T, page, name string) int {
+	t.Helper()
+	i := strings.Index(page, `name="`+name+`"`)
+	if i < 0 {
+		t.Fatalf("no select named %q on the page", name)
+	}
+	rest := page[i:]
+	end := strings.Index(rest, "</select>")
+	if end < 0 {
+		t.Fatalf("unterminated select %q", name)
+	}
+	return strings.Count(rest[:end], "<option")
 }

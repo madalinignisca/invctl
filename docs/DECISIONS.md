@@ -1699,3 +1699,98 @@ Six teams, each with a group contact. `haproxy-edge` is now looked after by
 **nobody**, which sharpens a finding the fixture already made: no project owns the
 edge either. The service every partner order crosses has no team to escalate to
 and no budget holder, and both pages say so plainly.
+
+---
+
+## 2026-07-31 — The teams review, and two bugs that made the feature unreachable
+
+Three reviews over the teams commit. The security and code-quality findings are
+below; the database review found the two that mattered most, and both were mine,
+both from a mechanical find-and-replace.
+
+### The team picker was empty on every page that could set one
+
+`asset_list.html` and `service_list.html` build their form context with an
+explicit `dict`, and both omitted `Teams` and `Roles`. `html/template` resolves a
+missing key to the zero value without erroring, so `{{range .Teams}}` iterated
+nothing and every picker rendered with only its `—` placeholder.
+
+**No human could set a team on an asset or a service at all.** Only the seeder
+wrote those columns. Every test passed, because they all read seeded data or the
+422 path — which passes a real struct and therefore works. The test that now
+guards it counts `<option>` elements, because "the page contains a team code"
+would also pass on a page that lists teams somewhere else entirely.
+
+### Every project's search body was a raw UUID
+
+Renaming `owner_team` to `team_id` across the codebase turned
+`Body: strDeref(p.OwnerTeam)` into `Body: strDeref(p.TeamID)` — a UUID indexed as
+searchable text. `indexAsset` and `indexService` correctly *dropped* the team from
+their bodies in the same commit; only projects substituted it.
+
+Two consequences, both reproduced against the demo database. The team name stopped
+being findable through its project, which is the one thing the old free text
+bought. And because UUIDv7 is time-sortable, every project written in the same
+millisecond shares a leading token, so FTS5 matched all three on the fragment
+`019fb8d6` and skewed bm25 for every other document. The body is now empty; the
+team is its own searchable entity.
+
+### Index shape, measured
+
+`00014` indexed `(team_id)` alone, but every count in `teamSelect` pairs
+`team_id = t.id` with `lifecycle <> 'retired'`. Measured on a 200,000-asset
+estate: **112 ms and 88,687 buffer hits to render 27 rows** — roughly 693 MB of
+buffer traffic. With `lifecycle` as a second column, 19.8 ms and 311 buffers with
+zero heap fetches; SQLite 165 ms → 11 ms. Migration `00016` reshapes three of the
+four. The partial `WHERE team_id IS NOT NULL` predicate *is* usable with a bound
+parameter — both planners prove the implication — so it stays.
+
+`idx_identity_team` is dropped outright: `identity.team_id` is written once by the
+seeder and read by nothing, so the index cost write amplification and served no
+query.
+
+And `responsibilityOptions` was calling the full three-subquery `ListTeams` to
+populate a `<select>` that renders two strings per row — on every asset form,
+every service form and every project list. `TeamOptions` costs 1 buffer.
+
+### An index could vanish from one engine with the whole suite green
+
+The reviewer proved it by deleting `idx_service_team` from the PostgreSQL half and
+watching everything pass. `TestColumnShapesMatchAcrossEngines` compares columns;
+`TestConstraintNamesMatchAcrossEngines` compares CHECK names; nothing compared
+indexes. `TestIndexesMatchAcrossEngines` is the third guard, and it immediately
+found the two pg_trgm indexes that legitimately exist on PostgreSQL only — the
+sanctioned FTS5-versus-trigram split — which are now an explicit allowlist entry
+rather than a silent pass.
+
+### Smaller, all real
+
+- `manager_role` was the only lookup-backed column not checked by
+  `requireVocabulary`, so an unknown value reached the foreign key and SQLite
+  reported it as `FOREIGN KEY constraint failed` with no column — a bare 422 with
+  nothing highlighted and the form contents lost.
+- `contact_ref` reached the append-only `change_log` unredacted (security review).
+  Correcting the mistake the hint warns against recorded the personal value a
+  *second* time, as the `old` side of the diff. Redacted globally like
+  `secret_ref`; the team row keeps the real value because that one is correctable.
+- A degraded picker could silently clear a team and attribute the removal to a
+  human. `submittedString` distinguishes "the operator cleared it" from "the field
+  never rendered".
+- A retired team stayed searchable by its contact with no screen offering to
+  change it.
+- The service form lost its picker selections on a 422 — the regression that bites
+  hardest on the one rule this feature added.
+- `TestTeamsShowWhatTheyAreAnswerableFor` passed with **both** `TeamID` filters
+  deleted from the store, because an unfiltered list contains the rows it looked
+  for. Rewritten with absences in both directions; it now fails on five
+  assertions under that mutation. Third time this session.
+
+### Recorded, not fixed
+
+The list filters match **ASCII only**. `lower` folds bytes `A-Z` to match SQLite's
+`LOWER()`, while PostgreSQL's is locale-aware and folds the whole string — so the
+two sides fold asymmetrically there and `ÖKO` finds `Ökonomie` on SQLite and not
+on PostgreSQL. Swapping in `strings.ToLower` just moves the failure to the other
+engine; a folded shadow column would fix it and is not worth a column yet. The
+comment above the filter claimed the `LOWER`-on-both-sides trick made the engines
+agree. It does not, and now says so.

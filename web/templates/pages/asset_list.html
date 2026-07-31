@@ -43,6 +43,13 @@
 {{template "asset_table" .}}
 
 {{if .CanWrite}}
-  {{template "asset_form" dict "CSRF" .CSRF "Errors" (dict) "Environments" .Environments "Kinds" .Kinds "Parents" .Assets}}
+  {{/* Teams and Roles come from .FormData, not from the page: assetListPage
+       has no such fields, and html/template resolves a missing dict key to the
+       zero value without erroring — so omitting them made {{range .Teams}}
+       iterate nothing and left both pickers empty. The feature was unreachable
+       from this page entirely. Found by a database review. */}}
+  {{template "asset_form" dict "CSRF" .CSRF "Errors" (dict)
+      "Environments" .Environments "Kinds" .Kinds "Parents" .Assets
+      "Teams" .FormData.Teams "Roles" .FormData.Roles}}
 {{end}}
 {{end}}

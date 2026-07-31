@@ -664,6 +664,15 @@ func TestTheOnlyFactDeletingStatementIsThePrune(t *testing.T) {
 		"internal/store/deps.go":   "dependency_data_class: a set the dependency owns, replaced wholesale",
 		"internal/store/search.go": "search_index: a derived index, rebuilt not authored",
 		"internal/store/prune.go":  "the rule 10 retention prune, the only statement here that removes a fact",
+		// certificate_san holds the CURRENT set of names a certificate covers,
+		// which the certificate owns. Replaced wholesale inside the parent's
+		// transaction, and certificateAudit folds the names into the audited
+		// value so the replacement cannot produce an empty diff -- the failure
+		// this codebase made three times before with set tables.
+		//
+		// The DEPLOYMENTS are not deleted: certificate_asset and
+		// certificate_service are soft-retired like every other link.
+		"internal/store/certificates.go": "certificate_san: the set of names a certificate owns, replaced wholesale",
 	}
 
 	root := repoRoot(t)

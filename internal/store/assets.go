@@ -173,9 +173,17 @@ func (s *SQLStore) ListAssets(ctx context.Context, f AssetFilter) ([]AssetRow, e
 	}
 	if f.Query != "" {
 		// LIKE with a leading wildcard, not a full-text match: this is the
-		// list page's filter box, not the global search, and it has to work
-		// identically on both engines. LOWER() on both sides keeps it
-		// case-insensitive on PostgreSQL, where LIKE is case-sensitive.
+		// list page's filter box rather than the global search. LOWER() on both
+		// sides makes it case-insensitive on PostgreSQL, where LIKE is not.
+		//
+		// ASCII ONLY, and the engines genuinely differ beyond that. `lower`
+		// folds bytes A-Z to match SQLite's LOWER(); PostgreSQL's LOWER() is
+		// locale-aware and folds the whole string, so the two sides of the
+		// comparison fold asymmetrically there. Searching `ÖKO` finds `Ökonomie`
+		// on SQLite and not on PostgreSQL -- measured by a database review. It
+		// cannot be fixed by swapping in strings.ToLower, which just moves the
+		// failure to the other engine; a folded shadow column would fix it and
+		// is not worth a column yet. Documented rather than claimed away.
 		where = append(where, `(LOWER(a.name) LIKE ? ESCAPE '\' OR LOWER(COALESCE(a.serial, '')) LIKE ? ESCAPE '\')`)
 		pattern := "%" + escapeLike(lower(f.Query)) + "%"
 		args = append(args, pattern, pattern)
@@ -239,14 +247,54 @@ func (r *AssetRow) SpansEnvironments() bool { return r.NonTransitEnvironments > 
 // decorateAssets attaches parent names and environment membership in two
 // queries rather than one per row.
 // decorateResponsibility fills in the team and role labels for a page of assets.
+//
+// In Go rather than as a join, because this is the same pass that already
+// resolves environments (a many-to-many no join collapses cleanly) and kind
+// behaviour. Adding a third mechanism to one function would not unify anything;
+// services and projects join in SQL because they have no such pass.
+//
+// SCOPED TO THE TEAMS ACTUALLY REFERENCED. It used to read the whole `team`
+// table on every list render -- harmless at organisational scale and flagged by
+// two reviews anyway, because "small today" is not a property the code states.
+// An IN list over the page's own rows costs nothing and removes the question.
 func (s *SQLStore) decorateResponsibility(ctx context.Context, rows []AssetRow) error {
+	wanted := make([]string, 0, len(rows))
+	seen := make(map[string]bool, len(rows))
+	for i := range rows {
+		if id := rows[i].TeamID; id != nil && !seen[*id] {
+			seen[*id] = true
+			wanted = append(wanted, *id)
+		}
+	}
+
 	var teams []struct {
 		ID   string `db:"id"`
 		Code string `db:"code"`
 		Name string `db:"name"`
 	}
-	if err := s.read(ctx, &teams, `SELECT id, code, name FROM team`); err != nil {
-		return fmt.Errorf("loading teams: %w", err)
+	// No team on any row: chunkIDs(nil) yields one empty chunk and
+	// placeholders(0) yields "NULL", so the query would still run as
+	// `WHERE id IN (NULL)` — valid, empty, and a pure round trip. That is the
+	// COMMON case for an estate that has not filled the field in.
+	//
+	// Retired teams are loaded like any other: an asset legitimately points at
+	// one, and that is the estate saying nobody has picked it up. Filtering on
+	// lifecycle here would blank the name and hide the finding.
+	for _, chunk := range chunkIDs(wanted) {
+		if len(chunk) == 0 {
+			continue
+		}
+		var part []struct {
+			ID   string `db:"id"`
+			Code string `db:"code"`
+			Name string `db:"name"`
+		}
+		if err := s.read(ctx, &part,
+			`SELECT id, code, name FROM team WHERE id IN (`+placeholders(len(chunk))+`)`,
+			anySlice(chunk)...); err != nil {
+			return fmt.Errorf("loading teams: %w", err)
+		}
+		teams = append(teams, part...)
 	}
 	byID := make(map[string]struct{ code, name string }, len(teams))
 	for _, t := range teams {
@@ -397,6 +445,9 @@ func (s *SQLStore) CreateAsset(ctx context.Context, actor domain.Actor, a *domai
 		if err := t.requireVocabulary(ctx, vocabAssetKind, "kind", a.Kind); err != nil {
 			return err
 		}
+		if err := requireRole(ctx, t, a.ManagerRole); err != nil {
+			return err
+		}
 		_, err := t.exec(ctx,
 			`INSERT INTO asset (id, kind, name, parent_id, serial, asset_tag, vendor, model,
 			                    lifecycle, team_id, manager_role, eol_date, attrs,
@@ -449,6 +500,9 @@ func (s *SQLStore) UpdateAsset(ctx context.Context, actor domain.Actor, a *domai
 
 	return s.write(ctx, actor, func(t *tx) error {
 		if err := t.requireVocabulary(ctx, vocabAssetKind, "kind", a.Kind); err != nil {
+			return err
+		}
+		if err := requireRole(ctx, t, a.ManagerRole); err != nil {
 			return err
 		}
 		_, err := t.exec(ctx,

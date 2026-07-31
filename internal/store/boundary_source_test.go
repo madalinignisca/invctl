@@ -319,6 +319,14 @@ var dynamicTargetAllowlist = map[string]string{
 	// that totals three subtly different shapes is a worse failure than a
 	// generated table name whose inputs are three constants.
 	"internal/store/costs.go": "updateCost/retireCost: three package-level costTable values, never a caller's string",
+
+	// deployCertificate/undeployCertificate name certificate_asset or
+	// certificate_service. Both are literals at the four public call sites --
+	// DeployCertificateToAsset and its three siblings each hardcode their own --
+	// and no entity type travels in from a request, which is also why the routes
+	// are separate URLs rather than /certificates/{id}/deploy/{type}. The
+	// statements set lifecycle and note, neither of which change_log has.
+	"internal/store/certificates.go": "deployCertificate/undeployCertificate: two literal link tables from four fixed call sites",
 }
 
 // dynamicTargetBudget is how many dynamic non-insert writes each allowlisted
@@ -326,10 +334,11 @@ var dynamicTargetAllowlist = map[string]string{
 // worth knowing about too, because it usually means the statement moved
 // somewhere that is not on this list.
 var dynamicTargetBudget = map[string]int{
-	"internal/store/reach.go":      1, // retireRows
-	"internal/store/vocabulary.go": 1, // UpsertVocabularyTerm; its INSERT is exempt, only the UPDATE counts
-	"internal/store/projects.go":   2, // releaseLinks, retireLink
-	"internal/store/costs.go":      2, // updateCost, retireCost
+	"internal/store/reach.go":        1, // retireRows
+	"internal/store/vocabulary.go":   1, // UpsertVocabularyTerm; its INSERT is exempt, only the UPDATE counts
+	"internal/store/projects.go":     2, // releaseLinks, retireLink
+	"internal/store/costs.go":        2, // updateCost, retireCost
+	"internal/store/certificates.go": 2, // deployCertificate's reactivation UPDATE, undeployCertificate
 }
 
 func TestNoAssembledWriteReachesChangeLog(t *testing.T) {

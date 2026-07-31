@@ -76,6 +76,27 @@ func (s *SQLStore) ListTeams(ctx context.Context, f TeamFilter) ([]TeamRow, erro
 	return rows, nil
 }
 
+// TeamOptions is the picker: who exists, and nothing about what they own.
+//
+// ListTeams carries three correlated subquery counts across asset, service and
+// project — measured at 112 ms and 88,687 buffer hits on a 200k-asset estate,
+// to render 27 rows. responsibilityOptions was calling it on every asset form,
+// every service form and every project list, for a <select> that renders two
+// strings per row. Found by a database review.
+//
+// Retired teams are excluded here and only here: a picker offers what somebody
+// may choose NOW, while every list and detail view still shows a disbanded team
+// beside what it used to look after, because that is a finding.
+func (s *SQLStore) TeamOptions(ctx context.Context) ([]TeamRow, error) {
+	var rows []TeamRow
+	if err := s.read(ctx, &rows,
+		`SELECT * FROM team WHERE lifecycle <> ? ORDER BY code`,
+		domain.LifecycleRetired); err != nil {
+		return nil, fmt.Errorf("listing teams for a picker: %w", err)
+	}
+	return rows, nil
+}
+
 // GetTeam loads one team.
 func (s *SQLStore) GetTeam(ctx context.Context, id string) (*TeamRow, error) {
 	var row TeamRow
@@ -158,7 +179,20 @@ func (s *SQLStore) RetireTeam(ctx context.Context, actor domain.Actor, id string
 		}
 		diff := fmt.Sprintf(`{"lifecycle":{"old":%q,"new":%q}}`,
 			before.Lifecycle, domain.LifecycleRetired)
-		return tx.log(ctx, "team", id, domain.ActionRetire, diff)
+		if err := tx.log(ctx, "team", id, domain.ActionRetire, diff); err != nil {
+			return err
+		}
+		// Reindexed, which retirement elsewhere in this codebase does not need
+		// to do. A team's search document carries its contact, and search_index
+		// holds only the CURRENT value -- that is the property that makes an
+		// erasure request answerable by editing the team rather than by
+		// rewriting history. A retired team left in the index would keep its
+		// last contact discoverable with no screen offering to change it.
+		// Found by a security review.
+		retired := before.Team
+		retired.Lifecycle = domain.LifecycleRetired
+		retired.ContactRef = nil
+		return s.indexTeam(ctx, tx, &retired)
 	})
 }
 
@@ -176,6 +210,22 @@ func (s *SQLStore) indexTeam(ctx context.Context, t *tx, team *domain.Team) erro
 		EntityType: "team", EntityID: team.ID,
 		Title: team.Name, Subtitle: team.Code, Body: body,
 	})
+}
+
+// requireRole checks a manager role against its lookup table before the write.
+//
+// manager_role was the only lookup-backed column in the codebase that did not
+// do this -- kind, form_factor, role, data_class, engine and cost_kind all do.
+// Without it an unknown value reached the foreign key, and SQLite reports that
+// as "FOREIGN KEY constraint failed" with no column in it, so translateWriteErr
+// can only turn it into a bare 422 with no field highlighted and the form
+// contents lost. That is precisely the failure requireVocabulary exists to
+// prevent. Found by a database review.
+func requireRole(ctx context.Context, t *tx, role *string) error {
+	if role == nil || *role == "" {
+		return nil
+	}
+	return t.requireVocabulary(ctx, vocabResponsibilityRole, "manager_role", *role)
 }
 
 // ResponsibilityRoles lists the capacities a team can hold. Descriptive: nothing

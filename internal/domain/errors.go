@@ -184,6 +184,28 @@ func checkRequired(ve *ValidationError, field, value string) string {
 var RedactedFields = map[string]bool{
 	"password_hash": true,
 	"secret_ref":    true,
+	// A team's contact. Global rather than per-entity because the name is
+	// unambiguous wherever it appears -- unlike `display_name`, which is a
+	// person on app_user and a Windows service description on rt_windows.
+	//
+	// The rule says a contact must be a group address, a queue or a channel and
+	// never an individual, and the application cannot check that. The form hint
+	// is adequate for the `team` row and for search_index, because both hold
+	// only the CURRENT value and an erasure request is answered by editing the
+	// team. It is NOT adequate for change_log, which is append-only: a
+	// predictable operator mistake would be permanent, and -- found by a
+	// security review -- CORRECTING it wrote the personal value a second time,
+	// as the `old` side of the update diff.
+	//
+	// So the audit trail records THAT the contact changed and never what to,
+	// which is the treatment secret_ref already gets for the same reason.
+	"contact_ref": true,
+	// A certificate's private-key reference. Same rule as secret_ref, and the
+	// same reason: it is a path to something secret, and a path is a lead. A
+	// certificate is also the entity where somebody is most likely to paste
+	// something worse than a path into a field, so the audit trail must not be
+	// the place that keeps it forever.
+	"key_ref": true,
 }
 
 // RedactedFieldsByEntity covers columns that are sensitive only on certain

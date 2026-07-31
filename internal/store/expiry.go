@@ -75,12 +75,13 @@ type ExpiryReport struct {
 	Soon    int
 	Later   int
 
-	// Undated is how many live assets and services carry no date at all. It is
+	// Undated is how many live assets, services and certificates carry no date. It is
 	// the number that makes the rest honest: a report over four dated rows in an
 	// estate of four hundred reads as "almost nothing expires", and the true
 	// answer is "almost nothing is recorded".
-	UndatedAssets   int
-	UndatedServices int
+	UndatedAssets       int
+	UndatedServices     int
+	UndatedCertificates int
 
 	// Horizon is the requested window, echoed back so the page can say what it
 	// covered rather than implying it covered everything.
@@ -116,6 +117,22 @@ func (s *SQLStore) Expiring(ctx context.Context, asOf time.Time, horizonMonths i
 		return nil, fmt.Errorf("listing expiring assets: %w", err)
 	}
 
+	// Certificates. The reason this report is worth opening: hardware support
+	// lapses on a five-year cycle and a certificate every ninety days, so this
+	// is the half that produces an actual outage.
+	var certificates []ExpiringRow
+	if err := s.read(ctx, &certificates, `
+		SELECT 'certificate' AS entity_type, c.id, c.subject_cn AS name,
+		       COALESCE(c.fingerprint, '') AS code,
+		       COALESCE(c.issuer, 'certificate') AS kind, c.lifecycle,
+		       c.not_after AS eol_date,
+		       0 AS service_count, 0 AS best_tier, 0 AS tier
+		FROM certificate c
+		WHERE c.not_after IS NOT NULL AND c.not_after <= ? AND c.lifecycle <> ?
+		ORDER BY c.not_after, c.subject_cn`, until, domain.LifecycleRetired); err != nil {
+		return nil, fmt.Errorf("listing expiring certificates: %w", err)
+	}
+
 	var services []ExpiringRow
 	if err := s.read(ctx, &services, `
 		SELECT 'service' AS entity_type, s.id, s.name, s.code, s.kind, s.lifecycle, s.eol_date,
@@ -129,6 +146,12 @@ func (s *SQLStore) Expiring(ctx context.Context, asOf time.Time, horizonMonths i
 	if err := s.expiryWorkload(ctx, assets); err != nil {
 		return nil, err
 	}
+	// What rides on a certificate is everywhere it is deployed: an expiring
+	// wildcard on four load balancers is four outages, and the bare count is
+	// what makes that legible next to a switch carrying six services.
+	if err := s.expiryCertificateReach(ctx, certificates); err != nil {
+		return nil, err
+	}
 	if err := s.expiryOwners(ctx, assets, services); err != nil {
 		return nil, err
 	}
@@ -136,7 +159,7 @@ func (s *SQLStore) Expiring(ctx context.Context, asOf time.Time, horizonMonths i
 		return nil, err
 	}
 
-	report.Rows = append(append([]ExpiringRow{}, assets...), services...)
+	report.Rows = append(append(append([]ExpiringRow{}, assets...), services...), certificates...)
 	for i := range report.Rows {
 		row := &report.Rows[i]
 		row.State = domain.ExpiryState(&row.EOLDate, asOf, domain.ExpirySoonDays*24*time.Hour)
@@ -216,6 +239,58 @@ func (s *SQLStore) expiryWorkload(ctx context.Context, assets []ExpiringRow) err
 	return nil
 }
 
+// expiryCertificateReach counts the places each expiring certificate is
+// deployed. Reusing ServiceCount rather than adding a field: the column is
+// "what rides on it", and for a certificate that is its deployments.
+func (s *SQLStore) expiryCertificateReach(ctx context.Context, certificates []ExpiringRow) error {
+	if len(certificates) == 0 {
+		return nil
+	}
+	ids := make([]string, len(certificates))
+	index := make(map[string]int, len(certificates))
+	for i, c := range certificates {
+		ids[i] = c.ID
+		index[c.ID] = i
+	}
+	for _, chunk := range chunkIDs(ids) {
+		var rows []struct {
+			CertificateID string `db:"certificate_id"`
+			Places        int    `db:"places"`
+		}
+		// Two IN lists and two lifecycle values, in the order the placeholders
+		// appear. Built explicitly rather than sliced out of one slice: the
+		// clever version was unreadable and one edit away from silently
+		// swapping an id for a lifecycle.
+		args := make([]any, 0, 2*len(chunk)+2)
+		args = append(args, anySlice(chunk)...)
+		args = append(args, domain.LifecycleActive)
+		args = append(args, anySlice(chunk)...)
+		args = append(args, domain.LifecycleActive)
+
+		if err := s.read(ctx, &rows, `
+			SELECT id AS certificate_id, SUM(places) AS places FROM (
+			  SELECT ca.certificate_id AS id, COUNT(*) AS places
+			  FROM certificate_asset ca
+			  WHERE ca.certificate_id IN (`+placeholders(len(chunk))+`) AND ca.lifecycle = ?
+			  GROUP BY ca.certificate_id
+			  UNION ALL
+			  SELECT cs.certificate_id AS id, COUNT(*) AS places
+			  FROM certificate_service cs
+			  WHERE cs.certificate_id IN (`+placeholders(len(chunk))+`) AND cs.lifecycle = ?
+			  GROUP BY cs.certificate_id
+			) deployments
+			GROUP BY id`, args...); err != nil {
+			return fmt.Errorf("counting certificate deployments: %w", err)
+		}
+		for _, r := range rows {
+			if i, ok := index[r.CertificateID]; ok {
+				certificates[i].ServiceCount = r.Places
+			}
+		}
+	}
+	return nil
+}
+
 // expiryOwners resolves the project that owns each row, if any.
 func (s *SQLStore) expiryOwners(ctx context.Context, assets, services []ExpiringRow) error {
 	assetIDs := make([]string, len(assets))
@@ -267,6 +342,14 @@ func (s *SQLStore) expiryUndated(ctx context.Context, report *ExpiryReport) erro
 		`SELECT COUNT(*) FROM service WHERE eol_date IS NULL AND lifecycle <> ?`,
 		domain.LifecycleRetired); err != nil {
 		return fmt.Errorf("counting undated services: %w", err)
+	}
+	// A certificate with no recorded expiry is the worst of the three: every
+	// certificate has one, so a blank means nobody looked rather than that the
+	// question does not apply.
+	if err := s.readOne(ctx, &report.UndatedCertificates,
+		`SELECT COUNT(*) FROM certificate WHERE not_after IS NULL AND lifecycle <> ?`,
+		domain.LifecycleRetired); err != nil {
+		return fmt.Errorf("counting undated certificates: %w", err)
 	}
 	return nil
 }

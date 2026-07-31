@@ -254,7 +254,17 @@ func (s *SQLStore) CreateProject(ctx context.Context, actor domain.Actor, p *dom
 		}
 		return s.indexEntity(ctx, t, searchDoc{
 			EntityType: "project", EntityID: p.ID,
-			Title: p.Name, Subtitle: p.Code, Body: strDeref(p.TeamID),
+			// Body is empty, NOT the team id. A mechanical rename of owner_team
+			// to team_id put a raw UUID here, which broke search twice over:
+			// the team name stopped being findable through its project, and
+			// because UUIDv7 is time-sortable every project written in the same
+			// millisecond shared a leading token, so FTS5 matched them all on a
+			// fragment and skewed bm25 for every other document. indexAsset and
+			// indexService dropped the team from their bodies in the same
+			// commit; this one substituted it. Found by a database review.
+			//
+			// The team is its own searchable entity via indexTeam.
+			Title: p.Name, Subtitle: p.Code, Body: "",
 		})
 	})
 }
@@ -283,7 +293,17 @@ func (s *SQLStore) UpdateProject(ctx context.Context, actor domain.Actor, p *dom
 		}
 		return s.indexEntity(ctx, t, searchDoc{
 			EntityType: "project", EntityID: p.ID,
-			Title: p.Name, Subtitle: p.Code, Body: strDeref(p.TeamID),
+			// Body is empty, NOT the team id. A mechanical rename of owner_team
+			// to team_id put a raw UUID here, which broke search twice over:
+			// the team name stopped being findable through its project, and
+			// because UUIDv7 is time-sortable every project written in the same
+			// millisecond shared a leading token, so FTS5 matched them all on a
+			// fragment and skewed bm25 for every other document. indexAsset and
+			// indexService dropped the team from their bodies in the same
+			// commit; this one substituted it. Found by a database review.
+			//
+			// The team is its own searchable entity via indexTeam.
+			Title: p.Name, Subtitle: p.Code, Body: "",
 		})
 	})
 }
@@ -486,13 +506,4 @@ func (s *SQLStore) retireLink(ctx context.Context, actor domain.Actor, table, co
 		return t.log(ctx, table, projectID+"/"+entityID, domain.ActionRetire,
 			`{"lifecycle":["active","retired"]}`)
 	})
-}
-
-// strDeref renders an optional string for the search index, where a nil owner
-// is simply nothing to match on.
-func strDeref(s *string) string {
-	if s == nil {
-		return ""
-	}
-	return *s
 }

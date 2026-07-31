@@ -184,3 +184,96 @@ var exemptFromShapeComparison = map[string]struct{}{
 	"search_index_idx":         {},
 	"sqlite_sequence":          {},
 }
+
+// TestIndexesMatchAcrossEngines.
+//
+// The third guard, and a database review proved it was needed by DELETING an
+// index from one dialect half and watching the entire suite stay green. That is
+// the same class of invisible divergence the other two were written for — one
+// engine gets a covering scan and the other a sequential one, and nothing says
+// so until somebody profiles the slow deployment.
+//
+// Names are compared, not definitions. Every index in this schema is named by
+// convention and named identically in both halves, so a set comparison catches
+// an index that is missing, renamed or added on one side. Comparing the column
+// lists would be stronger; it would also mean normalising two very different
+// catalogue shapes, and the failure mode this exists for is a whole index going
+// missing rather than one drifting a column.
+// indexesByDesign exist on one engine only, with the reason. Listed
+// individually so a second one is a deliberate edit and a conversation.
+//
+// Full-text search is the codebase's ONE sanctioned dialect split (HANDOVER
+// §4.4): FTS5 on SQLite, pg_trgm on PostgreSQL. The SQLite side needs no
+// separate index because search_index IS a virtual table; the PostgreSQL side
+// needs these two. Everything else must match.
+var indexesByDesign = map[string]string{
+	"idx_search_title_trgm": "pg_trgm index for the PostgreSQL search path; SQLite uses FTS5",
+	"idx_search_body_trgm":  "pg_trgm index for the PostgreSQL search path; SQLite uses FTS5",
+}
+
+func TestIndexesMatchAcrossEngines(t *testing.T) {
+	engines := Engines(t)
+	if len(engines) < 2 {
+		t.Skip("both engines are required to compare them")
+	}
+
+	perEngine := map[string]map[string]bool{}
+	for _, e := range engines {
+		db := e.Open(t)
+		found := map[string]bool{}
+
+		var names []string
+		switch db.Driver {
+		case DriverSQLite:
+			// Explicitly created indexes only: sqlite_autoindex_* are the
+			// engine's own for UNIQUE and PRIMARY KEY, which PostgreSQL names
+			// differently and which the column-shape test already covers.
+			if err := db.Reader.Select(&names, `
+				SELECT name FROM sqlite_master
+				WHERE type = 'index' AND sql IS NOT NULL AND name NOT LIKE 'sqlite_%'`); err != nil {
+				t.Fatalf("listing sqlite indexes: %v", err)
+			}
+		case DriverPostgres:
+			// Likewise: constraint-backed indexes carry the constraint's name
+			// and are compared by TestConstraintNamesMatchAcrossEngines.
+			if err := db.Reader.Select(&names, `
+				SELECT i.indexname FROM pg_indexes i
+				JOIN pg_class c ON c.relname = i.indexname
+				LEFT JOIN pg_constraint con ON con.conindid = c.oid
+				WHERE i.schemaname = current_schema() AND con.oid IS NULL`); err != nil {
+				t.Fatalf("listing postgres indexes: %v", err)
+			}
+		}
+		for _, n := range names {
+			found[n] = true
+		}
+		perEngine[e.Name] = found
+	}
+
+	only := func(a, b string) []string {
+		var out []string
+		for name := range perEngine[a] {
+			if !perEngine[b][name] {
+				if _, ok := indexesByDesign[name]; ok {
+					continue
+				}
+				out = append(out, name)
+			}
+		}
+		sort.Strings(out)
+		return out
+	}
+	if extra := only("sqlite", "postgres"); len(extra) > 0 {
+		t.Errorf("indexes on SQLite and not on PostgreSQL:\n  %s\n"+
+			"One engine gets a covering scan and the other a sequential one, and "+
+			"nothing says so until somebody profiles the slow deployment.",
+			strings.Join(extra, "\n  "))
+	}
+	if extra := only("postgres", "sqlite"); len(extra) > 0 {
+		t.Errorf("indexes on PostgreSQL and not on SQLite:\n  %s",
+			strings.Join(extra, "\n  "))
+	}
+	if len(perEngine["sqlite"]) == 0 {
+		t.Error("no indexes found at all; the comparison above was vacuous")
+	}
+}

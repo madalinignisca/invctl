@@ -178,6 +178,34 @@ func optionalString(r *http.Request, key string) *string {
 	return &v
 }
 
+// submittedString reads an optional field that must only change when the form
+// actually carried it.
+//
+// optionalString cannot tell "the operator cleared this select" from "this field
+// never rendered": both arrive as an empty value and both become nil. For the
+// team and role pickers that difference is the difference between a deliberate
+// edit and a silent one -- responsibilityOptions degrades to EMPTY pickers when
+// its store read fails, so a transient database error would otherwise turn a
+// save of some unrelated field into "this asset no longer has a team", written
+// to change_log under the name of whoever pressed the button. Found by a
+// security review.
+//
+// A key that is present and empty is still a clearance: that is the operator
+// choosing the blank option, and it must keep working.
+func submittedString(r *http.Request, key string, current *string) *string {
+	// Parsed here rather than relying on an earlier formValue having done it:
+	// this returning `current` because PostForm happened to be nil would be the
+	// same silent no-op in the other direction, and it would depend on the
+	// order of assignments in the caller.
+	if r.PostForm == nil {
+		_ = r.ParseForm()
+	}
+	if !r.PostForm.Has(key) {
+		return current
+	}
+	return optionalString(r, key)
+}
+
 // optionalInt parses an optional numeric field.
 func optionalInt(r *http.Request, key string) *int {
 	v := formValue(r, key)
