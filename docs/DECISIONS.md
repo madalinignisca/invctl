@@ -1442,3 +1442,62 @@ its life and prove nothing about the arithmetic.
 Three mutations confirmed the tests bite: folding amortisation into the run rate,
 treating "no EOL date" as amortisable-with-zero, and dropping the parent join each
 fail a specific assertion.
+
+---
+
+## 2026-07-31 — Search ranking, and two engines that disagreed
+
+Searching `hv-01` returned the bridge `hv-01-br0` above the hypervisor `hv-01`.
+Found while verifying the amortisation panel, which is the only reason it was
+found at all: it is exactly the kind of defect nobody reports and everybody works
+around.
+
+### Both engines were right, which was the problem
+
+SQLite ranks with **bm25**, which favours short documents. The hypervisor's
+indexed body carries its serial, vendor and model; the bridge's carries almost
+nothing, so the bridge scored higher. PostgreSQL orders by **trigram
+similarity** against the title, which put the exact match first.
+
+Neither is wrong as an information-retrieval choice. But an operator mid-incident
+must not get a different first result depending on which engine the deployment
+runs, and this is a rare case where the portability rule cannot be satisfied by
+writing one query — search is the codebase's one sanctioned dialect split. So the
+answer is to stop asking the database which hit is more relevant and decide it in
+**Go**, where both engines get the same rule.
+
+Order: exact name, exact code, name starts with the query, name contains it,
+everything else. Ties break on the shorter name — `hv-01` is a more specific
+answer to `hv-01` than `hv-01-br0` is — then alphabetically, so the result is
+stable rather than merely usually right.
+
+### Sorting cannot recover a row the query never returned
+
+Ranking after the fact only reorders what came back. In an estate where two
+hundred rows contain the string, the exact one can fall outside the query's
+`LIMIT` before Go ever sees it. Two changes follow:
+
+- The text query **over-fetches** `limit × 4`, so the row that will rank first is
+  still in the set.
+- A name typed **in full** is treated as the identifier it is and looked up
+  directly, alongside a serial or a MAC — `searchExactNames` covers asset names,
+  service codes and names, and project codes and names. That is the guarantee;
+  the ranking is the polish.
+
+### Each half was covering for the other
+
+The first pair of tests passed with **either** half deleted, because each
+compensated for the other. That is a green suite proving nothing, so both were
+rewritten to isolate their mechanism:
+
+- `TestRankingDecidesWhenNothingMatchesExactly` searches a **partial** string, so
+  no exact lookup fires and the ordering is the ranker's alone. Removing
+  `rankResults` fails it with `[hv-01-br0 hv-01-br1 hv-01]` — the original bug,
+  reproduced.
+- `TestAnExactNameSurvivesASmallLimit` puts **twenty** bridges ahead of the
+  hypervisor with a limit of 2, so the over-fetch window of 8 does not reach it.
+  Removing the exact-name lookup fails it.
+
+Both tests give the hypervisor a long indexed body on purpose. Without it bm25
+does not rank it last, and the tests would pass against an implementation that
+does no ranking at all.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -107,10 +108,17 @@ func (s *SQLStore) Search(ctx context.Context, query string, limit int) ([]Searc
 	}
 	results = append(results, structured...)
 
-	textual, err := s.searchText(ctx, query, limit)
+	// Over-fetched deliberately. The engines order their own results by
+	// relevance -- bm25 on SQLite, trigram similarity on PostgreSQL -- and
+	// neither agrees with the other or with what an operator expects. Ranking
+	// happens in Go below, so the database LIMIT has to be loose enough that
+	// the row which will rank first is still in the set. Cutting at `limit`
+	// first and sorting afterwards is how an exact match ends up on page two.
+	textual, err := s.searchText(ctx, query, limit*textOverfetch)
 	if err != nil {
 		return nil, err
 	}
+	rankResults(query, textual)
 
 	// Structured hits win; drop the duplicate text hit for the same entity.
 	seen := make(map[string]bool, len(results))
@@ -263,7 +271,133 @@ func (s *SQLStore) searchStructured(ctx context.Context, query string) ([]Search
 	}
 	results = append(results, serialHits...)
 
+	exact, err := s.searchExactNames(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	results = append(results, exact...)
+
 	return results, nil
+}
+
+// searchExactNames resolves a name somebody typed in full.
+//
+// Ranking the text results (rankResults) already floats an exact match to the
+// top of what came back -- but only of what came back. In an estate where two
+// hundred rows contain the string, the exact one can fall outside the query's
+// LIMIT before Go ever sees it, and no amount of sorting recovers a row that
+// was never fetched. So a name typed in full is treated as the identifier it
+// is, alongside a serial or a MAC, and looked up directly.
+//
+// Case-insensitive on both engines via LOWER on each side, which is the one
+// comparison both agree on without a collation argument.
+func (s *SQLStore) searchExactNames(ctx context.Context, query string) ([]SearchResult, error) {
+	q := lower(query)
+	var results []SearchResult
+
+	var assets []SearchResult
+	if err := s.read(ctx, &assets, `
+		SELECT 'asset' AS entity_type, id AS entity_id, name AS title, kind AS subtitle,
+		       '' AS body
+		FROM asset WHERE LOWER(name) = ? AND lifecycle <> ?
+		ORDER BY name, id`, q, domain.LifecycleRetired); err != nil {
+		return nil, fmt.Errorf("resolving asset name %s: %w", query, err)
+	}
+	for i := range assets {
+		assets[i].Why = "name matches exactly"
+	}
+	results = append(results, assets...)
+
+	var services []SearchResult
+	if err := s.read(ctx, &services, `
+		SELECT 'service' AS entity_type, id AS entity_id, name AS title, code AS subtitle,
+		       '' AS body
+		FROM service WHERE (LOWER(code) = ? OR LOWER(name) = ?) AND lifecycle <> ?
+		ORDER BY code, id`, q, q, domain.LifecycleRetired); err != nil {
+		return nil, fmt.Errorf("resolving service name %s: %w", query, err)
+	}
+	for i := range services {
+		services[i].Why = "code or name matches exactly"
+	}
+	results = append(results, services...)
+
+	var projects []SearchResult
+	if err := s.read(ctx, &projects, `
+		SELECT 'project' AS entity_type, id AS entity_id, name AS title, code AS subtitle,
+		       '' AS body
+		FROM project WHERE (LOWER(code) = ? OR LOWER(name) = ?) AND lifecycle <> ?
+		ORDER BY code, id`, q, q, domain.LifecycleRetired); err != nil {
+		return nil, fmt.Errorf("resolving project name %s: %w", query, err)
+	}
+	for i := range projects {
+		projects[i].Why = "code or name matches exactly"
+	}
+	return append(results, projects...), nil
+}
+
+// textOverfetch is how many extra rows the text query asks for so that Go
+// ranking has something to work with. Four is enough that an exact name behind
+// three pages of prefix matches still surfaces, and small enough that the
+// query stays a query.
+const textOverfetch = 4
+
+// rankResults orders text hits the way somebody who typed a name expects,
+// identically on both engines.
+//
+// This exists because the two engines disagreed and BOTH were defensible.
+// SQLite's bm25 favours short documents, so searching `hv-01` put the bridge
+// `hv-01-br0` above the hypervisor `hv-01` -- the bridge's indexed body is
+// shorter, having no serial, vendor or model. PostgreSQL's trigram similarity
+// put the exact match first. An operator during an incident should not get a
+// different first result depending on which engine the deployment runs, and the
+// portable answer to "which of these is more relevant" is to decide it in Go.
+//
+// The order is: exact name, exact code, name starts with the query, name
+// contains it, everything else. Ties break on the shorter name -- `hv-01` is a
+// more specific answer to `hv-01` than `hv-01-br0` is -- and then
+// alphabetically, so the result is stable rather than merely usually right.
+func rankResults(query string, results []SearchResult) {
+	q := lower(strings.TrimSpace(query))
+	sort.SliceStable(results, func(i, j int) bool {
+		a, b := rankOf(results[i], q), rankOf(results[j], q)
+		if a != b {
+			return a < b
+		}
+		ti, tj := results[i].Title, results[j].Title
+		if len(ti) != len(tj) {
+			return len(ti) < len(tj)
+		}
+		if ti != tj {
+			return ti < tj
+		}
+		return results[i].EntityID < results[j].EntityID
+	})
+}
+
+// Ranks, lowest first.
+const (
+	rankExactTitle = iota
+	rankExactSubtitle
+	rankTitlePrefix
+	rankTitleContains
+	rankOther
+)
+
+func rankOf(r SearchResult, q string) int {
+	title, subtitle := lower(r.Title), lower(r.Subtitle)
+	switch {
+	case title == q:
+		return rankExactTitle
+	// A service's subtitle is its code, which is what an operator types.
+	case subtitle == q:
+		return rankExactSubtitle
+	case strings.HasPrefix(title, q):
+		return rankTitlePrefix
+	case strings.Contains(title, q):
+		return rankTitleContains
+	default:
+		return rankOther
+	}
 }
 
 // searchText runs the dialect-specific free-text query.

@@ -1414,3 +1414,35 @@ func TestPrefixesPageHTMXBranching(t *testing.T) {
 		t.Errorf("the prefix was not created: %v", err)
 	}
 }
+
+// TestSearchRanksTheExactNameFirst, through the real router and the seeded
+// estate -- where `hv-01` competes with the bridge `hv-01-br0` hanging off it.
+//
+// This is the shape a viewer actually hits: they type a hostname, and the first
+// link had better be the host. It is asserted at this level as well as in the
+// store because the ordering only matters if it survives rendering.
+func TestSearchRanksTheExactNameFirst(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	page := body(t, h.get("/search?q=hv-01", false))
+
+	first := firstAssetLink(t, page)
+	if first != h.refs.Assets["hv-01"] {
+		t.Errorf("the first result is not hv-01; a bridge named after the host outranked it")
+	}
+	// The bridges are still there -- ranking orders, it does not filter.
+	if !strings.Contains(page, "hv-01-br0") {
+		t.Error("the near matches were dropped rather than ranked")
+	}
+}
+
+// firstAssetLink returns the id in the first /assets/ link on a page.
+func firstAssetLink(t *testing.T, page string) string {
+	t.Helper()
+	m := regexp.MustCompile(`href="/assets/([0-9a-f-]{30,})"`).FindStringSubmatch(page)
+	if m == nil {
+		t.Fatalf("no asset link on the page")
+	}
+	return m[1]
+}
