@@ -128,11 +128,11 @@ func (s *SQLStore) CreateService(ctx context.Context, actor domain.Actor, svc *d
 		_, err := t.exec(ctx, `
 			INSERT INTO service (id, code, name, kind, environment_id, availability,
 			                     min_healthy, failover_mode, tier, rto_minutes, rpo_minutes,
-			                     owner_team, lifecycle, attrs, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			                     owner_team, lifecycle, eol_date, attrs, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			svc.ID, svc.Code, svc.Name, svc.Kind, svc.EnvironmentID, svc.Availability,
 			svc.MinHealthy, svc.FailoverMode, svc.Tier, svc.RTOMinutes, svc.RPOMinutes,
-			svc.OwnerTeam, svc.Lifecycle, svc.Attrs, svc.CreatedAt, svc.UpdatedAt)
+			svc.OwnerTeam, svc.Lifecycle, svc.EOLDate, svc.Attrs, svc.CreatedAt, svc.UpdatedAt)
 		if err != nil {
 			return translateWriteErr(err, "creating service")
 		}
@@ -163,12 +163,12 @@ func (s *SQLStore) UpdateService(ctx context.Context, actor domain.Actor, svc *d
 			UPDATE service SET code = ?, name = ?, kind = ?, environment_id = ?,
 			                   availability = ?, min_healthy = ?, failover_mode = ?, tier = ?,
 			                   rto_minutes = ?, rpo_minutes = ?, owner_team = ?, lifecycle = ?,
-			                   attrs = ?, updated_at = ?
+			                   eol_date = ?, attrs = ?, updated_at = ?
 			WHERE id = ?`,
 			svc.Code, svc.Name, svc.Kind, svc.EnvironmentID,
 			svc.Availability, svc.MinHealthy, svc.FailoverMode, svc.Tier,
 			svc.RTOMinutes, svc.RPOMinutes, svc.OwnerTeam, svc.Lifecycle,
-			svc.Attrs, svc.UpdatedAt, svc.ID)
+			svc.EOLDate, svc.Attrs, svc.UpdatedAt, svc.ID)
 		if err != nil {
 			return translateWriteErr(err, "updating service")
 		}

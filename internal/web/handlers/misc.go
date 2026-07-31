@@ -318,3 +318,34 @@ func (a *App) Health(w http.ResponseWriter, r *http.Request) {
 		slog.Debug("health response truncated", "error", err)
 	}
 }
+
+type expiryPage struct {
+	Base
+	Report *store.ExpiryReport
+	// Horizons the page offers, so the choice is a link rather than a text box
+	// nobody knows the units of.
+	Horizons []int
+}
+
+// ExpiryReport is what runs out and who it lands on.
+//
+// A read, and only a read. Nothing on this page changes the estate or the model
+// of it: an EOL date passing is a fact to look at, never a trigger. The horizon
+// is a query parameter because a budget conversation and a next-sprint
+// conversation want different windows, and both are legitimate.
+func (a *App) ExpiryReport(w http.ResponseWriter, r *http.Request) {
+	months := queryInt(r, "months", store.ExpiryHorizonMonths)
+	if months < 1 || months > 120 {
+		months = store.ExpiryHorizonMonths
+	}
+	report, err := a.Store.Expiring(r.Context(), a.Store.Now(), months)
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
+	a.Render.Page(w, http.StatusOK, "expiry", expiryPage{
+		Base:     a.base(r, "What expires", "expiry"),
+		Report:   report,
+		Horizons: []int{3, 6, 12, 24, 60},
+	})
+}

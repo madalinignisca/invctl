@@ -45,8 +45,9 @@ func funcs() template.FuncMap {
 			}
 			return total
 		},
-		"seq":   seq,
-		"coord": coord,
+		"seq":    seq,
+		"coord":  coord,
+		"expiry": expiryOf,
 	}
 }
 
@@ -258,4 +259,67 @@ func queryString(pairs ...string) template.URL {
 		return ""
 	}
 	return template.URL("?" + strings.Join(parts, "&"))
+}
+
+// Expiry is the presentation form of an EOL date: what to show and how to
+// colour it.
+type Expiry struct {
+	State string
+	Class string
+	Label string
+	Date  string
+}
+
+// expiryOf renders a stored EOL date for display, returning nil when there is
+// none so a template can write {{with expiry .EOLDate}}.
+//
+// The classification is domain.ExpiryState -- this is a bridge, not a second
+// opinion. It reads the wall clock the way `since` above does, which is the
+// boundary this file draws: a helper may ask what time it is to phrase
+// something, but the rule for what counts as expired lives in the domain and is
+// tested there against a fixed clock.
+func expiryOf(eolDate *string) *Expiry {
+	if eolDate == nil || *eolDate == "" {
+		return nil
+	}
+	now := time.Now().UTC()
+	state := domain.ExpiryState(eolDate, now, domain.ExpirySoonDays*24*time.Hour)
+	e := &Expiry{State: state, Date: *eolDate, Class: "pill pill-muted"}
+
+	days, ok := domain.DaysUntil(eolDate, now)
+	if !ok {
+		// Stored but unreadable. Show the raw value rather than hiding it: a
+		// row somebody has to fix is more useful visible than tidy.
+		e.Label = *eolDate
+		return e
+	}
+	switch state {
+	case domain.ExpiryExpired:
+		e.Class = "pill pill-down"
+		e.Label = "expired " + humanDays(-days) + " ago"
+	case domain.ExpirySoon:
+		e.Class = "pill pill-degraded"
+		e.Label = "in " + humanDays(days)
+	default:
+		e.Class = "pill pill-ok"
+		e.Label = "in " + humanDays(days)
+	}
+	return e
+}
+
+// humanDays phrases a day count at the precision the number deserves. "in 803
+// days" is a false precision nobody reads; "in 2 years" is what a person says.
+func humanDays(days int) string {
+	switch {
+	case days <= 0:
+		return "0 days"
+	case days == 1:
+		return "1 day"
+	case days < 60:
+		return fmt.Sprintf("%d days", days)
+	case days < 730:
+		return fmt.Sprintf("%d months", days/30)
+	default:
+		return fmt.Sprintf("%d years", days/365)
+	}
 }

@@ -1145,3 +1145,110 @@ service" is the project overview, where the choice between `owns` and `uses` is 
 Offering only half of it on the service form would make `owns` look like the only kind of
 belonging. The service list and detail page *show* the owner — or `unowned` — and the list can
 filter by it.
+
+---
+
+## 2026-07-31 — End of life, and the shape of the cost model it precedes
+
+`asset` and `service` gained an optional `eol_date`, and `/reports/expiry` reads
+it. This is the first half of a financials feature; the second half — acquisition,
+support and operating costs — follows, and the design was settled before either
+was built because the two halves fail together if the first one guesses wrong.
+
+### One date, and it is declared
+
+Warranty end, support end and planned replacement are three different facts.
+Modelled as three columns they become three columns nobody fills in consistently,
+and then no report can combine them because "expiring" has to pick one. A single
+date plus a note says what a person actually knows.
+
+It reads like a fact about the world, which is exactly the trap `docs/AUDIT.md`
+exists for: somebody read a contract and typed it. Nothing observes it, nothing
+derives it, and a monitoring credential may never write it — a machine that could
+set an EOL date could quietly age out any asset in the estate.
+
+**Its passing is inert.** No lifecycle moves, no placement is removed, nobody is
+paged. A date changes what one page says and nothing else, which is the same rule
+as "invctl never acts on the estate" applied to time.
+
+`YYYY-MM-DD`, ten characters, sorting lexicographically for the same reason the
+RFC3339 timestamps do. Support ends on a day, not at a second; storing `00:00:00Z`
+would invite a reader to believe a precision that is not there and would make "is
+it past?" depend on a timezone nobody chose. The comparison is on whole days in
+UTC, and an item whose support ends **today is not yet expired** — support runs to
+the end of that day. Getting that wrong makes every renewal look a day late.
+
+The database CHECK is a shape test — `length` and `substr`, the two string
+functions both engines agree on — and the real parse is in Go, which rejects
+`2027-02-31` where the constraint cannot. Named `<table>_<column>_check`: the
+convention was not a guess, `TestConstraintNamesMatchAcrossEngines` failed on a
+`_shape` suffix because its PostgreSQL half filters `pg_constraint` to names
+ending `_check`. Measured on the pinned driver: `ADD COLUMN` then `ADD CONSTRAINT
+… CHECK` both apply on SQLite 3.53.3, validate existing rows, and leave the table
+unrebuilt.
+
+### The report is about time, and about what it cannot see
+
+Already-expired rows are **always** included, whatever the horizon. A window is a
+question about the future; something that already lapsed is not a forecast, and
+dropping it because it fell outside a twelve-month view is how an estate
+accumulates unsupported hardware nobody is looking at.
+
+Workload rides up through `asset_closure`, so a service on a guest counts for the
+hypervisor. Without that, every expiring host in a virtualised estate reads as
+carrying nothing — and "expires in 58 days, carries 6 services, best tier 1" is
+the row a reader acts on, where the bare date is not.
+
+Attribution is to the **owner only**. A project that merely uses a thing is not
+who has to replace it, and naming it would send the renewal conversation to the
+wrong team.
+
+The page closes by counting what carries no date at all. Four dated rows in an
+estate of four hundred reads as "almost nothing expires"; the true answer is
+"almost nothing is recorded", and a report that does not say so is flattering
+rather than useful.
+
+### The cost model this is the first half of
+
+Settled now, built next, recorded here because the failure mode is structural:
+
+**Cost attaches to what is billed, and does not inherit.** A VM's cost is not
+inherited from its hypervisor, it is a *share* of it — and if three guests each
+inherit the host's monthly cost the estate reports three times one box. Silent
+double-counting destroys trust in a cost report permanently, and it is the same
+failure the footprint conflict panel already exists to catch one layer up. So the
+cost goes on the thing that appears on an invoice, and the existing footprint
+derivation does the rest. A project owning a VM inside somebody else's hypervisor
+pays for no metal — which the conflict panel already says, now with a number.
+
+**Splitting a shared thing is allocation, and allocation is declared, never
+derived.** It needs a driver (vCPU, RAM, equal shares) and a policy, and every
+choice is arguable. When it comes it will be a share on a `uses` link — "orders
+uses hv-01 at 30%" — with the owner carrying the remainder, typed by a person and
+audited like everything else.
+
+**Three numbers, never one.** Capital committed (the one-time sum), monthly run
+rate (monthly + yearly/12) and annualised. A single "this project costs €X" is
+where cost reports go to die, because somebody always finds the switch bought once
+inside a monthly figure.
+
+**Kind × period, not three fixed fields.** "One-time acquisition / yearly support
+/ monthly operating" is two dimensions; encoding the period in the kind doubles
+the vocabulary the first time monthly support appears.
+
+**Minor units as INTEGER, one currency in config.** Never a float, never
+`NUMERIC`/`MONEY` — arithmetic differs across the engines. Summing mixed
+currencies needs FX rates with valuation dates, which is a subsystem rather than a
+column, and is a stated non-goal.
+
+**A validity window from day one**, queried only for "current" at first. Without
+it a renewal at a new price overwrites history and the only record left is
+`change_log`, which is an audit trail rather than something to query. Squarely in
+the category this repository calls miserable to retrofit.
+
+**Open, and deliberately not decided yet:** contract values change what this
+database is. Today anyone who can log in reads everything and RBAC is a
+comma-separated list of admins; adding acquisition prices and licence costs makes
+the estate commercially sensitive in a way it is not now. Whether cost visibility
+is a third permission rather than a property of read access is easier to settle
+before a client's numbers are in it than after.

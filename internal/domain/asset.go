@@ -142,6 +142,9 @@ type Asset struct {
 	Model     *string `db:"model"`
 	Lifecycle string  `db:"lifecycle"`
 	OwnerTeam *string `db:"owner_team"`
+	// EOLDate is when this stops being supportable. Declared, optional, and
+	// nothing in this codebase acts on it passing -- see eol.go.
+	EOLDate   *string `db:"eol_date"`
 	Attrs     string  `db:"attrs"`
 	CreatedAt string  `db:"created_at"`
 	UpdatedAt string  `db:"updated_at"`
@@ -177,6 +180,7 @@ func (a *Asset) Validate() error {
 	if a.ParentID != nil && *a.ParentID == a.ID {
 		ve.Add("parent_id", "an asset cannot contain itself")
 	}
+	a.EOLDate = checkDate(ve, "eol_date", a.EOLDate)
 	if strings.TrimSpace(a.Attrs) == "" {
 		a.Attrs = "{}"
 	}

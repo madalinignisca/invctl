@@ -137,7 +137,8 @@ var DeclaredColumns = map[string][]string{
 	},
 	"asset": {
 		"id", "kind", "name", "parent_id", "serial", "asset_tag", "vendor",
-		"model", "lifecycle", "owner_team", "attrs", "created_at", "updated_at",
+		"model", "lifecycle", "owner_team", "eol_date", "attrs",
+		"created_at", "updated_at",
 	},
 	"asset_closure":     {"ancestor_id", "descendant_id", "depth"},
 	"asset_environment": {"asset_id", "environment_id", "note"},
@@ -271,7 +272,8 @@ var DeclaredColumns = map[string][]string{
 	"service": {
 		"id", "code", "name", "kind", "environment_id",
 		"availability", "min_healthy", "failover_mode", "tier", "rto_minutes",
-		"rpo_minutes", "owner_team", "lifecycle", "attrs", "created_at", "updated_at",
+		"rpo_minutes", "owner_team", "lifecycle", "eol_date", "attrs",
+		"created_at", "updated_at",
 	},
 	// desired_state is DECLARED and stays here after 00008 moved observed_state
 	// and observed_at out. "Observed stopped, therefore desired stopped" is the

@@ -328,10 +328,10 @@ func (s *SQLStore) CreateAsset(ctx context.Context, actor domain.Actor, a *domai
 		}
 		_, err := t.exec(ctx,
 			`INSERT INTO asset (id, kind, name, parent_id, serial, asset_tag, vendor, model,
-			                    lifecycle, owner_team, attrs, created_at, updated_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			                    lifecycle, owner_team, eol_date, attrs, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			a.ID, a.Kind, a.Name, a.ParentID, a.Serial, a.AssetTag, a.Vendor, a.Model,
-			a.Lifecycle, a.OwnerTeam, a.Attrs, a.CreatedAt, a.UpdatedAt)
+			a.Lifecycle, a.OwnerTeam, a.EOLDate, a.Attrs, a.CreatedAt, a.UpdatedAt)
 		if err != nil {
 			return translateWriteErr(err, "creating asset")
 		}
@@ -381,10 +381,11 @@ func (s *SQLStore) UpdateAsset(ctx context.Context, actor domain.Actor, a *domai
 		}
 		_, err := t.exec(ctx,
 			`UPDATE asset SET kind = ?, name = ?, serial = ?, asset_tag = ?, vendor = ?,
-			                  model = ?, lifecycle = ?, owner_team = ?, attrs = ?, updated_at = ?
+			                  model = ?, lifecycle = ?, owner_team = ?, eol_date = ?,
+			                  attrs = ?, updated_at = ?
 			 WHERE id = ?`,
 			a.Kind, a.Name, a.Serial, a.AssetTag, a.Vendor, a.Model,
-			a.Lifecycle, a.OwnerTeam, a.Attrs, a.UpdatedAt, a.ID)
+			a.Lifecycle, a.OwnerTeam, a.EOLDate, a.Attrs, a.UpdatedAt, a.ID)
 		if err != nil {
 			return translateWriteErr(err, "updating asset")
 		}

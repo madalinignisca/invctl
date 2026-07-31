@@ -214,6 +214,7 @@ func (a *App) ServiceCreate(w http.ResponseWriter, r *http.Request) {
 		RTOMinutes:    optionalInt(r, "rto_minutes"),
 		RPOMinutes:    optionalInt(r, "rpo_minutes"),
 		OwnerTeam:     optionalString(r, "owner_team"),
+		EOLDate:       optionalString(r, "eol_date"),
 	}
 
 	svc, err := domain.NewService(store.NewID(), spec, a.Store.Now())
@@ -250,6 +251,7 @@ func (a *App) ServiceUpdate(w http.ResponseWriter, r *http.Request) {
 	updated.RTOMinutes = optionalInt(r, "rto_minutes")
 	updated.RPOMinutes = optionalInt(r, "rpo_minutes")
 	updated.OwnerTeam = optionalString(r, "owner_team")
+	updated.EOLDate = optionalString(r, "eol_date")
 	updated.Lifecycle = formValue(r, "lifecycle")
 
 	if err := a.Store.UpdateService(r.Context(), actor(r), &updated); err != nil {
@@ -257,6 +259,7 @@ func (a *App) ServiceUpdate(w http.ResponseWriter, r *http.Request) {
 			Code: updated.Code, Name: updated.Name, Kind: updated.Kind,
 			EnvironmentID: updated.EnvironmentID, Availability: updated.Availability,
 			Tier: updated.Tier, MinHealthy: updated.MinHealthy, FailoverMode: updated.FailoverMode,
+			EOLDate: updated.EOLDate,
 		})
 		return
 	}

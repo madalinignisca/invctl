@@ -89,6 +89,11 @@
         <label for="asset-owner">Owner team</label>
         <input id="asset-owner" type="text" name="owner_team">
       </div>
+      <div class="field">
+        <label for="asset-eol">Supported until</label>
+        <input id="asset-eol" type="date" name="eol_date">
+        <div class="field-hint">Optional. Nothing happens when it passes — it changes what the expiry report says.</div>
+      </div>
     </div>
     <div class="field">
       <label>Environments</label>
@@ -173,6 +178,11 @@
       <div class="field">
         <label for="svc-owner">Owner team</label>
         <input id="svc-owner" type="text" name="owner_team" value="{{deref .Spec.OwnerTeam}}">
+      </div>
+      <div class="field">
+        <label for="svc-eol">Supported until</label>
+        <input id="svc-eol" type="date" name="eol_date" value="{{deref .Spec.EOLDate}}">
+        <div class="field-hint">Optional — a licence that will not renew, a release past its support window.</div>
       </div>
       <div class="field">
         <label for="svc-rto">RTO (minutes)</label>

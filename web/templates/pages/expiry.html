@@ -1,0 +1,119 @@
+{{define "content"}}
+<div class="page-head">
+  <div class="eyebrow">analysis</div>
+  <h1>What expires</h1>
+  <p class="lede">
+    Everything with a recorded end-of-support date falling on or before
+    <span class="mono">{{.Report.Until}}</span>, plus everything already past it
+    however long ago. Nothing here acts: a date passing changes this page and
+    nothing else in the estate.
+  </p>
+</div>
+
+<div class="stat-row">
+  <div class="stat">
+    <div class="k">already expired</div>
+    <div class="v">{{.Report.Expired}}</div>
+  </div>
+  <div class="stat">
+    <div class="k">within {{.Report.HorizonMonths}} months</div>
+    <div class="v">{{add .Report.Soon .Report.Later}}</div>
+  </div>
+  <div class="stat">
+    <div class="k">no date recorded</div>
+    <div class="v">{{add .Report.UndatedAssets .Report.UndatedServices}}</div>
+  </div>
+</div>
+
+<div class="toolbar" style="margin-bottom:18px">
+  <div class="field" style="margin-bottom:0">
+    <label>Horizon</label>
+    <div class="order-list">
+      {{range $.Horizons}}
+        {{if eq . $.Report.HorizonMonths}}
+          <span class="step">{{.}} months</span>
+        {{else}}
+          <a class="step" href="/reports/expiry?months={{.}}">{{.}} months</a>
+        {{end}}
+      {{end}}
+    </div>
+  </div>
+</div>
+
+<div class="panel">
+  <div class="panel-head">
+    <h2>{{pluralise (len .Report.Rows) "thing" "things"}} with a date</h2>
+    <span class="panel-note">Soonest first, and the ones already past are at the top.</span>
+  </div>
+  {{if .Report.Rows}}
+  <div class="scroll-x">
+    <table>
+      <thead>
+        <tr>
+          <th>Expires</th><th>What</th><th>Kind</th><th>Owned by</th>
+          <th>What rides on it</th><th>State</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .Report.Rows}}
+        <tr>
+          <td class="mono">{{.EOLDate}}</td>
+          <td>
+            {{if eq .EntityType "asset"}}
+              <a class="id" href="/assets/{{.ID}}">{{.Name}}</a>
+            {{else}}
+              <a class="id" href="/services/{{.ID}}">{{.Code}}</a>
+              <div style="color:var(--muted);font-size:12px">{{.Name}}</div>
+            {{end}}
+          </td>
+          <td><span class="pill pill-muted">{{.Kind}}</span></td>
+          <td>
+            {{if .ProjectID}}
+              <a class="id" href="/projects/{{.ProjectID}}">{{.ProjectName}}</a>
+            {{else}}
+              <span class="pill pill-degraded" title="No project owns this">unowned</span>
+            {{end}}
+          </td>
+          <td>
+            {{if eq .EntityType "asset"}}
+              {{if .ServiceCount}}
+                {{pluralise .ServiceCount "service" "services"}}
+                <span class="{{tierClass .BestTier}}">tier {{.BestTier}}</span>
+              {{else}}
+                <span style="color:var(--faint)">nothing placed</span>
+              {{end}}
+            {{else}}
+              <span class="{{tierClass .Tier}}">tier {{.Tier}}</span>
+            {{end}}
+          </td>
+          <td>
+            {{with expiry .EOLDate}}
+              <span class="{{.Class}}">{{.Label}}</span>
+            {{end}}
+          </td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{else}}
+  <div class="empty">
+    <strong>Nothing expires in this window.</strong>
+    That is only good news if the dates are recorded — see below.
+  </div>
+  {{end}}
+</div>
+
+{{if or .Report.UndatedAssets .Report.UndatedServices}}
+<div class="callout callout-warn">
+  <h2>What this report cannot see</h2>
+  <p style="margin-top:6px">
+    {{pluralise .Report.UndatedAssets "asset carries" "assets carry"}} no end-of-support
+    date, and neither {{if eq .Report.UndatedServices 1}}does 1 service{{else}}do {{.Report.UndatedServices}} services{{end}}.
+    They are absent from the table above because nothing is known about them, not
+    because they are safe. An estate where nothing appears to expire is usually an
+    estate where nobody has written the dates down.
+  </p>
+</div>
+{{end}}
+{{end}}

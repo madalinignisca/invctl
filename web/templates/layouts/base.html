@@ -39,6 +39,7 @@
 
       <div class="rail-section">Analysis</div>
       <a class="rail-link" href="/changes" {{if eq .Nav "changes"}}aria-current="page"{{end}}>Change log</a>
+      <a class="rail-link" href="/reports/expiry" {{if eq .Nav "expiry"}}aria-current="page"{{end}}>What expires</a>
       <a class="rail-link" href="/reports/spanning" {{if eq .Nav "reports"}}aria-current="page"{{end}}>Environment spans</a>
       <a class="rail-link" href="/vocabularies" {{if eq .Nav "vocabularies"}}aria-current="page"{{end}}>Vocabularies</a>
       {{/* The help drawer. A plain link, so it works with JavaScript off (it

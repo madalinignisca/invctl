@@ -99,6 +99,10 @@ func Load(ctx context.Context, s *store.SQLStore) (*Refs, error) {
 	// it needs both to exist. It reads them and writes nothing they depend on,
 	// which is why it can sit at the end rather than being threaded through.
 	b.projects()
+	// Dates last: it reads and updates assets and services, so both must exist,
+	// and it must not run before projects() or the report would have nobody to
+	// attribute an expiring box to.
+	b.lifetimes()
 
 	// Last, and only when asked. Observations are telemetry rather than
 	// inventory, so a deployment gets the honest empty state unless somebody is

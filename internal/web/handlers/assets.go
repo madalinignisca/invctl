@@ -328,6 +328,7 @@ func (a *App) AssetCreate(w http.ResponseWriter, r *http.Request) {
 		asset.Vendor = optionalString(r, "vendor")
 		asset.Model = optionalString(r, "model")
 		asset.OwnerTeam = optionalString(r, "owner_team")
+		asset.EOLDate = optionalString(r, "eol_date")
 		err = a.Store.CreateAsset(r.Context(), actor(r), asset, submittedEnvironments(r))
 	}
 	if err != nil {
@@ -365,6 +366,7 @@ func (a *App) AssetUpdate(w http.ResponseWriter, r *http.Request) {
 	updated.Vendor = optionalString(r, "vendor")
 	updated.Model = optionalString(r, "model")
 	updated.OwnerTeam = optionalString(r, "owner_team")
+	updated.EOLDate = optionalString(r, "eol_date")
 
 	if err := a.Store.UpdateAsset(r.Context(), actor(r), &updated, submittedEnvironments(r)); err != nil {
 		if messages, ok := validationErrors(err); ok {

@@ -33,6 +33,9 @@
       </dd>
       <dt>Owner</dt>
       <dd>{{if .Service.OwnerTeam}}{{deref .Service.OwnerTeam}}{{else}}<span style="color:var(--faint)">unassigned</span>{{end}}</dd>
+      <dt>Supported until</dt>
+      <dd>{{with expiry .Service.EOLDate}}<span class="{{.Class}}">{{.Date}}</span>
+        <span style="color:var(--muted)">{{.Label}}</span>{{else}}—{{end}}</dd>
       <dt>RTO / RPO</dt>
       <dd class="num">
         {{if .Service.RTOMinutes}}{{.Service.RTOMinutes}} min{{else}}—{{end}}
