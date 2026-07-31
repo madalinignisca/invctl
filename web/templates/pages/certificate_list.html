@@ -1,0 +1,43 @@
+{{define "content"}}
+<div class="page-head">
+  <div class="eyebrow">inventory</div>
+  <h1>Certificates</h1>
+  <p class="lede">
+    Soonest expiry first. A certificate lapses every ninety days where hardware
+    support lapses every five years, so this is usually the list that matters
+    before any of the others.
+  </p>
+</div>
+
+<div class="panel">
+  <div class="panel-body">
+    <form class="toolbar" hx-get="/certificates" hx-target="#certificate-list"
+          hx-swap="outerHTML" hx-push-url="true"
+          hx-trigger="keyup changed delay:250ms, search, change">
+      <div class="field" style="margin-bottom:0">
+        <label for="cq">Find</label>
+        <input id="cq" type="search" name="q" value="{{.Filter.Query}}" placeholder="subject or issuer">
+      </div>
+      <div class="field" style="margin-bottom:0">
+        <label for="chost">Covers host</label>
+        <input id="chost" class="mono" type="search" name="host" value="{{.Filter.Host}}"
+               placeholder="orders.example.com">
+        <div class="field-hint">Wildcards resolved the way a TLS client would.</div>
+      </div>
+      <div class="field" style="margin-bottom:0">
+        <label for="cteam">Renewed by</label>
+        <select id="cteam" name="team">
+          <option value="">any</option>
+          {{range $.Teams}}<option value="{{.ID}}" {{if eq .ID $.Filter.TeamID}}selected{{end}}>{{.Code}}</option>{{end}}
+        </select>
+      </div>
+    </form>
+  </div>
+</div>
+
+{{template "certificate_list_panel" .}}
+
+{{if .CanWrite}}
+{{template "certificate_form" .}}
+{{end}}
+{{end}}

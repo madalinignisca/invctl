@@ -1,0 +1,342 @@
+{{define "certificate_list_panel"}}
+<div id="certificate-list" class="panel">
+  <div class="panel-head">
+    <h2>{{pluralise (len .Certificates) "certificate" "certificates"}}</h2>
+    <span class="panel-note">Soonest expiry first; undated last, because that is the one this cannot rank.</span>
+  </div>
+  {{if .Certificates}}
+  <div class="scroll-x">
+    <table>
+      <thead>
+        <tr><th>Expires</th><th>Subject</th><th>Covers</th><th>Issuer</th>
+            <th>Deployed</th><th>Renewed by</th></tr>
+      </thead>
+      <tbody>
+        {{range .Certificates}}
+        <tr>
+          <td>
+            {{with expiry .NotAfter}}
+              <span class="{{.Class}}">{{.Date}}</span>
+              <div style="color:var(--muted);font-size:11.5px">{{.Label}}</div>
+            {{else}}
+              <span class="pill pill-degraded">not recorded</span>
+            {{end}}
+          </td>
+          <td><a class="id" href="/certificates/{{.ID}}">{{.SubjectCN}}</a></td>
+          <td style="font-size:12px">
+            {{if gt (len .SANs) 1}}
+              <span class="mono">{{index .SANs 0}}</span>
+              <span style="color:var(--muted)">+{{add (len .SANs) -1}} more</span>
+            {{else if .SANs}}
+              <span class="mono">{{index .SANs 0}}</span>
+            {{end}}
+          </td>
+          <td style="color:var(--muted);font-size:12.5px">{{if .Issuer}}{{deref .Issuer}}{{end}}</td>
+          <td class="num">{{add .AssetCount .ServiceCount}}</td>
+          <td>
+            {{if .TeamName}}<a class="id" href="/teams/{{deref .TeamID}}">{{.TeamCode}}</a>
+            {{else}}<span class="pill pill-degraded" title="Nobody is recorded as renewing this">unassigned</span>{{end}}
+          </td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{else}}
+  <div class="empty">
+    <strong>No certificates match.</strong>
+    A certificate nobody recorded still expires.
+  </div>
+  {{end}}
+</div>
+{{end}}
+
+{{define "certificate_form"}}
+<div class="panel">
+  <div class="panel-head"><h2>Add a certificate</h2></div>
+  <form class="panel-body" method="post" action="/certificates" hx-post="/certificates">
+    <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+    <div class="field-row">
+      <div class="field">
+        <label for="c-subject">Subject</label>
+        <input id="c-subject" class="mono" type="text" name="subject_cn"
+               value="{{.Spec.SubjectCN}}" placeholder="orders.example.com" required>
+        {{with index .Errors "subject_cn"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="c-issuer">Issuer</label>
+        <input id="c-issuer" type="text" name="issuer" value="{{deref .Spec.Issuer}}"
+               placeholder="Let's Encrypt · internal CA">
+      </div>
+      <div class="field">
+        <label for="c-from">Valid from</label>
+        <input id="c-from" type="date" name="not_before" value="{{deref .Spec.NotBefore}}">
+      </div>
+      <div class="field">
+        <label for="c-until">Expires</label>
+        <input id="c-until" type="date" name="not_after" value="{{deref .Spec.NotAfter}}">
+        {{with index .Errors "not_after"}}<div class="field-error">{{.}}</div>{{end}}
+        <div class="field-hint">The field this whole page is about.</div>
+      </div>
+    </div>
+    <div class="field">
+      <label for="c-sans">Also covers</label>
+      <textarea id="c-sans" class="mono" name="sans" rows="3"
+                placeholder="www.example.com&#10;*.api.example.com"></textarea>
+      <div class="field-hint">
+        One per line, or commas. A paste from <span class="mono">openssl x509 -text</span>
+        works unedited — the <span class="mono">DNS:</span> prefixes are stripped.
+      </div>
+    </div>
+    <div class="field-row">
+      <div class="field">
+        <label for="c-fp">Fingerprint</label>
+        <input id="c-fp" class="mono" type="text" name="fingerprint"
+               value="{{deref .Spec.Fingerprint}}" placeholder="SHA-256, colons optional">
+        {{with index .Errors "fingerprint"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="c-serial">Serial</label>
+        <input id="c-serial" class="mono" type="text" name="serial" value="{{deref .Spec.Serial}}">
+      </div>
+      <div class="field">
+        <label for="c-key">Key reference</label>
+        <input id="c-key" class="mono" type="text" name="key_ref" value="{{deref .Spec.KeyRef}}"
+               placeholder="vault:secret/tls/orders">
+        <div class="field-hint">
+          A path to the key — <strong>never the key itself</strong>. This database
+          is not a secret store.
+        </div>
+      </div>
+    </div>
+    <div class="field-row">
+      <div class="field">
+        <label for="c-team">Renewed by</label>
+        <select id="c-team" name="team_id">
+          <option value="">—</option>
+          {{range .Teams}}<option value="{{.ID}}" {{if eq .ID (deref $.Spec.TeamID)}}selected{{end}}>{{.Code}}</option>{{end}}
+        </select>
+      </div>
+      <div class="field">
+        <label for="c-role">Managed as</label>
+        <select id="c-role" name="manager_role">
+          <option value="">—</option>
+          {{range .Roles}}<option value="{{.Code}}" {{if eq .Code (deref $.Spec.ManagerRole)}}selected{{end}}>{{.Label}}</option>{{end}}
+        </select>
+        {{with index .Errors "manager_role"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+    </div>
+    <button class="btn btn-primary" type="submit">Add certificate</button>
+  </form>
+</div>
+{{end}}
+
+{{define "certificate_panel"}}
+<div id="certificate">
+  <div class="panel">
+    <div class="panel-head"><h2>What it is</h2></div>
+    <div class="panel-body">
+      <dl class="kv">
+        <dt>Covers</dt>
+        <dd>
+          {{range .Certificate.SANs}}<span class="mono pill pill-muted">{{.}}</span> {{end}}
+          {{if not .Certificate.SANs}}<span style="color:var(--faint)">nothing recorded</span>{{end}}
+        </dd>
+        <dt>Valid</dt>
+        <dd class="mono">
+          {{if .Certificate.NotBefore}}{{deref .Certificate.NotBefore}}{{else}}?{{end}}
+          &rarr;
+          {{if .Certificate.NotAfter}}{{deref .Certificate.NotAfter}}{{else}}?{{end}}
+        </dd>
+        <dt>Fingerprint</dt>
+        <dd class="mono" style="word-break:break-all">
+          {{if .Certificate.Fingerprint}}{{deref .Certificate.Fingerprint}}{{else}}—{{end}}
+        </dd>
+        <dt>Serial</dt>
+        <dd class="mono">{{if .Certificate.Serial}}{{deref .Certificate.Serial}}{{else}}—{{end}}</dd>
+        <dt>Key reference</dt>
+        <dd class="mono">
+          {{if .Certificate.KeyRef}}{{deref .Certificate.KeyRef}}
+            <div class="field-hint">A path. The key itself is not in this database and must never be.</div>
+          {{else}}—{{end}}
+        </dd>
+        <dt>Renewed by</dt>
+        <dd>
+          {{if .Certificate.TeamName}}<a href="/teams/{{deref .Certificate.TeamID}}">{{.Certificate.TeamName}}</a>
+            {{if .Certificate.ManagerRoleName}}<span style="color:var(--muted)">as {{.Certificate.ManagerRoleName}}</span>{{end}}
+          {{else}}<span style="color:var(--faint)">nobody recorded</span>{{end}}
+        </dd>
+      </dl>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head">
+      <h2>Where it is deployed</h2>
+      <span class="panel-note">
+        {{pluralise (add (len .Assets) (len .Services)) "place" "places"}} — each one an outage when it expires.
+      </span>
+    </div>
+    {{if or .Assets .Services}}
+    <div class="scroll-x">
+      <table>
+        <thead><tr><th>What</th><th>Kind</th><th>Note</th>{{if .CanWrite}}<th></th>{{end}}</tr></thead>
+        <tbody>
+          {{range .Assets}}
+          <tr>
+            <td><a class="id" href="/assets/{{.EntityID}}">{{.EntityName}}</a></td>
+            <td><span class="pill pill-muted">asset</span></td>
+            <td style="color:var(--muted);font-size:12.5px">{{if .Note}}{{deref .Note}}{{end}}</td>
+            {{if $.CanWrite}}
+            <td>
+              <form method="post" action="/certificates/{{$.Certificate.ID}}/assets/{{.EntityID}}/retire"
+                    hx-post="/certificates/{{$.Certificate.ID}}/assets/{{.EntityID}}/retire" style="display:inline">
+                <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+                <button class="btn btn-sm btn-danger" type="submit">Remove</button>
+              </form>
+            </td>
+            {{end}}
+          </tr>
+          {{end}}
+          {{range .Services}}
+          <tr>
+            <td><a class="id" href="/services/{{.EntityID}}">{{.EntityName}}</a></td>
+            <td><span class="pill pill-info">service</span></td>
+            <td style="color:var(--muted);font-size:12.5px">{{if .Note}}{{deref .Note}}{{end}}</td>
+            {{if $.CanWrite}}
+            <td>
+              <form method="post" action="/certificates/{{$.Certificate.ID}}/services/{{.EntityID}}/retire"
+                    hx-post="/certificates/{{$.Certificate.ID}}/services/{{.EntityID}}/retire" style="display:inline">
+                <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+                <button class="btn btn-sm btn-danger" type="submit">Remove</button>
+              </form>
+            </td>
+            {{end}}
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+    {{else}}
+    <div class="empty">
+      <strong>Deployed nowhere.</strong>
+      Either nobody recorded where it is used, or it is a certificate the estate
+      no longer needs. The two look identical here, which is why recording it matters.
+    </div>
+    {{end}}
+  </div>
+
+  {{if .CanWrite}}
+  <div class="grid-2">
+    <div class="panel">
+      <div class="panel-head"><h2>Deploy to an asset</h2></div>
+      <form class="panel-body" method="post" action="/certificates/{{.Certificate.ID}}/assets"
+            hx-post="/certificates/{{.Certificate.ID}}/assets">
+        <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+        <div class="field">
+          <label for="cd-asset">Asset</label>
+          <select id="cd-asset" name="asset_id">
+            {{range .AllAssets}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
+          </select>
+        </div>
+        <div class="field">
+          <label for="cd-asset-note">Note</label>
+          <input id="cd-asset-note" type="text" name="note" placeholder="which listener, which vhost">
+        </div>
+        <button class="btn btn-primary" type="submit">Record deployment</button>
+      </form>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><h2>Deploy to a service</h2></div>
+      <form class="panel-body" method="post" action="/certificates/{{.Certificate.ID}}/services"
+            hx-post="/certificates/{{.Certificate.ID}}/services">
+        <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+        <div class="field">
+          <label for="cd-service">Service</label>
+          <select id="cd-service" name="service_id">
+            {{range .AllServices}}<option value="{{.ID}}">{{.Code}}</option>{{end}}
+          </select>
+        </div>
+        <div class="field">
+          <label for="cd-service-note">Note</label>
+          <input id="cd-service-note" type="text" name="note">
+        </div>
+        <button class="btn btn-primary" type="submit">Record deployment</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head"><h2>Edit</h2></div>
+    <form class="panel-body" method="post" action="/certificates/{{.Certificate.ID}}"
+          hx-post="/certificates/{{.Certificate.ID}}">
+      <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+      <div class="field-row">
+        <div class="field">
+          <label for="ce-subject">Subject</label>
+          <input id="ce-subject" class="mono" type="text" name="subject_cn"
+                 value="{{.Certificate.SubjectCN}}" required>
+          {{with index .Errors "subject_cn"}}<div class="field-error">{{.}}</div>{{end}}
+        </div>
+        <div class="field">
+          <label for="ce-issuer">Issuer</label>
+          <input id="ce-issuer" type="text" name="issuer" value="{{deref .Certificate.Issuer}}">
+        </div>
+        <div class="field">
+          <label for="ce-from">Valid from</label>
+          <input id="ce-from" type="date" name="not_before" value="{{deref .Certificate.NotBefore}}">
+        </div>
+        <div class="field">
+          <label for="ce-until">Expires</label>
+          <input id="ce-until" type="date" name="not_after" value="{{deref .Certificate.NotAfter}}">
+          {{with index .Errors "not_after"}}<div class="field-error">{{.}}</div>{{end}}
+        </div>
+        <div class="field">
+          <label for="ce-life">Lifecycle</label>
+          <select id="ce-life" name="lifecycle">
+            {{range $.Lifecycles}}<option value="{{.}}" {{if eq . $.Certificate.Lifecycle}}selected{{end}}>{{.}}</option>{{end}}
+          </select>
+        </div>
+      </div>
+      <div class="field">
+        <label for="ce-sans">Also covers</label>
+        <textarea id="ce-sans" class="mono" name="sans" rows="3">{{join .Certificate.SANs "\n"}}</textarea>
+        <div class="field-hint">The subject is always included; you do not need to repeat it.</div>
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label for="ce-fp">Fingerprint</label>
+          <input id="ce-fp" class="mono" type="text" name="fingerprint" value="{{deref .Certificate.Fingerprint}}">
+          {{with index .Errors "fingerprint"}}<div class="field-error">{{.}}</div>{{end}}
+        </div>
+        <div class="field">
+          <label for="ce-serial">Serial</label>
+          <input id="ce-serial" class="mono" type="text" name="serial" value="{{deref .Certificate.Serial}}">
+        </div>
+        <div class="field">
+          <label for="ce-key">Key reference</label>
+          <input id="ce-key" class="mono" type="text" name="key_ref" value="{{deref .Certificate.KeyRef}}">
+          <div class="field-hint">A path — <strong>never the key itself</strong>.</div>
+        </div>
+        <div class="field">
+          <label for="ce-team">Renewed by</label>
+          <select id="ce-team" name="team_id">
+            <option value="">—</option>
+            {{range .Teams}}<option value="{{.ID}}" {{if eq .ID (deref $.Certificate.TeamID)}}selected{{end}}>{{.Code}}</option>{{end}}
+          </select>
+        </div>
+        <div class="field">
+          <label for="ce-role">Managed as</label>
+          <select id="ce-role" name="manager_role">
+            <option value="">—</option>
+            {{range .Roles}}<option value="{{.Code}}" {{if eq .Code (deref $.Certificate.ManagerRole)}}selected{{end}}>{{.Label}}</option>{{end}}
+          </select>
+          {{with index .Errors "manager_role"}}<div class="field-error">{{.}}</div>{{end}}
+        </div>
+      </div>
+      <button class="btn btn-primary" type="submit">Save</button>
+    </form>
+  </div>
+  {{end}}
+</div>
+{{end}}

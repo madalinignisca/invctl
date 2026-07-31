@@ -1,0 +1,21 @@
+{{define "content"}}
+<div class="crumbs">
+  <a href="/certificates">certificates</a><span class="sep">/</span><span>{{.Certificate.SubjectCN}}</span>
+</div>
+
+<div class="page-head">
+  <div class="eyebrow">{{if .Certificate.Issuer}}{{deref .Certificate.Issuer}}{{else}}issuer not recorded{{end}}</div>
+  <h1>{{.Certificate.SubjectCN}}</h1>
+  <div class="tag-list" style="margin-top:8px">
+    <span class="{{lifecycleClass .Certificate.Lifecycle}}">{{.Certificate.Lifecycle}}</span>
+    {{with expiry .Certificate.NotAfter}}
+      <span class="{{.Class}}">{{.Date}}</span>
+      <span class="pill pill-muted">{{.Label}}</span>
+    {{else}}
+      <span class="pill pill-degraded" title="No expiry recorded">no expiry recorded</span>
+    {{end}}
+  </div>
+</div>
+
+{{template "certificate_panel" .}}
+{{end}}

@@ -111,6 +111,9 @@ func Load(ctx context.Context, s *store.SQLStore) (*Refs, error) {
 	// Prices last of all: they attach to assets, services AND projects, so
 	// every one of those has to exist, and nothing else reads them.
 	b.costs()
+	// Certificates last: they deploy to assets and services and are renewed by
+	// teams, so all three must exist.
+	b.certificates()
 
 	// Last, and only when asked. Observations are telemetry rather than
 	// inventory, so a deployment gets the honest empty state unless somebody is

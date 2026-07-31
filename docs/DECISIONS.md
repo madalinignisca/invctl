@@ -1794,3 +1794,92 @@ on PostgreSQL. Swapping in `strings.ToLower` just moves the failure to the other
 engine; a folded shadow column would fix it and is not worth a column yet. The
 comment above the filter claimed the `LOWER`-on-both-sides trick made the engines
 agree. It does not, and now says so.
+
+---
+
+## 2026-07-31 — TLS certificates, and the audit entry that recorded nothing
+
+The second half of the certificate work: handlers, screens, seed and tests. The
+schema and store landed with the teams review.
+
+### Certificates are the missing half of the expiry report
+
+Hardware support lapses on a five-year cycle; a certificate lapses every ninety
+days, and its expiry is an immediate outage rather than a procurement
+conversation. `not_after` is an EOL date in every way that matters, so
+certificates join the report that already answers "what runs out, who owns it,
+what rides on it" — and for a certificate, *what rides on it* is how many places
+it is deployed. One wildcard on four load balancers is four outages.
+
+The report now counts undated certificates separately, because a blank there is
+worse than a date in the past: **every** certificate has an expiry, so a blank
+means nobody looked rather than that the question does not apply.
+
+### Wildcard matching happens in Go, and matches what a client does
+
+`*.example.com` covers `orders.example.com`, and does **not** cover
+`example.com` or `a.b.example.com`. That is RFC 6125 and, more to the point,
+what every TLS client actually does. A CMDB answering more loosely than the
+clients do would tell somebody they were covered while they were about to serve
+a name error — and looser is the easy implementation: a suffix match or a `LIKE`
+gets all three cases wrong in the direction that reassures.
+
+It is Go rather than SQL because encoding that portably in SQL would be a worse
+lie than putting it where it can be tested. The names are a child table so the
+question is a real query, which is the whole reason `certificate_san` exists.
+
+### Never key material
+
+`key_ref` holds a path or a vault reference and is redacted from `change_log`
+like `secret_ref`. The public certificate body is not stored either — it is bulk
+with no query value, and a column that accepts certificate-shaped text is where
+a private key eventually gets pasted.
+
+### The audit entry recorded nothing, and only mutation found it
+
+`certificateAudit` embedded `*domain.Certificate` rather than
+`domain.Certificate`. It compiled, it ran, and it produced an audit entry
+containing **only the SANs** — `snapshotJSON` walks db-tagged fields and does not
+follow an embedded pointer, so every column of the certificate was absent from
+the permanent trail.
+
+Two tests passed over it. `TestChangingTheNamesIsAudited` passed because the SANs
+are on the outer struct. `TestAKeyReferenceNeverReachesTheAuditTrail` passed **for
+the wrong reason entirely**: the key was absent because *everything* was absent,
+and deleting the redaction rule did not make it fail. That is what exposed it —
+mutating a rule and noticing the test did not care.
+
+An audit entry that records nothing is worse than no entry, because it looks like
+coverage. `TestTheCertificateSnapshotIsComplete` now asserts every column by
+name, and both mutations fail it.
+
+`assetAudit` and `dependencyAudit` embed by value and had the answer all along;
+`dependencyAudit` also sorts its set before joining, so re-submitting the same
+members in a different order is not reported as a change. The certificate audit
+now does both.
+
+### The fixture makes five points
+
+A wildcard deployed in four places; a partner certificate expiring in eleven days
+that **nobody** is recorded as renewing — on the edge no project owns and no team
+looks after, so the estate's sharpest finding now has three faces; an internal
+certificate that lapsed six weeks ago and is still deployed, which is what an
+internal CA with no automation looks like; one ordinary well-managed certificate,
+so the alarming rows are not the only rows; and one with no expiry recorded at
+all.
+
+### Small things worth keeping
+
+The SAN field accepts a paste straight out of `openssl x509 -text` — newlines or
+commas, `DNS:` prefixes stripped — because that is how anybody actually fills it
+in. Fingerprints are normalised to lowercase hex with separators removed, so the
+same certificate pasted from openssl, a browser and a console is one row rather
+than three; a length that is neither 40 nor 64 characters is rejected, because a
+truncated fingerprint looks like an identity and is not one.
+
+One bug found by probing rather than review: the first fingerprint normaliser
+used `strings.Map` with a negative sentinel to mark invalid characters.
+`strings.Map` **drops** a negative return rather than inserting one, so `zz:qq`
+came back as the empty string and was then treated as no fingerprint at all.
+Silently discarding what somebody typed is the worst of the three possible
+behaviours.

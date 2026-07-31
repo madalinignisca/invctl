@@ -164,12 +164,23 @@ func (s *SQLStore) attachSANs(ctx context.Context, rows []CertificateRow) error 
 // certificate is exactly the entity where somebody might paste something worse
 // than a path.
 type certificateAudit struct {
-	*domain.Certificate
+	// EMBEDDED BY VALUE, like assetAudit and dependencyAudit. A pointer here
+	// compiled, ran, and produced an audit entry containing ONLY the SANs --
+	// snapshotJSON walks the struct's db-tagged fields and does not follow an
+	// embedded pointer, so every column of the certificate was missing from the
+	// trail. An entry that records nothing is worse than no entry, because it
+	// looks like coverage. Found by mutating the key_ref redaction and noticing
+	// the test did not care.
+	domain.Certificate
+	// Sorted and joined, so re-pasting the same names in a different order is
+	// not reported as a change -- the reason dependencyAudit sorts its classes.
 	SANs string `db:"sans"`
 }
 
 func auditedCertificate(c *domain.Certificate, sans []string) *certificateAudit {
-	return &certificateAudit{Certificate: c, SANs: strings.Join(sans, " ")}
+	sorted := append([]string(nil), sans...)
+	sort.Strings(sorted)
+	return &certificateAudit{Certificate: *c, SANs: strings.Join(sorted, " ")}
 }
 
 // CreateCertificate inserts a certificate and its names.

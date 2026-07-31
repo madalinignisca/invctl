@@ -129,6 +129,32 @@ var Topics = []Topic{
 		},
 	},
 	{
+		Key:   "certificate",
+		Title: "Certificates",
+		Intro: "What expires, what it covers, and where it is deployed. A certificate " +
+			"lapses every ninety days where hardware support lapses every five years, " +
+			"so this is usually the most urgent thing on the expiry report.",
+		Terms: []Term{
+			{Code: "covers", Label: "Covers", Description: "Every name the certificate is " +
+				"valid for, the subject included. Searching by host resolves wildcards the " +
+				"way a TLS client does: *.example.com covers orders.example.com, and does " +
+				"NOT cover example.com or a.b.example.com. Anything looser would tell you " +
+				"that you are covered while you are about to serve a name error."},
+			{Code: "deployed", Label: "Deployed", Description: "Every place it is in use. One " +
+				"wildcard on four load balancers is four outages on the day it expires, and " +
+				"that count is the difference between a date and a decision."},
+			{Code: "key_ref", Label: "Key reference", Description: "A PATH to the private key " +
+				"— a vault reference, a file location — and never the key itself. This is an " +
+				"inventory, not a secret store. The public certificate body is not held either: " +
+				"a field that accepts certificate-shaped text is where a key eventually gets " +
+				"pasted."},
+			{Code: "no_expiry", Label: "No expiry recorded", Description: "Worse than a date in " +
+				"the past. Every certificate has an expiry, so a blank means nobody looked " +
+				"rather than that the question does not apply — which is why the report counts " +
+				"these separately."},
+		},
+	},
+	{
 		Key:   "responsibility",
 		Title: "Team and role",
 		Intro: "Who looks after a thing, and in what capacity. Both are optional: a small " +

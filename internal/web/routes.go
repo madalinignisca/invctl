@@ -86,6 +86,8 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	// A view, and only a view: GET, no CSRF, no RequireAdmin, and nothing on
 	// the page it renders can change the estate or the model of it.
 	read("GET /assets/{id}/neighbourhood", app.AssetNeighbourhood)
+	read("GET /certificates", app.CertificateList)
+	read("GET /certificates/{id}", app.CertificateDetail)
 	read("GET /teams", app.TeamList)
 	read("GET /teams/{id}", app.TeamDetail)
 	read("GET /projects", app.ProjectList)
@@ -114,6 +116,15 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	write("POST /assets/{id}/parent", app.AssetReparent)
 
 	write("POST /services", app.ServiceCreate)
+	// One route per surface, as with costs: an entity type arriving in a URL
+	// is an entity type arriving from a request, and it would select a table.
+	write("POST /certificates", app.CertificateCreate)
+	write("POST /certificates/{id}", app.CertificateUpdate)
+	write("POST /certificates/{id}/retire", app.CertificateRetire)
+	write("POST /certificates/{id}/assets", app.CertificateDeployAsset)
+	write("POST /certificates/{id}/assets/{assetID}/retire", app.CertificateUndeployAsset)
+	write("POST /certificates/{id}/services", app.CertificateDeployService)
+	write("POST /certificates/{id}/services/{serviceID}/retire", app.CertificateUndeployService)
 	write("POST /teams", app.TeamCreate)
 	write("POST /teams/{id}", app.TeamUpdate)
 	write("POST /teams/{id}/retire", app.TeamRetire)

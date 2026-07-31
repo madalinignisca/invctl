@@ -3,7 +3,8 @@
   <div class="eyebrow">analysis</div>
   <h1>What expires</h1>
   <p class="lede">
-    Everything with a recorded end-of-support date falling on or before
+    Hardware support, service licences and TLS certificates together — everything
+    with a recorded end date falling on or before
     <span class="mono">{{.Report.Until}}</span>, plus everything already past it
     however long ago. Nothing here acts: a date passing changes this page and
     nothing else in the estate.
@@ -61,6 +62,8 @@
           <td>
             {{if eq .EntityType "asset"}}
               <a class="id" href="/assets/{{.ID}}">{{.Name}}</a>
+            {{else if eq .EntityType "certificate"}}
+              <a class="id" href="/certificates/{{.ID}}">{{.Name}}</a>
             {{else}}
               <a class="id" href="/services/{{.ID}}">{{.Code}}</a>
               <div style="color:var(--muted);font-size:12px">{{.Name}}</div>
@@ -81,6 +84,12 @@
                 <span class="{{tierClass .BestTier}}">tier {{.BestTier}}</span>
               {{else}}
                 <span style="color:var(--faint)">nothing placed</span>
+              {{end}}
+            {{else if eq .EntityType "certificate"}}
+              {{if .ServiceCount}}
+                {{pluralise .ServiceCount "deployment" "deployments"}}
+              {{else}}
+                <span style="color:var(--faint)">deployed nowhere</span>
               {{end}}
             {{else}}
               <span class="{{tierClass .Tier}}">tier {{.Tier}}</span>
@@ -113,6 +122,12 @@
     They are absent from the table above because nothing is known about them, not
     because they are safe. An estate where nothing appears to expire is usually an
     estate where nobody has written the dates down.
+    {{if .Report.UndatedCertificates}}
+    <br><br>
+    <strong>{{pluralise .Report.UndatedCertificates "certificate has" "certificates have"}} no recorded expiry</strong>,
+    which is worse than the others: every certificate has one, so a blank means
+    nobody looked rather than that the question does not apply.
+    {{end}}
   </p>
 </div>
 {{end}}
