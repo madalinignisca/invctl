@@ -277,6 +277,25 @@ var dynamicTargetAllowlist = map[string]string{
 	// It stays on the list because "could not currently work" is a weaker
 	// guarantee than "cannot be expressed", and rule 10 asks for the second.
 	"internal/store/reach.go": "retireRows: the shared net_* cascade, called only with literal table names",
+
+	// UpsertVocabularyTerm names one of the seven lookup tables. The name never
+	// comes from a request: it is checked against vocabularyQueries, which is
+	// the allow-list, before any statement is built -- and change_log is not in
+	// it, so the table cannot be reached even by a caller that tried. The
+	// statement also sets label/sort_order/description, none of which
+	// change_log has.
+	"internal/store/vocabulary.go": "UpsertVocabularyTerm: table checked against vocabularyQueries before use",
+
+	// releaseLinks and retireLink name project_asset or project_service, both
+	// literals at the four call sites; nothing derives the name from input.
+	// They set lifecycle and updated_at, which change_log does not have, and
+	// rule 10's concern is a statement that COULD be pointed at the audit
+	// table -- these are two fixed strings chosen in Go, not a parameter.
+	//
+	// The alternative was writing each statement out twice, once per table.
+	// That trades a guard for a copy-paste pair which will diverge the first
+	// time somebody fixes one of them, which is the worse failure.
+	"internal/store/projects.go": "releaseLinks/retireLink: called only with the two literal project link tables",
 }
 
 func TestNoAssembledWriteReachesChangeLog(t *testing.T) {

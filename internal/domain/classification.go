@@ -165,13 +165,13 @@ var DeclaredColumns = map[string][]string{
 	// happens to have rows.
 	// Declared, including the behaviour flags: what a kind is permitted to do is
 	// something an operator asserts, not something the estate reports.
-	"asset_kind":            {"code", "label", "sort_order", "can_host_instances", "is_attachable"},
-	"service_kind":          {"code", "label", "sort_order"},
-	"interface_form_factor": {"code", "label", "sort_order"},
-	"environment_role":      {"code", "label", "sort_order", "is_transit"},
-	"ip_address_role":       {"code", "label", "sort_order"},
-	"data_class":            {"code", "label", "sort_order"},
-	"container_engine":      {"code", "label", "sort_order"},
+	"asset_kind":            {"code", "label", "sort_order", "description", "can_host_instances", "is_attachable"},
+	"service_kind":          {"code", "label", "sort_order", "description"},
+	"interface_form_factor": {"code", "label", "sort_order", "description"},
+	"environment_role":      {"code", "label", "sort_order", "description", "is_transit"},
+	"ip_address_role":       {"code", "label", "sort_order", "description"},
+	"data_class":            {"code", "label", "sort_order", "description"},
+	"container_engine":      {"code", "label", "sort_order", "description"},
 	// The audit trail of declared change is itself declared: it is written by a
 	// person's act and is append-only forever (rule 10).
 	"change_log": {
@@ -233,6 +233,21 @@ var DeclaredColumns = map[string][]string{
 	"prefix": {
 		"id", "cidr_text", "addr_family", "addr_start", "addr_end",
 		"vlan_id", "environment_id", "role",
+	},
+	// Projects are declared through and through: somebody asserts that a thing
+	// belongs to a project. Nothing here is ever written by an observation, and
+	// the derived footprint is computed at read time and stored nowhere.
+	"project": {
+		"id", "code", "name", "description", "owner_team", "lifecycle",
+		"created_at", "updated_at",
+	},
+	"project_asset": {
+		"project_id", "asset_id", "relation", "note", "lifecycle",
+		"created_at", "updated_at",
+	},
+	"project_service": {
+		"project_id", "service_id", "relation", "note", "lifecycle",
+		"created_at", "updated_at",
 	},
 	"route": {
 		"id", "frontend_endpoint_id", "match_type", "match_value",

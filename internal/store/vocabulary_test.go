@@ -34,12 +34,14 @@ var vocabularyReaders = []struct {
 	table     string
 	read      func(*SQLStore, context.Context) ([]VocabularyTerm, error)
 	constants []string
-	// count is the number of rows migration 00004 seeded, asserted so that a
+	// count is the number of rows seeded for this vocabulary across ALL
+	// migrations, not just 00004 -- asset_kind gained `bridge` in 00006 and
+	// service_kind gained `lb` and `secrets` in 00008. Asserted so that a
 	// silently truncated seed is caught rather than a shorter dropdown.
 	count int
 }{
 	{"asset_kind", (*SQLStore).AssetKinds, domain.AssetKinds, 13},
-	{"service_kind", (*SQLStore).ServiceKinds, domain.ServiceKinds, 12},
+	{"service_kind", (*SQLStore).ServiceKinds, domain.ServiceKinds, 14},
 	{"interface_form_factor", (*SQLStore).InterfaceFormFactors, domain.FormFactors, 9},
 	{"environment_role", (*SQLStore).EnvironmentRoles, domain.EnvRoles, 6},
 	{"ip_address_role", (*SQLStore).IPAddressRoles, domain.IPRoles, 5},
