@@ -1,3 +1,10 @@
+-- Dialect-split despite being byte-identical in both directories, and that is
+-- not an oversight. The seven lookup tables are created by the DIALECT
+-- migration 00004, and Migrate applies every shared migration before any
+-- dialect one -- so a shared migration touching these tables runs before they
+-- exist. Measured, not assumed: as shared/00010 this failed with "no such
+-- table: asset_kind". Placement follows the dependency, not the SQL.
+--
 -- +goose Up
 -- Observed state: what the estate reports about itself (docs/AUDIT.md rules 1-14).
 --

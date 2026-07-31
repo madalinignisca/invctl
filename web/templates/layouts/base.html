@@ -13,7 +13,7 @@
 {{/* The CSRF token is injected once here, so every non-GET HTMX request
      carries it without each form having to remember. */}}
 <body hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
-<div class="shell">
+<div class="shell" x-data="{ helpOpen: false }">
 
   <nav class="rail">
     <div class="rail-brand">
@@ -30,9 +30,17 @@
       <a class="rail-link" href="/prefixes" {{if eq .Nav "prefixes"}}aria-current="page"{{end}}>Prefixes</a>
       <a class="rail-link" href="/network" {{if eq .Nav "network"}}aria-current="page"{{end}}>Network</a>
       <a class="rail-link" href="/paths" {{if eq .Nav "paths"}}aria-current="page"{{end}}>Paths</a>
+      {{/* The help drawer. A plain link, so it works with JavaScript off (it
+           navigates to the full /help page); with HTMX it fills the aside
+           instead and the page underneath is left alone -- which is the point,
+           since the question is always about the page you are already on. */}}
+      <a class="rail-link" href="/help"
+         hx-get="/help" hx-target="#help-panel" hx-swap="innerHTML"
+         x-on:click="helpOpen = true">Help</a>
 
       <div class="rail-section">Analysis</div>
       <a class="rail-link" href="/reports/spanning" {{if eq .Nav "reports"}}aria-current="page"{{end}}>Environment spans</a>
+      <a class="rail-link" href="/vocabularies" {{if eq .Nav "vocabularies"}}aria-current="page"{{end}}>Vocabularies</a>
       <a class="rail-link" href="/changes" {{if eq .Nav "changes"}}aria-current="page"{{end}}>Change log</a>
     </div>
 
@@ -68,6 +76,20 @@
       {{template "content" .}}
     </main>
   </div>
+
+  {{/* The help drawer. Alpine holds one boolean -- open or not -- which is
+       exactly the "local UI state only" boundary the house rules draw: it
+       fetches nothing and knows no fact about the estate. HTMX fills it; the
+       server decides what is in it. */}}
+  <aside class="help-drawer" x-bind:class="helpOpen ? 'is-open' : ''"
+         x-cloak aria-label="Help">
+    <div class="help-drawer-head">
+      <strong>Help</strong>
+      <button class="btn btn-sm" type="button" x-on:click="helpOpen = false"
+              aria-label="Close help">Close</button>
+    </div>
+    <div id="help-panel" class="help-drawer-body"></div>
+  </aside>
 </div>
 
 {{/* Flash messages land here via out-of-band swaps, so any handler can emit

@@ -1,0 +1,11 @@
+{{define "content"}}
+<div class="page-head">
+  <div class="eyebrow">Reference</div>
+  <h1>{{if .Topic}}{{.Topic.Title}}{{else}}What the words mean{{end}}</h1>
+  <p class="lede">
+    Every vocabulary this tool uses, and what each value means. Some are yours
+    to edit and some belong to the engine — the panel says which.
+  </p>
+</div>
+{{template "help_panel" .}}
+{{end}}

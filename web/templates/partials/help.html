@@ -1,0 +1,58 @@
+{{/* The help panel. Rendered standalone into the side drawer by HTMX, and as
+     a full page at /help for anyone who lands there directly or has no
+     JavaScript. One fragment, both jobs -- which is the same discipline every
+     other partial here follows. */}}
+
+{{define "help_panel"}}
+<div id="help-panel-body">
+
+  {{if .Topic}}
+  <div class="help-head">
+    <a class="btn btn-sm" href="/help" hx-get="/help" hx-target="#help-panel-body" hx-swap="outerHTML">← All topics</a>
+    <span class="pill {{if .Topic.Editable}}pill-info{{else}}pill-muted{{end}}">
+      {{if .Topic.Editable}}yours to edit{{else}}defined by the engine{{end}}
+    </span>
+  </div>
+  <h2 class="help-title">{{.Topic.Title}}</h2>
+  <p class="help-intro">{{.Topic.Intro}}</p>
+
+  <dl class="help-terms">
+    {{range .Topic.Terms}}
+    <dt><span class="mono">{{.Code}}</span> <span class="help-label">{{.Label}}</span></dt>
+    <dd>{{.Description}}</dd>
+    {{end}}
+  </dl>
+
+  {{if .Topic.Editable}}
+  <p class="help-foot">
+    These descriptions are data. An administrator can reword them, or add terms,
+    under <a href="/vocabularies">Vocabularies</a> — they describe your estate's
+    conventions, not this tool's rules.
+  </p>
+  {{else}}
+  <p class="help-foot">
+    These values are what the impact engine acts on, so their meaning ships with
+    the application and cannot be edited. Changing the wording would not change
+    the behaviour, which is exactly why it is not offered.
+  </p>
+  {{end}}
+
+  {{else}}
+  <h2 class="help-title">Topics</h2>
+  <p class="help-intro">
+    Pick a vocabulary. The first group is yours to edit; the second is defined
+    by the engine and ships with the application.
+  </p>
+  <ul class="help-index">
+    {{range .Index}}
+    <li>
+      <a href="/help/{{.Key}}" hx-get="/help/{{.Key}}" hx-target="#help-panel-body" hx-swap="outerHTML">{{.Title}}</a>
+      <span class="pill pill-muted">{{.Count}}</span>
+      {{if not .Editable}}<span class="help-fixed">engine</span>{{end}}
+    </li>
+    {{end}}
+  </ul>
+  {{end}}
+
+</div>
+{{end}}

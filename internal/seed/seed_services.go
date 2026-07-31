@@ -43,15 +43,18 @@ func (b *builder) services() {
 	specs := []svcSpec{
 		// Three-node Raft cluster. Losing one node must report ok -- this is
 		// the case that makes availability policy worth modelling at all.
-		{"vault", "HashiCorp Vault", domain.SvcAuth, "prod", domain.AvailQuorum, 1, 0, "", "platform", 15, 0},
+		{"vault", "HashiCorp Vault", domain.SvcSecrets, "prod", domain.AvailQuorum, 1, 0, "", "platform", 15, 0},
 
 		// Patroni pair with manual promotion: losing the primary is degraded,
 		// not down, because a human can promote the standby.
 		{"pgsql-core", "PostgreSQL (core)", domain.SvcDB, "prod", domain.AvailActivePassive, 1, 0, domain.FailoverManual, "dba", 30, 5},
 
-		// The edge proxy itself is healthy independently of its backends --
+		// The edge load balancer is healthy independently of its backends --
 		// which is precisely why route health has to be derived from the pool.
-		{"haproxy-edge", "HAProxy (edge)", domain.SvcProxy, "prod", domain.AvailActiveActive, 1, 1, "", "network", 10, 0},
+		// `lb` rather than `proxy`: this takes traffic IN and spreads it over a
+		// pool, which is the kind that owns routes. A forward proxy is the
+		// other direction and owns none of this.
+		{"haproxy-edge", "HAProxy (edge)", domain.SvcLB, "prod", domain.AvailActiveActive, 1, 1, "", "network", 10, 0},
 
 		// Two backend services that both happen to live on vm-app-1. Nothing
 		// about their individual definitions says that; only placement does.

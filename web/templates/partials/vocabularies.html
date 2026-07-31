@@ -1,0 +1,85 @@
+{{/* Vocabulary administration. Whole-fragment swap like every other panel, so
+     the table picker, the list and the form always describe the same
+     vocabulary. */}}
+
+{{define "vocabulary_panel"}}
+<div id="vocabularies">
+
+  <div class="panel">
+    <div class="panel-head">
+      <h2>{{.Title}}</h2>
+      <span class="panel-note">{{pluralise (len .Terms) "term" "terms"}}</span>
+    </div>
+    <div class="panel-body">
+      <div class="checks" style="margin-bottom:14px">
+        {{range .Tables}}
+        <a class="btn btn-sm {{if eq .Key $.Table}}btn-primary{{end}}"
+           href="/vocabularies?table={{.Key}}"
+           hx-get="/vocabularies?table={{.Key}}" hx-target="#vocabularies" hx-swap="outerHTML" hx-push-url="true">
+          {{.Title}} <span class="pill pill-muted">{{.Count}}</span>
+        </a>
+        {{end}}
+      </div>
+
+      <div class="scroll-x">
+        <table>
+          <thead><tr><th>Code</th><th>Label</th><th>Order</th><th>Description</th><th></th></tr></thead>
+          <tbody>
+            {{range .Terms}}
+            <tr>
+              <td class="mono">{{.Code}}</td>
+              <td>{{.Label}}</td>
+              <td class="num">{{.SortOrder}}</td>
+              <td style="font-size:12.5px;color:var(--muted)">{{if .Description}}{{.Description}}{{else}}<span style="color:var(--crimson)">no description — the dropdown that offers it cannot say what it means</span>{{end}}</td>
+              <td><a class="btn btn-sm" href="/vocabularies?table={{$.Table}}&edit={{.Code}}"
+                     hx-get="/vocabularies?table={{$.Table}}&edit={{.Code}}"
+                     hx-target="#vocabularies" hx-swap="outerHTML">Edit</a></td>
+            </tr>
+            {{end}}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head">
+      <h2>{{if .Editing}}Edit <span class="mono">{{.Editing}}</span>{{else}}Add a term{{end}}</h2>
+      <span class="panel-note">
+        {{if .Editing}}The code is the key other rows point at, so it cannot be changed. Add a new term instead.{{else}}Lower case, no spaces — it is stored on every row that uses it.{{end}}
+      </span>
+    </div>
+    <form class="panel-body" method="post" action="/vocabularies"
+          hx-post="/vocabularies" hx-target="#vocabularies" hx-swap="outerHTML">
+      <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+      <input type="hidden" name="table" value="{{.Table}}">
+      <div class="field-row">
+        <div class="field">
+          <label for="v-code">Code</label>
+          <input id="v-code" class="mono {{if index .Errors "code"}}invalid{{end}}" type="text" name="code"
+                 value="{{.Editing}}" {{if .Editing}}readonly{{end}} required>
+          {{with index .Errors "code"}}<div class="field-error">{{.}}</div>{{end}}
+        </div>
+        <div class="field">
+          <label for="v-label">Label</label>
+          <input id="v-label" type="text" name="label" class="{{if index .Errors "label"}}invalid{{end}}" required>
+          {{with index .Errors "label"}}<div class="field-error">{{.}}</div>{{end}}
+        </div>
+        <div class="field">
+          <label for="v-order">Sort order</label>
+          <input id="v-order" class="num" type="number" name="sort_order" value="0">
+          <div class="field-hint">Where it sits in a dropdown.</div>
+        </div>
+      </div>
+      <div class="field">
+        <label for="v-desc">Description</label>
+        <textarea id="v-desc" name="description" rows="3"
+                  placeholder="What does this mean, for the person choosing it from a list?"></textarea>
+        <div class="field-hint">Shown in the help panel beside the term.</div>
+      </div>
+      <button class="btn btn-primary" type="submit">{{if .Editing}}Save{{else}}Add term{{end}}</button>
+    </form>
+  </div>
+
+</div>
+{{end}}

@@ -476,3 +476,46 @@ func TestAVocabularyAddedAsDataIsUsable(t *testing.T) {
 		})
 	}
 }
+
+// TestEveryVocabularyTermHasADescription.
+//
+// The description column exists so a person choosing from a dropdown can find
+// out what the options mean; a term without one is a term the UI cannot
+// explain. This is a completeness check rather than a spot check on purpose:
+// the failure mode is a LATER migration adding a term and not describing it,
+// which is exactly what happened to asset_kind `bridge` -- added by 00006,
+// invisible to a migration written against 00004's list, and caught only
+// because this check counts rows rather than naming them.
+func TestEveryVocabularyTermHasADescription(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			s, ctx := newStore(t, e)
+			for _, v := range []struct {
+				name string
+				read func(context.Context) ([]VocabularyTerm, error)
+			}{
+				{"asset_kind", s.AssetKinds},
+				{"service_kind", s.ServiceKinds},
+				{"interface_form_factor", s.InterfaceFormFactors},
+				{"environment_role", s.EnvironmentRoles},
+				{"ip_address_role", s.IPAddressRoles},
+				{"data_class", s.DataClassVocabulary},
+				{"container_engine", s.ContainerEngines},
+			} {
+				terms, err := v.read(ctx)
+				if err != nil {
+					t.Fatalf("reading %s: %v", v.name, err)
+				}
+				if len(terms) == 0 {
+					t.Errorf("%s is empty, so this proves nothing", v.name)
+				}
+				for _, term := range terms {
+					if term.Description == "" {
+						t.Errorf("%s term %q has no description; the dropdown that offers it "+
+							"cannot say what it means", v.name, term.Code)
+					}
+				}
+			}
+		})
+	}
+}

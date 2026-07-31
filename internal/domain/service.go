@@ -13,7 +13,9 @@ const (
 	SvcWeb        = "web"
 	SvcAPI        = "api"
 	SvcProxy      = "proxy"
+	SvcLB         = "lb"
 	SvcAuth       = "auth"
+	SvcSecrets    = "secrets"
 	SvcBatch      = "batch"
 	SvcAgent      = "agent"
 	SvcStorage    = "storage"
@@ -28,8 +30,8 @@ const (
 // branches on a service kind -- the impact engine reads Availability, never
 // Kind -- which is why this one was safe to open.
 var ServiceKinds = []string{
-	SvcDB, SvcCache, SvcQueue, SvcWeb, SvcAPI, SvcProxy,
-	SvcAuth, SvcBatch, SvcAgent, SvcStorage, SvcInfra, SvcMonitoring,
+	SvcDB, SvcCache, SvcQueue, SvcWeb, SvcAPI, SvcLB, SvcProxy,
+	SvcAuth, SvcSecrets, SvcBatch, SvcAgent, SvcStorage, SvcInfra, SvcMonitoring,
 }
 
 // Availability policies (HANDOVER §3.3). Without these, "reboot node 3"

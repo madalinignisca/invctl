@@ -2,8 +2,10 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/gabriel/invctl/internal/domain"
@@ -49,6 +51,12 @@ type VocabularyTerm struct {
 	Code      string `db:"code"`
 	Label     string `db:"label"`
 	SortOrder int    `db:"sort_order"`
+	// Description is what the term MEANS, in a sentence, for the person
+	// looking at a dropdown who has to choose one. Seeded by migration and
+	// editable, because these describe an estate's own conventions -- one
+	// shop's `infra` is another's `platform`. Empty is legal: a term somebody
+	// added by hand has no description until they write one.
+	Description string `db:"description"`
 }
 
 // Codes flattens terms to their stored values.
@@ -65,13 +73,13 @@ func Codes(terms []VocabularyTerm) []string {
 // sort order -- which nothing prevents, since sort_order is not unique -- render
 // in a stable order instead of whatever the engine's scan happens to produce.
 var vocabularyQueries = map[string]string{
-	vocabAssetKind:           `SELECT code, label, sort_order FROM asset_kind ORDER BY sort_order, code`,
-	vocabServiceKind:         `SELECT code, label, sort_order FROM service_kind ORDER BY sort_order, code`,
-	vocabInterfaceFormFactor: `SELECT code, label, sort_order FROM interface_form_factor ORDER BY sort_order, code`,
-	vocabEnvironmentRole:     `SELECT code, label, sort_order FROM environment_role ORDER BY sort_order, code`,
-	vocabIPAddressRole:       `SELECT code, label, sort_order FROM ip_address_role ORDER BY sort_order, code`,
-	vocabDataClass:           `SELECT code, label, sort_order FROM data_class ORDER BY sort_order, code`,
-	vocabContainerEngine:     `SELECT code, label, sort_order FROM container_engine ORDER BY sort_order, code`,
+	vocabAssetKind:           `SELECT code, label, sort_order, description FROM asset_kind ORDER BY sort_order, code`,
+	vocabServiceKind:         `SELECT code, label, sort_order, description FROM service_kind ORDER BY sort_order, code`,
+	vocabInterfaceFormFactor: `SELECT code, label, sort_order, description FROM interface_form_factor ORDER BY sort_order, code`,
+	vocabEnvironmentRole:     `SELECT code, label, sort_order, description FROM environment_role ORDER BY sort_order, code`,
+	vocabIPAddressRole:       `SELECT code, label, sort_order, description FROM ip_address_role ORDER BY sort_order, code`,
+	vocabDataClass:           `SELECT code, label, sort_order, description FROM data_class ORDER BY sort_order, code`,
+	vocabContainerEngine:     `SELECT code, label, sort_order, description FROM container_engine ORDER BY sort_order, code`,
 }
 
 // AssetKinds returns the asset.kind vocabulary in display order.
@@ -218,4 +226,77 @@ func (s *SQLStore) RoleIsTransit(ctx context.Context, role string) (bool, error)
 		return false, fmt.Errorf("reading transit flag of environment role %q: %w", role, err)
 	}
 	return transit, nil
+}
+
+// ---------------------------------------------------------------------------
+// Writing vocabularies
+//
+// A vocabulary term is DECLARED state -- somebody decided the estate should
+// have this word -- so every mutation writes a change_log row in the same
+// transaction, exactly like an asset or a service. That is not ceremony: these
+// rows are foreign keys, so adding or rewording one changes what the estate
+// can express, and "who added `vrf` and when" is a question an audit will ask.
+//
+// There is no delete. A term in use is protected by its foreign keys anyway,
+// and a term not in use costs nothing but a row -- while removing one silently
+// breaks any saved filter or bookmark that named it. Retiring vocabulary is a
+// bigger design question than this POC needs to answer.
+
+// VocabularyTables names every lookup table a caller may write to. Only these
+// seven exist, and the map is the allow-list: a table name never comes from a
+// request, it comes from here.
+func VocabularyTables() []string {
+	names := make([]string, 0, len(vocabularyQueries))
+	for name := range vocabularyQueries {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// UpsertVocabularyTerm adds a term or updates the label, order and description
+// of an existing one.
+//
+// The code is the primary key and is never rewritten: changing it would orphan
+// every row pointing at it, and the foreign keys would refuse anyway. Somebody
+// who wants a different code is adding a term, not editing one.
+func (s *SQLStore) UpsertVocabularyTerm(ctx context.Context, actor domain.Actor, table string, term VocabularyTerm) error {
+	if _, ok := vocabularyQueries[table]; !ok {
+		return fmt.Errorf("writing vocabulary: %q is not a lookup table: %w", table, domain.ErrInvalid)
+	}
+	term.Code = strings.ToLower(strings.TrimSpace(term.Code))
+	term.Label = strings.TrimSpace(term.Label)
+	term.Description = strings.TrimSpace(term.Description)
+	if term.Code == "" {
+		return fmt.Errorf("vocabulary term needs a code: %w", domain.ErrInvalid)
+	}
+	if term.Label == "" {
+		return fmt.Errorf("vocabulary term %q needs a label: %w", term.Code, domain.ErrInvalid)
+	}
+
+	return s.write(ctx, actor, func(t *tx) error {
+		var before VocabularyTerm
+		err := t.get(ctx, &before,
+			`SELECT code, label, sort_order, description FROM `+table+` WHERE code = ?`, term.Code)
+		isNew := errors.Is(err, sql.ErrNoRows)
+		if err != nil && !isNew {
+			return fmt.Errorf("reading the existing term: %w", err)
+		}
+
+		if isNew {
+			if _, err := t.exec(ctx,
+				`INSERT INTO `+table+` (code, label, sort_order, description) VALUES (?, ?, ?, ?)`,
+				term.Code, term.Label, term.SortOrder, term.Description); err != nil {
+				return translateWriteErr(err, "adding a vocabulary term")
+			}
+			return t.logCreate(ctx, table, term.Code, term)
+		}
+
+		if _, err := t.exec(ctx,
+			`UPDATE `+table+` SET label = ?, sort_order = ?, description = ? WHERE code = ?`,
+			term.Label, term.SortOrder, term.Description, term.Code); err != nil {
+			return translateWriteErr(err, "updating a vocabulary term")
+		}
+		return t.logUpdate(ctx, table, term.Code, before, term)
+	})
 }
