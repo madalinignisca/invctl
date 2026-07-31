@@ -1020,3 +1020,128 @@ shared-endpoint class went to zero. On the seeded 27-asset estate: 1,415 → 773
 Dependency edges also gained an arrowhead at the provider end (`marker-end`,
 two defs so an optional dependency's arrow matches its faint stroke) — direction
 was previously carried only in hover text.
+
+---
+
+## 2026-07-31 — Projects, and absorbing `application`
+
+Assets and services now belong to a **project**, which is the business view of the estate:
+who owns what, and who is standing on somebody else's work. Everything else in the model
+answers a technical question — an environment says where a thing runs, containment says what
+it sits inside, a dependency says what it needs — and none of them answers "what does this
+project consist of", which is what a product owner or a CTO asks. It is deliberately a
+different shape: a project cuts *across* environments and racks rather than nesting inside
+them.
+
+### Two relations, and the asymmetry is the whole design
+
+`owns` — the thing exists for this project. **At most one project may own a given asset or
+service**, enforced by a partial unique index on `(asset_id)` / `(service_id)` where
+`relation = 'owns' AND lifecycle = 'active'`, not by application code that checks first. It
+is the anchor a later cost model attributes 100% of a thing's cost to, and it is the only
+relation the derived footprint follows.
+
+`uses` — the project depends on it and shares it with others. Any number of projects may use
+one thing, and **nothing is derived from a `uses` link**. What is inside somebody else's
+hypervisor is their footprint, not yours; deriving through `uses` would quietly attribute
+another team's estate — and later another team's costs — to whoever declared a `uses` link
+first.
+
+### The footprint is derived at read time and stored nowhere
+
+If a project owns a hypervisor, the guests inside it and the services running on them are
+part of what it costs and what breaks when it breaks — but nobody declared them, so no row
+says they belong to it. Writing that back would make a derived fact indistinguishable from a
+declared one in `change_log` (the laundering rule 7 of `AUDIT.md` exists to prevent), and it
+would go stale the moment a VM moved. Every derived number on the overview is labelled as
+derived, beside the declared ones. A manager who cannot trace a number stops believing all
+of them.
+
+An implied asset that another project owns outright is reported as a **conflict** rather than
+absorbed, because silently counting it would double-count it the day cost lands.
+
+### `application` is gone — migration `00010`, and it is destructive
+
+`application` grouped services and only services, had no UI anywhere in the app, and held one
+row in the fixture. Projects group assets *and* services and carry the owns/uses distinction
+it never had. Keeping both would leave two overlapping ways to say "these things belong
+together" and the weaker one would rot.
+
+Migration `00010` therefore copies every application into `project` **keeping its id** (so
+`change_log` rows written against `entity_type = 'application'` still resolve), turns
+`service.application_id` into an `owns` link, reindexes search, and then drops the column and
+the table.
+
+This repository's rule is that a destructive migration needs an explicit recorded decision
+after sign-off. **Sign-off has not happened.** The estate is a fixture plus one throwaway
+demo database, and the standing position — "until we get a production ready, and a first real
+client, even rewrite the migrations from zero" — applies. This is free now and would not be
+in a month; the entry exists so that later readers know it was a decision and not an
+oversight.
+
+No rebuild was needed on either engine, which is not obvious and was measured rather than
+assumed, against the same pinned driver as the 2026-07-29 entry:
+
+| Statement | Result |
+|---|---|
+| `ALTER TABLE service DROP COLUMN application_id`, with `idx_service_app` present | `error in index idx_service_app after drop column: no such column` |
+| `DROP INDEX idx_service_app;` then the same `DROP COLUMN` | works; the resulting DDL carries no `REFERENCES application(id)` |
+
+So SQLite needs the covering index dropped first and PostgreSQL does not care, and the
+twelve-table rebuild `00002` had to perform is avoided entirely.
+
+**The migration writes no `change_log` row.** No migration in this repository does: the trail
+records what operators do to the estate, and this is the schema arriving. It is a closer call
+than usual because data moves rather than only shape — `00009` reserved an `import` action for
+exactly this — and the choice is recorded here rather than left to be inferred.
+
+### A migration that would otherwise have been untestable
+
+`Migrate()` has no partial entry point, and the existing upgrade test re-runs `Migrate` over
+an already-migrated database, which for the newest migration is a no-op. A real test of the
+absorb has to reach the state *before* it, put an application and a service pointing at it
+into that schema, and only then migrate the rest of the way — so the highest-risk statement in
+the change would have had no coverage at all **and would have looked covered**. That is the
+same shape as a flag defaulting off: it defers the test, not just the risk. `migrateTo` (a
+`goose` `UpTo` against the dialect directory) exists for that one test.
+
+Two things it caught that a reading would not have:
+
+- The test's own "the table is gone" assertion was wrong on PostgreSQL. Each test runs in its
+  own schema with `search_path = <schema>,public`; once the migration correctly dropped
+  `<schema>.application`, a bare `SELECT 1 FROM application` resolved through to a stale
+  `public.application` left by an old pre-isolation run and reported the table as present.
+  Name resolution cannot express "absent **here**", so both existence checks now ask the
+  engine's catalogue about `current_schema()` — the only engine-specific statements in the
+  store tests, and worth the exception.
+- Mutating the migration confirmed the assertions bite: removing the ownership copy fails with
+  `owns links = map[]`, and removing the search reindex fails with
+  `search_index still holds 1 application documents`.
+
+### The fixture now argues for itself
+
+Three projects, and every link is chosen so that one derived panel has something true to say —
+a demo where the interesting boxes are empty proves nothing, and one full of invented findings
+is worse. Each finding below is a consequence of the estate the rest of the seed already
+describes:
+
+- **platform** owns the three hypervisors, **orders** owns `vm-app-1` inside one of them → a
+  footprint conflict, which is the double-counting a cost model would otherwise inherit.
+- **orders** owns `vm-app-1`, and the Veeam agent runs on it uninvited → an implied service
+  somebody else owns, on your hardware.
+- **Nobody owns `haproxy-edge`** → an unowned dependency: the edge every partner order crosses,
+  with no team to escalate to. The most realistic finding in the fixture, and it exists because
+  the seed deliberately leaves it unclaimed.
+- **orders** declared `uses` for the database and SSO but not for the queue → shared versus
+  external, side by side, from one dependency list.
+- `orders-api-dev` is in no project at all. The service list has to show "belongs to nobody" as
+  an ordinary state, because in a real estate most rows start there.
+
+### Ownership is not on the service form
+
+The create-service form lost its old Application picker and gained nothing in its place.
+Ownership is a link with a relation on it, and the place to say "this project owns that
+service" is the project overview, where the choice between `owns` and `uses` is visible.
+Offering only half of it on the service form would make `owns` look like the only kind of
+belonging. The service list and detail page *show* the owner — or `unowned` — and the list can
+filter by it.

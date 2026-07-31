@@ -29,17 +29,6 @@ func (b *builder) services() {
 		return
 	}
 
-	app, err := domain.NewApplication(store.NewID(), "orders", "Orders Platform", b.now)
-	if err != nil {
-		b.fail(fmt.Errorf("building application: %w", err))
-		return
-	}
-	app.OwnerTeam = str("commerce")
-	if err := b.store.CreateApplication(b.ctx, Actor, app); err != nil {
-		b.fail(fmt.Errorf("seeding application: %w", err))
-		return
-	}
-
 	specs := []svcSpec{
 		// Three-node Raft cluster. Losing one node must report ok -- this is
 		// the case that makes availability policy worth modelling at all.
@@ -93,7 +82,7 @@ func (b *builder) services() {
 		def := domain.ServiceSpec{
 			Code: spec.code, Name: spec.name, Kind: spec.kind,
 			EnvironmentID: b.env(spec.env), Availability: spec.availability,
-			Tier: spec.tier, ApplicationID: &app.ID,
+			Tier: spec.tier,
 		}
 		if spec.minHealthy > 0 {
 			def.MinHealthy = num(spec.minHealthy)

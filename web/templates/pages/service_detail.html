@@ -10,7 +10,11 @@
     <span class="mono pill pill-muted">{{.Service.Code}}</span>
     <span class="{{tierClass .Service.Tier}}">tier {{.Service.Tier}}</span>
     <span class="{{lifecycleClass .Service.Lifecycle}}">{{.Service.Lifecycle}}</span>
-    {{if .Service.ApplicationName}}<span class="pill pill-muted">{{.Service.ApplicationName}}</span>{{end}}
+    {{if .Service.OwningProjectID}}
+      <a class="pill pill-muted" href="/projects/{{.Service.OwningProjectID}}">{{.Service.OwningProjectName}}</a>
+    {{else}}
+      <span class="pill pill-degraded" title="No project owns this service">unowned</span>
+    {{end}}
   </div>
 </div>
 

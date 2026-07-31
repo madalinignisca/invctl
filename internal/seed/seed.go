@@ -28,6 +28,7 @@ type Refs struct {
 	Environments map[string]string // code -> id
 	Assets       map[string]string // name -> id
 	Services     map[string]string // code -> id
+	Projects     map[string]string // code -> id
 	Endpoints    map[string]string // "service/endpoint" -> id
 	Routes       map[string]string // match value -> id
 	NetGroups    map[string]string // code -> id
@@ -69,6 +70,7 @@ func Load(ctx context.Context, s *store.SQLStore) (*Refs, error) {
 			Environments: map[string]string{},
 			Assets:       map[string]string{},
 			Services:     map[string]string{},
+			Projects:     map[string]string{},
 			Endpoints:    map[string]string{},
 			Routes:       map[string]string{},
 			NetGroups:    map[string]string{},
@@ -93,6 +95,10 @@ func Load(ctx context.Context, s *store.SQLStore) (*Refs, error) {
 	b.endpoints()
 	b.routing()
 	b.dependencies()
+	// Last of the declared phases: a project links to assets and services, so
+	// it needs both to exist. It reads them and writes nothing they depend on,
+	// which is why it can sit at the end rather than being threaded through.
+	b.projects()
 
 	// Last, and only when asked. Observations are telemetry rather than
 	// inventory, so a deployment gets the honest empty state unless somebody is

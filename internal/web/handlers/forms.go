@@ -42,7 +42,6 @@ type serviceFormData struct {
 	Errors         map[string]string
 	Spec           domain.ServiceSpec
 	Environments   []domain.Environment
-	Applications   []domain.Application
 	Kinds          []store.VocabularyTerm
 	Availabilities []string
 	FailoverModes  []string
@@ -121,7 +120,11 @@ func (a *App) newAssetForm(r *http.Request, errs map[string]string, envs []domai
 	}
 }
 
-func (a *App) newServiceForm(r *http.Request, errs map[string]string, spec domain.ServiceSpec, envs []domain.Environment, apps []domain.Application, kinds []store.VocabularyTerm) serviceFormData {
+// A service form has no project picker. Ownership is a link with a relation on
+// it, and the place to say "this project owns that service" is the project
+// overview, where the choice between owns and uses is visible. Offering only
+// half of it here would make `owns` look like the only kind of belonging.
+func (a *App) newServiceForm(r *http.Request, errs map[string]string, spec domain.ServiceSpec, envs []domain.Environment, kinds []store.VocabularyTerm) serviceFormData {
 	if spec.Tier == 0 {
 		spec.Tier = 3
 	}
@@ -130,7 +133,6 @@ func (a *App) newServiceForm(r *http.Request, errs map[string]string, spec domai
 		Errors:         orEmpty(errs),
 		Spec:           spec,
 		Environments:   envs,
-		Applications:   apps,
 		Kinds:          kinds,
 		Availabilities: domain.Availabilities,
 		FailoverModes:  domain.FailoverModes,

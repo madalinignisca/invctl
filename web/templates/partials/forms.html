@@ -182,13 +182,6 @@
         <label for="svc-rpo">RPO (minutes)</label>
         <input id="svc-rpo" type="number" name="rpo_minutes" value="{{derefInt .Spec.RPOMinutes}}">
       </div>
-      <div class="field">
-        <label for="svc-app">Application</label>
-        <select id="svc-app" name="application_id">
-          <option value="">—</option>
-          {{range .Applications}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
-        </select>
-      </div>
     </div>
 
     <button class="btn btn-primary" type="submit">Add service</button>

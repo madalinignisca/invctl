@@ -8,44 +8,13 @@ import (
 	"github.com/gabriel/invctl/internal/domain"
 )
 
-// ---------- applications ----------
-
-// CreateApplication inserts an application.
-func (s *SQLStore) CreateApplication(ctx context.Context, actor domain.Actor, app *domain.Application) error {
-	return s.write(ctx, actor, func(t *tx) error {
-		_, err := t.exec(ctx,
-			`INSERT INTO application (id, code, name, owner_team, created_at, updated_at)
-			 VALUES (?, ?, ?, ?, ?, ?)`,
-			app.ID, app.Code, app.Name, app.OwnerTeam, app.CreatedAt, app.UpdatedAt)
-		if err != nil {
-			return translateWriteErr(err, "creating application")
-		}
-		if err := t.logCreate(ctx, "application", app.ID, app); err != nil {
-			return err
-		}
-		return s.indexEntity(ctx, t, searchDoc{
-			EntityType: "application", EntityID: app.ID,
-			Title: app.Name, Subtitle: app.Code,
-		})
-	})
-}
-
-// ListApplications returns every application.
-func (s *SQLStore) ListApplications(ctx context.Context) ([]domain.Application, error) {
-	var apps []domain.Application
-	if err := s.read(ctx, &apps, `SELECT * FROM application ORDER BY name`); err != nil {
-		return nil, fmt.Errorf("listing applications: %w", err)
-	}
-	return apps, nil
-}
-
 // ---------- services ----------
 
 // ServiceFilter narrows a service list query.
 type ServiceFilter struct {
 	EnvironmentID  string
 	Kind           string
-	ApplicationID  string
+	ProjectID      string
 	Availability   string
 	Tier           int
 	Query          string
@@ -58,19 +27,30 @@ type ServiceRow struct {
 	domain.Service
 	EnvironmentCode string `db:"environment_code"`
 	EnvironmentRole string `db:"environment_role"`
-	ApplicationName string `db:"application_name"`
-	InstanceCount   int    `db:"instance_count"`
+	// The project that OWNS this service, if any. Empty is a real answer and a
+	// visible one — an unowned service is the finding the projects feature
+	// exists to surface, not a gap in the data.
+	OwningProjectID   string `db:"owning_project_id"`
+	OwningProjectName string `db:"owning_project_name"`
+	InstanceCount     int    `db:"instance_count"`
 }
 
+// The owner join cannot fan a service out into several rows: idx_project_service_owner
+// is a partial unique index on (service_id) WHERE relation = 'owns' AND lifecycle =
+// 'active', so at most one row can match. That guarantee lives in the schema rather
+// than in a LIMIT here, which is why this stays a plain LEFT JOIN.
 const serviceSelect = `
 	SELECT s.*,
 	       e.code AS environment_code,
 	       e.role AS environment_role,
-	       COALESCE(app.name, '') AS application_name,
+	       COALESCE(p.id, '') AS owning_project_id,
+	       COALESCE(p.name, '') AS owning_project_name,
 	       (SELECT COUNT(*) FROM service_instance si WHERE si.service_id = s.id) AS instance_count
 	FROM service s
 	JOIN environment e ON e.id = s.environment_id
-	LEFT JOIN application app ON app.id = s.application_id`
+	LEFT JOIN project_service ps
+	       ON ps.service_id = s.id AND ps.relation = 'owns' AND ps.lifecycle = 'active'
+	LEFT JOIN project p ON p.id = ps.project_id`
 
 // ListServices returns services matching the filter.
 func (s *SQLStore) ListServices(ctx context.Context, f ServiceFilter) ([]ServiceRow, error) {
@@ -85,9 +65,12 @@ func (s *SQLStore) ListServices(ctx context.Context, f ServiceFilter) ([]Service
 		where = append(where, `s.kind = ?`)
 		args = append(args, f.Kind)
 	}
-	if f.ApplicationID != "" {
-		where = append(where, `s.application_id = ?`)
-		args = append(args, f.ApplicationID)
+	// Filters on OWNERSHIP, matching the column the list renders. "Services
+	// project X uses" is a different question with a different answer, and the
+	// project overview is where it is asked.
+	if f.ProjectID != "" {
+		where = append(where, `ps.project_id = ?`)
+		args = append(args, f.ProjectID)
 	}
 	if f.Availability != "" {
 		where = append(where, `s.availability = ?`)
@@ -143,11 +126,11 @@ func (s *SQLStore) CreateService(ctx context.Context, actor domain.Actor, svc *d
 			return err
 		}
 		_, err := t.exec(ctx, `
-			INSERT INTO service (id, application_id, code, name, kind, environment_id, availability,
+			INSERT INTO service (id, code, name, kind, environment_id, availability,
 			                     min_healthy, failover_mode, tier, rto_minutes, rpo_minutes,
 			                     owner_team, lifecycle, attrs, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			svc.ID, svc.ApplicationID, svc.Code, svc.Name, svc.Kind, svc.EnvironmentID, svc.Availability,
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			svc.ID, svc.Code, svc.Name, svc.Kind, svc.EnvironmentID, svc.Availability,
 			svc.MinHealthy, svc.FailoverMode, svc.Tier, svc.RTOMinutes, svc.RPOMinutes,
 			svc.OwnerTeam, svc.Lifecycle, svc.Attrs, svc.CreatedAt, svc.UpdatedAt)
 		if err != nil {
@@ -177,12 +160,12 @@ func (s *SQLStore) UpdateService(ctx context.Context, actor domain.Actor, svc *d
 			return err
 		}
 		_, err := t.exec(ctx, `
-			UPDATE service SET application_id = ?, code = ?, name = ?, kind = ?, environment_id = ?,
+			UPDATE service SET code = ?, name = ?, kind = ?, environment_id = ?,
 			                   availability = ?, min_healthy = ?, failover_mode = ?, tier = ?,
 			                   rto_minutes = ?, rpo_minutes = ?, owner_team = ?, lifecycle = ?,
 			                   attrs = ?, updated_at = ?
 			WHERE id = ?`,
-			svc.ApplicationID, svc.Code, svc.Name, svc.Kind, svc.EnvironmentID,
+			svc.Code, svc.Name, svc.Kind, svc.EnvironmentID,
 			svc.Availability, svc.MinHealthy, svc.FailoverMode, svc.Tier,
 			svc.RTOMinutes, svc.RPOMinutes, svc.OwnerTeam, svc.Lifecycle,
 			svc.Attrs, svc.UpdatedAt, svc.ID)

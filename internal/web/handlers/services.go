@@ -12,7 +12,7 @@ type serviceListPage struct {
 	Base
 	Services       []store.ServiceRow
 	Environments   []domain.Environment
-	Applications   []domain.Application
+	Projects       []store.ProjectRow
 	Kinds          []store.VocabularyTerm
 	Availabilities []string
 	Filter         store.ServiceFilter
@@ -26,6 +26,7 @@ func (a *App) ServiceList(w http.ResponseWriter, r *http.Request) {
 		EnvironmentID: q.Get("environment"),
 		Kind:          q.Get("kind"),
 		Availability:  q.Get("availability"),
+		ProjectID:     q.Get("project"),
 		Tier:          queryInt(r, "tier", 0),
 		Query:         q.Get("q"),
 	}
@@ -40,7 +41,7 @@ func (a *App) ServiceList(w http.ResponseWriter, r *http.Request) {
 		a.serverError(w, r, err)
 		return
 	}
-	apps, err := a.Store.ListApplications(r.Context())
+	projects, err := a.Store.ListProjects(r.Context(), store.ProjectFilter{})
 	if err != nil {
 		a.serverError(w, r, err)
 		return
@@ -55,12 +56,12 @@ func (a *App) ServiceList(w http.ResponseWriter, r *http.Request) {
 		Base:         a.base(r, "Services", "services"),
 		Services:     services,
 		Environments: envs,
-		Applications: apps,
+		Projects:     projects,
 		Kinds:        kinds,
 		// Availability stays a domain slice: the impact engine switches on it.
 		Availabilities: domain.Availabilities,
 		Filter:         filter,
-		FormData:       a.newServiceForm(r, nil, domain.ServiceSpec{}, envs, apps, kinds),
+		FormData:       a.newServiceForm(r, nil, domain.ServiceSpec{}, envs, kinds),
 	}
 	a.Render.Respond(w, r, http.StatusOK, "service_list", "service_table", data)
 }
@@ -213,7 +214,6 @@ func (a *App) ServiceCreate(w http.ResponseWriter, r *http.Request) {
 		RTOMinutes:    optionalInt(r, "rto_minutes"),
 		RPOMinutes:    optionalInt(r, "rpo_minutes"),
 		OwnerTeam:     optionalString(r, "owner_team"),
-		ApplicationID: optionalString(r, "application_id"),
 	}
 
 	svc, err := domain.NewService(store.NewID(), spec, a.Store.Now())
@@ -291,18 +291,13 @@ func (a *App) respondServiceFormError(w http.ResponseWriter, r *http.Request, er
 		a.serverError(w, r, listErr)
 		return
 	}
-	apps, listErr := a.Store.ListApplications(r.Context())
-	if listErr != nil {
-		a.serverError(w, r, listErr)
-		return
-	}
 	kinds, listErr := a.Store.ServiceKinds(r.Context())
 	if listErr != nil {
 		a.serverError(w, r, listErr)
 		return
 	}
 	a.Render.Partial(w, http.StatusUnprocessableEntity, "service_form",
-		a.newServiceForm(r, messages, spec, envs, apps, kinds))
+		a.newServiceForm(r, messages, spec, envs, kinds))
 }
 
 // ---------- instances ----------

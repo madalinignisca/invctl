@@ -31,6 +31,13 @@
         </select>
       </div>
       <div class="field">
+        <label for="sf-project">Project</label>
+        <select id="sf-project" name="project">
+          <option value="">any</option>
+          {{range $.Projects}}<option value="{{.ID}}" {{if eq .ID $.Filter.ProjectID}}selected{{end}}>{{.Code}}</option>{{end}}
+        </select>
+      </div>
+      <div class="field">
         <label for="sf-avail">Availability</label>
         <select id="sf-avail" name="availability">
           <option value="">any</option>
@@ -46,7 +53,7 @@
 {{if .CanWrite}}
   {{template "service_form" dict
       "CSRF" .CSRF "Errors" (dict) "Spec" (dict)
-      "Environments" .Environments "Applications" .Applications
+      "Environments" .Environments
       "Kinds" .Kinds "Availabilities" .Availabilities}}
 {{end}}
 {{end}}

@@ -113,34 +113,21 @@ func (s Status) Better(other Status) Status {
 	return s
 }
 
-// Application groups services under a business-facing name.
-type Application struct {
-	ID        string  `db:"id"`
-	Code      string  `db:"code"`
-	Name      string  `db:"name"`
-	OwnerTeam *string `db:"owner_team"`
-	CreatedAt string  `db:"created_at"`
-	UpdatedAt string  `db:"updated_at"`
-}
-
-// NewApplication validates and constructs.
-func NewApplication(id, code, name string, now time.Time) (*Application, error) {
-	ve := &ValidationError{}
-	code = checkRequired(ve, "code", code)
-	name = checkRequired(ve, "name", name)
-	if err := ve.OrNil(); err != nil {
-		return nil, err
-	}
-	ts := FormatTime(now)
-	return &Application{ID: id, Code: strings.ToLower(code), Name: name, CreatedAt: ts, UpdatedAt: ts}, nil
-}
+// Application used to live here. It grouped services under a business-facing
+// name, and Project now does that job for services AND assets, with the
+// owns/uses distinction it never had. Migration 00010 moved every application
+// across, keeping its id, and dropped the table.
+//
+// A service therefore no longer carries who owns it. Ownership is a link, not a
+// column, because "at most one owner" is enforceable as a partial unique index
+// while "and also these fifteen things use it" is not enforceable as a column at
+// all.
 
 // Service is a logical workload: one row regardless of how many replicas run
 // (HANDOVER §3.2). Dependencies, ownership and SLOs attach here, not to the
 // instance — otherwise every dependency edge has to be written once per replica.
 type Service struct {
 	ID            string  `db:"id"`
-	ApplicationID *string `db:"application_id"`
 	Code          string  `db:"code"`
 	Name          string  `db:"name"`
 	Kind          string  `db:"kind"`
@@ -173,7 +160,6 @@ type ServiceSpec struct {
 	EnvironmentID string
 	Availability  string
 	Tier          int
-	ApplicationID *string
 	MinHealthy    *int
 	FailoverMode  *string
 	RTOMinutes    *int
@@ -189,7 +175,6 @@ type ServiceSpec struct {
 func NewService(id string, spec ServiceSpec, now time.Time) (*Service, error) {
 	s := &Service{
 		ID:            id,
-		ApplicationID: spec.ApplicationID,
 		Code:          strings.ToLower(strings.TrimSpace(spec.Code)),
 		Name:          spec.Name,
 		Kind:          spec.Kind,

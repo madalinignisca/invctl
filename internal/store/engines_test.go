@@ -24,15 +24,21 @@ const postgresDSNEnv = "INV_TEST_POSTGRES_DSN"
 type Engine struct {
 	Name string
 	Open func(t *testing.T) *DB
+	// OpenRaw gives an empty database with NO migrations applied. Only a test
+	// that needs to stop partway through the migration history wants this --
+	// see migrateTo.
+	OpenRaw func(t *testing.T) *DB
 }
 
 // Engines returns every backend available in this environment, each already
 // migrated. Use it as the outer loop of a store test.
 func Engines(t *testing.T) []Engine {
 	t.Helper()
-	engines := []Engine{{Name: "sqlite", Open: openTestSQLite}}
+	engines := []Engine{{Name: "sqlite", Open: openTestSQLite, OpenRaw: openTestSQLiteRaw}}
 	if os.Getenv(postgresDSNEnv) != "" {
-		engines = append(engines, Engine{Name: "postgres", Open: openTestPostgres})
+		engines = append(engines, Engine{
+			Name: "postgres", Open: openTestPostgres, OpenRaw: openTestPostgresRaw,
+		})
 	} else {
 		t.Logf("%s not set: skipping the PostgreSQL half of this test", postgresDSNEnv)
 	}
@@ -40,6 +46,15 @@ func Engines(t *testing.T) []Engine {
 }
 
 func openTestSQLite(t *testing.T) *DB {
+	t.Helper()
+	db := openTestSQLiteRaw(t)
+	if err := Migrate(context.Background(), db); err != nil {
+		t.Fatalf("migrating sqlite: %v", err)
+	}
+	return db
+}
+
+func openTestSQLiteRaw(t *testing.T) *DB {
 	t.Helper()
 	// A file rather than :memory: -- the two-pool setup means reader and
 	// writer are distinct connections, and shared-cache in-memory databases
@@ -50,9 +65,6 @@ func openTestSQLite(t *testing.T) *DB {
 		t.Fatalf("opening sqlite: %v", err)
 	}
 	t.Cleanup(func() { db.Close() })
-	if err := Migrate(context.Background(), db); err != nil {
-		t.Fatalf("migrating sqlite: %v", err)
-	}
 	return db
 }
 
@@ -85,6 +97,15 @@ func nextSchemaName(t *testing.T) string {
 // openTestPostgres gives each test its own schema, so tests can run in
 // parallel against one container without seeing each other's rows.
 func openTestPostgres(t *testing.T) *DB {
+	t.Helper()
+	db := openTestPostgresRaw(t)
+	if err := Migrate(context.Background(), db); err != nil {
+		t.Fatalf("migrating postgres: %v", err)
+	}
+	return db
+}
+
+func openTestPostgresRaw(t *testing.T) *DB {
 	t.Helper()
 	baseDSN := os.Getenv(postgresDSNEnv)
 
@@ -129,10 +150,6 @@ func openTestPostgres(t *testing.T) *DB {
 		defer cleanup.Close()
 		cleanup.Writer.Exec(`DROP SCHEMA IF EXISTS ` + schema + ` CASCADE`)
 	})
-
-	if err := Migrate(context.Background(), db); err != nil {
-		t.Fatalf("migrating postgres: %v", err)
-	}
 	return db
 }
 

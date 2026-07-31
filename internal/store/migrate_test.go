@@ -22,7 +22,7 @@ func TestMigrate(t *testing.T) {
 			tables := []string{
 				"environment", "asset", "asset_closure", "asset_environment",
 				"interface", "link", "prefix", "ip_address",
-				"application", "identity", "service", "service_instance",
+				"identity", "service", "service_instance",
 				"rt_systemd", "rt_windows", "rt_container", "rt_k8s",
 				"endpoint", "backend_pool", "backend_member", "route",
 				"dependency", "dependency_data_class",
@@ -37,6 +37,16 @@ func TestMigrate(t *testing.T) {
 				var n int
 				if err := db.Reader.Get(&n, "SELECT COUNT(*) FROM "+table); err != nil {
 					t.Errorf("selecting from %s: %v", table, err)
+				}
+			}
+
+			// Absorbed by migration 00010 and expected to be absent. Listing
+			// it keeps the removal deliberate: a table that quietly comes back
+			// -- in a rebuild, or in a down path somebody ran -- means two
+			// places now claim to say who owns a service.
+			for _, table := range []string{"application"} {
+				if tableExists(t, db, table) {
+					t.Errorf("%s still exists; migration 00010 should have dropped it", table)
 				}
 			}
 		})

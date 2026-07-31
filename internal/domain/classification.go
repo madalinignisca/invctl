@@ -135,7 +135,6 @@ var DeclaredColumns = map[string][]string{
 		"id", "username", "display_name", "email", "source",
 		"password_hash", "is_active", "created_at",
 	},
-	"application": {"id", "code", "name", "owner_team", "created_at", "updated_at"},
 	"asset": {
 		"id", "kind", "name", "parent_id", "serial", "asset_tag", "vendor",
 		"model", "lifecycle", "owner_team", "attrs", "created_at", "updated_at",
@@ -270,7 +269,7 @@ var DeclaredColumns = map[string][]string{
 		"logon_identity_id", "depends_on_svc", "recovery_action",
 	},
 	"service": {
-		"id", "application_id", "code", "name", "kind", "environment_id",
+		"id", "code", "name", "kind", "environment_id",
 		"availability", "min_healthy", "failover_mode", "tier", "rto_minutes",
 		"rpo_minutes", "owner_team", "lifecycle", "attrs", "created_at", "updated_at",
 	},
