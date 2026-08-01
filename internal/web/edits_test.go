@@ -1445,3 +1445,44 @@ func TestGarbageInAnOptionalNumberDoesNotClearIt(t *testing.T) {
 		t.Error("the stored speed was cleared by a value that was refused")
 	}
 }
+
+// EVERY FIELD THAT CAN CARRY AN ERROR HAS SOMEWHERE TO SHOW IT.
+//
+// A refusal is only useful if the operator can see it. The service form
+// returned 422 for a non-numeric rto_minutes and rendered nothing, because the
+// message went into a map whose key had no rendering site — an invisible
+// refusal, which reads to the operator exactly like a save that did nothing.
+func TestARefusalIsVisibleForEveryNumericField(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	serviceID := h.refs.Services["orders-api"]
+	page := body(t, h.get("/services/"+serviceID+"?edit="+serviceID, false))
+	base := url.Values{
+		"csrf_token":  {h.csrfToken("/services/" + serviceID)},
+		"row_version": {versionInForm(t, page)},
+		"code":        {"orders-api"}, "name": {"S"}, "kind": {"api"},
+		"environment_id": {h.refs.Environments["prod"]},
+		"availability":   {"standalone"}, "tier": {"2"}, "lifecycle": {"active"},
+	}
+	for _, field := range []string{"tier", "min_healthy", "rto_minutes", "rpo_minutes"} {
+		form := url.Values{}
+		for k, v := range base {
+			form[k] = v
+		}
+		form.Set(field, "not a number")
+		form.Set("csrf_token", h.csrfToken("/services/"+serviceID))
+		form.Set("row_version", versionInForm(t,
+			body(t, h.get("/services/"+serviceID+"?edit="+serviceID, false))))
+
+		resp := h.post("/services/"+serviceID, form, false)
+		refused := body(t, resp)
+		if resp.StatusCode != http.StatusUnprocessableEntity {
+			t.Errorf("%s: returned %d, want 422", field, resp.StatusCode)
+			continue
+		}
+		if !strings.Contains(refused, "field-error") {
+			t.Errorf("%s: refused with 422 and rendered no message — an invisible refusal", field)
+		}
+	}
+}

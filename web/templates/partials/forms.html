@@ -251,11 +251,13 @@
       </div>
       <div class="field">
         <label for="svc-rto">RTO (minutes)</label>
-        <input id="svc-rto" type="number" name="rto_minutes" value="{{derefInt .Spec.RTOMinutes}}">
+        <input id="svc-rto" class="{{if index .Errors "rto_minutes"}}invalid{{end}}" type="number" name="rto_minutes" value="{{derefInt .Spec.RTOMinutes}}">
+        {{with index .Errors "rto_minutes"}}<div class="field-error">{{.}}</div>{{end}}
       </div>
       <div class="field">
         <label for="svc-rpo">RPO (minutes)</label>
         <input id="svc-rpo" type="number" name="rpo_minutes" value="{{derefInt .Spec.RPOMinutes}}">
+        {{with index .Errors "rpo_minutes"}}<div class="field-error">{{.}}</div>{{end}}
       </div>
     </div>
 
