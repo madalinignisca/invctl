@@ -40,45 +40,20 @@
     {{end}}
   </div>
 
-  <div class="panel">
-    <div class="panel-head"><h2>Add a project</h2></div>
-    <form class="panel-body" method="post" action="/projects"
-          hx-post="/projects" hx-target="#projects" hx-swap="outerHTML">
-      <input type="hidden" name="csrf_token" value="{{.CSRF}}">
-      <div class="field-row">
-        <div class="field">
-          <label for="p-code">Code</label>
-          <input id="p-code" class="mono {{if index .Errors "code"}}invalid{{end}}" type="text"
-                 name="code" value="{{.Spec.Code}}" required>
-          {{with index .Errors "code"}}<div class="field-error">{{.}}</div>{{end}}
-        </div>
-        <div class="field">
-          <label for="p-name">Name</label>
-          <input id="p-name" type="text" name="name" value="{{.Spec.Name}}"
-                 class="{{if index .Errors "name"}}invalid{{end}}" required>
-          {{with index .Errors "name"}}<div class="field-error">{{.}}</div>{{end}}
-        </div>
-        <div class="field">
-          <label for="p-team">Owning team</label>
-          <select id="p-team" name="team_id">
-            <option value="">—</option>
-            {{range $.Teams}}<option value="{{.ID}}">{{.Code}}</option>{{end}}
-          </select>
-        </div>
-      </div>
-      <div class="field">
-        <label for="p-desc">What is it for?</label>
-        <textarea id="p-desc" name="description" rows="2"
-                  placeholder="One sentence, for somebody deciding whether this is the project they meant."></textarea>
-      </div>
-      <button class="btn btn-primary" type="submit">Add project</button>
-    </form>
-  </div>
+  {{template "project_form" dict "Action" "/projects" "Submit" "Add project"
+      "Prefix" "p-new" "Editing" false "Spec" .Spec "Teams" .Teams "Errors" .Errors
+      "CSRF" .CSRF "Lifecycles" .Lifecycles "Lifecycle" "" "RowVersion" 0 "Target" "#projects"}}
 </div>
 {{end}}
 
 {{define "project_panel"}}
 <div id="project">
+
+  <div id="project-edit">
+  {{if .Edit}}
+    {{template "project_form" .Edit}}
+  {{end}}
+  </div>
 
   {{/* 1. What it consists of, as somebody declared it. */}}
   <div class="grid-2">
@@ -293,5 +268,65 @@
     </div>
   </div>
 
+</div>
+{{end}}
+
+
+{{/*
+  project_form both adds a project and corrects one. Extracted from the list
+  page so the two cannot drift: a project has few enough fields that a second
+  copy would look harmless right up until one of them gained a field.
+
+  What a project OWNS and USES is not here. Those are rows in their own right,
+  with their own audit trail, and they are edited where they are listed.
+*/}}
+{{define "project_form"}}
+<div class="panel">
+  <div class="panel-head">
+    <h2>{{if .Editing}}Correct this project{{else}}Add a project{{end}}</h2>
+    {{if .Editing}}<span class="panel-note">What it is. What it owns is edited below.</span>{{end}}
+  </div>
+  <form class="panel-body" method="post" action="{{.Action}}"
+        hx-post="{{.Action}}" hx-target="{{.Target}}" hx-swap="outerHTML">
+    <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+    {{if .Editing}}<input type="hidden" name="row_version" value="{{.RowVersion}}">{{end}}
+    <div class="field-row">
+      <div class="field">
+        <label for="{{.Prefix}}-code">Code</label>
+        <input id="{{.Prefix}}-code" class="mono {{if index .Errors "code"}}invalid{{end}}" type="text"
+               name="code" value="{{.Spec.Code}}" required>
+        {{with index .Errors "code"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="{{.Prefix}}-name">Name</label>
+        <input id="{{.Prefix}}-name" type="text" name="name" value="{{.Spec.Name}}"
+               class="{{if index .Errors "name"}}invalid{{end}}" required>
+        {{with index .Errors "name"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        {{$f := .}}
+        <label for="{{.Prefix}}-team">Owning team</label>
+        <select id="{{.Prefix}}-team" name="team_id">
+          <option value="">—</option>
+          {{range .Teams}}<option value="{{.ID}}" {{if eq .ID (deref $f.Spec.TeamID)}}selected{{end}}>{{.Code}}</option>{{end}}
+        </select>
+      </div>
+      {{if .Editing}}
+      <div class="field">
+        <label for="{{.Prefix}}-lifecycle">Lifecycle</label>
+        <select id="{{.Prefix}}-lifecycle" name="lifecycle">
+          {{range .Lifecycles}}<option value="{{.}}" {{if eq . $f.Lifecycle}}selected{{end}}>{{.}}</option>{{end}}
+        </select>
+      </div>
+      {{end}}
+    </div>
+    <div class="field">
+      <label for="{{.Prefix}}-desc">What is it for?</label>
+      <textarea id="{{.Prefix}}-desc" name="description" rows="2"
+                placeholder="One sentence, for somebody deciding whether this is the project they meant.">{{deref .Spec.Description}}</textarea>
+    </div>
+    <button class="btn btn-primary" type="submit">{{.Submit}}</button>
+    {{if .Editing}}<a class="btn" href="/projects/{{.ProjectID}}">Cancel</a>{{end}}
+  </form>
 </div>
 {{end}}

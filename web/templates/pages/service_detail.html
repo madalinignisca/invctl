@@ -20,6 +20,7 @@
 
 <div style="margin-bottom:18px">
   <a class="btn" href="/paths?from=service:{{.Service.ID}}">Where does it sit — path diagram</a>
+  {{if .CanWrite}}<a class="btn" href="/services/{{.Service.ID}}?edit={{.Service.ID}}#edit">Edit</a>{{end}}
 </div>
 
 <div class="panel">
@@ -48,6 +49,10 @@
   </div>
 </div>
 
+{{if .ServiceEdit}}
+<div id="edit">{{template "service_form" .ServiceEdit}}</div>
+{{end}}
+
 <div class="panel" id="instances">
   <div class="panel-head">
     <h2>Instances</h2>
@@ -61,7 +66,8 @@
            cell always carries its reporter and its age, and shows `unknown` once
            a reading is older than three of that reporter's intervals -- never
            its last value, because silence is not health (rule 8). */}}
-      <thead><tr><th>Host</th><th>Runtime</th><th>Role</th><th>Shard</th><th>Ordinal</th><th>Desired</th><th>Observed</th>{{if .CanWrite}}<th></th>{{end}}</tr></thead>
+      <thead><tr><th>Host</th><th>Runtime</th><th>Role</th><th>Shard</th><th>Ordinal</th><th>Desired</th><th>Observed</th>{{if .CanWrite}}
+<th></th>{{end}}</tr></thead>
       <tbody>
         {{range .Instances}}
         {{$si := .}}

@@ -271,7 +271,10 @@ type assetDetailPage struct {
 	Kinds        []store.VocabularyTerm
 	Lifecycles   []string
 	// Edit is set only when a port or address correction was refused.
-	Edit          *editState
+	Edit *editState
+	// AssetEdit is the whole-asset form, present only when the operator asked
+	// for it with ?edit=<the asset's own id>.
+	AssetEdit     *assetFormData
 	InterfaceForm interfaceFormData
 	IPAddressForm ipAddressFormData
 	LinkForm      linkFormData
@@ -388,9 +391,20 @@ func (a *App) renderAssetDetail(w http.ResponseWriter, r *http.Request, status i
 		// The refused row opens, whatever the query string said.
 		assetBase.EditRow = edit.ID
 	}
+	var assetEdit *assetFormData
+	if assetBase.CanWrite && assetBase.EditRow == asset.ID {
+		f := a.newAssetEditForm(r, asset, nil, envs, kinds, nil)
+		assetEdit = &f
+	}
+	if edit != nil && edit.ID == asset.ID {
+		// A refused save of the asset itself, rather than of a row on it.
+		f := a.newAssetEditForm(r, asset, edit.Errors, envs, kinds, edit)
+		assetEdit = &f
+	}
 	a.Render.Page(w, status, "asset_detail", assetDetailPage{
 		Base:           assetBase,
 		Edit:           edit,
+		AssetEdit:      assetEdit,
 		Asset:          asset,
 		Certificates:   certificates,
 		Costs:          costs,
@@ -490,11 +504,26 @@ func (a *App) AssetUpdate(w http.ResponseWriter, r *http.Request) {
 	updated.RowVersion = submittedVersion(r, updated.RowVersion)
 
 	if err := a.Store.UpdateAsset(r.Context(), actor(r), &updated, submittedEnvironments(r)); err != nil {
-		if messages, ok := validationErrors(err); ok {
-			a.renderAssetFormError(w, r, messages)
-			return
+		messages, ok := validationErrors(err)
+		if !ok {
+			switch {
+			case isStale(err):
+				messages = staleMessage("name")
+			case isConflict(err):
+				messages = map[string]string{"name": "another asset already has that name here"}
+			default:
+				a.handleStoreError(w, r, err)
+				return
+			}
 		}
-		a.handleStoreError(w, r, err)
+		// The whole page at the right status, with the form reopened on what
+		// was typed. renderAssetFormError answers a form post with a bare
+		// fragment -- no layout, no way back -- which is only survivable
+		// because HTMX swaps it into a page that is already there.
+		a.renderAssetDetail(w, r, refusalStatus(err), id,
+			rejected(r, id, messages, "name", "kind", "lifecycle", "vendor", "model",
+				"serial", "asset_tag", "team_id", "manager_role", "eol_date").
+				withMulti("environments", submittedEnvironments(r)))
 		return
 	}
 

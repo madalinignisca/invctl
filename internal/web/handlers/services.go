@@ -100,6 +100,9 @@ type serviceDetailPage struct {
 	// enums with a Go constant set beside them.
 	RuntimeTypes  []string
 	DesiredStates []string
+	// ServiceEdit is the whole-service form, present only when the operator
+	// asked for it with ?edit=<the service's own id>.
+	ServiceEdit *serviceFormData
 	// Edit is set only when a placement correction was refused; see editState.
 	Edit           *editState
 	DependencyForm dependencyFormData
@@ -242,6 +245,21 @@ func (a *App) renderServiceDetail(w http.ResponseWriter, r *http.Request, status
 		return
 	}
 
+	var serviceEdit *serviceFormData
+	if b.CanWrite && b.EditRow == service.ID {
+		envs, kinds, listErr := a.serviceFormOptions(r)
+		if listErr != nil {
+			a.serverError(w, r, listErr)
+			return
+		}
+		var spec *domain.ServiceSpec
+		var errs map[string]string
+		if edit != nil && edit.ID == service.ID {
+			spec, errs = edit.serviceSpec(), edit.Errors
+		}
+		f := a.newServiceEditForm(r, service, errs, envs, kinds, spec)
+		serviceEdit = &f
+	}
 	a.Render.Page(w, status, "service_detail", serviceDetailPage{
 		Base:           b,
 		Service:        service,
@@ -262,6 +280,7 @@ func (a *App) renderServiceDetail(w http.ResponseWriter, r *http.Request, status
 		EndpointEdit:   a.endpointEditForm(r, b, endpoints, epState),
 		RuntimeTypes:   domain.RuntimeTypes,
 		DesiredStates:  domain.DesiredStates,
+		ServiceEdit:    serviceEdit,
 		Edit:           edit,
 		DependencyForm: a.newDependencyForm(r, id, nil, domain.DependencySpec{}, allEndpoints, allRoutes, identities, classOptions),
 		OverrideForm:   a.newOverrideForm(r, overrideTargets, nil, overrideForm{}),
@@ -361,16 +380,23 @@ func (a *App) ServiceUpdate(w http.ResponseWriter, r *http.Request) {
 	updated.RowVersion = submittedVersion(r, updated.RowVersion)
 
 	if err := a.Store.UpdateService(r.Context(), actor(r), &updated); err != nil {
-		a.respondServiceFormError(w, r, err, domain.ServiceSpec{
-			Code: updated.Code, Name: updated.Name, Kind: updated.Kind,
-			EnvironmentID: updated.EnvironmentID, Availability: updated.Availability,
-			Tier: updated.Tier, MinHealthy: updated.MinHealthy, FailoverMode: updated.FailoverMode,
-			EOLDate: updated.EOLDate,
-			// Carried back, or the re-rendered form cannot show what was picked
-			// -- and the rule most likely to have caused the 422 is the one
-			// about these two fields.
-			TeamID: updated.TeamID, ManagerRole: updated.ManagerRole,
-		})
+		messages, ok := validationErrors(err)
+		if !ok {
+			switch {
+			case isStale(err):
+				messages = staleMessage("code")
+			case isConflict(err):
+				messages = map[string]string{"code": "a service with that code already exists"}
+			default:
+				a.handleStoreError(w, r, err)
+				return
+			}
+		}
+		a.renderServiceDetail(w, r, refusalStatus(err), id, endpointFormState{},
+			rejected(r, id, messages, "code", "name", "kind", "environment_id",
+				"availability", "tier", "min_healthy", "failover_mode",
+				"rto_minutes", "rpo_minutes", "team_id", "manager_role",
+				"eol_date", "lifecycle"))
 		return
 	}
 
@@ -411,6 +437,19 @@ func (a *App) respondServiceFormError(w http.ResponseWriter, r *http.Request, er
 	}
 	a.Render.Partial(w, http.StatusUnprocessableEntity, "service_form",
 		a.newServiceForm(r, messages, spec, envs, kinds))
+}
+
+// serviceFormOptions loads the two lookups the service form needs.
+func (a *App) serviceFormOptions(r *http.Request) ([]domain.Environment, []store.VocabularyTerm, error) {
+	envs, err := a.Store.ListEnvironments(r.Context())
+	if err != nil {
+		return nil, nil, err
+	}
+	kinds, err := a.Store.ServiceKinds(r.Context())
+	if err != nil {
+		return nil, nil, err
+	}
+	return envs, kinds, nil
 }
 
 // ---------- instances ----------

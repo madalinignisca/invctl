@@ -857,3 +857,198 @@ func firstFieldError(t *testing.T, page string) string {
 	}
 	return m[1]
 }
+
+// ---------- the three entities whose write routes had no form ----------
+//
+// AssetUpdate, ServiceUpdate and ProjectUpdate existed and were reachable by
+// anybody who could construct a POST, and by nobody using the application.
+// The mirror image of the store methods with no route that started this work.
+
+func TestCorrectingAnAsset(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	id := h.refs.Assets["hv-01"]
+	form := editingRow // silence: not used here, keeps imports honest
+	_ = form
+	page := body(t, h.get("/assets/"+id+"?edit="+id, false))
+
+	if !strings.Contains(page, `value="hv-01"`) {
+		t.Error("the asset editor does not show the stored name")
+	}
+	// THE PARENT IS NOT ON OFFER. Moving an asset rewrites asset_closure and
+	// with it every containment answer and impact simulation.
+	if strings.Contains(page, `name="parent_id"`) {
+		t.Error("the asset editor offers to re-parent, which moves the graph")
+	}
+	// Fields that only exist once the thing does.
+	for _, want := range []string{`name="lifecycle"`, `name="asset_tag"`, `name="row_version"`} {
+		if !strings.Contains(page, want) {
+			t.Errorf("the asset editor is missing %s", want)
+		}
+	}
+
+	version := versionInForm(t, page)
+	resp := h.post("/assets/"+id, url.Values{
+		"csrf_token": {h.csrfToken("/assets/" + id)}, "row_version": {version},
+		"name": {"hv-01-corrected"}, "kind": {"hypervisor"}, "lifecycle": {"active"},
+		"vendor": {"Dell"}, "asset_tag": {"TAG-9"},
+	}, false)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("correcting an asset returned %d, want a redirect", resp.StatusCode)
+	}
+
+	after := body(t, h.get("/assets/"+id, false))
+	if !strings.Contains(after, "hv-01-corrected") {
+		t.Error("the corrected name is not shown")
+	}
+	if !strings.Contains(body(t, h.get("/changes", false)), "asset") {
+		t.Error("correcting an asset wrote no change_log entry")
+	}
+}
+
+// Environments are a set, and a REFUSED save must redraw the boxes the operator
+// actually ticked. A single field falls back to what is stored when it is
+// missing, which is right for a text input and wrong for a checkbox: an
+// unticked box submits nothing, so falling back would silently re-tick it and
+// the next save would put the environment back without anybody choosing to.
+//
+// Asserted on the refusal path deliberately. On a SUCCESSFUL save the page is
+// re-read from storage, which shows the cleared state whatever this code does —
+// the first version of this test did that and passed with the whole Multi
+// lookup deleted.
+func TestARefusedAssetEditRedrawsTheBoxesThatWereTicked(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	id := h.refs.Assets["hv-01"]
+	page := body(t, h.get("/assets/"+id+"?edit="+id, false))
+	if !strings.Contains(page, " checked>") {
+		t.Fatal("the asset is in no environment, so unticking proves nothing")
+	}
+
+	// A save that fails validation (blank name) and ticks NO environment.
+	resp := h.post("/assets/"+id, url.Values{
+		"csrf_token":  {h.csrfToken("/assets/" + id)},
+		"row_version": {versionInForm(t, page)},
+		"name":        {""}, "kind": {"hypervisor"}, "lifecycle": {"active"},
+	}, false)
+	refused := body(t, resp)
+
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("the refused save returned %d, want 422", resp.StatusCode)
+	}
+	if strings.Contains(refused, " checked>") {
+		t.Error("a refused save re-ticked an environment the operator had unticked")
+	}
+	// And the stored row is untouched: a refusal changes nothing.
+	if !strings.Contains(body(t, h.get("/assets/"+id+"?edit="+id, false)), " checked>") {
+		t.Error("a refused save cleared the stored environments")
+	}
+}
+
+func TestCorrectingAService(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	id := h.refs.Services["orders-api"]
+	page := body(t, h.get("/services/"+id+"?edit="+id, false))
+	if !strings.Contains(page, `value="orders-api"`) {
+		t.Error("the service editor does not show the stored code")
+	}
+	version := versionInForm(t, page)
+
+	resp := h.post("/services/"+id, url.Values{
+		"csrf_token": {h.csrfToken("/services/" + id)}, "row_version": {version},
+		"code": {"orders-api"}, "name": {"Orders API, corrected"},
+		"kind": {"api"}, "environment_id": {h.refs.Environments["prod"]},
+		"availability": {"active_active"}, "min_healthy": {"2"}, "tier": {"1"},
+		"lifecycle": {"active"},
+	}, false)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("correcting a service returned %d, want a redirect", resp.StatusCode)
+	}
+	if !strings.Contains(body(t, h.get("/services/"+id, false)), "Orders API, corrected") {
+		t.Error("the corrected service name is not shown")
+	}
+}
+
+func TestCorrectingAProject(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	id := h.refs.Projects["platform"]
+	page := body(t, h.get("/projects/"+id+"?edit="+id, false))
+	if !strings.Contains(page, "Correct this project") {
+		t.Fatal("the project editor did not open")
+	}
+	version := versionInForm(t, page)
+
+	resp := h.post("/projects/"+id, url.Values{
+		"csrf_token": {h.csrfToken("/projects/" + id)}, "row_version": {version},
+		"code": {"platform"}, "name": {"Platform, corrected"},
+		"description": {"one sentence"}, "lifecycle": {"active"},
+	}, false)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("correcting a project returned %d, want a redirect", resp.StatusCode)
+	}
+	if !strings.Contains(body(t, h.get("/projects/"+id, false)), "Platform, corrected") {
+		t.Error("the corrected project name is not shown")
+	}
+	// The add form on the LIST page is the same partial and must still add.
+	if !strings.Contains(body(t, h.get("/projects", false)), "Add a project") {
+		t.Error("extracting the shared form broke the add form")
+	}
+}
+
+// A refused save keeps what was typed, on all three.
+func TestARefusedEntityEditKeepsWhatWasTyped(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+	assetID := h.refs.Assets["hv-01"]
+
+	page := body(t, h.get("/assets/"+assetID+"?edit="+assetID, false))
+	resp := h.post("/assets/"+assetID, url.Values{
+		"csrf_token":  {h.csrfToken("/assets/" + assetID)},
+		"row_version": {versionInForm(t, page)},
+		"name":        {""}, "kind": {"hypervisor"}, "lifecycle": {"active"},
+		"vendor": {"Typed and kept"},
+	}, false)
+	refused := body(t, resp)
+
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Errorf("a refused asset edit returned %d, want 422", resp.StatusCode)
+	}
+	if !strings.Contains(refused, "field-error") {
+		t.Error("the refusal did not say which field was wrong")
+	}
+	if !strings.Contains(refused, `value="Typed and kept"`) {
+		t.Error("the refused form lost the other fields the operator had typed")
+	}
+	if !strings.Contains(refused, "<nav") {
+		t.Error("the refusal answered with a fragment, not a page")
+	}
+}
+
+func TestReadOnlyUsersGetNoEntityEditors(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+	assetID := h.refs.Assets["hv-01"]
+	serviceID := h.refs.Services["orders-api"]
+	projectID := h.refs.Projects["platform"]
+
+	h.logout()
+	h.login("viewer", "viewer-password")
+	for _, c := range []struct{ name, path, marker string }{
+		{"asset", "/assets/" + assetID + "?edit=" + assetID, `name="asset_tag"`},
+		{"service", "/services/" + serviceID + "?edit=" + serviceID, `name="availability"`},
+		{"project", "/projects/" + projectID + "?edit=" + projectID, "Correct this project"},
+	} {
+		if strings.Contains(body(t, h.get(c.path, false)), c.marker) {
+			t.Errorf("a read-only user asking for the %s editor by id was given one", c.name)
+		}
+	}
+}

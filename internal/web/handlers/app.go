@@ -104,6 +104,10 @@ type editState struct {
 	ID     string
 	Errors map[string]string
 	Values map[string]string
+	// Multi holds fields that repeat -- a set of ticked checkboxes rather than
+	// one value. Kept separate because the fallback rules differ: a missing
+	// single field means "not rendered", a missing set means "all unticked".
+	Multi map[string][]string
 }
 
 // Value returns the submitted value for a field, or the stored one.
@@ -145,6 +149,51 @@ func rejected(r *http.Request, id string, errs map[string]string, fields ...stri
 		values[f] = formValue(r, f)
 	}
 	return &editState{ID: id, Errors: orEmpty(errs), Values: values}
+}
+
+// serviceSpec rebuilds what the operator typed into a service form. Only used
+// to redraw a refused submission, so a field the form does not carry is simply
+// absent rather than cleared.
+func (e *editState) serviceSpec() *domain.ServiceSpec {
+	if e == nil {
+		return nil
+	}
+	atoi := func(k string) int {
+		n, _ := strconv.Atoi(e.Values[k])
+		return n
+	}
+	optInt := func(k string) *int {
+		if e.Values[k] == "" {
+			return nil
+		}
+		n := atoi(k)
+		return &n
+	}
+	opt := func(k string) *string {
+		if e.Values[k] == "" {
+			return nil
+		}
+		v := e.Values[k]
+		return &v
+	}
+	return &domain.ServiceSpec{
+		Code: e.Values["code"], Name: e.Values["name"], Kind: e.Values["kind"],
+		EnvironmentID: e.Values["environment_id"], Availability: e.Values["availability"],
+		Tier: atoi("tier"), MinHealthy: optInt("min_healthy"),
+		FailoverMode: opt("failover_mode"), RTOMinutes: optInt("rto_minutes"),
+		RPOMinutes: optInt("rpo_minutes"), TeamID: opt("team_id"),
+		ManagerRole: opt("manager_role"), EOLDate: opt("eol_date"),
+	}
+}
+
+// withMulti records a repeating field, so a refused form redraws the boxes the
+// operator actually ticked.
+func (e *editState) withMulti(name string, values []string) *editState {
+	if e.Multi == nil {
+		e.Multi = map[string][]string{}
+	}
+	e.Multi[name] = values
+	return e
 }
 
 const (

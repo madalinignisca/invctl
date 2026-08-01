@@ -15,6 +15,7 @@
 
 <div style="margin-bottom:18px">
   <a class="btn btn-primary" href="/projects/{{.Project.ID}}/map">See how it fits together</a>
+  {{if .CanWrite}}<a class="btn" href="/projects/{{.Project.ID}}?edit={{.Project.ID}}#project-edit">Edit</a>{{end}}
 </div>
 
 {{template "project_panel" .}}

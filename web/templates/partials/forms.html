@@ -43,67 +43,99 @@
 {{end}}
 
 
+{{/*
+  asset_form both adds an asset and corrects one. .Asset is nil in the first
+  case and the stored row in the second; .Value pre-fills from it, and after a
+  refusal from what was submitted, so a field added here appears in both modes.
+
+  The PARENT is not editable. Moving an asset rewrites asset_closure and with it
+  every containment answer, impact simulation and environment span; that has its
+  own flow. Lifecycle and asset tag are the mirror image -- they only make sense
+  once the thing exists, so they appear only when correcting.
+*/}}
 {{define "asset_form"}}
-<form id="asset-form" class="panel" method="post" action="/assets"
-      hx-post="/assets" hx-target="#asset-form" hx-swap="outerHTML">
+<form id="{{.Prefix}}-form" class="panel" method="post" action="{{.Action}}"
+      hx-post="{{.Action}}" hx-target="#{{.Prefix}}-form" hx-swap="outerHTML">
   <input type="hidden" name="csrf_token" value="{{.CSRF}}">
-  <div class="panel-head"><h2>Add an asset</h2></div>
+  {{if .Editing}}<input type="hidden" name="row_version" value="{{.Version}}">{{end}}
+  <div class="panel-head">
+    <h2>{{if .Editing}}Correct this asset{{else}}Add an asset{{end}}</h2>
+    {{if .Editing}}<span class="panel-note">What it is — not where it sits.</span>{{end}}
+  </div>
   <div class="panel-body">
     <div class="field-row">
       <div class="field">
-        <label for="asset-name">Name</label>
-        <input id="asset-name" class="mono {{if index .Errors "name"}}invalid{{end}}"
-               type="text" name="name" placeholder="hv-04" required>
+        <label for="{{.Prefix}}-name">Name</label>
+        <input id="{{.Prefix}}-name" class="mono {{if index .Errors "name"}}invalid{{end}}"
+               type="text" name="name" placeholder="hv-04" value="{{.Value "name"}}" required>
         {{with index .Errors "name"}}<div class="field-error">{{.}}</div>{{end}}
       </div>
       <div class="field">
-        <label for="asset-kind">Kind</label>
-        <select id="asset-kind" name="kind">
-          {{range .Kinds}}<option value="{{.Code}}">{{.Label}}</option>{{end}}
+        {{$f := .}}
+        <label for="{{.Prefix}}-kind">Kind</label>
+        <select id="{{.Prefix}}-kind" name="kind">
+          {{range .Kinds}}<option value="{{.Code}}" {{if eq .Code ($f.Value "kind")}}selected{{end}}>{{.Label}}</option>{{end}}
         </select>
         {{with index .Errors "kind"}}<div class="field-error">{{.}}</div>{{end}}
       </div>
+      {{if .Editing}}
       <div class="field">
-        <label for="asset-parent">Contained by</label>
-        <select id="asset-parent" name="parent_id">
+        <label for="{{.Prefix}}-lifecycle">Lifecycle</label>
+        <select id="{{.Prefix}}-lifecycle" name="lifecycle">
+          {{range .Lifecycles}}<option value="{{.}}" {{if eq . ($f.Value "lifecycle")}}selected{{end}}>{{.}}</option>{{end}}
+        </select>
+        <div class="field-hint">Retiring has its own button; this is for the states before that.</div>
+      </div>
+      {{else}}
+      <div class="field">
+        <label for="{{.Prefix}}-parent">Contained by</label>
+        <select id="{{.Prefix}}-parent" name="parent_id">
           <option value="">— nothing (top level) —</option>
           {{range .Parents}}<option value="{{.ID}}">{{.Name}} ({{.Kind}})</option>{{end}}
         </select>
         {{with index .Errors "parent_id"}}<div class="field-error">{{.}}</div>{{end}}
       </div>
+      {{end}}
     </div>
     <div class="field-row">
       <div class="field">
-        <label for="asset-vendor">Vendor</label>
-        <input id="asset-vendor" type="text" name="vendor">
+        <label for="{{.Prefix}}-vendor">Vendor</label>
+        <input id="{{.Prefix}}-vendor" type="text" name="vendor" value="{{.Value "vendor"}}">
       </div>
       <div class="field">
-        <label for="asset-model">Model</label>
-        <input id="asset-model" type="text" name="model">
+        <label for="{{.Prefix}}-model">Model</label>
+        <input id="{{.Prefix}}-model" type="text" name="model" value="{{.Value "model"}}">
       </div>
       <div class="field">
-        <label for="asset-serial">Serial</label>
-        <input id="asset-serial" class="mono" type="text" name="serial">
+        <label for="{{.Prefix}}-serial">Serial</label>
+        <input id="{{.Prefix}}-serial" class="mono" type="text" name="serial" value="{{.Value "serial"}}">
       </div>
+      {{if .Editing}}
       <div class="field">
-        <label for="asset-team">Team</label>
-        <select id="asset-team" name="team_id">
+        <label for="{{.Prefix}}-tag">Asset tag</label>
+        <input id="{{.Prefix}}-tag" class="mono" type="text" name="asset_tag" value="{{.Value "asset_tag"}}">
+        <div class="field-hint">What the sticker says, if it differs from the serial.</div>
+      </div>
+      {{end}}
+      <div class="field">
+        <label for="{{.Prefix}}-team">Team</label>
+        <select id="{{.Prefix}}-team" name="team_id">
           <option value="">—</option>
-          {{range .Teams}}<option value="{{.ID}}">{{.Code}}</option>{{end}}
+          {{range .Teams}}<option value="{{.ID}}" {{if eq .ID ($f.Value "team_id")}}selected{{end}}>{{.Code}}</option>{{end}}
         </select>
         <div class="field-hint">Optional. Who looks after it.</div>
       </div>
       <div class="field">
-        <label for="asset-role">Managed as</label>
-        <select id="asset-role" name="manager_role">
+        <label for="{{.Prefix}}-role">Managed as</label>
+        <select id="{{.Prefix}}-role" name="manager_role">
           <option value="">—</option>
-          {{range .Roles}}<option value="{{.Code}}">{{.Label}}</option>{{end}}
+          {{range .Roles}}<option value="{{.Code}}" {{if eq .Code ($f.Value "manager_role")}}selected{{end}}>{{.Label}}</option>{{end}}
         </select>
         <div class="field-hint">Optional, and needs a team. Who to call, not a permission.</div>
       </div>
       <div class="field">
-        <label for="asset-eol">Supported until</label>
-        <input id="asset-eol" type="date" name="eol_date">
+        <label for="{{.Prefix}}-eol">Supported until</label>
+        <input id="{{.Prefix}}-eol" type="date" name="eol_date" value="{{.Value "eol_date"}}">
         <div class="field-hint">Optional. Nothing happens when it passes — it changes what the expiry report says.</div>
       </div>
     </div>
@@ -112,24 +144,29 @@
       <div class="checks">
         {{range .Environments}}
         <label class="check">
-          <input type="checkbox" name="environments" value="{{.ID}}"> {{.Code}}
+          <input type="checkbox" name="environments" value="{{.ID}}" {{if $f.InEnvironment .ID}}checked{{end}}> {{.Code}}
         </label>
         {{end}}
       </div>
       <div class="field-hint">Membership is many-to-many. An asset in two non-transit environments is flagged as a span.</div>
     </div>
-    <button class="btn btn-primary" type="submit">Add asset</button>
+    <button class="btn btn-primary" type="submit">{{.Submit}}</button>
+    {{if .Editing}}<a class="btn" href="/assets/{{.Asset.ID}}">Cancel</a>{{end}}
   </div>
 </form>
 {{end}}
 
 
 {{define "service_form"}}
-<form id="service-form" class="panel" method="post" action="/services"
-      hx-post="/services" hx-target="#service-form" hx-swap="outerHTML"
+<form id="{{.Prefix}}-form" class="panel" method="post" action="{{.Action}}"
+      hx-post="{{.Action}}" hx-target="#{{.Prefix}}-form" hx-swap="outerHTML"
       x-data="serviceForm">
   <input type="hidden" name="csrf_token" value="{{.CSRF}}">
-  <div class="panel-head"><h2>Add a service</h2></div>
+  {{if .Editing}}<input type="hidden" name="row_version" value="{{.RowVersion}}">{{end}}
+  <div class="panel-head">
+    <h2>{{if .Editing}}Correct this service{{else}}Add a service{{end}}</h2>
+    {{if .Editing}}<span class="panel-note">What it is. Where it runs is a placement, and has its own row.</span>{{end}}
+  </div>
   <div class="panel-body">
     <div class="field-row">
       <div class="field">
@@ -222,7 +259,18 @@
       </div>
     </div>
 
-    <button class="btn btn-primary" type="submit">Add service</button>
+    {{if .Editing}}
+    <div class="field" style="max-width:16em">
+      <label for="{{.Prefix}}-lifecycle">Lifecycle</label>
+      {{$f := .}}
+      <select id="{{.Prefix}}-lifecycle" name="lifecycle">
+        {{range .Lifecycles}}<option value="{{.}}" {{if eq . $f.Lifecycle}}selected{{end}}>{{.}}</option>{{end}}
+      </select>
+      <div class="field-hint">Retiring has its own button; this is for the states before that.</div>
+    </div>
+    {{end}}
+    <button class="btn btn-primary" type="submit">{{.Submit}}</button>
+    {{if .Editing}}<a class="btn" href="/services/{{.ServiceID}}">Cancel</a>{{end}}
   </div>
 </form>
 {{end}}

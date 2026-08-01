@@ -39,6 +39,84 @@ type assetFormData struct {
 	Parents    []store.AssetRow
 	Teams      []store.TeamRow
 	Roles      []store.VocabularyTerm
+	// Asset is the row being corrected, or nil when adding. One partial serves
+	// both, so a field cannot be added to one and forgotten on the other --
+	// which is how a form ends up quietly unable to set something.
+	Asset  *store.AssetRow
+	Action string
+	Submit string
+	Prefix string
+	// Edit carries a refused submission back; nil-safe, see editState.
+	Edit *editState
+}
+
+// Editing reports whether this form is correcting an existing asset.
+func (f assetFormData) Editing() bool { return f.Asset != nil }
+
+// Value is what a field should show: what the operator typed if their save was
+// refused, otherwise what is stored, otherwise blank.
+func (f assetFormData) Value(field string) string {
+	stored := ""
+	if f.Asset != nil {
+		a := f.Asset.Asset
+		switch field {
+		case "name":
+			stored = a.Name
+		case "kind":
+			stored = a.Kind
+		case "lifecycle":
+			stored = a.Lifecycle
+		case "vendor":
+			stored = orBlank(a.Vendor)
+		case "model":
+			stored = orBlank(a.Model)
+		case "serial":
+			stored = orBlank(a.Serial)
+		case "asset_tag":
+			stored = orBlank(a.AssetTag)
+		case "team_id":
+			stored = orBlank(a.TeamID)
+		case "manager_role":
+			stored = orBlank(a.ManagerRole)
+		case "eol_date":
+			stored = orBlank(a.EOLDate)
+		}
+	}
+	return f.Edit.Value(field, stored)
+}
+
+// InEnvironment reports whether the environment checkbox should be ticked.
+//
+// After a refusal the answer comes from the SUBMISSION, not the stored row: an
+// operator who unticked an environment and failed validation elsewhere must not
+// find it silently re-ticked. editState cannot answer this one -- a repeating
+// checkbox is a set, not a field -- so the submitted ids are read directly.
+func (f assetFormData) InEnvironment(id string) bool {
+	if f.Edit != nil {
+		for _, submitted := range f.Edit.Multi["environments"] {
+			if submitted == id {
+				return true
+			}
+		}
+		return false
+	}
+	if f.Asset == nil {
+		return false
+	}
+	for _, env := range f.Asset.Environments {
+		if env.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+// Version is the concurrency token to render, and 0 when adding.
+func (f assetFormData) Version() int {
+	if f.Asset == nil {
+		return 0
+	}
+	return f.Asset.RowVersion
 }
 
 type serviceFormData struct {
@@ -52,7 +130,18 @@ type serviceFormData struct {
 	Availabilities []string
 	FailoverModes  []string
 	Lifecycles     []string
+	// Set only when correcting an existing service. The form is already
+	// Spec-driven, so edit mode is the same fields fed from the stored row.
+	ServiceID  string
+	Lifecycle  string
+	RowVersion int
+	Action     string
+	Submit     string
+	Prefix     string
 }
+
+// Editing reports whether this form is correcting an existing service.
+func (f serviceFormData) Editing() bool { return f.ServiceID != "" }
 
 type instanceFormData struct {
 	Base
@@ -170,7 +259,28 @@ func (a *App) newAssetForm(r *http.Request, errs map[string]string, envs []domai
 		Parents:      parents,
 		Teams:        teams,
 		Roles:        roles,
+		Action:       "/assets",
+		Submit:       "Add asset",
+		Prefix:       "asset-new",
 	}
+}
+
+// newAssetEditForm is the same form pointed at an existing asset.
+//
+// PARENT IS NOT AMONG THE FIELDS, and AssetUpdate does not read one. Moving an
+// asset rewrites asset_closure and therefore every containment answer, every
+// impact simulation and every environment span; it has its own flow. The form
+// says so rather than leaving a reader to wonder where the field went.
+func (a *App) newAssetEditForm(r *http.Request, row *store.AssetRow, errs map[string]string,
+	envs []domain.Environment, kinds []store.VocabularyTerm, edit *editState) assetFormData {
+
+	f := a.newAssetForm(r, errs, envs, kinds, nil)
+	f.Asset = row
+	f.Action = "/assets/" + row.ID
+	f.Submit = "Save asset"
+	f.Prefix = "asset-" + row.ID
+	f.Edit = edit
+	return f
 }
 
 // responsibilityOptions loads the two pickers every entity form carries.
@@ -223,7 +333,41 @@ func (a *App) newServiceForm(r *http.Request, errs map[string]string, spec domai
 		Availabilities: domain.Availabilities,
 		FailoverModes:  domain.FailoverModes,
 		Lifecycles:     domain.ServiceLifecycles,
+		Action:         "/services",
+		Submit:         "Add service",
+		Prefix:         "svc-new",
 	}
+}
+
+// newServiceEditForm is the same form fed from a stored service.
+//
+// The ENVIRONMENT stays editable here, unlike an asset's parent: a service
+// belongs to exactly one environment and that is a classification somebody
+// assigns, not a structural edge -- the same reasoning that makes a prefix's
+// environment editable. Its PLACEMENTS are what tie it to hardware, and they
+// have their own rows and their own editor.
+func (a *App) newServiceEditForm(r *http.Request, svc *store.ServiceRow, errs map[string]string,
+	envs []domain.Environment, kinds []store.VocabularyTerm, spec *domain.ServiceSpec) serviceFormData {
+
+	current := domain.ServiceSpec{
+		Code: svc.Code, Name: svc.Name, Kind: svc.Kind,
+		EnvironmentID: svc.EnvironmentID, Availability: svc.Availability,
+		Tier: svc.Tier, MinHealthy: svc.MinHealthy, FailoverMode: svc.FailoverMode,
+		RTOMinutes: svc.RTOMinutes, RPOMinutes: svc.RPOMinutes,
+		TeamID: svc.TeamID, ManagerRole: svc.ManagerRole, EOLDate: svc.EOLDate,
+	}
+	if spec != nil {
+		// A refused save: show what was typed, not what is stored.
+		current = *spec
+	}
+	f := a.newServiceForm(r, errs, current, envs, kinds)
+	f.ServiceID = svc.ID
+	f.Lifecycle = svc.Lifecycle
+	f.RowVersion = svc.RowVersion
+	f.Action = "/services/" + svc.ID
+	f.Submit = "Save service"
+	f.Prefix = "svc-" + svc.ID
+	return f
 }
 
 func (a *App) newInstanceForm(r *http.Request, serviceID string, errs map[string]string, hosts []store.AssetRow) instanceFormData {

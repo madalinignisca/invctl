@@ -48,8 +48,11 @@
        zero value without erroring — so omitting them made {{range .Teams}}
        iterate nothing and left both pickers empty. The feature was unreachable
        from this page entirely. Found by a database review. */}}
-  {{template "asset_form" dict "CSRF" .CSRF "Errors" (dict)
-      "Environments" .Environments "Kinds" .Kinds "Parents" .Assets
-      "Teams" .FormData.Teams "Roles" .FormData.Roles}}
+  {{/* .FormData, not a hand-built dict. The dict had to name every key the
+       partial reads, and html/template resolves a missing one to the zero
+       value without complaining — which is how both pickers once rendered
+       empty here, and how .Value silently became "not a method" the moment
+       the partial grew one. A struct makes an omission a compile error. */}}
+  {{template "asset_form" .FormData}}
 {{end}}
 {{end}}

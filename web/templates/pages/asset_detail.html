@@ -19,6 +19,7 @@
   <a class="btn btn-primary" href="/assets/{{.Asset.ID}}/impact">Simulate losing this</a>
   <a class="btn" href="/assets/{{.Asset.ID}}/neighbourhood">See what it connects to</a>
   {{if .CanWrite}}
+    <a class="btn" href="/assets/{{.Asset.ID}}?edit={{.Asset.ID}}#edit">Edit</a>
     {{if ne .Asset.Lifecycle "retired"}}
     <form method="post" action="/assets/{{.Asset.ID}}/retire" style="display:inline"
           hx-post="/assets/{{.Asset.ID}}/retire"
@@ -243,6 +244,10 @@
 </div>
 
 {{template "deployed_certificates" .}}
+
+{{if .AssetEdit}}
+<div id="edit">{{template "asset_form" .AssetEdit}}</div>
+{{end}}
 
 {{template "cost_panel" dict
     "Action" (printf "/assets/%s/costs" .Asset.ID) "Slug" "asset"
