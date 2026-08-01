@@ -1052,3 +1052,113 @@ func TestReadOnlyUsersGetNoEntityEditors(t *testing.T) {
 		}
 	}
 }
+
+// A number that is not a number is refused, not silently replaced.
+//
+// intValue used to return its fallback for unparseable input, so a POST of
+// tier=abc saved the STORED value and answered 303 — the operator is told the
+// edit went in and it did not. Blank still means "leave it alone": a field left
+// empty, or one that never rendered, is not a lie.
+func TestANonNumericFieldIsRefusedRatherThanIgnored(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	envID := h.refs.Environments["prod"]
+	page := body(t, h.get("/environments?edit="+envID, false))
+	stored := versionInForm(t, page)
+	resp := h.post("/environments/"+envID, url.Values{
+		"csrf_token":  {h.csrfToken("/environments")},
+		"row_version": {versionInForm(t, page)},
+		"code":        {"prod"}, "name": {"Production"},
+		"role": {"production"}, "criticality": {"not a number"}, "in_scope": {"true"},
+	}, false)
+	refused := body(t, resp)
+
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Errorf("a non-numeric criticality returned %d, want 422", resp.StatusCode)
+	}
+	if !strings.Contains(refused, "must be a whole number") {
+		t.Error("the operator was not told what was wrong with it")
+	}
+	// Nothing was written: the version is the cheapest proof, since every
+	// write bumps it. Comparing whole pages would compare CSRF tokens too.
+	if now := versionInForm(t, body(t, h.get("/environments?edit="+envID, false))); now != stored {
+		t.Errorf("a refused submission wrote anyway: version %s -> %s", stored, now)
+	}
+}
+
+// And a blank one still means "leave it": the two cases must not collapse.
+func TestABlankNumberKeepsWhatIsStored(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	serviceID := h.refs.Services["orders-api"]
+	page := body(t, h.get("/services/"+serviceID+"?edit="+serviceID, false))
+	tier := regexp.MustCompile(`name="tier"[^>]*value="(\d+)"`).FindStringSubmatch(page)
+	if tier == nil {
+		t.Fatal("the service editor renders no tier")
+	}
+
+	resp := h.post("/services/"+serviceID, url.Values{
+		"csrf_token":  {h.csrfToken("/services/" + serviceID)},
+		"row_version": {versionInForm(t, page)},
+		"code":        {"orders-api"}, "name": {"Orders API"}, "kind": {"api"},
+		"environment_id": {h.refs.Environments["prod"]},
+		"availability":   {"active_active"}, "min_healthy": {"2"},
+		"tier": {""}, "lifecycle": {"active"},
+	}, false)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("a blank tier returned %d, want a redirect", resp.StatusCode)
+	}
+	after := body(t, h.get("/services/"+serviceID+"?edit="+serviceID, false))
+	if !strings.Contains(after, `value="`+tier[1]+`"`) {
+		t.Errorf("a blank tier did not keep the stored value %s", tier[1])
+	}
+}
+
+// A retired service's shape is history, and its children are part of that
+// shape. An endpoint has no lifecycle of its own — it exists because its
+// service declares it — so the fact that makes it unamendable lives one level
+// up. Same for a placement: if the service is gone, so is the fact that it ran
+// somewhere.
+func TestARetiredServicesShapeCannotBeRewritten(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	serviceID := h.refs.Services["rabbitmq"]
+	endpointID := h.refs.Endpoints["rabbitmq/amqp"]
+	page := body(t, h.get("/services/"+serviceID, false))
+	instanceID := firstInstanceEditID(t, page)
+
+	retire := h.post("/services/"+serviceID+"/retire", url.Values{
+		"csrf_token": {h.csrfToken("/services/" + serviceID)},
+	}, false)
+	retire.Body.Close()
+
+	// The endpoint.
+	resp := h.post("/endpoints/"+endpointID, url.Values{
+		"csrf_token": {h.csrfToken("/services/" + serviceID)},
+		"name":       {"rewritten-history"}, "l4_proto": {"tcp"}, "port": {"1234"},
+		"bind_scope": {"host"}, "tls_mode": {"none"}, "exposure": {"internal"},
+	}, false)
+	resp.Body.Close()
+
+	// The placement.
+	resp2 := h.post("/instances/"+instanceID, url.Values{
+		"csrf_token":   {h.csrfToken("/services/" + serviceID)},
+		"runtime_type": {"systemd"}, "role": {"rewritten-history"},
+		"ordinal": {"0"}, "desired_state": {"running"},
+	}, false)
+	resp2.Body.Close()
+
+	after := body(t, h.get("/services/"+serviceID, false))
+	if strings.Contains(after, "rewritten-history") {
+		t.Error("a retired service's recorded shape was rewritten")
+	}
+	// The service really is retired, so the assertion above is about the guard
+	// and not about a request that failed for some unrelated reason.
+	if !strings.Contains(after, "retired") {
+		t.Fatal("the service was not retired, so this test proved nothing")
+	}
+}

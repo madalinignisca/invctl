@@ -47,6 +47,15 @@ type ValidationError struct {
 	Fields []FieldError
 }
 
+// NewValidation builds a one-field validation failure, for a check a handler
+// makes before the domain gets a chance to -- a form value that is not the
+// right SHAPE, rather than not the right value.
+func NewValidation(field, message string) *ValidationError {
+	ve := &ValidationError{}
+	ve.Add(field, "%s", message)
+	return ve
+}
+
 func (v *ValidationError) Error() string {
 	parts := make([]string, 0, len(v.Fields))
 	for _, f := range v.Fields {

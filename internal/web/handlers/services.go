@@ -322,13 +322,14 @@ func (a *App) endpointEditForm(r *http.Request, b Base, endpoints []store.Endpoi
 
 // ServiceCreate adds a service.
 func (a *App) ServiceCreate(w http.ResponseWriter, r *http.Request) {
+	tier, tierNumeric := intValue(r, "tier", 3)
 	spec := domain.ServiceSpec{
 		Code:          formValue(r, "code"),
 		Name:          formValue(r, "name"),
 		Kind:          formValue(r, "kind"),
 		EnvironmentID: formValue(r, "environment_id"),
 		Availability:  formValue(r, "availability"),
-		Tier:          intValue(r, "tier", 3),
+		Tier:          tier,
 		MinHealthy:    optionalInt(r, "min_healthy"),
 		FailoverMode:  optionalString(r, "failover_mode"),
 		RTOMinutes:    optionalInt(r, "rto_minutes"),
@@ -336,6 +337,10 @@ func (a *App) ServiceCreate(w http.ResponseWriter, r *http.Request) {
 		TeamID:        optionalString(r, "team_id"),
 		ManagerRole:   optionalString(r, "manager_role"),
 		EOLDate:       optionalString(r, "eol_date"),
+	}
+	if !tierNumeric {
+		a.respondServiceFormError(w, r, domain.NewValidation("tier", "must be a whole number"), spec)
+		return
 	}
 
 	svc, err := domain.NewService(store.NewID(), spec, a.Store.Now())
@@ -366,7 +371,8 @@ func (a *App) ServiceUpdate(w http.ResponseWriter, r *http.Request) {
 	updated.Kind = formValue(r, "kind")
 	updated.EnvironmentID = formValue(r, "environment_id")
 	updated.Availability = formValue(r, "availability")
-	updated.Tier = intValue(r, "tier", existing.Tier)
+	tier, tierNumeric := intValue(r, "tier", existing.Tier)
+	updated.Tier = tier
 	updated.MinHealthy = optionalInt(r, "min_healthy")
 	updated.FailoverMode = optionalString(r, "failover_mode")
 	updated.RTOMinutes = optionalInt(r, "rto_minutes")
@@ -378,6 +384,14 @@ func (a *App) ServiceUpdate(w http.ResponseWriter, r *http.Request) {
 	updated.EOLDate = optionalString(r, "eol_date")
 	updated.Lifecycle = formValue(r, "lifecycle")
 	updated.RowVersion = submittedVersion(r, updated.RowVersion)
+	if !tierNumeric {
+		a.renderServiceDetail(w, r, http.StatusUnprocessableEntity, id, endpointFormState{},
+			rejected(r, id, notANumber("tier"), "code", "name", "kind", "environment_id",
+				"availability", "tier", "min_healthy", "failover_mode",
+				"rto_minutes", "rpo_minutes", "team_id", "manager_role",
+				"eol_date", "lifecycle"))
+		return
+	}
 
 	if err := a.Store.UpdateService(r.Context(), actor(r), &updated); err != nil {
 		messages, ok := validationErrors(err)
@@ -458,9 +472,14 @@ func (a *App) serviceFormOptions(r *http.Request) ([]domain.Environment, []store
 func (a *App) InstanceCreate(w http.ResponseWriter, r *http.Request) {
 	serviceID := r.PathValue("id")
 
+	ordinal, ordinalNumeric := intValue(r, "ordinal", 0)
+	if !ordinalNumeric {
+		a.respondInstanceError(w, r, serviceID, domain.NewValidation("ordinal", "must be a whole number"))
+		return
+	}
 	si, err := domain.NewServiceInstance(store.NewID(), serviceID,
 		formValue(r, "host_asset_id"), formValue(r, "runtime_type"),
-		intValue(r, "ordinal", 0), a.Store.Now())
+		ordinal, a.Store.Now())
 	if err == nil {
 		si.Role = optionalString(r, "role")
 		si.Shard = optionalString(r, "shard")
@@ -497,9 +516,16 @@ func (a *App) InstanceUpdate(w http.ResponseWriter, r *http.Request) {
 	updated.RuntimeType = formValue(r, "runtime_type")
 	updated.Role = optionalString(r, "role")
 	updated.Shard = optionalString(r, "shard")
-	updated.Ordinal = intValue(r, "ordinal", existing.Ordinal)
+	ordinal, ordinalNumeric := intValue(r, "ordinal", existing.Ordinal)
+	updated.Ordinal = ordinal
 	updated.DesiredState = formValue(r, "desired_state")
 	updated.RowVersion = submittedVersion(r, updated.RowVersion)
+	if !ordinalNumeric {
+		a.renderServiceDetail(w, r, http.StatusUnprocessableEntity, existing.ServiceID,
+			endpointFormState{}, rejected(r, existing.ID, notANumber("ordinal"),
+				"runtime_type", "role", "shard", "ordinal", "desired_state"))
+		return
+	}
 
 	if err := a.Store.UpdateInstance(r.Context(), actor(r), &updated); err != nil {
 		messages, ok := validationErrors(err)

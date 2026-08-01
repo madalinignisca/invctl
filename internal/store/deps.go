@@ -89,6 +89,24 @@ func (s *SQLStore) UpdateEndpoint(ctx context.Context, actor domain.Actor, e *do
 	if err != nil {
 		return err
 	}
+	// A RETIRED SERVICE'S SHAPE IS HISTORY. An endpoint has no lifecycle of its
+	// own -- it exists because its service declares it -- so the fact that
+	// makes it unamendable belongs to the service. Rewriting the port a
+	// withdrawn service used to listen on changes what the record says it was,
+	// and somebody reading an old incident is the only person who will ever
+	// look. Correct it the way change_log is corrected: by adding the right
+	// thing, not by editing the wrong one.
+	//
+	// The same rule the cost line and the placement follow, reached one level
+	// up because that is where the lifecycle lives.
+	svc, err := s.GetService(ctx, before.ServiceID)
+	if err != nil {
+		return fmt.Errorf("checking the service of endpoint %s: %w", e.ID, err)
+	}
+	if svc.Lifecycle == domain.LifecycleRetired {
+		return fmt.Errorf("endpoint %s belongs to a retired service and cannot be amended: %w",
+			e.ID, domain.ErrConflict)
+	}
 	at := domain.FormatTime(s.now())
 	e.UpdatedAt = &at
 	return s.write(ctx, actor, func(t *tx) error {

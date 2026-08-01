@@ -59,12 +59,17 @@ func (a *App) EnvironmentList(w http.ResponseWriter, r *http.Request) {
 
 // EnvironmentCreate adds an environment.
 func (a *App) EnvironmentCreate(w http.ResponseWriter, r *http.Request) {
+	criticality, numeric := intValue(r, "criticality", 3)
 	form := environmentForm{
 		Code:        formValue(r, "code"),
 		Name:        formValue(r, "name"),
 		Role:        formValue(r, "role"),
 		InScope:     checkbox(r, "in_scope"),
-		Criticality: intValue(r, "criticality", 3),
+		Criticality: criticality,
+	}
+	if !numeric {
+		a.renderEnvironments(w, r, http.StatusUnprocessableEntity, notANumber("criticality"), form)
+		return
 	}
 
 	env, err := domain.NewEnvironment(store.NewID(), form.Code, form.Name, form.Role,
@@ -113,7 +118,14 @@ func (a *App) EnvironmentUpdate(w http.ResponseWriter, r *http.Request) {
 	updated.Name = formValue(r, "name")
 	updated.Role = formValue(r, "role")
 	updated.InScope = checkbox(r, "in_scope")
-	updated.Criticality = intValue(r, "criticality", existing.Criticality)
+	criticality, numeric := intValue(r, "criticality", existing.Criticality)
+	if !numeric {
+		a.renderEnvironmentsEditing(w, r, http.StatusUnprocessableEntity,
+			rejected(r, id, notANumber("criticality"),
+				"code", "name", "role", "criticality", "in_scope"))
+		return
+	}
+	updated.Criticality = criticality
 	updated.RowVersion = submittedVersion(r, updated.RowVersion)
 
 	if err := a.Store.UpdateEnvironment(r.Context(), actor(r), &updated); err != nil {

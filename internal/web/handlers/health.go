@@ -115,11 +115,17 @@ func (a *App) newOverrideForm(r *http.Request, targets []overrideTarget, message
 
 // HealthOverrideCreate records an operator's assertion that a reading is wrong.
 func (a *App) HealthOverrideCreate(w http.ResponseWriter, r *http.Request) {
+	minutes, numeric := intValue(r, "minutes", 0)
 	form := overrideForm{
 		Target:        formValue(r, "target"),
 		AssertedState: formValue(r, "asserted_state"),
 		Reason:        formValue(r, "reason"),
-		Minutes:       intValue(r, "minutes", 0),
+		Minutes:       minutes,
+	}
+
+	if !numeric {
+		a.respondOverrideFormError(w, r, "", "", form, notANumber("minutes"))
+		return
 	}
 
 	entityType, entityID, ok := splitTarget(form.Target)
@@ -178,7 +184,13 @@ func (a *App) HealthOverrideAmend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	expires, minutesErr := a.overrideExpiry(intValue(r, "minutes", 0))
+	minutes, numeric := intValue(r, "minutes", 0)
+	if !numeric {
+		a.setFlash(r, "error", "The duration must be a whole number of minutes.")
+		render.Redirect(w, r, a.entityURL(r.Context(), existing.EntityType, existing.EntityID))
+		return
+	}
+	expires, minutesErr := a.overrideExpiry(minutes)
 	if minutesErr != nil {
 		a.setFlash(r, "error", minutesErr.Error())
 		render.Redirect(w, r, a.entityURL(r.Context(), existing.EntityType, existing.EntityID))

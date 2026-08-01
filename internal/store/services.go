@@ -368,6 +368,17 @@ func (s *SQLStore) UpdateInstance(ctx context.Context, actor domain.Actor, si *d
 	if before.Lifecycle == domain.LifecycleRetired {
 		return fmt.Errorf("placement %s is withdrawn and cannot be amended: %w", si.ID, domain.ErrConflict)
 	}
+	// And its service's history is history too, for the reason above. A
+	// placement outlives nothing: if the service is gone, so is the fact that
+	// it ran here.
+	svc, err := s.GetService(ctx, before.ServiceID)
+	if err != nil {
+		return fmt.Errorf("checking the service of placement %s: %w", si.ID, err)
+	}
+	if svc.Lifecycle == domain.LifecycleRetired {
+		return fmt.Errorf("placement %s belongs to a retired service and cannot be amended: %w",
+			si.ID, domain.ErrConflict)
+	}
 	si.CreatedAt = before.CreatedAt
 	si.UpdatedAt = domain.FormatTime(s.now())
 

@@ -365,16 +365,33 @@ func optionalInt(r *http.Request, key string) *int {
 	return &n
 }
 
-func intValue(r *http.Request, key string, fallback int) int {
+// intValue reads a whole number from a form.
+//
+// ok is FALSE only when the field was present and is not a number. That case
+// used to return the fallback silently, so a hand-written POST of tier=abc
+// saved the stored value and answered 303: the operator is told their edit went
+// in and it did not. Blank is not that case — a field left empty, or one that
+// never rendered, legitimately means "use what was there", which is the same
+// reasoning submittedString is built on.
+//
+// Returning two values rather than swallowing it makes every caller decide,
+// which is the point: there is no correct universal answer, only a per-field
+// one, and eight call sites had all silently taken the wrong one.
+func intValue(r *http.Request, key string, fallback int) (int, bool) {
 	v := formValue(r, key)
 	if v == "" {
-		return fallback
+		return fallback, true
 	}
 	n, err := strconv.Atoi(v)
 	if err != nil {
-		return fallback
+		return fallback, false
 	}
-	return n
+	return n, true
+}
+
+// notANumber is the message for a field that arrived as something else.
+func notANumber(field string) map[string]string {
+	return map[string]string{field: "must be a whole number"}
 }
 
 func queryInt(r *http.Request, key string, fallback int) int {
