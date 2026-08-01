@@ -639,3 +639,216 @@ func TestClearingACostAmountIsRefusedRatherThanStoredAsZero(t *testing.T) {
 		t.Error("the stored amount did not survive a blank submission")
 	}
 }
+
+// ---------- optimistic concurrency ----------
+
+// TWO PEOPLE, ONE ROW. Both open the editor, both save. Without a version the
+// second write silently reverts the first and change_log records the revert as
+// a deliberate act by whoever was slower -- the misattribution docs/AUDIT.md
+// objects to for observed state, arriving through the declared door.
+//
+// The form carries the version it was rendered with, so the second save is
+// compared against a row that has moved and is refused.
+func TestASecondSaveFromAStaleFormIsRefused(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	envID := h.refs.Environments["prod"]
+	// Both operators open the editor and read the same version.
+	staleVersion := versionInForm(t, body(t, h.get("/environments?edit="+envID, false)))
+
+	first := h.post("/environments/"+envID, url.Values{
+		"csrf_token": {h.csrfToken("/environments")}, "row_version": {staleVersion},
+		"code": {"prod"}, "name": {"First writer"},
+		"role": {"production"}, "criticality": {"1"}, "in_scope": {"true"},
+	}, false)
+	first.Body.Close()
+	if first.StatusCode != http.StatusSeeOther {
+		t.Fatalf("the first save returned %d, want a redirect", first.StatusCode)
+	}
+
+	second := h.post("/environments/"+envID, url.Values{
+		"csrf_token": {h.csrfToken("/environments")}, "row_version": {staleVersion},
+		"code": {"prod"}, "name": {"Second writer"},
+		"role": {"production"}, "criticality": {"1"}, "in_scope": {"true"},
+	}, false)
+	second.Body.Close()
+	if second.StatusCode == http.StatusSeeOther {
+		t.Error("the second save from a stale form was accepted")
+	}
+
+	after := body(t, h.get("/environments", false))
+	if !strings.Contains(after, "First writer") {
+		t.Error("the first writer's change was reverted by the second")
+	}
+	if strings.Contains(after, "Second writer") {
+		t.Error("the stale write landed")
+	}
+}
+
+// And the version moves, so a fresh read can save. A guard that refused
+// everything would pass the test above and make the application unusable.
+func TestAFreshFormSavesAfterSomebodyElseWrote(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+	envID := h.refs.Environments["prod"]
+
+	save := func(version, name string) int {
+		resp := h.post("/environments/"+envID, url.Values{
+			"csrf_token": {h.csrfToken("/environments")}, "row_version": {version},
+			"code": {"prod"}, "name": {name},
+			"role": {"production"}, "criticality": {"1"}, "in_scope": {"true"},
+		}, false)
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	v1 := versionInForm(t, body(t, h.get("/environments?edit="+envID, false)))
+	if got := save(v1, "One"); got != http.StatusSeeOther {
+		t.Fatalf("the first save returned %d", got)
+	}
+	// Re-open the editor: a new version, and saving works again.
+	v2 := versionInForm(t, body(t, h.get("/environments?edit="+envID, false)))
+	if v1 == v2 {
+		t.Errorf("the version did not move after a write: still %s", v2)
+	}
+	if got := save(v2, "Two"); got != http.StatusSeeOther {
+		t.Errorf("a save from a freshly opened form returned %d, want a redirect", got)
+	}
+	if !strings.Contains(body(t, h.get("/environments", false)), "Two") {
+		t.Error("the second, legitimate save did not land")
+	}
+}
+
+// Retiring counts. A form opened before something was withdrawn must not save
+// over the withdrawal, or an edit in a stale tab quietly brings a retired thing
+// back. Every write bumps the version, retirements included -- that is the only
+// reason this is caught.
+//
+// A CERTIFICATE, deliberately. Cost lines and placements are refused by their
+// own "history is not amendable" guard whatever the version says, so testing
+// with one proves nothing about the bump: the first version of this test used a
+// cost line and passed with the retirement's bump deleted. UpdateCertificate
+// has no such guard, so the version is the only thing standing here.
+func TestAnEditOpenedBeforeARetirementIsRefused(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	list := body(t, h.get("/certificates", false))
+	m := regexp.MustCompile(`href="/certificates/([0-9a-f-]+)"`).FindStringSubmatch(list)
+	if m == nil {
+		t.Fatal("no certificate to edit")
+	}
+	certID := m[1]
+	stale := versionInForm(t, body(t, h.get("/certificates/"+certID, false)))
+
+	retire := h.post("/certificates/"+certID+"/retire", url.Values{
+		"csrf_token": {h.csrfToken("/certificates/" + certID)},
+	}, false)
+	retire.Body.Close()
+
+	resp := h.post("/certificates/"+certID, url.Values{
+		"csrf_token": {h.csrfToken("/certificates/" + certID)}, "row_version": {stale},
+		"subject_cn": {"stale-write.example.com"}, "lifecycle": {"active"},
+	}, false)
+	resp.Body.Close()
+
+	after := body(t, h.get("/certificates/"+certID, false))
+	if strings.Contains(after, "stale-write.example.com") {
+		t.Error("an edit from a form opened before the retirement was applied anyway")
+	}
+	// And it did not quietly come back to life.
+	if !strings.Contains(after, "retired") {
+		t.Error("the certificate is no longer retired: the stale write un-retired it")
+	}
+}
+
+// Every editor in the application emits its version. The token is only worth
+// anything if the form carries it, and submittedVersion falls back to the
+// stored value when it is missing -- which is safe ONLY because this test fails
+// when a form stops emitting one.
+func TestEveryEditFormCarriesItsVersion(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	assetID := h.refs.Assets["hv-01"]
+	serviceID := h.refs.Services["orders-api"]
+	rabbit := h.refs.Services["rabbitmq"]
+	assetPage := body(t, h.get("/assets/"+assetID, false))
+
+	editors := []struct{ name, path string }{
+		{"environment", "/environments?edit=" + h.refs.Environments["prod"]},
+		{"network", "/prefixes?edit=" + firstEditID(t, body(t, h.get("/prefixes", false)))},
+		{"port", "/assets/" + assetID + "?edit=" + firstPortEditID(t, assetPage)},
+		{"cost line", "/assets/" + assetID + "?edit=" + firstCostFormID(t, assetPage)},
+		{"placement", "/services/" + serviceID + "?edit=" +
+			firstInstanceEditID(t, body(t, h.get("/services/"+serviceID, false)))},
+		{"endpoint", "/services/" + rabbit + "?edit=" + h.refs.Endpoints["rabbitmq/amqp"]},
+		{"team", "/teams/" + h.refs.Teams["platform"]},
+	}
+	for _, e := range editors {
+		page := body(t, h.get(e.path, false))
+		if !strings.Contains(page, `name="row_version"`) {
+			t.Errorf("the %s editor renders no version, so its guard is inert", e.name)
+			continue
+		}
+		// And not a zero: a zero matches no row and would refuse every save.
+		if strings.Contains(page, `name="row_version" value="0"`) {
+			t.Errorf("the %s editor renders version 0 — the column is missing from its query", e.name)
+		}
+	}
+	addr, _ := firstAddressEditID(t, assetPage)
+	if page := body(t, h.get("/assets/"+assetID+"?edit="+addr, false)); !strings.Contains(page, `name="row_version"`) {
+		t.Error("the address editor renders no version, so its guard is inert")
+	}
+}
+
+// versionInForm reads the token out of a rendered editor.
+func versionInForm(t *testing.T, page string) string {
+	t.Helper()
+	m := regexp.MustCompile(`name="row_version" value="(\d+)"`).FindStringSubmatch(page)
+	if m == nil {
+		t.Fatal("the form carries no version")
+	}
+	return m[1]
+}
+
+// A stale write and a duplicate are both conflicts and are NOT the same
+// problem. Told "that already exists", an operator goes looking for a name
+// clash that is not there; what actually happened is that somebody else saved
+// first. The message has to say which.
+func TestAStaleWriteIsNotReportedAsADuplicate(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	prefixID := firstEditID(t, body(t, h.get("/prefixes", false)))
+	stale := versionInForm(t, body(t, h.get("/prefixes?edit="+prefixID, false)))
+
+	save := func(version, cidr string) *http.Response {
+		return h.post("/prefixes/"+prefixID, url.Values{
+			"csrf_token": {h.csrfToken("/prefixes")}, "row_version": {version},
+			"cidr_text": {cidr}, "role": {"first"},
+		}, false)
+	}
+	first := save(stale, "10.31.0.0/16")
+	first.Body.Close()
+	if first.StatusCode != http.StatusSeeOther {
+		t.Fatalf("the first save returned %d", first.StatusCode)
+	}
+
+	page := body(t, save(stale, "10.32.0.0/16"))
+	if !strings.Contains(page, "somebody else changed this") {
+		t.Errorf("a stale write was not explained as one:\n%s", firstFieldError(t, page))
+	}
+	if strings.Contains(page, "already declared") {
+		t.Error("a stale write was reported as a duplicate network")
+	}
+}
+
+func firstFieldError(t *testing.T, page string) string {
+	t.Helper()
+	m := regexp.MustCompile(`(?s)<div class="field-error">(.*?)</div>`).FindStringSubmatch(page)
+	if m == nil {
+		return "(no field error at all)"
+	}
+	return m[1]
+}

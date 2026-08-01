@@ -142,6 +142,7 @@ func (a *App) TeamUpdate(w http.ResponseWriter, r *http.Request) {
 	updated.Description = optional(formValue(r, "description"))
 	updated.ContactRef = optional(formValue(r, "contact_ref"))
 	updated.Lifecycle = formValue(r, "lifecycle")
+	updated.RowVersion = submittedVersion(r, updated.RowVersion)
 
 	if err := a.Store.UpdateTeam(r.Context(), actor(r), &updated); err != nil {
 		if errs, ok := validationErrors(err); ok {

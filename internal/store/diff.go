@@ -65,8 +65,11 @@ func auditFields(v reflect.Value, out map[string]auditField) {
 		if name == "" || name == "-" {
 			continue
 		}
-		// updated_at moves on every write and would drown the real change.
-		if name == "updated_at" {
+		// updated_at and row_version move on EVERY write and would drown the
+		// real change. row_version in particular is not a fact about the
+		// entity at all -- it is the concurrency token, and an audit entry
+		// reading "row_version: 4 -> 5" tells a reader nothing they can use.
+		if name == "updated_at" || name == "row_version" {
 			continue
 		}
 		out[name] = auditField{value: deref(v.Field(i)), entity: t.Name()}

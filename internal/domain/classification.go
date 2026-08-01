@@ -38,6 +38,14 @@ const (
 	// came from. Governed separately because laundering provenance is how a
 	// fabricated fact becomes an authoritative one (rule 7).
 	ClassProvenance ColumnClass = "provenance"
+	//
+	// BOOKKEEPING COLUMNS -- created_at, updated_at, row_version -- are listed
+	// as declared alongside the fields they timestamp. None is a fact anybody
+	// asserts, but this classification's job is to decide what an OBSERVED
+	// writer may touch, and the answer for all three is "nothing": a heartbeat
+	// must not bump updated_at (rule 3) and must not consume a version. A
+	// fourth class would have to be named explicitly by every rule, for no
+	// decision it would change.
 )
 
 // ObservedTables are tables where every column is observed, so a new column on
@@ -139,6 +147,7 @@ var DeclaredColumns = map[string][]string{
 		"id", "kind", "name", "parent_id", "serial", "asset_tag", "vendor",
 		"model", "lifecycle", "team_id", "manager_role", "eol_date", "attrs",
 		"created_at", "updated_at",
+		"row_version",
 	},
 	"asset_closure":     {"ancestor_id", "descendant_id", "depth"},
 	"asset_environment": {"asset_id", "environment_id", "note"},
@@ -188,13 +197,15 @@ var DeclaredColumns = map[string][]string{
 		// rule justified by it.
 		"verified_by", "verified_at",
 		"lifecycle", "created_at", "updated_at",
+		"row_version",
 	},
 	"dependency_data_class": {"dependency_id", "data_class"},
 	"endpoint": {
 		"id", "service_id", "name", "l4_proto", "port", "unix_path", "bind_scope",
 		"ip_address_id", "l7_proto", "tls_mode", "certificate_id", "exposure",
+		"created_at", "updated_at", "row_version",
 	},
-	"environment": {"id", "code", "name", "role", "in_scope", "criticality", "created_at", "updated_at"},
+	"environment": {"id", "code", "name", "role", "in_scope", "criticality", "created_at", "updated_at", "row_version"},
 	// Rule 14: an operator overruling a monitor is a declared act, audited like
 	// any other. The row is about observed state; it is not observed state.
 	"health_override": {
@@ -208,8 +219,9 @@ var DeclaredColumns = map[string][]string{
 	"interface": {
 		"id", "asset_id", "name", "form_factor", "speed_mbps", "mac", "mtu",
 		"lag_parent_id", "is_mgmt", "enabled",
+		"created_at", "updated_at", "row_version",
 	},
-	"ip_address": {"id", "addr_text", "addr_family", "addr_start", "interface_id", "role"},
+	"ip_address": {"id", "addr_text", "addr_family", "addr_start", "interface_id", "role", "created_at", "updated_at", "row_version"},
 	"link":       {"id", "a_interface_id", "b_interface_id", "medium", "length_m", "lifecycle"},
 	"net_anchor": {
 		"id", "code", "name", "scope", "group_id", "environment_id", "plane",
@@ -233,6 +245,7 @@ var DeclaredColumns = map[string][]string{
 	"prefix": {
 		"id", "cidr_text", "addr_family", "addr_start", "addr_end",
 		"vlan_id", "environment_id", "role",
+		"created_at", "updated_at", "row_version",
 	},
 	// Projects are declared through and through: somebody asserts that a thing
 	// belongs to a project. Nothing here is ever written by an observation, and
@@ -244,19 +257,23 @@ var DeclaredColumns = map[string][]string{
 	"asset_cost": {
 		"id", "asset_id", "kind", "period", "amount_minor", "note",
 		"valid_from", "valid_until", "lifecycle", "created_at", "updated_at",
+		"row_version",
 	},
 	"service_cost": {
 		"id", "service_id", "kind", "period", "amount_minor", "note",
 		"valid_from", "valid_until", "lifecycle", "created_at", "updated_at",
+		"row_version",
 	},
 	"project_cost": {
 		"id", "project_id", "kind", "period", "amount_minor", "note",
 		"valid_from", "valid_until", "lifecycle", "created_at", "updated_at",
+		"row_version",
 	},
 	"cost_kind": {"code", "label", "sort_order", "description"},
 	"project": {
 		"id", "code", "name", "description", "team_id", "lifecycle",
 		"created_at", "updated_at",
+		"row_version",
 	},
 	// Who looks after what (migration 00014). Declared without argument:
 	// somebody decided that this team is answerable for this box. Nothing
@@ -265,6 +282,7 @@ var DeclaredColumns = map[string][]string{
 	"team": {
 		"id", "code", "name", "description", "contact_ref", "lifecycle",
 		"created_at", "updated_at",
+		"row_version",
 	},
 	"responsibility_role": {"code", "label", "sort_order", "description"},
 	// Certificates (migration 00015). Declared: somebody asserts that this
@@ -276,6 +294,7 @@ var DeclaredColumns = map[string][]string{
 		"id", "subject_cn", "issuer", "fingerprint", "serial",
 		"not_before", "not_after", "key_ref", "team_id", "manager_role",
 		"lifecycle", "attrs", "created_at", "updated_at",
+		"row_version",
 	},
 	"certificate_san":     {"certificate_id", "name"},
 	"certificate_asset":   {"certificate_id", "asset_id", "note", "lifecycle", "created_at", "updated_at"},
@@ -313,6 +332,7 @@ var DeclaredColumns = map[string][]string{
 		"availability", "min_healthy", "failover_mode", "tier", "rto_minutes",
 		"rpo_minutes", "team_id", "manager_role", "lifecycle", "eol_date", "attrs",
 		"created_at", "updated_at",
+		"row_version",
 	},
 	// desired_state is DECLARED and stays here after 00008 moved observed_state
 	// and observed_at out. "Observed stopped, therefore desired stopped" is the
@@ -320,6 +340,7 @@ var DeclaredColumns = map[string][]string{
 	"service_instance": {
 		"id", "service_id", "host_asset_id", "runtime_type", "role", "shard",
 		"ordinal", "desired_state", "lifecycle", "created_at", "updated_at",
+		"row_version",
 	},
 }
 

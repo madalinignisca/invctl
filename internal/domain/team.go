@@ -42,6 +42,8 @@ type Team struct {
 	Lifecycle  string  `db:"lifecycle"`
 	CreatedAt  string  `db:"created_at"`
 	UpdatedAt  string  `db:"updated_at"`
+	// RowVersion is the optimistic-concurrency token; see version.go.
+	RowVersion int `db:"row_version"`
 }
 
 // TeamLifecycles reuses the estate-wide set, so a team reads the way an asset

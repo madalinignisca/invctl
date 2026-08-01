@@ -165,6 +165,7 @@
           <td style="white-space:nowrap">
             <form id="if-{{.ID}}" method="post" action="/interfaces/{{.ID}}" style="display:inline">
               <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+              <input type="hidden" name="row_version" value="{{.RowVersion}}">
               <button class="btn btn-sm btn-primary" type="submit">Save</button>
             </form>
             <a class="btn btn-sm" href="/assets/{{$.Asset.ID}}#ports">Cancel</a>
@@ -183,6 +184,7 @@
               {{if and $.CanWrite (eq .ID $.EditRow)}}
               <form method="post" action="/addresses/{{.ID}}" style="display:flex;gap:4px;align-items:center;margin:2px 0">
                 <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+                <input type="hidden" name="row_version" value="{{.RowVersion}}">
                 <input class="mono {{if $.Edit.Err "addr_text"}}invalid{{end}}" type="text" name="addr_text"
                        value="{{$.Edit.Value "addr_text" .AddrText}}" aria-label="Address" style="width:11em" required>
                 {{$role := $.Edit.Value "role" $addr.Role}}

@@ -41,6 +41,8 @@ type Environment struct {
 	Criticality int    `db:"criticality"`
 	CreatedAt   string `db:"created_at"`
 	UpdatedAt   string `db:"updated_at"`
+	// RowVersion is the optimistic-concurrency token; see version.go.
+	RowVersion int `db:"row_version"`
 }
 
 // NewEnvironment validates and constructs. The DB CHECK is a backstop; this is
@@ -163,6 +165,8 @@ type Asset struct {
 	Attrs     string  `db:"attrs"`
 	CreatedAt string  `db:"created_at"`
 	UpdatedAt string  `db:"updated_at"`
+	// RowVersion is the optimistic-concurrency token; see version.go.
+	RowVersion int `db:"row_version"`
 }
 
 // NewAsset validates and constructs an asset.

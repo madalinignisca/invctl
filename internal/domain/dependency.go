@@ -63,6 +63,8 @@ type Dependency struct {
 	Lifecycle          string   `db:"lifecycle"`
 	CreatedAt          string   `db:"created_at"`
 	UpdatedAt          string   `db:"updated_at"`
+	// RowVersion is the optimistic-concurrency token; see version.go.
+	RowVersion int `db:"row_version"`
 }
 
 // DependencySpec is everything needed to declare an edge.

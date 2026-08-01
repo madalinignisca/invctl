@@ -162,6 +162,7 @@ func (a *App) CertificateUpdate(w http.ResponseWriter, r *http.Request) {
 	updated.Lifecycle = formValue(r, "lifecycle")
 	// The names arrive with the form; Validate checks them.
 	updated.SANs = spec.SANs
+	updated.RowVersion = submittedVersion(r, updated.RowVersion)
 
 	if err := a.Store.UpdateCertificate(r.Context(), actor(r), &updated); err != nil {
 		if errs, ok := validationErrors(err); ok {

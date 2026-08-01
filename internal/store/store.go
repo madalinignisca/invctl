@@ -269,3 +269,34 @@ func anySlice(values []string) []any {
 	}
 	return out
 }
+
+// requireVersion turns an UPDATE's result into a conflict when the row moved.
+//
+// Zero rows affected does NOT mean the row is gone. Every caller here has just
+// read it, and nothing in this codebase deletes an entity -- so the clause that
+// failed is `row_version = ?`, which means somebody else wrote the row between
+// the form being rendered and this submission arriving. Reporting that as a 404
+// would tell the operator their thing had vanished; reporting nothing at all is
+// how the slower of two people silently reverts the faster one and gets the
+// change_log entry with their name on it.
+//
+// See internal/domain/version.go for why the token is an integer.
+// version points at the caller's RowVersion field, which is advanced to match
+// the row this statement just wrote. Without that, a caller updating the same
+// struct twice compares a stale token against a row it moved itself and gets a
+// conflict against nobody. Taking a pointer rather than leaving it to each call
+// site makes it impossible to forget in one of thirteen.
+//
+// Advanced optimistically, like UpdatedAt, which every method here also sets
+// before the write: the struct is meaningful only when the error is nil.
+func requireVersion(res sql.Result, entity, id string, version *int) error {
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("checking the %s update: %w", entity, err)
+	}
+	if n == 0 {
+		return fmt.Errorf("%s %s: %w", entity, id, domain.ErrStale)
+	}
+	*version++
+	return nil
+}

@@ -140,16 +140,22 @@ func (s *SQLStore) ListAvailableInterfaces(ctx context.Context, excludeInterface
 
 // CreateInterface inserts a port.
 func (s *SQLStore) CreateInterface(ctx context.Context, actor domain.Actor, i *domain.Interface) error {
+	// The row the INSERT just wrote is version 1 (the column default).
+	// Without this a caller that creates and then updates the SAME struct
+	// compares 0 against 1 and gets a conflict against itself.
+	i.RowVersion = 1
+	at := domain.FormatTime(s.now())
+	i.CreatedAt, i.UpdatedAt = &at, &at
 	return s.write(ctx, actor, func(t *tx) error {
 		if err := t.requireVocabulary(ctx, vocabInterfaceFormFactor, "form_factor", i.FormFactor); err != nil {
 			return err
 		}
 		_, err := t.exec(ctx, `
 			INSERT INTO interface (id, asset_id, name, form_factor, speed_mbps, mac, mtu,
-			                       lag_parent_id, is_mgmt, enabled)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			                       lag_parent_id, is_mgmt, enabled, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			i.ID, i.AssetID, i.Name, i.FormFactor, i.SpeedMbps, i.MAC, i.MTU,
-			i.LagParentID, i.IsMgmt, i.Enabled)
+			i.LagParentID, i.IsMgmt, i.Enabled, i.CreatedAt, i.UpdatedAt)
 		if err != nil {
 			return translateWriteErr(err, "creating interface")
 		}
@@ -176,18 +182,25 @@ func (s *SQLStore) UpdateInterface(ctx context.Context, actor domain.Actor, i *d
 	// would be the move this method exists to refuse.
 	i.AssetID = before.AssetID
 	i.LagParentID = before.LagParentID
+	at := domain.FormatTime(s.now())
+	i.UpdatedAt = &at
 
 	return s.write(ctx, actor, func(t *tx) error {
 		if err := t.requireVocabulary(ctx, vocabInterfaceFormFactor, "form_factor", i.FormFactor); err != nil {
 			return err
 		}
-		_, err := t.exec(ctx, `
+		res, err := t.exec(ctx, `
 			UPDATE interface SET name = ?, form_factor = ?, speed_mbps = ?, mac = ?,
-			                     mtu = ?, is_mgmt = ?, enabled = ?
-			WHERE id = ?`,
-			i.Name, i.FormFactor, i.SpeedMbps, i.MAC, i.MTU, i.IsMgmt, i.Enabled, i.ID)
+			                     mtu = ?, is_mgmt = ?, enabled = ?,
+			                     updated_at = ?, row_version = row_version + 1
+			WHERE id = ? AND row_version = ?`,
+			i.Name, i.FormFactor, i.SpeedMbps, i.MAC, i.MTU, i.IsMgmt, i.Enabled,
+			at, i.ID, i.RowVersion)
 		if err != nil {
 			return translateWriteErr(err, "updating interface")
+		}
+		if err := requireVersion(res, "interface", i.ID, &i.RowVersion); err != nil {
+			return err
 		}
 		return t.logUpdate(ctx, "interface", i.ID, before, i)
 	})
@@ -265,14 +278,22 @@ func (s *SQLStore) RetireLink(ctx context.Context, actor domain.Actor, id string
 
 // CreateIPAddress assigns an address.
 func (s *SQLStore) CreateIPAddress(ctx context.Context, actor domain.Actor, a *domain.IPAddress) error {
+	// The row the INSERT just wrote is version 1 (the column default).
+	// Without this a caller that creates and then updates the SAME struct
+	// compares 0 against 1 and gets a conflict against itself.
+	a.RowVersion = 1
+	at := domain.FormatTime(s.now())
+	a.CreatedAt, a.UpdatedAt = &at, &at
 	return s.write(ctx, actor, func(t *tx) error {
 		if err := t.requireVocabulary(ctx, vocabIPAddressRole, "role", a.Role); err != nil {
 			return err
 		}
 		_, err := t.exec(ctx,
-			`INSERT INTO ip_address (id, addr_text, addr_family, addr_start, interface_id, role)
-			 VALUES (?, ?, ?, ?, ?, ?)`,
-			a.ID, a.AddrText, a.AddrFamily, a.AddrStart, a.InterfaceID, a.Role)
+			`INSERT INTO ip_address (id, addr_text, addr_family, addr_start, interface_id, role,
+			                         created_at, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			a.ID, a.AddrText, a.AddrFamily, a.AddrStart, a.InterfaceID, a.Role,
+			a.CreatedAt, a.UpdatedAt)
 		if err != nil {
 			return translateWriteErr(err, "creating ip address")
 		}
@@ -305,17 +326,23 @@ func (s *SQLStore) UpdateIPAddress(ctx context.Context, actor domain.Actor, a *d
 		return err
 	}
 	a.InterfaceID = before.InterfaceID
+	at := domain.FormatTime(s.now())
+	a.UpdatedAt = &at
 
 	return s.write(ctx, actor, func(t *tx) error {
 		if err := t.requireVocabulary(ctx, vocabIPAddressRole, "role", a.Role); err != nil {
 			return err
 		}
-		_, err := t.exec(ctx, `
-			UPDATE ip_address SET addr_text = ?, addr_family = ?, addr_start = ?, role = ?
-			WHERE id = ?`,
-			a.AddrText, a.AddrFamily, a.AddrStart, a.Role, a.ID)
+		res, err := t.exec(ctx, `
+			UPDATE ip_address SET addr_text = ?, addr_family = ?, addr_start = ?, role = ?,
+			                      updated_at = ?, row_version = row_version + 1
+			WHERE id = ? AND row_version = ?`,
+			a.AddrText, a.AddrFamily, a.AddrStart, a.Role, at, a.ID, a.RowVersion)
 		if err != nil {
 			return translateWriteErr(err, "updating ip address")
+		}
+		if err := requireVersion(res, "ip_address", a.ID, &a.RowVersion); err != nil {
+			return err
 		}
 		return t.logUpdate(ctx, "ip_address", a.ID, before, a)
 	})
@@ -347,16 +374,22 @@ func (s *SQLStore) UpdatePrefix(ctx context.Context, actor domain.Actor, p *doma
 	if err != nil {
 		return err
 	}
+	at := domain.FormatTime(s.now())
+	p.UpdatedAt = &at
 
 	return s.write(ctx, actor, func(t *tx) error {
-		_, err := t.exec(ctx, `
+		res, err := t.exec(ctx, `
 			UPDATE prefix SET cidr_text = ?, addr_family = ?, addr_start = ?, addr_end = ?,
-			                  vlan_id = ?, environment_id = ?, role = ?
-			WHERE id = ?`,
+			                  vlan_id = ?, environment_id = ?, role = ?,
+			                  updated_at = ?, row_version = row_version + 1
+			WHERE id = ? AND row_version = ?`,
 			p.CIDRText, p.AddrFamily, p.AddrStart, p.AddrEnd,
-			p.VLANID, p.EnvironmentID, p.Role, p.ID)
+			p.VLANID, p.EnvironmentID, p.Role, at, p.ID, p.RowVersion)
 		if err != nil {
 			return translateWriteErr(err, "updating prefix")
+		}
+		if err := requireVersion(res, "prefix", p.ID, &p.RowVersion); err != nil {
+			return err
 		}
 		if err := t.logUpdate(ctx, "prefix", p.ID, before, p); err != nil {
 			return err
@@ -370,13 +403,19 @@ func (s *SQLStore) UpdatePrefix(ctx context.Context, actor domain.Actor, p *doma
 
 // CreatePrefix inserts a network.
 func (s *SQLStore) CreatePrefix(ctx context.Context, actor domain.Actor, p *domain.Prefix) error {
+	// The row the INSERT just wrote is version 1 (the column default).
+	// Without this a caller that creates and then updates the SAME struct
+	// compares 0 against 1 and gets a conflict against itself.
+	p.RowVersion = 1
+	at := domain.FormatTime(s.now())
+	p.CreatedAt, p.UpdatedAt = &at, &at
 	return s.write(ctx, actor, func(t *tx) error {
 		_, err := t.exec(ctx, `
 			INSERT INTO prefix (id, cidr_text, addr_family, addr_start, addr_end,
-			                    vlan_id, environment_id, role)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			                    vlan_id, environment_id, role, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			p.ID, p.CIDRText, p.AddrFamily, p.AddrStart, p.AddrEnd,
-			p.VLANID, p.EnvironmentID, p.Role)
+			p.VLANID, p.EnvironmentID, p.Role, p.CreatedAt, p.UpdatedAt)
 		if err != nil {
 			return translateWriteErr(err, "creating prefix")
 		}

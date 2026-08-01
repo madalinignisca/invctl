@@ -55,6 +55,8 @@ type Certificate struct {
 	// because a separate parameter is a seam through which an unvalidated name
 	// can reach the database. The constructor fills this in; the store reads it.
 	SANs []string `db:"-"`
+	// RowVersion is the optimistic-concurrency token; see version.go.
+	RowVersion int `db:"row_version"`
 }
 
 // CertificateLifecycles reuses the estate-wide set.

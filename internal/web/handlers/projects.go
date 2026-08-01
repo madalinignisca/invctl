@@ -215,6 +215,9 @@ func (a *App) ProjectUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	updated.CreatedAt = existing.CreatedAt
+	// NewProject builds a fresh struct, so the version has to be restored
+	// explicitly -- a zero here would conflict with every row on earth.
+	updated.RowVersion = submittedVersion(r, existing.RowVersion)
 	if err := a.Store.UpdateProject(r.Context(), actor(r), updated); err != nil {
 		if errs, ok := validationErrors(err); ok {
 			a.renderProject(w, r, http.StatusUnprocessableEntity, errs)

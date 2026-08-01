@@ -271,6 +271,7 @@
     <form class="panel-body" method="post" action="/certificates/{{.Certificate.ID}}"
           hx-post="/certificates/{{.Certificate.ID}}">
       <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+      <input type="hidden" name="row_version" value="{{.Certificate.RowVersion}}">
       <div class="field-row">
         <div class="field">
           <label for="ce-subject">Subject</label>

@@ -13,6 +13,10 @@ import (
 
 // CreateEnvironment inserts an environment and its audit row.
 func (s *SQLStore) CreateEnvironment(ctx context.Context, actor domain.Actor, env *domain.Environment) error {
+	// The row the INSERT just wrote is version 1 (the column default).
+	// Without this a caller that creates and then updates the SAME struct
+	// compares 0 against 1 and gets a conflict against itself.
+	env.RowVersion = 1
 	return s.write(ctx, actor, func(t *tx) error {
 		if err := t.requireVocabulary(ctx, vocabEnvironmentRole, "role", env.Role); err != nil {
 			return err
@@ -50,13 +54,18 @@ func (s *SQLStore) UpdateEnvironment(ctx context.Context, actor domain.Actor, en
 		if err := t.requireVocabulary(ctx, vocabEnvironmentRole, "role", env.Role); err != nil {
 			return err
 		}
-		_, err := t.exec(ctx,
+		res, err := t.exec(ctx,
 			`UPDATE environment
-			 SET code = ?, name = ?, role = ?, in_scope = ?, criticality = ?, updated_at = ?
-			 WHERE id = ?`,
-			env.Code, env.Name, env.Role, env.InScope, env.Criticality, env.UpdatedAt, env.ID)
+			 SET code = ?, name = ?, role = ?, in_scope = ?, criticality = ?, updated_at = ?,
+			     row_version = row_version + 1
+			 WHERE id = ? AND row_version = ?`,
+			env.Code, env.Name, env.Role, env.InScope, env.Criticality, env.UpdatedAt,
+			env.ID, env.RowVersion)
 		if err != nil {
 			return translateWriteErr(err, "updating environment")
+		}
+		if err := requireVersion(res, "environment", env.ID, &env.RowVersion); err != nil {
+			return err
 		}
 		if err := t.logUpdate(ctx, "environment", env.ID, before, env); err != nil {
 			return err
@@ -437,6 +446,10 @@ func (s *SQLStore) GetAsset(ctx context.Context, id string) (*AssetRow, error) {
 
 // CreateAsset inserts an asset, seeds its closure rows, and audits the change.
 func (s *SQLStore) CreateAsset(ctx context.Context, actor domain.Actor, a *domain.Asset, environmentIDs []string) error {
+	// The row the INSERT just wrote is version 1 (the column default).
+	// Without this a caller that creates and then updates the SAME struct
+	// compares 0 against 1 and gets a conflict against itself.
+	a.RowVersion = 1
 	if err := a.Validate(); err != nil {
 		return err
 	}
@@ -508,15 +521,20 @@ func (s *SQLStore) UpdateAsset(ctx context.Context, actor domain.Actor, a *domai
 		if err := requireRole(ctx, t, a.ManagerRole); err != nil {
 			return err
 		}
-		_, err := t.exec(ctx,
+		res, err := t.exec(ctx,
 			`UPDATE asset SET kind = ?, name = ?, serial = ?, asset_tag = ?, vendor = ?,
 			                  model = ?, lifecycle = ?, team_id = ?, manager_role = ?,
-			                  eol_date = ?, attrs = ?, updated_at = ?
-			 WHERE id = ?`,
+			                  eol_date = ?, attrs = ?, updated_at = ?,
+			                  row_version = row_version + 1
+			 WHERE id = ? AND row_version = ?`,
 			a.Kind, a.Name, a.Serial, a.AssetTag, a.Vendor, a.Model,
-			a.Lifecycle, a.TeamID, a.ManagerRole, a.EOLDate, a.Attrs, a.UpdatedAt, a.ID)
+			a.Lifecycle, a.TeamID, a.ManagerRole, a.EOLDate, a.Attrs, a.UpdatedAt,
+			a.ID, a.RowVersion)
 		if err != nil {
 			return translateWriteErr(err, "updating asset")
+		}
+		if err := requireVersion(res, "asset", a.ID, &a.RowVersion); err != nil {
+			return err
 		}
 		if err := setAssetEnvironments(ctx, t, a.ID, environmentIDs); err != nil {
 			return err
@@ -560,7 +578,8 @@ func (s *SQLStore) RetireAsset(ctx context.Context, actor domain.Actor, id strin
 	}
 	at := domain.FormatTime(s.now())
 	return s.writeSerializable(ctx, actor, func(t *tx) error {
-		_, err := t.exec(ctx, `UPDATE asset SET lifecycle = ?, updated_at = ? WHERE id = ?`,
+		_, err := t.exec(ctx, `UPDATE asset SET lifecycle = ?, updated_at = ?,
+			                       row_version = row_version + 1 WHERE id = ?`,
 			domain.LifecycleRetired, at, id)
 		if err != nil {
 			return translateWriteErr(err, "retiring asset")
@@ -742,7 +761,8 @@ func (s *SQLStore) ReparentAsset(ctx context.Context, actor domain.Actor, id str
 			}
 		}
 
-		if _, err := t.exec(ctx, `UPDATE asset SET parent_id = ?, updated_at = ? WHERE id = ?`,
+		if _, err := t.exec(ctx, `UPDATE asset SET parent_id = ?, updated_at = ?,
+			                          row_version = row_version + 1 WHERE id = ?`,
 			newParentID, at, id); err != nil {
 			return translateWriteErr(err, "reparenting asset")
 		}

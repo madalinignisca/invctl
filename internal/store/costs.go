@@ -64,6 +64,7 @@ func (t costTable) selectSQL() string {
 	return `
 		SELECT c.id, c.` + t.column + ` AS owner_id, c.kind, c.period, c.amount_minor,
 		       c.note, c.valid_from, c.valid_until, c.lifecycle, c.created_at, c.updated_at,
+		       c.row_version,
 		       COALESCE(k.label, c.kind) AS kind_label,
 		       ` + eol + `
 		FROM ` + t.name + ` c
@@ -141,6 +142,10 @@ func (s *SQLStore) AddProjectCost(ctx context.Context, actor domain.Actor, proje
 }
 
 func (s *SQLStore) addCost(ctx context.Context, actor domain.Actor, t costTable, ownerID string, c *domain.Cost) error {
+	// The row the INSERT just wrote is version 1 (the column default).
+	// Without this a caller that creates and then updates the SAME struct
+	// compares 0 against 1 and gets a conflict against itself.
+	c.RowVersion = 1
 	if err := c.Validate(); err != nil {
 		return err
 	}
@@ -204,14 +209,18 @@ func (s *SQLStore) updateCost(ctx context.Context, actor domain.Actor, t costTab
 		if err := tx.requireVocabulary(ctx, vocabCostKind, "kind", c.Kind); err != nil {
 			return err
 		}
-		_, err := tx.exec(ctx, `
+		res, err := tx.exec(ctx, `
 			UPDATE `+t.name+` SET kind = ?, period = ?, amount_minor = ?, note = ?,
-			                      valid_from = ?, valid_until = ?, lifecycle = ?, updated_at = ?
-			WHERE id = ?`,
+			                      valid_from = ?, valid_until = ?, lifecycle = ?, updated_at = ?,
+			                      row_version = row_version + 1
+			WHERE id = ? AND row_version = ?`,
 			c.Kind, c.Period, c.AmountMinor, c.Note,
-			c.ValidFrom, c.ValidUntil, c.Lifecycle, c.UpdatedAt, c.ID)
+			c.ValidFrom, c.ValidUntil, c.Lifecycle, c.UpdatedAt, c.ID, c.RowVersion)
 		if err != nil {
 			return translateWriteErr(err, "updating a cost line")
+		}
+		if err := requireVersion(res, t.entity, c.ID, &c.RowVersion); err != nil {
+			return err
 		}
 		return tx.logUpdate(ctx, t.entity, c.ID, &before.Cost, c)
 	})
@@ -260,7 +269,8 @@ func (s *SQLStore) retireCost(ctx context.Context, actor domain.Actor, t costTab
 	at := domain.FormatTime(s.now())
 	return s.write(ctx, actor, func(tx *tx) error {
 		if _, err := tx.exec(ctx,
-			`UPDATE `+t.name+` SET lifecycle = ?, updated_at = ? WHERE id = ?`,
+			`UPDATE `+t.name+` SET lifecycle = ?, updated_at = ?,
+			                       row_version = row_version + 1 WHERE id = ?`,
 			domain.LifecycleRetired, at, id); err != nil {
 			return translateWriteErr(err, "retiring a cost line")
 		}

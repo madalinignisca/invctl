@@ -114,15 +114,20 @@ func (a *App) EnvironmentUpdate(w http.ResponseWriter, r *http.Request) {
 	updated.Role = formValue(r, "role")
 	updated.InScope = checkbox(r, "in_scope")
 	updated.Criticality = intValue(r, "criticality", existing.Criticality)
+	updated.RowVersion = submittedVersion(r, updated.RowVersion)
 
 	if err := a.Store.UpdateEnvironment(r.Context(), actor(r), &updated); err != nil {
 		messages, ok := validationErrors(err)
 		if !ok {
-			if !isConflict(err) {
+			switch {
+			case isStale(err):
+				messages = staleMessage("name")
+			case isConflict(err):
+				messages = map[string]string{"code": "another environment already uses that code"}
+			default:
 				a.handleStoreError(w, r, err)
 				return
 			}
-			messages = map[string]string{"code": "another environment already uses that code"}
 		}
 		// 422 with the row reopened on what was typed, not a redirect that
 		// throws the operator's input away. The house rule, and the reason for
@@ -482,6 +487,7 @@ func (a *App) AssetUpdate(w http.ResponseWriter, r *http.Request) {
 	updated.TeamID = submittedString(r, "team_id", updated.TeamID)
 	updated.ManagerRole = submittedString(r, "manager_role", updated.ManagerRole)
 	updated.EOLDate = optionalString(r, "eol_date")
+	updated.RowVersion = submittedVersion(r, updated.RowVersion)
 
 	if err := a.Store.UpdateAsset(r.Context(), actor(r), &updated, submittedEnvironments(r)); err != nil {
 		if messages, ok := validationErrors(err); ok {
@@ -748,4 +754,20 @@ func impactTitle(assets []impactAsset) string {
 
 func isConflict(err error) bool {
 	return errors.Is(err, domain.ErrConflict)
+}
+
+// isStale separates "somebody else got here first" from "that name is taken".
+// Both are conflicts; only one is fixed by choosing a different value.
+func isStale(err error) bool {
+	return errors.Is(err, domain.ErrStale)
+}
+
+// staleMessage is what an operator is told when their form lost the race. It
+// names the field they were most likely editing so the message lands next to
+// the work rather than floating at the top of the page.
+func staleMessage(field string) map[string]string {
+	return map[string]string{
+		field: "somebody else changed this since you opened the form. " +
+			"Your text is still here — reopen the row to see what they wrote, then re-apply it.",
+	}
 }

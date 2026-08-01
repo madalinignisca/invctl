@@ -55,16 +55,24 @@ func (s *SQLStore) GetEndpoint(ctx context.Context, id string) (*EndpointRow, er
 
 // CreateEndpoint inserts a listening socket.
 func (s *SQLStore) CreateEndpoint(ctx context.Context, actor domain.Actor, e *domain.Endpoint) error {
+	// The row the INSERT just wrote is version 1 (the column default).
+	// Without this a caller that creates and then updates the SAME struct
+	// compares 0 against 1 and gets a conflict against itself.
+	e.RowVersion = 1
 	if err := e.Validate(); err != nil {
 		return err
 	}
+	at := domain.FormatTime(s.now())
+	e.CreatedAt, e.UpdatedAt = &at, &at
 	return s.write(ctx, actor, func(t *tx) error {
 		_, err := t.exec(ctx, `
 			INSERT INTO endpoint (id, service_id, name, l4_proto, port, unix_path, bind_scope,
-			                      ip_address_id, l7_proto, tls_mode, certificate_id, exposure)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			                      ip_address_id, l7_proto, tls_mode, certificate_id, exposure,
+			                      created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			e.ID, e.ServiceID, e.Name, e.L4Proto, e.Port, e.UnixPath, e.BindScope,
-			e.IPAddressID, e.L7Proto, e.TLSMode, e.CertificateID, e.Exposure)
+			e.IPAddressID, e.L7Proto, e.TLSMode, e.CertificateID, e.Exposure,
+			e.CreatedAt, e.UpdatedAt)
 		if err != nil {
 			return translateWriteErr(err, "creating endpoint")
 		}
@@ -81,16 +89,22 @@ func (s *SQLStore) UpdateEndpoint(ctx context.Context, actor domain.Actor, e *do
 	if err != nil {
 		return err
 	}
+	at := domain.FormatTime(s.now())
+	e.UpdatedAt = &at
 	return s.write(ctx, actor, func(t *tx) error {
-		_, err := t.exec(ctx, `
+		res, err := t.exec(ctx, `
 			UPDATE endpoint SET name = ?, l4_proto = ?, port = ?, unix_path = ?, bind_scope = ?,
 			                    ip_address_id = ?, l7_proto = ?, tls_mode = ?, certificate_id = ?,
-			                    exposure = ?
-			WHERE id = ?`,
+			                    exposure = ?, updated_at = ?, row_version = row_version + 1
+			WHERE id = ? AND row_version = ?`,
 			e.Name, e.L4Proto, e.Port, e.UnixPath, e.BindScope,
-			e.IPAddressID, e.L7Proto, e.TLSMode, e.CertificateID, e.Exposure, e.ID)
+			e.IPAddressID, e.L7Proto, e.TLSMode, e.CertificateID, e.Exposure,
+			at, e.ID, e.RowVersion)
 		if err != nil {
 			return translateWriteErr(err, "updating endpoint")
+		}
+		if err := requireVersion(res, "endpoint", e.ID, &e.RowVersion); err != nil {
+			return err
 		}
 		return t.logUpdate(ctx, "endpoint", e.ID, &before.Endpoint, e)
 	})
@@ -299,6 +313,10 @@ func (s *SQLStore) GetDependency(ctx context.Context, id string) (*DependencyRow
 
 // CreateDependency inserts an edge and its data classes.
 func (s *SQLStore) CreateDependency(ctx context.Context, actor domain.Actor, d *domain.Dependency, dataClasses []string) error {
+	// The row the INSERT just wrote is version 1 (the column default).
+	// Without this a caller that creates and then updates the SAME struct
+	// compares 0 against 1 and gets a conflict against itself.
+	d.RowVersion = 1
 	if err := d.Validate(); err != nil {
 		return err
 	}
@@ -357,19 +375,23 @@ func (s *SQLStore) UpdateDependency(ctx context.Context, actor domain.Actor, d *
 	d.UpdatedAt = domain.FormatTime(s.now())
 
 	return s.write(ctx, actor, func(t *tx) error {
-		_, err := t.exec(ctx, `
+		res, err := t.exec(ctx, `
 			UPDATE dependency
 			SET consumer_instance_id = ?, provider_endpoint_id = ?, provider_route_id = ?,
 			    nature = ?, tolerance_seconds = ?, failure_mode = ?, identity_id = ?,
 			    auth_method = ?, firewall_rule_ref = ?, source = ?, confidence = ?,
-			    verified_by = ?, verified_at = ?, lifecycle = ?, updated_at = ?
-			WHERE id = ?`,
+			    verified_by = ?, verified_at = ?, lifecycle = ?, updated_at = ?,
+			    row_version = row_version + 1
+			WHERE id = ? AND row_version = ?`,
 			d.ConsumerInstanceID, d.ProviderEndpointID, d.ProviderRouteID,
 			d.Nature, d.ToleranceSeconds, d.FailureMode, d.IdentityID,
 			d.AuthMethod, d.FirewallRuleRef, d.Source, d.Confidence,
-			d.VerifiedBy, d.VerifiedAt, d.Lifecycle, d.UpdatedAt, d.ID)
+			d.VerifiedBy, d.VerifiedAt, d.Lifecycle, d.UpdatedAt, d.ID, d.RowVersion)
 		if err != nil {
 			return translateWriteErr(err, "updating dependency")
+		}
+		if err := requireVersion(res, "dependency", d.ID, &d.RowVersion); err != nil {
+			return err
 		}
 		if err := setDataClasses(ctx, t, d.ID, dataClasses); err != nil {
 			return err
@@ -398,7 +420,8 @@ func (s *SQLStore) RetireDependency(ctx context.Context, actor domain.Actor, id 
 	at := domain.FormatTime(s.now())
 	return s.write(ctx, actor, func(t *tx) error {
 		if _, err := t.exec(ctx,
-			`UPDATE dependency SET lifecycle = 'retired', updated_at = ? WHERE id = ?`, at, id); err != nil {
+			`UPDATE dependency SET lifecycle = 'retired', updated_at = ?,
+			                       row_version = row_version + 1 WHERE id = ?`, at, id); err != nil {
 			return translateWriteErr(err, "retiring dependency")
 		}
 		diff := fmt.Sprintf(`{"lifecycle":{"old":%q,"new":"retired"}}`, before.Lifecycle)
@@ -423,7 +446,8 @@ func (s *SQLStore) VerifyDependency(ctx context.Context, actor domain.Actor, id 
 	at := domain.FormatTime(s.now())
 	return s.write(ctx, actor, func(t *tx) error {
 		if _, err := t.exec(ctx,
-			`UPDATE dependency SET verified_by = ?, verified_at = ?, updated_at = ? WHERE id = ?`,
+			`UPDATE dependency SET verified_by = ?, verified_at = ?, updated_at = ?,
+			                       row_version = row_version + 1 WHERE id = ?`,
 			actor.ID, at, at, id); err != nil {
 			return translateWriteErr(err, "verifying dependency")
 		}

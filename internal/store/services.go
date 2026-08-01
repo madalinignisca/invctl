@@ -140,6 +140,10 @@ func (s *SQLStore) GetServiceByCode(ctx context.Context, code string) (*ServiceR
 
 // CreateService inserts a service.
 func (s *SQLStore) CreateService(ctx context.Context, actor domain.Actor, svc *domain.Service) error {
+	// The row the INSERT just wrote is version 1 (the column default).
+	// Without this a caller that creates and then updates the SAME struct
+	// compares 0 against 1 and gets a conflict against itself.
+	svc.RowVersion = 1
 	if err := svc.Validate(); err != nil {
 		return err
 	}
@@ -189,18 +193,22 @@ func (s *SQLStore) UpdateService(ctx context.Context, actor domain.Actor, svc *d
 		if err := requireRole(ctx, t, svc.ManagerRole); err != nil {
 			return err
 		}
-		_, err := t.exec(ctx, `
+		res, err := t.exec(ctx, `
 			UPDATE service SET code = ?, name = ?, kind = ?, environment_id = ?,
 			                   availability = ?, min_healthy = ?, failover_mode = ?, tier = ?,
 			                   rto_minutes = ?, rpo_minutes = ?, team_id = ?, manager_role = ?,
-			                   lifecycle = ?, eol_date = ?, attrs = ?, updated_at = ?
-			WHERE id = ?`,
+			                   lifecycle = ?, eol_date = ?, attrs = ?, updated_at = ?,
+			                   row_version = row_version + 1
+			WHERE id = ? AND row_version = ?`,
 			svc.Code, svc.Name, svc.Kind, svc.EnvironmentID,
 			svc.Availability, svc.MinHealthy, svc.FailoverMode, svc.Tier,
 			svc.RTOMinutes, svc.RPOMinutes, svc.TeamID, svc.ManagerRole, svc.Lifecycle,
-			svc.EOLDate, svc.Attrs, svc.UpdatedAt, svc.ID)
+			svc.EOLDate, svc.Attrs, svc.UpdatedAt, svc.ID, svc.RowVersion)
 		if err != nil {
 			return translateWriteErr(err, "updating service")
+		}
+		if err := requireVersion(res, "service", svc.ID, &svc.RowVersion); err != nil {
+			return err
 		}
 		if err := t.logUpdate(ctx, "service", svc.ID, &before.Service, svc); err != nil {
 			return err
@@ -220,7 +228,8 @@ func (s *SQLStore) RetireService(ctx context.Context, actor domain.Actor, id str
 	}
 	at := domain.FormatTime(s.now())
 	return s.write(ctx, actor, func(t *tx) error {
-		if _, err := t.exec(ctx, `UPDATE service SET lifecycle = ?, updated_at = ? WHERE id = ?`,
+		if _, err := t.exec(ctx, `UPDATE service SET lifecycle = ?, updated_at = ?,
+			                         row_version = row_version + 1 WHERE id = ?`,
 			domain.LifecycleRetired, at, id); err != nil {
 			return translateWriteErr(err, "retiring service")
 		}
@@ -288,6 +297,10 @@ func (s *SQLStore) GetInstance(ctx context.Context, id string) (*InstanceRow, er
 
 // CreateInstance places a service on a host.
 func (s *SQLStore) CreateInstance(ctx context.Context, actor domain.Actor, si *domain.ServiceInstance) error {
+	// The row the INSERT just wrote is version 1 (the column default).
+	// Without this a caller that creates and then updates the SAME struct
+	// compares 0 against 1 and gets a conflict against itself.
+	si.RowVersion = 1
 	if err := si.Validate(); err != nil {
 		return err
 	}
@@ -359,15 +372,19 @@ func (s *SQLStore) UpdateInstance(ctx context.Context, actor domain.Actor, si *d
 	si.UpdatedAt = domain.FormatTime(s.now())
 
 	return s.write(ctx, actor, func(t *tx) error {
-		_, err := t.exec(ctx, `
+		res, err := t.exec(ctx, `
 			UPDATE service_instance
 			SET host_asset_id = ?, runtime_type = ?, role = ?, shard = ?, ordinal = ?,
-			    desired_state = ?, source = ?, updated_at = ?
-			WHERE id = ?`,
+			    desired_state = ?, source = ?, updated_at = ?,
+			    row_version = row_version + 1
+			WHERE id = ? AND row_version = ?`,
 			si.HostAssetID, si.RuntimeType, si.Role, si.Shard, si.Ordinal,
-			si.DesiredState, si.Source, si.UpdatedAt, si.ID)
+			si.DesiredState, si.Source, si.UpdatedAt, si.ID, si.RowVersion)
 		if err != nil {
 			return translateWriteErr(err, "updating service instance")
+		}
+		if err := requireVersion(res, "service_instance", si.ID, &si.RowVersion); err != nil {
+			return err
 		}
 		return t.logUpdate(ctx, "service_instance", si.ID, &before.ServiceInstance, si)
 	})
@@ -396,7 +413,8 @@ func (s *SQLStore) RetireInstance(ctx context.Context, actor domain.Actor, id st
 	at := domain.FormatTime(s.now())
 	return s.write(ctx, actor, func(t *tx) error {
 		if _, err := t.exec(ctx,
-			`UPDATE service_instance SET lifecycle = ?, updated_at = ? WHERE id = ?`,
+			`UPDATE service_instance SET lifecycle = ?, updated_at = ?,
+			                             row_version = row_version + 1 WHERE id = ?`,
 			domain.LifecycleRetired, at, id); err != nil {
 			return translateWriteErr(err, "retiring service instance")
 		}

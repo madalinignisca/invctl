@@ -53,6 +53,8 @@ type Project struct {
 	Lifecycle   string  `db:"lifecycle"`
 	CreatedAt   string  `db:"created_at"`
 	UpdatedAt   string  `db:"updated_at"`
+	// RowVersion is the optimistic-concurrency token; see version.go.
+	RowVersion int `db:"row_version"`
 }
 
 // ProjectSpec is what a caller supplies to create or update a project.

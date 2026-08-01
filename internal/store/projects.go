@@ -241,6 +241,10 @@ func (s *SQLStore) projectsFor(ctx context.Context, table, column string, ids []
 
 // CreateProject stores a new project.
 func (s *SQLStore) CreateProject(ctx context.Context, actor domain.Actor, p *domain.Project) error {
+	// The row the INSERT just wrote is version 1 (the column default).
+	// Without this a caller that creates and then updates the SAME struct
+	// compares 0 against 1 and gets a conflict against itself.
+	p.RowVersion = 1
 	return s.write(ctx, actor, func(t *tx) error {
 		_, err := t.exec(ctx, `
 			INSERT INTO project (id, code, name, description, team_id, lifecycle, created_at, updated_at)
@@ -280,13 +284,17 @@ func (s *SQLStore) UpdateProject(ctx context.Context, actor domain.Actor, p *dom
 			return fmt.Errorf("loading project for update: %w", err)
 		}
 		p.CreatedAt = before.CreatedAt
-		_, err := t.exec(ctx, `
+		res, err := t.exec(ctx, `
 			UPDATE project SET code = ?, name = ?, description = ?, team_id = ?,
-			                   lifecycle = ?, updated_at = ?
-			WHERE id = ?`,
-			p.Code, p.Name, p.Description, p.TeamID, p.Lifecycle, p.UpdatedAt, p.ID)
+			                   lifecycle = ?, updated_at = ?, row_version = row_version + 1
+			WHERE id = ? AND row_version = ?`,
+			p.Code, p.Name, p.Description, p.TeamID, p.Lifecycle, p.UpdatedAt,
+			p.ID, p.RowVersion)
 		if err != nil {
 			return translateWriteErr(err, "updating project")
+		}
+		if err := requireVersion(res, "project", p.ID, &p.RowVersion); err != nil {
+			return err
 		}
 		if err := t.logUpdate(ctx, "project", p.ID, &before, p); err != nil {
 			return err
@@ -330,7 +338,8 @@ func (s *SQLStore) RetireProject(ctx context.Context, actor domain.Actor, id str
 
 		now := domain.FormatTime(s.Now())
 		if _, err := t.exec(ctx,
-			`UPDATE project SET lifecycle = ?, updated_at = ? WHERE id = ?`,
+			`UPDATE project SET lifecycle = ?, updated_at = ?,
+			                    row_version = row_version + 1 WHERE id = ?`,
 			domain.LifecycleRetired, now, id); err != nil {
 			return translateWriteErr(err, "retiring project")
 		}

@@ -281,6 +281,8 @@
       hx-post="{{.Action}}" hx-target="#{{.Prefix}}-form" hx-swap="outerHTML"
       x-data="endpointForm">
   <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+  {{/* Only when correcting: an add has no row to be stale against. */}}
+  {{if .Endpoint}}<input type="hidden" name="row_version" value="{{.Endpoint.RowVersion}}">{{end}}
   <div class="field-row">
     <div class="field">
       <label for="{{.Prefix}}-name">Name</label>

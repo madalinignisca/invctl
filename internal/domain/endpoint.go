@@ -64,6 +64,9 @@ type Endpoint struct {
 	TLSMode       string  `db:"tls_mode"`
 	CertificateID *string `db:"certificate_id"`
 	Exposure      string  `db:"exposure"`
+	CreatedAt     *string `db:"created_at"`
+	UpdatedAt     *string `db:"updated_at"`
+	RowVersion    int     `db:"row_version"`
 }
 
 // NewEndpoint validates and constructs a listening socket.

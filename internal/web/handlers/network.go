@@ -291,6 +291,7 @@ func (a *App) InterfaceUpdate(w http.ResponseWriter, r *http.Request) {
 	updated.MTU = optionalInt(r, "mtu")
 	updated.IsMgmt = checkbox(r, "is_mgmt")
 	updated.Enabled = checkbox(r, "enabled")
+	updated.RowVersion = submittedVersion(r, updated.RowVersion)
 	err = updated.SetMAC(formValue(r, "mac"))
 	if err == nil {
 		err = a.Store.UpdateInterface(r.Context(), actor(r), &updated)
@@ -333,6 +334,7 @@ func (a *App) IPAddressUpdate(w http.ResponseWriter, r *http.Request) {
 
 	updated := *existing
 	updated.Role = formValue(r, "role")
+	updated.RowVersion = submittedVersion(r, updated.RowVersion)
 	err = updated.SetAddress(formValue(r, "addr_text"))
 	if err == nil {
 		err = a.Store.UpdateIPAddress(r.Context(), actor(r), &updated)
@@ -363,6 +365,7 @@ func (a *App) PrefixUpdate(w http.ResponseWriter, r *http.Request) {
 	updated.VLANID = optionalInt(r, "vlan_id")
 	updated.EnvironmentID = optionalString(r, "environment_id")
 	updated.Role = optionalString(r, "role")
+	updated.RowVersion = submittedVersion(r, updated.RowVersion)
 	err = updated.SetCIDR(formValue(r, "cidr_text"))
 	if err == nil {
 		err = a.Store.UpdatePrefix(r.Context(), actor(r), &updated)
@@ -386,6 +389,14 @@ func (a *App) PrefixUpdate(w http.ResponseWriter, r *http.Request) {
 func refusalMessages(err error, conflict map[string]string) (map[string]string, bool) {
 	if messages, ok := validationErrors(err); ok {
 		return messages, true
+	}
+	// Stale first: it is a conflict too, so checking the general case first
+	// would answer "somebody else got here" with "that name is taken".
+	if isStale(err) {
+		for field := range conflict {
+			return staleMessage(field), true
+		}
+		return staleMessage("cidr_text"), true
 	}
 	if isConflict(err) {
 		return conflict, true

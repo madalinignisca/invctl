@@ -155,6 +155,8 @@
     <form class="panel-body" method="post" action="/teams/{{.Team.ID}}"
           hx-post="/teams/{{.Team.ID}}">
       <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+      {{/* The version the operator opened. See internal/domain/version.go. */}}
+      <input type="hidden" name="row_version" value="{{.Team.RowVersion}}">
       <div class="field-row">
         <div class="field">
           <label for="te-code">Code</label>

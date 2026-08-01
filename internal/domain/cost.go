@@ -84,6 +84,8 @@ type Cost struct {
 	Lifecycle  string  `db:"lifecycle"`
 	CreatedAt  string  `db:"created_at"`
 	UpdatedAt  string  `db:"updated_at"`
+	// RowVersion is the optimistic-concurrency token; see version.go.
+	RowVersion int `db:"row_version"`
 }
 
 // CostSpec is what a caller supplies.

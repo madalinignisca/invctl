@@ -358,6 +358,7 @@ func (a *App) ServiceUpdate(w http.ResponseWriter, r *http.Request) {
 	updated.ManagerRole = submittedString(r, "manager_role", updated.ManagerRole)
 	updated.EOLDate = optionalString(r, "eol_date")
 	updated.Lifecycle = formValue(r, "lifecycle")
+	updated.RowVersion = submittedVersion(r, updated.RowVersion)
 
 	if err := a.Store.UpdateService(r.Context(), actor(r), &updated); err != nil {
 		a.respondServiceFormError(w, r, err, domain.ServiceSpec{
@@ -459,16 +460,21 @@ func (a *App) InstanceUpdate(w http.ResponseWriter, r *http.Request) {
 	updated.Shard = optionalString(r, "shard")
 	updated.Ordinal = intValue(r, "ordinal", existing.Ordinal)
 	updated.DesiredState = formValue(r, "desired_state")
+	updated.RowVersion = submittedVersion(r, updated.RowVersion)
 
 	if err := a.Store.UpdateInstance(r.Context(), actor(r), &updated); err != nil {
 		messages, ok := validationErrors(err)
 		if !ok {
-			if !isConflict(err) {
+			switch {
+			case isStale(err):
+				messages = staleMessage("ordinal")
+			case isConflict(err):
+				messages = map[string]string{
+					"ordinal": "another placement already has that ordinal on that host, or this one has been withdrawn",
+				}
+			default:
 				a.handleStoreError(w, r, err)
 				return
-			}
-			messages = map[string]string{
-				"ordinal": "another placement already has that ordinal on that host, or this one has been withdrawn",
 			}
 		}
 		// 422 with the row reopened on what was typed. Same rule, same reason
@@ -553,6 +559,7 @@ func (a *App) EndpointUpdate(w http.ResponseWriter, r *http.Request) {
 	updated.BindScope = formValue(r, "bind_scope")
 	updated.TLSMode = formValue(r, "tls_mode")
 	updated.Exposure = formValue(r, "exposure")
+	updated.RowVersion = submittedVersion(r, updated.RowVersion)
 
 	if err := a.Store.UpdateEndpoint(r.Context(), actor(r), &updated); err != nil {
 		messages, ok := validationErrors(err)

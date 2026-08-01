@@ -113,6 +113,10 @@ func (s *SQLStore) GetTeam(ctx context.Context, id string) (*TeamRow, error) {
 
 // CreateTeam inserts a team.
 func (s *SQLStore) CreateTeam(ctx context.Context, actor domain.Actor, t *domain.Team) error {
+	// The row the INSERT just wrote is version 1 (the column default).
+	// Without this a caller that creates and then updates the SAME struct
+	// compares 0 against 1 and gets a conflict against itself.
+	t.RowVersion = 1
 	if err := t.Validate(); err != nil {
 		return err
 	}
@@ -146,13 +150,17 @@ func (s *SQLStore) UpdateTeam(ctx context.Context, actor domain.Actor, t *domain
 	t.UpdatedAt = domain.FormatTime(s.now())
 
 	return s.write(ctx, actor, func(tx *tx) error {
-		_, err := tx.exec(ctx, `
+		res, err := tx.exec(ctx, `
 			UPDATE team SET code = ?, name = ?, description = ?, contact_ref = ?,
-			                lifecycle = ?, updated_at = ?
-			WHERE id = ?`,
-			t.Code, t.Name, t.Description, t.ContactRef, t.Lifecycle, t.UpdatedAt, t.ID)
+			                lifecycle = ?, updated_at = ?, row_version = row_version + 1
+			WHERE id = ? AND row_version = ?`,
+			t.Code, t.Name, t.Description, t.ContactRef, t.Lifecycle, t.UpdatedAt,
+			t.ID, t.RowVersion)
 		if err != nil {
 			return translateWriteErr(err, "updating team")
+		}
+		if err := requireVersion(res, "team", t.ID, &t.RowVersion); err != nil {
+			return err
 		}
 		if err := tx.logUpdate(ctx, "team", t.ID, &before.Team, t); err != nil {
 			return err
@@ -178,7 +186,8 @@ func (s *SQLStore) RetireTeam(ctx context.Context, actor domain.Actor, id string
 	at := domain.FormatTime(s.now())
 	return s.write(ctx, actor, func(tx *tx) error {
 		if _, err := tx.exec(ctx,
-			`UPDATE team SET lifecycle = ?, updated_at = ? WHERE id = ?`,
+			`UPDATE team SET lifecycle = ?, updated_at = ?,
+			                 row_version = row_version + 1 WHERE id = ?`,
 			domain.LifecycleRetired, at, id); err != nil {
 			return translateWriteErr(err, "retiring team")
 		}

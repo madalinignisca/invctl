@@ -106,6 +106,7 @@
                  <form>, which HTML does not allow inside a table row. */}}
             <form id="cost-{{.ID}}" method="post" action="{{$.Action}}/{{.ID}}" style="display:inline">
               <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+              <input type="hidden" name="row_version" value="{{.RowVersion}}">
               <button class="btn btn-sm btn-primary" type="submit">Save</button>
             </form>
             <a class="btn btn-sm" href="{{$.Return}}#costs">Cancel</a>

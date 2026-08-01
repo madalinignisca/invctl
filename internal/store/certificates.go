@@ -227,6 +227,10 @@ func auditedCertificate(c *domain.Certificate, sans []string) *certificateAudit 
 
 // CreateCertificate inserts a certificate and its names.
 func (s *SQLStore) CreateCertificate(ctx context.Context, actor domain.Actor, c *domain.Certificate) error {
+	// The row the INSERT just wrote is version 1 (the column default).
+	// Without this a caller that creates and then updates the SAME struct
+	// compares 0 against 1 and gets a conflict against itself.
+	c.RowVersion = 1
 	if err := c.Validate(); err != nil {
 		return err
 	}
@@ -282,16 +286,20 @@ func (s *SQLStore) UpdateCertificate(ctx context.Context, actor domain.Actor, c 
 		if err := requireRole(ctx, t, c.ManagerRole); err != nil {
 			return err
 		}
-		_, err := t.exec(ctx, `
+		res, err := t.exec(ctx, `
 			UPDATE certificate SET subject_cn = ?, issuer = ?, fingerprint = ?, serial = ?,
 			                       not_before = ?, not_after = ?, key_ref = ?, team_id = ?,
-			                       manager_role = ?, lifecycle = ?, attrs = ?, updated_at = ?
-			WHERE id = ?`,
+			                       manager_role = ?, lifecycle = ?, attrs = ?, updated_at = ?,
+			                       row_version = row_version + 1
+			WHERE id = ? AND row_version = ?`,
 			c.SubjectCN, c.Issuer, c.Fingerprint, c.Serial,
 			c.NotBefore, c.NotAfter, c.KeyRef, c.TeamID, c.ManagerRole,
-			c.Lifecycle, c.Attrs, c.UpdatedAt, c.ID)
+			c.Lifecycle, c.Attrs, c.UpdatedAt, c.ID, c.RowVersion)
 		if err != nil {
 			return translateWriteErr(err, "updating certificate")
+		}
+		if err := requireVersion(res, "certificate", c.ID, &c.RowVersion); err != nil {
+			return err
 		}
 		if err := setCertificateSANs(ctx, t, c.ID, names); err != nil {
 			return err
@@ -317,7 +325,8 @@ func (s *SQLStore) RetireCertificate(ctx context.Context, actor domain.Actor, id
 	at := domain.FormatTime(s.now())
 	return s.write(ctx, actor, func(t *tx) error {
 		if _, err := t.exec(ctx,
-			`UPDATE certificate SET lifecycle = ?, updated_at = ? WHERE id = ?`,
+			`UPDATE certificate SET lifecycle = ?, updated_at = ?, row_version = row_version + 1
+			 WHERE id = ?`,
 			domain.LifecycleRetired, at, id); err != nil {
 			return translateWriteErr(err, "retiring certificate")
 		}

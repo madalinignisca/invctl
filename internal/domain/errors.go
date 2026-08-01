@@ -18,7 +18,15 @@ import (
 var (
 	ErrNotFound = errors.New("not found")
 	ErrConflict = errors.New("conflict")
-	ErrInvalid  = errors.New("invalid")
+	// ErrStale is a conflict with a DIFFERENT cause and a different answer: the
+	// row moved between the form being rendered and the save arriving. Wrapped
+	// so errors.Is(err, ErrConflict) still holds -- a caller that only cares
+	// "this did not go in" keeps working -- while a caller that can say
+	// something more useful than "that already exists" is able to tell the
+	// difference. Reporting a stale write as a duplicate sends an operator
+	// looking for a name clash that does not exist.
+	ErrStale   = fmt.Errorf("changed by somebody else: %w", ErrConflict)
+	ErrInvalid = errors.New("invalid")
 	// ErrForbidden is authenticated-but-not-permitted, and it is deliberately
 	// distinct from ErrInvalid: a monitoring credential reporting on an
 	// environment outside its scope has sent a well-formed request that it is

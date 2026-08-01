@@ -65,6 +65,30 @@ type Base struct {
 	EditRow string
 }
 
+// submittedVersion reads the optimistic-concurrency token out of a form.
+//
+// THE POINT IS THAT IT COMES FROM THE FORM. The handler has just read the row,
+// so using that row's version would compare it against itself and detect
+// nothing; the token has to be the one rendered into the page the operator was
+// looking at. See internal/domain/version.go.
+//
+// A form with no token falls back to the stored value, which means no
+// protection rather than a refusal -- the same reasoning as submittedString: a
+// field that failed to render must not break a save. That is only safe because
+// TestEveryEditFormCarriesItsVersion enumerates the forms and fails if one
+// stops emitting it, so the fallback cannot quietly become the normal path.
+func submittedVersion(r *http.Request, stored int) int {
+	raw := formValue(r, domain.VersionField)
+	if raw == "" {
+		return stored
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n <= 0 {
+		return stored
+	}
+	return n
+}
+
 // editState is a rejected inline edit on its way back to the page it came from.
 //
 // The house rule is 422 with the form re-rendered in error state, and an inline

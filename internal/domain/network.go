@@ -42,6 +42,13 @@ type Interface struct {
 	LagParentID *string `db:"lag_parent_id"`
 	IsMgmt      bool    `db:"is_mgmt"`
 	Enabled     bool    `db:"enabled"`
+	// Nullable, unlike on the tables that carried these from the start: rows
+	// that predate migration 00019 have whatever change_log could tell us, and
+	// NULL where it could tell us nothing. See the migration header.
+	CreatedAt *string `db:"created_at"`
+	UpdatedAt *string `db:"updated_at"`
+	// RowVersion is the optimistic-concurrency token. See Versioned.
+	RowVersion int `db:"row_version"`
 }
 
 // NewInterface validates and constructs. A MAC, if given, is normalized to
@@ -146,6 +153,9 @@ type Prefix struct {
 	VLANID        *int    `db:"vlan_id"`
 	EnvironmentID *string `db:"environment_id"`
 	Role          *string `db:"role"`
+	CreatedAt     *string `db:"created_at"`
+	UpdatedAt     *string `db:"updated_at"`
+	RowVersion    int     `db:"row_version"`
 }
 
 // NewPrefix parses and normalizes a CIDR into the stored representation.
@@ -215,6 +225,9 @@ type IPAddress struct {
 	AddrStart   []byte  `db:"addr_start"`
 	InterfaceID *string `db:"interface_id"`
 	Role        string  `db:"role"`
+	CreatedAt   *string `db:"created_at"`
+	UpdatedAt   *string `db:"updated_at"`
+	RowVersion  int     `db:"row_version"`
 }
 
 // NewIPAddress parses and normalizes an address into the stored representation.
