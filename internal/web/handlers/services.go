@@ -480,7 +480,7 @@ func (a *App) InstanceUpdate(w http.ResponseWriter, r *http.Request) {
 		// 422 with the row reopened on what was typed. Same rule, same reason
 		// as everywhere else: a redirect refills from storage and the operator
 		// cannot tell their edit was refused rather than saved.
-		a.renderServiceDetail(w, r, http.StatusUnprocessableEntity, existing.ServiceID,
+		a.renderServiceDetail(w, r, refusalStatus(err), existing.ServiceID,
 			endpointFormState{}, rejected(r, existing.ID, messages,
 				"runtime_type", "role", "shard", "ordinal", "desired_state"))
 		return
@@ -578,7 +578,7 @@ func (a *App) EndpointUpdate(w http.ResponseWriter, r *http.Request) {
 				a.newEndpointEditForm(r, &updated, messages))
 			return
 		}
-		a.renderServiceDetail(w, r, http.StatusUnprocessableEntity, existing.ServiceID,
+		a.renderServiceDetail(w, r, refusalStatus(err), existing.ServiceID,
 			endpointFormState{errs: messages, failed: &updated}, nil)
 		return
 	}

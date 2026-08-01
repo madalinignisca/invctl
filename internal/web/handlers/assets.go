@@ -133,7 +133,7 @@ func (a *App) EnvironmentUpdate(w http.ResponseWriter, r *http.Request) {
 		// throws the operator's input away. The house rule, and the reason for
 		// it: a redirect refills the row from storage, so the field they just
 		// corrected shows the old value back and nothing says whether it saved.
-		a.renderEnvironmentsEditing(w, r, http.StatusUnprocessableEntity,
+		a.renderEnvironmentsEditing(w, r, refusalStatus(err),
 			rejected(r, id, messages, "code", "name", "role", "criticality", "in_scope"))
 		return
 	}
@@ -760,6 +760,20 @@ func isConflict(err error) bool {
 // Both are conflicts; only one is fixed by choosing a different value.
 func isStale(err error) bool {
 	return errors.Is(err, domain.ErrStale)
+}
+
+// refusalStatus separates the two reasons a save comes back.
+//
+// 422 says "what you typed is wrong"; 409 says "what you typed was fine and
+// somebody else got there first". They call for different things from whoever
+// is on the other end -- a person retypes a field for one and re-reads the row
+// for the other, and a script should retry only the second. Answering both with
+// 422 tells them to fix input that has nothing wrong with it.
+func refusalStatus(err error) int {
+	if isStale(err) {
+		return http.StatusConflict
+	}
+	return http.StatusUnprocessableEntity
 }
 
 // staleMessage is what an operator is told when their form lost the race. It

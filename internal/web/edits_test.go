@@ -835,7 +835,12 @@ func TestAStaleWriteIsNotReportedAsADuplicate(t *testing.T) {
 		t.Fatalf("the first save returned %d", first.StatusCode)
 	}
 
-	page := body(t, save(stale, "10.32.0.0/16"))
+	lost := save(stale, "10.32.0.0/16")
+	page := body(t, lost)
+	// 409, not 422: nothing the operator typed was wrong.
+	if lost.StatusCode != http.StatusConflict {
+		t.Errorf("a stale write returned %d, want 409", lost.StatusCode)
+	}
 	if !strings.Contains(page, "somebody else changed this") {
 		t.Errorf("a stale write was not explained as one:\n%s", firstFieldError(t, page))
 	}

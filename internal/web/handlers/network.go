@@ -376,7 +376,7 @@ func (a *App) PrefixUpdate(w http.ResponseWriter, r *http.Request) {
 			a.handleStoreError(w, r, err)
 			return
 		}
-		a.renderPrefixes(w, r, http.StatusUnprocessableEntity,
+		a.renderPrefixes(w, r, refusalStatus(err),
 			rejected(r, existing.ID, messages, "cidr_text", "vlan_id", "environment_id", "role"))
 		return
 	}
@@ -422,6 +422,6 @@ func (a *App) refuseAssetEdit(w http.ResponseWriter, r *http.Request, err error,
 		render.Redirect(w, r, "/assets")
 		return
 	}
-	a.renderAssetDetail(w, r, http.StatusUnprocessableEntity, assetID,
+	a.renderAssetDetail(w, r, refusalStatus(err), assetID,
 		rejected(r, rowID, messages, fields...))
 }
