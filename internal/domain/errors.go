@@ -56,6 +56,17 @@ func NewValidation(field, message string) *ValidationError {
 	return ve
 }
 
+// NewValidationFrom builds a failure from messages a handler has already
+// collected, for shape checks the domain cannot make because the value never
+// reaches it in a form it could judge.
+func NewValidationFrom(messages map[string]string) *ValidationError {
+	ve := &ValidationError{}
+	for field, message := range messages {
+		ve.Add(field, "%s", message)
+	}
+	return ve
+}
+
 func (v *ValidationError) Error() string {
 	parts := make([]string, 0, len(v.Fields))
 	for _, f := range v.Fields {

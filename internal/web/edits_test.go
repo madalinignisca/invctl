@@ -762,43 +762,95 @@ func TestAnEditOpenedBeforeARetirementIsRefused(t *testing.T) {
 	}
 }
 
-// Every editor in the application emits its version. The token is only worth
-// anything if the form carries it, and submittedVersion falls back to the
-// stored value when it is missing -- which is safe ONLY because this test fails
-// when a form stops emitting one.
-func TestEveryEditFormCarriesItsVersion(t *testing.T) {
+// Every editor in the application emits its version AND ITS HANDLER USES IT.
+//
+// Rendering the token is half the contract and was the only half this test
+// checked. The cost editor rendered it perfectly and its handler never read it
+// back — so a second save from a stale form always won, silently, which is the
+// exact bug the whole mechanism exists to prevent. A review caught it; this
+// test could not have.
+//
+// Now every editor is submitted TWICE from one token. The second must be
+// refused. That is a property of the pair, not of the markup, and it is the
+// only assertion that would have failed.
+func TestEveryEditorRefusesASecondSaveFromOneToken(t *testing.T) {
 	h := newHarness(t)
 	h.login("admin", "admin-password")
 
 	assetID := h.refs.Assets["hv-01"]
 	serviceID := h.refs.Services["orders-api"]
-	rabbit := h.refs.Services["rabbitmq"]
+	projectID := h.refs.Projects["platform"]
+	envID := h.refs.Environments["prod"]
 	assetPage := body(t, h.get("/assets/"+assetID, false))
+	servicePage := body(t, h.get("/services/"+serviceID, false))
 
-	editors := []struct{ name, path string }{
-		{"environment", "/environments?edit=" + h.refs.Environments["prod"]},
-		{"network", "/prefixes?edit=" + firstEditID(t, body(t, h.get("/prefixes", false)))},
-		{"port", "/assets/" + assetID + "?edit=" + firstPortEditID(t, assetPage)},
-		{"cost line", "/assets/" + assetID + "?edit=" + firstCostFormID(t, assetPage)},
-		{"placement", "/services/" + serviceID + "?edit=" +
-			firstInstanceEditID(t, body(t, h.get("/services/"+serviceID, false)))},
-		{"endpoint", "/services/" + rabbit + "?edit=" + h.refs.Endpoints["rabbitmq/amqp"]},
-		{"team", "/teams/" + h.refs.Teams["platform"]},
+	editors := []struct {
+		name   string
+		open   string // where the form is rendered
+		action string // where it posts
+		form   url.Values
+	}{
+		{"environment", "/environments?edit=" + envID, "/environments/" + envID,
+			url.Values{"code": {"prod"}, "name": {"Env"}, "role": {"production"},
+				"criticality": {"1"}, "in_scope": {"true"}}},
+		{"cost line", "/assets/" + assetID + "?edit=" + firstCostFormID(t, assetPage),
+			"/assets/" + assetID + "/costs/" + firstCostFormID(t, assetPage),
+			url.Values{"kind": {"acquisition"}, "period": {"once"},
+				"amount": {"4321"}, "valid_from": {"2024-01-01"}}},
+		{"port", "/assets/" + assetID + "?edit=" + firstPortEditID(t, assetPage),
+			"/interfaces/" + firstPortEditID(t, assetPage),
+			url.Values{"name": {"eth-token"}, "form_factor": {"rj45"}}},
+		{"placement", "/services/" + serviceID + "?edit=" + firstInstanceEditID(t, servicePage),
+			"/instances/" + firstInstanceEditID(t, servicePage),
+			url.Values{"runtime_type": {"systemd"}, "ordinal": {"5"},
+				"desired_state": {"running"}}},
+		{"asset", "/assets/" + assetID + "?edit=" + assetID, "/assets/" + assetID,
+			url.Values{"name": {"hv-token"}, "kind": {"hypervisor"}, "lifecycle": {"active"}}},
+		{"project", "/projects/" + projectID + "?edit=" + projectID, "/projects/" + projectID,
+			url.Values{"code": {"platform"}, "name": {"P"}, "lifecycle": {"active"}}},
+		{"service", "/services/" + serviceID + "?edit=" + serviceID, "/services/" + serviceID,
+			url.Values{"code": {"orders-api"}, "name": {"S"}, "kind": {"api"},
+				"environment_id": {envID}, "availability": {"standalone"},
+				"tier": {"2"}, "lifecycle": {"active"}}},
+		{"certificate", "/certificates/" + certificateID(t, h), "/certificates/" + certificateID(t, h),
+			url.Values{"subject_cn": {"token.example.com"}, "lifecycle": {"active"}}},
+		{"endpoint", "/services/" + serviceID + "?edit=" + firstEndpointEditID(t, servicePage),
+			"/endpoints/" + firstEndpointEditID(t, servicePage),
+			url.Values{"name": {"ep-token"}, "l4_proto": {"tcp"}, "port": {"7001"},
+				"bind_scope": {"host"}, "tls_mode": {"none"}, "exposure": {"internal"}}},
 	}
+
 	for _, e := range editors {
-		page := body(t, h.get(e.path, false))
+		page := body(t, h.get(e.open, false))
 		if !strings.Contains(page, `name="row_version"`) {
 			t.Errorf("the %s editor renders no version, so its guard is inert", e.name)
 			continue
 		}
-		// And not a zero: a zero matches no row and would refuse every save.
-		if strings.Contains(page, `name="row_version" value="0"`) {
+		token := versionInForm(t, page)
+		if token == "0" {
 			t.Errorf("the %s editor renders version 0 — the column is missing from its query", e.name)
+			continue
 		}
-	}
-	addr, _ := firstAddressEditID(t, assetPage)
-	if page := body(t, h.get("/assets/"+assetID+"?edit="+addr, false)); !strings.Contains(page, `name="row_version"`) {
-		t.Error("the address editor renders no version, so its guard is inert")
+
+		post := func() int {
+			form := url.Values{}
+			for k, v := range e.form {
+				form[k] = v
+			}
+			form.Set("csrf_token", h.csrfToken(e.open))
+			form.Set("row_version", token)
+			resp := h.post(e.action, form, false)
+			resp.Body.Close()
+			return resp.StatusCode
+		}
+		if first := post(); first != http.StatusSeeOther {
+			t.Errorf("the %s editor refused a save from a FRESH token (%d)", e.name, first)
+			continue
+		}
+		if second := post(); second == http.StatusSeeOther {
+			t.Errorf("the %s editor accepted a second save from the same token: "+
+				"its handler does not read the version back", e.name)
+		}
 	}
 }
 
@@ -1296,4 +1348,100 @@ func withdrawableEndpoint(t *testing.T, h *harness) (string, string, string) {
 	}
 	t.Fatal("the endpoint that was just added is not on the page")
 	return "", "", ""
+}
+
+// A REFUSED FORM KEEPS ITS STALE TOKEN, so the next click of Save is refused
+// again rather than becoming a one-click force-overwrite of the very edit the
+// operator was just warned about. The message tells them to go and read that
+// edit first; before this, the mechanics made that optional.
+func TestARefusedStaleSaveCannotBeForcedByPressingSaveAgain(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	envID := h.refs.Environments["prod"]
+	token := versionInForm(t, body(t, h.get("/environments?edit="+envID, false)))
+	save := func(version, name string) *http.Response {
+		return h.post("/environments/"+envID, url.Values{
+			"csrf_token": {h.csrfToken("/environments")}, "row_version": {version},
+			"code": {"prod"}, "name": {name},
+			"role": {"production"}, "criticality": {"1"}, "in_scope": {"true"},
+		}, false)
+	}
+	first := save(token, "The other operator")
+	first.Body.Close()
+
+	refused := save(token, "Mine")
+	page := body(t, refused)
+	if refused.StatusCode != http.StatusConflict {
+		t.Fatalf("the stale save returned %d, want 409", refused.StatusCode)
+	}
+	// The refused page hands back the token that was refused, not a fresh one.
+	if back := versionInForm(t, page); back != token {
+		t.Errorf("the refused form re-armed with a fresh token %s (submitted %s): "+
+			"pressing Save again would overwrite blindly", back, token)
+	}
+	// And submitting it again really is refused again.
+	again := save(versionInForm(t, page), "Mine, forced")
+	again.Body.Close()
+	if again.StatusCode == http.StatusSeeOther {
+		t.Error("a blind resubmit of the refused form went through")
+	}
+	if !strings.Contains(body(t, h.get("/environments", false)), "The other operator") {
+		t.Error("the other operator's edit was overwritten")
+	}
+}
+
+// certificateID returns any certificate, for the editor enumeration.
+func certificateID(t *testing.T, h *harness) string {
+	t.Helper()
+	m := regexp.MustCompile(`href="/certificates/([0-9a-f-]+)"`).
+		FindStringSubmatch(body(t, h.get("/certificates", false)))
+	if m == nil {
+		t.Fatal("no certificate in the fixture")
+	}
+	return m[1]
+}
+
+// An optional number that arrives as garbage is refused, not silently dropped.
+//
+// optionalInt returned nil on a parse error, and nil is a VALID value for every
+// field it feeds — so Validate passed, the store wrote NULL, and the response
+// said "updated". An operator who types 1000mbps into a port's speed loses the
+// speed with no warning. Same defect intValue had; found by a review that
+// pointed out fixing one and not the other was arbitrary.
+func TestGarbageInAnOptionalNumberDoesNotClearIt(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	assetID := h.refs.Assets["hv-01"]
+	page := body(t, h.get("/assets/"+assetID, false))
+	ifaceID := firstPortEditID(t, page)
+
+	// Give it a speed to lose.
+	set := h.post("/interfaces/"+ifaceID, url.Values{
+		"csrf_token":  {h.csrfToken("/assets/" + assetID)},
+		"row_version": {versionInForm(t, body(t, h.get("/assets/"+assetID+"?edit="+ifaceID, false)))},
+		"name":        {"eth-speed"}, "form_factor": {"sfp28"}, "speed_mbps": {"25000"},
+	}, false)
+	set.Body.Close()
+	if !strings.Contains(body(t, h.get("/assets/"+assetID, false)), "25000") {
+		t.Fatal("the speed was not stored, so losing it proves nothing")
+	}
+
+	resp := h.post("/interfaces/"+ifaceID, url.Values{
+		"csrf_token":  {h.csrfToken("/assets/" + assetID)},
+		"row_version": {versionInForm(t, body(t, h.get("/assets/"+assetID+"?edit="+ifaceID, false)))},
+		"name":        {"eth-speed"}, "form_factor": {"sfp28"}, "speed_mbps": {"1000mbps"},
+	}, false)
+	refused := body(t, resp)
+
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Errorf("a non-numeric speed returned %d, want 422", resp.StatusCode)
+	}
+	if !strings.Contains(refused, "whole number") {
+		t.Error("the operator was not told what was wrong")
+	}
+	if !strings.Contains(body(t, h.get("/assets/"+assetID, false)), "25000") {
+		t.Error("the stored speed was cleared by a value that was refused")
+	}
 }

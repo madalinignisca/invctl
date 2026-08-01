@@ -106,6 +106,10 @@
                  <form>, which HTML does not allow inside a table row. */}}
             <form id="cost-{{.ID}}" method="post" action="{{$.Action}}/{{.ID}}" style="display:inline">
               <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+              {{/* The stored version, not a submitted one: this panel is a dict, and the
+                   cost editor is the one refusal path that still redirects rather than
+                   re-rendering, so there is no editState to carry a stale token back.
+                   The operator retypes from scratch either way. */}}
               <input type="hidden" name="row_version" value="{{.RowVersion}}">
               <button class="btn btn-sm btn-primary" type="submit">Save</button>
             </form>

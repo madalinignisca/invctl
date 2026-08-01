@@ -144,10 +144,20 @@ func (e *editState) Err(field string) string {
 // fields the caller names. Only named fields are captured: a form post carries
 // the CSRF token too, and nothing rejected should be echoed back untouched.
 func rejected(r *http.Request, id string, errs map[string]string, fields ...string) *editState {
-	values := make(map[string]string, len(fields))
+	values := make(map[string]string, len(fields)+1)
 	for _, f := range fields {
 		values[f] = formValue(r, f)
 	}
+	// ALWAYS the version, whatever the caller listed. A refused form that
+	// redraws with a FRESH token turns the next click of Save into a blind
+	// force-overwrite of the very edit the operator was just warned about --
+	// and the message tells them to go and read that edit first, which the
+	// mechanics would have made optional. Keeping the stale token means a
+	// resubmit is refused again until they actually reopen the row.
+	//
+	// Harmless on an ordinary validation failure: nothing moved, so the token
+	// they sent is still the current one and the corrected save goes through.
+	values[domain.VersionField] = formValue(r, domain.VersionField)
 	return &editState{ID: id, Errors: orEmpty(errs), Values: values}
 }
 
@@ -353,16 +363,65 @@ func submittedString(r *http.Request, key string, current *string) *string {
 }
 
 // optionalInt parses an optional numeric field.
-func optionalInt(r *http.Request, key string) *int {
+// optionalInt reads a whole number that may legitimately be absent.
+//
+// ok is FALSE only when the field was present and is not a number — the same
+// contract intValue got, and for the same reason, arrived at the same way: an
+// error swallowed here returns nil, nil is a VALID value for every field this
+// is used on, so Validate passes, the store writes NULL and the response says
+// "updated". An operator who types 1000mbps into a speed loses the speed with
+// no warning.
+//
+// Fixed at the constructor rather than at the seventeen call sites, because
+// the call sites are not where the mistake is: a helper that cannot express
+// "that was garbage" makes every caller wrong by default, and the next
+// optional numeric field would be wrong too.
+func optionalInt(r *http.Request, key string) (*int, bool) {
 	v := formValue(r, key)
 	if v == "" {
-		return nil
+		return nil, true
 	}
 	n, err := strconv.Atoi(v)
 	if err != nil {
+		return nil, false
+	}
+	return &n, true
+}
+
+// numbers collects the optional numeric fields of one form and remembers which
+// of them arrived as something that is not a number.
+//
+// The alternative is an `ok` check beside every field, which is noise at the
+// seventeen call sites and gets skipped at the eighteenth. This keeps each
+// field one line and makes the refusal a single check at the end.
+type numbers struct {
+	r   *http.Request
+	bad []string
+}
+
+func optionalNumbers(r *http.Request) *numbers { return &numbers{r: r} }
+
+// opt reads one field, recording it if it was garbage.
+func (n *numbers) opt(key string) *int {
+	v, ok := optionalInt(n.r, key)
+	if !ok {
+		n.bad = append(n.bad, key)
+	}
+	return v
+}
+
+// messages is nil when every field was usable, and otherwise names each one
+// that was not — so an operator is told which box to look at rather than that
+// something, somewhere, was wrong.
+func (n *numbers) messages() map[string]string {
+	if len(n.bad) == 0 {
 		return nil
 	}
-	return &n
+	msgs := make(map[string]string, len(n.bad))
+	for _, key := range n.bad {
+		msgs[key] = "must be a whole number, or blank"
+	}
+	return msgs
 }
 
 // intValue reads a whole number from a form.

@@ -18,6 +18,7 @@ func (a *App) InterfaceCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	assetID := r.PathValue("id")
 
+	nums := optionalNumbers(r)
 	iface, err := domain.NewInterface(store.NewID(), assetID, formValue(r, "name"), formValue(r, "form_factor"))
 	if err == nil {
 		if macErr := iface.SetMAC(formValue(r, "mac")); macErr != nil {
@@ -25,10 +26,14 @@ func (a *App) InterfaceCreate(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if err == nil {
-		iface.SpeedMbps = optionalInt(r, "speed_mbps")
-		iface.MTU = optionalInt(r, "mtu")
+		iface.SpeedMbps = nums.opt("speed_mbps")
+		iface.MTU = nums.opt("mtu")
 		iface.IsMgmt = checkbox(r, "is_mgmt")
-		err = a.Store.CreateInterface(r.Context(), actor(r), iface)
+		if msgs := nums.messages(); msgs != nil {
+			err = domain.NewValidationFrom(msgs)
+		} else {
+			err = a.Store.CreateInterface(r.Context(), actor(r), iface)
+		}
 	}
 	if err != nil {
 		messages, ok := validationErrors(err)
@@ -117,11 +122,16 @@ func (a *App) LinkCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	assetID := formValue(r, "asset_id")
 
+	nums := optionalNumbers(r)
 	link, err := domain.NewLink(store.NewID(), formValue(r, "a_interface_id"), formValue(r, "target_interface_id"))
 	if err == nil {
 		link.Medium = optionalString(r, "medium")
-		link.LengthM = optionalInt(r, "length_m")
-		err = a.Store.CreateLink(r.Context(), actor(r), link)
+		link.LengthM = nums.opt("length_m")
+		if msgs := nums.messages(); msgs != nil {
+			err = domain.NewValidationFrom(msgs)
+		} else {
+			err = a.Store.CreateLink(r.Context(), actor(r), link)
+		}
 	}
 	if err != nil {
 		messages, ok := validationErrors(err)
@@ -233,12 +243,17 @@ func (a *App) PrefixCreate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Could not read that form.", http.StatusBadRequest)
 		return
 	}
+	nums := optionalNumbers(r)
 	prefix, err := domain.NewPrefix(store.NewID(), formValue(r, "cidr_text"))
 	if err == nil {
-		prefix.VLANID = optionalInt(r, "vlan_id")
+		prefix.VLANID = nums.opt("vlan_id")
 		prefix.EnvironmentID = optionalString(r, "environment_id")
 		prefix.Role = optionalString(r, "role")
-		err = a.Store.CreatePrefix(r.Context(), actor(r), prefix)
+		if msgs := nums.messages(); msgs != nil {
+			err = domain.NewValidationFrom(msgs)
+		} else {
+			err = a.Store.CreatePrefix(r.Context(), actor(r), prefix)
+		}
 	}
 	if err != nil {
 		messages, ok := validationErrors(err)
@@ -284,17 +299,22 @@ func (a *App) InterfaceUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	nums := optionalNumbers(r)
 	updated := *existing
 	updated.Name = formValue(r, "name")
 	updated.FormFactor = formValue(r, "form_factor")
-	updated.SpeedMbps = optionalInt(r, "speed_mbps")
-	updated.MTU = optionalInt(r, "mtu")
+	updated.SpeedMbps = nums.opt("speed_mbps")
+	updated.MTU = nums.opt("mtu")
 	updated.IsMgmt = checkbox(r, "is_mgmt")
 	updated.Enabled = checkbox(r, "enabled")
 	updated.RowVersion = submittedVersion(r, updated.RowVersion)
 	err = updated.SetMAC(formValue(r, "mac"))
 	if err == nil {
-		err = a.Store.UpdateInterface(r.Context(), actor(r), &updated)
+		if msgs := nums.messages(); msgs != nil {
+			err = domain.NewValidationFrom(msgs)
+		} else {
+			err = a.Store.UpdateInterface(r.Context(), actor(r), &updated)
+		}
 	}
 	if err != nil {
 		a.refuseAssetEdit(w, r, err, existing.AssetID, existing.ID,
@@ -361,14 +381,19 @@ func (a *App) PrefixUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	nums := optionalNumbers(r)
 	updated := *existing
-	updated.VLANID = optionalInt(r, "vlan_id")
+	updated.VLANID = nums.opt("vlan_id")
 	updated.EnvironmentID = optionalString(r, "environment_id")
 	updated.Role = optionalString(r, "role")
 	updated.RowVersion = submittedVersion(r, updated.RowVersion)
 	err = updated.SetCIDR(formValue(r, "cidr_text"))
 	if err == nil {
-		err = a.Store.UpdatePrefix(r.Context(), actor(r), &updated)
+		if msgs := nums.messages(); msgs != nil {
+			err = domain.NewValidationFrom(msgs)
+		} else {
+			err = a.Store.UpdatePrefix(r.Context(), actor(r), &updated)
+		}
 	}
 	if err != nil {
 		messages, ok := refusalMessages(err, map[string]string{"cidr_text": "that network is already declared"})

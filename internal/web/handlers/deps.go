@@ -17,12 +17,13 @@ func (a *App) DependencyCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	consumerID := r.PathValue("id")
 
+	nums := optionalNumbers(r)
 	spec := domain.DependencySpec{
 		ConsumerServiceID:  consumerID,
 		ProviderEndpointID: optionalString(r, "provider_endpoint_id"),
 		ProviderRouteID:    optionalString(r, "provider_route_id"),
 		Nature:             formValue(r, "nature"),
-		ToleranceSeconds:   optionalInt(r, "tolerance_seconds"),
+		ToleranceSeconds:   nums.opt("tolerance_seconds"),
 		FailureMode:        formValue(r, "failure_mode"),
 		IdentityID:         optionalString(r, "identity_id"),
 		AuthMethod:         optionalString(r, "auth_method"),

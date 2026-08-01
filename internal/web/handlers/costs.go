@@ -121,6 +121,7 @@ func (a *App) editCost(r *http.Request, costID string,
 	updated.Note = optional(formValue(r, "note"))
 	updated.ValidFrom = formValue(r, "valid_from")
 	updated.ValidUntil = optionalString(r, "valid_until")
+	updated.RowVersion = submittedVersion(r, updated.RowVersion)
 
 	return update(r.Context(), actor(r), &updated)
 }

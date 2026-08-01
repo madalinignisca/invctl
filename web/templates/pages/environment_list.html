@@ -58,7 +58,7 @@
           <td style="white-space:nowrap">
             <form id="env-{{.ID}}" method="post" action="/environments/{{.ID}}" style="display:inline">
               <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
-              <input type="hidden" name="row_version" value="{{.RowVersion}}">
+              <input type="hidden" name="row_version" value="{{$.Edit.Value "row_version" (itoa .RowVersion)}}">
               <button class="btn btn-sm btn-primary" type="submit">Save</button>
             </form>
             <a class="btn btn-sm" href="/environments">Cancel</a>

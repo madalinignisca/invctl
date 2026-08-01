@@ -165,11 +165,12 @@ func (a *App) NetworkGroupCreate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Could not read that form.", http.StatusBadRequest)
 		return
 	}
+	nums := optionalNumbers(r)
 	spec := domain.NetGroupSpec{
 		Code: formValue(r, "code"), Name: formValue(r, "name"),
 		Kind: formValue(r, "kind"), Role: formValue(r, "role"),
 		Availability: formValue(r, "availability"),
-		MinHealthy:   optionalInt(r, "min_healthy"),
+		MinHealthy:   nums.opt("min_healthy"),
 		FailoverMode: optionalString(r, "failover_mode"),
 	}
 	g, err := domain.NewNetGroup(store.NewID(), spec, a.Store.Now())

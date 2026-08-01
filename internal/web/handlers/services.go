@@ -323,6 +323,7 @@ func (a *App) endpointEditForm(r *http.Request, b Base, endpoints []store.Endpoi
 // ServiceCreate adds a service.
 func (a *App) ServiceCreate(w http.ResponseWriter, r *http.Request) {
 	tier, tierNumeric := intValue(r, "tier", 3)
+	nums := optionalNumbers(r)
 	spec := domain.ServiceSpec{
 		Code:          formValue(r, "code"),
 		Name:          formValue(r, "name"),
@@ -330,16 +331,20 @@ func (a *App) ServiceCreate(w http.ResponseWriter, r *http.Request) {
 		EnvironmentID: formValue(r, "environment_id"),
 		Availability:  formValue(r, "availability"),
 		Tier:          tier,
-		MinHealthy:    optionalInt(r, "min_healthy"),
+		MinHealthy:    nums.opt("min_healthy"),
 		FailoverMode:  optionalString(r, "failover_mode"),
-		RTOMinutes:    optionalInt(r, "rto_minutes"),
-		RPOMinutes:    optionalInt(r, "rpo_minutes"),
+		RTOMinutes:    nums.opt("rto_minutes"),
+		RPOMinutes:    nums.opt("rpo_minutes"),
 		TeamID:        optionalString(r, "team_id"),
 		ManagerRole:   optionalString(r, "manager_role"),
 		EOLDate:       optionalString(r, "eol_date"),
 	}
 	if !tierNumeric {
 		a.respondServiceFormError(w, r, domain.NewValidation("tier", "must be a whole number"), spec)
+		return
+	}
+	if msgs := nums.messages(); msgs != nil {
+		a.respondServiceFormError(w, r, domain.NewValidationFrom(msgs), spec)
 		return
 	}
 
@@ -365,6 +370,7 @@ func (a *App) ServiceUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	nums := optionalNumbers(r)
 	updated := existing.Service
 	updated.Code = formValue(r, "code")
 	updated.Name = formValue(r, "name")
@@ -373,10 +379,10 @@ func (a *App) ServiceUpdate(w http.ResponseWriter, r *http.Request) {
 	updated.Availability = formValue(r, "availability")
 	tier, tierNumeric := intValue(r, "tier", existing.Tier)
 	updated.Tier = tier
-	updated.MinHealthy = optionalInt(r, "min_healthy")
+	updated.MinHealthy = nums.opt("min_healthy")
 	updated.FailoverMode = optionalString(r, "failover_mode")
-	updated.RTOMinutes = optionalInt(r, "rto_minutes")
-	updated.RPOMinutes = optionalInt(r, "rpo_minutes")
+	updated.RTOMinutes = nums.opt("rto_minutes")
+	updated.RPOMinutes = nums.opt("rpo_minutes")
 	// submittedString, not optionalString: a picker that failed to render must
 	// not read as an operator clearing the field. See its doc comment.
 	updated.TeamID = submittedString(r, "team_id", updated.TeamID)
@@ -384,9 +390,12 @@ func (a *App) ServiceUpdate(w http.ResponseWriter, r *http.Request) {
 	updated.EOLDate = optionalString(r, "eol_date")
 	updated.Lifecycle = formValue(r, "lifecycle")
 	updated.RowVersion = submittedVersion(r, updated.RowVersion)
-	if !tierNumeric {
+	if msgs := nums.messages(); msgs != nil || !tierNumeric {
+		if msgs == nil {
+			msgs = notANumber("tier")
+		}
 		a.renderServiceDetail(w, r, http.StatusUnprocessableEntity, id, endpointFormState{},
-			rejected(r, id, notANumber("tier"), "code", "name", "kind", "environment_id",
+			rejected(r, id, msgs, "code", "name", "kind", "environment_id",
 				"availability", "tier", "min_healthy", "failover_mode",
 				"rto_minutes", "rpo_minutes", "team_id", "manager_role",
 				"eol_date", "lifecycle"))
@@ -616,24 +625,38 @@ func (a *App) EndpointUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	nums := optionalNumbers(r)
 	updated := existing.Endpoint
 	updated.Name = formValue(r, "name")
 	updated.L4Proto = formValue(r, "l4_proto")
-	updated.Port = optionalInt(r, "port")
+	updated.Port = nums.opt("port")
 	updated.UnixPath = optionalString(r, "unix_path")
 	updated.BindScope = formValue(r, "bind_scope")
 	updated.TLSMode = formValue(r, "tls_mode")
 	updated.Exposure = formValue(r, "exposure")
 	updated.RowVersion = submittedVersion(r, updated.RowVersion)
 
+	if msgs := nums.messages(); msgs != nil {
+		a.renderServiceDetail(w, r, http.StatusUnprocessableEntity, existing.ServiceID,
+			endpointFormState{errs: msgs, failed: &updated}, nil)
+		return
+	}
+
 	if err := a.Store.UpdateEndpoint(r.Context(), actor(r), &updated); err != nil {
 		messages, ok := validationErrors(err)
 		if !ok {
-			if isConflict(err) {
+			switch {
+			case isStale(err):
+				// Checked before isConflict: ErrStale wraps ErrConflict, so the
+				// general case first answers "somebody else got here" with
+				// "that port is taken" -- the misreport 2fd9f2a fixed
+				// everywhere else and missed here.
+				messages = staleMessage("name")
+			case isConflict(err):
 				messages = map[string]string{
 					"port": "this service already has an endpoint on that port and protocol",
 				}
-			} else {
+			default:
 				a.handleStoreError(w, r, err)
 				return
 			}
@@ -682,17 +705,24 @@ func (a *App) EndpointRetire(w http.ResponseWriter, r *http.Request) {
 func (a *App) EndpointCreate(w http.ResponseWriter, r *http.Request) {
 	serviceID := r.PathValue("id")
 
+	nums := optionalNumbers(r)
 	e := &domain.Endpoint{
 		ID:        store.NewID(),
 		ServiceID: serviceID,
 		Name:      formValue(r, "name"),
 		L4Proto:   formValue(r, "l4_proto"),
-		Port:      optionalInt(r, "port"),
+		Port:      nums.opt("port"),
 		UnixPath:  optionalString(r, "unix_path"),
 		BindScope: formValue(r, "bind_scope"),
 		L7Proto:   optionalString(r, "l7_proto"),
 		TLSMode:   formValue(r, "tls_mode"),
 		Exposure:  formValue(r, "exposure"),
+	}
+
+	if msgs := nums.messages(); msgs != nil {
+		a.renderServiceDetail(w, r, http.StatusUnprocessableEntity, serviceID,
+			endpointFormState{errs: msgs}, nil)
+		return
 	}
 
 	if err := a.Store.CreateEndpoint(r.Context(), actor(r), e); err != nil {

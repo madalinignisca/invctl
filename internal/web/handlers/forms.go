@@ -112,9 +112,18 @@ func (f assetFormData) InEnvironment(id string) bool {
 }
 
 // Version is the concurrency token to render, and 0 when adding.
+//
+// The SUBMITTED one wins on a refusal, so a blind resubmit stays refused; see
+// rejected(). Falls back to the stored value when the form is simply being
+// opened.
 func (f assetFormData) Version() int {
 	if f.Asset == nil {
 		return 0
+	}
+	if submitted := f.Edit.Value(domain.VersionField, ""); submitted != "" {
+		if n, err := strconv.Atoi(submitted); err == nil && n > 0 {
+			return n
+		}
 	}
 	return f.Asset.RowVersion
 }

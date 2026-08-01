@@ -365,3 +365,117 @@ func TestUpdateInterfaceCannotMoveOrRebondAPort(t *testing.T) {
 		})
 	}
 }
+
+// A live edge cannot be declared THROUGH a withdrawn socket.
+//
+// RetireEndpoint refuses to withdraw a socket that has live dependants, which
+// only holds in one direction: nothing stopped declaring a dependant on an
+// already-retired socket afterwards. Two ordinary requests in the wrong order,
+// no race -- and the result is what the retire guard exists to prevent.
+// LoadGraph drops retired sockets, the impact engine skips a dependency whose
+// provider is missing from the map, and the edge stays on the service page
+// while quietly vanishing from every simulation. Found by a security review.
+func TestADependencyCannotBeDeclaredThroughAWithdrawnEndpoint(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			s, ctx := newStore(t, e)
+			consumer, _, epID := servicePairWithEndpoint(t, s, ctx, 5432)
+
+			// It works while the socket is live.
+			if err := declareDependency(s, ctx, consumer, epID); err != nil {
+				t.Fatalf("declaring on a live socket: %v", err)
+			}
+			// Withdraw the edge, then the socket.
+			deps, err := s.ListUpstream(ctx, consumer)
+			if err != nil || len(deps) == 0 {
+				t.Fatalf("reading the edge back: %v (%d)", err, len(deps))
+			}
+			if err := s.RetireDependency(ctx, testActor, deps[0].ID); err != nil {
+				t.Fatalf("retiring the edge: %v", err)
+			}
+			if err := s.RetireEndpoint(ctx, testActor, epID); err != nil {
+				t.Fatalf("withdrawing the socket: %v", err)
+			}
+
+			err = declareDependency(s, ctx, consumer, epID)
+			if err == nil {
+				t.Fatal("a dependency was declared through a withdrawn socket")
+			}
+			if !errors.Is(err, domain.ErrConflict) {
+				t.Errorf("got %v, want a conflict", err)
+			}
+		})
+	}
+}
+
+// A socket still serving a pool cannot be withdrawn either.
+//
+// It is reachable without any dependency naming it, and LoadGraph keeps a
+// membership row whose endpoint has gone from the map -- which the engine skips
+// in silence, so a pool loses capacity with nothing marked down. The read audit
+// in migration 00020 never mentioned backend_member until a review asked why.
+func TestAPoolBackendCannotBeWithdrawn(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			s, ctx := newStore(t, e)
+			_, provider, epID := servicePairWithEndpoint(t, s, ctx, 8080)
+
+			pool := &domain.BackendPool{ID: NewID(), ServiceID: provider, Name: "web", LBAlgorithm: strPtr("roundrobin")}
+			if err := s.CreateBackendPool(ctx, testActor, pool); err != nil {
+				t.Fatalf("creating the pool: %v", err)
+			}
+			if err := s.AddBackendMember(ctx, testActor,
+				&domain.BackendMember{PoolID: pool.ID, EndpointID: epID, Weight: 1}); err != nil {
+				t.Fatalf("adding the backend: %v", err)
+			}
+
+			err := s.RetireEndpoint(ctx, testActor, epID)
+			if err == nil {
+				t.Fatal("a socket still serving a pool was withdrawn")
+			}
+			if !errors.Is(err, domain.ErrConflict) {
+				t.Errorf("got %v, want a conflict", err)
+			}
+		})
+	}
+}
+
+// servicePairWithEndpoint builds a consumer, a provider and one socket on the
+// provider, and returns their ids.
+func servicePairWithEndpoint(t *testing.T, s *SQLStore, ctx context.Context, port int) (string, string, string) {
+	t.Helper()
+	env := mustEnvironment(t, s, ctx, "prod-ep", domain.EnvRoleProduction)
+	mk := func(code string) string {
+		svc, err := domain.NewService(NewID(), domain.ServiceSpec{
+			Code: code, Name: code, Kind: domain.SvcAPI,
+			EnvironmentID: env, Availability: domain.AvailStandalone, Tier: 3,
+		}, s.Now())
+		if err != nil {
+			t.Fatalf("building %s: %v", code, err)
+		}
+		if err := s.CreateService(ctx, testActor, svc); err != nil {
+			t.Fatalf("creating %s: %v", code, err)
+		}
+		return svc.ID
+	}
+	consumer, provider := mk("consumer-ep"), mk("provider-ep")
+
+	ep, err := domain.NewEndpoint(NewID(), provider, "sock", domain.ProtoTCP, &port, domain.BindHost)
+	if err != nil {
+		t.Fatalf("building the endpoint: %v", err)
+	}
+	if err := s.CreateEndpoint(ctx, testActor, ep); err != nil {
+		t.Fatalf("creating the endpoint: %v", err)
+	}
+	return consumer, provider, ep.ID
+}
+
+func declareDependency(s *SQLStore, ctx context.Context, consumer, endpointID string) error {
+	d, err := domain.NewDependency(NewID(), domain.DependencySpec{
+		ConsumerServiceID: consumer, ProviderEndpointID: &endpointID,
+		Nature: domain.NatureHard, FailureMode: "it stops"}, s.Now())
+	if err != nil {
+		return err
+	}
+	return s.CreateDependency(ctx, testActor, d, nil)
+}

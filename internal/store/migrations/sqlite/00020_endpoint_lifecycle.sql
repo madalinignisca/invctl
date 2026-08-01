@@ -41,10 +41,27 @@
 --                                     socket is a finding worth seeing, not
 --                                     hiding
 --
+-- BACKEND_MEMBER IS NOT A READ OF THIS TABLE, and was missing from the list
+-- above until a security review asked why. A socket can be reached without any
+-- dependency naming it -- as a backend behind a route -- and LoadGraph keeps a
+-- membership row whose endpoint has gone from the map, which the engine skips
+-- in silence. So the decision is not a filter but a refusal: RetireEndpoint
+-- will not withdraw a socket that is still a pool member, because removing a
+-- backend is a capacity decision and nothing here can tell whether the pool has
+-- anything left to serve with.
+--
 -- NO NEW INDEX. The filtered queries are either whole-table scans that were
 -- already whole-table scans (LoadGraph) or already selective on another column.
 -- Adding a partial index on a guess is how the last two index migrations got
 -- written and then measured back out.
+
+-- ADD CONSTRAINT NEEDS A RECENT SQLITE. Measured: the pinned driver
+-- (modernc.org/sqlite v1.54.0, SQLite 3.53.3) accepts it and enforces the CHECK;
+-- the sqlite3 CLI at 3.45 rejects it as a syntax error. Nothing in this project
+-- applies migrations with the CLI -- goose runs through the pinned driver -- but
+-- anybody who reaches for `sqlite3 invctl.db < 00020...` will be told the file
+-- is malformed rather than that their SQLite is old, so it is written down here.
+-- Raised by a security review.
 
 -- +goose Up
 ALTER TABLE endpoint ADD COLUMN lifecycle TEXT NOT NULL DEFAULT 'active';

@@ -139,6 +139,36 @@ func (s *SQLStore) UpdateEndpoint(ctx context.Context, actor domain.Actor, e *do
 	})
 }
 
+// requireLiveProvider refuses an edge that resolves through a withdrawn socket.
+//
+// THE MIRROR OF RetireEndpoint, and without it that guard only holds in one
+// direction: you cannot retire a socket with live dependants, but nothing
+// stopped you declaring a dependant on an already-retired socket afterwards.
+// Two ordinary admin requests in the wrong order, no race required -- and the
+// result is the failure RetireEndpoint's own comment forbids. LoadGraph drops
+// retired sockets, the impact engine skips any dependency whose provider is
+// missing from the map, and the edge stays on the service page (dependencySelect
+// is deliberately unfiltered) while quietly vanishing from every simulation.
+//
+// A route is checked through its frontend for the same reason the retire guard
+// counts routes: the socket a route fronts is the socket the traffic reaches.
+func requireLiveProvider(ctx context.Context, t *tx, endpointID, routeID *string) error {
+	var live int
+	err := t.get(ctx, &live, `
+		SELECT COUNT(*) FROM endpoint e
+		WHERE e.lifecycle = ?
+		  AND (e.id = ?
+		    OR e.id = (SELECT r.frontend_endpoint_id FROM route r WHERE r.id = ?))`,
+		domain.LifecycleActive, derefString(endpointID), derefString(routeID))
+	if err != nil {
+		return fmt.Errorf("checking the provider socket: %w", err)
+	}
+	if live == 0 {
+		return fmt.Errorf("the provider socket is withdrawn: %w", domain.ErrConflict)
+	}
+	return nil
+}
+
 // RetireEndpoint withdraws a listening socket.
 //
 // REFUSED WHILE ANYTHING LIVE STILL RESOLVES THROUGH IT. A dependency naming
@@ -177,6 +207,29 @@ func (s *SQLStore) RetireEndpoint(ctx context.Context, actor domain.Actor, id st
 		if live > 0 {
 			return fmt.Errorf("endpoint %s still has %d live %s resolving through it: %w",
 				id, live, pluralDependencies(live), domain.ErrConflict)
+		}
+
+		// AND POOL MEMBERSHIP, which the first version of this guard missed.
+		// A socket can be reached without being named by any dependency: as a
+		// backend behind a route. LoadGraph keeps the membership row whose
+		// endpoint has vanished from the map and the engine skips it silently,
+		// so withdrawing a member shrinks a pool's capacity -- possibly to
+		// zero -- with nothing anywhere marked down. Found by a security
+		// review; the read audit in migration 00020 never mentioned
+		// backend_member at all, which by its own standard reads as forgotten
+		// rather than decided.
+		//
+		// Refused rather than cascaded: removing a backend from a pool is a
+		// capacity decision, and this method cannot tell whether the pool has
+		// anything left to serve with.
+		var pools int
+		if err := t.get(ctx, &pools,
+			`SELECT COUNT(*) FROM backend_member WHERE endpoint_id = ?`, id); err != nil {
+			return fmt.Errorf("checking pool membership of endpoint %s: %w", id, err)
+		}
+		if pools > 0 {
+			return fmt.Errorf("endpoint %s is still a backend in %d pool(s): %w",
+				id, pools, domain.ErrConflict)
 		}
 
 		res, err := t.exec(ctx, `
@@ -418,7 +471,13 @@ func (s *SQLStore) CreateDependency(ctx context.Context, actor domain.Actor, d *
 		return err
 	}
 	d.Confidence = domain.ConfidenceFor(actor, d.Confidence)
-	return s.write(ctx, actor, func(t *tx) error {
+	// Serializable, as the retire guard is: the check below asserts an
+	// invariant this transaction depends on, and at read-committed a
+	// concurrent retirement is invisible to it.
+	return s.writeSerializable(ctx, actor, func(t *tx) error {
+		if err := requireLiveProvider(ctx, t, d.ProviderEndpointID, d.ProviderRouteID); err != nil {
+			return err
+		}
 		_, err := t.exec(ctx, `
 			INSERT INTO dependency (id, consumer_service_id, consumer_instance_id,
 			                        provider_endpoint_id, provider_route_id, nature,
@@ -467,7 +526,12 @@ func (s *SQLStore) UpdateDependency(ctx context.Context, actor domain.Actor, d *
 	d.CreatedAt = before.CreatedAt
 	d.UpdatedAt = domain.FormatTime(s.now())
 
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.writeSerializable(ctx, actor, func(t *tx) error {
+		// Re-pointing an edge is declaring it, so it faces the same check. No
+		// route reaches this today; that is not a reason to leave the hole.
+		if err := requireLiveProvider(ctx, t, d.ProviderEndpointID, d.ProviderRouteID); err != nil {
+			return err
+		}
 		res, err := t.exec(ctx, `
 			UPDATE dependency
 			SET consumer_instance_id = ?, provider_endpoint_id = ?, provider_route_id = ?,
