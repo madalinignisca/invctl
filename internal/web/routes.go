@@ -162,6 +162,9 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	write("POST /endpoints/{id}", app.EndpointUpdate)
 	write("POST /instances/{id}", app.InstanceUpdate)
 	write("POST /environments/{id}", app.EnvironmentUpdate)
+	write("POST /interfaces/{id}", app.InterfaceUpdate)
+	write("POST /addresses/{id}", app.IPAddressUpdate)
+	write("POST /prefixes/{id}", app.PrefixUpdate)
 
 	// Operator overrides of an observation (docs/AUDIT.md rule 14). These are
 	// DECLARED mutations -- a person decided that a reading is wrong -- so they

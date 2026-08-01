@@ -73,16 +73,20 @@
           <td><a class="id" href="/assets/{{.HostAssetID}}">{{.HostName}}</a>
               <div class="mono" style="color:var(--faint);font-size:11.5px">host is fixed</div></td>
           <td>
+            {{$runtime := $.Edit.Value "runtime_type" $si.RuntimeType}}
             <select form="si-{{.ID}}" name="runtime_type" aria-label="Runtime">
-              {{range $.RuntimeTypes}}<option value="{{.}}" {{if eq . $si.RuntimeType}}selected{{end}}>{{.}}</option>{{end}}
+              {{range $.RuntimeTypes}}<option value="{{.}}" {{if eq . $runtime}}selected{{end}}>{{.}}</option>{{end}}
             </select>
           </td>
-          <td><input form="si-{{.ID}}" class="mono" type="text" name="role" value="{{deref .Role}}" aria-label="Role" style="width:8em"></td>
-          <td><input form="si-{{.ID}}" class="mono" type="text" name="shard" value="{{deref .Shard}}" aria-label="Shard" style="width:7em"></td>
-          <td><input form="si-{{.ID}}" type="number" name="ordinal" value="{{.Ordinal}}" min="0" aria-label="Ordinal" style="width:5em"></td>
+          <td><input form="si-{{.ID}}" class="mono" type="text" name="role" value="{{$.Edit.Value "role" (deref .Role)}}" aria-label="Role" style="width:8em"></td>
+          <td><input form="si-{{.ID}}" class="mono" type="text" name="shard" value="{{$.Edit.Value "shard" (deref .Shard)}}" aria-label="Shard" style="width:7em"></td>
+          <td><input form="si-{{.ID}}" class="mono {{if $.Edit.Err "ordinal"}}invalid{{end}}" type="number" name="ordinal"
+                     value="{{$.Edit.Value "ordinal" (itoa .Ordinal)}}" min="0" aria-label="Ordinal" style="width:5em">
+              {{with $.Edit.Err "ordinal"}}<div class="field-error">{{.}}</div>{{end}}</td>
           <td>
+            {{$desired := $.Edit.Value "desired_state" $si.DesiredState}}
             <select form="si-{{.ID}}" name="desired_state" aria-label="Desired state">
-              {{range $.DesiredStates}}<option value="{{.}}" {{if eq . $si.DesiredState}}selected{{end}}>{{.}}</option>{{end}}
+              {{range $.DesiredStates}}<option value="{{.}}" {{if eq . $desired}}selected{{end}}>{{.}}</option>{{end}}
             </select>
           </td>
           <td>{{template "health_cell" (index $.InstanceHealth .ID)}}</td>

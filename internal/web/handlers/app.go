@@ -55,7 +55,72 @@ type Base struct {
 	CSRF        string
 	Flash       *Flash
 	// EditRow is the id of the one row the operator opened for editing.
+	//
+	// ONE PARAMETER FOR EVERY EDITOR ON A PAGE, deliberately. The asset page
+	// alone offers ports, addresses and cost lines; they share `?edit=<id>`
+	// because ids are UUIDv7 and unique across tables, so an id names exactly
+	// one row wherever it appears. Splitting it into ?edit_port=/?edit_cost=
+	// would look tidier and break every URL bookmarked or tested against today
+	// for no gain. Each template still checks CanWrite before comparing.
 	EditRow string
+}
+
+// editState is a rejected inline edit on its way back to the page it came from.
+//
+// The house rule is 422 with the form re-rendered in error state, and an inline
+// row editor has to honour it the same as a standalone form: the row reopens,
+// showing WHAT THE OPERATOR TYPED rather than what is stored, with the message
+// against the field it belongs to. Reopening with the stored values instead is
+// the failure mode this exists to prevent -- the operator sees the old number
+// where they just typed a new one and cannot tell whether it saved.
+//
+// Nil means nothing was rejected, and every accessor is nil-safe so a template
+// can call it unconditionally.
+type editState struct {
+	ID     string
+	Errors map[string]string
+	Values map[string]string
+}
+
+// Value returns the submitted value for a field, or the stored one.
+func (e *editState) Value(field, stored string) string {
+	if e == nil {
+		return stored
+	}
+	if v, ok := e.Values[field]; ok {
+		return v
+	}
+	return stored
+}
+
+// Checked is Value for a checkbox. An unticked box submits NOTHING, so a
+// missing key on a rejected form means false, not "fall back to stored" --
+// otherwise unticking a box and failing validation elsewhere would silently
+// re-tick it.
+func (e *editState) Checked(field string, stored bool) bool {
+	if e == nil || e.Values == nil {
+		return stored
+	}
+	return e.Values[field] != ""
+}
+
+// Err returns the message against one field, if any.
+func (e *editState) Err(field string) string {
+	if e == nil {
+		return ""
+	}
+	return e.Errors[field]
+}
+
+// rejected builds the state for a form that was refused, capturing exactly the
+// fields the caller names. Only named fields are captured: a form post carries
+// the CSRF token too, and nothing rejected should be echoed back untouched.
+func rejected(r *http.Request, id string, errs map[string]string, fields ...string) *editState {
+	values := make(map[string]string, len(fields))
+	for _, f := range fields {
+		values[f] = formValue(r, f)
+	}
+	return &editState{ID: id, Errors: orEmpty(errs), Values: values}
 }
 
 const (

@@ -21,7 +21,10 @@ func logError(err error) { slog.Error("render failed", "error", err) }
 // can test.
 func funcs() template.FuncMap {
 	return template.FuncMap{
-		"dict":           dict,
+		"dict": dict,
+		// itoa exists so a number can be compared with, or fall back to, a
+		// submitted form value -- which is always a string.
+		"itoa":           strconv.Itoa,
 		"hasField":       hasField,
 		"since":          since,
 		"shortTime":      shortTime,

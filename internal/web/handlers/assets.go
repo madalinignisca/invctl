@@ -18,7 +18,9 @@ import (
 type environmentsPage struct {
 	Base
 	Environments []domain.Environment
-	FormData     environmentFormData
+	// Edit is set only when a correction was refused; see editState.
+	Edit     *editState
+	FormData environmentFormData
 }
 
 type environmentForm struct {
@@ -114,17 +116,20 @@ func (a *App) EnvironmentUpdate(w http.ResponseWriter, r *http.Request) {
 	updated.Criticality = intValue(r, "criticality", existing.Criticality)
 
 	if err := a.Store.UpdateEnvironment(r.Context(), actor(r), &updated); err != nil {
-		if messages, ok := validationErrors(err); ok {
-			a.setFlash(r, "error", "That environment was not accepted: "+joinMessages(messages))
-			render.Redirect(w, r, "/environments?edit="+id)
-			return
+		messages, ok := validationErrors(err)
+		if !ok {
+			if !isConflict(err) {
+				a.handleStoreError(w, r, err)
+				return
+			}
+			messages = map[string]string{"code": "another environment already uses that code"}
 		}
-		if isConflict(err) {
-			a.setFlash(r, "error", "Another environment already uses that code.")
-			render.Redirect(w, r, "/environments?edit="+id)
-			return
-		}
-		a.handleStoreError(w, r, err)
+		// 422 with the row reopened on what was typed, not a redirect that
+		// throws the operator's input away. The house rule, and the reason for
+		// it: a redirect refills the row from storage, so the field they just
+		// corrected shows the old value back and nothing says whether it saved.
+		a.renderEnvironmentsEditing(w, r, http.StatusUnprocessableEntity,
+			rejected(r, id, messages, "code", "name", "role", "criticality", "in_scope"))
 		return
 	}
 
@@ -132,7 +137,17 @@ func (a *App) EnvironmentUpdate(w http.ResponseWriter, r *http.Request) {
 	render.Redirect(w, r, "/environments")
 }
 
+// renderEnvironmentsEditing redraws the list with one row rejected.
+func (a *App) renderEnvironmentsEditing(w http.ResponseWriter, r *http.Request, status int, edit *editState) {
+	a.renderEnvironmentsWith(w, r, status, nil, environmentForm{}, edit)
+}
+
 func (a *App) renderEnvironments(w http.ResponseWriter, r *http.Request, status int, messages map[string]string, form environmentForm) {
+	a.renderEnvironmentsWith(w, r, status, messages, form, nil)
+}
+
+func (a *App) renderEnvironmentsWith(w http.ResponseWriter, r *http.Request, status int,
+	messages map[string]string, form environmentForm, edit *editState) {
 	envs, err := a.Store.ListEnvironments(r.Context())
 	if err != nil {
 		a.serverError(w, r, err)
@@ -153,9 +168,16 @@ func (a *App) renderEnvironments(w http.ResponseWriter, r *http.Request, status 
 		a.Render.Partial(w, status, "environment_form", formData)
 		return
 	}
+	base := a.base(r, "Environments", "environments")
+	if edit != nil {
+		// The rejected row is the one that opens, whatever the query string
+		// said: the operator is looking at the form they just submitted.
+		base.EditRow = edit.ID
+	}
 	a.Render.Page(w, status, "environment_list", environmentsPage{
-		Base:         a.base(r, "Environments", "environments"),
+		Base:         base,
 		Environments: envs,
+		Edit:         edit,
 		FormData:     formData,
 	})
 }
@@ -239,10 +261,12 @@ type assetDetailPage struct {
 	// neighbours' and with the observed transitions for the same rows. "What
 	// changed just before this broke" is the 03:00 question and it is not
 	// answerable from one entity's history.
-	Timeline      []store.TimelineEntry
-	Environments  []domain.Environment
-	Kinds         []store.VocabularyTerm
-	Lifecycles    []string
+	Timeline     []store.TimelineEntry
+	Environments []domain.Environment
+	Kinds        []store.VocabularyTerm
+	Lifecycles   []string
+	// Edit is set only when a port or address correction was refused.
+	Edit          *editState
 	InterfaceForm interfaceFormData
 	IPAddressForm ipAddressFormData
 	LinkForm      linkFormData
@@ -251,7 +275,16 @@ type assetDetailPage struct {
 
 // AssetDetail renders one asset with its containment, ports and workloads.
 func (a *App) AssetDetail(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
+	a.renderAssetDetail(w, r, http.StatusOK, r.PathValue("id"), nil)
+}
+
+// renderAssetDetail draws the page at any status, so a refused inline edit can
+// come back as 422 with the row reopened on what was typed -- the same shape
+// renderServiceDetail has, and for the same reason: the ports and addresses
+// editors live on this page, and answering a form post with a bare fragment
+// leaves a browser with no layout and no way back.
+func (a *App) renderAssetDetail(w http.ResponseWriter, r *http.Request, status int,
+	id string, edit *editState) {
 
 	asset, err := a.Store.GetAsset(r.Context(), id)
 	if err != nil {
@@ -345,8 +378,14 @@ func (a *App) AssetDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	a.Render.Page(w, http.StatusOK, "asset_detail", assetDetailPage{
-		Base:           a.base(r, asset.Name, "assets"),
+	assetBase := a.base(r, asset.Name, "assets")
+	if edit != nil {
+		// The refused row opens, whatever the query string said.
+		assetBase.EditRow = edit.ID
+	}
+	a.Render.Page(w, status, "asset_detail", assetDetailPage{
+		Base:           assetBase,
+		Edit:           edit,
 		Asset:          asset,
 		Certificates:   certificates,
 		Costs:          costs,

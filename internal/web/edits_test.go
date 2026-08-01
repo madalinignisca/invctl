@@ -213,6 +213,13 @@ func TestCorrectingAnEnvironment(t *testing.T) {
 // An update runs the same rules as a create. They lived inside NewEnvironment,
 // where an update could not reach them, so the table CHECK was the only thing
 // between a form and a blank name.
+//
+// AND IT IS REFUSED THE WAY THE HOUSE RULE SAYS: 422, the form re-rendered in
+// error state, with what the operator typed still in the fields. A redirect
+// would refill the row from storage, so the value they just corrected reappears
+// as the old one and nothing says whether it saved. Both reviews called this
+// out; the first version of this test asserted neither the status nor the
+// preserved input, so it would have passed either way.
 func TestAnEnvironmentUpdateIsValidated(t *testing.T) {
 	h := newHarness(t)
 	h.login("admin", "admin-password")
@@ -223,14 +230,27 @@ func TestAnEnvironmentUpdateIsValidated(t *testing.T) {
 		"code":       {"prod"}, "name": {""},
 		"role": {"production"}, "criticality": {"9"},
 	}, false)
-	resp.Body.Close()
+	page := body(t, resp)
 
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Errorf("a refused environment returned %d, want 422", resp.StatusCode)
+	}
+	if !strings.Contains(page, "field-error") {
+		t.Error("the refusal did not say which field was wrong")
+	}
+	if !strings.Contains(page, "<nav") {
+		t.Error("the refusal answered with a fragment, not a page")
+	}
+	// The typed value survives: 9 is what they entered and 9 is what comes
+	// back, not the stored 1.
+	row := editingRow(t, page)
+	if !strings.Contains(row, `value="9"`) {
+		t.Errorf("the rejected row lost what the operator typed: %s", row)
+	}
+	// And nothing was stored.
 	after := body(t, h.get("/environments", false))
 	if strings.Contains(after, `<td class="num">9</td>`) {
 		t.Error("a criticality of 9 was stored; the range check did not run on update")
-	}
-	if !strings.Contains(after, "not accepted") {
-		t.Error("the operator was not told the environment was refused")
 	}
 }
 
@@ -362,5 +382,260 @@ func TestAnEndpointFormRejectionIsAWholePageWithoutHTMX(t *testing.T) {
 		if !strings.Contains(page, "field-error") {
 			t.Errorf("%s without HTMX did not say what was wrong", c.name)
 		}
+	}
+}
+
+// ---------- ports, addresses and networks ----------
+//
+// The same line as everywhere else in this slice: a port keeps its chassis and
+// its bond, an address keeps its port. What changes is what the thing IS.
+
+func TestCorrectingAPort(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	assetID := h.refs.Assets["hv-01"]
+	ifaceID := firstPortEditID(t, body(t, h.get("/assets/"+assetID, false)))
+
+	row := editingRow(t, body(t, h.get("/assets/"+assetID+"?edit="+ifaceID, false)))
+	// The attachment is not on offer: neither the chassis nor the bond.
+	for _, forbidden := range []string{`name="asset_id"`, `name="lag_parent_id"`} {
+		if strings.Contains(row, forbidden) {
+			t.Errorf("the port editor offers %s, which moves the topology", forbidden)
+		}
+	}
+
+	resp := h.post("/interfaces/"+ifaceID, url.Values{
+		"csrf_token": {h.csrfToken("/assets/" + assetID)},
+		"name":       {"eth9"}, "form_factor": {"sfp28"},
+		"speed_mbps": {"25000"}, "mac": {"AA-BB-CC-DD-EE-FF"},
+		"mtu": {"9000"}, "is_mgmt": {"true"},
+	}, false)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("correcting a port returned %d, want a redirect", resp.StatusCode)
+	}
+
+	after := body(t, h.get("/assets/"+assetID, false))
+	if !strings.Contains(after, "eth9") {
+		t.Error("the port's new name is not shown")
+	}
+	// A MAC is normalised whichever way it was pasted, so a lookup matches.
+	if !strings.Contains(after, "aa:bb:cc:dd:ee:ff") {
+		t.Error("a MAC pasted in dashed uppercase was not normalised")
+	}
+	// `enabled` was not submitted, and an unticked box submits nothing: the
+	// port is now administratively down and the page must say so rather than
+	// leaving it looking live.
+	if !strings.Contains(after, "disabled") {
+		t.Error("unticking enabled did not take, or the page does not show it")
+	}
+}
+
+// The address value is editable and its derived columns move with it. addr_text
+// is what a person reads; addr_start is what every containment query scans. A
+// row where they disagree resolves to the wrong network and nothing on screen
+// would ever show it.
+func TestCorrectingAnAddressMovesItsDerivedColumns(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	assetID := h.refs.Assets["hv-01"]
+	page := body(t, h.get("/assets/"+assetID, false))
+	addrID, oldAddr := firstAddressEditID(t, page)
+
+	resp := h.post("/addresses/"+addrID, url.Values{
+		"csrf_token": {h.csrfToken("/assets/" + assetID)},
+		"addr_text":  {"10.42.42.42"}, "role": {"primary"},
+	}, false)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("correcting an address returned %d, want a redirect", resp.StatusCode)
+	}
+
+	after := body(t, h.get("/assets/"+assetID, false))
+	if !strings.Contains(after, "10.42.42.42") || strings.Contains(after, oldAddr) {
+		t.Errorf("the address still reads %s, not the corrected one", oldAddr)
+	}
+	// The proof that addr_start moved too: search resolves an address by a
+	// bytewise range scan over the derived column, never over the text.
+	hits := body(t, h.get("/search?q=10.42.42.42", false))
+	if !strings.Contains(hits, "hv-01") {
+		t.Error("the corrected address does not resolve to its asset: addr_start did not move with addr_text")
+	}
+}
+
+func TestCorrectingANetwork(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	page := body(t, h.get("/prefixes", false))
+	prefixID := firstEditID(t, page)
+
+	resp := h.post("/prefixes/"+prefixID, url.Values{
+		"csrf_token": {h.csrfToken("/prefixes")},
+		"cidr_text":  {"10.99.0.0/16"}, "vlan_id": {"99"}, "role": {"quarantined"},
+	}, false)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("correcting a network returned %d, want a redirect", resp.StatusCode)
+	}
+
+	after := body(t, h.get("/prefixes", false))
+	if !strings.Contains(after, "10.99.0.0/16") {
+		t.Error("the network's new CIDR is not shown")
+	}
+	// THE REINDEX, exercised through FREE TEXT. A prefix is the one thing in
+	// this slice that lives in the search index, and an update that skipped
+	// indexEntity would leave search answering with the old row.
+	//
+	// Searching the CIDR itself proves nothing: an address or a network in the
+	// query box is resolved STRUCTURALLY, by a range scan over addr_start,
+	// which never touches the index. The first version of this assertion did
+	// exactly that and passed with the reindex deleted. The role is plain text
+	// and only reachable through the index.
+	hits := body(t, h.get("/search?q=quarantined", false))
+	if !strings.Contains(hits, "10.99.0.0/16") {
+		t.Error("search does not know the corrected network: the reindex was skipped")
+	}
+}
+
+// A refused correction comes back as 422 with the row reopened on what was
+// typed, on every page in this slice. Both reviews of the previous slice
+// flagged handlers that redirected instead, discarding the operator's input.
+func TestARefusedNetworkEditKeepsWhatWasTyped(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	prefixID := firstEditID(t, body(t, h.get("/prefixes", false)))
+	resp := h.post("/prefixes/"+prefixID, url.Values{
+		"csrf_token": {h.csrfToken("/prefixes")},
+		"cidr_text":  {"10.1.0.0/16"}, "vlan_id": {"9999"}, "role": {"kept"},
+	}, false)
+	page := body(t, resp)
+
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Errorf("a refused network edit returned %d, want 422", resp.StatusCode)
+	}
+	if !strings.Contains(page, "field-error") {
+		t.Error("the refusal did not say which field was wrong")
+	}
+	row := editingRow(t, page)
+	if !strings.Contains(row, `value="9999"`) {
+		t.Errorf("the rejected row lost the VLAN that was typed: %s", row)
+	}
+	if !strings.Contains(row, `value="kept"`) {
+		t.Errorf("the rejected row lost the role that was typed: %s", row)
+	}
+}
+
+func TestReadOnlyUsersGetNoNetworkEditors(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+	assetID := h.refs.Assets["hv-01"]
+	ifaceID := firstPortEditID(t, body(t, h.get("/assets/"+assetID, false)))
+	prefixID := firstEditID(t, body(t, h.get("/prefixes", false)))
+
+	h.logout()
+	h.login("viewer", "viewer-password")
+	for _, c := range []struct{ name, path, marker string }{
+		{"port", "/assets/" + assetID + "?edit=" + ifaceID, `name="form_factor"`},
+		{"network", "/prefixes?edit=" + prefixID, `name="cidr_text"`},
+	} {
+		if strings.Contains(body(t, h.get(c.path, false)), c.marker) {
+			t.Errorf("a read-only user asking for the %s editor by id was given one", c.name)
+		}
+	}
+}
+
+// firstPortEditID returns the first PORT offered for editing.
+//
+// Matched on the actions-column button specifically. Scoping to the panel is
+// not enough: an address's edit link sits inside the port's own row, earlier in
+// the markup, so "the first ?edit= in the interfaces panel" is an address id
+// and the port row never opens.
+func firstPortEditID(t *testing.T, page string) string {
+	t.Helper()
+	i := strings.Index(page, "<h2>Interfaces</h2>")
+	if i < 0 {
+		t.Fatal("no interfaces panel on the asset page")
+	}
+	m := regexp.MustCompile(`class="btn btn-sm" href="[^"]*\?edit=([0-9a-f-]+)#ports"`).
+		FindStringSubmatch(page[i:])
+	if m == nil {
+		t.Fatal("no port offers an edit link")
+	}
+	return m[1]
+}
+
+// firstAddressEditID returns an address offered for editing and the text it
+// currently shows, so a test can assert the old value is gone.
+func firstAddressEditID(t *testing.T, page string) (string, string) {
+	t.Helper()
+	i := strings.Index(page, "<h2>Interfaces</h2>")
+	if i < 0 {
+		t.Fatal("no interfaces panel on the asset page")
+	}
+	m := regexp.MustCompile(`<div>([0-9a-f.:]+) <span class="pill pill-muted">[^<]*</span>\s*<a class="id" href="[^"]*\?edit=([0-9a-f-]+)`).
+		FindStringSubmatch(page[i:])
+	if m == nil {
+		t.Fatal("no address offers an edit link")
+	}
+	return m[2], m[1]
+}
+
+// The store refuses to move a port even when the form says to. The UI not
+// offering a field is not a control: a hand-written POST is one line of curl,
+// and moving a port to another chassis rewrites the cable map and every path
+// that runs through it.
+func TestAPortCannotBeMovedByPostingAnAssetID(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	assetID := h.refs.Assets["hv-01"]
+	otherID := h.refs.Assets["hv-02"]
+	ifaceID := firstPortEditID(t, body(t, h.get("/assets/"+assetID, false)))
+	otherBefore := body(t, h.get("/assets/"+otherID, false))
+
+	resp := h.post("/interfaces/"+ifaceID, url.Values{
+		"csrf_token": {h.csrfToken("/assets/" + assetID)},
+		"name":       {"moved"}, "form_factor": {"sfp28"},
+		// The two the handler must ignore.
+		"asset_id": {otherID}, "lag_parent_id": {ifaceID},
+	}, false)
+	resp.Body.Close()
+
+	if !strings.Contains(body(t, h.get("/assets/"+assetID, false)), "moved") {
+		t.Fatal("the rename did not take, so the rest of this proves nothing")
+	}
+	otherAfter := body(t, h.get("/assets/"+otherID, false))
+	if strings.Contains(otherAfter, "moved") && !strings.Contains(otherBefore, "moved") {
+		t.Error("a posted asset_id moved the port to another chassis")
+	}
+}
+
+// Clearing the amount and saving must not rewrite a real figure to zero. It
+// used to: parseAmountMinor treated blank as 0, so the only record that
+// anything happened was the change_log. Found by a security review.
+func TestClearingACostAmountIsRefusedRatherThanStoredAsZero(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	id := h.refs.Assets["hv-01"]
+	costID := firstCostFormID(t, body(t, h.get("/assets/"+id, false)))
+
+	resp := h.post("/assets/"+id+"/costs/"+costID, url.Values{
+		"csrf_token": {h.csrfToken("/assets/" + id)},
+		"kind":       {"acquisition"}, "period": {"once"},
+		"amount": {""}, "valid_from": {"2024-01-01"},
+	}, false)
+	resp.Body.Close()
+
+	after := body(t, h.get("/assets/"+id, false))
+	if strings.Contains(after, "€0.00") {
+		t.Error("clearing the amount stored zero")
+	}
+	if !strings.Contains(after, "€8,400.00") {
+		t.Error("the stored amount did not survive a blank submission")
 	}
 }

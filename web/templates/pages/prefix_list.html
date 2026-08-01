@@ -14,16 +14,49 @@
   {{if .Prefixes}}
   <div class="scroll-x">
     <table>
-      <thead><tr><th>CIDR</th><th>VLAN</th><th>Environment</th><th>Role</th><th>Addresses in use</th></tr></thead>
+      <thead><tr><th>CIDR</th><th>VLAN</th><th>Environment</th><th>Role</th><th>Addresses in use</th>{{if .CanWrite}}<th></th>{{end}}</tr></thead>
       <tbody>
         {{range .Prefixes}}
+        {{$p := .}}
+        {{/* Editing the network itself, including its CIDR: the text and the
+             byte range it is searched by are one fact stored four times, and
+             SetCIDR is the only way to move them, together. */}}
+        {{if and $.CanWrite (eq .ID $.EditRow)}}
+        <tr class="row-editing">
+          <td><input form="pfx-{{.ID}}" class="mono {{if $.Edit.Err "cidr_text"}}invalid{{end}}" type="text" name="cidr_text"
+                     value="{{$.Edit.Value "cidr_text" .CIDRText}}" aria-label="Network" required style="width:12em">
+              {{with $.Edit.Err "cidr_text"}}<div class="field-error">{{.}}</div>{{end}}</td>
+          <td><input form="pfx-{{.ID}}" class="{{if $.Edit.Err "vlan_id"}}invalid{{end}}" type="number" name="vlan_id"
+                     value="{{$.Edit.Value "vlan_id" (derefInt .VLANID)}}" min="1" max="4094" aria-label="VLAN" style="width:5.5em">
+              {{with $.Edit.Err "vlan_id"}}<div class="field-error">{{.}}</div>{{end}}</td>
+          <td>
+            {{$env := $.Edit.Value "environment_id" (deref $p.EnvironmentID)}}
+            <select form="pfx-{{.ID}}" name="environment_id" aria-label="Environment">
+              <option value="">—</option>
+              {{range $.FormData.Environments}}<option value="{{.ID}}" {{if eq .ID $env}}selected{{end}}>{{.Code}}</option>{{end}}
+            </select>
+          </td>
+          <td><input form="pfx-{{.ID}}" type="text" name="role" value="{{$.Edit.Value "role" (deref .Role)}}"
+                     aria-label="Role" style="width:8em"></td>
+          <td class="num">{{.AddressCount}}</td>
+          <td style="white-space:nowrap">
+            <form id="pfx-{{.ID}}" method="post" action="/prefixes/{{.ID}}" style="display:inline">
+              <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+              <button class="btn btn-sm btn-primary" type="submit">Save</button>
+            </form>
+            <a class="btn btn-sm" href="/prefixes">Cancel</a>
+          </td>
+        </tr>
+        {{else}}
         <tr>
           <td class="mono">{{.CIDRText}}</td>
           <td class="num">{{if .VLANID}}{{derefInt .VLANID}}{{else}}—{{end}}</td>
           <td>{{if .EnvironmentCode}}<span class="pill pill-info">{{.EnvironmentCode}}</span>{{else}}—{{end}}</td>
           <td>{{if .Role}}{{deref .Role}}{{else}}—{{end}}</td>
           <td class="num">{{.AddressCount}}</td>
+          <td>{{if $.CanWrite}}<a class="btn btn-sm" href="/prefixes?edit={{.ID}}">Edit</a>{{end}}</td>
         </tr>
+        {{end}}
         {{end}}
       </tbody>
     </table>

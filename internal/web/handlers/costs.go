@@ -210,8 +210,13 @@ func costFromForm(r *http.Request, now time.Time) (*domain.Cost, error) {
 // by a factor of a thousand, and a wrong guess is a silently wrong budget.
 func parseAmountMinor(raw string) (int64, error) {
 	s := strings.TrimSpace(raw)
+	// BLANK IS NOT ZERO. It used to return (0, nil), so clearing the amount on
+	// an edit and pressing Save rewrote a real figure to €0.00 with nothing on
+	// screen to say so -- only the change_log knew. An omitted amount is a
+	// mistake in a form whose entire purpose is the amount. A deliberate zero
+	// is still expressible: type 0.
 	if s == "" {
-		return 0, nil
+		return 0, amountError("an amount is required")
 	}
 	s = strings.ReplaceAll(s, " ", "")
 	s = strings.ReplaceAll(s, " ", "")

@@ -97,7 +97,7 @@
                both a comma and a point, which the parser refuses as ambiguous.
                A field must render what its own parser accepts. */}}
           <td><input form="cost-{{.ID}}" class="mono" type="text" name="amount"
-                     value="{{amount .AmountMinor}}" aria-label="Amount" style="width:7em"></td>
+                     value="{{amount .AmountMinor}}" aria-label="Amount" required style="width:7em"></td>
           <td><input form="cost-{{.ID}}" type="date" name="valid_from" value="{{.ValidFrom}}" aria-label="From"></td>
           <td><input form="cost-{{.ID}}" type="date" name="valid_until" value="{{deref .ValidUntil}}" aria-label="Until"></td>
           <td><input form="cost-{{.ID}}" type="text" name="note" value="{{deref .Note}}" aria-label="Note" style="width:100%"></td>
@@ -161,7 +161,7 @@
       </div>
       <div class="field">
         <label for="cost-amount-{{.Slug}}">Amount</label>
-        <input id="cost-amount-{{.Slug}}" class="mono" type="text" name="amount" placeholder="1200.00">
+        <input id="cost-amount-{{.Slug}}" class="mono" type="text" name="amount" placeholder="1200.00" required>
       </div>
       <div class="field">
         <label for="cost-from-{{.Slug}}">From</label>

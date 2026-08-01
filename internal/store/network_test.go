@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/gabriel/invctl/internal/domain"
@@ -257,4 +258,110 @@ func mustInterface(t *testing.T, s *SQLStore, ctx context.Context, assetID, name
 		t.Fatalf("creating interface %s: %v", name, err)
 	}
 	return iface.ID
+}
+
+// The store refuses to move a port or rebond it, whatever the caller passes.
+//
+// AT THE STORE, not only at the handler. InterfaceUpdate never reads asset_id
+// or lag_parent_id from a form, so a request cannot carry them today -- which
+// means a web test cannot reach this guard at all, and deleting it leaves the
+// whole suite green. The next caller will not be an HTML form, and a port that
+// silently changes chassis rewrites the cable map and every path through it.
+func TestUpdateInterfaceCannotMoveOrRebondAPort(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			s, ctx := newStore(t, e)
+			homeID := mustAsset(t, s, ctx, domain.KindServer, "srv-home", nil)
+			awayID := mustAsset(t, s, ctx, domain.KindServer, "srv-away", nil)
+
+			iface, err := domain.NewInterface(NewID(), homeID, "eth0", domain.FFRJ45)
+			if err != nil {
+				t.Fatalf("building interface: %v", err)
+			}
+			if err := s.CreateInterface(ctx, testActor, iface); err != nil {
+				t.Fatalf("creating interface: %v", err)
+			}
+			bond, err := domain.NewInterface(NewID(), homeID, "bond0", domain.FFRJ45)
+			if err != nil {
+				t.Fatalf("building bond: %v", err)
+			}
+			if err := s.CreateInterface(ctx, testActor, bond); err != nil {
+				t.Fatalf("creating bond: %v", err)
+			}
+
+			// A caller asking for all three at once: rename, move, rebond.
+			tampered := *iface
+			tampered.Name = "eth0-renamed"
+			tampered.AssetID = awayID
+			tampered.LagParentID = &bond.ID
+			if err := s.UpdateInterface(ctx, testActor, &tampered); err != nil {
+				t.Fatalf("updating interface: %v", err)
+			}
+
+			after, err := s.GetInterface(ctx, iface.ID)
+			if err != nil {
+				t.Fatalf("reloading interface: %v", err)
+			}
+			// The rename took: without this the rest proves only that nothing
+			// happened at all.
+			if after.Name != "eth0-renamed" {
+				t.Fatalf("name = %q, want the rename to have taken", after.Name)
+			}
+			if after.AssetID != homeID {
+				t.Errorf("the port moved chassis: asset_id = %q, want %q", after.AssetID, homeID)
+			}
+			if after.LagParentID != nil {
+				t.Errorf("the port was bonded by an update: lag_parent_id = %v, want nil", after.LagParentID)
+			}
+
+			// And the port is still listed where it was, which is what any
+			// reader of the topology actually looks at.
+			home, err := s.ListInterfaces(ctx, homeID)
+			if err != nil {
+				t.Fatalf("listing home interfaces: %v", err)
+			}
+			var found bool
+			for _, row := range home {
+				if row.ID == iface.ID {
+					found = true
+				}
+			}
+			if !found {
+				t.Error("the port is no longer listed on the asset it belongs to")
+			}
+
+			// THE AUDIT MUST NOT CLAIM IT MOVED. What actually stops the move
+			// is the UPDATE column list, which never mentions asset_id -- but
+			// logUpdate diffs the struct it was HANDED against the stored row,
+			// so a tampered field reaches the change_log even though it never
+			// reached the table. The entry would read "asset_id: srv-home ->
+			// srv-away" for a port that did not move: a permanent, append-only
+			// record of something that never happened, which is worse than a
+			// missing one because nothing contradicts it.
+			changes, err := s.ListChangesForEntity(ctx, "interface", iface.ID, 10)
+			if err != nil {
+				t.Fatalf("reading the change log: %v", err)
+			}
+			// Updates only. A create carries a FULL SNAPSHOT by design, which
+			// names every column including these two -- checking every entry
+			// makes the assertion fail on the create and prove nothing about
+			// the update.
+			var updates int
+			for _, c := range changes {
+				if c.Action != "update" {
+					continue
+				}
+				updates++
+				for _, phantom := range []string{"asset_id", "lag_parent_id"} {
+					if strings.Contains(c.Diff, phantom) {
+						t.Errorf("the audit trail claims %s changed, but the port did not move: %s",
+							phantom, c.Diff)
+					}
+				}
+			}
+			if updates == 0 {
+				t.Fatal("no update entry in the audit trail, so nothing above was checked")
+			}
+		})
+	}
 }

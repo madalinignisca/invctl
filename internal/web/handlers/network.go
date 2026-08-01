@@ -192,12 +192,18 @@ type prefixListPage struct {
 	Base
 	Prefixes     []store.PrefixRow
 	Environments []domain.Environment
-	FormData     prefixFormData
+	// Edit is set only when a correction was refused; see editState.
+	Edit     *editState
+	FormData prefixFormData
 }
 
 // PrefixList renders every network, with its environment, VLAN and how many
 // addresses in it are actually assigned.
 func (a *App) PrefixList(w http.ResponseWriter, r *http.Request) {
+	a.renderPrefixes(w, r, http.StatusOK, nil)
+}
+
+func (a *App) renderPrefixes(w http.ResponseWriter, r *http.Request, status int, edit *editState) {
 	prefixes, err := a.Store.ListPrefixes(r.Context())
 	if err != nil {
 		a.serverError(w, r, err)
@@ -208,10 +214,15 @@ func (a *App) PrefixList(w http.ResponseWriter, r *http.Request) {
 		a.serverError(w, r, err)
 		return
 	}
-	a.Render.Page(w, http.StatusOK, "prefix_list", prefixListPage{
-		Base:         a.base(r, "Prefixes", "prefixes"),
+	base := a.base(r, "Prefixes", "prefixes")
+	if edit != nil {
+		base.EditRow = edit.ID
+	}
+	a.Render.Page(w, status, "prefix_list", prefixListPage{
+		Base:         base,
 		Prefixes:     prefixes,
 		Environments: envs,
+		Edit:         edit,
 		FormData:     a.newPrefixForm(r, nil, envs),
 	})
 }
@@ -251,4 +262,155 @@ func (a *App) PrefixCreate(w http.ResponseWriter, r *http.Request) {
 
 	a.setFlash(r, "success", "Prefix "+prefix.CIDRText+" declared.")
 	render.Redirect(w, r, "/prefixes")
+}
+
+// ---------- corrections ----------
+//
+// Editing what a port, an address or a network IS. None of these move a thing:
+// a port stays in its chassis and out of or in its bond, an address stays on
+// its port. Those decide what the topology and the reachability walk see, and
+// the store carries them over from the stored row rather than trusting the
+// form — the UI not offering a field is not a control.
+
+// InterfaceUpdate corrects a port.
+func (a *App) InterfaceUpdate(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Could not read that form.", http.StatusBadRequest)
+		return
+	}
+	existing, err := a.Store.GetInterface(r.Context(), r.PathValue("id"))
+	if err != nil {
+		a.handleStoreError(w, r, err)
+		return
+	}
+
+	updated := *existing
+	updated.Name = formValue(r, "name")
+	updated.FormFactor = formValue(r, "form_factor")
+	updated.SpeedMbps = optionalInt(r, "speed_mbps")
+	updated.MTU = optionalInt(r, "mtu")
+	updated.IsMgmt = checkbox(r, "is_mgmt")
+	updated.Enabled = checkbox(r, "enabled")
+	err = updated.SetMAC(formValue(r, "mac"))
+	if err == nil {
+		err = a.Store.UpdateInterface(r.Context(), actor(r), &updated)
+	}
+	if err != nil {
+		a.refuseAssetEdit(w, r, err, existing.AssetID, existing.ID,
+			map[string]string{"name": "this asset already has a port with that name"},
+			"name", "form_factor", "speed_mbps", "mac", "mtu", "is_mgmt", "enabled")
+		return
+	}
+	a.setFlash(r, "success", "Port updated.")
+	render.Redirect(w, r, "/assets/"+existing.AssetID)
+}
+
+// IPAddressUpdate corrects an address.
+func (a *App) IPAddressUpdate(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Could not read that form.", http.StatusBadRequest)
+		return
+	}
+	existing, err := a.Store.GetIPAddress(r.Context(), r.PathValue("id"))
+	if err != nil {
+		a.handleStoreError(w, r, err)
+		return
+	}
+	// The asset to return to comes from the address's own port, not from the
+	// form: a posted asset id would decide which page an operator lands on
+	// after editing somebody else's record, which is a small lie with a long
+	// tail. Nothing here needs the caller to tell us where this address lives.
+	assetID := ""
+	if existing.InterfaceID != nil {
+		if iface, ifErr := a.Store.GetInterface(r.Context(), *existing.InterfaceID); ifErr == nil {
+			assetID = iface.AssetID
+		}
+	}
+	back := "/assets"
+	if assetID != "" {
+		back = "/assets/" + assetID
+	}
+
+	updated := *existing
+	updated.Role = formValue(r, "role")
+	err = updated.SetAddress(formValue(r, "addr_text"))
+	if err == nil {
+		err = a.Store.UpdateIPAddress(r.Context(), actor(r), &updated)
+	}
+	if err != nil {
+		a.refuseAssetEdit(w, r, err, assetID, existing.ID,
+			map[string]string{"addr_text": "this interface already has that address"},
+			"addr_text", "role")
+		return
+	}
+	a.setFlash(r, "success", "Address updated.")
+	render.Redirect(w, r, back)
+}
+
+// PrefixUpdate corrects a network.
+func (a *App) PrefixUpdate(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Could not read that form.", http.StatusBadRequest)
+		return
+	}
+	existing, err := a.Store.GetPrefix(r.Context(), r.PathValue("id"))
+	if err != nil {
+		a.handleStoreError(w, r, err)
+		return
+	}
+
+	updated := *existing
+	updated.VLANID = optionalInt(r, "vlan_id")
+	updated.EnvironmentID = optionalString(r, "environment_id")
+	updated.Role = optionalString(r, "role")
+	err = updated.SetCIDR(formValue(r, "cidr_text"))
+	if err == nil {
+		err = a.Store.UpdatePrefix(r.Context(), actor(r), &updated)
+	}
+	if err != nil {
+		messages, ok := refusalMessages(err, map[string]string{"cidr_text": "that network is already declared"})
+		if !ok {
+			a.handleStoreError(w, r, err)
+			return
+		}
+		a.renderPrefixes(w, r, http.StatusUnprocessableEntity,
+			rejected(r, existing.ID, messages, "cidr_text", "vlan_id", "environment_id", "role"))
+		return
+	}
+	a.setFlash(r, "success", "Network updated.")
+	render.Redirect(w, r, "/prefixes")
+}
+
+// refusalMessages turns a store error into field messages, or reports that it
+// is not a refusal at all and belongs to the error handler.
+func refusalMessages(err error, conflict map[string]string) (map[string]string, bool) {
+	if messages, ok := validationErrors(err); ok {
+		return messages, true
+	}
+	if isConflict(err) {
+		return conflict, true
+	}
+	return nil, false
+}
+
+// refuseAssetEdit redraws the asset page at 422 with the refused row reopened
+// on what the operator typed. Ports and addresses both live on that page, so
+// they share it.
+func (a *App) refuseAssetEdit(w http.ResponseWriter, r *http.Request, err error,
+	assetID, rowID string, conflict map[string]string, fields ...string) {
+
+	messages, ok := refusalMessages(err, conflict)
+	if !ok {
+		a.handleStoreError(w, r, err)
+		return
+	}
+	if assetID == "" {
+		// An address with no port has no asset page to go back to. Rare, and
+		// better than rendering a page for an asset we cannot name.
+		a.setFlash(r, "error", "Not accepted: "+joinMessages(messages))
+		render.Redirect(w, r, "/assets")
+		return
+	}
+	a.renderAssetDetail(w, r, http.StatusUnprocessableEntity, assetID,
+		rejected(r, rowID, messages, fields...))
 }

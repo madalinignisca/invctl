@@ -127,19 +127,85 @@
       <thead><tr><th>Port</th><th>Form factor</th><th>Speed</th><th>MAC</th><th>Addresses</th><th>Patched to</th>{{if $.CanWrite}}<th></th>{{end}}</tr></thead>
       <tbody>
         {{range .Interfaces}}
+        {{$if := .}}
+        {{/* Correcting a port. Not its chassis and not its bond: the topology
+             and the reachability walk read both, and the store carries them
+             over regardless of what a form sends. */}}
+        {{if and $.CanWrite (eq .ID $.EditRow)}}
+        <tr class="row-editing">
+          <td><input form="if-{{.ID}}" class="mono {{if $.Edit.Err "name"}}invalid{{end}}" type="text" name="name"
+                     value="{{$.Edit.Value "name" .Name}}" aria-label="Port name" required style="width:8em">
+              {{with $.Edit.Err "name"}}<div class="field-error">{{.}}</div>{{end}}</td>
+          <td>
+            <select form="if-{{.ID}}" name="form_factor" aria-label="Form factor">
+              {{$ff := $.Edit.Value "form_factor" $if.FormFactor}}
+              {{range $.InterfaceForm.FormFactors}}<option value="{{.Code}}" {{if eq .Code $ff}}selected{{end}}>{{.Label}}</option>{{end}}
+            </select>
+          </td>
+          <td><input form="if-{{.ID}}" class="{{if $.Edit.Err "speed_mbps"}}invalid{{end}}" type="number" name="speed_mbps"
+                     value="{{$.Edit.Value "speed_mbps" (derefInt .SpeedMbps)}}" min="1" aria-label="Speed in Mb/s" style="width:7em">
+              {{with $.Edit.Err "speed_mbps"}}<div class="field-error">{{.}}</div>{{end}}</td>
+          <td><input form="if-{{.ID}}" class="mono {{if $.Edit.Err "mac"}}invalid{{end}}" type="text" name="mac"
+                     value="{{$.Edit.Value "mac" (deref .MAC)}}" aria-label="MAC address"
+                     placeholder="aa:bb:cc:dd:ee:ff" style="width:11em">
+              {{with $.Edit.Err "mac"}}<div class="field-error">{{.}}</div>{{end}}</td>
+          <td class="mono" style="font-size:12px">
+            {{/* Addresses are edited one at a time from their own link below;
+                 a port and an address are different rows in the same cell. */}}
+            {{range .Addresses}}<div>{{.AddrText}} <span class="pill pill-muted">{{.Role}}</span></div>{{end}}
+            <input form="if-{{.ID}}" class="{{if $.Edit.Err "mtu"}}invalid{{end}}" type="number" name="mtu"
+                   value="{{$.Edit.Value "mtu" (derefInt .MTU)}}"
+                   min="68" max="65535" aria-label="MTU" placeholder="MTU" style="width:6em;margin-top:4px">
+            {{with $.Edit.Err "mtu"}}<div class="field-error">{{.}}</div>{{end}}
+          </td>
+          <td class="mono" style="font-size:12px">
+            <label style="display:block"><input form="if-{{.ID}}" type="checkbox" name="is_mgmt" value="true" {{if $.Edit.Checked "is_mgmt" .IsMgmt}}checked{{end}}> mgmt</label>
+            <label style="display:block"><input form="if-{{.ID}}" type="checkbox" name="enabled" value="true" {{if $.Edit.Checked "enabled" .Enabled}}checked{{end}}> enabled</label>
+          </td>
+          <td style="white-space:nowrap">
+            <form id="if-{{.ID}}" method="post" action="/interfaces/{{.ID}}" style="display:inline">
+              <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+              <button class="btn btn-sm btn-primary" type="submit">Save</button>
+            </form>
+            <a class="btn btn-sm" href="/assets/{{$.Asset.ID}}#ports">Cancel</a>
+          </td>
+        </tr>
+        {{else}}
         <tr>
-          <td class="mono">{{.Name}} {{if .IsMgmt}}<span class="pill pill-info">mgmt</span>{{end}}</td>
+          <td class="mono">{{.Name}} {{if .IsMgmt}}<span class="pill pill-info">mgmt</span>{{end}}
+              {{if not .Enabled}}<span class="pill pill-muted" title="Administratively down">disabled</span>{{end}}</td>
           <td class="mono" style="font-size:12px">{{.FormFactor}}</td>
           <td class="num">{{if .SpeedMbps}}{{.SpeedMbps}} Mb/s{{else}}—{{end}}</td>
           <td class="mono" style="font-size:12px;color:var(--muted)">{{if .MAC}}{{deref .MAC}}{{else}}—{{end}}</td>
           <td class="mono" style="font-size:12px">
-            {{range .Addresses}}<div>{{.AddrText}} <span class="pill pill-muted">{{.Role}}</span></div>{{end}}
+            {{range .Addresses}}
+              {{$addr := .}}
+              {{if and $.CanWrite (eq .ID $.EditRow)}}
+              <form method="post" action="/addresses/{{.ID}}" style="display:flex;gap:4px;align-items:center;margin:2px 0">
+                <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+                <input class="mono {{if $.Edit.Err "addr_text"}}invalid{{end}}" type="text" name="addr_text"
+                       value="{{$.Edit.Value "addr_text" .AddrText}}" aria-label="Address" style="width:11em" required>
+                {{$role := $.Edit.Value "role" $addr.Role}}
+                <select name="role" aria-label="Address role">
+                  {{range $.IPAddressForm.Roles}}<option value="{{.Code}}" {{if eq .Code $role}}selected{{end}}>{{.Label}}</option>{{end}}
+                </select>
+                {{with $.Edit.Err "addr_text"}}<div class="field-error">{{.}}</div>{{end}}
+                <button class="btn btn-sm btn-primary" type="submit">Save</button>
+                <a class="btn btn-sm" href="/assets/{{$.Asset.ID}}#ports">Cancel</a>
+              </form>
+              {{else}}
+              <div>{{.AddrText}} <span class="pill pill-muted">{{.Role}}</span>
+                {{if $.CanWrite}}<a class="id" href="/assets/{{$.Asset.ID}}?edit={{.ID}}#ports" title="Correct this address">edit</a>{{end}}
+              </div>
+              {{end}}
+            {{end}}
           </td>
           <td class="mono" style="font-size:12px;color:var(--muted)">
             {{if .PeerAsset}}{{.PeerAsset}} · {{.PeerPort}}{{else}}—{{end}}
           </td>
           {{if $.CanWrite}}
           <td style="white-space:nowrap">
+            <a class="btn btn-sm" href="/assets/{{$.Asset.ID}}?edit={{.ID}}#ports">Edit</a>
             {{if .IsPatched}}
             <form method="post" action="/links/{{.LinkID}}/retire" style="display:inline"
                   hx-post="/links/{{.LinkID}}/retire"
@@ -152,6 +218,7 @@
           </td>
           {{end}}
         </tr>
+        {{end}}
         {{end}}
       </tbody>
     </table>

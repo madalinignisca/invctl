@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gabriel/invctl/internal/domain"
 )
@@ -23,6 +24,13 @@ type projectFixture struct {
 func newProjectFixture(t *testing.T, e Engine) *projectFixture {
 	t.Helper()
 	s, ctx := newStore(t, e)
+	// PINNED CLOCK. A cost line with no explicit window gets valid_from =
+	// now(), and every assertion here asks for totals as at costNow. With the
+	// real clock those agree only on the day the test was written: once UTC
+	// rolled past it, valid_from was LATER than the as-at date, the window
+	// filter excluded every line, and six tests started reporting totals of
+	// zero. They did not detect a regression -- they expired.
+	s = s.WithClock(func() time.Time { return costNow })
 	f := &projectFixture{
 		s: s, ctx: ctx,
 		projects: map[string]string{},

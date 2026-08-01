@@ -284,10 +284,18 @@ func TestARetiredCostLineCannotBeEdited(t *testing.T) {
 	}
 }
 
-// firstCostFormID pulls a cost line's id out of the Edit link on the table.
+// firstCostFormID pulls a cost line's id out of the Edit link on the cost
+// table, SCOPED TO THAT PANEL. The asset page now carries edit links for ports
+// and addresses too, all using the same ?edit= parameter, so an unscoped match
+// returned an interface id and every assertion below it was about the wrong
+// row -- which showed up as "no row for cost X" rather than as a wrong pass.
 func firstCostFormID(t *testing.T, page string) string {
 	t.Helper()
-	m := regexp.MustCompile(`\?edit=([0-9a-f-]+)`).FindStringSubmatch(page)
+	i := strings.Index(page, `id="costs"`)
+	if i < 0 {
+		t.Fatal("no cost panel on the page")
+	}
+	m := regexp.MustCompile(`\?edit=([0-9a-f-]+)`).FindStringSubmatch(page[i:])
 	if m == nil {
 		t.Fatal("no cost row offers an edit link")
 	}

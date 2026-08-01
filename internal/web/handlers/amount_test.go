@@ -20,7 +20,13 @@ func TestParseAmountMinor(t *testing.T) {
 		{"trailing point is mid-typing", "1200.", 120000, false},
 		{"a comma is a decimal point", "1200,50", 120050, false},
 		{"spaces are grouping", "1 200,50", 120050, false},
-		{"empty is zero", "", 0, false},
+		// Blank is REFUSED, not zero. It returned (0, nil) until a security
+		// review pointed out what that means on the edit path: clearing the
+		// field and pressing Save rewrites a real figure to €0.00, with only
+		// the change_log any the wiser. A deliberate zero is still expressible
+		// by typing 0.
+		{"empty is refused rather than treated as zero", "", 0, true},
+		{"an explicit zero is still allowed", "0", 0, false},
 
 		// Found by a security review. strconv.ParseInt accepts a leading sign,
 		// so the fraction "-5" parsed to 5 and silently subtracted a cent from

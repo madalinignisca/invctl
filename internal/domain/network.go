@@ -47,19 +47,46 @@ type Interface struct {
 // NewInterface validates and constructs. A MAC, if given, is normalized to
 // lowercase colon form so that lookups match regardless of paste format.
 func NewInterface(id, assetID, name, formFactor string) (*Interface, error) {
-	ve := &ValidationError{}
-	name = checkRequired(ve, "name", name)
-	checkRequired(ve, "asset_id", assetID)
-	formFactor = checkVocabulary(ve, "form_factor", formFactor)
-	if err := ve.OrNil(); err != nil {
+	i := &Interface{
+		ID: id, AssetID: assetID, Name: name, FormFactor: formFactor, Enabled: true,
+	}
+	if err := i.Validate(); err != nil {
 		return nil, err
 	}
-	return &Interface{
-		ID: id, AssetID: assetID, Name: name, FormFactor: formFactor, Enabled: true,
-	}, nil
+	return i, nil
 }
 
 // SetMAC normalizes and assigns a MAC address.
+// Validate checks a port against its business rules.
+//
+// SEPARATE FROM THE CONSTRUCTOR so an update runs the same rules. The checks
+// used to live inside NewInterface, where nothing editing an existing port
+// could reach them -- the same gap Environment had, and for the same reason:
+// there was no update path, so nobody noticed the rules were unreachable.
+func (i *Interface) Validate() error {
+	ve := &ValidationError{}
+	i.Name = checkRequired(ve, "name", i.Name)
+	checkRequired(ve, "asset_id", i.AssetID)
+	i.FormFactor = checkVocabulary(ve, "form_factor", i.FormFactor)
+	// A speed or an MTU that is present must be a real one. Absent is fine --
+	// plenty of ports have neither recorded.
+	if i.SpeedMbps != nil && *i.SpeedMbps <= 0 {
+		ve.Add("speed_mbps", "must be a positive number of megabits, or blank")
+	}
+	// 68 is the IPv4 minimum an interface must be able to carry; 65535 is the
+	// widest any driver here will accept. Both ends catch a transposed digit,
+	// which is the realistic error.
+	if i.MTU != nil && (*i.MTU < 68 || *i.MTU > 65535) {
+		ve.Add("mtu", "must be between 68 and 65535, or blank")
+	}
+	// A port bonded into itself is a cycle of one, and the LAG walk would not
+	// terminate. Deeper cycles are the store's problem, not a field check.
+	if i.LagParentID != nil && *i.LagParentID == i.ID {
+		ve.Add("lag_parent_id", "a port cannot be bonded into itself")
+	}
+	return ve.OrNil()
+}
+
 func (i *Interface) SetMAC(mac string) error {
 	if mac == "" {
 		i.MAC = nil
@@ -135,6 +162,35 @@ func NewPrefix(id, cidr string) (*Prefix, error) {
 	}, nil
 }
 
+// SetCIDR reparses a network and rewrites ALL FOUR stored columns, for the
+// reason IPAddress.SetAddress does: the text is the label and the byte range is
+// what ResolveAddress scans. A prefix whose text and range disagree answers
+// "which network is this address on" with the wrong network.
+func (p *Prefix) SetCIDR(cidr string) error {
+	pv, err := ParsePrefix(cidr)
+	if err != nil {
+		ve := &ValidationError{}
+		ve.Add("cidr_text", "%s", err.Error())
+		return ve
+	}
+	p.CIDRText, p.AddrFamily = pv.Text, pv.Family
+	p.AddrStart, p.AddrEnd = pv.Start, pv.End
+	return nil
+}
+
+// Validate checks a network against its business rules.
+func (p *Prefix) Validate() error {
+	ve := &ValidationError{}
+	if p.CIDRText == "" || len(p.AddrStart) == 0 || len(p.AddrEnd) == 0 {
+		ve.Add("cidr_text", "a network is required")
+	}
+	// 802.1Q: 0 and 4095 are reserved, so a real tag is 1..4094.
+	if p.VLANID != nil && (*p.VLANID < 1 || *p.VLANID > 4094) {
+		ve.Add("vlan_id", "must be between 1 and 4094, or blank")
+	}
+	return ve.OrNil()
+}
+
 // IP address roles.
 const (
 	IPRolePrimary   = "primary"
@@ -176,4 +232,35 @@ func NewIPAddress(id, addr string, interfaceID *string, role string) (*IPAddress
 		ID: id, AddrText: av.Text, AddrFamily: av.Family, AddrStart: av.Start,
 		InterfaceID: interfaceID, Role: role,
 	}, nil
+}
+
+// SetAddress reparses an address and rewrites ALL THREE stored columns.
+//
+// THE ONLY WAY TO CHANGE AN ADDRESS. addr_text is what a person reads and
+// addr_start is what every range query actually uses (HANDOVER §4.1) -- they
+// are one fact stored three times, and a caller that assigned AddrText alone
+// would leave a row that displays 10.1.0.9 and answers containment queries as
+// whatever it used to be. Wrong, invisible, and only discovered during an
+// incident. A method that cannot set one without the others removes the
+// possibility rather than documenting it.
+func (a *IPAddress) SetAddress(addr string) error {
+	av, err := ParseAddr(addr)
+	if err != nil {
+		ve := &ValidationError{}
+		ve.Add("addr_text", "%s", err.Error())
+		return ve
+	}
+	a.AddrText, a.AddrFamily, a.AddrStart = av.Text, av.Family, av.Start
+	return nil
+}
+
+// Validate checks an address against its business rules. The address value
+// itself is checked by SetAddress, which is the only way to set it.
+func (a *IPAddress) Validate() error {
+	ve := &ValidationError{}
+	a.Role = checkVocabulary(ve, "role", a.Role)
+	if a.AddrText == "" || len(a.AddrStart) == 0 {
+		ve.Add("addr_text", "an address is required")
+	}
+	return ve.OrNil()
 }

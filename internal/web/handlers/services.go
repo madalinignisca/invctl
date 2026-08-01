@@ -98,8 +98,10 @@ type serviceDetailPage struct {
 	// RuntimeTypes and DesiredStates feed the inline placement editor. From the
 	// domain rather than a lookup table because both are CHECK-constrained
 	// enums with a Go constant set beside them.
-	RuntimeTypes   []string
-	DesiredStates  []string
+	RuntimeTypes  []string
+	DesiredStates []string
+	// Edit is set only when a placement correction was refused; see editState.
+	Edit           *editState
 	DependencyForm dependencyFormData
 	OverrideForm   overrideFormData
 }
@@ -107,7 +109,7 @@ type serviceDetailPage struct {
 // ServiceDetail is the page the whole tool builds towards: header, placement,
 // endpoints, and the two dependency panels.
 func (a *App) ServiceDetail(w http.ResponseWriter, r *http.Request) {
-	a.renderServiceDetail(w, r, http.StatusOK, r.PathValue("id"), endpointFormState{})
+	a.renderServiceDetail(w, r, http.StatusOK, r.PathValue("id"), endpointFormState{}, nil)
 }
 
 // endpointFormState carries a rejected endpoint back to the page it came from.
@@ -129,7 +131,7 @@ type endpointFormState struct {
 // of this codebase does; the row editors are plain forms precisely so they work
 // without it, and this was the one path that did not.
 func (a *App) renderServiceDetail(w http.ResponseWriter, r *http.Request, status int,
-	id string, epState endpointFormState) {
+	id string, epState endpointFormState, edit *editState) {
 
 	service, err := a.Store.GetService(r.Context(), id)
 	if err != nil {
@@ -220,6 +222,10 @@ func (a *App) renderServiceDetail(w http.ResponseWriter, r *http.Request, status
 	}
 
 	b := a.base(r, service.Name, "services")
+	if edit != nil {
+		// The refused row opens, whatever the query string said.
+		b.EditRow = edit.ID
+	}
 	certificates, err := a.Store.CertificatesOnService(r.Context(), id)
 	if err != nil {
 		a.serverError(w, r, err)
@@ -256,6 +262,7 @@ func (a *App) renderServiceDetail(w http.ResponseWriter, r *http.Request, status
 		EndpointEdit:   a.endpointEditForm(r, b, endpoints, epState),
 		RuntimeTypes:   domain.RuntimeTypes,
 		DesiredStates:  domain.DesiredStates,
+		Edit:           edit,
 		DependencyForm: a.newDependencyForm(r, id, nil, domain.DependencySpec{}, allEndpoints, allRoutes, identities, classOptions),
 		OverrideForm:   a.newOverrideForm(r, overrideTargets, nil, overrideForm{}),
 	})
@@ -454,18 +461,22 @@ func (a *App) InstanceUpdate(w http.ResponseWriter, r *http.Request) {
 	updated.DesiredState = formValue(r, "desired_state")
 
 	if err := a.Store.UpdateInstance(r.Context(), actor(r), &updated); err != nil {
-		if messages, ok := validationErrors(err); ok {
-			a.setFlash(r, "error", "That placement was not accepted: "+joinMessages(messages))
-			render.Redirect(w, r, "/services/"+existing.ServiceID+"?edit="+existing.ID)
-			return
+		messages, ok := validationErrors(err)
+		if !ok {
+			if !isConflict(err) {
+				a.handleStoreError(w, r, err)
+				return
+			}
+			messages = map[string]string{
+				"ordinal": "another placement already has that ordinal on that host, or this one has been withdrawn",
+			}
 		}
-		if isConflict(err) {
-			a.setFlash(r, "error",
-				"That placement could not be amended: another instance already has that ordinal on that host, or the placement has been withdrawn.")
-			render.Redirect(w, r, "/services/"+existing.ServiceID)
-			return
-		}
-		a.handleStoreError(w, r, err)
+		// 422 with the row reopened on what was typed. Same rule, same reason
+		// as everywhere else: a redirect refills from storage and the operator
+		// cannot tell their edit was refused rather than saved.
+		a.renderServiceDetail(w, r, http.StatusUnprocessableEntity, existing.ServiceID,
+			endpointFormState{}, rejected(r, existing.ID, messages,
+				"runtime_type", "role", "shard", "ordinal", "desired_state"))
 		return
 	}
 
@@ -561,7 +572,7 @@ func (a *App) EndpointUpdate(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		a.renderServiceDetail(w, r, http.StatusUnprocessableEntity, existing.ServiceID,
-			endpointFormState{errs: messages, failed: &updated})
+			endpointFormState{errs: messages, failed: &updated}, nil)
 		return
 	}
 
@@ -606,7 +617,7 @@ func (a *App) EndpointCreate(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		a.renderServiceDetail(w, r, http.StatusUnprocessableEntity, serviceID,
-			endpointFormState{errs: messages})
+			endpointFormState{errs: messages}, nil)
 		return
 	}
 

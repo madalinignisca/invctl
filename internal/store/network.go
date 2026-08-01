@@ -157,6 +157,42 @@ func (s *SQLStore) CreateInterface(ctx context.Context, actor domain.Actor, i *d
 	})
 }
 
+// UpdateInterface corrects a port.
+//
+// NOT asset_id and NOT lag_parent_id. The first says which box the port is in
+// and the second which bond it is a member of; both are structure, and the
+// topology, the cable map and the reachability walk all read them. Correcting
+// a speed is a correction. Moving a port to another chassis is a rebuild, and
+// there is no honest way to make it look like the former.
+func (s *SQLStore) UpdateInterface(ctx context.Context, actor domain.Actor, i *domain.Interface) error {
+	if err := i.Validate(); err != nil {
+		return err
+	}
+	before, err := s.GetInterface(ctx, i.ID)
+	if err != nil {
+		return err
+	}
+	// Carried over, never taken from the caller: an update that accepted these
+	// would be the move this method exists to refuse.
+	i.AssetID = before.AssetID
+	i.LagParentID = before.LagParentID
+
+	return s.write(ctx, actor, func(t *tx) error {
+		if err := t.requireVocabulary(ctx, vocabInterfaceFormFactor, "form_factor", i.FormFactor); err != nil {
+			return err
+		}
+		_, err := t.exec(ctx, `
+			UPDATE interface SET name = ?, form_factor = ?, speed_mbps = ?, mac = ?,
+			                     mtu = ?, is_mgmt = ?, enabled = ?
+			WHERE id = ?`,
+			i.Name, i.FormFactor, i.SpeedMbps, i.MAC, i.MTU, i.IsMgmt, i.Enabled, i.ID)
+		if err != nil {
+			return translateWriteErr(err, "updating interface")
+		}
+		return t.logUpdate(ctx, "interface", i.ID, before, i)
+	})
+}
+
 // CreateLink cables two interfaces together.
 func (s *SQLStore) CreateLink(ctx context.Context, actor domain.Actor, l *domain.Link) error {
 	if l.Lifecycle == "" {
@@ -241,6 +277,94 @@ func (s *SQLStore) CreateIPAddress(ctx context.Context, actor domain.Actor, a *d
 			return translateWriteErr(err, "creating ip address")
 		}
 		return t.logCreate(ctx, "ip_address", a.ID, a)
+	})
+}
+
+// GetIPAddress loads one address by id.
+func (s *SQLStore) GetIPAddress(ctx context.Context, id string) (*domain.IPAddress, error) {
+	var addr domain.IPAddress
+	if err := s.readOne(ctx, &addr, `SELECT * FROM ip_address WHERE id = ?`, id); err != nil {
+		return nil, fmt.Errorf("getting ip address %s: %w", id, err)
+	}
+	return &addr, nil
+}
+
+// UpdateIPAddress corrects an address.
+//
+// NOT interface_id. Which port an address is on decides which box a service
+// bound to it is reachable from, and every endpoint resolving through this row
+// would follow it silently. The address VALUE is editable -- a typo is the
+// commonest thing wrong with an inventory record -- and only through
+// SetAddress, which rewrites the derived columns with it.
+func (s *SQLStore) UpdateIPAddress(ctx context.Context, actor domain.Actor, a *domain.IPAddress) error {
+	if err := a.Validate(); err != nil {
+		return err
+	}
+	before, err := s.GetIPAddress(ctx, a.ID)
+	if err != nil {
+		return err
+	}
+	a.InterfaceID = before.InterfaceID
+
+	return s.write(ctx, actor, func(t *tx) error {
+		if err := t.requireVocabulary(ctx, vocabIPAddressRole, "role", a.Role); err != nil {
+			return err
+		}
+		_, err := t.exec(ctx, `
+			UPDATE ip_address SET addr_text = ?, addr_family = ?, addr_start = ?, role = ?
+			WHERE id = ?`,
+			a.AddrText, a.AddrFamily, a.AddrStart, a.Role, a.ID)
+		if err != nil {
+			return translateWriteErr(err, "updating ip address")
+		}
+		return t.logUpdate(ctx, "ip_address", a.ID, before, a)
+	})
+}
+
+// GetPrefix loads one network by id.
+func (s *SQLStore) GetPrefix(ctx context.Context, id string) (*domain.Prefix, error) {
+	var p domain.Prefix
+	if err := s.readOne(ctx, &p, `SELECT * FROM prefix WHERE id = ?`, id); err != nil {
+		return nil, fmt.Errorf("getting prefix %s: %w", id, err)
+	}
+	return &p, nil
+}
+
+// UpdatePrefix corrects a network.
+//
+// THE REINDEX IS NOT OPTIONAL. A prefix is the one thing in this file that goes
+// into the search index, so an update that skipped indexEntity would leave
+// global search answering with the old CIDR -- findable, wrong, and with
+// nothing on screen to suggest it. Every field here describes the network
+// itself, including the environment: this codebase already treats an
+// environment as a classification a person assigns, editable on an asset for
+// exactly the same reason.
+func (s *SQLStore) UpdatePrefix(ctx context.Context, actor domain.Actor, p *domain.Prefix) error {
+	if err := p.Validate(); err != nil {
+		return err
+	}
+	before, err := s.GetPrefix(ctx, p.ID)
+	if err != nil {
+		return err
+	}
+
+	return s.write(ctx, actor, func(t *tx) error {
+		_, err := t.exec(ctx, `
+			UPDATE prefix SET cidr_text = ?, addr_family = ?, addr_start = ?, addr_end = ?,
+			                  vlan_id = ?, environment_id = ?, role = ?
+			WHERE id = ?`,
+			p.CIDRText, p.AddrFamily, p.AddrStart, p.AddrEnd,
+			p.VLANID, p.EnvironmentID, p.Role, p.ID)
+		if err != nil {
+			return translateWriteErr(err, "updating prefix")
+		}
+		if err := t.logUpdate(ctx, "prefix", p.ID, before, p); err != nil {
+			return err
+		}
+		return s.indexEntity(ctx, t, searchDoc{
+			EntityType: "prefix", EntityID: p.ID,
+			Title: p.CIDRText, Subtitle: derefString(p.Role), Body: p.CIDRText,
+		})
 	})
 }
 

@@ -23,9 +23,15 @@
           {{/* The code is editable. Nothing resolves an environment by it --
                every reference in the schema is by id -- so a rename moves no
                edge; it is still what other systems will quote, hence the note. */}}
-          <td><input form="env-{{.ID}}" class="mono" type="text" name="code" value="{{.Code}}"
-                     aria-label="Code" required style="width:7em"></td>
-          <td><input form="env-{{.ID}}" type="text" name="name" value="{{.Name}}" aria-label="Name" required></td>
+          {{/* $.Edit.Value falls back to the stored value, so the same markup
+               serves an ordinary open row and a rejected one. Nil-safe by
+               design: the template does not need to know which it is. */}}
+          <td><input form="env-{{.ID}}" class="mono {{if $.Edit.Err "code"}}invalid{{end}}" type="text" name="code"
+                     value="{{$.Edit.Value "code" .Code}}" aria-label="Code" required style="width:7em">
+              {{with $.Edit.Err "code"}}<div class="field-error">{{.}}</div>{{end}}</td>
+          <td><input form="env-{{.ID}}" class="{{if $.Edit.Err "name"}}invalid{{end}}" type="text" name="name"
+                     value="{{$.Edit.Value "name" .Name}}" aria-label="Name" required>
+              {{with $.Edit.Err "name"}}<div class="field-error">{{.}}</div>{{end}}</td>
           <td>
             {{/* .FormData.Roles, not a second field on the page. This page has
                  two render paths -- the plain list and the 422 re-render -- and
@@ -35,14 +41,17 @@
                  without complaining, which is why nothing said so. One source
                  both paths already fill cannot go out of step. */}}
             <select form="env-{{.ID}}" name="role" aria-label="Role">
-              {{range $.FormData.Roles}}<option value="{{.Code}}" {{if eq .Code $env.Role}}selected{{end}}>{{.Label}}</option>{{end}}
+              {{$role := $.Edit.Value "role" $env.Role}}
+              {{range $.FormData.Roles}}<option value="{{.Code}}" {{if eq .Code $role}}selected{{end}}>{{.Label}}</option>{{end}}
             </select>
           </td>
-          <td><input form="env-{{.ID}}" type="number" name="criticality" value="{{.Criticality}}"
-                     min="1" max="5" aria-label="Criticality" style="width:4.5em"></td>
+          <td><input form="env-{{.ID}}" class="{{if $.Edit.Err "criticality"}}invalid{{end}}" type="number" name="criticality"
+                     value="{{$.Edit.Value "criticality" (itoa .Criticality)}}"
+                     min="1" max="5" aria-label="Criticality" style="width:4.5em">
+              {{with $.Edit.Err "criticality"}}<div class="field-error">{{.}}</div>{{end}}</td>
           <td>
             <label class="mono" style="font-size:12px">
-              <input form="env-{{.ID}}" type="checkbox" name="in_scope" value="true" {{if .InScope}}checked{{end}}>
+              <input form="env-{{.ID}}" type="checkbox" name="in_scope" value="true" {{if $.Edit.Checked "in_scope" .InScope}}checked{{end}}>
               in scope
             </label>
           </td>
