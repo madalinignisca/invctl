@@ -64,10 +64,22 @@ type Endpoint struct {
 	TLSMode       string  `db:"tls_mode"`
 	CertificateID *string `db:"certificate_id"`
 	Exposure      string  `db:"exposure"`
+	Lifecycle     string  `db:"lifecycle"`
 	CreatedAt     *string `db:"created_at"`
 	UpdatedAt     *string `db:"updated_at"`
 	RowVersion    int     `db:"row_version"`
 }
+
+// EndpointLifecycles is the Go side of the endpoint.lifecycle CHECK.
+//
+// Deliberately narrower than ServiceLifecycles, for the reason placements are:
+// a socket either exists or it does not. 'planned' and 'deprecated' describe
+// the SERVICE, and offering them here would invite writing them where nothing
+// reads them.
+var EndpointLifecycles = []string{LifecycleActive, LifecycleRetired}
+
+// Retired reports whether this socket has been withdrawn.
+func (e *Endpoint) Retired() bool { return e.Lifecycle == LifecycleRetired }
 
 // NewEndpoint validates and constructs a listening socket.
 //
@@ -77,6 +89,7 @@ func NewEndpoint(id, serviceID, name, proto string, port *int, bindScope string)
 	e := &Endpoint{
 		ID: id, ServiceID: serviceID, Name: name, L4Proto: proto,
 		Port: port, BindScope: bindScope, TLSMode: "none", Exposure: "internal",
+		Lifecycle: LifecycleActive,
 	}
 	if err := e.Validate(); err != nil {
 		return nil, err
@@ -93,6 +106,12 @@ func (e *Endpoint) Validate() error {
 	checkEnum(ve, "bind_scope", e.BindScope, BindScopes)
 	checkEnum(ve, "tls_mode", e.TLSMode, TLSModes)
 	checkEnum(ve, "exposure", e.Exposure, Exposures)
+	// Defaulted rather than rejected: every endpoint built before this column
+	// existed, and every literal in the seed, omits it.
+	if e.Lifecycle == "" {
+		e.Lifecycle = LifecycleActive
+	}
+	checkEnum(ve, "lifecycle", e.Lifecycle, EndpointLifecycles)
 
 	if e.L4Proto == ProtoUnix {
 		if e.UnixPath == nil || *e.UnixPath == "" {

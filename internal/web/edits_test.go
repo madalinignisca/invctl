@@ -1162,3 +1162,138 @@ func TestARetiredServicesShapeCannotBeRewritten(t *testing.T) {
 		t.Fatal("the service was not retired, so this test proved nothing")
 	}
 }
+
+// ---------- a withdrawn socket ----------
+
+// An endpoint can stop existing, and what that means differs per query. The
+// read audit in migration 00020 records the decision for all fifteen; these
+// pin the four that FILTER, because a missing WHERE looks identical whether it
+// was considered or forgotten.
+func TestAWithdrawnEndpointLeavesTheLiveViewsButKeepsItsRecord(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	// A socket nothing depends on, so it can actually be withdrawn.
+	serviceID, endpointID, port := withdrawableEndpoint(t, h)
+
+	resp := h.post("/endpoints/"+endpointID+"/retire", url.Values{
+		"csrf_token": {h.csrfToken("/services/" + serviceID)},
+	}, false)
+	resp.Body.Close()
+
+	// Fetched twice: the first GET carries the success flash, whose text also
+	// contains the word "withdrawn". Asserting on the page would then pass with
+	// the row's own marker deleted -- which it did, until this mutation caught
+	// it. The second GET has no flash, so the only "withdrawn" left is the row.
+	body(t, h.get("/services/"+serviceID, false))
+	page := body(t, h.get("/services/"+serviceID, false))
+	// KEPT: the service page still shows it, marked, exactly as a withdrawn
+	// placement is. Deleting the row would delete the answer to "what was it
+	// listening on when this broke".
+	if !strings.Contains(page, "scratch") {
+		t.Fatal("the withdrawn endpoint vanished from its service page")
+	}
+	if !strings.Contains(page, "withdrawn") {
+		t.Error("the withdrawn endpoint is not marked as such on its row")
+	}
+	if strings.Contains(page, `/services/`+serviceID+`?edit=`+endpointID) {
+		t.Error("a withdrawn endpoint is still offered for editing")
+	}
+
+	// FILTERED: search by port must not send anybody to a socket that is gone.
+	if hits := body(t, h.get("/search?q="+port, false)); strings.Contains(hits, "listens on") {
+		t.Errorf("port search still answers with the withdrawn socket:\n%s", port)
+	}
+	// FILTERED: the dependency picker must not offer it as a provider.
+	depForm := body(t, h.get("/services/"+serviceID, false))
+	if strings.Contains(depForm, `<option value="`+endpointID+`"`) {
+		t.Error("the dependency picker still offers the withdrawn socket as a provider")
+	}
+}
+
+// It is not amendable either: history, like a retired cost line.
+func TestAWithdrawnEndpointCannotBeAmended(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+	serviceID, endpointID, _ := withdrawableEndpoint(t, h)
+
+	retire := h.post("/endpoints/"+endpointID+"/retire", url.Values{
+		"csrf_token": {h.csrfToken("/services/" + serviceID)},
+	}, false)
+	retire.Body.Close()
+
+	resp := h.post("/endpoints/"+endpointID, url.Values{
+		"csrf_token": {h.csrfToken("/services/" + serviceID)},
+		"name":       {"amended-after-death"}, "l4_proto": {"tcp"}, "port": {"9999"},
+		"bind_scope": {"host"}, "tls_mode": {"none"}, "exposure": {"internal"},
+	}, false)
+	resp.Body.Close()
+	if strings.Contains(body(t, h.get("/services/"+serviceID, false)), "amended-after-death") {
+		t.Error("a withdrawn endpoint was amended")
+	}
+}
+
+// AND IT CANNOT BE PULLED OUT FROM UNDER A LIVE EDGE. A dependency naming this
+// socket describes traffic somebody believes is flowing. Withdrawing it would
+// leave an active edge pointing at a thing declared not to exist — and because
+// the impact engine now skips retired sockets, that outage would quietly stop
+// propagating along an edge still drawn on screen.
+func TestAnEndpointWithLiveDependantsCannotBeWithdrawn(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	// rabbitmq/amqp is a provider in the fixture graph.
+	endpointID := h.refs.Endpoints["rabbitmq/amqp"]
+	serviceID := h.refs.Services["rabbitmq"]
+	before := body(t, h.get("/services/"+serviceID, false))
+
+	resp := h.post("/endpoints/"+endpointID+"/retire", url.Values{
+		"csrf_token": {h.csrfToken("/services/" + serviceID)},
+	}, false)
+	resp.Body.Close()
+
+	after := body(t, h.get("/services/"+serviceID, false))
+	if strings.Contains(after, "withdrawn") && !strings.Contains(before, "withdrawn") {
+		t.Error("an endpoint with a live dependant was withdrawn")
+	}
+	if !strings.Contains(after, "still has something depending on it") {
+		t.Error("the operator was not told why it was refused")
+	}
+}
+
+// withdrawableEndpoint adds a fresh socket and returns its service, id and
+// port. CREATED rather than found: nothing depends on a socket that did not
+// exist a moment ago, which is the only way to be sure the retirement under
+// test is the one being exercised. The first version searched the fixture by
+// TRYING to retire each candidate, so the helper did the retiring and every
+// test's own call was a no-op against an already-withdrawn row.
+func withdrawableEndpoint(t *testing.T, h *harness) (string, string, string) {
+	t.Helper()
+	serviceID := h.refs.Services["orders-api"]
+	const port = "19999"
+
+	resp := h.post("/services/"+serviceID+"/endpoints", url.Values{
+		"csrf_token": {h.csrfToken("/services/" + serviceID)},
+		"name":       {"scratch"}, "l4_proto": {"tcp"}, "port": {port},
+		"bind_scope": {"host"}, "tls_mode": {"none"}, "exposure": {"internal"},
+	}, false)
+	resp.Body.Close()
+
+	page := body(t, h.get("/services/"+serviceID, false))
+	i := strings.Index(page, `id="endpoints"`)
+	if i < 0 {
+		t.Fatal("the service page has no endpoints panel")
+	}
+	for _, row := range regexp.MustCompile(`(?s)<tr[^>]*>.*?</tr>`).FindAllString(page[i:], -1) {
+		if !strings.Contains(row, ">scratch") {
+			continue
+		}
+		m := regexp.MustCompile(`\?edit=([0-9a-f-]+)#endpoints`).FindStringSubmatch(row)
+		if m == nil {
+			t.Fatal("the new endpoint offers no edit link, so it has no id to return")
+		}
+		return serviceID, m[1], port
+	}
+	t.Fatal("the endpoint that was just added is not on the page")
+	return "", "", ""
+}

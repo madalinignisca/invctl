@@ -163,8 +163,10 @@
       <thead><tr><th>Name</th><th>Address</th><th>Bind scope</th><th>TLS</th><th>Exposure</th>{{if .CanWrite}}<th></th>{{end}}</tr></thead>
       <tbody>
         {{range .Endpoints}}
-        <tr {{if and $.EndpointEdit (eq .ID $.EndpointEdit.Endpoint.ID)}}class="row-editing"{{end}}>
-          <td class="mono">{{.Name}}</td>
+        <tr {{if and $.EndpointEdit (eq .ID $.EndpointEdit.Endpoint.ID)}}class="row-editing"{{end}}
+            {{if .Retired}}style="opacity:.55"{{end}}>
+          <td class="mono">{{.Name}}
+              {{if .Retired}}<span class="pill pill-muted" title="Withdrawn — kept for the record">withdrawn</span>{{end}}</td>
           <td class="mono">{{.Addr}}{{if .AddrText}} <span style="color:var(--faint)">on {{.AddrText}}</span>{{end}}</td>
           <td><span class="pill pill-muted">{{.BindScope}}</span></td>
           <td class="mono" style="font-size:12px">{{.TLSMode}}</td>
@@ -172,7 +174,18 @@
             <span class="pill {{if eq .Exposure "external"}}pill-down{{else if eq .Exposure "cross_env"}}pill-degraded{{else}}pill-muted{{end}}">{{.Exposure}}</span>
           </td>
           {{if $.CanWrite}}
-          <td><a class="btn btn-sm" href="/services/{{$.Service.ID}}?edit={{.ID}}#endpoints">Edit</a></td>
+          <td style="white-space:nowrap">
+            {{/* A withdrawn socket is history: readable, not amendable. */}}
+            {{if not .Retired}}
+            <a class="btn btn-sm" href="/services/{{$.Service.ID}}?edit={{.ID}}#endpoints">Edit</a>
+            <form method="post" action="/endpoints/{{.ID}}/retire" style="display:inline"
+                  hx-post="/endpoints/{{.ID}}/retire"
+                  hx-confirm="Withdraw {{.Name}}? The row and its history stay, and nothing may still depend on it.">
+              <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+              <button class="btn btn-sm btn-danger" type="submit">Withdraw</button>
+            </form>
+            {{end}}
+          </td>
           {{end}}
         </tr>
         {{end}}

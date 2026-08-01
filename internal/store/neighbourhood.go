@@ -512,8 +512,9 @@ func (s *SQLStore) neighbourhoodWorkloads(ctx context.Context, assetIDs []string
 		FROM endpoint e
 		LEFT JOIN ip_address ip ON ip.id = e.ip_address_id
 		LEFT JOIN interface bi ON bi.id = ip.interface_id
-		WHERE e.service_id IN (`+list+`)
-		ORDER BY e.service_id, e.name`, anySlice(serviceIDs)...); err != nil {
+		WHERE e.service_id IN (`+list+`) AND e.lifecycle = ?
+		ORDER BY e.service_id, e.name`,
+		append(anySlice(serviceIDs), domain.LifecycleActive)...); err != nil {
 		return fmt.Errorf("loading neighbourhood endpoints: %w", err)
 	}
 

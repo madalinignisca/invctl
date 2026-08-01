@@ -204,6 +204,7 @@ var DeclaredColumns = map[string][]string{
 		"id", "service_id", "name", "l4_proto", "port", "unix_path", "bind_scope",
 		"ip_address_id", "l7_proto", "tls_mode", "certificate_id", "exposure",
 		"created_at", "updated_at", "row_version",
+		"lifecycle",
 	},
 	"environment": {"id", "code", "name", "role", "in_scope", "criticality", "created_at", "updated_at", "row_version"},
 	// Rule 14: an operator overruling a monitor is a declared act, audited like

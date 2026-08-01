@@ -35,10 +35,14 @@ func (s *SQLStore) ListEndpointsByService(ctx context.Context, serviceID string)
 	return rows, nil
 }
 
-// ListAllEndpoints returns every endpoint, for the dependency picker.
+// ListAllEndpoints returns every LIVE endpoint, for the dependency picker.
+//
+// Filtered, per the read audit in migration 00020: a withdrawn socket is not
+// something a new dependency can start resolving through.
 func (s *SQLStore) ListAllEndpoints(ctx context.Context) ([]EndpointRow, error) {
 	var rows []EndpointRow
-	if err := s.read(ctx, &rows, endpointSelect+` ORDER BY s.code, e.name`); err != nil {
+	if err := s.read(ctx, &rows, endpointSelect+`
+		WHERE e.lifecycle = ? ORDER BY s.code, e.name`, domain.LifecycleActive); err != nil {
 		return nil, fmt.Errorf("listing endpoints: %w", err)
 	}
 	return rows, nil
@@ -68,11 +72,11 @@ func (s *SQLStore) CreateEndpoint(ctx context.Context, actor domain.Actor, e *do
 		_, err := t.exec(ctx, `
 			INSERT INTO endpoint (id, service_id, name, l4_proto, port, unix_path, bind_scope,
 			                      ip_address_id, l7_proto, tls_mode, certificate_id, exposure,
-			                      created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			                      lifecycle, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			e.ID, e.ServiceID, e.Name, e.L4Proto, e.Port, e.UnixPath, e.BindScope,
 			e.IPAddressID, e.L7Proto, e.TLSMode, e.CertificateID, e.Exposure,
-			e.CreatedAt, e.UpdatedAt)
+			e.Lifecycle, e.CreatedAt, e.UpdatedAt)
 		if err != nil {
 			return translateWriteErr(err, "creating endpoint")
 		}
@@ -107,17 +111,24 @@ func (s *SQLStore) UpdateEndpoint(ctx context.Context, actor domain.Actor, e *do
 		return fmt.Errorf("endpoint %s belongs to a retired service and cannot be amended: %w",
 			e.ID, domain.ErrConflict)
 	}
+	// And a socket withdrawn in its own right is history, the same as a
+	// retired cost line: correct it by declaring the right one.
+	if before.Retired() {
+		return fmt.Errorf("endpoint %s is withdrawn and cannot be amended: %w",
+			e.ID, domain.ErrConflict)
+	}
 	at := domain.FormatTime(s.now())
 	e.UpdatedAt = &at
 	return s.write(ctx, actor, func(t *tx) error {
 		res, err := t.exec(ctx, `
 			UPDATE endpoint SET name = ?, l4_proto = ?, port = ?, unix_path = ?, bind_scope = ?,
 			                    ip_address_id = ?, l7_proto = ?, tls_mode = ?, certificate_id = ?,
-			                    exposure = ?, updated_at = ?, row_version = row_version + 1
+			                    exposure = ?, lifecycle = ?, updated_at = ?,
+			                    row_version = row_version + 1
 			WHERE id = ? AND row_version = ?`,
 			e.Name, e.L4Proto, e.Port, e.UnixPath, e.BindScope,
 			e.IPAddressID, e.L7Proto, e.TLSMode, e.CertificateID, e.Exposure,
-			at, e.ID, e.RowVersion)
+			e.Lifecycle, at, e.ID, e.RowVersion)
 		if err != nil {
 			return translateWriteErr(err, "updating endpoint")
 		}
@@ -126,6 +137,70 @@ func (s *SQLStore) UpdateEndpoint(ctx context.Context, actor domain.Actor, e *do
 		}
 		return t.logUpdate(ctx, "endpoint", e.ID, &before.Endpoint, e)
 	})
+}
+
+// RetireEndpoint withdraws a listening socket.
+//
+// REFUSED WHILE ANYTHING LIVE STILL RESOLVES THROUGH IT. A dependency naming
+// this endpoint, or a route fronting it, describes traffic somebody believes is
+// flowing; withdrawing the socket under them would leave an active edge
+// pointing at a thing declared not to exist, and the impact engine -- which
+// now skips retired sockets -- would quietly stop propagating an outage along
+// an edge that is still on screen. Retire the edge first, which is a decision
+// somebody has to make rather than one this method can make for them.
+//
+// Serializable, for the reason CreateLink is: the COUNT below asserts an
+// invariant this transaction is about to depend on, and at read-committed a
+// dependency created concurrently is invisible to it.
+func (s *SQLStore) RetireEndpoint(ctx context.Context, actor domain.Actor, id string) error {
+	before, err := s.GetEndpoint(ctx, id)
+	if err != nil {
+		return err
+	}
+	if before.Retired() {
+		// Already withdrawn: nothing to record, and a second audit entry
+		// would claim a withdrawal that did not happen.
+		return nil
+	}
+	at := domain.FormatTime(s.now())
+
+	return s.writeSerializable(ctx, actor, func(t *tx) error {
+		var live int
+		if err := t.get(ctx, &live, `
+			SELECT COUNT(*) FROM dependency d
+			LEFT JOIN route r ON r.id = d.provider_route_id
+			WHERE d.lifecycle = ?
+			  AND (d.provider_endpoint_id = ? OR r.frontend_endpoint_id = ?)`,
+			domain.LifecycleActive, id, id); err != nil {
+			return fmt.Errorf("checking what depends on endpoint %s: %w", id, err)
+		}
+		if live > 0 {
+			return fmt.Errorf("endpoint %s still has %d live %s resolving through it: %w",
+				id, live, pluralDependencies(live), domain.ErrConflict)
+		}
+
+		res, err := t.exec(ctx, `
+			UPDATE endpoint SET lifecycle = ?, updated_at = ?, row_version = row_version + 1
+			WHERE id = ? AND row_version = ?`,
+			domain.LifecycleRetired, at, id, before.RowVersion)
+		if err != nil {
+			return translateWriteErr(err, "retiring endpoint")
+		}
+		version := before.RowVersion
+		if err := requireVersion(res, "endpoint", id, &version); err != nil {
+			return err
+		}
+		diff := fmt.Sprintf(`{"lifecycle":{"old":%q,"new":%q}}`,
+			before.Lifecycle, domain.LifecycleRetired)
+		return t.log(ctx, "endpoint", id, domain.ActionRetire, diff)
+	})
+}
+
+func pluralDependencies(n int) string {
+	if n == 1 {
+		return "dependency"
+	}
+	return "dependencies"
 }
 
 // ---------- pools and routes ----------

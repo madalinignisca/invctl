@@ -652,6 +652,32 @@ func (a *App) EndpointUpdate(w http.ResponseWriter, r *http.Request) {
 	render.Redirect(w, r, "/services/"+existing.ServiceID)
 }
 
+// EndpointRetire withdraws a listening socket.
+//
+// The row and its history stay, like every other retirement here. Refused while
+// a live dependency or route still resolves through it -- that edge has to be
+// retired by somebody who knows whether the traffic really stopped.
+func (a *App) EndpointRetire(w http.ResponseWriter, r *http.Request) {
+	existing, err := a.Store.GetEndpoint(r.Context(), r.PathValue("id"))
+	if err != nil {
+		a.handleStoreError(w, r, err)
+		return
+	}
+	if err := a.Store.RetireEndpoint(r.Context(), actor(r), existing.ID); err != nil {
+		if isConflict(err) && !isStale(err) {
+			a.setFlash(r, "error",
+				"That endpoint still has something depending on it. Retire the dependency first — "+
+					"withdrawing the socket underneath it would leave an edge pointing at nothing.")
+			render.Redirect(w, r, "/services/"+existing.ServiceID)
+			return
+		}
+		a.handleStoreError(w, r, err)
+		return
+	}
+	a.setFlash(r, "success", "Endpoint withdrawn. The row and its history stay.")
+	render.Redirect(w, r, "/services/"+existing.ServiceID)
+}
+
 // EndpointCreate adds a listening socket to a service.
 func (a *App) EndpointCreate(w http.ResponseWriter, r *http.Request) {
 	serviceID := r.PathValue("id")

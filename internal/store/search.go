@@ -243,8 +243,8 @@ func (s *SQLStore) searchStructured(ctx context.Context, query string) ([]Search
 			SELECT s.id AS service_id, s.name AS service_name, s.code AS service_code,
 			       e.name AS endpoint_name, e.l4_proto
 			FROM endpoint e JOIN service s ON s.id = e.service_id
-			WHERE e.port = ?
-			ORDER BY s.code`, port)
+			WHERE e.port = ? AND e.lifecycle = ?
+			ORDER BY s.code`, port, domain.LifecycleActive)
 		if err != nil {
 			return nil, fmt.Errorf("resolving port %d: %w", port, err)
 		}

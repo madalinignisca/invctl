@@ -160,6 +160,7 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	// on its service, a placement stays on its host. Those re-point the graph
 	// and have their own flows.
 	write("POST /endpoints/{id}", app.EndpointUpdate)
+	write("POST /endpoints/{id}/retire", app.EndpointRetire)
 	write("POST /instances/{id}", app.InstanceUpdate)
 	write("POST /environments/{id}", app.EnvironmentUpdate)
 	write("POST /interfaces/{id}", app.InterfaceUpdate)

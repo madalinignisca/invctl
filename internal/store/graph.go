@@ -53,8 +53,12 @@ func (s *SQLStore) LoadGraph(ctx context.Context) (*impact.Graph, error) {
 		})
 	}
 
+	// Live sockets only, per the read audit in migration 00020. A withdrawn
+	// socket carries no traffic, and leaving it here makes the impact engine
+	// simulate an outage propagating through something that does not exist.
 	var endpoints []domain.Endpoint
-	if err := s.read(ctx, &endpoints, `SELECT * FROM endpoint`); err != nil {
+	if err := s.read(ctx, &endpoints,
+		`SELECT * FROM endpoint WHERE lifecycle = ?`, domain.LifecycleActive); err != nil {
 		return nil, fmt.Errorf("loading endpoints for graph: %w", err)
 	}
 	for _, e := range endpoints {
