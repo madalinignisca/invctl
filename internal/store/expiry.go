@@ -63,10 +63,29 @@ type ExpiringRow struct {
 	ProjectCode string
 	ProjectName string
 
+	// EOLSource says where EOLDate came from: domain.EOLFromAsset when somebody
+	// stated it for this box, domain.EOLFromDeviceType when its model's
+	// published date is standing in.
+	//
+	// A resolved date on its own is half the information. "Out of support in
+	// March" and "its MODEL is out of support in March, and nobody has checked
+	// this box against the contract" send a reader to different people, and a
+	// report that renders them identically has merged a fact with an assumption.
+	// Only assets carry it; services and certificates have no model to inherit
+	// from, and their source is always themselves.
+	EOLSource string `db:"eol_source"`
+	// DeviceTypeLabel is the model the date came from, when it did, so a row can
+	// name it without a second lookup.
+	DeviceTypeLabel string `db:"device_type_label"`
+
 	// Derived from EOLDate and the clock handed to Expiring.
 	State     string
 	DaysUntil int
 }
+
+// InheritedEOL reports whether this row's date came from its model rather than
+// from anybody looking at the thing itself.
+func (r ExpiringRow) InheritedEOL() bool { return r.EOLSource == domain.EOLFromDeviceType }
 
 // IsExpired is a convenience for templates, which must not do arithmetic.
 func (r ExpiringRow) IsExpired() bool { return r.State == domain.ExpiryExpired }
@@ -115,13 +134,30 @@ func (s *SQLStore) Expiring(ctx context.Context, asOf time.Time, horizonMonths i
 	// (an asset has no tier, a service has no containment) and a UNION would
 	// have to pad both sides with literals to line them up. Merging two typed
 	// results in Go is the same shape the neighbourhood loaders use.
+	// THE OVERRIDE RULE, IN SQL. An asset's own eol_date wins; its model's
+	// stands in when it has none. COALESCE and CASE are the portable way to say
+	// that, and both engines take them unchanged.
+	//
+	// The same rule is domain.ResolveEOL for callers holding structs. Two
+	// expressions of one rule is one more than is safe, so if this WHERE and
+	// that function ever disagree, the function is right -- and
+	// TestTheReportAgreesWithTheDomainRule fails until they agree again.
 	var assets []ExpiringRow
 	if err := s.read(ctx, &assets, `
-		SELECT 'asset' AS entity_type, a.id, a.name, '' AS code, a.kind, a.lifecycle, a.eol_date,
+		SELECT 'asset' AS entity_type, a.id, a.name, '' AS code, a.kind, a.lifecycle,
+		       COALESCE(a.eol_date, dt.eol_date) AS eol_date,
+		       CASE WHEN a.eol_date IS NOT NULL THEN ? ELSE ? END AS eol_source,
+		       COALESCE(mf.name || ' ' || dt.model, '') AS device_type_label,
 		       0 AS service_count, 0 AS best_tier, 0 AS tier
 		FROM asset a
-		WHERE a.eol_date IS NOT NULL AND a.eol_date <= ? AND a.lifecycle <> ?
-		ORDER BY a.eol_date, a.name`, until, domain.LifecycleRetired); err != nil {
+		LEFT JOIN device_type dt ON dt.id = a.device_type_id
+		LEFT JOIN manufacturer mf ON mf.id = dt.manufacturer_id
+		WHERE COALESCE(a.eol_date, dt.eol_date) IS NOT NULL
+		  AND COALESCE(a.eol_date, dt.eol_date) <= ?
+		  AND a.lifecycle <> ?
+		ORDER BY COALESCE(a.eol_date, dt.eol_date), a.name`,
+		domain.EOLFromAsset, domain.EOLFromDeviceType,
+		until, domain.LifecycleRetired); err != nil {
 		return nil, fmt.Errorf("listing expiring assets: %w", err)
 	}
 
@@ -134,6 +170,7 @@ func (s *SQLStore) Expiring(ctx context.Context, asOf time.Time, horizonMonths i
 		       COALESCE(c.fingerprint, '') AS code,
 		       COALESCE(c.issuer, 'certificate') AS kind, c.lifecycle,
 		       c.not_after AS eol_date,
+		       'asset' AS eol_source, '' AS device_type_label,
 		       0 AS service_count, 0 AS best_tier, 0 AS tier
 		FROM certificate c
 		WHERE c.not_after IS NOT NULL AND c.not_after <= ? AND c.lifecycle <> ?
@@ -144,6 +181,7 @@ func (s *SQLStore) Expiring(ctx context.Context, asOf time.Time, horizonMonths i
 	var services []ExpiringRow
 	if err := s.read(ctx, &services, `
 		SELECT 'service' AS entity_type, s.id, s.name, s.code, s.kind, s.lifecycle, s.eol_date,
+		       'asset' AS eol_source, '' AS device_type_label,
 		       0 AS service_count, 0 AS best_tier, s.tier
 		FROM service s
 		WHERE s.eol_date IS NOT NULL AND s.eol_date <= ? AND s.lifecycle <> ?
@@ -341,8 +379,14 @@ func (s *SQLStore) expiryOwners(ctx context.Context, assets, services []Expiring
 
 // expiryUndated counts what carries no date at all.
 func (s *SQLStore) expiryUndated(ctx context.Context, report *ExpiryReport) error {
-	if err := s.readOne(ctx, &report.UndatedAssets,
-		`SELECT COUNT(*) FROM asset WHERE eol_date IS NULL AND lifecycle <> ?`,
+	// Undated now means undated from EITHER source. An asset with no date of its
+	// own but a model that has one is not a gap in the record -- it is the case
+	// the catalogue was built for, and counting it here would report the feature
+	// working as if it were not.
+	if err := s.readOne(ctx, &report.UndatedAssets, `
+		SELECT COUNT(*) FROM asset a
+		LEFT JOIN device_type dt ON dt.id = a.device_type_id
+		WHERE COALESCE(a.eol_date, dt.eol_date) IS NULL AND a.lifecycle <> ?`,
 		domain.LifecycleRetired); err != nil {
 		return fmt.Errorf("counting undated assets: %w", err)
 	}

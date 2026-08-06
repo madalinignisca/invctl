@@ -155,15 +155,23 @@ var AssetLifecycles = []string{
 // strictly a tree; every other relationship is an explicit edge table. The
 // flattened form lives in asset_closure and is maintained by the store.
 type Asset struct {
-	ID        string  `db:"id"`
-	Kind      string  `db:"kind"`
-	Name      string  `db:"name"`
-	ParentID  *string `db:"parent_id"`
-	Serial    *string `db:"serial"`
-	AssetTag  *string `db:"asset_tag"`
-	Vendor    *string `db:"vendor"`
-	Model     *string `db:"model"`
-	Lifecycle string  `db:"lifecycle"`
+	ID       string  `db:"id"`
+	Kind     string  `db:"kind"`
+	Name     string  `db:"name"`
+	ParentID *string `db:"parent_id"`
+	Serial   *string `db:"serial"`
+	AssetTag *string `db:"asset_tag"`
+	Vendor   *string `db:"vendor"`
+	Model    *string `db:"model"`
+	// DeviceTypeID links this box to a catalogued model. Optional, and it stays
+	// optional: an inventory that refused to hold a server until somebody had
+	// modelled its type would be an inventory that stayed empty.
+	//
+	// It DESCRIBES the thing rather than deciding what it is attached to, so it
+	// is editable like vendor and model -- unlike parent_id, which moves the
+	// graph and has its own flow.
+	DeviceTypeID *string `db:"device_type_id"`
+	Lifecycle    string  `db:"lifecycle"`
 	// Who looks after it, and in what capacity. Both optional; see team.go.
 	TeamID      *string `db:"team_id"`
 	ManagerRole *string `db:"manager_role"`

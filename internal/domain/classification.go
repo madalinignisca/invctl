@@ -153,7 +153,8 @@ var DeclaredColumns = map[string][]string{
 	},
 	"asset": {
 		"id", "kind", "name", "parent_id", "serial", "asset_tag", "vendor",
-		"model", "lifecycle", "team_id", "manager_role", "eol_date", "attrs",
+		"model", "device_type_id", "lifecycle", "team_id", "manager_role",
+		"eol_date", "attrs",
 		"created_at", "updated_at",
 		"row_version",
 	},
@@ -294,6 +295,23 @@ var DeclaredColumns = map[string][]string{
 		"row_version",
 	},
 	"responsibility_role": {"code", "label", "sort_order", "description"},
+	// The hardware catalogue (migration 00022). Declared throughout, and the
+	// interesting one is `device_type.eol_date`: it is what a MANUFACTURER
+	// published, transcribed by a person, and an asset that states its own
+	// overrides it. Neither is observed -- nothing in the estate reports when it
+	// stops being supportable, which is exactly why somebody has to write it
+	// down. `support_ref` is a portal or a contract reference and is governed by
+	// the same rule as team.contact_ref: never a person, never a credential.
+	"manufacturer": {
+		"id", "code", "name", "support_ref", "lifecycle",
+		"created_at", "updated_at",
+		"row_version",
+	},
+	"device_type": {
+		"id", "manufacturer_id", "model", "part_number", "u_height", "full_depth",
+		"eol_date", "notes", "lifecycle", "created_at", "updated_at",
+		"row_version",
+	},
 	// Certificates (migration 00015). Declared: somebody asserts that this
 	// certificate, with this expiry, is deployed here. What a scanner finds
 	// actually being served is a different fact for the observed side, and the

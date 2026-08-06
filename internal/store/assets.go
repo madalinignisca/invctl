@@ -563,11 +563,12 @@ func (s *SQLStore) insertAsset(ctx context.Context, t *tx, a *domain.Asset, envi
 	}
 	_, err := t.exec(ctx,
 		`INSERT INTO asset (id, kind, name, parent_id, serial, asset_tag, vendor, model,
-		                    lifecycle, team_id, manager_role, eol_date, attrs,
+		                    device_type_id, lifecycle, team_id, manager_role, eol_date, attrs,
 		                    created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		a.ID, a.Kind, a.Name, a.ParentID, a.Serial, a.AssetTag, a.Vendor, a.Model,
-		a.Lifecycle, a.TeamID, a.ManagerRole, a.EOLDate, a.Attrs, a.CreatedAt, a.UpdatedAt)
+		a.DeviceTypeID, a.Lifecycle, a.TeamID, a.ManagerRole, a.EOLDate, a.Attrs,
+		a.CreatedAt, a.UpdatedAt)
 	if err != nil {
 		return translateWriteErr(err, "creating asset")
 	}
@@ -627,11 +628,11 @@ func (s *SQLStore) UpdateAsset(ctx context.Context, actor domain.Actor, a *domai
 		}
 		res, err := t.exec(ctx,
 			`UPDATE asset SET kind = ?, name = ?, serial = ?, asset_tag = ?, vendor = ?,
-			                  model = ?, lifecycle = ?, team_id = ?, manager_role = ?,
-			                  eol_date = ?, attrs = ?, updated_at = ?,
+			                  model = ?, device_type_id = ?, lifecycle = ?, team_id = ?,
+			                  manager_role = ?, eol_date = ?, attrs = ?, updated_at = ?,
 			                  row_version = row_version + 1
 			 WHERE id = ? AND row_version = ?`,
-			a.Kind, a.Name, a.Serial, a.AssetTag, a.Vendor, a.Model,
+			a.Kind, a.Name, a.Serial, a.AssetTag, a.Vendor, a.Model, a.DeviceTypeID,
 			a.Lifecycle, a.TeamID, a.ManagerRole, a.EOLDate, a.Attrs, a.UpdatedAt,
 			a.ID, a.RowVersion)
 		if err != nil {
