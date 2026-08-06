@@ -206,17 +206,21 @@ func (s *SQLStore) ImportAssetsBatched(ctx context.Context, actor domain.Actor,
 			}
 			return nil
 		})
-		if err != nil && !errors.Is(err, errRefused) {
+		// A BATCH THAT FAILED IS A STOP, not an error returned to the caller.
+		// Earlier batches committed, so this is a real outcome the operator has
+		// to be told about precisely -- how many rows landed -- rather than an
+		// error that loses that number on its way up.
+		switch {
+		case errors.Is(err, errRefused):
+			// A row the snapshot said was fine and the database refused: almost
+			// always somebody else taking a name while this ran. The reasons are
+			// already on the report; this batch rolled back, earlier ones did not.
+			report.PartialRows = done
+			return report, nil
+		case err != nil:
 			report.Problems = append(report.Problems, ImportProblem{
 				Message: fmt.Sprintf("stopped after %d rows: %v", done, err),
 			})
-			report.PartialRows = done
-			return report, nil
-		}
-		if err != nil {
-			// A validation failure the snapshot could not have seen -- almost
-			// always somebody else taking a name while this ran. The batch rolled
-			// back; earlier ones did not.
 			report.PartialRows = done
 			return report, nil
 		}
