@@ -477,6 +477,7 @@ func (a *App) AssetCreate(w http.ResponseWriter, r *http.Request) {
 		asset.AssetTag = optionalString(r, "asset_tag")
 		asset.Vendor = optionalString(r, "vendor")
 		asset.Model = optionalString(r, "model")
+		asset.DeviceTypeID = optionalString(r, "device_type_id")
 		asset.TeamID = optionalString(r, "team_id")
 		asset.ManagerRole = optionalString(r, "manager_role")
 		asset.EOLDate = optionalString(r, "eol_date")
@@ -517,7 +518,10 @@ func (a *App) AssetUpdate(w http.ResponseWriter, r *http.Request) {
 	updated.Vendor = optionalString(r, "vendor")
 	updated.Model = optionalString(r, "model")
 	// submittedString, not optionalString: a picker that failed to render must
-	// not read as an operator clearing the field. See its doc comment.
+	// not read as an operator clearing the field. See its doc comment. The
+	// catalogue picker is the same shape, and getting it wrong would silently
+	// drop an asset's model -- taking its inherited end-of-support date with it.
+	updated.DeviceTypeID = submittedString(r, "device_type_id", updated.DeviceTypeID)
 	updated.TeamID = submittedString(r, "team_id", updated.TeamID)
 	updated.ManagerRole = submittedString(r, "manager_role", updated.ManagerRole)
 	updated.EOLDate = optionalString(r, "eol_date")

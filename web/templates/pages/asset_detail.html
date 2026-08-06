@@ -53,9 +53,23 @@
         <dd>{{if .Asset.TeamName}}<a href="/teams/{{deref .Asset.TeamID}}">{{.Asset.TeamName}}</a>{{if .Asset.ManagerRoleName}}
               <span style="color:var(--muted)">as {{.Asset.ManagerRoleName}}</span>{{end}}
             {{else}}<span style="color:var(--faint)">nobody recorded</span>{{end}}</dd>
+        <dt>Catalogued model</dt>
+        <dd>{{if .Asset.DeviceTypeLabel}}{{.Asset.DeviceTypeLabel}}{{else}}<span style="color:var(--faint)">not catalogued</span>{{end}}</dd>
         <dt>Supported until</dt>
-        <dd>{{with expiry .Asset.EOLDate}}<span class="{{.Class}}">{{.Date}}</span>
-          <span style="color:var(--muted)">{{.Label}}</span>{{else}}—{{end}}</dd>
+        {{/* The date and its SOURCE, never one without the other. An inherited
+             date is the manufacturer's claim about a model; a date on the asset
+             is somebody's claim about THIS box, which is how a private support
+             contract gets recorded. They send a reader to different people. */}}
+        <dd>{{with expiry .Asset.ResolvedEOL}}<span class="{{.Class}}">{{.Date}}</span>
+          <span style="color:var(--muted)">{{.Label}}</span>{{else}}—{{end}}
+          {{if .Asset.InheritedEOL}}
+            <div style="color:var(--muted);font-size:12px">
+              inherited from {{.Asset.DeviceTypeLabel}} — this asset has no date of its own
+            </div>
+          {{else if .Asset.EOLDate}}
+            <div style="color:var(--muted);font-size:12px">recorded on this asset</div>
+          {{end}}
+        </dd>
         <dt>Contained by</dt>
         <dd>{{if .Asset.ParentName}}<span class="id">{{.Asset.ParentName}}</span>{{else}}<span style="color:var(--faint)">top level</span>{{end}}</dd>
       </dl>

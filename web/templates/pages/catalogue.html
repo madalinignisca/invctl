@@ -1,0 +1,311 @@
+{{/*
+  invctl — infrastructure inventory
+  Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+
+  Licensed under the GNU Affero General Public License, version 3 only —
+  no later version applies. See LICENSE for the full text.
+
+  SPDX-License-Identifier: AGPL-3.0-only
+*/}}
+{{define "content"}}
+<div class="page-head">
+  <div class="eyebrow">inventory</div>
+  <h1>Hardware catalogue</h1>
+  <p class="lede">
+    What you buy, entered once. A model carries the manufacturer's end of
+    support, and every asset of that model inherits it — so the date is typed
+    once instead of forty times, which is the difference between it being
+    recorded and not.
+  </p>
+</div>
+
+{{template "catalogue_panel" .}}
+
+{{if .CanWrite}}
+<div class="panel">
+  <div class="panel-head"><h2>Catalogue a model</h2></div>
+  <form class="panel-body" method="post" action="/catalogue/types">
+    <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+    <div class="field-row">
+      <div class="field">
+        <label for="dt-mf">Manufacturer</label>
+        <select id="dt-mf" name="manufacturer_id" required>
+          <option value="">Choose…</option>
+          {{range .Manufacturers}}
+            <option value="{{.ID}}" {{if eq $.TypeSpec.ManufacturerID .ID}}selected{{end}}>{{.Name}}</option>
+          {{end}}
+        </select>
+        {{with index .Errors "manufacturer_id"}}<div class="field-error">{{.}}</div>{{end}}
+        {{if not .Manufacturers}}
+          <div class="field-hint">Add a manufacturer below first.</div>
+        {{end}}
+      </div>
+      <div class="field">
+        <label for="dt-model">Model</label>
+        <input id="dt-model" type="text" name="model" value="{{.TypeSpec.Model}}"
+               placeholder="R650" required>
+        {{with index .Errors "model"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="dt-part">Part number</label>
+        <input id="dt-part" class="mono" type="text" name="part_number" value="{{deref .TypeSpec.PartNumber}}">
+      </div>
+    </div>
+    <div class="field-row">
+      <div class="field">
+        <label for="dt-eol">End of support</label>
+        <input id="dt-eol" type="date" name="eol_date" value="{{deref .TypeSpec.EOLDate}}">
+        <div class="field-hint">
+          What the manufacturer published. An asset with a support contract of
+          its own overrides this.
+        </div>
+        {{with index .Errors "eol_date"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="dt-u">Rack units</label>
+        <input id="dt-u" type="number" name="u_height" min="1" max="60"
+               value="{{derefInt .TypeSpec.UHeight}}">
+        <div class="field-hint">Leave empty for anything that does not mount.</div>
+        {{with index .Errors "u_height"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label class="check" for="dt-depth">
+          <input id="dt-depth" type="checkbox" name="full_depth" value="1"
+                 {{if .TypeSpec.FullDepth}}checked{{end}}>
+          Full depth
+        </label>
+      </div>
+    </div>
+    <div class="field">
+      <label for="dt-notes">Notes</label>
+      <input id="dt-notes" type="text" name="notes" value="{{deref .TypeSpec.Notes}}">
+    </div>
+    <div class="form-actions">
+      <button type="submit" class="btn btn-primary">Add model</button>
+    </div>
+  </form>
+</div>
+
+<div class="panel">
+  <div class="panel-head"><h2>Add a manufacturer</h2></div>
+  <form class="panel-body" method="post" action="/catalogue/manufacturers">
+    <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+    <div class="field-row">
+      <div class="field">
+        <label for="mf-code">Code</label>
+        <input id="mf-code" class="mono" type="text" name="code" value="{{.Spec.Code}}"
+               placeholder="dell" required>
+        {{with index .Errors "code"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="mf-name">Name</label>
+        <input id="mf-name" type="text" name="name" value="{{.Spec.Name}}"
+               placeholder="Dell" required>
+        {{with index .Errors "name"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="mf-support">Support reference</label>
+        <input id="mf-support" class="mono" type="text" name="support_ref"
+               value="{{deref .Spec.SupportRef}}"
+               placeholder="https://support.example.com · CONTRACT-1234">
+        <div class="field-hint">
+          A portal or a contract reference — <strong>never a person and never a
+          credential</strong>. This database is read by more people than wrote it.
+        </div>
+      </div>
+    </div>
+    <div class="form-actions">
+      <button type="submit" class="btn">Add manufacturer</button>
+    </div>
+  </form>
+</div>
+{{end}}
+{{end}}
+
+{{define "catalogue_panel"}}
+<div id="catalogue-panel">
+  <div class="panel">
+    <div class="panel-head">
+      <h2>Models</h2>
+      <p class="panel-note">{{pluralise (len .DeviceTypes) "model" "models"}} catalogued.</p>
+    </div>
+    <div class="panel-body">
+      {{if .DeviceTypes}}
+      <table class="grid">
+        <thead>
+          <tr>
+            <th>Manufacturer</th><th>Model</th><th>Part number</th>
+            <th>End of support</th><th>U</th><th>In use</th><th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .DeviceTypes}}
+            {{if and $.CanWrite (eq $.Editing .ID)}}
+            <tr>
+              <td colspan="7">
+                <form method="post" action="/catalogue/types/{{.ID}}">
+                  <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+                  <input type="hidden" name="row_version" value="{{.RowVersion}}">
+                  <div class="field-row">
+                    <div class="field">
+                      <label for="e-model-{{.ID}}">Model</label>
+                      <input id="e-model-{{.ID}}" type="text" name="model" value="{{.Model}}" required>
+                      {{with index $.Errors "model"}}<div class="field-error">{{.}}</div>{{end}}
+                    </div>
+                    <div class="field">
+                      <label for="e-part-{{.ID}}">Part number</label>
+                      <input id="e-part-{{.ID}}" class="mono" type="text" name="part_number" value="{{deref .PartNumber}}">
+                    </div>
+                    <div class="field">
+                      <label for="e-eol-{{.ID}}">End of support</label>
+                      <input id="e-eol-{{.ID}}" type="date" name="eol_date" value="{{deref .EOLDate}}">
+                      {{with index $.Errors "eol_date"}}<div class="field-error">{{.}}</div>{{end}}
+                    </div>
+                    <div class="field">
+                      <label for="e-u-{{.ID}}">Rack units</label>
+                      <input id="e-u-{{.ID}}" type="number" name="u_height" min="1" max="60" value="{{derefInt .UHeight}}">
+                      {{with index $.Errors "u_height"}}<div class="field-error">{{.}}</div>{{end}}
+                    </div>
+                    <div class="field">
+                      <label for="e-life-{{.ID}}">Lifecycle</label>
+                      <select id="e-life-{{.ID}}" name="lifecycle">
+                        {{$row := .}}
+                        {{range $.Lifecycles}}
+                          <option value="{{.}}" {{if eq $row.Lifecycle .}}selected{{end}}>{{title .}}</option>
+                        {{end}}
+                      </select>
+                      {{with index $.Errors "lifecycle"}}<div class="field-error">{{.}}</div>{{end}}
+                    </div>
+                  </div>
+                  <div class="field">
+                    <label class="check" for="e-depth-{{.ID}}">
+                      <input id="e-depth-{{.ID}}" type="checkbox" name="full_depth" value="1" {{if .FullDepth}}checked{{end}}>
+                      Full depth
+                    </label>
+                  </div>
+                  <div class="form-actions">
+                    <button type="submit" class="btn btn-primary">Save</button>
+                    <a class="btn btn-sm" href="/catalogue">Cancel</a>
+                  </div>
+                </form>
+              </td>
+            </tr>
+            {{else}}
+            <tr>
+              <td>{{.ManufacturerName}}</td>
+              <td class="mono">{{.Model}}</td>
+              <td class="mono">{{deref .PartNumber}}</td>
+              <td>
+                {{with expiry .EOLDate}}
+                  <span class="{{.Class}}">{{.Label}}</span>
+                  <div class="muted mono">{{.Date}}</div>
+                {{else}}
+                  <span class="muted">not recorded</span>
+                {{end}}
+              </td>
+              <td class="mono">{{derefInt .UHeight}}</td>
+              <td>
+                {{if .Assets}}
+                  <a href="/assets?device_type_id={{.ID}}">{{pluralise .Assets "asset" "assets"}}</a>
+                {{else}}
+                  <span class="muted">none</span>
+                {{end}}
+              </td>
+              <td class="row-actions">
+                {{if $.CanWrite}}
+                  <a class="btn btn-sm" href="/catalogue?edit={{.ID}}">Edit</a>
+                  <form method="post" action="/catalogue/types/{{.ID}}/retire" style="display:inline">
+                    <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+                    <button class="btn btn-sm" type="submit">Retire</button>
+                  </form>
+                {{end}}
+              </td>
+            </tr>
+            {{end}}
+          {{end}}
+        </tbody>
+      </table>
+      {{else}}
+      <p class="empty">
+        Nothing catalogued yet. Add a manufacturer, then a model, and every asset
+        you point at that model inherits its end-of-support date.
+      </p>
+      {{end}}
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head"><h2>Manufacturers</h2></div>
+    <div class="panel-body">
+      {{if .Manufacturers}}
+      <table class="grid">
+        <thead><tr><th>Code</th><th>Name</th><th>Support</th><th>Models</th><th></th></tr></thead>
+        <tbody>
+          {{range .Manufacturers}}
+            {{if and $.CanWrite (eq $.Editing .ID)}}
+            <tr>
+              <td colspan="5">
+                <form method="post" action="/catalogue/manufacturers/{{.ID}}">
+                  <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+                  <input type="hidden" name="row_version" value="{{.RowVersion}}">
+                  <div class="field-row">
+                    <div class="field">
+                      <label for="em-code-{{.ID}}">Code</label>
+                      <input id="em-code-{{.ID}}" class="mono" type="text" name="code" value="{{.Code}}" required>
+                      {{with index $.Errors "code"}}<div class="field-error">{{.}}</div>{{end}}
+                    </div>
+                    <div class="field">
+                      <label for="em-name-{{.ID}}">Name</label>
+                      <input id="em-name-{{.ID}}" type="text" name="name" value="{{.Name}}" required>
+                      {{with index $.Errors "name"}}<div class="field-error">{{.}}</div>{{end}}
+                    </div>
+                    <div class="field">
+                      <label for="em-support-{{.ID}}">Support reference</label>
+                      <input id="em-support-{{.ID}}" class="mono" type="text" name="support_ref" value="{{deref .SupportRef}}">
+                    </div>
+                    <div class="field">
+                      <label for="em-life-{{.ID}}">Lifecycle</label>
+                      <select id="em-life-{{.ID}}" name="lifecycle">
+                        {{$row := .}}
+                        {{range $.Lifecycles}}
+                          <option value="{{.}}" {{if eq $row.Lifecycle .}}selected{{end}}>{{title .}}</option>
+                        {{end}}
+                      </select>
+                    </div>
+                  </div>
+                  <div class="form-actions">
+                    <button type="submit" class="btn btn-primary">Save</button>
+                    <a class="btn btn-sm" href="/catalogue">Cancel</a>
+                  </div>
+                </form>
+              </td>
+            </tr>
+            {{else}}
+            <tr>
+              <td class="mono">{{.Code}}</td>
+              <td>{{.Name}}</td>
+              <td class="mono">{{truncate (deref .SupportRef) 40}}</td>
+              <td>{{.DeviceTypes}}</td>
+              <td class="row-actions">
+                {{if $.CanWrite}}
+                  <a class="btn btn-sm" href="/catalogue?edit={{.ID}}">Edit</a>
+                  {{if not .DeviceTypes}}
+                  <form method="post" action="/catalogue/manufacturers/{{.ID}}/retire" style="display:inline">
+                    <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+                    <button class="btn btn-sm" type="submit">Retire</button>
+                  </form>
+                  {{end}}
+                {{end}}
+              </td>
+            </tr>
+            {{end}}
+          {{end}}
+        </tbody>
+      </table>
+      {{else}}
+      <p class="empty">No manufacturers yet.</p>
+      {{end}}
+    </div>
+  </div>
+</div>
+{{end}}

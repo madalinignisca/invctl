@@ -47,6 +47,9 @@ type assetFormData struct {
 	Parents    []store.AssetRow
 	Teams      []store.TeamRow
 	Roles      []store.VocabularyTerm
+	// DeviceTypes is the catalogue, so an asset can be pointed at a model and
+	// inherit its end-of-support date.
+	DeviceTypes []store.DeviceTypeRow
 	// Asset is the row being corrected, or nil when adding. One partial serves
 	// both, so a field cannot be added to one and forgotten on the other --
 	// which is how a form ends up quietly unable to set something.
@@ -78,6 +81,8 @@ func (f assetFormData) Value(field string) string {
 			stored = orBlank(a.Vendor)
 		case "model":
 			stored = orBlank(a.Model)
+		case "device_type_id":
+			stored = orBlank(a.DeviceTypeID)
 		case "serial":
 			stored = orBlank(a.Serial)
 		case "asset_tag":
@@ -267,6 +272,14 @@ type prefixFormData struct {
 // table shows, so an asset can be filed under anything already on screen.
 func (a *App) newAssetForm(r *http.Request, errs map[string]string, envs []domain.Environment, kinds []store.VocabularyTerm, parents []store.AssetRow) assetFormData {
 	teams, roles := a.responsibilityOptions(r)
+	// A catalogue that cannot be read leaves the picker empty rather than
+	// failing the page: the form still works, the model is simply not offered.
+	// The empty-picker failure has bitten this codebase before, so the count is
+	// asserted in a test rather than trusted here.
+	deviceTypes, err := a.Store.ListDeviceTypes(r.Context(), store.DeviceTypeFilter{})
+	if err != nil {
+		slog.Error("listing device types for the asset form", "error", err, "path", r.URL.Path)
+	}
 	return assetFormData{
 		Base:         a.base(r, "Assets", "assets"),
 		Errors:       orEmpty(errs),
@@ -276,6 +289,7 @@ func (a *App) newAssetForm(r *http.Request, errs map[string]string, envs []domai
 		Parents:      parents,
 		Teams:        teams,
 		Roles:        roles,
+		DeviceTypes:  deviceTypes,
 		Action:       "/assets",
 		Submit:       "Add asset",
 		Prefix:       "asset-new",

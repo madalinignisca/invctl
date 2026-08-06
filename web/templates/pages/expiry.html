@@ -67,7 +67,19 @@
       <tbody>
         {{range .Report.Rows}}
         <tr>
-          <td class="mono">{{.EOLDate}}</td>
+          <td class="mono">
+            {{.EOLDate}}
+            {{/* The source, never apart from the date. "Out of support in March"
+                 and "its MODEL is out of support in March, and nobody has checked
+                 this box against the contract" send a reader to different people,
+                 and rendering them alike merges a fact with an assumption. Same
+                 handling as actor / actor_kind. */}}
+            {{if .InheritedEOL}}
+              <div class="muted" style="font-size:12px">
+                from {{.DeviceTypeLabel}}
+              </div>
+            {{end}}
+          </td>
           <td>
             {{if eq .EntityType "asset"}}
               <a class="id" href="/assets/{{.ID}}">{{.Name}}</a>

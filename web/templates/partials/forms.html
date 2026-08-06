@@ -116,6 +116,18 @@
         <input id="{{.Prefix}}-model" type="text" name="model" value="{{.Value "model"}}">
       </div>
       <div class="field">
+        <label for="{{.Prefix}}-devicetype">Catalogued model</label>
+        <select id="{{.Prefix}}-devicetype" name="device_type_id">
+          <option value="">—</option>
+          {{range .DeviceTypes}}<option value="{{.ID}}" {{if eq .ID ($f.Value "device_type_id")}}selected{{end}}>{{.ManufacturerName}} {{.Model}}</option>{{end}}
+        </select>
+        <div class="field-hint">
+          Optional. Inherits the model's end-of-support date unless this asset
+          states its own below.
+        </div>
+        {{with index .Errors "device_type_id"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
         <label for="{{.Prefix}}-serial">Serial</label>
         <input id="{{.Prefix}}-serial" class="mono" type="text" name="serial" value="{{.Value "serial"}}">
       </div>

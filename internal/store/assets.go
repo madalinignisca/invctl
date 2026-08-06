@@ -238,6 +238,11 @@ type AssetRow struct {
 	ManagerRoleName string
 	Environments    []domain.Environment
 	InstanceCount   int
+	// The catalogued model, when there is one, and the date it publishes.
+	// Carried rather than resolved here so that ResolvedEOL below stays the
+	// single expression of the override rule.
+	DeviceTypeLabel string  `db:"device_type_label"`
+	DeviceTypeEOL   *string `db:"device_type_eol"`
 	// Behaviour comes from the asset_kind lookup row rather than a switch in
 	// Go, so a kind added by INSERT is usable rather than merely storable.
 	// Populated by decorateAssets; the zero value is "may do nothing", which is
@@ -387,6 +392,29 @@ func (s *SQLStore) decorateAssets(ctx context.Context, assets []domain.Asset) ([
 			if !m.IsTransit {
 				rows[i].NonTransitEnvironments++
 			}
+		}
+	}
+
+	// The catalogued model each one is, when it is one. One query rather than a
+	// join on every asset select, the same shape as the responsibility and
+	// vocabulary loads below.
+	var models []struct {
+		AssetID string  `db:"asset_id"`
+		Label   string  `db:"label"`
+		EOLDate *string `db:"eol_date"`
+	}
+	if err := s.read(ctx, &models, `
+		SELECT a.id AS asset_id, mf.name || ' ' || dt.model AS label, dt.eol_date
+		FROM asset a
+		JOIN device_type dt ON dt.id = a.device_type_id
+		JOIN manufacturer mf ON mf.id = dt.manufacturer_id
+		WHERE a.id IN (`+placeholders(len(ids))+`)`, anySlice(ids)...); err != nil {
+		return nil, fmt.Errorf("loading asset device types: %w", err)
+	}
+	for _, m := range models {
+		if i, ok := index[m.AssetID]; ok {
+			rows[i].DeviceTypeLabel = m.Label
+			rows[i].DeviceTypeEOL = m.EOLDate
 		}
 	}
 
@@ -1002,4 +1030,26 @@ func lower(s string) string {
 		}
 	}
 	return string(b)
+}
+
+// ResolvedEOL is the date this asset is actually supported until, applying the
+// override rule: its own if it states one, otherwise its model's.
+//
+// It delegates to domain.ResolveEOL rather than repeating the comparison, so
+// this page and the expiry report cannot drift apart. They are already two
+// expressions of one rule -- the report resolves it in SQL because it has to
+// filter on it -- and TestTheReportAgreesWithTheDomainRule holds them together.
+func (r AssetRow) ResolvedEOL() *string {
+	date, _ := domain.ResolveEOL(r.EOLDate, r.DeviceTypeEOL)
+	return date
+}
+
+// InheritedEOL reports whether the resolved date came from the model rather
+// than from anybody looking at this box.
+//
+// Templates call this beside the date and never instead of it, the way every
+// view of `actor` renders `actor_kind`.
+func (r AssetRow) InheritedEOL() bool {
+	_, source := domain.ResolveEOL(r.EOLDate, r.DeviceTypeEOL)
+	return source == domain.EOLFromDeviceType
 }
