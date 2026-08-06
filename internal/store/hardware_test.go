@@ -12,6 +12,7 @@ import (
 	"context"
 	"errors"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -395,6 +396,211 @@ func TestADeviceTypeRefusesWhatWouldMislead(t *testing.T) {
 			if msg := fieldError(err, tc.field); msg == "" {
 				t.Errorf("error = %v, want it attached to %q so the form can render it",
 					err, tc.field)
+			}
+		})
+	}
+}
+
+// Search over the catalogue: a part number, and a serial in whatever case it
+// was read out in.
+
+func TestAPartNumberFindsTheModelAndCountsTheBoxes(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			s, ctx := newStore(t, e)
+			mf := mustManufacturer(t, s, ctx, "hpe", "HPE")
+			d, err := domain.NewDeviceType(NewID(), domain.DeviceTypeSpec{
+				ManufacturerID: mf, Model: "DL380 Gen10", PartNumber: ptr("P30721-B21"),
+			}, s.Now())
+			if err != nil {
+				t.Fatalf("building: %v", err)
+			}
+			if err := s.CreateDeviceType(ctx, testActor, d); err != nil {
+				t.Fatalf("creating: %v", err)
+			}
+			assetOfType(t, s, ctx, "dl-01", d.ID, nil)
+			assetOfType(t, s, ctx, "dl-02", d.ID, nil)
+
+			hits, err := s.Search(ctx, "P30721-B21", 20)
+			if err != nil {
+				t.Fatalf("searching: %v", err)
+			}
+			var found *SearchResult
+			for i := range hits {
+				if hits[i].EntityType == "device_type" {
+					found = &hits[i]
+				}
+			}
+			if found == nil {
+				t.Fatalf("a part number found no model. %d hits: %+v\n"+
+					"A part number is what arrives from procurement or a support portal, "+
+					"and it is the one identifier nobody can translate by hand.",
+					len(hits), hits)
+			}
+			if found.Title != "DL380 Gen10" {
+				t.Errorf("title = %q, want the model", found.Title)
+			}
+			// The COUNT is the answer, not decoration. "Do we have any of these"
+			// is the question behind pasting a part number.
+			if found.Assets != 2 {
+				t.Errorf("hit says %d assets, want 2", found.Assets)
+			}
+			if !strings.Contains(found.Why, "2 assets") {
+				t.Errorf("why = %q, want it to say how many boxes are of this model", found.Why)
+			}
+		})
+	}
+}
+
+func TestAPartNumberIsFoundInAnyCase(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			s, ctx := newStore(t, e)
+			mf := mustManufacturer(t, s, ctx, "hpe", "HPE")
+			d, _ := domain.NewDeviceType(NewID(), domain.DeviceTypeSpec{
+				ManufacturerID: mf, Model: "DL380", PartNumber: ptr("P30721-B21"),
+			}, s.Now())
+			if err := s.CreateDeviceType(ctx, testActor, d); err != nil {
+				t.Fatalf("creating: %v", err)
+			}
+
+			// The EXACT hit specifically, not merely "a model came back". The
+			// free-text index also matches a part number in the body, so an
+			// assertion on entity type alone passes even when the structured
+			// lookup is case-sensitive and finding nothing -- which is exactly
+			// what mutation testing caught here.
+			for _, typed := range []string{"p30721-b21", "P30721-b21"} {
+				hits, err := s.Search(ctx, typed, 20)
+				if err != nil {
+					t.Fatalf("searching %q: %v", typed, err)
+				}
+				var exact bool
+				for _, h := range hits {
+					if h.EntityType == "device_type" && strings.Contains(h.Why, "part number matches exactly") {
+						exact = true
+					}
+				}
+				if !exact {
+					t.Errorf("%q did not resolve to the model as an exact part-number match. "+
+						"A part number is copied out of a quote or read off a label; the "+
+						"case it arrives in is not the case it was recorded in.", typed)
+				}
+			}
+		})
+	}
+}
+
+func TestASerialIsFoundInWhateverCaseItWasReadOutIn(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			s, ctx := newStore(t, e)
+			a, err := domain.NewAsset(NewID(), domain.KindServer, "srv-01", nil, s.Now())
+			if err != nil {
+				t.Fatalf("building: %v", err)
+			}
+			a.Serial = ptr("FCH2033V0YR")
+			a.AssetTag = ptr("ASSET-0042")
+			if err := s.CreateAsset(ctx, testActor, a, nil); err != nil {
+				t.Fatalf("creating: %v", err)
+			}
+
+			// The case that matters is the lower one: somebody typing what they
+			// are reading off a sticker, at 03:00, does not hold shift.
+			for _, typed := range []string{"FCH2033V0YR", "fch2033v0yr", "asset-0042", "ASSET-0042"} {
+				hits, err := s.Search(ctx, typed, 20)
+				if err != nil {
+					t.Fatalf("searching %q: %v", typed, err)
+				}
+				var exact bool
+				for _, h := range hits {
+					if h.EntityID == a.ID && strings.Contains(h.Why, "exactly") {
+						exact = true
+					}
+				}
+				if !exact {
+					t.Errorf("%q did not resolve to the box as an exact identifier match", typed)
+				}
+			}
+		})
+	}
+}
+
+func TestACataloguedModelIsFindableByName(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			s, ctx := newStore(t, e)
+			mf := mustManufacturer(t, s, ctx, "dell", "Dell")
+			mustDeviceType(t, s, ctx, mf, "PowerEdge R650", nil)
+
+			hits, err := s.Search(ctx, "PowerEdge", 20)
+			if err != nil {
+				t.Fatalf("searching: %v", err)
+			}
+			for _, h := range hits {
+				if h.EntityType == "device_type" {
+					return
+				}
+			}
+			t.Errorf("a catalogued model is not in the search index at all. %d hits: %+v",
+				len(hits), hits)
+		})
+	}
+}
+
+func TestCorrectingAPartNumberCorrectsTheIndex(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			s, ctx := newStore(t, e)
+			mf := mustManufacturer(t, s, ctx, "hpe", "HPE")
+			d, _ := domain.NewDeviceType(NewID(), domain.DeviceTypeSpec{
+				ManufacturerID: mf, Model: "DL380", PartNumber: ptr("WRONG-1"),
+			}, s.Now())
+			if err := s.CreateDeviceType(ctx, testActor, d); err != nil {
+				t.Fatalf("creating: %v", err)
+			}
+
+			row, err := s.GetDeviceType(ctx, d.ID)
+			if err != nil {
+				t.Fatalf("reading back: %v", err)
+			}
+			row.PartNumber = ptr("P30721-B21")
+			if err := s.UpdateDeviceType(ctx, testActor, &row.DeviceType); err != nil {
+				t.Fatalf("updating: %v", err)
+			}
+
+			// Searching the OLD part number, not the new one.
+			//
+			// The new one is answered by the STRUCTURED lookup, which reads
+			// device_type directly and knows nothing about the index -- so
+			// asserting on it passes whether or not anything was reindexed, which
+			// is what mutation testing caught. The stale value can only be
+			// answered by the index, so it is the one that proves the reindex ran.
+			hits, err := s.Search(ctx, "WRONG-1", 20)
+			if err != nil {
+				t.Fatalf("searching: %v", err)
+			}
+			for _, h := range hits {
+				if h.EntityID == d.ID {
+					t.Errorf("the model is still findable by the part number it no longer "+
+						"has (%q). A value fixed in the form and not in the index is a "+
+						"wrong answer the index goes on giving.", "WRONG-1")
+				}
+			}
+
+			// And the control: the corrected value does resolve, so the test
+			// above cannot pass on a search that finds nothing at all.
+			hits, err = s.Search(ctx, "P30721-B21", 20)
+			if err != nil {
+				t.Fatalf("searching: %v", err)
+			}
+			var ok bool
+			for _, h := range hits {
+				if h.EntityID == d.ID {
+					ok = true
+				}
+			}
+			if !ok {
+				t.Error("the corrected part number finds nothing at all")
 			}
 		})
 	}

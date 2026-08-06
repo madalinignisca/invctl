@@ -211,3 +211,53 @@ func TestARefusedModelKeepsWhatWasTyped(t *testing.T) {
 		t.Error("the refused form came back blank; what was typed has to survive a refusal")
 	}
 }
+
+// TestFilteringAssetsByModelActuallyFilters covers a link that was a no-op.
+//
+// The catalogue lists "3 assets" against a model and links to
+// /assets?device_type_id=<id>. AssetFilter had no such field, so the parameter
+// was accepted, ignored, and the page showed the WHOLE inventory under a
+// heading that implied otherwise -- the silent-fallback shape, in a link.
+//
+// Nothing on screen distinguishes "every asset is of this model" from "the
+// filter did nothing", which is why this asserts on what is ABSENT.
+func TestFilteringAssetsByModelActuallyFilters(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+	dtID := h.catalogueModel(t, "dell", "Dell", "R650", "2027-09-30")
+
+	resp := h.post("/assets", url.Values{
+		"csrf_token":     {h.csrfToken("/assets")},
+		"name":           {"of-the-model-01"},
+		"kind":           {"server"},
+		"device_type_id": {dtID},
+	}, false)
+	resp.Body.Close()
+	resp = h.post("/assets", url.Values{
+		"csrf_token": {h.csrfToken("/assets")},
+		"name":       {"not-of-the-model-01"},
+		"kind":       {"server"},
+	}, false)
+	resp.Body.Close()
+
+	// Asserted on the ROW LINKS, not on the names appearing anywhere in the
+	// page. The same page renders a parent picker listing every asset, so a
+	// bare substring check finds every name in an <option> and can never fail.
+	inID := h.lookup(`SELECT id FROM asset WHERE name = ?`, "of-the-model-01")
+	outID := h.lookup(`SELECT id FROM asset WHERE name = ?`, "not-of-the-model-01")
+
+	page := body(t, h.get("/assets?device_type_id="+dtID, false))
+	if !strings.Contains(page, `href="/assets/`+inID+`"`) {
+		t.Error("the filtered list omits an asset that IS of that model")
+	}
+	if strings.Contains(page, `href="/assets/`+outID+`"`) {
+		t.Error("the filtered list includes an asset that is not of that model, so the " +
+			"parameter is being ignored and the page is showing everything")
+	}
+	// And the seeded estate is excluded too, so this cannot pass on a database
+	// where "everything" and "the filtered set" happen to coincide.
+	seeded := h.asset("hv-01")
+	if strings.Contains(page, `href="/assets/`+seeded+`"`) {
+		t.Error("the filtered list includes seeded assets with no model at all")
+	}
+}

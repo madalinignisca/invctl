@@ -82,6 +82,10 @@
                 <td>
                   {{if eq .EntityType "asset"}}<a class="id" href="/assets/{{.EntityID}}">{{.Title}}</a>
                   {{else if eq .EntityType "service"}}<a class="id" href="/services/{{.EntityID}}">{{.Title}}</a>
+                  {{/* A model links to the boxes OF it, not to a catalogue row.
+                       Somebody who pasted a part number is asking "do we have
+                       any of these", and the list of them is the answer. */}}
+                  {{else if eq .EntityType "device_type"}}<a class="id" href="/assets?device_type_id={{.EntityID}}">{{.Title}}</a>
                   {{else}}<span class="id">{{.Title}}</span>{{end}}
                   {{if .Subtitle}}<div class="mono" style="color:var(--faint);font-size:11.5px">{{.Subtitle}}</div>{{end}}
                 </td>

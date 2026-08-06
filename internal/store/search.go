@@ -40,6 +40,9 @@ type SearchResult struct {
 	Title      string `db:"title"`
 	Subtitle   string `db:"subtitle"`
 	Body       string `db:"body"`
+	// Assets is how many live boxes a device_type hit covers. Zero for every
+	// other kind of hit, and meaningful only there.
+	Assets int `db:"assets"`
 	// Why explains the match for structured hits ("IP 10.20.30.5 on eth0"),
 	// which is far more useful than a highlighted snippet when the operator
 	// pasted an address they found in a log.
@@ -91,6 +94,23 @@ func (s *SQLStore) indexAsset(ctx context.Context, t *tx, a *domain.Asset) error
 	return s.indexEntity(ctx, t, searchDoc{
 		EntityType: "asset", EntityID: a.ID,
 		Title: a.Name, Subtitle: a.Kind, Body: strings.Join(body, " "),
+	})
+}
+
+// indexDeviceType makes a catalogued model findable by model or part number.
+//
+// The part number goes in the BODY rather than the title because it is what
+// somebody pastes out of a quote or a support portal, not what they call the
+// thing. "R650" is the title; "P30721-B21" is how the same model arrives from
+// procurement, and both have to land on it.
+func (s *SQLStore) indexDeviceType(ctx context.Context, t *tx, d *domain.DeviceType, manufacturerName string) error {
+	body := []string{manufacturerName}
+	if d.PartNumber != nil && *d.PartNumber != "" {
+		body = append(body, *d.PartNumber)
+	}
+	return s.indexEntity(ctx, t, searchDoc{
+		EntityType: "device_type", EntityID: d.ID,
+		Title: d.Model, Subtitle: manufacturerName, Body: strings.Join(body, " "),
 	})
 }
 
@@ -265,12 +285,22 @@ func (s *SQLStore) searchStructured(ctx context.Context, query string) ([]Search
 		}
 	}
 
-	// An exact serial number.
+	// An exact serial number or asset tag.
+	//
+	// LOWER on both sides. A serial arrives off a sticker, out of a shipping
+	// note or out of a vendor portal, and the case it arrives in is not the case
+	// it was recorded in -- a lookup that only matched one of them would fail
+	// exactly when somebody is standing in front of the box reading it aloud.
+	// It is the comparison searchExactNames already uses, and the one both
+	// engines agree on without a collation argument.
+	lowered := strings.ToLower(query)
 	var serialHits []SearchResult
 	err := s.read(ctx, &serialHits, `
 		SELECT 'asset' AS entity_type, id AS entity_id, name AS title, kind AS subtitle,
 		       COALESCE(serial, '') AS body
-		FROM asset WHERE serial = ? OR asset_tag = ?`, query, query)
+		FROM asset
+		WHERE LOWER(COALESCE(serial, '')) = ? OR LOWER(COALESCE(asset_tag, '')) = ?`,
+		lowered, lowered)
 	if err != nil {
 		return nil, fmt.Errorf("resolving serial %s: %w", query, err)
 	}
@@ -278,6 +308,31 @@ func (s *SQLStore) searchStructured(ctx context.Context, query string) ([]Search
 		serialHits[i].Why = "serial or asset tag matches exactly"
 	}
 	results = append(results, serialHits...)
+
+	// An exact part number, which resolves to the MODEL rather than to a box.
+	//
+	// That is the useful answer and not a compromise: a part number identifies a
+	// product, and the question behind pasting one is almost always "do we have
+	// any of these, and how many" -- so the hit carries the live count and links
+	// to the boxes. Answering with one arbitrary asset of that model would be
+	// answering a question nobody asked.
+	var partHits []SearchResult
+	err = s.read(ctx, &partHits, `
+		SELECT 'device_type' AS entity_type, d.id AS entity_id, d.model AS title,
+		       m.name AS subtitle, COALESCE(d.part_number, '') AS body,
+		       (SELECT COUNT(*) FROM asset a
+		        WHERE a.device_type_id = d.id AND a.lifecycle <> ?) AS assets
+		FROM device_type d
+		JOIN manufacturer m ON m.id = d.manufacturer_id
+		WHERE LOWER(COALESCE(d.part_number, '')) = ?`, domain.LifecycleRetired, lowered)
+	if err != nil {
+		return nil, fmt.Errorf("resolving part number %s: %w", query, err)
+	}
+	for i := range partHits {
+		partHits[i].Why = fmt.Sprintf("part number matches exactly; %s of this model",
+			pluralWord(partHits[i].Assets, "1 asset", strconv.Itoa(partHits[i].Assets)+" assets"))
+	}
+	results = append(results, partHits...)
 
 	exact, err := s.searchExactNames(ctx, query)
 	if err != nil {

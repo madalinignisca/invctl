@@ -155,7 +155,10 @@ type AssetFilter struct {
 	EnvironmentID string
 	ParentID      string
 	TeamID        string
-	Query         string
+	// DeviceTypeID narrows to the boxes of one catalogued model, which is what
+	// turns "this model lapses in March" into the list of things to do about it.
+	DeviceTypeID string
+	Query        string
 	// IncludeRetired defaults false: retired assets are kept forever but are
 	// noise in day-to-day lists.
 	IncludeRetired bool
@@ -190,6 +193,10 @@ func (s *SQLStore) ListAssets(ctx context.Context, f AssetFilter) ([]AssetRow, e
 	if f.TeamID != "" {
 		where = append(where, `a.team_id = ?`)
 		args = append(args, f.TeamID)
+	}
+	if f.DeviceTypeID != "" {
+		where = append(where, `a.device_type_id = ?`)
+		args = append(args, f.DeviceTypeID)
 	}
 	if f.Query != "" {
 		// LIKE with a leading wildcard, not a full-text match: this is the

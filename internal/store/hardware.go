@@ -169,10 +169,11 @@ func (s *SQLStore) CreateDeviceType(ctx context.Context, actor domain.Actor, d *
 		return err
 	}
 	return s.write(ctx, actor, func(t *tx) error {
-		if err := requireLiveManufacturer(ctx, t, d.ManufacturerID); err != nil {
+		maker, err := requireLiveManufacturer(ctx, t, d.ManufacturerID)
+		if err != nil {
 			return err
 		}
-		_, err := t.exec(ctx, `
+		_, err = t.exec(ctx, `
 			INSERT INTO device_type (id, manufacturer_id, model, part_number, u_height,
 			                         full_depth, eol_date, notes, lifecycle, created_at, updated_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -181,7 +182,10 @@ func (s *SQLStore) CreateDeviceType(ctx context.Context, actor domain.Actor, d *
 		if err != nil {
 			return translateWriteErr(err, "creating device type")
 		}
-		return t.logCreate(ctx, "device_type", d.ID, d)
+		if err := t.logCreate(ctx, "device_type", d.ID, d); err != nil {
+			return err
+		}
+		return s.indexDeviceType(ctx, t, d, maker)
 	})
 }
 
@@ -217,7 +221,12 @@ func (s *SQLStore) UpdateDeviceType(ctx context.Context, actor domain.Actor, d *
 		if err := requireVersion(res, "device_type", d.ID, &d.RowVersion); err != nil {
 			return err
 		}
-		return t.logUpdate(ctx, "device_type", d.ID, &before.DeviceType, d)
+		if err := t.logUpdate(ctx, "device_type", d.ID, &before.DeviceType, d); err != nil {
+			return err
+		}
+		// Reindexed on every edit: a part number corrected in the form and not
+		// in the index is a part number that still finds nothing.
+		return s.indexDeviceType(ctx, t, d, before.ManufacturerName)
 	})
 }
 
@@ -286,21 +295,25 @@ func (s *SQLStore) RetireDeviceType(ctx context.Context, actor domain.Actor, id 
 	})
 }
 
-// requireLiveManufacturer refuses a model filed under a maker that is not there.
-func requireLiveManufacturer(ctx context.Context, t *tx, id string) error {
-	var lifecycle string
-	err := t.get(ctx, &lifecycle, `SELECT lifecycle FROM manufacturer WHERE id = ?`, id)
+// requireLiveManufacturer refuses a model filed under a maker that is not
+// there, and returns its name for the search index.
+func requireLiveManufacturer(ctx context.Context, t *tx, id string) (string, error) {
+	var row struct {
+		Name      string `db:"name"`
+		Lifecycle string `db:"lifecycle"`
+	}
+	err := t.get(ctx, &row, `SELECT name, lifecycle FROM manufacturer WHERE id = ?`, id)
 	if err != nil {
 		ve := &domain.ValidationError{}
 		ve.Add("manufacturer_id", "choose a manufacturer")
-		return ve
+		return "", ve
 	}
-	if lifecycle == domain.LifecycleRetired {
+	if row.Lifecycle == domain.LifecycleRetired {
 		ve := &domain.ValidationError{}
 		ve.Add("manufacturer_id", "that manufacturer has been retired")
-		return ve
+		return "", ve
 	}
-	return nil
+	return row.Name, nil
 }
 
 // pluralWord picks a noun form for a message.

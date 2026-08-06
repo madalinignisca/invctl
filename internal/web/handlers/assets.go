@@ -225,6 +225,7 @@ func (a *App) AssetList(w http.ResponseWriter, r *http.Request) {
 		Kind:           q.Get("kind"),
 		EnvironmentID:  q.Get("environment"),
 		Lifecycle:      q.Get("lifecycle"),
+		DeviceTypeID:   q.Get("device_type_id"),
 		Query:          q.Get("q"),
 		IncludeRetired: q.Get("retired") == "1",
 	}

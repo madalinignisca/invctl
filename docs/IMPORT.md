@@ -66,7 +66,7 @@ The first line is a header naming the columns. Their order does not matter.
 | `name` | yes | What the asset is called. |
 | `kind` | yes | A code from the **asset kinds** vocabulary — see below. |
 | `parent` | | The containing asset, as a path. Empty means top level. |
-| `serial` | | Manufacturer serial number. |
+| `serial` | | Manufacturer serial number. Searchable as an exact identifier, in any case. |
 | `asset_tag` | | Your own asset tag. |
 | `vendor` | | |
 | `model` | | |
