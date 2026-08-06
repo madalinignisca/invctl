@@ -1,3 +1,11 @@
+// invctl — infrastructure inventory
+// Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+//
+// Licensed under the GNU Affero General Public License, version 3 only —
+// no later version applies. See LICENSE for the full text.
+//
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // The observed-state webhook: the one route a machine credential can reach.
 //
 // This is the most security-sensitive file in the project, because it is where

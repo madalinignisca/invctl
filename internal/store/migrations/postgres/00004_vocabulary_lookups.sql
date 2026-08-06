@@ -1,3 +1,11 @@
+-- invctl — infrastructure inventory
+-- Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+--
+-- Licensed under the GNU Affero General Public License, version 3 only —
+-- no later version applies. See LICENSE for the full text.
+--
+-- SPDX-License-Identifier: AGPL-3.0-only
+
 -- Seven domain vocabularies stop being frozen enums and become lookup tables.
 -- PostgreSQL half; see migrations/sqlite/00004 for which seven, why those and
 -- not the other fifty-odd, and why keying on `code` means no data migrates.

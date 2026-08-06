@@ -1,3 +1,11 @@
+// invctl — infrastructure inventory
+// Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+//
+// Licensed under the GNU Affero General Public License, version 3 only —
+// no later version applies. See LICENSE for the full text.
+//
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Observed state: the vocabulary for what the estate reports about itself.
 //
 // The Go side of migration 00008_observed.sql and the normative rules in

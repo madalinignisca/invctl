@@ -1,3 +1,11 @@
+// invctl — infrastructure inventory
+// Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+//
+// Licensed under the GNU Affero General Public License, version 3 only —
+// no later version applies. See LICENSE for the full text.
+//
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // The health read side: what a person sees when they look at an entity.
 //
 // Three obligations meet here, and none of them is optional.

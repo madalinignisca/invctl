@@ -1,3 +1,11 @@
+-- invctl — infrastructure inventory
+-- Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+--
+-- Licensed under the GNU Affero General Public License, version 3 only —
+-- no later version applies. See LICENSE for the full text.
+--
+-- SPDX-License-Identifier: AGPL-3.0-only
+
 -- Dialect-split despite being byte-identical in both directories, and that is
 -- not an oversight. The seven lookup tables are created by the DIALECT
 -- migration 00004, and Migrate applies every shared migration before any

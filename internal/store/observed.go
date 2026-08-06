@@ -1,3 +1,11 @@
+// invctl — infrastructure inventory
+// Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+//
+// Licensed under the GNU Affero General Public License, version 3 only —
+// no later version applies. See LICENSE for the full text.
+//
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Observed state: the write path for what the estate reports about itself, and
 // the boundary that makes overreach a compile error rather than a review note.
 //

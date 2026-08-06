@@ -219,6 +219,16 @@ A change is complete when all of these hold:
 
 ---
 
+## Licence
+
+AGPL-3.0-**only** — not "or later"; see README for why. Every source file
+(`.go`, `.sql`, `.html`, `.css`, `.js`) opens with the copyright notice and
+`SPDX-License-Identifier: AGPL-3.0-only`, and `internal/license` fails if one
+does not. New files get it; vendored and generated files must not.
+
+In Go, the notice is followed by a **blank line** before the package clause or
+its doc comment — without it the licence becomes the package documentation.
+
 ## Never do this
 
 - Add an ORM, a JS framework, or a build step beyond Tailwind

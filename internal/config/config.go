@@ -1,3 +1,11 @@
+// invctl — infrastructure inventory
+// Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+//
+// Licensed under the GNU Affero General Public License, version 3 only —
+// no later version applies. See LICENSE for the full text.
+//
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Package config parses and validates configuration from the environment.
 //
 // Everything is validated at startup rather than at first use: a service that

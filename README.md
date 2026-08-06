@@ -207,3 +207,29 @@ make cover       # coverage summary
 - `internal/auth` — credential handling, the indistinguishability of failure
   modes, operational errors not masquerading as bad passwords, and LDAP DN
   injection.
+
+## Copyright and licence
+
+Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+
+invctl is free software, licensed under the **GNU Affero General Public
+License, version 3 only**. The full text is in [LICENSE](LICENSE).
+
+**Version 3 only, not "or later", and deliberately so.** The reason to choose
+the AGPL at all is §13: run a modified version so that people interact with it
+over a network, and you owe those users the source. "Or later" would grant every
+recipient the option of terms the Free Software Foundation has not written yet —
+so a future version that softened that clause would reopen exactly the hole the
+licence was chosen to close, retroactively and with no way to withdraw it.
+
+This costs nothing and is not a one-way door. The copyright holder above holds
+all of it, so he can relicense, or add "or later", whenever he decides to. The
+reverse is impossible: a permission granted cannot be taken back.
+
+Every source file carries the notice and an `SPDX-License-Identifier`, and
+`internal/license` fails the build if one does not — a file added without it has
+unstated copyright, and the omission is invisible in review because the header
+is identical in every other file. Vendored code (`web/static/htmx.min.js`,
+`web/static/alpine.min.js`) and generated output (`web/static/app.css`) are
+exempt and are asserted to *stay* exempt, so nothing of somebody else's is ever
+claimed as ours.

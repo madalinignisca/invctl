@@ -1,3 +1,11 @@
+-- invctl — infrastructure inventory
+-- Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+--
+-- Licensed under the GNU Affero General Public License, version 3 only —
+-- no later version applies. See LICENSE for the full text.
+--
+-- SPDX-License-Identifier: AGPL-3.0-only
+
 -- +goose Up
 -- Endpoints, L7 routing, and the dependency edge that the whole tool exists for.
 

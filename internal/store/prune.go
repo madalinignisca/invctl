@@ -1,3 +1,11 @@
+// invctl — infrastructure inventory
+// Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+//
+// Licensed under the GNU Affero General Public License, version 3 only —
+// no later version applies. See LICENSE for the full text.
+//
+// SPDX-License-Identifier: AGPL-3.0-only
+
 // Retention, separated by table rather than by predicate (docs/AUDIT.md rule 10).
 //
 // This file holds the only DELETE FROM in this codebase that removes a fact.

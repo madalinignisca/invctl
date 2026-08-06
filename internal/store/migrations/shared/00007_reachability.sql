@@ -1,3 +1,11 @@
+-- invctl — infrastructure inventory
+-- Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+--
+-- Licensed under the GNU Affero General Public License, version 3 only —
+-- no later version applies. See LICENSE for the full text.
+--
+-- SPDX-License-Identifier: AGPL-3.0-only
+
 -- +goose Up
 -- Network reachability (docs/reachability-design.md, M2). asset_closure answers
 -- "what is inside this"; these tables answer "what is behind this". Two graphs,

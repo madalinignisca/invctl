@@ -1,3 +1,11 @@
+-- invctl — infrastructure inventory
+-- Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+--
+-- Licensed under the GNU Affero General Public License, version 3 only —
+-- no later version applies. See LICENSE for the full text.
+--
+-- SPDX-License-Identifier: AGPL-3.0-only
+
 -- Rebuild change_log with named constraints and a vocabulary that fits.
 --
 -- This is the last opportunity to change this table's shape, and that is the

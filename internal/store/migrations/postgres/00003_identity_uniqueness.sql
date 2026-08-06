@@ -1,3 +1,11 @@
+-- invctl — infrastructure inventory
+-- Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+--
+-- Licensed under the GNU Affero General Public License, version 3 only —
+-- no later version applies. See LICENSE for the full text.
+--
+-- SPDX-License-Identifier: AGPL-3.0-only
+
 -- identity: uniqueness that respects the lifecycle, a realm that cannot be
 -- NULL, and a CHECK on the lifecycle column that never had one. PostgreSQL
 -- half; see migrations/sqlite/00003 for the three defects and why they are
