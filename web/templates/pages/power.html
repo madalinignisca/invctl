@@ -70,6 +70,49 @@
 </div>
 
 <div class="panel">
+  <div class="panel-head"><h2>Add a supply</h2></div>
+  <form class="panel-body" method="post" action="/power/sources">
+    <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+    <div class="field-row">
+      <div class="field">
+        <label for="s-site">Site</label>
+        <select id="s-site" name="site_id" required>
+          <option value="">Choose…</option>
+          {{range .Sites}}<option value="{{.ID}}" {{if eq $.SourceSpec.SiteID .ID}}selected{{end}}>{{.Name}}</option>{{end}}
+        </select>
+        {{with index .Errors "site_id"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="s-name">Name</label>
+        <input id="s-name" type="text" name="name" value="{{.SourceSpec.Name}}" placeholder="UPS-A" required>
+        {{with index .Errors "name"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="s-kind">Kind</label>
+        <select id="s-kind" name="kind" required>
+          <option value="">Choose…</option>
+          {{range .Kinds}}<option value="{{.}}" {{if eq $.SourceSpec.Kind .}}selected{{end}}>{{title .}}</option>{{end}}
+        </select>
+        <div class="field-hint">
+          Two feeds meeting at a UPS die together. Two meeting only at the
+          generator is the design.
+        </div>
+        {{with index .Errors "kind"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="s-parent">Fed by</label>
+        <select id="s-parent" name="parent_id">
+          <option value="">— top of the chain —</option>
+          {{range .Sources}}<option value="{{.ID}}">{{.Name}} ({{title .Kind}})</option>{{end}}
+        </select>
+        {{with index .Errors "parent_id"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+    </div>
+    <div class="form-actions"><button type="submit" class="btn">Add supply</button></div>
+  </form>
+</div>
+
+<div class="panel">
   <div class="panel-head"><h2>Add a panel</h2></div>
   <form class="panel-body" method="post" action="/power/panels">
     <input type="hidden" name="csrf_token" value="{{.CSRF}}">
@@ -81,6 +124,18 @@
           {{range .Sites}}<option value="{{.ID}}" {{if eq $.PanelSpec.SiteID .ID}}selected{{end}}>{{.Name}}</option>{{end}}
         </select>
         {{with index .Errors "site_id"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="p-source">Fed by</label>
+        <select id="p-source" name="source_id">
+          <option value="">— not recorded —</option>
+          {{range .Sources}}<option value="{{.ID}}">{{.Name}} ({{title .Kind}})</option>{{end}}
+        </select>
+        <div class="field-hint">
+          Two boards behind one UPS is not redundancy. Until this is recorded,
+          nothing above the board can be checked.
+        </div>
+        {{with index .Errors "source_id"}}<div class="field-error">{{.}}</div>{{end}}
       </div>
       <div class="field">
         <label for="p-name">Name</label>
@@ -147,16 +202,52 @@
   </div>
 
   <div class="panel">
+    <div class="panel-head"><h2>Supplies</h2></div>
+    <div class="panel-body">
+      {{if .Sources}}
+      <table class="grid">
+        <thead><tr><th>Site</th><th>Supply</th><th>Kind</th><th>Fed by</th><th>Panels</th><th></th></tr></thead>
+        <tbody>
+          {{range .Sources}}
+          <tr>
+            <td>{{.SiteName}}</td>
+            <td class="mono">{{.Name}}</td>
+            <td>{{title .Kind}}</td>
+            <td class="mono">{{if .ParentName}}{{deref .ParentName}}{{else}}<span class="muted">top of the chain</span>{{end}}</td>
+            <td>{{.Panels}}</td>
+            <td class="row-actions">
+              {{if and $.CanWrite (not .Panels) (not .Children)}}
+              <form method="post" action="/power/sources/{{.ID}}/retire" style="display:inline">
+                <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+                <button class="btn btn-sm" type="submit">Withdraw</button>
+              </form>
+              {{end}}
+            </td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+      {{else}}
+      <p class="empty">
+        No supplies recorded. Without them, two boards look independent whether
+        or not they share a UPS.
+      </p>
+      {{end}}
+    </div>
+  </div>
+
+  <div class="panel">
     <div class="panel-head"><h2>Panels</h2></div>
     <div class="panel-body">
       {{if .Panels}}
       <table class="grid">
-        <thead><tr><th>Site</th><th>Panel</th><th>Rating</th><th>Feeds</th><th></th></tr></thead>
+        <thead><tr><th>Site</th><th>Panel</th><th>Fed by</th><th>Rating</th><th>Feeds</th><th></th></tr></thead>
         <tbody>
           {{range .Panels}}
           <tr>
             <td>{{.SiteName}}</td>
             <td class="mono">{{.Name}}</td>
+            <td class="mono">{{if .SourceName}}{{deref .SourceName}}{{else}}<span class="muted">not recorded</span>{{end}}</td>
             <td class="mono">{{template "power_rating" .}}</td>
             <td>{{.Feeds}}</td>
             <td class="row-actions">

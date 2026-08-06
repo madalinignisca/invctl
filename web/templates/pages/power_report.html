@@ -16,9 +16,10 @@
   <div class="eyebrow">analysis</div>
   <h1>Power findings</h1>
   <p class="lede">
-    What the chain says, traced from every asset back to the panel behind it.
-    The first kind is the one nobody finds by looking: two cables that were
-    meant to be independent and are not.
+    What the chain says, traced from every asset back through its board to the
+    UPS, transfer switch or generator behind it. The one nobody finds by looking
+    is two cables that were meant to be independent and converge before they get
+    anywhere: on one board, or on one UPS two boards away.
   </p>
 </div>
 
@@ -33,6 +34,10 @@
         <div class="stat"><div class="stat-n">{{.Report.FalseRedundancy}}</div><div class="stat-l">false redundancy</div></div>
         <div class="stat"><div class="stat-n">{{.Report.SingleFed}}</div><div class="stat-l">single-fed, carrying services</div></div>
         <div class="stat"><div class="stat-n">{{.Report.OverAllocated}}</div><div class="stat-l">feeds over their derating</div></div>
+        {{/* Counted apart, and never added in. Two feeds meeting at the
+             generator is the design; folding it into the alarming number would
+             report the safety measure as the hazard. */}}
+        <div class="stat"><div class="stat-n">{{.Report.SharedUpstream}}</div><div class="stat-l">converge upstream, as designed</div></div>
       </div>
     </div>
   </div>
@@ -49,7 +54,9 @@
               {{if eq .EntityType "asset"}}<a class="id" href="/assets/{{.EntityID}}">{{.Name}}</a>
               {{else}}<span class="id">{{.Name}}</span>{{end}}
               <div class="muted" style="font-size:11.5px">
-                {{if eq .Kind "false_redundancy"}}<span class="pill pill-down">false redundancy</span>
+                {{if eq .Kind "false_redundancy"}}
+                  {{if eq .Severity "expected"}}<span class="pill pill-muted">converges upstream</span>
+                  {{else}}<span class="pill pill-down">false redundancy</span>{{end}}
                 {{else if eq .Kind "single_fed"}}<span class="pill pill-degraded">single-fed</span>
                 {{else}}<span class="pill pill-degraded">over-allocated</span>{{end}}
               </div>
@@ -88,6 +95,12 @@
         {{if .Report.UndeclaredDraw}}
           {{pluralise .Report.UndeclaredDraw "input declares" "inputs declare"}} no draw, so any
           utilisation figure is a floor rather than a total.
+        {{end}}
+        {{if .Report.UnsourcedPanels}}
+          <strong>{{pluralise .Report.UnsourcedPanels "panel names" "panels name"}} no supply</strong>,
+          so nothing can be said about what is above {{if eq .Report.UnsourcedPanels 1}}it{{else}}them{{end}} —
+          two boards look independent whether or not they share a UPS. Silence
+          there means "not known", not "checked and fine".
         {{end}}
         {{if .Report.UnratedFeeds}}
           {{pluralise .Report.UnratedFeeds "feed has" "feeds have"}} no rating recorded and are

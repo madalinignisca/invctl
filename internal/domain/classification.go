@@ -319,8 +319,19 @@ var DeclaredColumns = map[string][]string{
 	// nothing derives it. The ratings are nullable on purpose: "not recorded"
 	// must stay distinguishable from zero, or an unrated feed reports as
 	// over-allocated the moment anything draws on it.
+	// What sits above a panel (migration 00024). Declared: somebody asserts that
+	// this board is fed by that UPS. Nothing observes it. `kind` is behavioural
+	// rather than descriptive -- it decides whether two inputs converging here is
+	// a fault or the design -- and `asset_id` is the optional link to the same
+	// thing as an inventory item, which is how a UPS's battery end-of-life
+	// reaches the expiry report.
+	"power_source": {
+		"id", "parent_id", "site_id", "asset_id", "name", "kind", "notes",
+		"lifecycle", "created_at", "updated_at",
+		"row_version",
+	},
 	"power_panel": {
-		"id", "site_id", "name", "voltage", "amperage", "phase", "notes",
+		"id", "site_id", "source_id", "name", "voltage", "amperage", "phase", "notes",
 		"lifecycle", "created_at", "updated_at",
 		"row_version",
 	},

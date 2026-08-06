@@ -23,16 +23,18 @@ import (
 // PowerPanelRow is a panel with its location and how much hangs off it.
 type PowerPanelRow struct {
 	domain.PowerPanel
-	SiteName string `db:"site_name"`
-	Feeds    int    `db:"feeds"`
+	SiteName   string  `db:"site_name"`
+	SourceName *string `db:"source_name"`
+	Feeds      int     `db:"feeds"`
 }
 
 const powerPanelSelect = `
-	SELECT p.*, a.name AS site_name,
+	SELECT p.*, a.name AS site_name, src.name AS source_name,
 	       (SELECT COUNT(*) FROM power_feed f
 	        WHERE f.panel_id = p.id AND f.lifecycle <> '` + domain.LifecycleRetired + `') AS feeds
 	FROM power_panel p
-	JOIN asset a ON a.id = p.site_id`
+	JOIN asset a ON a.id = p.site_id
+	LEFT JOIN power_source src ON src.id = p.source_id`
 
 // CreatePowerPanel inserts a panel and its audit row.
 func (s *SQLStore) CreatePowerPanel(ctx context.Context, actor domain.Actor, p *domain.PowerPanel) error {
@@ -48,11 +50,16 @@ func (s *SQLStore) CreatePowerPanel(ctx context.Context, actor domain.Actor, p *
 			`power_panel`, `site_id`, p.SiteID, p.Name, p.Lifecycle, p.ID); err != nil {
 			return err
 		}
+		if p.SourceID != nil {
+			if err := requireLiveSource(ctx, t, *p.SourceID); err != nil {
+				return err
+			}
+		}
 		_, err := t.exec(ctx, `
-			INSERT INTO power_panel (id, site_id, name, voltage, amperage, phase, notes,
+			INSERT INTO power_panel (id, site_id, source_id, name, voltage, amperage, phase, notes,
 			                         lifecycle, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			p.ID, p.SiteID, p.Name, p.Voltage, p.Amperage, p.Phase, p.Notes,
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			p.ID, p.SiteID, p.SourceID, p.Name, p.Voltage, p.Amperage, p.Phase, p.Notes,
 			p.Lifecycle, p.CreatedAt, p.UpdatedAt)
 		if err != nil {
 			return translateWriteErr(err, "creating power panel")
@@ -81,12 +88,18 @@ func (s *SQLStore) UpdatePowerPanel(ctx context.Context, actor domain.Actor, p *
 			`power_panel`, `site_id`, p.SiteID, p.Name, p.Lifecycle, p.ID); err != nil {
 			return err
 		}
+		if p.SourceID != nil {
+			if err := requireLiveSource(ctx, t, *p.SourceID); err != nil {
+				return err
+			}
+		}
 		res, err := t.exec(ctx, `
-			UPDATE power_panel SET name = ?, voltage = ?, amperage = ?, phase = ?, notes = ?,
-			                       lifecycle = ?, updated_at = ?, row_version = row_version + 1
+			UPDATE power_panel SET source_id = ?, name = ?, voltage = ?, amperage = ?, phase = ?,
+			                       notes = ?, lifecycle = ?, updated_at = ?,
+			                       row_version = row_version + 1
 			WHERE id = ? AND row_version = ?`,
-			p.Name, p.Voltage, p.Amperage, p.Phase, p.Notes, p.Lifecycle, p.UpdatedAt,
-			p.ID, p.RowVersion)
+			p.SourceID, p.Name, p.Voltage, p.Amperage, p.Phase, p.Notes, p.Lifecycle,
+			p.UpdatedAt, p.ID, p.RowVersion)
 		if err != nil {
 			return translateWriteErr(err, "updating power panel")
 		}

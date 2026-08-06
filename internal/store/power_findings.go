@@ -35,6 +35,18 @@ const (
 	FindingOverAllocated = "over_allocated"
 )
 
+// Severity separates a fault from the design.
+//
+// Two inputs meeting at a UPS die together and that is a finding. Two inputs
+// meeting only at the generator is the ordinary 2N build -- the generator is
+// what makes a utility failure survivable, and calling it a single point of
+// failure reports the safety measure as the hazard. It is still worth SAYING
+// where they converge; it is just not an alarm.
+const (
+	PowerSeverityFault    = "fault"
+	PowerSeverityExpected = "expected"
+)
+
 // PowerFinding is one thing worth doing something about.
 type PowerFinding struct {
 	Kind string
@@ -53,6 +65,9 @@ type PowerFinding struct {
 	BestTier     int
 	// Panels names what the inputs trace to, for a false-redundancy finding.
 	Panels []string
+	// Severity is PowerSeverityFault or PowerSeverityExpected. Only convergence
+	// findings carry it; the others are always faults.
+	Severity string
 }
 
 // PowerReport is every finding plus the numbers that keep them honest.
@@ -63,6 +78,9 @@ type PowerReport struct {
 	FalseRedundancy int
 	SingleFed       int
 	OverAllocated   int
+	// SharedUpstream is the convergences that are the design rather than a
+	// fault -- counted separately so they never inflate the alarming number.
+	SharedUpstream int
 
 	// The honesty numbers, and they matter more here than in most reports. An
 	// estate with three findings over four modelled assets is not a healthy
@@ -72,6 +90,11 @@ type PowerReport struct {
 	UnmodelledSites int // live sites with no panel at all
 	UndeclaredDraw  int // live inputs with no draw recorded
 	UnratedFeeds    int // live feeds whose capacity cannot be computed
+	// UnsourcedPanels is how many live panels name no supply. It is the number
+	// that decides how much the redundancy findings are worth: with nothing
+	// above the boards, two panels look independent whether or not they are, and
+	// a silent report means "not known" rather than "checked and fine".
+	UnsourcedPanels int
 }
 
 // powerLink is one input, flattened with everything behind it.
@@ -83,7 +106,11 @@ type powerLink struct {
 	FeedName  string `db:"feed_name"`
 	PanelID   string `db:"panel_id"`
 	PanelName string `db:"panel_name"`
-	DrawVA    *int   `db:"draw_va"`
+	// SourceID is the panel's supply, when one is recorded. nil is what makes a
+	// pair of panels look independent whether or not they are, which is why the
+	// report counts unsourced panels.
+	SourceID *string `db:"source_id"`
+	DrawVA   *int    `db:"draw_va"`
 }
 
 // PowerFindings traces the chain and reports what it finds.
@@ -97,7 +124,8 @@ func (s *SQLStore) PowerFindings(ctx context.Context) (*PowerReport, error) {
 	var links []powerLink
 	err := s.read(ctx, &links, `
 		SELECT i.asset_id, a.name AS asset_name, i.name AS input_name,
-		       i.feed_id, f.name AS feed_name, f.panel_id, p.name AS panel_name, i.draw_va
+		       i.feed_id, f.name AS feed_name, f.panel_id, p.name AS panel_name,
+		       p.source_id, i.draw_va
 		FROM power_input i
 		JOIN asset a       ON a.id = i.asset_id
 		JOIN power_feed f  ON f.id = i.feed_id
@@ -127,42 +155,37 @@ func (s *SQLStore) PowerFindings(ctx context.Context) (*PowerReport, error) {
 		return nil, err
 	}
 
+	supplies, err := s.loadSupplyChains(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	for _, assetID := range order {
 		inputs := byAsset[assetID]
 		w := workload[assetID]
 
-		panels := map[string]string{}
-		for _, l := range inputs {
-			panels[l.PanelID] = l.PanelName
+		if len(inputs) >= 2 {
+			if shared, ok := lowestSharedAncestor(inputs, supplies); ok {
+				report.Findings = append(report.Findings, shared.finding(assetID, inputs, w))
+				if shared.severity == PowerSeverityFault {
+					report.FalseRedundancy++
+				} else {
+					report.SharedUpstream++
+				}
+			}
+			continue
 		}
 
-		switch {
-		case len(inputs) >= 2 && len(panels) == 1:
-			// THE FINDING. Two or more inputs, one panel behind all of them.
-			var names []string
-			for _, l := range inputs {
-				names = append(names, l.InputName)
-			}
-			report.Findings = append(report.Findings, PowerFinding{
-				Kind: FindingFalseRedundancy, EntityType: "asset", EntityID: assetID,
-				Name: inputs[0].AssetName,
-				Detail: fmt.Sprintf(
-					"%s look redundant but every one traces to panel %s — one failure takes all of them",
-					joinNames(sortedStrings(names)), inputs[0].PanelName),
-				ServiceCount: w.services, BestTier: w.tier,
-				Panels: []string{inputs[0].PanelName},
-			})
-			report.FalseRedundancy++
-
-		case len(inputs) == 1 && w.services > 0:
-			// SINGLE-FED, BUT ONLY WHERE IT MATTERS. Reporting every single-fed
-			// patch panel and office switch would bury the A+B findings in a list
-			// nobody reads, and most things in a real estate are single-fed on
-			// purpose. Carrying a service is the signal that somebody chose to
-			// depend on it.
+		// SINGLE-FED, BUT ONLY WHERE IT MATTERS. Reporting every single-fed
+		// patch panel and office switch would bury the findings above in a list
+		// nobody reads, and most things in a real estate are single-fed on
+		// purpose. Carrying a service is the signal that somebody chose to
+		// depend on it.
+		if len(inputs) == 1 && w.services > 0 {
 			report.Findings = append(report.Findings, PowerFinding{
 				Kind: FindingSingleFed, EntityType: "asset", EntityID: assetID,
-				Name: inputs[0].AssetName,
+				Name:     inputs[0].AssetName,
+				Severity: PowerSeverityFault,
 				Detail: fmt.Sprintf(
 					"one input, on feed %s from panel %s, and %s ride on it",
 					inputs[0].FeedName, inputs[0].PanelName,
@@ -276,6 +299,11 @@ func (s *SQLStore) powerCoverage(ctx context.Context, report *PowerReport) error
 	// Sites with no panel at all. Not "assets with no input" -- almost nothing
 	// in a rack has its own input modelled and never will; the question worth
 	// asking is whether a LOCATION has any power model behind it.
+	if err := s.readOne(ctx, &report.UnsourcedPanels, `
+		SELECT COUNT(*) FROM power_panel WHERE source_id IS NULL AND lifecycle <> ?`,
+		domain.LifecycleRetired); err != nil {
+		return fmt.Errorf("counting panels with no supply: %w", err)
+	}
 	if err := s.readOne(ctx, &report.UnmodelledSites, `
 		SELECT COUNT(*) FROM asset a
 		WHERE a.kind = ? AND a.lifecycle <> ?
@@ -307,7 +335,8 @@ func (s *SQLStore) AssetsLosingPower(ctx context.Context, feedIDs []string) ([]s
 	var links []powerLink
 	err := s.read(ctx, &links, `
 		SELECT i.asset_id, a.name AS asset_name, i.name AS input_name,
-		       i.feed_id, f.name AS feed_name, f.panel_id, p.name AS panel_name, i.draw_va
+		       i.feed_id, f.name AS feed_name, f.panel_id, p.name AS panel_name,
+		       p.source_id, i.draw_va
 		FROM power_input i
 		JOIN asset a       ON a.id = i.asset_id
 		JOIN power_feed f  ON f.id = i.feed_id
@@ -366,4 +395,131 @@ func joinNames(names []string) string {
 	}
 	return "inputs " + strings.Join(names[:len(names)-1], ", ") +
 		" and " + names[len(names)-1]
+}
+
+// ---------- tracing the supply chain ----------
+
+// supplyNode is one link in the chain above a panel.
+type supplyNode struct {
+	ID     string  `db:"id"`
+	Parent *string `db:"parent_id"`
+	Name   string  `db:"name"`
+	Kind   string  `db:"kind"`
+}
+
+// loadSupplyChains reads every live supply once.
+func (s *SQLStore) loadSupplyChains(ctx context.Context) (map[string]supplyNode, error) {
+	var rows []supplyNode
+	err := s.read(ctx, &rows,
+		`SELECT id, parent_id, name, kind FROM power_source WHERE lifecycle <> ?`,
+		domain.LifecycleRetired)
+	if err != nil {
+		return nil, fmt.Errorf("reading the supply chain: %w", err)
+	}
+	out := make(map[string]supplyNode, len(rows))
+	for _, r := range rows {
+		out[r.ID] = r
+	}
+	return out, nil
+}
+
+// sharedAncestor is where every input of one asset converges.
+type sharedAncestor struct {
+	label    string
+	what     string // "feed", "panel" or a source kind
+	severity string
+}
+
+func (a sharedAncestor) finding(assetID string, inputs []powerLink, w powerWorkloadRow) PowerFinding {
+	names := make([]string, 0, len(inputs))
+	for _, l := range inputs {
+		names = append(names, l.InputName)
+	}
+	verdict := "one failure takes all of them"
+	if a.severity == PowerSeverityExpected {
+		verdict = "which is the usual design rather than a fault"
+	}
+	return PowerFinding{
+		Kind: FindingFalseRedundancy, EntityType: "asset", EntityID: assetID,
+		Name:     inputs[0].AssetName,
+		Severity: a.severity,
+		Detail: fmt.Sprintf("%s converge on %s %s — %s",
+			joinNames(sortedStrings(names)), a.what, a.label, verdict),
+		ServiceCount: w.services, BestTier: w.tier,
+		Panels: []string{a.label},
+	}
+}
+
+// lowestSharedAncestor walks every input up to the top of its chain and finds
+// the most specific thing they ALL pass through.
+//
+// ALL, not some. An asset with three inputs where two share a panel survives
+// losing that panel, because the third is still live -- so the question is only
+// ever whether there is a single thing whose failure takes every input at once.
+//
+// The path for one input is [feed, panel, source, source's parent, …]. Because
+// each is a chain, the shared portion is a suffix, and the first node of the
+// first input's path that appears in every other path is the lowest one.
+func lowestSharedAncestor(inputs []powerLink, supplies map[string]supplyNode) (sharedAncestor, bool) {
+	paths := make([]map[string]bool, len(inputs))
+	for i, l := range inputs {
+		paths[i] = map[string]bool{}
+		for _, id := range supplyPath(l, supplies) {
+			paths[i][id] = true
+		}
+	}
+
+	for _, id := range supplyPath(inputs[0], supplies) {
+		shared := true
+		for i := 1; i < len(paths); i++ {
+			if !paths[i][id] {
+				shared = false
+				break
+			}
+		}
+		if !shared {
+			continue
+		}
+		switch id {
+		case inputs[0].FeedID:
+			// Every input on ONE feed. Not two cables to one board -- two cables
+			// to one breaker.
+			return sharedAncestor{label: inputs[0].FeedName, what: "feed",
+				severity: PowerSeverityFault}, true
+		case inputs[0].PanelID:
+			return sharedAncestor{label: inputs[0].PanelName, what: "panel",
+				severity: PowerSeverityFault}, true
+		}
+		node, ok := supplies[id]
+		if !ok {
+			continue
+		}
+		severity := PowerSeverityExpected
+		if domain.SharingIsAFault(node.Kind) {
+			severity = PowerSeverityFault
+		}
+		return sharedAncestor{label: node.Name, what: strings.ReplaceAll(node.Kind, "_", " "),
+			severity: severity}, true
+	}
+	return sharedAncestor{}, false
+}
+
+// supplyPath is one input's chain, most specific first.
+//
+// Bounded, like every walk up this tree. A cycle is refused on the way in and
+// the depth guard is what stops a report hanging if that is ever wrong -- a hung
+// page is worse than a wrong one, because nobody can see what it was going to
+// say.
+func supplyPath(l powerLink, supplies map[string]supplyNode) []string {
+	path := []string{l.FeedID, l.PanelID}
+	cur := l.SourceID
+	for depth := 0; cur != nil && depth < supplyDepthLimit; depth++ {
+		node, ok := supplies[*cur]
+		if !ok {
+			break
+		}
+		path = append(path, node.ID)
+		cur = node.Parent
+	}
+	return path
 }

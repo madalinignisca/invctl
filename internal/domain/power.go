@@ -100,7 +100,12 @@ type PowerPanel struct {
 	// already knows where things are; a second location model would be a second
 	// answer to the same question.
 	SiteID string `db:"site_id"`
-	Name   string `db:"name"`
+	// SourceID is what feeds this board: a UPS, a transfer switch, a generator.
+	// Optional, and it stays optional -- an estate that has recorded its boards
+	// but not yet what is behind them is the normal starting point. The findings
+	// report counts how many are in that state rather than guessing.
+	SourceID *string `db:"source_id"`
+	Name     string  `db:"name"`
 	Rating
 	Notes      *string `db:"notes"`
 	Lifecycle  string  `db:"lifecycle"`
@@ -111,8 +116,9 @@ type PowerPanel struct {
 
 // PowerPanelSpec is what a caller supplies.
 type PowerPanelSpec struct {
-	SiteID string
-	Name   string
+	SiteID   string
+	SourceID *string
+	Name     string
 	Rating
 	Notes     *string
 	Lifecycle string
@@ -129,7 +135,7 @@ func NewPowerPanel(id string, spec PowerPanelSpec, now time.Time) (*PowerPanel, 
 		return nil, err
 	}
 	return &PowerPanel{
-		ID: id, SiteID: site, Name: name, Rating: spec.Rating,
+		ID: id, SiteID: site, SourceID: blankToNil(spec.SourceID), Name: name, Rating: spec.Rating,
 		Notes: blankToNil(spec.Notes), Lifecycle: lifecycle,
 		CreatedAt: FormatTime(now), UpdatedAt: FormatTime(now),
 	}, nil
@@ -140,6 +146,7 @@ func (p *PowerPanel) Validate() error {
 	ve := &ValidationError{}
 	p.SiteID = checkRequired(ve, "site_id", p.SiteID)
 	p.Name = checkRequired(ve, "name", p.Name)
+	p.SourceID = blankToNil(p.SourceID)
 	checkRating(ve, &p.Rating)
 	p.Notes = blankToNil(p.Notes)
 	checkEnum(ve, "lifecycle", p.Lifecycle, PowerLifecycles)
@@ -305,4 +312,113 @@ func defaultedPowerLifecycle(ve *ValidationError, lifecycle string) string {
 	}
 	checkEnum(ve, "lifecycle", lifecycle, PowerLifecycles)
 	return lifecycle
+}
+
+// ---------- what sits above a panel ----------
+
+// Kinds of supply. Behavioural, not a vocabulary: the value decides whether two
+// inputs converging here is a fault or the design, so it is a Go constant set
+// with a matching CHECK.
+const (
+	SourceUtility        = "utility"
+	SourceGenerator      = "generator"
+	SourceTransferSwitch = "transfer_switch"
+	SourceUPS            = "ups"
+)
+
+// SourceKinds is the allowed set, roughly upstream-first.
+var SourceKinds = []string{SourceUtility, SourceGenerator, SourceTransferSwitch, SourceUPS}
+
+// SharingIsAFault reports whether two inputs converging on a source of this
+// kind means they die together.
+//
+// THE DISTINCTION THE WHOLE SUPPLY LAYER EXISTS FOR. Two feeds meeting at a UPS
+// or a transfer switch fail at the same instant: that is not redundancy, it is
+// one point of failure with two cables. Two feeds meeting only at the GENERATOR
+// is the ordinary 2N design -- the generator is what makes a utility failure
+// survivable, and reporting it as a single point of failure reports the safety
+// measure as the hazard. The utility is the same: everything shares it, which is
+// precisely why there are UPSes and a generator below it.
+//
+// It is still worth SAYING where they converge. "These diverge only above the
+// generator" is a true and useful sentence; it is just not an alarm.
+func SharingIsAFault(kind string) bool {
+	switch kind {
+	case SourceUPS, SourceTransferSwitch:
+		return true
+	default:
+		return false
+	}
+}
+
+// PowerSource is a supply: utility, generator, transfer switch or UPS.
+type PowerSource struct {
+	ID string `db:"id"`
+	// ParentID is what feeds this one; nil is the top of a chain.
+	ParentID *string `db:"parent_id"`
+	SiteID   string  `db:"site_id"`
+	// AssetID is the same thing as an inventory item, when somebody has
+	// catalogued it -- which is how a UPS's battery end-of-life reaches the
+	// expiry report.
+	AssetID    *string `db:"asset_id"`
+	Name       string  `db:"name"`
+	Kind       string  `db:"kind"`
+	Notes      *string `db:"notes"`
+	Lifecycle  string  `db:"lifecycle"`
+	CreatedAt  string  `db:"created_at"`
+	UpdatedAt  string  `db:"updated_at"`
+	RowVersion int     `db:"row_version"`
+}
+
+// PowerSourceSpec is what a caller supplies.
+type PowerSourceSpec struct {
+	ParentID  *string
+	SiteID    string
+	AssetID   *string
+	Name      string
+	Kind      string
+	Notes     *string
+	Lifecycle string
+}
+
+// NewPowerSource validates and constructs.
+func NewPowerSource(id string, spec PowerSourceSpec, now time.Time) (*PowerSource, error) {
+	ve := &ValidationError{}
+	site := checkRequired(ve, "site_id", spec.SiteID)
+	name := checkRequired(ve, "name", spec.Name)
+	kind := strings.TrimSpace(spec.Kind)
+	if !containsString(SourceKinds, kind) {
+		ve.Add("kind", "must be one of %s", strings.Join(SourceKinds, ", "))
+	}
+	parent := blankToNil(spec.ParentID)
+	if parent != nil && *parent == id {
+		ve.Add("parent_id", "a supply cannot feed itself")
+	}
+	lifecycle := defaultedPowerLifecycle(ve, spec.Lifecycle)
+	if err := ve.OrNil(); err != nil {
+		return nil, err
+	}
+	return &PowerSource{
+		ID: id, ParentID: parent, SiteID: site, AssetID: blankToNil(spec.AssetID),
+		Name: name, Kind: kind, Notes: blankToNil(spec.Notes), Lifecycle: lifecycle,
+		CreatedAt: FormatTime(now), UpdatedAt: FormatTime(now),
+	}, nil
+}
+
+// Validate re-checks a source after field updates.
+func (p *PowerSource) Validate() error {
+	ve := &ValidationError{}
+	p.SiteID = checkRequired(ve, "site_id", p.SiteID)
+	p.Name = checkRequired(ve, "name", p.Name)
+	if !containsString(SourceKinds, p.Kind) {
+		ve.Add("kind", "must be one of %s", strings.Join(SourceKinds, ", "))
+	}
+	p.ParentID = blankToNil(p.ParentID)
+	if p.ParentID != nil && *p.ParentID == p.ID {
+		ve.Add("parent_id", "a supply cannot feed itself")
+	}
+	p.AssetID = blankToNil(p.AssetID)
+	p.Notes = blankToNil(p.Notes)
+	checkEnum(ve, "lifecycle", p.Lifecycle, PowerLifecycles)
+	return ve.OrNil()
 }

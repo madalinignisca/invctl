@@ -149,6 +149,8 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	write("POST /assets/{id}/power", app.PowerInputCreate)
 	write("POST /assets/{id}/power/{inputID}/retire", app.PowerInputRetire)
 
+	write("POST /power/sources", app.PowerSourceCreate)
+	write("POST /power/sources/{id}/retire", app.PowerSourceRetire)
 	write("POST /power/panels", app.PowerPanelCreate)
 	write("POST /power/panels/{id}/retire", app.PowerPanelRetire)
 	write("POST /power/feeds", app.PowerFeedCreate)

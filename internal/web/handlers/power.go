@@ -22,6 +22,8 @@ import (
 type powerPage struct {
 	Base
 	Errors     map[string]string
+	Sources    []store.PowerSourceRow
+	Kinds      []string
 	Panels     []store.PowerPanelRow
 	Feeds      []store.PowerFeedRow
 	Sites      []store.AssetRow
@@ -29,6 +31,7 @@ type powerPage struct {
 	Lifecycles []string
 	PanelSpec  domain.PowerPanelSpec
 	FeedSpec   domain.PowerFeedSpec
+	SourceSpec domain.PowerSourceSpec
 	Editing    string
 }
 
@@ -50,6 +53,11 @@ func (a *App) renderPower(w http.ResponseWriter, r *http.Request, status int,
 		a.serverError(w, r, err)
 		return
 	}
+	sources, err := a.Store.ListPowerSources(r.Context(), false)
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
 	feeds, err := a.Store.ListPowerFeeds(r.Context(), store.PowerFeedFilter{})
 	if err != nil {
 		a.serverError(w, r, err)
@@ -67,6 +75,8 @@ func (a *App) renderPower(w http.ResponseWriter, r *http.Request, status int,
 		Base:       a.base(r, "Power", "power"),
 		Errors:     orEmpty(errs),
 		Panels:     panels,
+		Sources:    sources,
+		Kinds:      domain.SourceKinds,
 		Feeds:      feeds,
 		Sites:      sites,
 		Phases:     domain.Phases,
@@ -117,10 +127,11 @@ func (a *App) panelSpecFrom(w http.ResponseWriter, r *http.Request) (domain.Powe
 	volts, vOK := optionalInt(r, "voltage")
 	amps, aOK := optionalInt(r, "amperage")
 	spec := domain.PowerPanelSpec{
-		SiteID: formValue(r, "site_id"),
-		Name:   formValue(r, "name"),
-		Rating: domain.Rating{Voltage: volts, Amperage: amps, Phase: optional(formValue(r, "phase"))},
-		Notes:  optional(formValue(r, "notes")),
+		SiteID:   formValue(r, "site_id"),
+		SourceID: optional(formValue(r, "source_id")),
+		Name:     formValue(r, "name"),
+		Rating:   domain.Rating{Voltage: volts, Amperage: amps, Phase: optional(formValue(r, "phase"))},
+		Notes:    optional(formValue(r, "notes")),
 	}
 	if !vOK || !aOK {
 		field := "voltage"
@@ -131,6 +142,82 @@ func (a *App) panelSpecFrom(w http.ResponseWriter, r *http.Request) (domain.Powe
 		return spec, false
 	}
 	return spec, true
+}
+
+// PowerSourceCreate adds a supply: a UPS, a generator, a transfer switch.
+func (a *App) PowerSourceCreate(w http.ResponseWriter, r *http.Request) {
+	spec := domain.PowerSourceSpec{
+		SiteID:   formValue(r, "site_id"),
+		ParentID: optional(formValue(r, "parent_id")),
+		AssetID:  optional(formValue(r, "asset_id")),
+		Name:     formValue(r, "name"),
+		Kind:     formValue(r, "kind"),
+		Notes:    optional(formValue(r, "notes")),
+	}
+	src, err := domain.NewPowerSource(store.NewID(), spec, a.Store.Now())
+	if err == nil {
+		err = a.Store.CreatePowerSource(r.Context(), actor(r), src)
+	}
+	if err != nil {
+		if errs, ok := validationErrors(err); ok {
+			a.renderPowerWithSource(w, r, errs, spec)
+			return
+		}
+		a.handleStoreError(w, r, err)
+		return
+	}
+	render.Redirect(w, r, "/power")
+}
+
+// PowerSourceRetire withdraws a supply.
+func (a *App) PowerSourceRetire(w http.ResponseWriter, r *http.Request) {
+	if err := a.Store.RetirePowerSource(r.Context(), actor(r), r.PathValue("id")); err != nil {
+		a.setFlash(r, "error", "That supply still feeds panels or other supplies. "+
+			"Move them first — otherwise the chain behind them could no longer be traced.")
+		render.Redirect(w, r, "/power")
+		return
+	}
+	a.setFlash(r, "success", "Supply withdrawn.")
+	render.Redirect(w, r, "/power")
+}
+
+func (a *App) renderPowerWithSource(w http.ResponseWriter, r *http.Request,
+	errs map[string]string, spec domain.PowerSourceSpec) {
+
+	// Rendered through the same assembly as everything else on this page, so a
+	// refused supply form comes back with the panels and feeds still on screen.
+	sources, err := a.Store.ListPowerSources(r.Context(), false)
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
+	panels, err := a.Store.ListPowerPanels(r.Context(), false)
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
+	feeds, err := a.Store.ListPowerFeeds(r.Context(), store.PowerFeedFilter{})
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
+	sites, err := a.Store.ListAssets(r.Context(), store.AssetFilter{Kind: domain.KindSite})
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
+	a.Render.Respond(w, r, http.StatusUnprocessableEntity, "power", "power_panel_list", powerPage{
+		Base:       a.base(r, "Power", "power"),
+		Errors:     orEmpty(errs),
+		Panels:     panels,
+		Sources:    sources,
+		Kinds:      domain.SourceKinds,
+		Feeds:      feeds,
+		Sites:      sites,
+		Phases:     domain.Phases,
+		Lifecycles: domain.PowerLifecycles,
+		SourceSpec: spec,
+	})
 }
 
 // PowerPanelRetire takes a panel out of service.

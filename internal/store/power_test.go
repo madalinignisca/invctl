@@ -405,3 +405,187 @@ func TestCapacityArithmetic(t *testing.T) {
 			"case must be the smaller one", u, st)
 	}
 }
+
+// The supply layer, and the false negative it exists to close.
+
+func mustSource(t *testing.T, s *SQLStore, ctx context.Context, siteID, name, kind string, parent *string) string {
+	t.Helper()
+	src, err := domain.NewPowerSource(NewID(), domain.PowerSourceSpec{
+		SiteID: siteID, Name: name, Kind: kind, ParentID: parent,
+	}, s.Now())
+	if err != nil {
+		t.Fatalf("building supply %s: %v", name, err)
+	}
+	if err := s.CreatePowerSource(ctx, testActor, src); err != nil {
+		t.Fatalf("creating supply %s: %v", name, err)
+	}
+	return src.ID
+}
+
+func panelOn(t *testing.T, s *SQLStore, ctx context.Context, siteID, name, sourceID string) string {
+	t.Helper()
+	p, err := domain.NewPowerPanel(NewID(), domain.PowerPanelSpec{
+		SiteID: siteID, Name: name, SourceID: &sourceID,
+	}, s.Now())
+	if err != nil {
+		t.Fatalf("building panel %s: %v", name, err)
+	}
+	if err := s.CreatePowerPanel(ctx, testActor, p); err != nil {
+		t.Fatalf("creating panel %s: %v", name, err)
+	}
+	return p.ID
+}
+
+// TestTwoPanelsBehindOneUPSIsNotRedundancyEither is the whole reason the supply
+// layer exists.
+//
+// The ordinary 2N build: a generator behind two UPS groups, boards under each.
+// A dual-fed server on A1 and A2 is on TWO PANELS -- which the panel-only model
+// reported as genuinely redundant, and which is the more dangerous kind of wrong
+// answer because the tool actively reassures. Both boards are behind UPS-A.
+func TestTwoPanelsBehindOneUPSIsNotRedundancyEither(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			s, ctx := newStore(t, e)
+			site := mustAsset(t, s, ctx, domain.KindSite, "dc-a", nil)
+
+			gen := mustSource(t, s, ctx, site, "GEN-1", domain.SourceGenerator, nil)
+			upsA := mustSource(t, s, ctx, site, "UPS-A", domain.SourceUPS, &gen)
+			upsB := mustSource(t, s, ctx, site, "UPS-B", domain.SourceUPS, &gen)
+
+			a1 := panelOn(t, s, ctx, site, "A1", upsA)
+			a2 := panelOn(t, s, ctx, site, "A2", upsA)
+			b1 := panelOn(t, s, ctx, site, "B1", upsB)
+
+			fa1 := mustFeed(t, s, ctx, a1, "F1", 230, 32)
+			fa2 := mustFeed(t, s, ctx, a2, "F1", 230, 32)
+			fb1 := mustFeed(t, s, ctx, b1, "F1", 230, 32)
+
+			// TWO PANELS, ONE UPS. The old model said nothing about this.
+			trap := mustAsset(t, s, ctx, domain.KindServer, "same-ups", &site)
+			mustInput(t, s, ctx, trap, fa1, "A", nil)
+			mustInput(t, s, ctx, trap, fa2, "B", nil)
+
+			// Properly 2N: one side each. Converges only at the generator, which
+			// is the design.
+			proper := mustAsset(t, s, ctx, domain.KindServer, "proper-2n", &site)
+			mustInput(t, s, ctx, proper, fa1, "A", nil)
+			mustInput(t, s, ctx, proper, fb1, "B", nil)
+
+			report, err := s.PowerFindings(ctx)
+			if err != nil {
+				t.Fatalf("finding: %v", err)
+			}
+
+			byAsset := map[string]PowerFinding{}
+			for _, f := range report.Findings {
+				byAsset[f.EntityID] = f
+			}
+
+			got, ok := byAsset[trap]
+			if !ok {
+				t.Fatal("two panels behind ONE UPS was not reported. That is the false " +
+					"negative the supply layer exists to close, and it is the dangerous " +
+					"kind: the tool actively reassures.")
+			}
+			if got.Severity != PowerSeverityFault {
+				t.Errorf("severity = %q, want %q -- both feeds die the instant that UPS does",
+					got.Severity, PowerSeverityFault)
+			}
+			if !strings.Contains(got.Detail, "UPS-A") {
+				t.Errorf("detail = %q, want it to name the UPS they converge on", got.Detail)
+			}
+
+			// The properly built one IS reported, but as the design rather than a
+			// fault -- and it must not inflate the alarming count.
+			good, ok := byAsset[proper]
+			if !ok {
+				t.Fatal("a properly 2N asset produced no finding at all; converging at the " +
+					"generator is worth SAYING, it is just not an alarm")
+			}
+			if good.Severity != PowerSeverityExpected {
+				t.Errorf("severity = %q for an asset fed from both UPS groups, want %q. "+
+					"Calling the generator a single point of failure reports the safety "+
+					"measure as the hazard.", good.Severity, PowerSeverityExpected)
+			}
+			if report.FalseRedundancy != 1 {
+				t.Errorf("false-redundancy count = %d, want 1 -- the expected convergence "+
+					"must not inflate it", report.FalseRedundancy)
+			}
+			if report.SharedUpstream != 1 {
+				t.Errorf("shared-upstream count = %d, want 1", report.SharedUpstream)
+			}
+		})
+	}
+}
+
+func TestUnsourcedPanelsAreCountedSoSilenceMeansSomething(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			s, ctx := newStore(t, e)
+			site := mustAsset(t, s, ctx, domain.KindSite, "dc-a", nil)
+			p1 := mustPanel(t, s, ctx, site, "A1") // no supply recorded
+			p2 := mustPanel(t, s, ctx, site, "A2")
+			f1 := mustFeed(t, s, ctx, p1, "F1", 230, 32)
+			f2 := mustFeed(t, s, ctx, p2, "F1", 230, 32)
+
+			box := mustAsset(t, s, ctx, domain.KindServer, "srv-1", &site)
+			mustInput(t, s, ctx, box, f1, "A", nil)
+			mustInput(t, s, ctx, box, f2, "B", nil)
+
+			report, err := s.PowerFindings(ctx)
+			if err != nil {
+				t.Fatalf("finding: %v", err)
+			}
+			// Nothing can be said: with no supply above either board, two panels
+			// look independent whether or not they are.
+			if report.FalseRedundancy != 0 {
+				t.Errorf("%d findings from panels with no supply recorded; nothing is known "+
+					"about what is above them", report.FalseRedundancy)
+			}
+			// So the report has to say the silence means "not known".
+			if report.UnsourcedPanels != 2 {
+				t.Errorf("unsourced panels = %d, want 2. Without this number a silent "+
+					"report reads as 'checked and fine' when it means 'not known'.",
+					report.UnsourcedPanels)
+			}
+		})
+	}
+}
+
+func TestASupplyChainCannotLoop(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			s, ctx := newStore(t, e)
+			site := mustAsset(t, s, ctx, domain.KindSite, "dc-a", nil)
+			gen := mustSource(t, s, ctx, site, "GEN-1", domain.SourceGenerator, nil)
+			ups := mustSource(t, s, ctx, site, "UPS-A", domain.SourceUPS, &gen)
+
+			// Feed the generator from the UPS it feeds.
+			row, err := s.GetPowerSource(ctx, gen)
+			if err != nil {
+				t.Fatalf("reading back: %v", err)
+			}
+			row.ParentID = &ups
+			err = s.UpdatePowerSource(ctx, testActor, &row.PowerSource)
+			if err == nil {
+				t.Fatal("a supply chain was allowed to loop; every walk up it would then " +
+					"depend on a depth guard rather than on the data being sane")
+			}
+			if msg := fieldError(err, "parent_id"); msg == "" {
+				t.Errorf("error = %v, want a field failure on parent_id", err)
+			}
+
+			// The control: a legitimate re-parent still works.
+			util := mustSource(t, s, ctx, site, "UTIL-1", domain.SourceUtility, nil)
+			row, err = s.GetPowerSource(ctx, gen)
+			if err != nil {
+				t.Fatalf("reading back: %v", err)
+			}
+			row.ParentID = &util
+			if err := s.UpdatePowerSource(ctx, testActor, &row.PowerSource); err != nil {
+				t.Errorf("a legitimate re-parent was refused: %v", err)
+			}
+		})
+	}
+}
