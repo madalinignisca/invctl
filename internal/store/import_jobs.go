@@ -31,6 +31,10 @@ const (
 	// operator's to fix. Distinct from failed, which is ours.
 	ImportRefused = "refused"
 	ImportFailed  = "failed"
+	// Partial is the only status that means the estate is half-changed. It is
+	// separate from both of the above because the action it calls for is
+	// different: not "fix your file" and not "tell us", but "run it again".
+	ImportPartial = "partial"
 )
 
 // ImportJob is one run.

@@ -35,6 +35,7 @@
         {{if eq .Job.Status "queued"}}Queued
         {{else if eq .Job.Status "running"}}Importing…
         {{else if eq .Job.Status "succeeded"}}Imported
+        {{else if eq .Job.Status "partial"}}Stopped part-way
         {{else if eq .Job.Status "refused"}}Nothing was imported
         {{else}}The import did not finish{{end}}
       </h2>
@@ -42,6 +43,7 @@
         {{if .Job.Done}}
           {{if eq .Job.Status "succeeded"}}{{pluralise .Job.Created "row" "rows"}} created, each with its own audit entry.{{end}}
           {{if eq .Job.Status "refused"}}The whole file is applied or none of it is, so the database is unchanged.{{end}}
+          {{if eq .Job.Status "partial"}}{{pluralise .Job.Created "row was" "rows were"}} written before it stopped. This is the one outcome that leaves the estate half-changed.{{end}}
           {{if eq .Job.Status "failed"}}This one is ours, not your file's.{{end}}
         {{else}}
           {{/* ROWS EXAMINED, not rows you have. This is one transaction: a run

@@ -11,6 +11,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -114,7 +115,10 @@ func (r *importRunner) run(w importWork) {
 	var err error
 	switch w.job.Kind {
 	case store.ImportKindAssets:
-		report, err = r.store.ImportAssets(ctx, w.actor, w.assets, false, progress)
+		// Batched, not one transaction: at measured speed a big file would hold
+		// SQLite's single writer for half a minute and stop everybody else
+		// saving anything. See ImportAssetsBatched for what that costs.
+		report, err = r.store.ImportAssetsBatched(ctx, w.actor, w.assets, progress)
 	case store.ImportKindDeviceTypes:
 		report, err = r.store.ImportDeviceTypes(ctx, w.actor, w.types, false, progress)
 	default:
@@ -128,6 +132,16 @@ func (r *importRunner) run(w importWork) {
 		slog.Error("import failed", "error", err, "job", w.job.ID, "kind", w.job.Kind)
 		r.finish(ctx, w.job.ID, store.ImportFailed, 0,
 			"the import could not be carried out: "+err.Error(), nil)
+	case report.PartialRows > 0:
+		// THE ONE OUTCOME THAT LEAVES THE ESTATE HALF-CHANGED, and it gets its
+		// own message rather than being folded into "refused". It means the file
+		// validated and then something moved underneath it -- almost always
+		// somebody else taking a name mid-import. Re-running is safe: import
+		// creates and never updates, so the rows that landed are skipped.
+		r.finish(ctx, w.job.ID, store.ImportPartial, report.PartialRows,
+			fmt.Sprintf("%d rows were written before this stopped. Re-run the same file — "+
+				"import never updates, so what already landed is skipped.", report.PartialRows),
+			report.Problems)
 	case len(report.Problems) > 0:
 		// THEIRS. The file was read and answered no; nothing was written.
 		r.finish(ctx, w.job.ID, store.ImportRefused, 0,

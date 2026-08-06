@@ -763,3 +763,65 @@ func TestAnAmbiguousModelPathIsRefusedRatherThanGuessed(t *testing.T) {
 		})
 	}
 }
+
+func TestABatchedImportWritesTheWholeFile(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			s, ctx := newStore(t, e)
+			rows := importCSV(t, importHeader+
+				"dc-a/rack-1,esx-01,hypervisor\n"+
+				"dc-a,rack-1,rack\n"+
+				",dc-a,site\n")
+
+			report, err := s.ImportAssetsBatched(ctx, testActor, rows, nil)
+			if err != nil {
+				t.Fatalf("importing: %v", err)
+			}
+			if len(report.Problems) > 0 {
+				t.Fatalf("a valid file was refused: %+v", report.Problems)
+			}
+			if len(report.Created) != 3 {
+				t.Fatalf("created %v, want 3 paths", report.Created)
+			}
+			if report.PartialRows != 0 {
+				t.Errorf("PartialRows = %d, want 0", report.PartialRows)
+			}
+			// Parents before children, across batches: the child must have found
+			// its parent's id.
+			list, err := s.ListAssets(ctx, AssetFilter{Query: "esx-01"})
+			if err != nil || len(list) != 1 {
+				t.Fatalf("reading back: %v", err)
+			}
+			if list[0].ParentID == nil {
+				t.Error("the child was written with no parent; depth ordering is what " +
+					"guarantees a parent is committed before its child")
+			}
+
+			// CREATE ONLY, on this path too. The rule was tested against the
+			// preview path and not against the one that actually writes -- caught
+			// by mutating the batched check and watching everything stay green.
+			again, err := s.ImportAssetsBatched(ctx, testActor,
+				importCSV(t, importHeader+"dc-a,rack-1,rack\n"), nil)
+			if err != nil {
+				t.Fatalf("re-importing: %v", err)
+			}
+			if len(problemsAbout(again, "already exists")) != 1 {
+				t.Fatalf("problems = %+v, want one saying it already exists", again.Problems)
+			}
+			if again.PartialRows != 0 {
+				t.Errorf("PartialRows = %d; a file refused before any write leaves nothing "+
+					"half-done", again.PartialRows)
+			}
+
+			// And re-running a file whose rows ALL already exist is how somebody
+			// recovers from a partial import, so it must refuse rather than break.
+			list2, err := s.ListAssets(ctx, AssetFilter{})
+			if err != nil {
+				t.Fatalf("listing: %v", err)
+			}
+			if len(list2) != 3 {
+				t.Errorf("estate has %d assets after a refused re-run, want 3", len(list2))
+			}
+		})
+	}
+}

@@ -22,10 +22,22 @@ reviewed, and there would be no way to tell afterwards which values a person
 chose and which a spreadsheet overwrote. To change something that exists, edit
 it — the change log then records who, when, and from what.
 
-**The whole file lands, or none of it does.** Every row shares one database
-transaction. A fault on line 300 leaves the first 299 unwritten. A partly
-applied import is the worst outcome available: you cannot tell what landed, and
-re-running the corrected file collides with its own successful half.
+**The whole file lands, or none of it does.** Every row is checked before any
+row is written, so a fault on line 300 leaves the first 299 unwritten and the
+report lists everything wrong at once.
+
+The writing then happens in **batches of 200**, and that is a deliberate trade
+worth understanding. One giant transaction would hold the database's single
+writer for the whole import — measured at 1.4ms a row, twenty-five thousand
+assets is thirty-five seconds during which nobody else can save anything.
+Batching keeps the longest wait for another person at well under a second, and
+that number stays flat however big your file is.
+
+What it costs: if something changes underneath a running import — almost always
+somebody else taking a name in the seconds between checking and writing — it
+stops and says **exactly how many rows were written**. That is the one outcome
+that leaves the estate half-changed, and the fix is simply to run the same file
+again: import creates and never updates, so whatever already landed is skipped.
 
 **A preview runs the real thing and throws it away.** Tick *Preview only* and
 the import performs the actual inserts — same validation, same constraints, same
@@ -168,10 +180,23 @@ nothing half-written to resume — the transaction went with the process.
 One import runs at a time. SQLite takes a single writer, so a second would only
 queue behind the first, and while an import runs other saves wait for it.
 
-## Limits
+## How big should a file be?
 
-A file may be up to **1 MiB**, which is roughly fifteen thousand rows. A larger
-upload is refused with a message saying so rather than a bare error.
+**A thousand rows is a comfortable size, and most estates never need more.**
+
+A file may be up to **1 MiB**, roughly fifteen thousand rows, and a larger upload
+is refused with a message saying so rather than a bare error. But there are
+better reasons than the limit to split a big load into a few files:
+
+- A smaller file is quicker to preview and far easier to correct when one row is
+  wrong — the whole file is refused, so one bad row means re-uploading all of it.
+- Several files that each landed are easier to reason about than one that
+  stopped part-way.
+- You can do them in a sensible order — sites and racks first, then the kit —
+  and check each one before the next.
+
+Splitting is not required. Rows may appear in any order and parents can live in
+an earlier file, so there is nothing to co-ordinate.
 
 ---
 

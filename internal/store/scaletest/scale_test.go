@@ -40,6 +40,12 @@ const (
 	serversPerRack = 25
 )
 
+// secondFile is a second estate, so the writer-contention probe imports
+// something that does not collide with the first.
+var secondRows []store.AssetImportRow
+
+func secondFile() []store.AssetImportRow { return secondRows }
+
 func TestAtScale(t *testing.T) {
 	if os.Getenv("INV_SCALE") == "" {
 		t.Skip("set INV_SCALE=1 to run the scale measurement")
@@ -79,6 +85,17 @@ func TestAtScale(t *testing.T) {
 	}
 	t.Logf("%-26s %d", "rows parsed", len(rows))
 
+	var second strings.Builder
+	second.WriteString("parent,name,kind\n")
+	for si := 0; si < 4; si++ {
+		site := fmt.Sprintf("probe-dc-%02d", si)
+		fmt.Fprintf(&second, ",%s,site\n", site)
+		for b := 0; b < 250; b++ {
+			fmt.Fprintf(&second, "%s,probe-%02d%03d,server\n", site, si, b)
+		}
+	}
+	secondRows, _ = store.ParseAssetCSV(strings.NewReader(second.String()))
+
 	actor := domain.Actor{ID: "scale", Name: "scale", Kind: domain.ActorKindUser}
 	timed := func(label string, fn func() string) {
 		t0 := time.Now()
@@ -93,15 +110,51 @@ func TestAtScale(t *testing.T) {
 		}
 		return fmt.Sprintf("%d would be created, %d problems", len(rep.Created), len(rep.Problems))
 	})
-	timed("real import", func() string {
-		rep, err := s.ImportAssets(ctx, actor, rows, false)
+	timed("real import (batched)", func() string {
+		rep, err := s.ImportAssetsBatched(ctx, actor, rows, nil)
 		if err != nil {
 			t.Fatalf("import: %v", err)
 		}
 		if len(rep.Problems) > 0 {
 			t.Fatalf("import refused: %+v", rep.Problems[:1])
 		}
-		return fmt.Sprintf("%d created", len(rep.Created))
+		return fmt.Sprintf("%d created, in batches of %d", len(rep.Created), store.ImportBatchSize)
+	})
+
+	// THE NUMBER THE BATCHING EXISTS FOR: how long another writer waits while an
+	// import runs. One transaction meant the whole file; batches mean one batch.
+	timed("longest wait for the writer", func() string {
+		worst := time.Duration(0)
+		stop := make(chan struct{})
+		go func() {
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				t0 := time.Now()
+				env, err := domain.NewEnvironment(store.NewID(),
+					fmt.Sprintf("probe-%d", time.Now().UnixNano()), "probe",
+					domain.EnvRoleProduction, false, 3, time.Now().UTC())
+				if err == nil {
+					_ = s.CreateEnvironment(ctx, actor, env)
+				}
+				if d := time.Since(t0); d > worst {
+					worst = d
+				}
+				time.Sleep(20 * time.Millisecond)
+			}
+		}()
+		rep, err := s.ImportAssetsBatched(ctx, actor, secondFile(), nil)
+		close(stop)
+		if err != nil {
+			t.Fatalf("second import: %v", err)
+		}
+		if len(rep.Problems) > 0 {
+			t.Fatalf("second import refused: %+v", rep.Problems[:1])
+		}
+		return fmt.Sprintf("worst single write waited %s", worst.Round(time.Millisecond))
 	})
 
 	var assets, closure, audit int

@@ -128,6 +128,11 @@ type ImportReport struct {
 	// WHOLE list rather than the first failure: an operator fixing a
 	// four-hundred-line file one error per upload is an operator who gives up.
 	Problems []ImportProblem
+	// PartialRows is how many rows were written before a batched import stopped.
+	// Zero for everything else, and non-zero is the one outcome that leaves the
+	// estate half-changed -- so it is a field rather than a sentence, and the
+	// job page leads with it.
+	PartialRows int
 	// Rows is how many data rows the file held, so "0 created, 0 problems" can
 	// be distinguished from an empty file.
 	Rows int

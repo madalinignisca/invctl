@@ -26,8 +26,12 @@
         <label for="import-file">CSV file</label>
         <input type="file" id="import-file" name="file" accept=".csv,text/csv" required>
         <p class="hint">
-          Up to 1 MiB, around fifteen thousand rows. A real import runs on the
-          server and you can close the page; a preview answers here and now.
+          Up to 1 MiB, around fifteen thousand rows — but
+          <strong>a thousand rows a file is a comfortable size</strong>. An
+          import writes in batches and other people keep working while it runs,
+          and a smaller file is quicker to check and easier to correct when a
+          row is wrong. A real import runs on the server and you can close the
+          page; a preview answers here and now.
           <a href="/imports">Past imports</a>.
         </p>
       </div>

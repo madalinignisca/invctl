@@ -34,6 +34,7 @@
             <td>
               {{if eq .Status "succeeded"}}<span class="pill pill-ok">imported</span>
               {{else if eq .Status "refused"}}<span class="pill pill-degraded">refused</span>
+              {{else if eq .Status "partial"}}<span class="pill pill-down">stopped part-way</span>
               {{else if eq .Status "failed"}}<span class="pill pill-down">failed</span>
               {{else}}<span class="pill pill-info">{{.Status}}</span>{{end}}
             </td>
