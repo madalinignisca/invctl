@@ -11,6 +11,7 @@ package store
 import (
 	"context"
 	"errors"
+	"strconv"
 	"testing"
 	"time"
 
@@ -179,8 +180,8 @@ func TestTheReportAgreesWithTheDomainRule(t *testing.T) {
 
 			for i, tc := range cases {
 				t.Run(tc.name, func(t *testing.T) {
-					dt := mustDeviceType(t, s, ctx, mf, "model-"+string(rune('a'+i)), tc.typeEOL)
-					name := "box-" + string(rune('a'+i))
+					dt := mustDeviceType(t, s, ctx, mf, "model-"+strconv.Itoa(i), tc.typeEOL)
+					name := "box-" + strconv.Itoa(i)
 					assetOfType(t, s, ctx, name, dt, tc.assetEOL)
 
 					// The domain's answer.
@@ -398,4 +399,3 @@ func TestADeviceTypeRefusesWhatWouldMislead(t *testing.T) {
 		})
 	}
 }
-
