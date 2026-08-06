@@ -62,7 +62,7 @@ var assetImportColumns = map[string]bool{
 	"parent": true, "name": true, "kind": true, "serial": true,
 	"asset_tag": true, "vendor": true, "model": true,
 	"lifecycle": true, "eol_date": true, "environments": true,
-	"team": true, "manager_role": true,
+	"team": true, "manager_role": true, "device_type": true,
 }
 
 // AssetImportRow is one line of the file, before anything has been resolved.
@@ -87,6 +87,10 @@ type AssetImportRow struct {
 	// capacity, never an individual, and an import is not an exception to that.
 	Team        string
 	ManagerRole string
+	// DeviceType is a catalogued model as `manufacturer-code/model`, e.g.
+	// dell/PowerEdge R650 -- the same natural key the catalogue importer uses.
+	// Pointing an asset at one is how it inherits an end-of-support date.
+	DeviceType string
 }
 
 // Path is where this row's asset would sit, which is also its natural key.
@@ -243,6 +247,7 @@ func ParseAssetCSV(r io.Reader) ([]AssetImportRow, []ImportProblem) {
 			Environments: at(record, "environments"),
 			Team:         at(record, "team"),
 			ManagerRole:  at(record, "manager_role"),
+			DeviceType:   strings.Trim(at(record, "device_type"), "/"),
 		}
 		// A wholly blank line is a spreadsheet artefact, not an intention.
 		if row == (AssetImportRow{Line: line}) {
@@ -322,6 +327,10 @@ func (s *SQLStore) ImportAssets(ctx context.Context, actor domain.Actor, rows []
 		if err != nil {
 			return err
 		}
+		models, err := loadDeviceTypeIndex(ctx, t)
+		if err != nil {
+			return err
+		}
 
 		// Rows resolve against the estate PLUS everything created so far in
 		// this run, so a file may introduce a site and the racks inside it. The
@@ -361,7 +370,7 @@ func (s *SQLStore) ImportAssets(ctx context.Context, actor domain.Actor, rows []
 					continue
 				}
 
-				asset, envIDs, envCodes, problems := buildImportedAsset(row, parentID, environments, teams, s.Now())
+				asset, envIDs, envCodes, problems := buildImportedAsset(row, parentID, environments, teams, models, s.Now())
 				if len(problems) > 0 {
 					report.Problems = append(report.Problems, problems...)
 					continue
@@ -431,7 +440,8 @@ func (s *SQLStore) ImportAssets(ctx context.Context, actor domain.Actor, rows []
 // domain constructor already works that way; this keeps the same contract at the
 // file level, for the same reason -- an operator who has to re-upload once per
 // mistake stops using the feature.
-func buildImportedAsset(row AssetImportRow, parentID *string, environments, teams map[string]string, now time.Time) (*domain.Asset, []string, []string, []ImportProblem) {
+func buildImportedAsset(row AssetImportRow, parentID *string, environments, teams map[string]string,
+	models deviceTypeIndex, now time.Time) (*domain.Asset, []string, []string, []ImportProblem) {
 	var problems []ImportProblem
 	add := func(field, format string, args ...any) {
 		problems = append(problems, ImportProblem{
@@ -473,6 +483,20 @@ func buildImportedAsset(row AssetImportRow, parentID *string, environments, team
 	// inside the transaction, which is the same check the form goes through.
 	// Duplicating it would be a second list to keep in step.
 	asset.ManagerRole = optionalText(row.ManagerRole)
+
+	if row.DeviceType != "" {
+		id, found, ambiguous := models.lookup(row.DeviceType)
+		switch {
+		case ambiguous:
+			add("device_type", "%q matches more than one catalogued model, differing only "+
+				"in capitalisation; rename one of them", row.DeviceType)
+		case !found:
+			add("device_type", "there is no catalogued model at %q; catalogue it first, "+
+				"or import one with a device-type file", row.DeviceType)
+		default:
+			asset.DeviceTypeID = &id
+		}
+	}
 
 	// Validate covers lifecycle and the EOL date shape. The DB CHECK behind it
 	// is the second line of defence, and a constraint failure mid-file would

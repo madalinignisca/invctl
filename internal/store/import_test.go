@@ -571,16 +571,26 @@ func TestTheDocumentedExampleActuallyImports(t *testing.T) {
 				}
 				mustEnvironment(t, s, ctx, "prod", domain.EnvRoleProduction)
 				mustEnvironment(t, s, ctx, "dr", domain.EnvRoleProduction)
-				mustManufacturer(t, s, ctx, "dell", "Dell")
+				dell := mustManufacturer(t, s, ctx, "dell", "Dell")
 				mustManufacturer(t, s, ctx, "hpe", "HPE")
 
 				// Dispatched on the header, so the test does not have to be told
 				// which block is which -- and a third example is picked up by
 				// whichever importer its columns name.
 				header, _, _ := strings.Cut(example, "\n")
+				catalogueExample := strings.HasPrefix(header, "manufacturer,")
+
+				// The asset example POINTS AT a catalogued model; the catalogue
+				// example CREATES one. Seeding it for both would make the second
+				// collide with the fixture rather than be judged on the file, so
+				// the estate is built to suit whichever example is running.
+				if !catalogueExample {
+					mustDeviceType(t, s, ctx, dell, "R650", ptr("2029-03-31"))
+				}
+
 				var report *ImportReport
 				var problems []ImportProblem
-				if strings.HasPrefix(header, "manufacturer,") {
+				if catalogueExample {
 					var rows []DeviceTypeImportRow
 					rows, problems = ParseDeviceTypeCSV(strings.NewReader(example))
 					if len(problems) == 0 {
@@ -608,6 +618,147 @@ func TestTheDocumentedExampleActuallyImports(t *testing.T) {
 				if len(report.Created) == 0 {
 					t.Errorf("example %d created nothing", i+1)
 				}
+			}
+		})
+	}
+}
+
+// TestImportingAnAssetPointsItAtACataloguedModel closes the gap that made the
+// import story only look complete: assets could be imported and models could be
+// imported, but nothing linked them without opening a form per box.
+func TestImportingAnAssetPointsItAtACataloguedModel(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			s, ctx := newStore(t, e)
+			dell := mustManufacturer(t, s, ctx, "dell", "Dell")
+			r650 := mustDeviceType(t, s, ctx, dell, "PowerEdge R650", ptr("2029-03-31"))
+
+			t.Run("the model is resolved and the date is inherited", func(t *testing.T) {
+				rows, problems := ParseAssetCSV(strings.NewReader(
+					"name,kind,device_type\ninherits-01,server,dell/PowerEdge R650\n"))
+				if len(problems) > 0 {
+					t.Fatalf("parsing: %+v", problems)
+				}
+				report, err := s.ImportAssets(ctx, testActor, rows, false)
+				if err != nil {
+					t.Fatalf("importing: %v", err)
+				}
+				if len(report.Problems) > 0 {
+					t.Fatalf("refused: %+v", report.Problems)
+				}
+
+				list, err := s.ListAssets(ctx, AssetFilter{Query: "inherits-01"})
+				if err != nil || len(list) != 1 {
+					t.Fatalf("reading back: %v (%d rows)", err, len(list))
+				}
+				// The ID read back, not "no error": an unresolved path left as nil
+				// is the shape that reports success and stores nothing.
+				if list[0].DeviceTypeID == nil || *list[0].DeviceTypeID != r650 {
+					t.Fatalf("device_type_id = %v, want the R650's id", list[0].DeviceTypeID)
+				}
+				// And the point of linking it at all.
+				if got := list[0].ResolvedEOL(); got == nil || *got != "2029-03-31" {
+					t.Errorf("resolved EOL = %v, want the model's 2029-03-31", got)
+				}
+				if !list[0].InheritedEOL() {
+					t.Error("the date is not marked as inherited")
+				}
+			})
+
+			t.Run("case is folded, so a lower-cased file still resolves", func(t *testing.T) {
+				rows, _ := ParseAssetCSV(strings.NewReader(
+					"name,kind,device_type\nlowercased-01,server,dell/poweredge r650\n"))
+				report, err := s.ImportAssets(ctx, testActor, rows, false)
+				if err != nil {
+					t.Fatalf("importing: %v", err)
+				}
+				if len(report.Problems) > 0 {
+					t.Fatalf("a lower-cased model path was refused: %+v\n"+
+						"Nobody transcribing a model name from a screen preserves its "+
+						"capitalisation.", report.Problems)
+				}
+			})
+
+			t.Run("an unknown model is named, not silently left unset", func(t *testing.T) {
+				rows, _ := ParseAssetCSV(strings.NewReader(
+					"name,kind,device_type\nghost-01,server,dell/NoSuchModel\n"))
+				report, err := s.ImportAssets(ctx, testActor, rows, false)
+				if err != nil {
+					t.Fatalf("importing: %v", err)
+				}
+				if len(problemsAbout(report, "dell/NoSuchModel")) != 1 {
+					t.Fatalf("problems = %+v, want one quoting the path.\n"+
+						"Leaving it unset would import the asset with no model and report "+
+						"success -- and the expiry date it was supposed to inherit would "+
+						"simply never appear.", report.Problems)
+				}
+			})
+
+			t.Run("an asset's own date still beats the model's", func(t *testing.T) {
+				rows, _ := ParseAssetCSV(strings.NewReader(
+					"name,kind,device_type,eol_date\ncontracted-01,server,dell/PowerEdge R650,2031-12-31\n"))
+				if report, err := s.ImportAssets(ctx, testActor, rows, false); err != nil {
+					t.Fatalf("importing: %v", err)
+				} else if len(report.Problems) > 0 {
+					t.Fatalf("refused: %+v", report.Problems)
+				}
+				list, err := s.ListAssets(ctx, AssetFilter{Query: "contracted-01"})
+				if err != nil || len(list) != 1 {
+					t.Fatalf("reading back: %v", err)
+				}
+				if got := list[0].ResolvedEOL(); got == nil || *got != "2031-12-31" {
+					t.Errorf("resolved EOL = %v, want the asset's own 2031-12-31", got)
+				}
+				if list[0].InheritedEOL() {
+					t.Error("a date stated in the file is reported as inherited")
+				}
+			})
+
+			t.Run("a retired model is not adopted from a file", func(t *testing.T) {
+				gone := mustDeviceType(t, s, ctx, dell, "PowerEdge R500", nil)
+				if err := s.RetireDeviceType(ctx, testActor, gone); err != nil {
+					t.Fatalf("retiring: %v", err)
+				}
+				rows, _ := ParseAssetCSV(strings.NewReader(
+					"name,kind,device_type\nold-01,server,dell/PowerEdge R500\n"))
+				report, err := s.ImportAssets(ctx, testActor, rows, false)
+				if err != nil {
+					t.Fatalf("importing: %v", err)
+				}
+				if len(report.Problems) == 0 {
+					t.Error("a file re-adopted a model the estate has stopped buying. " +
+						"A retired model is not offered in the picker either.")
+				}
+			})
+		})
+	}
+}
+
+// TestAnAmbiguousModelPathIsRefusedRatherThanGuessed covers the cost of folding
+// case.
+//
+// The unique index on device_type is case-sensitive, so two models differing
+// only in capitalisation can both exist. Folding case to be forgiving means
+// admitting that, and the only honest answer is to refuse -- picking whichever
+// came back first would resolve silently and wrongly half the time.
+func TestAnAmbiguousModelPathIsRefusedRatherThanGuessed(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			s, ctx := newStore(t, e)
+			dell := mustManufacturer(t, s, ctx, "dell", "Dell")
+			mustDeviceType(t, s, ctx, dell, "PowerEdge R650", ptr("2029-03-31"))
+			mustDeviceType(t, s, ctx, dell, "poweredge r650", ptr("2020-01-01"))
+
+			rows, _ := ParseAssetCSV(strings.NewReader(
+				"name,kind,device_type\nwhich-01,server,dell/PowerEdge R650\n"))
+			report, err := s.ImportAssets(ctx, testActor, rows, false)
+			if err != nil {
+				t.Fatalf("importing: %v", err)
+			}
+			if len(problemsAbout(report, "more than one")) != 1 {
+				t.Fatalf("problems = %+v, want one saying the path is ambiguous.\n"+
+					"The two models carry different end-of-support dates, so guessing "+
+					"picks the wrong answer half the time and says nothing.", report.Problems)
 			}
 		})
 	}

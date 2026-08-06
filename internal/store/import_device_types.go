@@ -342,3 +342,56 @@ func existingDeviceTypePaths(ctx context.Context, t *tx) (map[string]string, err
 	}
 	return out, nil
 }
+
+// deviceTypeIndex resolves a `manufacturer/model` path from an import file to a
+// catalogued model.
+//
+// CASE-INSENSITIVE, WITH AN EXPLICIT REFUSAL WHEN THAT IS AMBIGUOUS. The unique
+// index on device_type is case-sensitive, so "PowerEdge R650" and "poweredge
+// r650" can both exist under one maker. Matching exactly would be defensible and
+// would also mean a file typed in lower case silently finds nothing; matching
+// loosely and picking one would be worse, because it would pick silently. So it
+// folds case and, in the one pathological situation where that matches two
+// models, says so and refuses rather than choosing.
+type deviceTypeIndex struct {
+	byPath map[string][]string // lower-cased path -> ids
+}
+
+func (i deviceTypeIndex) lookup(path string) (id string, found, ambiguous bool) {
+	ids := i.byPath[strings.ToLower(path)]
+	switch len(ids) {
+	case 0:
+		return "", false, false
+	case 1:
+		return ids[0], true, false
+	default:
+		return "", true, true
+	}
+}
+
+// loadDeviceTypeIndex reads the LIVE catalogue.
+//
+// Live only, matching what the pickers offer and what the partial unique index
+// governs: a retired model is one the estate has stopped buying, and pointing
+// new assets at it from a file would be the file re-adopting it.
+func loadDeviceTypeIndex(ctx context.Context, t *tx) (deviceTypeIndex, error) {
+	var rows []struct {
+		ID    string `db:"id"`
+		Model string `db:"model"`
+		Code  string `db:"code"`
+	}
+	err := t.selectAll(ctx, &rows, `
+		SELECT d.id, d.model, m.code
+		FROM device_type d
+		JOIN manufacturer m ON m.id = d.manufacturer_id
+		WHERE d.lifecycle <> ?`, domain.LifecycleRetired)
+	if err != nil {
+		return deviceTypeIndex{}, fmt.Errorf("reading the catalogue: %w", err)
+	}
+	idx := deviceTypeIndex{byPath: make(map[string][]string, len(rows))}
+	for _, r := range rows {
+		key := strings.ToLower(r.Code + "/" + r.Model)
+		idx.byPath[key] = append(idx.byPath[key], r.ID)
+	}
+	return idx, nil
+}

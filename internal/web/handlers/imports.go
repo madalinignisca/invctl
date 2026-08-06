@@ -200,6 +200,7 @@ var importColumns = []importColumn{
 	{"environments", false, "environment codes, comma separated: prod,dr"},
 	{"team", false, "the owning team's code — a team, never a person"},
 	{"manager_role", false, "the capacity that team holds: owner, operator…  needs a team"},
+	{"device_type", false, "a catalogued model as manufacturer/model — dell/PowerEdge R650. Inherits its end-of-support date."},
 }
 
 func (a *App) renderImport(w http.ResponseWriter, r *http.Request, kind importKind, status int,

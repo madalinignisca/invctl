@@ -79,6 +79,7 @@ The first line is a header naming the columns. Their order does not matter.
 | `environments` | | Environment codes, comma separated: `prod,dr`. |
 | `team` | | The owning team's **code**. |
 | `manager_role` | | A code from the **responsibility roles** vocabulary: `owner`, `operator`, `approver`, `oncall`, `custodian`, `vendor`. Requires `team`. |
+| `device_type` | | A catalogued model as `manufacturer/model` — `dell/PowerEdge R650`. The asset inherits its end-of-support date. |
 
 ### Kinds are a vocabulary, not a fixed list
 
@@ -94,6 +95,11 @@ As shipped: `site`, `rack`, `pdu`, `firewall`, `switch`, `patch_panel`,
 `lifecyle` would otherwise be dropped silently, the asset created with the wrong
 lifecycle, and the result page would cheerfully report a success.
 
+`device_type` matches case-insensitively, so `dell/r650` finds `dell/R650`. In
+the one situation where that is genuinely ambiguous — two catalogued models
+differing only in capitalisation — the row is refused rather than resolved to
+whichever came first.
+
 **Teams and roles, never people.** `team` names a team and `manager_role` names
 a capacity. This system does not record individuals, and an import is not an
 exception.
@@ -106,12 +112,17 @@ empty one.
 ## An example
 
 ```csv
-parent,name,kind,vendor,model,eol_date,environments,team,manager_role
-,dc-a,site,,,,,platform,owner
-dc-a,rack-1,rack,,,,,platform,owner
-dc-a/rack-1,esx-01,hypervisor,Dell,R650,2029-03-31,"prod,dr",platform,operator
-dc-a/rack-1,esx-02,hypervisor,Dell,R650,2029-03-31,"prod,dr",platform,operator
+parent,name,kind,device_type,eol_date,environments,team,manager_role
+,dc-a,site,,,,platform,owner
+dc-a,rack-1,rack,,,,platform,owner
+dc-a/rack-1,esx-01,hypervisor,dell/R650,,"prod,dr",platform,operator
+dc-a/rack-1,esx-02,hypervisor,dell/R650,2031-12-31,"prod,dr",platform,operator
 ```
+
+`esx-01` inherits its end-of-support date from the `dell/R650` model.
+`esx-02` is the same model but states its own — a support contract on that
+particular box — and its own date wins. Every screen showing either one says
+which of the two it is.
 
 Quote any cell containing a comma, as `environments` does above.
 
