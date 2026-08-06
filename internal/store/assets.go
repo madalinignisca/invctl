@@ -453,6 +453,73 @@ func (s *SQLStore) GetAsset(ctx context.Context, id string) (*AssetRow, error) {
 }
 
 // CreateAsset inserts an asset, seeds its closure rows, and audits the change.
+// requireUniqueSiblingName enforces the asset natural key: a name is unique
+// among an asset's LIVE siblings.
+//
+// The partial unique indexes in migration 00021 are the guarantee; this is the
+// message. Without it a duplicate name arrives as translateWriteErr's
+// ErrConflict, which the handler renders as a bare 409 -- "That conflicts with
+// something that already exists" -- with no field named, no form re-rendered and
+// everything the operator typed thrown away. That is the wrong shape twice over:
+// a name collision is a validation failure on one field, and CLAUDE.md's answer
+// to a validation failure is 422 with the form partial and what was typed still
+// in it.
+//
+// CHECK-THEN-ACT, DELIBERATELY. Two concurrent creates can both pass this and
+// the second will lose to the index, which is correct -- the constraint is the
+// line that holds. This runs inside the caller's transaction and exists so the
+// common case reads as a sentence rather than a status code.
+//
+// RETIRED ROWS DO NOT PARTICIPATE, on either side. A retired asset does not
+// hold its name against a new one, and an asset being retired cannot collide
+// with anything. Both halves match the index, and they have to: a pre-check
+// stricter than the constraint refuses writes the database would accept.
+// THE FIELD IS A PARAMETER because the same collision arrives through two
+// different inputs. Typing a name into the asset form is a fault of `name`;
+// choosing a destination that already holds that name is a fault of
+// `parent_id`, and that is the only input the move form has. A message attached
+// to a field the form does not render is a refusal with nowhere to appear,
+// which this project has shipped three times.
+func requireUniqueSiblingName(ctx context.Context, t *tx, field, name string, parentID *string, lifecycle, excludeID string) error {
+	if lifecycle == domain.LifecycleRetired {
+		return nil
+	}
+
+	// Two statements rather than one clever predicate, because `parent_id = ?`
+	// never matches NULL on either engine -- the same asymmetry that makes the
+	// index two indexes.
+	var n int
+	var err error
+	if parentID == nil {
+		err = t.get(ctx, &n,
+			`SELECT COUNT(*) FROM asset
+			 WHERE parent_id IS NULL AND name = ? AND lifecycle <> 'retired' AND id <> ?`,
+			name, excludeID)
+	} else {
+		err = t.get(ctx, &n,
+			`SELECT COUNT(*) FROM asset
+			 WHERE parent_id = ? AND name = ? AND lifecycle <> 'retired' AND id <> ?`,
+			*parentID, name, excludeID)
+	}
+	if err != nil {
+		return fmt.Errorf("checking for a sibling of the same name: %w", err)
+	}
+	if n == 0 {
+		return nil
+	}
+
+	ve := &domain.ValidationError{}
+	switch {
+	case field == "parent_id":
+		ve.Add(field, "that destination already contains something called %q", name)
+	case parentID == nil:
+		ve.Add(field, "another top-level asset is already called %q", name)
+	default:
+		ve.Add(field, "something here is already called %q", name)
+	}
+	return ve
+}
+
 func (s *SQLStore) CreateAsset(ctx context.Context, actor domain.Actor, a *domain.Asset, environmentIDs []string) error {
 	// The row the INSERT just wrote is version 1 (the column default).
 	// Without this a caller that creates and then updates the SAME struct
@@ -466,33 +533,54 @@ func (s *SQLStore) CreateAsset(ctx context.Context, actor domain.Actor, a *domai
 		return err
 	}
 	return s.write(ctx, actor, func(t *tx) error {
-		if err := t.requireVocabulary(ctx, vocabAssetKind, "kind", a.Kind); err != nil {
-			return err
-		}
-		if err := requireRole(ctx, t, a.ManagerRole); err != nil {
-			return err
-		}
-		_, err := t.exec(ctx,
-			`INSERT INTO asset (id, kind, name, parent_id, serial, asset_tag, vendor, model,
-			                    lifecycle, team_id, manager_role, eol_date, attrs,
-			                    created_at, updated_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			a.ID, a.Kind, a.Name, a.ParentID, a.Serial, a.AssetTag, a.Vendor, a.Model,
-			a.Lifecycle, a.TeamID, a.ManagerRole, a.EOLDate, a.Attrs, a.CreatedAt, a.UpdatedAt)
-		if err != nil {
-			return translateWriteErr(err, "creating asset")
-		}
-		if err := insertClosureForNewNode(ctx, t, a.ID, a.ParentID); err != nil {
-			return err
-		}
-		if err := setAssetEnvironments(ctx, t, a.ID, environmentIDs); err != nil {
-			return err
-		}
-		if err := t.logCreate(ctx, "asset", a.ID, auditedAsset(a, codes)); err != nil {
-			return err
-		}
-		return s.indexAsset(ctx, t, a)
+		return s.insertAsset(ctx, t, a, environmentIDs, codes)
 	})
+}
+
+// insertAsset writes one asset inside a transaction the CALLER owns.
+//
+// Split out of CreateAsset so a bulk import can put many of these in ONE
+// transaction. That is not a tidiness refactor: "whole-file refusal on partial
+// failure" is only expressible if every row shares a transaction, and the same
+// property is what makes a dry run honest -- the import runs the real writes,
+// with the real vocabulary checks, the real closure maintenance and the real
+// unique indexes, and then rolls back. A dry run that SIMULATES instead would be
+// a second implementation of this function, and the two would disagree exactly
+// when it mattered.
+//
+// Everything a single create does happens here, in the same order, including the
+// change_log row. An import is a declared-state mutation like any other and gets
+// one audit entry per asset, not one per file.
+func (s *SQLStore) insertAsset(ctx context.Context, t *tx, a *domain.Asset, environmentIDs, codes []string) error {
+	if err := t.requireVocabulary(ctx, vocabAssetKind, "kind", a.Kind); err != nil {
+		return err
+	}
+	if err := requireRole(ctx, t, a.ManagerRole); err != nil {
+		return err
+	}
+	if err := requireUniqueSiblingName(ctx, t, "name", a.Name, a.ParentID, a.Lifecycle, a.ID); err != nil {
+		return err
+	}
+	_, err := t.exec(ctx,
+		`INSERT INTO asset (id, kind, name, parent_id, serial, asset_tag, vendor, model,
+		                    lifecycle, team_id, manager_role, eol_date, attrs,
+		                    created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		a.ID, a.Kind, a.Name, a.ParentID, a.Serial, a.AssetTag, a.Vendor, a.Model,
+		a.Lifecycle, a.TeamID, a.ManagerRole, a.EOLDate, a.Attrs, a.CreatedAt, a.UpdatedAt)
+	if err != nil {
+		return translateWriteErr(err, "creating asset")
+	}
+	if err := insertClosureForNewNode(ctx, t, a.ID, a.ParentID); err != nil {
+		return err
+	}
+	if err := setAssetEnvironments(ctx, t, a.ID, environmentIDs); err != nil {
+		return err
+	}
+	if err := t.logCreate(ctx, "asset", a.ID, auditedAsset(a, codes)); err != nil {
+		return err
+	}
+	return s.indexAsset(ctx, t, a)
 }
 
 // UpdateAsset persists field changes. Reparenting is deliberately not handled
@@ -527,6 +615,14 @@ func (s *SQLStore) UpdateAsset(ctx context.Context, actor domain.Actor, a *domai
 			return err
 		}
 		if err := requireRole(ctx, t, a.ManagerRole); err != nil {
+			return err
+		}
+		// a.ParentID was forced to before.ParentID above -- reparenting goes
+		// through ReparentAsset, which runs its own check against the DESTINATION.
+		// The lifecycle is the SUBMITTED one, so un-retiring into a name somebody
+		// else took while this row was retired is refused here with a message
+		// rather than by the index with a 409.
+		if err := requireUniqueSiblingName(ctx, t, "name", a.Name, a.ParentID, a.Lifecycle, a.ID); err != nil {
 			return err
 		}
 		res, err := t.exec(ctx,
@@ -741,6 +837,14 @@ func (s *SQLStore) ReparentAsset(ctx context.Context, actor domain.Actor, id str
 				ve.Add("parent_id", "that asset is inside this one; moving it there would create a cycle")
 				return ve
 			}
+		}
+
+		// The third way into a collision, and the one that is easy to miss: the
+		// name is not changing and the destination is not new, but together they
+		// are. Moving esx-01 out of rack-a into rack-b, where an esx-01 already
+		// sits, is refused here rather than by the index.
+		if err := requireUniqueSiblingName(ctx, t, "parent_id", before.Name, newParentID, before.Lifecycle, id); err != nil {
+			return err
 		}
 
 		// Detach: drop every edge from outside the subtree into it, keeping
