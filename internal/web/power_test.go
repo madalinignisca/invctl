@@ -16,6 +16,12 @@ import (
 )
 
 // The power screens, driven through the real forms, ending at the finding.
+//
+// EVERY TEST OWNS ITS OWN TOPOLOGY. The seeded fixture now carries a 2N estate
+// of its own -- deliberately, so a fresh install shows what the feature is for
+// -- which means an assertion like "the report mentions a false redundancy" is
+// true before these tests do anything. So each one builds its own panels and
+// plugs in assets the fixture leaves unpowered, and asserts on those.
 
 func (h *harness) addPanel(t *testing.T, siteID, name string) string {
 	t.Helper()
@@ -71,8 +77,8 @@ func TestTheFalseRedundancyFindingReachesTheScreen(t *testing.T) {
 	h.login("admin", "admin-password")
 
 	site := h.lookup(`SELECT id FROM asset WHERE kind = 'site' LIMIT 1`)
-	p1 := h.addPanel(t, site, "panel-1")
-	p2 := h.addPanel(t, site, "panel-2")
+	p1 := h.addPanel(t, site, "t-panel-1")
+	p2 := h.addPanel(t, site, "t-panel-2")
 	f1a := h.addFeed(t, p1, "F1")
 	f1b := h.addFeed(t, p1, "F2")
 	f2a := h.addFeed(t, p2, "F1")
@@ -80,14 +86,15 @@ func TestTheFalseRedundancyFindingReachesTheScreen(t *testing.T) {
 		t.Fatal("the panels or feeds were not created through the forms")
 	}
 
-	trap := h.asset("hv-01")
+	// Assets the fixture leaves unpowered, so this test owns their inputs.
+	trap := h.asset("sw-core-2")
 	resp := h.plug(t, trap, f1a, "A")
 	resp.Body.Close()
 	resp = h.plug(t, trap, f1b, "B")
 	resp.Body.Close()
 
 	// The control: genuinely redundant, and it must not be reported.
-	ok := h.asset("hv-02")
+	ok := h.asset("fw-edge-1")
 	resp = h.plug(t, ok, f1a, "A")
 	resp.Body.Close()
 	resp = h.plug(t, ok, f2a, "B")
@@ -104,14 +111,14 @@ func TestTheFalseRedundancyFindingReachesTheScreen(t *testing.T) {
 		t.Error("the report flags an asset whose inputs are on DIFFERENT panels, so it " +
 			"is reporting 'has two inputs' rather than 'has two inputs on one panel'")
 	}
-	if !strings.Contains(page, "panel-1") {
+	if !strings.Contains(page, "t-panel-1") {
 		t.Error("the finding does not name the shared panel, so somebody has to trace it by hand")
 	}
 
 	// And the asset's own page shows where it draws from, panel included --
 	// which is where somebody would go to fix it.
 	assetPage := body(t, h.get("/assets/"+trap, false))
-	if !strings.Contains(assetPage, "panel-1") {
+	if !strings.Contains(assetPage, "t-panel-1") {
 		t.Error("the asset page does not show the panel behind its inputs")
 	}
 }
@@ -120,16 +127,16 @@ func TestLosingAFeedSimulatesOnlyWhatActuallyGoesDark(t *testing.T) {
 	h := newHarness(t)
 	h.login("admin", "admin-password")
 	site := h.lookup(`SELECT id FROM asset WHERE kind = 'site' LIMIT 1`)
-	p1 := h.addPanel(t, site, "panel-1")
-	p2 := h.addPanel(t, site, "panel-2")
+	p1 := h.addPanel(t, site, "t-panel-1")
+	p2 := h.addPanel(t, site, "t-panel-2")
 	fa := h.addFeed(t, p1, "F1")
 	fb := h.addFeed(t, p2, "F1")
 
-	single := h.asset("hv-01")
+	single := h.asset("fw-edge-1")
 	resp := h.plug(t, single, fa, "A")
 	resp.Body.Close()
 
-	redundant := h.asset("hv-02")
+	redundant := h.asset("sw-core-2")
 	resp = h.plug(t, redundant, fa, "A")
 	resp.Body.Close()
 	resp = h.plug(t, redundant, fb, "B")
@@ -157,7 +164,7 @@ func TestLosingAFeedSimulatesOnlyWhatActuallyGoesDark(t *testing.T) {
 
 	// And it does land on a real impact page rather than a broken URL.
 	page := body(t, h.get(loc, false))
-	if !strings.Contains(page, "hv-01") {
+	if !strings.Contains(page, "fw-edge-1") {
 		t.Errorf("the impact page does not name the asset that goes dark:\n%s", page)
 	}
 }
@@ -168,12 +175,12 @@ func TestAFeedThatTakesNothingDownSaysSo(t *testing.T) {
 	h := newHarness(t)
 	h.login("admin", "admin-password")
 	site := h.lookup(`SELECT id FROM asset WHERE kind = 'site' LIMIT 1`)
-	p1 := h.addPanel(t, site, "panel-1")
-	p2 := h.addPanel(t, site, "panel-2")
+	p1 := h.addPanel(t, site, "t-panel-1")
+	p2 := h.addPanel(t, site, "t-panel-2")
 	fa := h.addFeed(t, p1, "F1")
 	fb := h.addFeed(t, p2, "F1")
 
-	box := h.asset("hv-01")
+	box := h.asset("sw-core-2")
 	resp := h.plug(t, box, fa, "A")
 	resp.Body.Close()
 	resp = h.plug(t, box, fb, "B")
@@ -192,7 +199,7 @@ func TestPowerIsReadableByAnyoneAndWritableByAdminsOnly(t *testing.T) {
 	h := newHarness(t)
 	h.login("admin", "admin-password")
 	site := h.lookup(`SELECT id FROM asset WHERE kind = 'site' LIMIT 1`)
-	panel := h.addPanel(t, site, "panel-1")
+	panel := h.addPanel(t, site, "t-panel-1")
 	before := h.count(`SELECT COUNT(*) FROM power_feed`)
 
 	h.logout()

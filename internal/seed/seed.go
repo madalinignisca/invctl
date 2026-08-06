@@ -41,6 +41,12 @@ type Refs struct {
 	Endpoints    map[string]string // "service/endpoint" -> id
 	Routes       map[string]string // match value -> id
 	NetGroups    map[string]string // code -> id
+	// The hardware catalogue and the power chain.
+	Manufacturers map[string]string // code -> id
+	DeviceTypes   map[string]string // model -> id
+	PowerSources  map[string]string // name -> id
+	PowerPanels   map[string]string // name -> id
+	PowerFeeds    map[string]string // "panel/feed" -> id
 }
 
 // builder threads the store, context and error state through the many small
@@ -84,6 +90,12 @@ func Load(ctx context.Context, s *store.SQLStore) (*Refs, error) {
 			Endpoints:    map[string]string{},
 			Routes:       map[string]string{},
 			NetGroups:    map[string]string{},
+
+			Manufacturers: map[string]string{},
+			DeviceTypes:   map[string]string{},
+			PowerSources:  map[string]string{},
+			PowerPanels:   map[string]string{},
+			PowerFeeds:    map[string]string{},
 		},
 	}
 
@@ -91,6 +103,9 @@ func Load(ctx context.Context, s *store.SQLStore) (*Refs, error) {
 	// Teams first: assets, services, projects and identities all point at one,
 	// and a foreign key does not care that this is a fixture.
 	b.teams()
+	// The catalogue before the estate: an asset names its model at creation, so
+	// the models have to exist for the link to be made rather than backfilled.
+	b.catalogue()
 	b.physical()
 	b.networking()
 	// The bridges hang off the hypervisors physical() built and land on the
@@ -99,6 +114,9 @@ func Load(ctx context.Context, s *store.SQLStore) (*Refs, error) {
 	// inherits its host's attachment through asset_closure, which is the same
 	// thing every guest already does.
 	b.virtual()
+	// Power after the estate: a board names its site and an input names an
+	// asset. It reads both and nothing reads it, so it can sit here.
+	b.power()
 	// topology reads asset ids and interface ids, so it has to follow both of
 	// the phases above. It sits here rather than at the end because the groups
 	// it declares are a reading of the cable plant networking() just laid.
@@ -230,6 +248,7 @@ func (b *builder) physical() {
 	b.asset(domain.KindPDU, "pdu-a1", "rack-a1", []string{"prod"}, func(a *domain.Asset) {
 		a.Vendor, a.Model = str("APC"), str("AP8853")
 		a.Serial = str("5A2134X09881")
+		a.DeviceTypeID = b.deviceType("AP8853")
 	})
 
 	// The shared switch: it carries both production and development VLANs, so
@@ -239,6 +258,9 @@ func (b *builder) physical() {
 		a.Vendor, a.Model = str("Arista"), str("DCS-7050SX3-48YC8")
 		a.Serial, a.AssetTag = str("JPE19140XYZ"), str("NET-0001")
 		a.TeamID = b.team("network")
+		// No date of its own: it INHERITS the model's, and every view says so.
+		// The catalogue's whole argument, sitting in the fixture.
+		a.DeviceTypeID = b.deviceType("DCS-7050SX3-48YC8")
 	})
 
 	// The MC-LAG peer, in the other rack. It carries the same VLANs as
@@ -250,6 +272,7 @@ func (b *builder) physical() {
 		a.Vendor, a.Model = str("Arista"), str("DCS-7050SX3-48YC8")
 		a.Serial, a.AssetTag = str("JPE19140ABC"), str("NET-0002")
 		a.TeamID = b.team("network")
+		a.DeviceTypeID = b.deviceType("DCS-7050SX3-48YC8")
 	})
 
 	// The firewall spans production and transit. Transit is excluded from
@@ -285,6 +308,21 @@ func (b *builder) physical() {
 			a.Vendor, a.Model = str("Dell"), str("PowerEdge R650")
 			a.Serial = str(hh.serial)
 			a.TeamID = b.team("platform")
+			// hv-01 and hv-02 only, and hv-03 DELIBERATELY NOT.
+			//
+			// lifetimes() gives these two dates of their own, so they override
+			// the model's and the asset page says "recorded on this asset".
+			// hv-03 is left uncatalogued on purpose: it is the fixture's undated
+			// asset, and the expiry report's closing callout -- "an estate where
+			// nothing appears to expire is usually one where nobody wrote the
+			// dates down" -- needs one to count. An estate with a box nobody has
+			// catalogued yet is also the ordinary state of the world.
+			//
+			// pdu-a1 carries the INHERITANCE demonstration instead: no date of
+			// its own, a model that has one.
+			if hh.name != "hv-03" {
+				a.DeviceTypeID = b.deviceType("PowerEdge R650")
+			}
 		})
 	}
 

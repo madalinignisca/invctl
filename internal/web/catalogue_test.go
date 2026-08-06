@@ -52,13 +52,13 @@ func TestCataloguingAModelAndPointingAnAssetAtIt(t *testing.T) {
 	h := newHarness(t)
 	h.login("admin", "admin-password")
 
-	dtID := h.catalogueModel(t, "dell", "Dell", "R650", "2027-09-30")
+	dtID := h.catalogueModel(t, "acme", "Acme Systems", "Widget-9000", "2027-09-30")
 	if dtID == "" {
 		t.Fatal("the model was not catalogued")
 	}
 
 	page := body(t, h.get("/catalogue", false))
-	if !strings.Contains(page, "R650") || !strings.Contains(page, "Dell") {
+	if !strings.Contains(page, "Widget-9000") || !strings.Contains(page, "Acme Systems") {
 		t.Errorf("the catalogue page does not list what it just created:\n%s", page)
 	}
 
@@ -78,7 +78,7 @@ func TestCataloguingAModelAndPointingAnAssetAtIt(t *testing.T) {
 func TestAnInheritedSupportDateSaysWhereItCameFrom(t *testing.T) {
 	h := newHarness(t)
 	h.login("admin", "admin-password")
-	dtID := h.catalogueModel(t, "dell", "Dell", "R650", "2027-09-30")
+	dtID := h.catalogueModel(t, "acme", "Acme Systems", "Widget-9000", "2027-09-30")
 
 	// An asset of that model, with NO date of its own.
 	resp := h.post("/assets", url.Values{
@@ -100,7 +100,7 @@ func TestAnInheritedSupportDateSaysWhereItCameFrom(t *testing.T) {
 			"A date whose origin is unstated renders a manufacturer's claim about a " +
 			"MODEL identically to somebody's claim about THIS box.")
 	}
-	if !strings.Contains(page, "Dell R650") {
+	if !strings.Contains(page, "Acme Systems Widget-9000") {
 		t.Error("the page does not name the model the date came from")
 	}
 }
@@ -108,7 +108,7 @@ func TestAnInheritedSupportDateSaysWhereItCameFrom(t *testing.T) {
 func TestAnAssetsOwnDateIsLabelledAsItsOwn(t *testing.T) {
 	h := newHarness(t)
 	h.login("admin", "admin-password")
-	dtID := h.catalogueModel(t, "dell", "Dell", "R650", "2027-09-30")
+	dtID := h.catalogueModel(t, "acme", "Acme Systems", "Widget-9000", "2027-09-30")
 
 	// The magic contract: this box is supported past what the model promises.
 	resp := h.post("/assets", url.Values{
@@ -138,9 +138,9 @@ func TestAnAssetsOwnDateIsLabelledAsItsOwn(t *testing.T) {
 func TestTheCatalogueIsAdminOnly(t *testing.T) {
 	h := newHarness(t)
 	h.login("admin", "admin-password")
-	h.catalogueModel(t, "dell", "Dell", "R650", "2027-09-30")
+	h.catalogueModel(t, "acme", "Acme Systems", "Widget-9000", "2027-09-30")
 	before := h.count(`SELECT COUNT(*) FROM device_type`)
-	mfID := h.lookup(`SELECT id FROM manufacturer WHERE code = ?`, "dell")
+	mfID := h.lookup(`SELECT id FROM manufacturer WHERE code = ?`, "acme")
 
 	h.logout()
 	h.login("viewer", "viewer-password")
@@ -183,8 +183,8 @@ func TestTheCatalogueIsAdminOnly(t *testing.T) {
 func TestARefusedModelKeepsWhatWasTyped(t *testing.T) {
 	h := newHarness(t)
 	h.login("admin", "admin-password")
-	h.catalogueModel(t, "dell", "Dell", "R650", "2027-09-30")
-	mfID := h.lookup(`SELECT id FROM manufacturer WHERE code = ?`, "dell")
+	h.catalogueModel(t, "acme", "Acme Systems", "Widget-9000", "2027-09-30")
+	mfID := h.lookup(`SELECT id FROM manufacturer WHERE code = ?`, "acme")
 
 	// A rack height that is not a number. Refused rather than silently stored
 	// as zero, which would put the model into every elevation calculation as
@@ -224,7 +224,7 @@ func TestARefusedModelKeepsWhatWasTyped(t *testing.T) {
 func TestFilteringAssetsByModelActuallyFilters(t *testing.T) {
 	h := newHarness(t)
 	h.login("admin", "admin-password")
-	dtID := h.catalogueModel(t, "dell", "Dell", "R650", "2027-09-30")
+	dtID := h.catalogueModel(t, "acme", "Acme Systems", "Widget-9000", "2027-09-30")
 
 	resp := h.post("/assets", url.Values{
 		"csrf_token":     {h.csrfToken("/assets")},
