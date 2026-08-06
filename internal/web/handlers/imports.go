@@ -11,7 +11,9 @@ package handlers
 import (
 	"io"
 	"net/http"
-	"strconv"
+
+	"github.com/madalinignisca/invctl/internal/domain"
+	"github.com/madalinignisca/invctl/internal/web/render"
 
 	"github.com/madalinignisca/invctl/internal/store"
 	"github.com/madalinignisca/invctl/internal/web/middleware"
@@ -51,6 +53,9 @@ type importKind struct {
 	// parsing, or an error -- the three outcomes are distinct and collapsing any
 	// two of them is how an import surface starts lying.
 	run func(*App, *http.Request, io.Reader, bool) (*store.ImportReport, []store.ImportProblem, error)
+	// parse reads a file into rows without touching the database, so a
+	// background job is queued only for a file that is at least well formed.
+	parse func(io.Reader) ([]store.AssetImportRow, []store.DeviceTypeImportRow, []store.ImportProblem, error)
 }
 
 var assetImport = importKind{
@@ -63,6 +68,10 @@ var assetImport = importKind{
 		"half-imported.",
 	Columns: importColumns,
 	Example: "parent,name,kind\n,dc-a,site\ndc-a,rack-1,rack\ndc-a/rack-1,esx-01,hypervisor",
+	parse: func(f io.Reader) ([]store.AssetImportRow, []store.DeviceTypeImportRow, []store.ImportProblem, error) {
+		rows, problems := store.ParseAssetCSV(f)
+		return rows, nil, problems, nil
+	},
 	run: func(a *App, r *http.Request, f io.Reader, dry bool) (*store.ImportReport, []store.ImportProblem, error) {
 		rows, problems := store.ParseAssetCSV(f)
 		if len(problems) > 0 {
@@ -82,6 +91,10 @@ var deviceTypeImport = importKind{
 		"list loaded here answers \"what lapses next year\" for the whole estate at once.",
 	Columns: deviceTypeColumns,
 	Example: "manufacturer,model,part_number,u_height,eol_date\ndell,R650,P30721-B21,1,2029-03-31\nhpe,DL380 Gen10,868703-B21,2,2028-12-31",
+	parse: func(f io.Reader) ([]store.AssetImportRow, []store.DeviceTypeImportRow, []store.ImportProblem, error) {
+		rows, problems := store.ParseDeviceTypeCSV(f)
+		return nil, rows, problems, nil
+	},
 	run: func(a *App, r *http.Request, f io.Reader, dry bool) (*store.ImportReport, []store.ImportProblem, error) {
 		rows, problems := store.ParseDeviceTypeCSV(f)
 		if len(problems) > 0 {
@@ -145,26 +158,61 @@ func (a *App) runImport(w http.ResponseWriter, r *http.Request, kind importKind)
 	defer file.Close()
 
 	dryRun := formValue(r, "dry_run") != ""
-	report, problems, err := kind.run(a, r, file, dryRun)
+
+	// A PREVIEW STAYS SYNCHRONOUS. It is the operator standing there asking a
+	// question, it writes nothing, and answering it on another page they have to
+	// go and watch would be worse than the wait. A real run is the one that
+	// takes seven seconds per five thousand rows and outlives the request.
+	if dryRun {
+		report, problems, err := kind.run(a, r, file, true)
+		if len(problems) > 0 {
+			a.renderImport(w, r, kind, http.StatusUnprocessableEntity, problems, nil)
+			return
+		}
+		if err != nil {
+			a.handleStoreError(w, r, err)
+			return
+		}
+		report.Filename = header.Filename
+		status := http.StatusOK
+		if len(report.Problems) > 0 {
+			status = http.StatusUnprocessableEntity
+		}
+		a.renderImport(w, r, kind, status, nil, report)
+		return
+	}
+
+	// Parsed HERE, in the request, so a malformed file is refused while the
+	// operator is still looking at the form rather than becoming a job that
+	// fails two seconds later on a page they have to find.
+	rows, types, problems, err := kind.parse(file)
 	if len(problems) > 0 {
 		a.renderImport(w, r, kind, http.StatusUnprocessableEntity, problems, nil)
 		return
 	}
 	if err != nil {
-		a.handleStoreError(w, r, err)
+		a.serverError(w, r, err)
 		return
 	}
-	report.Filename = header.Filename
+	total := len(rows) + len(types)
+	if total == 0 {
+		a.renderImport(w, r, kind, http.StatusUnprocessableEntity,
+			[]store.ImportProblem{{Message: "the file has a header but no rows"}}, nil)
+		return
+	}
 
-	if len(report.Problems) > 0 {
-		// 422 with the reasons, like every other refused form in this codebase.
-		a.renderImport(w, r, kind, http.StatusUnprocessableEntity, nil, report)
+	who := actor(r)
+	job := store.ImportJob{
+		ID: store.NewID(), Kind: kind.Slug, Filename: header.Filename,
+		Actor: who.ID, ActorKind: who.Kind, Status: store.ImportQueued,
+		RowsTotal: total, CreatedAt: domain.FormatTime(a.Store.Now()),
+	}
+	if err := a.Store.CreateImportJob(r.Context(), &job); err != nil {
+		a.serverError(w, r, err)
 		return
 	}
-	if report.Applied() {
-		a.setFlash(r, "success", pluralised(len(report.Created), "row imported", "rows imported"))
-	}
-	a.renderImport(w, r, kind, http.StatusOK, nil, report)
+	a.importer().submit(importWork{job: job, assets: rows, types: types, actor: who})
+	render.Redirect(w, r, "/imports/"+job.ID)
 }
 
 // importPage is the upload screen and, once there is one, its report.
@@ -216,11 +264,44 @@ func (a *App) renderImport(w http.ResponseWriter, r *http.Request, kind importKi
 	a.Render.Page(w, status, "import", page)
 }
 
-// pluralised is the flash wording, kept here because the two forms differ by
-// more than an "s" in several languages this may yet be translated into.
-func pluralised(n int, one, many string) string {
-	if n == 1 {
-		return "1 " + one
+// ---------- watching a job ----------
+
+type importJobPage struct {
+	Base
+	Job  store.ImportJob
+	Poll int // seconds between refreshes, for the template's hx-trigger
+}
+
+type importJobListPage struct {
+	Base
+	Jobs []store.ImportJob
+}
+
+// ImportJobPage shows one run, refreshing itself while it is going.
+func (a *App) ImportJobPage(w http.ResponseWriter, r *http.Request) {
+	job, err := a.Store.GetImportJob(r.Context(), r.PathValue("id"))
+	if err != nil {
+		a.handleStoreError(w, r, err)
+		return
 	}
-	return strconv.Itoa(n) + " " + many
+	// Respond, not Page: HTMX asks for the fragment on each poll and a browser
+	// with JavaScript off gets the whole page and a meta refresh. Both work.
+	a.Render.Respond(w, r, http.StatusOK, "import_job", "import_job_status", importJobPage{
+		Base: a.base(r, "Import", "assets"),
+		Job:  *job,
+		Poll: int(pollEvery.Seconds()),
+	})
+}
+
+// ImportJobList shows recent runs.
+func (a *App) ImportJobList(w http.ResponseWriter, r *http.Request) {
+	jobs, err := a.Store.ListImportJobs(r.Context(), 50)
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
+	a.Render.Respond(w, r, http.StatusOK, "import_jobs", "import_job_list", importJobListPage{
+		Base: a.base(r, "Imports", "assets"),
+		Jobs: jobs,
+	})
 }

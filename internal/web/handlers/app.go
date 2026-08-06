@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/alexedwards/scs/v2"
 	"github.com/justinas/nosurf"
@@ -41,6 +42,18 @@ type App struct {
 	// removed and later pruned -- is simply absent, and a panel whose whole job
 	// is "a dead collector is one alertable event" reads as a covered estate.
 	Agents *auth.AgentRegistry
+
+	// imports is the background import queue, created lazily so a handler set
+	// built without one still works -- a test that never imports should not have
+	// to start a worker.
+	imports     *importRunner
+	importsOnce sync.Once
+}
+
+// importer returns the runner, starting it on first use.
+func (a *App) importer() *importRunner {
+	a.importsOnce.Do(func() { a.imports = newImportRunner(a.Store) })
+	return a.imports
 }
 
 // Flash is a one-shot message shown after a mutation.

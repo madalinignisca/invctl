@@ -1536,3 +1536,14 @@ func TestHSTSFollowsTheTLSDeclaration(t *testing.T) {
 		}
 	})
 }
+
+// exec runs a statement against the harness database, for the handful of states
+// that cannot be produced through the application -- a job orphaned by a
+// process that died, for instance.
+func (h *harness) exec(query string, args ...any) {
+	h.t.Helper()
+	writer := h.store.DB().Writer
+	if _, err := writer.Exec(writer.Rebind(query), args...); err != nil {
+		h.t.Fatalf("exec (%s): %v", query, err)
+	}
+}

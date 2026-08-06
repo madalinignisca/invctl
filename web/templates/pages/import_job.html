@@ -1,0 +1,92 @@
+{{/*
+  invctl — infrastructure inventory
+  Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+
+  Licensed under the GNU Affero General Public License, version 3 only —
+  no later version applies. See LICENSE for the full text.
+
+  SPDX-License-Identifier: AGPL-3.0-only
+*/}}
+{{define "content"}}
+<div class="crumbs">
+  <a href="/imports">imports</a><span class="sep">/</span><span>{{.Job.Filename}}</span>
+</div>
+
+<div class="page-head">
+  <div class="eyebrow">bulk import</div>
+  <h1>{{.Job.Filename}}</h1>
+  <p class="lede">
+    This runs on the server, not in your browser. You can close this page — the
+    import carries on, and <a href="/imports">Imports</a> will show how it ended.
+  </p>
+</div>
+
+{{template "import_job_status" .}}
+{{end}}
+
+{{define "import_job_status"}}
+{{/* Polls only while there is something to poll for. A finished job swaps in a
+     fragment with no hx-trigger, so a page left open overnight stops asking. */}}
+<div id="import-job"
+     {{if not .Job.Done}}hx-get="/imports/{{.Job.ID}}" hx-trigger="every {{.Poll}}s" hx-swap="outerHTML"{{end}}>
+  <div class="panel">
+    <div class="panel-head">
+      <h2>
+        {{if eq .Job.Status "queued"}}Queued
+        {{else if eq .Job.Status "running"}}Importing…
+        {{else if eq .Job.Status "succeeded"}}Imported
+        {{else if eq .Job.Status "refused"}}Nothing was imported
+        {{else}}The import did not finish{{end}}
+      </h2>
+      <p class="panel-note">
+        {{if .Job.Done}}
+          {{if eq .Job.Status "succeeded"}}{{pluralise .Job.Created "row" "rows"}} created, each with its own audit entry.{{end}}
+          {{if eq .Job.Status "refused"}}The whole file is applied or none of it is, so the database is unchanged.{{end}}
+          {{if eq .Job.Status "failed"}}This one is ours, not your file's.{{end}}
+        {{else}}
+          {{/* ROWS EXAMINED, not rows you have. This is one transaction: a run
+               that stops halfway wrote nothing at all, so calling this
+               "imported" would be reporting a number that can still become
+               zero. */}}
+          Examined {{.Job.RowsDone}} of {{.Job.RowsTotal}} rows. Nothing is
+          written until every row has been checked.
+        {{end}}
+      </p>
+    </div>
+    <div class="panel-body">
+      {{if not .Job.Done}}
+      <div class="progress"><div class="progress-bar" style="width:{{.Job.Percent}}%"></div></div>
+      <noscript>
+        <p class="hint">This page updates itself with JavaScript on; reload to see progress.</p>
+      </noscript>
+      {{end}}
+
+      {{with .Job.Message}}<p class="hint">{{.}}</p>{{end}}
+
+      {{$problems := .Job.DecodedProblems}}
+      {{if $problems}}
+      <table class="grid">
+        <thead><tr><th>Line</th><th>Path</th><th>Field</th><th>Problem</th></tr></thead>
+        <tbody>
+          {{range $problems}}
+          <tr>
+            <td class="mono">{{if .Line}}{{.Line}}{{else}}—{{end}}</td>
+            <td class="mono">{{if .Path}}{{.Path}}{{else}}—{{end}}</td>
+            <td>{{if .Field}}{{.Field}}{{else}}—{{end}}</td>
+            <td>{{.Message}}</td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+      {{end}}
+
+      {{if .Job.Done}}
+      <p class="hint" style="margin-top:12px">
+        <a href="/import/{{if eq .Job.Kind "assets"}}assets{{else}}device-types{{end}}">Import another file</a>
+        · <a href="/imports">All imports</a>
+      </p>
+      {{end}}
+    </div>
+  </div>
+</div>
+{{end}}

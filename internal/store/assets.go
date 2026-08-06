@@ -162,7 +162,21 @@ type AssetFilter struct {
 	// IncludeRetired defaults false: retired assets are kept forever but are
 	// noise in day-to-day lists.
 	IncludeRetired bool
+	// Limit bounds the result. Zero means the default below, not "unbounded":
+	// measured at five thousand assets an unfiltered list took 100ms in the
+	// store and would have rendered five thousand rows into one page. A list
+	// nobody can read is not a feature, and a page that grows without limit is
+	// how a fast application becomes a slow one without any single change being
+	// to blame.
+	Limit int
 }
+
+// AssetListLimit is the default ceiling on a list page.
+//
+// Generous on purpose: it is a guard against an unbounded page, not pagination,
+// and an estate under it sees no change at all. Real paging belongs with the
+// filters it would need to be useful.
+const AssetListLimit = 500
 
 // ListAssets returns assets matching the filter, with their environment codes
 // preloaded for display.
@@ -215,7 +229,12 @@ func (s *SQLStore) ListAssets(ctx context.Context, f AssetFilter) ([]AssetRow, e
 		pattern := "%" + escapeLike(lower(f.Query)) + "%"
 		args = append(args, pattern, pattern)
 	}
-	query += whereClause(where) + ` ORDER BY a.kind, a.name`
+	limit := f.Limit
+	if limit <= 0 || limit > AssetListLimit {
+		limit = AssetListLimit
+	}
+	query += whereClause(where) + ` ORDER BY a.kind, a.name LIMIT ?`
+	args = append(args, limit)
 
 	var assets []domain.Asset
 	if err := s.read(ctx, &assets, query, args...); err != nil {

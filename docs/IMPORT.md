@@ -147,6 +147,27 @@ Common ones:
 
 ---
 
+## It runs in the background
+
+A **preview** answers immediately — it is you standing there asking a question.
+
+A **real import** is queued and runs on the server. You get a page showing
+progress, and you can close it: the import carries on and **Imports** shows how
+it ended. Measured at about 1.4ms a row, so five thousand assets take roughly
+seven seconds and a full file would sit well past any proxy timeout if it tried
+to answer in the request.
+
+While it runs the page says **"examined N of M rows"**, not "N imported". The
+distinction is real: the import is one transaction, so a run that stops at row
+five thousand has written nothing, and a percentage of *imported* rows would be
+a number that can still become zero.
+
+If invctl restarts mid-import, the job is marked failed and says so. There is
+nothing half-written to resume — the transaction went with the process.
+
+One import runs at a time. SQLite takes a single writer, so a second would only
+queue behind the first, and while an import runs other saves wait for it.
+
 ## Limits
 
 A file may be up to **1 MiB**, which is roughly fifteen thousand rows. A larger

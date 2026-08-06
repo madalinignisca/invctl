@@ -269,6 +269,14 @@ func columnList(known map[string]bool) string {
 	return strings.Join(out, ", ")
 }
 
+// progressEvery is how often a running import reports where it has got to.
+//
+// Every row would be a write per row on the writer connection, competing with
+// the import's own transaction for the single SQLite writer -- the cure being
+// worse than the symptom. Every hundred is about seven updates a second at
+// measured speed, which is finer than a human reads a progress bar.
+const progressEvery = 100
+
 // errDryRun unwinds the transaction after a successful dry run. It never
 // reaches a caller: ImportAssets recognises it and returns the report instead.
 var errDryRun = errors.New("import: dry run, rolling back")
@@ -283,7 +291,8 @@ var errRefused = errors.New("import: file refused")
 // could not be carried out" -- the database was unreachable, the actor could not
 // write. A file full of unresolvable parents is not an error, it is a successful
 // run whose answer is no, and the report carries the reasons.
-func (s *SQLStore) ImportAssets(ctx context.Context, actor domain.Actor, rows []AssetImportRow, dryRun bool) (*ImportReport, error) {
+func (s *SQLStore) ImportAssets(ctx context.Context, actor domain.Actor, rows []AssetImportRow, dryRun bool,
+	progress ...func(done int)) (*ImportReport, error) {
 	report := &ImportReport{DryRun: dryRun, Rows: len(rows)}
 	if len(rows) == 0 {
 		report.Problems = append(report.Problems, ImportProblem{
@@ -339,12 +348,20 @@ func (s *SQLStore) ImportAssets(ctx context.Context, actor domain.Actor, rows []
 		// a pass resolves nothing new.
 		pending := append([]AssetImportRow(nil), rows...)
 		created := map[string]string{} // path -> new id
+		examined := 0
 
 		for len(pending) > 0 {
 			var deferred []AssetImportRow
-			progress := false
+			// Renamed off `progress` when the parameter arrived: this one is
+			// "did this pass resolve anything", which is a different question
+			// from "how far through the file are we".
+			resolvedAny := false
 
 			for _, row := range pending {
+				examined++
+				if len(progress) > 0 && progress[0] != nil && examined%progressEvery == 0 {
+					progress[0](examined)
+				}
 				if row.Name == "" {
 					continue // already reported above
 				}
@@ -361,7 +378,7 @@ func (s *SQLStore) ImportAssets(ctx context.Context, actor domain.Actor, rows []
 					parentID = &id
 				}
 
-				progress = true
+				resolvedAny = true
 				if _, clash := existing[row.Path()]; clash {
 					report.Problems = append(report.Problems, ImportProblem{
 						Line: row.Line, Path: row.Path(), Field: "name",
@@ -392,7 +409,7 @@ func (s *SQLStore) ImportAssets(ctx context.Context, actor domain.Actor, rows []
 				report.Created = append(report.Created, row.Path())
 			}
 
-			if !progress {
+			if !resolvedAny {
 				// Everything left names a parent that does not exist and is not
 				// being created. Report each one rather than the set, so the
 				// operator sees which line to fix.

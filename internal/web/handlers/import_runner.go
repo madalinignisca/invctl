@@ -1,0 +1,135 @@
+// invctl — infrastructure inventory
+// Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+//
+// Licensed under the GNU Affero General Public License, version 3 only —
+// no later version applies. See LICENSE for the full text.
+//
+// SPDX-License-Identifier: AGPL-3.0-only
+
+package handlers
+
+import (
+	"context"
+	"errors"
+	"log/slog"
+	"time"
+
+	"github.com/madalinignisca/invctl/internal/domain"
+	"github.com/madalinignisca/invctl/internal/store"
+)
+
+// Running an import after the request that started it.
+//
+// ONE WORKER, and that is not a throttle -- it is the truth about the storage.
+// SQLite takes a single writer, so a second concurrent import would spend its
+// life waiting for the first to release the connection while holding a queue
+// slot and looking busy. A queue of one says the same thing honestly and makes
+// the wait visible on the page rather than invisible in a connection pool.
+//
+// It also means an import blocks other people's saves for its duration --
+// measured at about seven seconds for five thousand rows. Admin-only and rare,
+// so it is accepted and written down rather than engineered around; the
+// alternative is committing in batches, which would trade the property the
+// whole feature rests on (whole file or nothing) for a latency nobody has
+// complained about.
+
+// importWork is one queued file, parsed and waiting.
+type importWork struct {
+	job    store.ImportJob
+	assets []store.AssetImportRow
+	types  []store.DeviceTypeImportRow
+	// actor is captured at SUBMIT time and carried here. It is never re-derived
+	// when the work runs and is never the system actor: the audit trail names
+	// the person who uploaded the file.
+	actor domain.Actor
+}
+
+// importRunner owns the queue and the single worker.
+type importRunner struct {
+	store *store.SQLStore
+	queue chan importWork
+}
+
+// importQueueDepth is how many files may wait. Beyond it, submitting blocks the
+// request briefly rather than dropping the upload -- a refusal an operator can
+// see beats an acceptance that quietly went nowhere.
+const importQueueDepth = 16
+
+func newImportRunner(s *store.SQLStore) *importRunner {
+	r := &importRunner{store: s, queue: make(chan importWork, importQueueDepth)}
+	go r.work()
+	return r
+}
+
+// submit queues a parsed file.
+func (r *importRunner) submit(w importWork) { r.queue <- w }
+
+// work runs queued imports, one at a time, for the life of the process.
+func (r *importRunner) work() {
+	for w := range r.queue {
+		r.run(w)
+	}
+}
+
+func (r *importRunner) run(w importWork) {
+	// A background context on purpose. The request that submitted this is long
+	// gone -- that is the entire point -- so tying the work to its context would
+	// cancel every import the moment the operator closed the tab.
+	ctx := context.Background()
+
+	if err := r.store.MarkImportRunning(ctx, w.job.ID); err != nil {
+		slog.Error("marking import running", "error", err, "job", w.job.ID)
+	}
+	progress := func(done int) {
+		if err := r.store.ImportProgress(ctx, w.job.ID, done); err != nil {
+			// Logged, not fatal. Losing a progress update costs a stale number
+			// on a page; abandoning the import over one would cost the import.
+			slog.Warn("recording import progress", "error", err, "job", w.job.ID)
+		}
+	}
+
+	var report *store.ImportReport
+	var err error
+	switch w.job.Kind {
+	case store.ImportKindAssets:
+		report, err = r.store.ImportAssets(ctx, w.actor, w.assets, false, progress)
+	case store.ImportKindDeviceTypes:
+		report, err = r.store.ImportDeviceTypes(ctx, w.actor, w.types, false, progress)
+	default:
+		err = errUnknownImportKind
+	}
+
+	switch {
+	case err != nil:
+		// OURS, not theirs. A failure here is the database or this process, and
+		// the message says so rather than implying the file was wrong.
+		slog.Error("import failed", "error", err, "job", w.job.ID, "kind", w.job.Kind)
+		r.finish(ctx, w.job.ID, store.ImportFailed, 0,
+			"the import could not be carried out: "+err.Error(), nil)
+	case len(report.Problems) > 0:
+		// THEIRS. The file was read and answered no; nothing was written.
+		r.finish(ctx, w.job.ID, store.ImportRefused, 0,
+			"nothing was imported — the whole file is applied or none of it is", report.Problems)
+	default:
+		r.finish(ctx, w.job.ID, store.ImportSucceeded, len(report.Created), "", nil)
+	}
+}
+
+func (r *importRunner) finish(ctx context.Context, id, status string, created int,
+	message string, problems []store.ImportProblem) {
+
+	if err := r.store.FinishImportJob(ctx, id, status, created, message, problems); err != nil {
+		slog.Error("recording import outcome", "error", err, "job", id, "status", status)
+	}
+}
+
+// pollEvery is how often a running job's page refreshes itself.
+//
+// Two seconds: fast enough that a person believes something is happening, slow
+// enough that a page left open overnight is not a load generator.
+const pollEvery = 2 * time.Second
+
+// errUnknownImportKind cannot happen through the routes -- the kind comes from
+// a package constant, never from a request -- and is a real error rather than a
+// silent no-op so that it cannot start happening quietly.
+var errUnknownImportKind = errors.New("unknown import kind")

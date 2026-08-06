@@ -105,6 +105,17 @@ func run() error {
 
 	st := store.New(db)
 
+	// An import that was running when this process last stopped did NOT commit
+	// -- it is one transaction and it went with the process. Leaving the row
+	// saying "running" would have its page poll for ever for work nobody is
+	// doing, so it is marked failed with a message saying to upload again.
+	// There is nothing to resume, because there is nothing half-written.
+	if n, err := st.FailStaleImportJobs(ctx); err != nil {
+		return err
+	} else if n > 0 {
+		slog.Warn("import jobs were interrupted by a restart", "count", n)
+	}
+
 	// Presentation only: stage a set of demo observations through the real
 	// recorder after the inventory. Never on by default -- an operator's first
 	// run should show the honest empty state, not readings nobody sent.

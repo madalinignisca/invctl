@@ -295,6 +295,18 @@ var DeclaredColumns = map[string][]string{
 		"row_version",
 	},
 	"responsibility_role": {"code", "label", "sort_order", "description"},
+	// Import jobs (migration 00025). Declared: a record of something a person
+	// did, carrying the same OPAQUE actor id change_log does, so this table
+	// holds no personal data either. It writes no change_log row of its own --
+	// the rows an import creates each write theirs, naming the same actor, and
+	// "who put this box in the inventory" is the obligation rather than "who
+	// ran a batch". `rows_done` counts rows EXAMINED, never rows you have: the
+	// import is one transaction, so a run that stopped halfway wrote nothing.
+	"import_job": {
+		"id", "kind", "filename", "actor", "actor_kind", "status",
+		"rows_total", "rows_done", "created", "message", "problems",
+		"created_at", "started_at", "finished_at",
+	},
 	// The hardware catalogue (migration 00022). Declared throughout, and the
 	// interesting one is `device_type.eol_date`: it is what a MANUFACTURER
 	// published, transcribed by a person, and an asset that states its own

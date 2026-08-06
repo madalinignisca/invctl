@@ -10,10 +10,12 @@ package web_test
 
 import (
 	"bytes"
+	"context"
 	"mime/multipart"
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 )
 
 // upload posts a CSV to the import route the way a browser would.
@@ -55,6 +57,36 @@ func (h *harness) upload(csv string, dryRun bool) *http.Response {
 	return resp
 }
 
+// awaitImport follows the redirect a real import returns and polls the job page
+// until it stops moving.
+//
+// The import is a BACKGROUND JOB now: the response is "queued, here is where to
+// watch", not the outcome. A test that asserted on the immediate body would be
+// asserting on a redirect stub -- the same trap the power tests fell into -- so
+// this waits for the job the way the page does.
+func (h *harness) awaitImport(t *testing.T, resp *http.Response) string {
+	t.Helper()
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther {
+		// Not a queued job: a malformed file is still refused synchronously,
+		// while the operator is looking at the form.
+		return ""
+	}
+	loc := resp.Header.Get("Location")
+	deadline := time.Now().Add(20 * time.Second)
+	for time.Now().Before(deadline) {
+		page := body(t, h.get(loc, false))
+		// The polling attribute is present only while there is something to
+		// poll for, so its absence IS the finished signal the browser uses.
+		if !strings.Contains(page, `hx-trigger="every`) {
+			return page
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("import at %s did not finish within 20s", loc)
+	return ""
+}
+
 const goodFile = "parent,name,kind\n" +
 	",imp-dc,site\n" +
 	"imp-dc,imp-rack,rack\n"
@@ -64,20 +96,22 @@ func TestImportingAFileCreatesTheAssetsAndSaysSo(t *testing.T) {
 	h.login("admin", "admin-password")
 
 	before := h.count(`SELECT COUNT(*) FROM asset`)
-	resp := h.upload(goodFile, false)
-	page := body(t, resp)
+	page := h.awaitImport(t, h.upload(goodFile, false))
 
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200\n%s", resp.StatusCode, page)
-	}
 	if got := h.count(`SELECT COUNT(*) FROM asset`) - before; got != 2 {
 		t.Errorf("created %d assets, want 2", got)
 	}
-	for _, want := range []string{"imp-dc", "imp-dc/imp-rack"} {
-		if !strings.Contains(page, want) {
-			t.Errorf("the result page does not list %q; an import that does not say what "+
-				"it created leaves the operator to go and look", want)
-		}
+	if !strings.Contains(page, "Imported") {
+		t.Errorf("the job page does not say it succeeded:\n%s", page)
+	}
+	if !strings.Contains(page, "2 rows created") {
+		t.Errorf("the job page does not say how many rows it created:\n%s", page)
+	}
+	// And the actor is the person who uploaded it, not the process that wrote
+	// the rows -- captured at submit time and carried into the job.
+	if got := h.lookup(`SELECT actor_kind FROM import_job ORDER BY created_at DESC LIMIT 1`); got != "user" {
+		t.Errorf("import job actor_kind = %q, want \"user\": the audit trail names the "+
+			"person who uploaded the file", got)
 	}
 }
 
@@ -113,22 +147,22 @@ func TestARefusedFileImportsNothingAndReturns422(t *testing.T) {
 	before := h.count(`SELECT COUNT(*) FROM asset`)
 	// Two good rows and then one with an unknown kind, so anything that leaks
 	// through leaves the first two behind.
-	resp := h.upload(goodFile+"imp-dc,imp-rack-2,teleporter\n", false)
-	page := body(t, resp)
+	page := h.awaitImport(t, h.upload(goodFile+"imp-dc,imp-rack-2,teleporter\n", false))
 
-	if resp.StatusCode != http.StatusUnprocessableEntity {
-		t.Errorf("status = %d, want 422 -- a refused form is 422 in this codebase, "+
-			"not 200 with the bad news in the body", resp.StatusCode)
-	}
 	if got := h.count(`SELECT COUNT(*) FROM asset`) - before; got != 0 {
 		t.Errorf("%d assets survived a refused file", got)
 	}
 	if !strings.Contains(page, "Nothing was imported") {
-		t.Errorf("the page does not say the file was refused:\n%s", page)
+		t.Errorf("the job page does not say the file was refused:\n%s", page)
 	}
-	// The line number is the whole point of the report.
+	// The line number is the whole point of the report, and it has to survive
+	// being stored on the job and read back out.
 	if !strings.Contains(page, ">4<") {
 		t.Error("the report does not point at line 4, so the operator has to search the file")
+	}
+	if got := h.lookup(`SELECT status FROM import_job ORDER BY created_at DESC LIMIT 1`); got != "refused" {
+		t.Errorf("job status = %q, want \"refused\" -- the file was read and answered no, "+
+			"which is not the same as the import breaking", got)
 	}
 }
 
@@ -205,5 +239,72 @@ func TestImportIsAdminOnlyOnBothVerbs(t *testing.T) {
 	}
 	if got := h.count(`SELECT COUNT(*) FROM asset`) - before; got != 0 {
 		t.Errorf("a read-only user created %d assets", got)
+	}
+}
+
+// TestAnImportOutlivesTheRequestThatStartedIt is the property the background
+// job exists for.
+func TestAnImportOutlivesTheRequestThatStartedIt(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+	before := h.count(`SELECT COUNT(*) FROM asset`)
+
+	resp := h.upload(goodFile, false)
+	loc := resp.Header.Get("Location")
+	resp.Body.Close()
+
+	// The request is answered immediately with somewhere to watch, NOT with the
+	// outcome. That is the whole point: measured at 1.4ms a row, a full file
+	// would sit past every proxy timeout between a browser and this process.
+	if resp.StatusCode != http.StatusSeeOther || !strings.HasPrefix(loc, "/imports/") {
+		t.Fatalf("upload returned %d to %q, want a redirect to a job page",
+			resp.StatusCode, loc)
+	}
+
+	// The operator leaves. Nothing here touches the job again.
+	h.logout()
+
+	deadline := time.Now().Add(20 * time.Second)
+	for time.Now().Before(deadline) {
+		if h.count(`SELECT COUNT(*) FROM import_job WHERE status = 'succeeded'`) > 0 {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if got := h.count(`SELECT COUNT(*) FROM asset`) - before; got != 2 {
+		t.Errorf("created %d assets after the session ended, want 2 -- the import has to "+
+			"survive the operator closing the tab", got)
+	}
+}
+
+// TestAJobInterruptedByARestartSaysSoRatherThanPollingForever covers the state
+// nobody thinks about until it happens at three in the morning.
+func TestAJobInterruptedByARestartSaysSoRatherThanPollingForever(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	// A job stuck as this process found it: written directly, because the only
+	// way to produce one legitimately is to kill the process mid-import.
+	h.exec(`INSERT INTO import_job (id, kind, filename, actor, actor_kind, status,
+	                                rows_total, rows_done, created, created_at)
+	        VALUES (?, 'assets', 'orphan.csv', 'someone', 'user', 'running', 100, 43, 0, ?)`,
+		"01931111-1111-7111-8111-111111111111", "2026-08-06T22:00:00Z")
+
+	n, err := h.store.FailStaleImportJobs(context.Background())
+	if err != nil {
+		t.Fatalf("clearing stale jobs: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("cleared %d stale jobs, want 1", n)
+	}
+
+	page := body(t, h.get("/imports/01931111-1111-7111-8111-111111111111", false))
+	if strings.Contains(page, `hx-trigger="every`) {
+		t.Error("the page still polls for a job nobody is running; it would ask for ever")
+	}
+	if !strings.Contains(page, "nothing was written") {
+		t.Errorf("the page does not say the interrupted import wrote nothing. It was one "+
+			"transaction and it went with the process, so there is no half-import to "+
+			"reason about:\n%s", page)
 	}
 }

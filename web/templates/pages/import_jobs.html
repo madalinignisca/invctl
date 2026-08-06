@@ -1,0 +1,54 @@
+{{/*
+  invctl — infrastructure inventory
+  Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+
+  Licensed under the GNU Affero General Public License, version 3 only —
+  no later version applies. See LICENSE for the full text.
+
+  SPDX-License-Identifier: AGPL-3.0-only
+*/}}
+{{define "content"}}
+<div class="page-head">
+  <div class="eyebrow">bulk import</div>
+  <h1>Imports</h1>
+  <p class="lede">
+    Every file anybody has uploaded, and how it ended. A refused file changed
+    nothing; the rows a successful one created each carry their own audit entry.
+  </p>
+</div>
+{{template "import_job_list" .}}
+{{end}}
+
+{{define "import_job_list"}}
+<div id="import-job-list">
+  <div class="panel">
+    <div class="panel-body">
+      {{if .Jobs}}
+      <table class="grid">
+        <thead><tr><th>File</th><th>Kind</th><th>Status</th><th>Rows</th><th>Started</th></tr></thead>
+        <tbody>
+          {{range .Jobs}}
+          <tr>
+            <td><a class="id" href="/imports/{{.ID}}">{{.Filename}}</a></td>
+            <td>{{title .Kind}}</td>
+            <td>
+              {{if eq .Status "succeeded"}}<span class="pill pill-ok">imported</span>
+              {{else if eq .Status "refused"}}<span class="pill pill-degraded">refused</span>
+              {{else if eq .Status "failed"}}<span class="pill pill-down">failed</span>
+              {{else}}<span class="pill pill-info">{{.Status}}</span>{{end}}
+            </td>
+            <td class="mono">
+              {{if eq .Status "succeeded"}}{{.Created}} created{{else}}{{.RowsTotal}} in file{{end}}
+            </td>
+            <td class="mono">{{shortTime .CreatedAt}}</td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+      {{else}}
+      <p class="empty">Nothing has been imported yet.</p>
+      {{end}}
+    </div>
+  </div>
+</div>
+{{end}}
