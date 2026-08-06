@@ -204,9 +204,50 @@ an account answers an erasure request while the log keeps its integrity.
 
 ---
 
+## 6. Getting an estate in without typing it (3 min)
+
+Two things nobody demos and everybody asks about: how the data gets in, and how
+you avoid typing an end-of-support date forty times.
+
+**Catalogue → Import a CSV.** Upload a hardware list. Tick *Preview only* first
+— it runs the real import against the real constraints and then throws the
+transaction away, so what it lists is exactly what a real run creates. Nothing
+is written, not even an audit row.
+
+Then upload it for real, and upload it **again**. The second attempt is refused:
+import creates, it never updates. A file that quietly rewrote four hundred
+assets would write four hundred audit entries nobody reviewed.
+
+**Now open `hv-03`.** It has no end-of-support date of its own, so it reads:
+
+> **2029-03-31** · in 2 years
+> *inherited from Dell PowerEdge R650 — this asset has no date of its own*
+
+**Then open `hv-01`.** Same model, but somebody recorded a date on the box:
+
+> **2026-10-03** · in 2 months
+> *recorded on this asset*
+
+That second line is the point, and it is worth pausing on. A manufacturer's
+claim about a MODEL and somebody's claim about THIS BOX are different kinds of
+fact. A private support contract can carry one unit years past what its model
+promises; a second-hand unit can fall short of it. Showing the two identically
+would merge a fact with an assumption — so the date never appears without its
+source, exactly as `actor` never appears without `actor_kind`.
+
+**Search `P30721-B21`.** A part number resolves to the model and says how many
+boxes are of it, because "do we have any of these" is the question behind
+pasting one. Serials work too, in whatever case they were read off the sticker.
+
+**Assets → Import a CSV** does the same for the estate itself: a path per row
+(`dc-a/rack-1/esx-01`), rows in any order, whole file or nothing.
+
+---
+
 ## If somebody asks
 
-**"Is any of this faked for the demo?"** No. The inventory is a seeded fixture.
+**"Is any of this faked for the demo?"** No. The inventory is a seeded fixture,
+plus whatever visitors and the hardware-catalogue import have added since.
 The telemetry is staged through the real recorder with real agent credentials
 and a real environment scope, subject to the same validation, monotonicity,
 transition-only logging and flap arithmetic as a live collector. Nothing here
