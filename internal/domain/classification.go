@@ -307,6 +307,33 @@ var DeclaredColumns = map[string][]string{
 		"created_at", "updated_at",
 		"row_version",
 	},
+	// The power chain (migration 00023). Declared throughout, and worth stating
+	// because one column looks observed and is not: `power_input.draw_va` is a
+	// NAMEPLATE or allocated figure a person typed, not a measurement. Nothing in
+	// the estate reports it. A measured draw arriving from a PDU would be
+	// observed state with a reporter, an age and a transition rule -- a different
+	// contract entirely (rules 1 and 3), and it would be a new column beside this
+	// one rather than a reinterpretation of it.
+	//
+	// `max_utilisation` is a local electrical decision somebody recorded, and
+	// nothing derives it. The ratings are nullable on purpose: "not recorded"
+	// must stay distinguishable from zero, or an unrated feed reports as
+	// over-allocated the moment anything draws on it.
+	"power_panel": {
+		"id", "site_id", "name", "voltage", "amperage", "phase", "notes",
+		"lifecycle", "created_at", "updated_at",
+		"row_version",
+	},
+	"power_feed": {
+		"id", "panel_id", "name", "voltage", "amperage", "phase", "max_utilisation",
+		"notes", "lifecycle", "created_at", "updated_at",
+		"row_version",
+	},
+	"power_input": {
+		"id", "asset_id", "feed_id", "name", "draw_va", "notes",
+		"lifecycle", "created_at", "updated_at",
+		"row_version",
+	},
 	"device_type": {
 		"id", "manufacturer_id", "model", "part_number", "u_height", "full_depth",
 		"eol_date", "notes", "lifecycle", "created_at", "updated_at",
