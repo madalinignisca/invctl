@@ -83,6 +83,7 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	read("GET /{$}", app.Dashboard)
 	read("GET /search", app.Search)
 	read("GET /changes", app.ChangeLog)
+	read("GET /changes/{id}", app.ChangeEntry)
 	read("GET /reports/spanning", app.SpanningReport)
 	read("GET /reports/expiry", app.ExpiryReport)
 

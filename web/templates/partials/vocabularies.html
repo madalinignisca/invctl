@@ -76,7 +76,9 @@
         </div>
         <div class="field">
           <label for="v-order">Sort order</label>
-          <input id="v-order" class="num" type="number" name="sort_order" value="0">
+          <input id="v-order" class="num {{if index .Errors "sort_order"}}invalid{{end}}"
+                 type="number" name="sort_order" value="0">
+          {{with index .Errors "sort_order"}}<div class="field-error">{{.}}</div>{{end}}
           <div class="field-hint">Where it sits in a dropdown.</div>
         </div>
       </div>

@@ -176,8 +176,16 @@ func (e *editState) serviceSpec() *domain.ServiceSpec {
 	if e == nil {
 		return nil
 	}
+	// A value that will not parse cannot be shown in an int field, so the
+	// caller refuses BEFORE redrawing rather than letting it arrive here as a
+	// zero — see the tierNumeric check in ServiceUpdate. Zero here therefore
+	// means "the operator submitted nothing", which is the only case that
+	// reaches this line.
 	atoi := func(k string) int {
-		n, _ := strconv.Atoi(e.Values[k])
+		n, err := strconv.Atoi(e.Values[k])
+		if err != nil {
+			return 0
+		}
 		return n
 	}
 	optInt := func(k string) *int {

@@ -281,6 +281,36 @@ func (a *App) ChangeLog(w http.ResponseWriter, r *http.Request) {
 	a.Render.Respond(w, r, status, "changes", "change_log", data)
 }
 
+// changeEntryPage is one audit entry, on its own URL so it can be cited.
+type changeEntryPage struct {
+	Base
+	Entry  domain.ChangeLog
+	Detail store.ChangeDetail
+	// EntityURL is where the thing this entry is about lives now, or empty
+	// when nothing on screen can show it.
+	EntityURL string
+}
+
+// ChangeEntry renders one audit entry.
+//
+// WHY A ROUTE PER ENTRY. An incident write-up that says "the configuration
+// changed at 03:12" is an assertion; one that links to the entry is evidence.
+// The log is append-only and nothing is ever deleted, so the link cannot rot —
+// which is the property that makes citing it worth anything.
+func (a *App) ChangeEntry(w http.ResponseWriter, r *http.Request) {
+	entry, err := a.Store.GetChange(r.Context(), r.PathValue("id"))
+	if err != nil {
+		a.handleStoreError(w, r, err)
+		return
+	}
+	a.Render.Page(w, http.StatusOK, "change_entry", changeEntryPage{
+		Base:      a.base(r, "Change entry", "changes"),
+		Entry:     *entry,
+		Detail:    store.ParseDiff(entry.Diff),
+		EntityURL: a.entityURL(r.Context(), entry.EntityType, entry.EntityID),
+	})
+}
+
 // changeDetails parses each entry's stored diff once, keyed by entry id, so
 // the template renders field rows rather than the serialised payload.
 //

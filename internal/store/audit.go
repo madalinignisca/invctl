@@ -98,6 +98,19 @@ func ParseChangeCursor(v string) (ChangeCursor, bool) {
 	return ChangeCursor{At: at, ID: id}, true
 }
 
+// GetChange loads one audit entry.
+//
+// Exists so an entry can be LINKED TO. An incident write-up that says "the
+// config changed at 03:12" is an assertion; one that links to the entry is
+// evidence, and the log is append-only so the link cannot rot.
+func (s *SQLStore) GetChange(ctx context.Context, id string) (*domain.ChangeLog, error) {
+	var row domain.ChangeLog
+	if err := s.readOne(ctx, &row, changeLogSelect+` WHERE cl.id = ?`, id); err != nil {
+		return nil, fmt.Errorf("getting change %s: %w", id, err)
+	}
+	return &row, nil
+}
+
 // ChangeFilter selects a window of the change log.
 //
 // From and To are RFC3339 UTC TEXT, inclusive at both ends, and compare

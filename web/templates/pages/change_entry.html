@@ -1,0 +1,95 @@
+{{/*
+  invctl — infrastructure inventory
+  Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+
+  Licensed under the GNU Affero General Public License, version 3 only —
+  no later version applies. See LICENSE for the full text.
+
+  SPDX-License-Identifier: AGPL-3.0-only
+*/}}
+{{define "content"}}
+<div class="crumbs">
+  <a href="/changes">change log</a>
+  <span class="sep">/</span><span>entry</span>
+</div>
+
+<div class="page-head">
+  <div class="eyebrow">audit</div>
+  <h1>{{.Entry.EntityType}} — {{.Entry.Action}}</h1>
+  <p class="lede">
+    One entry, on its own address so it can be quoted. Nothing here is ever
+    edited or deleted: a wrong entry is corrected by writing another, so this
+    link answers the same way in a year as it does today.
+  </p>
+</div>
+
+<div class="panel">
+  <div class="panel-body">
+    <dl class="kv">
+      <dt>When</dt>
+      <dd class="mono">{{.Entry.At}}</dd>
+
+      <dt>What</dt>
+      <dd>
+        <span class="mono">{{.Entry.EntityType}}</span>
+        {{if .EntityURL}}
+          <a class="id" href="{{.EntityURL}}">{{.Entry.EntityID}}</a>
+        {{else}}
+          <span class="mono" style="color:var(--muted)">{{.Entry.EntityID}}</span>
+        {{end}}
+      </dd>
+
+      <dt>Action</dt>
+      <dd><span class="pill {{if eq .Entry.Action "retire"}}pill-degraded{{else}}pill-muted{{end}}">{{.Entry.Action}}</span></dd>
+
+      {{/* Actor and actor_kind together, always. "admin" means something
+           different depending on whether a person, the system or an agent
+           wrote it, and the kind is the only thing that says which. */}}
+      <dt>By</dt>
+      <dd>{{template "actor_cell" .Entry}}</dd>
+
+      {{if .Entry.TicketRef}}
+      <dt>Ticket</dt>
+      <dd class="mono">{{deref .Entry.TicketRef}}</dd>
+      {{end}}
+    </dl>
+  </div>
+</div>
+
+<div class="panel">
+  <div class="panel-head">
+    <h2>{{if .Detail.Snapshot}}What it was created with{{else}}What changed{{end}}</h2>
+    <span class="panel-note">
+      {{if .Detail.Snapshot}}
+        A create records the whole row, so there is a baseline to compare later entries against.
+      {{else}}
+        Field by field, as recorded in the same transaction as the change itself.
+      {{end}}
+    </span>
+  </div>
+  <div class="panel-body">
+    {{if not .Detail.Parsed}}
+      {{/* Shown rather than hidden: a screen that blanks what it could not
+           read is worse than one that prints JSON. */}}
+      <div class="mono" style="font-size:12px;color:var(--muted);overflow-wrap:anywhere">{{.Detail.Raw}}</div>
+    {{else if not .Detail.Fields}}
+      <div class="empty"><strong>Nothing recorded.</strong>The entry exists but carries no field detail.</div>
+    {{else}}
+    <div class="scroll-x">
+      <table>
+        <thead><tr><th>Field</th>{{if not .Detail.Snapshot}}<th>Was</th>{{end}}<th>{{if .Detail.Snapshot}}Value{{else}}Became{{end}}</th></tr></thead>
+        <tbody>
+          {{range .Detail.Fields}}
+          <tr>
+            <td class="mono">{{.Field}}</td>
+            {{if not .Added}}<td class="mono diff-old" style="overflow-wrap:anywhere">{{.Old}}</td>{{end}}
+            <td class="mono diff-new" style="overflow-wrap:anywhere">{{.New}}</td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+    {{end}}
+  </div>
+</div>
+{{end}}

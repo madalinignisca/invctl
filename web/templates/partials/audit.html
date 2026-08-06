@@ -154,7 +154,12 @@
         <tbody>
           {{range .Page.Changes}}
           <tr>
-            <td class="mono" style="font-size:12px;white-space:nowrap;color:var(--muted)">{{shortTime .At}}</td>
+            {{/* The timestamp is the link: an entry has its own address so it
+                 can be quoted in an incident write-up, and the log is
+                 append-only so the link cannot rot. */}}
+            <td class="mono" style="font-size:12px;white-space:nowrap">
+              <a class="id" href="/changes/{{.ID}}">{{shortTime .At}}</a>
+            </td>
             <td class="mono" style="font-size:12px">{{.EntityType}}</td>
             <td><span class="pill {{if eq .Action "retire"}}pill-degraded{{else}}pill-muted{{end}}">{{.Action}}</span></td>
             <td>{{template "actor_cell" .}}</td>

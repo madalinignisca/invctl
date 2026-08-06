@@ -10,7 +10,6 @@ package handlers
 
 import (
 	"net/http"
-	"strconv"
 
 	"github.com/madalinignisca/invctl/internal/store"
 	"github.com/madalinignisca/invctl/internal/web/render"
@@ -53,12 +52,21 @@ func (a *App) VocabularyUpsert(w http.ResponseWriter, r *http.Request) {
 		a.notFound(w, r)
 		return
 	}
-	order, _ := strconv.Atoi(formValue(r, "sort_order"))
+	// Refused, not silently zeroed. Typing "abc" here used to store 0 and
+	// answer "saved" — the term then sorts to the top of a list forever and
+	// nothing says why. Same shape as intValue and optionalInt.
+	order, numeric := intValue(r, "sort_order", 0)
 	term := store.VocabularyTerm{
 		Code:        formValue(r, "code"),
 		Label:       formValue(r, "label"),
 		SortOrder:   order,
 		Description: formValue(r, "description"),
+	}
+
+	if !numeric {
+		a.renderVocab(w, r, http.StatusUnprocessableEntity,
+			notANumber("sort_order"), term.Code)
+		return
 	}
 
 	if err := a.Store.UpsertVocabularyTerm(r.Context(), actor(r), table, term); err != nil {

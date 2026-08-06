@@ -1426,3 +1426,100 @@ func TestAnOutOfRangeReportHorizonIsClamped(t *testing.T) {
 		t.Skip("the default horizon happens to be 9; the check above proves nothing")
 	}
 }
+
+// The vocabulary sort order was the fifth instance of the silent-fallback
+// shape: "abc" became 0, the term sorted to the top of every picker in the
+// application, and the response said saved. Found by sweeping for the shape
+// rather than by anybody hitting it.
+func TestANonNumericSortOrderIsRefused(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	resp := h.post("/vocabularies", url.Values{
+		"csrf_token": {h.csrfToken("/vocabularies")},
+		"table":      {"asset_kind"},
+		"code":       {"probe-term"}, "label": {"Probe"},
+		"sort_order": {"not a number"},
+	}, false)
+	refused := body(t, resp)
+
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Errorf("a non-numeric sort order returned %d, want 422", resp.StatusCode)
+	}
+	if !strings.Contains(refused, "whole number") {
+		t.Error("the operator was not told what was wrong")
+	}
+	if strings.Contains(body(t, h.get("/vocabularies", false)), "probe-term") {
+		t.Error("the term was stored anyway, with a sort order of zero")
+	}
+}
+
+// An audit entry has its own address, so it can be cited.
+//
+// "The configuration changed at 03:12" is an assertion; a link to the entry is
+// evidence. The log is append-only and nothing is deleted, so the link cannot
+// rot — which is the property that makes citing it worth anything.
+func TestAnAuditEntryCanBeLinkedTo(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	// Make a change with a known shape so the entry has something to show.
+	envID := h.refs.Environments["prod"]
+	page := body(t, h.get("/environments?edit="+envID, false))
+	save := h.post("/environments/"+envID, url.Values{
+		"csrf_token":  {h.csrfToken("/environments")},
+		"row_version": {versionInForm(t, page)},
+		"code":        {"prod"}, "name": {"Cited in an incident"},
+		"role": {"production"}, "criticality": {"1"}, "in_scope": {"true"},
+	}, false)
+	save.Body.Close()
+
+	log := body(t, h.get("/changes", false))
+	m := regexp.MustCompile(`href="/changes/([0-9a-f-]+)"`).FindStringSubmatch(log)
+	if m == nil {
+		t.Fatal("the change log does not link to its entries")
+	}
+
+	resp := h.get("/changes/"+m[1], false)
+	entry := body(t, resp)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("the entry returned %d", resp.StatusCode)
+	}
+	// Everything needed to quote it: when, what, who, and the field detail.
+	for _, want := range []string{"environment", "update", "name"} {
+		if !strings.Contains(entry, want) {
+			t.Errorf("the entry page does not show %q", want)
+		}
+	}
+	// Actor and actor kind together — "admin" means a different thing
+	// depending on whether a person, the system or an agent wrote it.
+	if !strings.Contains(entry, "actor-kind") && !strings.Contains(entry, "user") {
+		t.Error("the entry does not say what kind of actor wrote it")
+	}
+	// And it links back to the thing it is about.
+	if !strings.Contains(entry, `href="/`) {
+		t.Error("the entry does not link to the entity it concerns")
+	}
+
+	// A read-only user can cite one too: the audit trail is readable by
+	// everyone who can read the estate.
+	h.logout()
+	h.login("viewer", "viewer-password")
+	if got := h.get("/changes/"+m[1], false); got.StatusCode != http.StatusOK {
+		t.Errorf("a read-only user cannot open an audit entry (%d)", got.StatusCode)
+	}
+}
+
+// A entry id that names nothing is a 404, not a blank page pretending an entry
+// exists.
+func TestAMissingAuditEntryIs404(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+	for _, id := range []string{"019fd217-0e49-723d-a187-a97bcb24b4ad", "not-a-uuid"} {
+		resp := h.get("/changes/"+id, false)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusNotFound {
+			t.Errorf("/changes/%s returned %d, want 404", id, resp.StatusCode)
+		}
+	}
+}
