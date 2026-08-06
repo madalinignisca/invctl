@@ -244,6 +244,49 @@ pasting one. Serials work too, in whatever case they were read off the sticker.
 
 ---
 
+## 7. The one nobody can find by looking (3 min)
+
+This is the part to slow down for.
+
+**Power → Findings**, or `/reports/power`. Three findings on the demo estate:
+
+> **hv-01** — inputs A and B look redundant but every one traces to panel
+> **DB-A** — one failure takes all of them
+
+Stop there. Two power leads, two feeds, two separate circuits — everything a
+spreadsheet records, and everything an operator believes. Both circuits come off
+the same distribution board. It is not redundancy, it is two cables to one point
+of failure, and nobody finds it during normal running. They find it during that
+panel's first and only failure.
+
+**hv-02 is not in the list**, and that matters as much. Its A and B are on
+different panels, so it is genuinely redundant and the report says nothing about
+it. A finding that fired on every asset with two inputs would be worthless.
+
+The other two: **hv-03** is single-fed and *five services ride on it* — reported
+because something depends on it, not merely because it has one lead. And feed
+**A1** is over its derating, stated as "3600 VA allocated against 2944 VA usable
+(80% of 3680 VA)" rather than as a percentage nobody can check.
+
+**Then click "If it fails" on A1.** It resolves and lands on the ordinary impact
+page — the same screen, the same window control — showing what actually goes
+dark. **hv-01 is not in it**, because it still has its B lead. Redundancy that is
+modelled and then ignored is worse than not modelling it.
+
+**Now click "If it fails" on A2.** It goes nowhere and says:
+
+> Nothing loses power if DB-A / A2 fails: every asset on it has another live input.
+
+"Nothing breaks" and "nothing loses power in the first place" are different
+answers, and showing an empty impact page for the second is the most dangerous
+thing an inventory can do.
+
+Scroll to the bottom of the findings page for the coverage counts — how many
+sites have no panel modelled at all. Three findings over four modelled assets is
+not a healthy estate; it is an unmodelled one, and the page says so.
+
+---
+
 ## If somebody asks
 
 **"Is any of this faked for the demo?"** No. The inventory is a seeded fixture,
