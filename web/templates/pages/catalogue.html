@@ -22,6 +22,11 @@
 {{template "catalogue_panel" .}}
 
 {{if .CanWrite}}
+<p class="hint" style="margin:12px 0">
+  Loading a hardware list? <a href="/import/device-types">Import a CSV</a> — the
+  whole file or none of it, and it previews first if you ask.
+</p>
+
 <div class="panel">
   <div class="panel-head"><h2>Catalogue a model</h2></div>
   <form class="panel-body" method="post" action="/catalogue/types">

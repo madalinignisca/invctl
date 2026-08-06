@@ -1,7 +1,11 @@
 # Bulk import
 
-Create many assets at once from a CSV file. Sign in as an administrator and go
-to **Assets → Import a CSV**, or straight to `/import/assets`.
+Create many things at once from a CSV file. Sign in as an administrator:
+
+| What | Where |
+|---|---|
+| Assets | **Assets → Import a CSV**, or `/import/assets` |
+| Device types | **Catalogue → Import a CSV**, or `/import/device-types` |
 
 This page is the reference. The import screen itself carries a shorter version
 of the same thing, because that is where somebody building a file is actually
@@ -150,10 +154,66 @@ A preview writes no audit entries at all.
 
 ---
 
+---
+
+# Device types
+
+`/import/device-types` catalogues models. Each carries the manufacturer's end of
+support, and every asset pointed at it inherits that date — so one hardware list
+loaded here answers "what lapses next year" for the whole estate at once.
+
+The three rules above apply unchanged: it creates and never updates, the whole
+file lands or none of it does, and a preview runs the real thing and discards it.
+
+## Identifying a model: manufacturer and model
+
+A model is identified by its manufacturer's **code** and its model name, so
+`dell/r650`. Two manufacturers using the same model string do not collide.
+
+**The manufacturer must already exist.** Add it in the catalogue first. A row
+naming an unknown code is refused rather than quietly creating one — a
+manufacturer invented from a bare code would have no name, and the catalogue
+would fill with entries nobody chose.
+
+## Columns
+
+| Column | Required | Meaning |
+|---|---|---|
+| `manufacturer` | yes | The maker's **code**, as catalogued: `dell`, `hpe`. Case is ignored. |
+| `model` | yes | `R650` |
+| `part_number` | | What procurement and support portals call it. Searchable as an exact identifier. |
+| `u_height` | | Rack units, a whole number. Leave empty for anything that does not mount. |
+| `full_depth` | | `true`/`false`, `yes`/`no` or `1`/`0`. Empty means no. |
+| `eol_date` | | The manufacturer's end of support, `YYYY-MM-DD`. |
+| `notes` | | |
+| `lifecycle` | | `planned`, `active`, `deprecated`, `retired`. Defaults to `active`. |
+
+A `full_depth` value that is none of the accepted spellings is **refused**, not
+read as "no". A full-depth chassis recorded as half-depth is wrong in a way
+nobody notices until a rack diagram is built on it. The same goes for a rack
+height that is not a number: refused, never quietly dropped.
+
+## An example
+
+```csv
+manufacturer,model,part_number,u_height,full_depth,eol_date
+dell,R650,P30721-B21,1,yes,2029-03-31
+dell,R750,P30722-B21,2,yes,2030-06-30
+hpe,DL380 Gen10,868703-B21,2,true,2028-12-31
+```
+
+## What it changes
+
+An asset gains its model's end-of-support date the moment you point it at the
+model — and every screen showing that date says it came from the model rather
+than from this box, because those are different claims. An asset with a support
+contract of its own overrides it.
+
+---
+
 ## Not yet importable
 
-Services, dependencies, interfaces, addresses and certificates. Only assets so
-far.
+Services, dependencies, interfaces, addresses and certificates.
 
 Custom attributes (`attrs`) are deliberately excluded: a file that could write
 into them would be a file that could put anything anywhere, and a value worth

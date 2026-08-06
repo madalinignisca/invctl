@@ -531,47 +531,83 @@ func TestImportingOwnershipNamesATeamAndNeverAPerson(t *testing.T) {
 func TestTheDocumentedExampleActuallyImports(t *testing.T) {
 	doc := readFile(t, filepath.Join(repoRoot(t), "docs", "IMPORT.md"))
 
-	_, after, found := strings.Cut(doc, "```csv\n")
-	if !found {
-		t.Fatal("docs/IMPORT.md has no ```csv example block. If the example moved, " +
-			"point this test at it; do not delete it.")
+	// EVERY csv block, not the first one. The document grew a second example
+	// when the catalogue importer landed, and a guard that checked only block
+	// one would have gone on passing while the new example rotted -- which is
+	// precisely the failure it exists to prevent.
+	var examples []string
+	rest := doc
+	for {
+		_, after, found := strings.Cut(rest, "```csv\n")
+		if !found {
+			break
+		}
+		block, remainder, closed := strings.Cut(after, "```")
+		if !closed {
+			t.Fatal("a csv block in docs/IMPORT.md is not closed")
+		}
+		examples = append(examples, block)
+		rest = remainder
 	}
-	example, _, found := strings.Cut(after, "```")
-	if !found {
-		t.Fatal("the csv block in docs/IMPORT.md is not closed")
+	if len(examples) < 2 {
+		t.Fatalf("docs/IMPORT.md has %d csv examples, expected at least 2 (assets and "+
+			"device types). If one moved, point this test at it; do not delete it.",
+			len(examples))
 	}
 
 	for _, e := range Engines(t) {
 		t.Run(e.Name, func(t *testing.T) {
-			s, ctx := newStore(t, e)
+			for i, example := range examples {
+				s, ctx := newStore(t, e)
 
-			// The example names a team, so the estate has to have one for it to
-			// be a fair test of the FILE rather than of the fixture.
-			team, err := domain.NewTeam(NewID(), domain.TeamSpec{Code: "platform", Name: "Platform"}, s.Now())
-			if err != nil {
-				t.Fatalf("building the team: %v", err)
-			}
-			if err := s.CreateTeam(ctx, testActor, team); err != nil {
-				t.Fatalf("creating the team: %v", err)
-			}
-			mustEnvironment(t, s, ctx, "prod", domain.EnvRoleProduction)
-			mustEnvironment(t, s, ctx, "dr", domain.EnvRoleProduction)
+				// The estate the examples reference. Set up per example so one
+				// cannot depend on another having run first.
+				team, err := domain.NewTeam(NewID(), domain.TeamSpec{Code: "platform", Name: "Platform"}, s.Now())
+				if err != nil {
+					t.Fatalf("building the team: %v", err)
+				}
+				if err := s.CreateTeam(ctx, testActor, team); err != nil {
+					t.Fatalf("creating the team: %v", err)
+				}
+				mustEnvironment(t, s, ctx, "prod", domain.EnvRoleProduction)
+				mustEnvironment(t, s, ctx, "dr", domain.EnvRoleProduction)
+				mustManufacturer(t, s, ctx, "dell", "Dell")
+				mustManufacturer(t, s, ctx, "hpe", "HPE")
 
-			rows, problems := ParseAssetCSV(strings.NewReader(example))
-			if len(problems) > 0 {
-				t.Fatalf("the documented example does not parse: %+v", problems)
-			}
-			report, err := s.ImportAssets(ctx, testActor, rows, false)
-			if err != nil {
-				t.Fatalf("importing the documented example: %v", err)
-			}
-			if len(report.Problems) > 0 {
-				t.Fatalf("the documented example was refused: %+v\n"+
-					"Somebody will copy this block first. Fix the example or fix the "+
-					"importer, but they cannot disagree.", report.Problems)
-			}
-			if len(report.Created) != 4 {
-				t.Errorf("the example created %d assets, want 4", len(report.Created))
+				// Dispatched on the header, so the test does not have to be told
+				// which block is which -- and a third example is picked up by
+				// whichever importer its columns name.
+				header, _, _ := strings.Cut(example, "\n")
+				var report *ImportReport
+				var problems []ImportProblem
+				if strings.HasPrefix(header, "manufacturer,") {
+					var rows []DeviceTypeImportRow
+					rows, problems = ParseDeviceTypeCSV(strings.NewReader(example))
+					if len(problems) == 0 {
+						report, err = s.ImportDeviceTypes(ctx, testActor, rows, false)
+					}
+				} else {
+					var rows []AssetImportRow
+					rows, problems = ParseAssetCSV(strings.NewReader(example))
+					if len(problems) == 0 {
+						report, err = s.ImportAssets(ctx, testActor, rows, false)
+					}
+				}
+
+				if len(problems) > 0 {
+					t.Fatalf("example %d does not parse: %+v", i+1, problems)
+				}
+				if err != nil {
+					t.Fatalf("importing example %d: %v", i+1, err)
+				}
+				if len(report.Problems) > 0 {
+					t.Errorf("example %d was refused: %+v\n"+
+						"Somebody will copy this block first. Fix the example or fix the "+
+						"importer, but they cannot disagree.", i+1, report.Problems)
+				}
+				if len(report.Created) == 0 {
+					t.Errorf("example %d created nothing", i+1)
+				}
 			}
 		})
 	}

@@ -123,6 +123,8 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	// only outcome is a 403.
 	write("GET /import/assets", app.AssetImportForm)
 	write("POST /import/assets", app.AssetImportRun)
+	write("GET /import/device-types", app.DeviceTypeImportForm)
+	write("POST /import/device-types", app.DeviceTypeImportRun)
 
 	write("POST /environments", app.EnvironmentCreate)
 

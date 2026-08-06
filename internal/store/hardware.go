@@ -173,20 +173,32 @@ func (s *SQLStore) CreateDeviceType(ctx context.Context, actor domain.Actor, d *
 		if err != nil {
 			return err
 		}
-		_, err = t.exec(ctx, `
-			INSERT INTO device_type (id, manufacturer_id, model, part_number, u_height,
-			                         full_depth, eol_date, notes, lifecycle, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			d.ID, d.ManufacturerID, d.Model, d.PartNumber, d.UHeight,
-			d.FullDepth, d.EOLDate, d.Notes, d.Lifecycle, d.CreatedAt, d.UpdatedAt)
-		if err != nil {
-			return translateWriteErr(err, "creating device type")
-		}
-		if err := t.logCreate(ctx, "device_type", d.ID, d); err != nil {
-			return err
-		}
-		return s.indexDeviceType(ctx, t, d, maker)
+		return s.insertDeviceType(ctx, t, d, maker)
 	})
+}
+
+// insertDeviceType writes one model inside a transaction the CALLER owns.
+//
+// Split out for the same reason insertAsset is: a catalogue import puts many of
+// these in one transaction, which is what makes whole-file refusal expressible
+// and what lets a dry run run the REAL writes and roll them back. The importer
+// therefore exercises this exact path -- the audit row, the search index and the
+// unique index included -- rather than a parallel one that would agree until it
+// mattered.
+func (s *SQLStore) insertDeviceType(ctx context.Context, t *tx, d *domain.DeviceType, manufacturerName string) error {
+	_, err := t.exec(ctx, `
+		INSERT INTO device_type (id, manufacturer_id, model, part_number, u_height,
+		                         full_depth, eol_date, notes, lifecycle, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		d.ID, d.ManufacturerID, d.Model, d.PartNumber, d.UHeight,
+		d.FullDepth, d.EOLDate, d.Notes, d.Lifecycle, d.CreatedAt, d.UpdatedAt)
+	if err != nil {
+		return translateWriteErr(err, "creating device type")
+	}
+	if err := t.logCreate(ctx, "device_type", d.ID, d); err != nil {
+		return err
+	}
+	return s.indexDeviceType(ctx, t, d, manufacturerName)
 }
 
 // UpdateDeviceType persists field changes.

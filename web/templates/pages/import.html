@@ -9,24 +9,19 @@
 */}}
 {{define "content"}}
 <div class="crumbs">
-  <a href="/assets">assets</a>
+  <a href="/{{.Kind.Nav}}">{{.Kind.Nav}}</a>
   <span class="sep">/</span><span>import</span>
 </div>
 
 <div class="page-head">
   <div class="eyebrow">bulk import</div>
-  <h1>Import assets</h1>
-  <p class="lede">
-    A CSV creates assets. It never updates one: a row naming something that is
-    already here is reported, not applied. The whole file lands or none of it
-    does, so a fault on line 300 leaves the first 299 unwritten rather than
-    half-imported.
-  </p>
+  <h1>{{.Kind.Title}}</h1>
+  <p class="lede">{{.Kind.Lede}}</p>
 </div>
 
 <div class="panel">
   <div class="panel-body">
-    <form method="post" action="/import/assets" enctype="multipart/form-data">
+    <form method="post" action="/import/{{.Kind.Slug}}" enctype="multipart/form-data">
       <div class="field">
         <label for="import-file">CSV file</label>
         <input type="file" id="import-file" name="file" accept=".csv,text/csv" required>
@@ -143,15 +138,8 @@
       </tbody>
     </table>
 
-    <p class="hint">An asset is identified by its path, so this file is valid:</p>
-<pre class="code-sample">parent,name,kind
-,dc-a,site
-dc-a,rack-1,rack
-dc-a/rack-1,esx-01,hypervisor</pre>
-    <p class="hint">
-      Rows may appear in any order — a row whose parent is created further down
-      the file still resolves.
-    </p>
+    <p class="hint">A valid file:</p>
+<pre class="code-sample">{{.Kind.Example}}</pre>
   </div>
 </div>
 {{end}}

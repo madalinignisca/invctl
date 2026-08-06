@@ -605,3 +605,239 @@ func TestCorrectingAPartNumberCorrectsTheIndex(t *testing.T) {
 		})
 	}
 }
+
+// Catalogue import. The machinery is the asset importer's, so what is tested
+// here is what DIFFERS: the natural key, the manufacturer reference, and the
+// yes/no column.
+
+const catalogueHeader = "manufacturer,model\n"
+
+func catalogueCSV(t *testing.T, body string) []DeviceTypeImportRow {
+	t.Helper()
+	rows, problems := ParseDeviceTypeCSV(strings.NewReader(body))
+	if len(problems) > 0 {
+		t.Fatalf("parsing the fixture file failed: %+v", problems)
+	}
+	return rows
+}
+
+func TestImportingACatalogueFile(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			t.Run("models land, with their dates", func(t *testing.T) {
+				s, ctx := newStore(t, e)
+				mustManufacturer(t, s, ctx, "dell", "Dell")
+
+				rows, problems := ParseDeviceTypeCSV(strings.NewReader(
+					"manufacturer,model,part_number,u_height,full_depth,eol_date\n" +
+						"dell,R650,P30721-B21,1,yes,2029-03-31\n"))
+				if len(problems) > 0 {
+					t.Fatalf("parsing: %+v", problems)
+				}
+				report, err := s.ImportDeviceTypes(ctx, testActor, rows, false)
+				if err != nil {
+					t.Fatalf("importing: %v", err)
+				}
+				if len(report.Problems) > 0 {
+					t.Fatalf("a valid file was refused: %+v", report.Problems)
+				}
+
+				list, err := s.ListDeviceTypes(ctx, DeviceTypeFilter{})
+				if err != nil || len(list) != 1 {
+					t.Fatalf("reading back: %v (%d rows)", err, len(list))
+				}
+				got := list[0]
+				// Read every field back. "No error" is what a correct import and
+				// one that stored a row of zeroes both look like.
+				if got.Model != "R650" {
+					t.Errorf("model = %q", got.Model)
+				}
+				if got.PartNumber == nil || *got.PartNumber != "P30721-B21" {
+					t.Errorf("part number = %v", got.PartNumber)
+				}
+				if got.UHeight == nil || *got.UHeight != 1 {
+					t.Errorf("u_height = %v", got.UHeight)
+				}
+				if !got.FullDepth {
+					t.Error("full_depth = false, but the file said yes")
+				}
+				if got.EOLDate == nil || *got.EOLDate != "2029-03-31" {
+					t.Errorf("eol_date = %v", got.EOLDate)
+				}
+			})
+
+			t.Run("an unknown manufacturer is named, not created", func(t *testing.T) {
+				s, ctx := newStore(t, e)
+				report, err := s.ImportDeviceTypes(ctx, testActor,
+					catalogueCSV(t, catalogueHeader+"nosuchmaker,R650\n"), false)
+				if err != nil {
+					t.Fatalf("importing: %v", err)
+				}
+				if len(problemsAbout(report, "nosuchmaker")) != 1 {
+					t.Fatalf("problems = %+v, want one quoting the unknown code", report.Problems)
+				}
+				// Creating it from a bare code would give the catalogue an entry
+				// with no name that nobody chose.
+				var makers int
+				if err := s.db.Reader.GetContext(ctx, &makers,
+					`SELECT COUNT(*) FROM manufacturer`); err != nil {
+					t.Fatalf("counting: %v", err)
+				}
+				if makers != 0 {
+					t.Errorf("the import created %d manufacturers; it must reference, not invent", makers)
+				}
+			})
+
+			t.Run("a model already catalogued is refused, not updated", func(t *testing.T) {
+				s, ctx := newStore(t, e)
+				mf := mustManufacturer(t, s, ctx, "dell", "Dell")
+				mustDeviceType(t, s, ctx, mf, "R650", ptr("2029-03-31"))
+
+				report, err := s.ImportDeviceTypes(ctx, testActor,
+					catalogueCSV(t, "manufacturer,model,eol_date\ndell,R650,2035-01-01\n"), false)
+				if err != nil {
+					t.Fatalf("importing: %v", err)
+				}
+				if len(problemsAbout(report, "already catalogued")) != 1 {
+					t.Fatalf("problems = %+v, want one saying it already exists", report.Problems)
+				}
+				list, err := s.ListDeviceTypes(ctx, DeviceTypeFilter{})
+				if err != nil || len(list) != 1 {
+					t.Fatalf("reading back: %v", err)
+				}
+				if *list[0].EOLDate != "2029-03-31" {
+					t.Errorf("eol_date = %q; import creates, it does not update", *list[0].EOLDate)
+				}
+			})
+
+			t.Run("the same model under two makers is fine", func(t *testing.T) {
+				s, ctx := newStore(t, e)
+				mustManufacturer(t, s, ctx, "dell", "Dell")
+				mustManufacturer(t, s, ctx, "acme", "Acme")
+				report, err := s.ImportDeviceTypes(ctx, testActor,
+					catalogueCSV(t, catalogueHeader+"dell,R650\nacme,R650\n"), false)
+				if err != nil {
+					t.Fatalf("importing: %v", err)
+				}
+				if len(report.Problems) > 0 {
+					t.Fatalf("refused: %+v\nThe key is (manufacturer, model); two makers "+
+						"using the same model string is not a collision.", report.Problems)
+				}
+			})
+
+			t.Run("one bad row refuses the whole file", func(t *testing.T) {
+				s, ctx := newStore(t, e)
+				mustManufacturer(t, s, ctx, "dell", "Dell")
+				report, err := s.ImportDeviceTypes(ctx, testActor, catalogueCSV(t,
+					catalogueHeader+"dell,R650\ndell,R750\nnosuchmaker,R850\n"), false)
+				if err != nil {
+					t.Fatalf("importing: %v", err)
+				}
+				if len(report.Problems) == 0 {
+					t.Fatal("a file with an unknown manufacturer was accepted")
+				}
+				list, err := s.ListDeviceTypes(ctx, DeviceTypeFilter{})
+				if err != nil {
+					t.Fatalf("listing: %v", err)
+				}
+				if len(list) != 0 {
+					t.Errorf("%d models survived a refused file", len(list))
+				}
+			})
+		})
+	}
+}
+
+// TestAYesNoColumnRefusesWhatItCannotRead is the silent-fallback shape in its
+// most tempting form.
+func TestAYesNoColumnRefusesWhatItCannotRead(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			s, ctx := newStore(t, e)
+			mustManufacturer(t, s, ctx, "dell", "Dell")
+
+			// The tempting implementation returns false for anything it does not
+			// recognise, which turns a localised "ja" -- or a stray character --
+			// into a quiet no. A full-depth chassis recorded as half-depth is
+			// wrong in a way nobody notices until a rack diagram is built on it.
+			report, err := s.ImportDeviceTypes(ctx, testActor, catalogueCSV(t,
+				"manufacturer,model,full_depth\ndell,R650,ja\n"), false)
+			if err != nil {
+				t.Fatalf("importing: %v", err)
+			}
+			if len(report.Problems) != 1 {
+				t.Fatalf("problems = %+v, want one about the unreadable yes/no", report.Problems)
+			}
+			if report.Problems[0].Field != "full_depth" {
+				t.Errorf("problem field = %q, want full_depth", report.Problems[0].Field)
+			}
+
+			// The control: the spellings a spreadsheet actually produces all work,
+			// so the refusal above is not simply a column that never accepts
+			// anything.
+			for _, yes := range []string{"true", "TRUE", "yes", "Y", "1"} {
+				r, err := s.ImportDeviceTypes(ctx, testActor, catalogueCSV(t,
+					"manufacturer,model,full_depth\ndell,M-"+yes+","+yes+"\n"), true)
+				if err != nil {
+					t.Fatalf("importing %q: %v", yes, err)
+				}
+				if len(r.Problems) > 0 {
+					t.Errorf("%q was refused as a yes: %+v", yes, r.Problems)
+				}
+			}
+		})
+	}
+}
+
+func TestAnUnreadableRackHeightIsRefusedRatherThanDropped(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			s, ctx := newStore(t, e)
+			mustManufacturer(t, s, ctx, "dell", "Dell")
+
+			report, err := s.ImportDeviceTypes(ctx, testActor, catalogueCSV(t,
+				"manufacturer,model,u_height\ndell,R650,1U\n"), false)
+			if err != nil {
+				t.Fatalf("importing: %v", err)
+			}
+			if len(report.Problems) != 1 || report.Problems[0].Field != "u_height" {
+				t.Fatalf("problems = %+v, want one on u_height.\nA model stored with the "+
+					"height quietly dropped occupies nothing in every future elevation "+
+					"calculation, and nothing on screen says why.", report.Problems)
+			}
+		})
+	}
+}
+
+func TestACatalogueImportIsAuditedAndIndexed(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			s, ctx := newStore(t, e)
+			mustManufacturer(t, s, ctx, "hpe", "HPE")
+
+			if _, err := s.ImportDeviceTypes(ctx, testActor, catalogueCSV(t,
+				"manufacturer,model,part_number\nhpe,DL380,P30721-B21\n"), false); err != nil {
+				t.Fatalf("importing: %v", err)
+			}
+
+			var audits int
+			if err := s.db.Reader.GetContext(ctx, &audits,
+				`SELECT COUNT(*) FROM change_log WHERE entity_type = 'device_type'`); err != nil {
+				t.Fatalf("counting: %v", err)
+			}
+			if audits != 1 {
+				t.Errorf("import wrote %d device_type audit rows, want 1", audits)
+			}
+
+			// Indexed too. The importer goes through insertDeviceType precisely so
+			// it cannot skip half of what a create does.
+			hits, err := s.Search(ctx, "P30721-B21", 10)
+			if err != nil {
+				t.Fatalf("searching: %v", err)
+			}
+			if len(hits) == 0 {
+				t.Error("an imported model is not findable by its part number")
+			}
+		})
+	}
+}

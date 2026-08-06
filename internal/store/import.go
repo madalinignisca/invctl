@@ -141,22 +141,34 @@ func (r *ImportReport) Applied() bool {
 // unknown column IS an error, because the alternative is silently ignoring the
 // one column somebody cared about -- a misspelled `lifecyle` that vanishes is
 // exactly the silent-fallback shape this codebase keeps finding.
-func ParseAssetCSV(r io.Reader) ([]AssetImportRow, []ImportProblem) {
+// readCSVHeader parses a file and validates its header against a column set.
+//
+// Shared by both importers because the header rules are the same rules and the
+// second copy of them is the one that would quietly stop refusing unknown
+// columns. Returns the data records and a cell reader, or the problems.
+//
+// Header-driven rather than positional: a file whose columns are in a different
+// order is a file somebody exported from a spreadsheet, not a mistake. An
+// unknown column IS an error, because the alternative is silently ignoring the
+// one column somebody cared about -- a misspelled `lifecyle` that vanishes is
+// exactly the silent-fallback shape this codebase keeps finding.
+func readCSVHeader(r io.Reader, what string, known map[string]bool, required []string) (
+	[][]string, func([]string, string) string, []ImportProblem) {
+
 	reader := csv.NewReader(r)
 	reader.TrimLeadingSpace = true
-	// Rows may legitimately differ in length only if the file is malformed;
-	// FieldsPerRecord left at 0 makes the header set the expectation and the
-	// reader report any row that disagrees.
+	// FieldsPerRecord left at 0 makes the header set the expectation, so the
+	// reader itself reports any row that disagrees.
 
 	records, err := reader.ReadAll()
 	if err != nil {
-		return nil, []ImportProblem{{
+		return nil, nil, []ImportProblem{{
 			Line:    0,
 			Message: fmt.Sprintf("this file could not be read as CSV: %v", err),
 		}}
 	}
 	if len(records) == 0 {
-		return nil, []ImportProblem{{Line: 0, Message: "the file is empty"}}
+		return nil, nil, []ImportProblem{{Line: 0, Message: "the file is empty"}}
 	}
 
 	var problems []ImportProblem
@@ -167,11 +179,11 @@ func ParseAssetCSV(r io.Reader) ([]AssetImportRow, []ImportProblem) {
 		if name == "" {
 			continue
 		}
-		if !assetImportColumns[name] {
+		if !known[name] {
 			problems = append(problems, ImportProblem{
 				Line: 1, Field: name,
-				Message: fmt.Sprintf("there is no asset column called %q; known columns are %s",
-					name, knownColumns()),
+				Message: fmt.Sprintf("there is no %s column called %q; known columns are %s",
+					what, name, columnList(known)),
 			})
 			continue
 		}
@@ -184,28 +196,38 @@ func ParseAssetCSV(r io.Reader) ([]AssetImportRow, []ImportProblem) {
 		}
 		index[name] = i
 	}
-	for _, required := range []string{"name", "kind"} {
-		if _, ok := index[required]; !ok {
+	for _, want := range required {
+		if _, ok := index[want]; !ok {
 			problems = append(problems, ImportProblem{
-				Line: 1, Field: required,
-				Message: fmt.Sprintf("the file has no %q column, and an asset cannot be created without one", required),
+				Line: 1, Field: want,
+				Message: fmt.Sprintf("the file has no %q column, and a %s cannot be created without one",
+					want, what),
 			})
 		}
 	}
 	if len(problems) > 0 {
-		return nil, problems
+		return nil, nil, problems
 	}
 
-	at := func(record []string, column string) string {
+	cell := func(record []string, column string) string {
 		i, ok := index[column]
 		if !ok || i >= len(record) {
 			return ""
 		}
 		return strings.TrimSpace(record[i])
 	}
+	return records[1:], cell, nil
+}
 
-	rows := make([]AssetImportRow, 0, len(records)-1)
-	for n, record := range records[1:] {
+// ParseAssetCSV reads an asset import file.
+func ParseAssetCSV(r io.Reader) ([]AssetImportRow, []ImportProblem) {
+	data, at, problems := readCSVHeader(r, "asset", assetImportColumns, []string{"name", "kind"})
+	if len(problems) > 0 {
+		return nil, problems
+	}
+
+	rows := make([]AssetImportRow, 0, len(data))
+	for n, record := range data {
 		line := n + 2 // one-based, and the header is line 1
 		row := AssetImportRow{
 			Line:         line,
@@ -231,9 +253,11 @@ func ParseAssetCSV(r io.Reader) ([]AssetImportRow, []ImportProblem) {
 	return rows, nil
 }
 
-func knownColumns() string {
-	out := make([]string, 0, len(assetImportColumns))
-	for name := range assetImportColumns {
+// columnList renders a column set for a message, sorted so the same file
+// produces the same wording twice.
+func columnList(known map[string]bool) string {
+	out := make([]string, 0, len(known))
+	for name := range known {
 		out = append(out, name)
 	}
 	sort.Strings(out)
