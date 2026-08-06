@@ -589,3 +589,72 @@ func TestASupplyChainCannotLoop(t *testing.T) {
 		})
 	}
 }
+
+// TestLosingAUPSTakesWhatIsBeneathItAndNoMore is the 2N question people
+// actually ask before a maintenance window.
+func TestLosingAUPSTakesWhatIsBeneathItAndNoMore(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			s, ctx := newStore(t, e)
+			site := mustAsset(t, s, ctx, domain.KindSite, "dc-a", nil)
+			gen := mustSource(t, s, ctx, site, "GEN-1", domain.SourceGenerator, nil)
+			upsA := mustSource(t, s, ctx, site, "UPS-A", domain.SourceUPS, &gen)
+			upsB := mustSource(t, s, ctx, site, "UPS-B", domain.SourceUPS, &gen)
+
+			a1 := panelOn(t, s, ctx, site, "A1", upsA)
+			a2 := panelOn(t, s, ctx, site, "A2", upsA)
+			b1 := panelOn(t, s, ctx, site, "B1", upsB)
+			fa1 := mustFeed(t, s, ctx, a1, "F1", 230, 32)
+			fa2 := mustFeed(t, s, ctx, a2, "F1", 230, 32)
+			fb1 := mustFeed(t, s, ctx, b1, "F1", 230, 32)
+
+			// Dual-fed across two boards that share UPS-A: dies with it.
+			trap := mustAsset(t, s, ctx, domain.KindServer, "same-ups", &site)
+			mustInput(t, s, ctx, trap, fa1, "A", nil)
+			mustInput(t, s, ctx, trap, fa2, "B", nil)
+
+			// Properly 2N: survives.
+			proper := mustAsset(t, s, ctx, domain.KindServer, "proper-2n", &site)
+			mustInput(t, s, ctx, proper, fa1, "A", nil)
+			mustInput(t, s, ctx, proper, fb1, "B", nil)
+
+			// Single-fed off the other side: untouched.
+			other := mustAsset(t, s, ctx, domain.KindServer, "b-side", &site)
+			mustInput(t, s, ctx, other, fb1, "A", nil)
+
+			down, err := s.AssetsLosingSupply(ctx, []string{upsA})
+			if err != nil {
+				t.Fatalf("resolving: %v", err)
+			}
+			got := map[string]bool{}
+			for _, id := range down {
+				got[id] = true
+			}
+			if !got[trap] {
+				t.Error("losing UPS-A spared a server dual-fed across two of its own boards")
+			}
+			if got[proper] {
+				t.Error("losing UPS-A took down an asset that still has a live input on " +
+					"UPS-B. The supply outage must honour redundancy exactly as a feed " +
+					"outage does, or there are two answers to one question.")
+			}
+			if got[other] {
+				t.Error("losing UPS-A took down an asset on the other side entirely")
+			}
+			if len(down) != 1 {
+				t.Errorf("losing UPS-A took down %d assets, want 1", len(down))
+			}
+
+			// Losing the GENERATOR takes everything, because both UPS groups are
+			// beneath it -- the walk has to go down more than one level.
+			down, err = s.AssetsLosingSupply(ctx, []string{gen})
+			if err != nil {
+				t.Fatalf("resolving: %v", err)
+			}
+			if len(down) != 3 {
+				t.Errorf("losing the generator took down %d assets, want all 3 -- the walk "+
+					"has to descend through the UPS groups, not just one level", len(down))
+			}
+		})
+	}
+}

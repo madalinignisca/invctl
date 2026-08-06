@@ -169,6 +169,32 @@ func (a *App) PowerSourceCreate(w http.ResponseWriter, r *http.Request) {
 	render.Redirect(w, r, "/power")
 }
 
+// PowerSourceImpact simulates losing a supply: a UPS group, a generator.
+//
+// Same shape as losing a feed, and deliberately so: it resolves and redirects
+// into the ordinary impact page rather than rendering a second one, and a supply
+// that takes nothing down says so instead of showing an empty result.
+func (a *App) PowerSourceImpact(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	src, err := a.Store.GetPowerSource(r.Context(), id)
+	if err != nil {
+		a.handleStoreError(w, r, err)
+		return
+	}
+	down, err := a.Store.AssetsLosingSupply(r.Context(), []string{id})
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
+	if len(down) == 0 {
+		a.setFlash(r, "success", "Nothing loses power if "+src.Name+
+			" fails: every asset below it has another live input elsewhere.")
+		render.Redirect(w, r, "/power")
+		return
+	}
+	render.Redirect(w, r, impactURL(down, 180))
+}
+
 // PowerSourceRetire withdraws a supply.
 func (a *App) PowerSourceRetire(w http.ResponseWriter, r *http.Request) {
 	if err := a.Store.RetirePowerSource(r.Context(), actor(r), r.PathValue("id")); err != nil {
@@ -218,6 +244,51 @@ func (a *App) renderPowerWithSource(w http.ResponseWriter, r *http.Request,
 		Lifecycles: domain.PowerLifecycles,
 		SourceSpec: spec,
 	})
+}
+
+// PowerPanelUpdate corrects a board, including what feeds it.
+//
+// Written after the supply layer landed and it became obvious that create and
+// retire were not enough: every panel recorded before 00024 had no supply and
+// no way to gain one short of retiring and re-entering it, which would have
+// thrown away its audit history to fix a field.
+func (a *App) PowerPanelUpdate(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	existing, err := a.Store.GetPowerPanel(r.Context(), id)
+	if err != nil {
+		a.handleStoreError(w, r, err)
+		return
+	}
+	volts, vOK := optionalInt(r, "voltage")
+	amps, aOK := optionalInt(r, "amperage")
+	if !vOK || !aOK {
+		a.setFlash(r, "error", "The rating has to be whole numbers, or left empty.")
+		render.Redirect(w, r, "/power")
+		return
+	}
+
+	updated := existing.PowerPanel
+	updated.Name = formValue(r, "name")
+	// submittedString, not optionalString: a picker that failed to render must
+	// not read as an operator clearing the field -- and clearing this one would
+	// silently detach a board from its UPS, which is exactly the state the
+	// findings cannot see through.
+	updated.SourceID = submittedString(r, "source_id", updated.SourceID)
+	updated.Voltage, updated.Amperage = volts, amps
+	updated.Phase = optional(formValue(r, "phase"))
+	updated.Notes = optional(formValue(r, "notes"))
+	updated.RowVersion = submittedVersion(r, updated.RowVersion)
+
+	if err := a.Store.UpdatePowerPanel(r.Context(), actor(r), &updated); err != nil {
+		if messages, ok := validationErrors(err); ok {
+			a.setFlash(r, "error", "That panel was not accepted: "+joinMessages(messages))
+			render.Redirect(w, r, "/power")
+			return
+		}
+		a.handleStoreError(w, r, err)
+		return
+	}
+	render.Redirect(w, r, "/power")
 }
 
 // PowerPanelRetire takes a panel out of service.

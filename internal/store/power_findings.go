@@ -523,3 +523,73 @@ func supplyPath(l powerLink, supplies map[string]supplyNode) []string {
 	}
 	return path
 }
+
+// AssetsLosingSupply resolves a failed supply to the assets that go dark.
+//
+// A supply failing takes everything BENEATH it: the boards it feeds, the boards
+// fed by supplies it feeds, and the feeds off all of them. So this walks the
+// chain DOWN, collects the feeds, and hands them to AssetsLosingPower -- which
+// already knows that an asset survives while any one of its inputs is on a live
+// feed. Losing UPS-A takes a server dual-fed across two of its boards; it does
+// not take one fed from UPS-A and UPS-B.
+//
+// Written as a resolver over the existing one rather than a second traversal,
+// because the redundancy rule must have exactly one implementation. A supply
+// outage that honoured redundancy differently from a feed outage would be two
+// answers to one question.
+func (s *SQLStore) AssetsLosingSupply(ctx context.Context, sourceIDs []string) ([]string, error) {
+	if len(sourceIDs) == 0 {
+		return nil, nil
+	}
+	supplies, err := s.loadSupplyChains(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// Everything at or below the failed supplies. Bounded by the same depth
+	// limit as every other walk here: a cycle is refused on the way in, and a
+	// guard that trusts that is one that hangs a page if it is ever wrong.
+	failed := map[string]bool{}
+	for _, id := range sourceIDs {
+		failed[id] = true
+	}
+	for depth := 0; depth < supplyDepthLimit; depth++ {
+		grew := false
+		for id, node := range supplies {
+			if failed[id] || node.Parent == nil || !failed[*node.Parent] {
+				continue
+			}
+			failed[id] = true
+			grew = true
+		}
+		if !grew {
+			break
+		}
+	}
+
+	// Filtered in Go against the closure computed above, rather than as a
+	// recursive query the two engines would have to agree on.
+	var panelFeeds []struct {
+		FeedID   string `db:"feed_id"`
+		SourceID string `db:"source_id"`
+	}
+	err = s.read(ctx, &panelFeeds, `
+		SELECT f.id AS feed_id, p.source_id
+		FROM power_feed f
+		JOIN power_panel p ON p.id = f.panel_id
+		WHERE f.lifecycle <> ? AND p.lifecycle <> ? AND p.source_id IS NOT NULL`,
+		domain.LifecycleRetired, domain.LifecycleRetired)
+	if err != nil {
+		return nil, fmt.Errorf("resolving feeds below a supply: %w", err)
+	}
+	var lost []string
+	for _, pf := range panelFeeds {
+		if failed[pf.SourceID] {
+			lost = append(lost, pf.FeedID)
+		}
+	}
+	if len(lost) == 0 {
+		return nil, nil
+	}
+	return s.AssetsLosingPower(ctx, lost)
+}

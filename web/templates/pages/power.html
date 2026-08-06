@@ -216,6 +216,7 @@
             <td class="mono">{{if .ParentName}}{{deref .ParentName}}{{else}}<span class="muted">top of the chain</span>{{end}}</td>
             <td>{{.Panels}}</td>
             <td class="row-actions">
+              <a class="btn btn-sm" href="/power/sources/{{.ID}}/impact">If it fails</a>
               {{if and $.CanWrite (not .Panels) (not .Children)}}
               <form method="post" action="/power/sources/{{.ID}}/retire" style="display:inline">
                 <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
@@ -247,7 +248,26 @@
           <tr>
             <td>{{.SiteName}}</td>
             <td class="mono">{{.Name}}</td>
-            <td class="mono">{{if .SourceName}}{{deref .SourceName}}{{else}}<span class="muted">not recorded</span>{{end}}</td>
+            <td class="mono">
+              {{if $.CanWrite}}
+              <form method="post" action="/power/panels/{{.ID}}" style="display:flex;gap:4px">
+                <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+                <input type="hidden" name="row_version" value="{{.RowVersion}}">
+                <input type="hidden" name="name" value="{{.Name}}">
+                <input type="hidden" name="voltage" value="{{derefInt .Voltage}}">
+                <input type="hidden" name="amperage" value="{{derefInt .Amperage}}">
+                <input type="hidden" name="phase" value="{{deref .Phase}}">
+                {{$row := .}}
+                <select name="source_id">
+                  <option value="">— not recorded —</option>
+                  {{range $.Sources}}<option value="{{.ID}}" {{if eq (deref $row.SourceID) .ID}}selected{{end}}>{{.Name}}</option>{{end}}
+                </select>
+                <button class="btn btn-sm" type="submit">Set</button>
+              </form>
+              {{else}}
+                {{if .SourceName}}{{deref .SourceName}}{{else}}<span class="muted">not recorded</span>{{end}}
+              {{end}}
+            </td>
             <td class="mono">{{template "power_rating" .}}</td>
             <td>{{.Feeds}}</td>
             <td class="row-actions">
