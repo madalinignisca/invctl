@@ -11,6 +11,7 @@ package handlers
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -300,6 +301,9 @@ type assetDetailPage struct {
 	IPAddressForm ipAddressFormData
 	LinkForm      linkFormData
 	OverrideForm  overrideFormData
+	// Where it takes power from, and the feeds it could take it from.
+	PowerInputs []store.PowerInputRow
+	PowerFeeds  []store.PowerFeedRow
 }
 
 // AssetDetail renders one asset with its containment, ports and workloads.
@@ -422,8 +426,23 @@ func (a *App) renderAssetDetail(w http.ResponseWriter, r *http.Request, status i
 		f := a.newAssetEditForm(r, asset, edit.Errors, envs, kinds, edit)
 		assetEdit = &f
 	}
+	// Power, and the feeds this asset could be plugged into. A failure to read
+	// either leaves the section empty rather than failing the page: an asset
+	// page is what somebody opens during an incident, and it must not 500
+	// because a subsystem they were not asking about is unhappy.
+	powerInputs, err := a.Store.PowerInputsFor(r.Context(), id)
+	if err != nil {
+		slog.Error("listing power inputs", "error", err, "asset", id)
+	}
+	powerFeeds, err := a.Store.ListPowerFeeds(r.Context(), store.PowerFeedFilter{})
+	if err != nil {
+		slog.Error("listing power feeds", "error", err, "asset", id)
+	}
+
 	a.Render.Page(w, status, "asset_detail", assetDetailPage{
 		Base:           assetBase,
+		PowerInputs:    powerInputs,
+		PowerFeeds:     powerFeeds,
 		Edit:           edit,
 		AssetEdit:      assetEdit,
 		Asset:          asset,

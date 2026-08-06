@@ -281,4 +281,67 @@
     "Note" "Attached to this asset, because this is what the invoice names."}}
 
 {{template "timeline_panel" .Timeline}}
+
+{{/* Power. Two inputs on one panel is the finding this exists for, so the
+     panel is shown on every row rather than hidden behind the feed. */}}
+<div class="panel">
+  <div class="panel-head">
+    <h2>Power</h2>
+    <p class="panel-note">Where it draws from. <a href="/reports/power">What the chain says</a>.</p>
+  </div>
+  <div class="panel-body">
+    {{if .PowerInputs}}
+    <table class="grid">
+      <thead><tr><th>Input</th><th>Feed</th><th>Panel</th><th>Draw</th><th></th></tr></thead>
+      <tbody>
+        {{range .PowerInputs}}
+        <tr>
+          <td class="mono">{{.Name}}</td>
+          <td class="mono">{{.FeedName}}</td>
+          <td class="mono">{{.PanelName}}</td>
+          <td class="mono">{{if .DrawVA}}{{derefInt .DrawVA}} VA{{else}}<span class="muted">not recorded</span>{{end}}</td>
+          <td class="row-actions">
+            {{if $.CanWrite}}
+            <form method="post" action="/assets/{{$.Asset.ID}}/power/{{.ID}}/retire" style="display:inline">
+              <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+              <button class="btn btn-sm" type="submit">Disconnect</button>
+            </form>
+            {{end}}
+          </td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+    {{else}}
+    <p class="empty">No power inputs recorded.</p>
+    {{end}}
+
+    {{if .CanWrite}}
+    <form method="post" action="/assets/{{.Asset.ID}}/power" style="margin-top:12px">
+      <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+      <div class="field-row">
+        <div class="field">
+          <label for="pi-name">Input</label>
+          <input id="pi-name" type="text" name="name" placeholder="A" required>
+        </div>
+        <div class="field">
+          <label for="pi-feed">Feed</label>
+          <select id="pi-feed" name="feed_id" required>
+            <option value="">Choose…</option>
+            {{range .PowerFeeds}}<option value="{{.ID}}">{{.SiteName}} / {{.PanelName}} / {{.Name}}</option>{{end}}
+          </select>
+          {{if not .PowerFeeds}}<div class="field-hint">Add a feed under <a href="/power">Power</a> first.</div>{{end}}
+        </div>
+        <div class="field">
+          <label for="pi-draw">Draw (VA)</label>
+          <input id="pi-draw" type="number" name="draw_va" min="0">
+          <div class="field-hint">Nameplate or allocated. Nothing measures this.</div>
+        </div>
+      </div>
+      <div class="form-actions"><button type="submit" class="btn btn-sm">Add input</button></div>
+    </form>
+    {{end}}
+  </div>
+</div>
+
 {{end}}

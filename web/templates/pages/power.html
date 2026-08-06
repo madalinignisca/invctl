@@ -1,0 +1,199 @@
+{{/*
+  invctl — infrastructure inventory
+  Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+
+  Licensed under the GNU Affero General Public License, version 3 only —
+  no later version applies. See LICENSE for the full text.
+
+  SPDX-License-Identifier: AGPL-3.0-only
+*/}}
+{{define "content"}}
+<div class="page-head">
+  <div class="eyebrow">inventory</div>
+  <h1>Power</h1>
+  <p class="lede">
+    Panels distribute to feeds; an asset draws through its inputs. Recorded so
+    that "these two cables are redundant" can be checked rather than believed —
+    see <a href="/reports/power">what the chain says</a>.
+  </p>
+</div>
+
+{{template "power_panel_list" .}}
+
+{{if .CanWrite}}
+<div class="panel">
+  <div class="panel-head"><h2>Add a feed</h2></div>
+  <form class="panel-body" method="post" action="/power/feeds">
+    <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+    <div class="field-row">
+      <div class="field">
+        <label for="f-panel">Panel</label>
+        <select id="f-panel" name="panel_id" required>
+          <option value="">Choose…</option>
+          {{range .Panels}}<option value="{{.ID}}" {{if eq $.FeedSpec.PanelID .ID}}selected{{end}}>{{.SiteName}} / {{.Name}}</option>{{end}}
+        </select>
+        {{with index .Errors "panel_id"}}<div class="field-error">{{.}}</div>{{end}}
+        {{if not .Panels}}<div class="field-hint">Add a panel below first.</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="f-name">Name</label>
+        <input id="f-name" type="text" name="name" value="{{.FeedSpec.Name}}" placeholder="A-01" required>
+        {{with index .Errors "name"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="f-volts">Voltage</label>
+        <input id="f-volts" type="number" name="voltage" min="1" value="{{derefInt .FeedSpec.Voltage}}" placeholder="230">
+        {{with index .Errors "voltage"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="f-amps">Amperage</label>
+        <input id="f-amps" type="number" name="amperage" min="1" value="{{derefInt .FeedSpec.Amperage}}" placeholder="32">
+        {{with index .Errors "amperage"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="f-phase">Phase</label>
+        <select id="f-phase" name="phase">
+          <option value="">—</option>
+          {{range .Phases}}<option value="{{.}}" {{if eq (deref $.FeedSpec.Phase) .}}selected{{end}}>{{title .}}</option>{{end}}
+        </select>
+        {{with index .Errors "phase"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="f-util">Max utilisation %</label>
+        <input id="f-util" type="number" name="max_utilisation" min="1" max="100" value="80">
+        <div class="field-hint">80 is the usual derating for a continuous load.</div>
+        {{with index .Errors "max_utilisation"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+    </div>
+    <div class="form-actions"><button type="submit" class="btn btn-primary">Add feed</button></div>
+  </form>
+</div>
+
+<div class="panel">
+  <div class="panel-head"><h2>Add a panel</h2></div>
+  <form class="panel-body" method="post" action="/power/panels">
+    <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+    <div class="field-row">
+      <div class="field">
+        <label for="p-site">Site</label>
+        <select id="p-site" name="site_id" required>
+          <option value="">Choose…</option>
+          {{range .Sites}}<option value="{{.ID}}" {{if eq $.PanelSpec.SiteID .ID}}selected{{end}}>{{.Name}}</option>{{end}}
+        </select>
+        {{with index .Errors "site_id"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="p-name">Name</label>
+        <input id="p-name" type="text" name="name" value="{{.PanelSpec.Name}}" placeholder="DB-A" required>
+        {{with index .Errors "name"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="p-volts">Voltage</label>
+        <input id="p-volts" type="number" name="voltage" min="1" value="{{derefInt .PanelSpec.Voltage}}">
+        {{with index .Errors "voltage"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="p-amps">Amperage</label>
+        <input id="p-amps" type="number" name="amperage" min="1" value="{{derefInt .PanelSpec.Amperage}}">
+        {{with index .Errors "amperage"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+    </div>
+    <div class="form-actions"><button type="submit" class="btn">Add panel</button></div>
+  </form>
+</div>
+{{end}}
+{{end}}
+
+{{define "power_panel_list"}}
+<div id="power-panel-list">
+  <div class="panel">
+    <div class="panel-head">
+      <h2>Feeds</h2>
+      <p class="panel-note">{{pluralise (len .Feeds) "feed" "feeds"}}, across {{pluralise (len .Panels) "panel" "panels"}}.</p>
+    </div>
+    <div class="panel-body">
+      {{if .Feeds}}
+      <table class="grid">
+        <thead><tr><th>Site</th><th>Panel</th><th>Feed</th><th>Rating</th><th>Allocated</th><th>Inputs</th><th></th></tr></thead>
+        <tbody>
+          {{range .Feeds}}
+          <tr>
+            <td>{{.SiteName}}</td>
+            <td class="mono">{{.PanelName}}</td>
+            <td class="mono">{{.Name}}</td>
+            <td class="mono">{{template "power_rating" .}}</td>
+            <td class="mono">{{template "power_allocation" .}}</td>
+            <td>{{.Inputs}}</td>
+            <td class="row-actions">
+              <a class="btn btn-sm" href="/power/feeds/{{.ID}}/impact">If it fails</a>
+              {{if $.CanWrite}}
+              <form method="post" action="/power/feeds/{{.ID}}/retire" style="display:inline">
+                <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+                <button class="btn btn-sm" type="submit">Withdraw</button>
+              </form>
+              {{end}}
+            </td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+      {{else}}
+      <p class="empty">
+        No feeds recorded. Until there are, nothing can check whether an A and a
+        B cable actually reach different places.
+      </p>
+      {{end}}
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head"><h2>Panels</h2></div>
+    <div class="panel-body">
+      {{if .Panels}}
+      <table class="grid">
+        <thead><tr><th>Site</th><th>Panel</th><th>Rating</th><th>Feeds</th><th></th></tr></thead>
+        <tbody>
+          {{range .Panels}}
+          <tr>
+            <td>{{.SiteName}}</td>
+            <td class="mono">{{.Name}}</td>
+            <td class="mono">{{template "power_rating" .}}</td>
+            <td>{{.Feeds}}</td>
+            <td class="row-actions">
+              {{if and $.CanWrite (not .Feeds)}}
+              <form method="post" action="/power/panels/{{.ID}}/retire" style="display:inline">
+                <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+                <button class="btn btn-sm" type="submit">Retire</button>
+              </form>
+              {{end}}
+            </td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+      {{else}}
+      <p class="empty">No panels recorded.</p>
+      {{end}}
+    </div>
+  </div>
+</div>
+{{end}}
+
+{{/* A rating, or an honest blank. "Not recorded" is never rendered as a
+     number, because a capacity read as zero makes every feed look full. */}}
+{{define "power_rating"}}
+  {{if and .Voltage .Amperage}}
+    {{derefInt .Voltage}} V · {{derefInt .Amperage}} A{{if .Phase}} · {{deref .Phase}}{{end}}
+  {{else}}
+    <span class="muted">not recorded</span>
+  {{end}}
+{{end}}
+
+{{define "power_allocation"}}
+  {{if and .Voltage .Amperage}}
+    {{.AllocatedVA}} VA
+    {{if .UndeclaredInputs}}<div class="muted" style="font-size:12px">{{pluralise .UndeclaredInputs "input declares" "inputs declare"}} no draw</div>{{end}}
+  {{else}}
+    <span class="muted">—</span>
+  {{end}}
+{{end}}

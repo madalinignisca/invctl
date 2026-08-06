@@ -1,0 +1,101 @@
+{{/*
+  invctl — infrastructure inventory
+  Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+
+  Licensed under the GNU Affero General Public License, version 3 only —
+  no later version applies. See LICENSE for the full text.
+
+  SPDX-License-Identifier: AGPL-3.0-only
+*/}}
+{{define "content"}}
+<div class="crumbs">
+  <a href="/power">power</a><span class="sep">/</span><span>findings</span>
+</div>
+
+<div class="page-head">
+  <div class="eyebrow">analysis</div>
+  <h1>Power findings</h1>
+  <p class="lede">
+    What the chain says, traced from every asset back to the panel behind it.
+    The first kind is the one nobody finds by looking: two cables that were
+    meant to be independent and are not.
+  </p>
+</div>
+
+{{template "power_findings" .}}
+{{end}}
+
+{{define "power_findings"}}
+<div id="power-findings">
+  <div class="panel">
+    <div class="panel-body">
+      <div class="stat-row">
+        <div class="stat"><div class="stat-n">{{.Report.FalseRedundancy}}</div><div class="stat-l">false redundancy</div></div>
+        <div class="stat"><div class="stat-n">{{.Report.SingleFed}}</div><div class="stat-l">single-fed, carrying services</div></div>
+        <div class="stat"><div class="stat-n">{{.Report.OverAllocated}}</div><div class="stat-l">feeds over their derating</div></div>
+      </div>
+    </div>
+  </div>
+
+  {{if .Report.Findings}}
+  <div class="panel">
+    <div class="panel-body">
+      <table class="grid">
+        <thead><tr><th>What</th><th>Finding</th><th>Rides on it</th></tr></thead>
+        <tbody>
+          {{range .Report.Findings}}
+          <tr>
+            <td>
+              {{if eq .EntityType "asset"}}<a class="id" href="/assets/{{.EntityID}}">{{.Name}}</a>
+              {{else}}<span class="id">{{.Name}}</span>{{end}}
+              <div class="muted" style="font-size:11.5px">
+                {{if eq .Kind "false_redundancy"}}<span class="pill pill-down">false redundancy</span>
+                {{else if eq .Kind "single_fed"}}<span class="pill pill-degraded">single-fed</span>
+                {{else}}<span class="pill pill-degraded">over-allocated</span>{{end}}
+              </div>
+            </td>
+            <td>{{.Detail}}</td>
+            <td>
+              {{if .ServiceCount}}
+                {{pluralise .ServiceCount "service" "services"}}
+                {{if .BestTier}}<div class="muted" style="font-size:11.5px">best tier {{.BestTier}}</div>{{end}}
+              {{else}}<span class="muted">—</span>{{end}}
+            </td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {{else}}
+  <div class="panel"><div class="panel-body">
+    <p class="empty">No findings.</p>
+  </div></div>
+  {{end}}
+
+  {{/* The coverage numbers, and they are not a footnote. A short list of
+       findings over four modelled assets is not a healthy estate, it is an
+       unmodelled one — and without this the page reads as reassurance. */}}
+  <div class="panel">
+    <div class="panel-head"><h2>How much of this is actually recorded</h2></div>
+    <div class="panel-body">
+      <p class="hint">
+        {{pluralise .Report.Assets "asset has" "assets have"}} a power input recorded.
+        {{if .Report.UnmodelledSites}}
+          <strong>{{pluralise .Report.UnmodelledSites "site has" "sites have"}} no panel at all</strong>,
+          so nothing above can be said about anything in {{if eq .Report.UnmodelledSites 1}}it{{else}}them{{end}}.
+        {{end}}
+        {{if .Report.UndeclaredDraw}}
+          {{pluralise .Report.UndeclaredDraw "input declares" "inputs declare"}} no draw, so any
+          utilisation figure is a floor rather than a total.
+        {{end}}
+        {{if .Report.UnratedFeeds}}
+          {{pluralise .Report.UnratedFeeds "feed has" "feeds have"}} no rating recorded and are
+          left out of the utilisation check entirely — a missing rating is a gap in
+          the record, not a fault in the estate.
+        {{end}}
+      </p>
+    </div>
+  </div>
+</div>
+{{end}}
