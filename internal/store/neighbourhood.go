@@ -13,7 +13,7 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/gabriel/invctl/internal/domain"
+	"github.com/madalinignisca/invctl/internal/domain"
 )
 
 // The neighbourhood walk: one asset, plus what it actually connects to, out to

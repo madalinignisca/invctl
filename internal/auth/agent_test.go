@@ -12,8 +12,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gabriel/invctl/internal/config"
-	"github.com/gabriel/invctl/internal/domain"
+	"github.com/madalinignisca/invctl/internal/config"
+	"github.com/madalinignisca/invctl/internal/domain"
 )
 
 // The monitoring credential is a different principal type from an operator

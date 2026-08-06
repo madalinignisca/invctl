@@ -19,9 +19,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gabriel/invctl/internal/domain"
-	"github.com/gabriel/invctl/internal/store"
-	webassets "github.com/gabriel/invctl/web"
+	"github.com/madalinignisca/invctl/internal/domain"
+	"github.com/madalinignisca/invctl/internal/store"
+	webassets "github.com/madalinignisca/invctl/web"
 )
 
 // What a person sees: docs/AUDIT.md rules 5, 8, 14 and 15, driven over real

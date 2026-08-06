@@ -19,7 +19,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 
-	"github.com/gabriel/invctl/internal/domain"
+	"github.com/madalinignisca/invctl/internal/domain"
 )
 
 // SQLStore is the portable implementation of Store. Everything it executes

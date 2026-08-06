@@ -16,7 +16,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/gabriel/invctl/internal/domain"
+	"github.com/madalinignisca/invctl/internal/domain"
 )
 
 // Domain vocabularies: the seven lookup tables migration 00004 created.

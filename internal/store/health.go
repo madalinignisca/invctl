@@ -45,7 +45,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/gabriel/invctl/internal/domain"
+	"github.com/madalinignisca/invctl/internal/domain"
 )
 
 // EntityHealth is everything a view needs to render one entity's health

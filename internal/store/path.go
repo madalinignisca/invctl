@@ -13,7 +13,7 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/gabriel/invctl/internal/domain"
+	"github.com/madalinignisca/invctl/internal/domain"
 )
 
 // PathQuery asks how THIS reaches THAT, drawn as the chain and nothing else.

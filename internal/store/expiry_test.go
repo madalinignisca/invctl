@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gabriel/invctl/internal/domain"
+	"github.com/madalinignisca/invctl/internal/domain"
 )
 
 // The expiry report, against a FIXED clock. Every date below is expressed as an

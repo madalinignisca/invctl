@@ -37,8 +37,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/gabriel/invctl/internal/domain"
-	"github.com/gabriel/invctl/internal/store"
+	"github.com/madalinignisca/invctl/internal/domain"
+	"github.com/madalinignisca/invctl/internal/store"
 )
 
 // Demo reporter identities. They match the credentials the Makefile configures

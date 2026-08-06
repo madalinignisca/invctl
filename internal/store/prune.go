@@ -53,7 +53,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/gabriel/invctl/internal/domain"
+	"github.com/madalinignisca/invctl/internal/domain"
 )
 
 // prunableTable is the whole of what may be pruned. It is a constant rather

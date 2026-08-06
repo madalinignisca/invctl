@@ -24,7 +24,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gabriel/invctl/internal/domain"
+	"github.com/madalinignisca/invctl/internal/domain"
 )
 
 // Tests for retention (docs/AUDIT.md rule 10). Both engines.

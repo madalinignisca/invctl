@@ -28,15 +28,15 @@ import (
 	"github.com/alexedwards/scs/sqlite3store"
 	"github.com/alexedwards/scs/v2"
 
-	"github.com/gabriel/invctl/internal/auth"
-	"github.com/gabriel/invctl/internal/config"
-	"github.com/gabriel/invctl/internal/domain"
-	"github.com/gabriel/invctl/internal/seed"
-	"github.com/gabriel/invctl/internal/store"
-	"github.com/gabriel/invctl/internal/web"
-	"github.com/gabriel/invctl/internal/web/handlers"
-	"github.com/gabriel/invctl/internal/web/render"
-	webassets "github.com/gabriel/invctl/web"
+	"github.com/madalinignisca/invctl/internal/auth"
+	"github.com/madalinignisca/invctl/internal/config"
+	"github.com/madalinignisca/invctl/internal/domain"
+	"github.com/madalinignisca/invctl/internal/seed"
+	"github.com/madalinignisca/invctl/internal/store"
+	"github.com/madalinignisca/invctl/internal/web"
+	"github.com/madalinignisca/invctl/internal/web/handlers"
+	"github.com/madalinignisca/invctl/internal/web/render"
+	webassets "github.com/madalinignisca/invctl/web"
 )
 
 // These tests drive the real router over real HTTP against a real database.

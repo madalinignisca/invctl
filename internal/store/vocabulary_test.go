@@ -14,7 +14,7 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/gabriel/invctl/internal/domain"
+	"github.com/madalinignisca/invctl/internal/domain"
 )
 
 // vocabularyReaders pairs each lookup table with its store method and with the

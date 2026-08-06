@@ -14,7 +14,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gabriel/invctl/internal/diagram"
+	"github.com/madalinignisca/invctl/internal/diagram"
 )
 
 // The renderer's half of the no-line-crosses-a-box guarantee.

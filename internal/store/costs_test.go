@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gabriel/invctl/internal/domain"
+	"github.com/madalinignisca/invctl/internal/domain"
 )
 
 var costNow = time.Date(2026, 7, 31, 12, 0, 0, 0, time.UTC)

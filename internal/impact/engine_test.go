@@ -15,10 +15,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gabriel/invctl/internal/domain"
-	"github.com/gabriel/invctl/internal/impact"
-	"github.com/gabriel/invctl/internal/seed"
-	"github.com/gabriel/invctl/internal/store"
+	"github.com/madalinignisca/invctl/internal/domain"
+	"github.com/madalinignisca/invctl/internal/impact"
+	"github.com/madalinignisca/invctl/internal/seed"
+	"github.com/madalinignisca/invctl/internal/store"
 )
 
 // The engine is tested against the seeded fixture graph rather than against

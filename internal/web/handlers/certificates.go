@@ -12,9 +12,9 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/gabriel/invctl/internal/domain"
-	"github.com/gabriel/invctl/internal/store"
-	"github.com/gabriel/invctl/internal/web/render"
+	"github.com/madalinignisca/invctl/internal/domain"
+	"github.com/madalinignisca/invctl/internal/store"
+	"github.com/madalinignisca/invctl/internal/web/render"
 )
 
 // Certificates: what expires, what it covers, and where it is deployed.

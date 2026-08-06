@@ -12,9 +12,9 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/gabriel/invctl/internal/diagram"
-	"github.com/gabriel/invctl/internal/domain"
-	"github.com/gabriel/invctl/internal/store"
+	"github.com/madalinignisca/invctl/internal/diagram"
+	"github.com/madalinignisca/invctl/internal/domain"
+	"github.com/madalinignisca/invctl/internal/store"
 )
 
 // The environment map: everything in one environment, all three layers --

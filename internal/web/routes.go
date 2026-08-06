@@ -13,9 +13,9 @@ import (
 	"io/fs"
 	"net/http"
 
-	"github.com/gabriel/invctl/internal/auth"
-	"github.com/gabriel/invctl/internal/web/handlers"
-	"github.com/gabriel/invctl/internal/web/middleware"
+	"github.com/madalinignisca/invctl/internal/auth"
+	"github.com/madalinignisca/invctl/internal/web/handlers"
+	"github.com/madalinignisca/invctl/internal/web/middleware"
 )
 
 // ObservationsPath is the one route a monitoring credential can reach.

@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gabriel/invctl/internal/domain"
+	"github.com/madalinignisca/invctl/internal/domain"
 )
 
 // fakeUsers is an in-memory UserStore. Authentication logic is pure enough

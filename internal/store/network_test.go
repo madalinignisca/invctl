@@ -14,7 +14,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gabriel/invctl/internal/domain"
+	"github.com/madalinignisca/invctl/internal/domain"
 )
 
 // TestInterfaceMACNormalisation covers docs/DECISIONS.md Q2: identity is

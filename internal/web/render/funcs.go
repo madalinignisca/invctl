@@ -17,7 +17,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gabriel/invctl/internal/domain"
+	"github.com/madalinignisca/invctl/internal/domain"
 )
 
 func logError(err error) { slog.Error("render failed", "error", err) }

@@ -14,7 +14,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/gabriel/invctl/internal/domain"
+	"github.com/madalinignisca/invctl/internal/domain"
 )
 
 // ---------- endpoints ----------

@@ -15,7 +15,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gabriel/invctl/internal/domain"
+	"github.com/madalinignisca/invctl/internal/domain"
 )
 
 func mustCertificate(t *testing.T, s *SQLStore, ctx context.Context, subject string,

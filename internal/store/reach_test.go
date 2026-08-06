@@ -14,7 +14,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gabriel/invctl/internal/domain"
+	"github.com/madalinignisca/invctl/internal/domain"
 )
 
 // mustNetGroup declares a forwarder group and returns its id.

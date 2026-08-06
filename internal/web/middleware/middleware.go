@@ -22,9 +22,9 @@ import (
 	"github.com/alexedwards/scs/v2"
 	"github.com/justinas/nosurf"
 
-	"github.com/gabriel/invctl/internal/auth"
-	"github.com/gabriel/invctl/internal/domain"
-	"github.com/gabriel/invctl/internal/web/render"
+	"github.com/madalinignisca/invctl/internal/auth"
+	"github.com/madalinignisca/invctl/internal/domain"
+	"github.com/madalinignisca/invctl/internal/web/render"
 )
 
 type contextKey string

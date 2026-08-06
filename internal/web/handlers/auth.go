@@ -14,9 +14,9 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/gabriel/invctl/internal/auth"
-	"github.com/gabriel/invctl/internal/web/middleware"
-	"github.com/gabriel/invctl/internal/web/render"
+	"github.com/madalinignisca/invctl/internal/auth"
+	"github.com/madalinignisca/invctl/internal/web/middleware"
+	"github.com/madalinignisca/invctl/internal/web/render"
 )
 
 type loginPage struct {

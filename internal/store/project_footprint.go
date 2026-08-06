@@ -13,7 +13,7 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/gabriel/invctl/internal/domain"
+	"github.com/madalinignisca/invctl/internal/domain"
 )
 
 // What a project actually consists of, and what it is standing on that it does

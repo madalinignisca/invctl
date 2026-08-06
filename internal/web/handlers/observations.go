@@ -49,11 +49,11 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/gabriel/invctl/internal/auth"
-	"github.com/gabriel/invctl/internal/domain"
-	"github.com/gabriel/invctl/internal/store"
-	"github.com/gabriel/invctl/internal/web/middleware"
-	"github.com/gabriel/invctl/internal/web/render"
+	"github.com/madalinignisca/invctl/internal/auth"
+	"github.com/madalinignisca/invctl/internal/domain"
+	"github.com/madalinignisca/invctl/internal/store"
+	"github.com/madalinignisca/invctl/internal/web/middleware"
+	"github.com/madalinignisca/invctl/internal/web/render"
 )
 
 // Caps on one request (rule 6: "caps body size and batch size").

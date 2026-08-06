@@ -19,10 +19,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gabriel/invctl/internal/store"
-	"github.com/gabriel/invctl/internal/web"
-	"github.com/gabriel/invctl/internal/web/handlers"
-	"github.com/gabriel/invctl/internal/web/middleware"
+	"github.com/madalinignisca/invctl/internal/store"
+	"github.com/madalinignisca/invctl/internal/web"
+	"github.com/madalinignisca/invctl/internal/web/handlers"
+	"github.com/madalinignisca/invctl/internal/web/middleware"
 )
 
 // Adversarial tests for the one route a machine credential can reach

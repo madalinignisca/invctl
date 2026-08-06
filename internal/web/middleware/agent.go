@@ -27,8 +27,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gabriel/invctl/internal/auth"
-	"github.com/gabriel/invctl/internal/web/render"
+	"github.com/madalinignisca/invctl/internal/auth"
+	"github.com/madalinignisca/invctl/internal/web/render"
 )
 
 const agentContextKey contextKey = "agent"

@@ -16,7 +16,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gabriel/invctl/internal/store"
+	"github.com/madalinignisca/invctl/internal/store"
 )
 
 // Simulating the loss of several assets at once.

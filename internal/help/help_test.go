@@ -11,7 +11,7 @@ package help
 import (
 	"testing"
 
-	"github.com/gabriel/invctl/internal/domain"
+	"github.com/madalinignisca/invctl/internal/domain"
 )
 
 // TestTopicsCoverTheirEnums is the guard that makes this package worth having

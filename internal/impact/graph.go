@@ -16,7 +16,7 @@
 package impact
 
 import (
-	"github.com/gabriel/invctl/internal/domain"
+	"github.com/madalinignisca/invctl/internal/domain"
 )
 
 // Instance is a placement, reduced to what capacity evaluation needs.

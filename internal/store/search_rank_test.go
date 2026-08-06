@@ -13,7 +13,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/gabriel/invctl/internal/domain"
+	"github.com/madalinignisca/invctl/internal/domain"
 )
 
 // Search ranking, on both engines, because the two disagreed and both were

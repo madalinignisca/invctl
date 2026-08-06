@@ -17,7 +17,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gabriel/invctl/internal/domain"
+	"github.com/madalinignisca/invctl/internal/domain"
 )
 
 var testActor = domain.Actor{ID: "tester", Name: "tester", Kind: "user"}

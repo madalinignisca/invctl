@@ -22,7 +22,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gabriel/invctl/internal/domain"
+	"github.com/madalinignisca/invctl/internal/domain"
 )
 
 // The structural half of docs/AUDIT.md rule 1, written against the rule rather

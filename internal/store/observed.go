@@ -57,7 +57,7 @@ import (
 
 	"github.com/jmoiron/sqlx"
 
-	"github.com/gabriel/invctl/internal/domain"
+	"github.com/madalinignisca/invctl/internal/domain"
 )
 
 // ---------------------------------------------------------------------------

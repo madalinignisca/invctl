@@ -11,7 +11,7 @@ package store
 import (
 	"testing"
 
-	"github.com/gabriel/invctl/internal/domain"
+	"github.com/madalinignisca/invctl/internal/domain"
 )
 
 // The derived footprint and the hidden-dependency finding.

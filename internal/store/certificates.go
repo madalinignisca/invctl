@@ -16,7 +16,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/gabriel/invctl/internal/domain"
+	"github.com/madalinignisca/invctl/internal/domain"
 )
 
 // Certificates, the names they cover, and where they are deployed.

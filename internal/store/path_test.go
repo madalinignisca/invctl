@@ -15,7 +15,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gabriel/invctl/internal/domain"
+	"github.com/madalinignisca/invctl/internal/domain"
 )
 
 // The path walk, against a fixture built to have exactly the shapes that can

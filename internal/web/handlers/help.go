@@ -12,8 +12,8 @@ import (
 	"net/http"
 	"sort"
 
-	"github.com/gabriel/invctl/internal/help"
-	"github.com/gabriel/invctl/internal/store"
+	"github.com/madalinignisca/invctl/internal/help"
+	"github.com/madalinignisca/invctl/internal/store"
 )
 
 // The help panel: what the words on this page mean, without leaving it.

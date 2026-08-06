@@ -11,7 +11,7 @@ package seed
 import (
 	"fmt"
 
-	"github.com/gabriel/invctl/internal/domain"
+	"github.com/madalinignisca/invctl/internal/domain"
 )
 
 // ---------- how long things last ----------

@@ -12,7 +12,7 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/gabriel/invctl/internal/domain"
+	"github.com/madalinignisca/invctl/internal/domain"
 )
 
 // assertByteRangeContainment inserts two overlapping prefixes and one address,

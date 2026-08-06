@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gabriel/invctl/internal/domain"
+	"github.com/madalinignisca/invctl/internal/domain"
 )
 
 // Tests for flap compression (docs/AUDIT.md rule 9). Both engines, no sleeping:

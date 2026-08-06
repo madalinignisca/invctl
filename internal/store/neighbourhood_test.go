@@ -13,7 +13,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/gabriel/invctl/internal/domain"
+	"github.com/madalinignisca/invctl/internal/domain"
 )
 
 // The neighbourhood walk, against both engines.

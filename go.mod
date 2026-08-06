@@ -1,4 +1,4 @@
-module github.com/gabriel/invctl
+module github.com/madalinignisca/invctl
 
 go 1.26.4
 

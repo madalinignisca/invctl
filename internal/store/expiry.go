@@ -14,7 +14,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/gabriel/invctl/internal/domain"
+	"github.com/madalinignisca/invctl/internal/domain"
 )
 
 // What runs out, when, and who it lands on.

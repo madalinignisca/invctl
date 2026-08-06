@@ -14,7 +14,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gabriel/invctl/internal/domain"
+	"github.com/madalinignisca/invctl/internal/domain"
 )
 
 // Search is the one place dialect-specific SQL is sanctioned, so it is also

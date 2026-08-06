@@ -19,7 +19,7 @@ import (
 
 	"github.com/alexedwards/argon2id"
 
-	"github.com/gabriel/invctl/internal/domain"
+	"github.com/madalinignisca/invctl/internal/domain"
 )
 
 // ErrInvalidCredentials is returned for every authentication failure.

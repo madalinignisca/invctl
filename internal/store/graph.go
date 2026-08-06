@@ -12,8 +12,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/gabriel/invctl/internal/domain"
-	"github.com/gabriel/invctl/internal/impact"
+	"github.com/madalinignisca/invctl/internal/domain"
+	"github.com/madalinignisca/invctl/internal/impact"
 )
 
 // LoadGraph reads the whole dependency picture in a fixed number of queries.

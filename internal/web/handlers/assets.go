@@ -15,10 +15,10 @@ import (
 	"net/url"
 	"strconv"
 
-	"github.com/gabriel/invctl/internal/domain"
-	"github.com/gabriel/invctl/internal/impact"
-	"github.com/gabriel/invctl/internal/store"
-	"github.com/gabriel/invctl/internal/web/render"
+	"github.com/madalinignisca/invctl/internal/domain"
+	"github.com/madalinignisca/invctl/internal/impact"
+	"github.com/madalinignisca/invctl/internal/store"
+	"github.com/madalinignisca/invctl/internal/web/render"
 )
 
 // ---------- environments ----------

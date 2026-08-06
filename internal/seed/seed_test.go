@@ -14,9 +14,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gabriel/invctl/internal/domain"
-	"github.com/gabriel/invctl/internal/seed"
-	"github.com/gabriel/invctl/internal/store"
+	"github.com/madalinignisca/invctl/internal/domain"
+	"github.com/madalinignisca/invctl/internal/seed"
+	"github.com/madalinignisca/invctl/internal/store"
 )
 
 // The demo estate is not decoration: the impact engine's tests assert against

@@ -21,8 +21,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/gabriel/invctl/internal/domain"
-	"github.com/gabriel/invctl/internal/store"
+	"github.com/madalinignisca/invctl/internal/domain"
+	"github.com/madalinignisca/invctl/internal/store"
 )
 
 // Actor attributes seeded rows in the change log, so demo data is instantly

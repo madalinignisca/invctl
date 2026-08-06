@@ -13,7 +13,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/gabriel/invctl/internal/domain"
+	"github.com/madalinignisca/invctl/internal/domain"
 )
 
 // What a project costs, in the same three buckets its dependencies already use,

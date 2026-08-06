@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gabriel/invctl/internal/domain"
-	"github.com/gabriel/invctl/internal/impact"
-	"github.com/gabriel/invctl/internal/store"
+	"github.com/madalinignisca/invctl/internal/domain"
+	"github.com/madalinignisca/invctl/internal/impact"
+	"github.com/madalinignisca/invctl/internal/store"
 )
 
 // ---------------------------------------------------------------------------

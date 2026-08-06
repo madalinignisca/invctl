@@ -35,7 +35,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/gabriel/invctl/internal/domain"
+	"github.com/madalinignisca/invctl/internal/domain"
 )
 
 // HealthOverrideRow is an override with its author's display name resolved.

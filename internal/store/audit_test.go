@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gabriel/invctl/internal/domain"
+	"github.com/madalinignisca/invctl/internal/domain"
 )
 
 // Tests for docs/AUDIT.md rule 15: the audit views must survive volume, and the

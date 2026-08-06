@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gabriel/invctl/internal/domain"
+	"github.com/madalinignisca/invctl/internal/domain"
 )
 
 // Projects: ownership, sharing, and the audit obligation that comes with both.

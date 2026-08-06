@@ -18,7 +18,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gabriel/invctl/internal/domain"
+	"github.com/madalinignisca/invctl/internal/domain"
 )
 
 // Tests for the observed write path (docs/AUDIT.md rules 1-8). Every one runs

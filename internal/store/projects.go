@@ -15,7 +15,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/gabriel/invctl/internal/domain"
+	"github.com/madalinignisca/invctl/internal/domain"
 )
 
 // Projects: the business view, and the only place in this schema where a

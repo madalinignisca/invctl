@@ -17,7 +17,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gabriel/invctl/internal/domain"
+	"github.com/madalinignisca/invctl/internal/domain"
 )
 
 // The boundary tests docs/AUDIT.md requires, on both engines.
