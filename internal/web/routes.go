@@ -117,6 +117,12 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	write := func(pattern string, h http.HandlerFunc) {
 		mux.Handle(pattern, middleware.RequireAuth(requireAdmin(h)))
 	}
+	// The import page is admin-only on the GET as well as the POST. It is
+	// purely a write tool: rendering it to a read-only user offers a form whose
+	// only outcome is a 403.
+	write("GET /import/assets", app.AssetImportForm)
+	write("POST /import/assets", app.AssetImportRun)
+
 	write("POST /environments", app.EnvironmentCreate)
 
 	write("POST /assets", app.AssetCreate)

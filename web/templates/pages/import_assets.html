@@ -1,0 +1,157 @@
+{{/*
+  invctl — infrastructure inventory
+  Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+
+  Licensed under the GNU Affero General Public License, version 3 only —
+  no later version applies. See LICENSE for the full text.
+
+  SPDX-License-Identifier: AGPL-3.0-only
+*/}}
+{{define "content"}}
+<div class="crumbs">
+  <a href="/assets">assets</a>
+  <span class="sep">/</span><span>import</span>
+</div>
+
+<div class="page-head">
+  <div class="eyebrow">bulk import</div>
+  <h1>Import assets</h1>
+  <p class="lede">
+    A CSV creates assets. It never updates one: a row naming something that is
+    already here is reported, not applied. The whole file lands or none of it
+    does, so a fault on line 300 leaves the first 299 unwritten rather than
+    half-imported.
+  </p>
+</div>
+
+<div class="panel">
+  <div class="panel-body">
+    <form method="post" action="/import/assets" enctype="multipart/form-data">
+      <div class="field">
+        <label for="import-file">CSV file</label>
+        <input type="file" id="import-file" name="file" accept=".csv,text/csv" required>
+        <p class="hint">Up to 1 MiB, which is around fifteen thousand rows.</p>
+      </div>
+
+      <div class="field">
+        <label class="check">
+          <input type="checkbox" name="dry_run" value="1">
+          Preview only — report what would happen and write nothing
+        </label>
+      </div>
+
+      <div class="form-actions">
+        <button type="submit" class="btn btn-primary">Import</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+{{if .Problems}}
+<div class="panel panel-danger">
+  <div class="panel-head"><h2>That file was not imported</h2></div>
+  <div class="panel-body">
+    <ul class="problem-list">
+      {{range .Problems}}
+        <li>
+          {{if .Line}}<span class="mono">line {{.Line}}</span> — {{end}}
+          {{if .Field}}<strong>{{.Field}}</strong>: {{end}}{{.Message}}
+        </li>
+      {{end}}
+    </ul>
+  </div>
+</div>
+{{end}}
+
+{{with .Report}}
+  {{if .Problems}}
+  <div class="panel panel-danger">
+    <div class="panel-head">
+      <h2>Nothing was imported</h2>
+      <p class="panel-note">
+        {{pluralise (len .Problems) "problem" "problems"}} in
+        {{if .Filename}}<span class="mono">{{.Filename}}</span>{{else}}the file{{end}}.
+        The import is all or nothing, so the database is unchanged.
+      </p>
+    </div>
+    <div class="panel-body">
+      <table class="grid">
+        <thead>
+          <tr><th>Line</th><th>Path</th><th>Field</th><th>Problem</th></tr>
+        </thead>
+        <tbody>
+          {{range .Problems}}
+          <tr>
+            <td class="mono">{{if .Line}}{{.Line}}{{else}}—{{end}}</td>
+            <td class="mono">{{if .Path}}{{.Path}}{{else}}—{{end}}</td>
+            <td>{{if .Field}}{{.Field}}{{else}}—{{end}}</td>
+            <td>{{.Message}}</td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {{else}}
+  <div class="panel">
+    <div class="panel-head">
+      <h2>
+        {{if .DryRun}}Preview — nothing was written{{else}}Imported{{end}}
+      </h2>
+      <p class="panel-note">
+        {{if .DryRun}}
+          This ran the real import and then discarded it, so what is listed
+          below is exactly what a real run would create.
+        {{else}}
+          {{pluralise (len .Created) "asset" "assets"}} created from
+          {{if .Filename}}<span class="mono">{{.Filename}}</span>{{else}}the file{{end}},
+          each with its own audit entry.
+        {{end}}
+      </p>
+    </div>
+    <div class="panel-body">
+      {{if .Created}}
+      <ul class="path-list">
+        {{range .Created}}<li class="mono">{{.}}</li>{{end}}
+      </ul>
+      {{else}}
+      <p class="empty">The file had no rows to create.</p>
+      {{end}}
+    </div>
+  </div>
+  {{end}}
+{{end}}
+
+<div class="panel">
+  <div class="panel-head"><h2>File format</h2></div>
+  <div class="panel-body">
+    <p class="hint">
+      The first line is a header naming the columns; their order does not
+      matter. A column that is not on this list is refused rather than ignored,
+      so a misspelling cannot silently drop the values it carried.
+    </p>
+    <table class="grid">
+      <thead><tr><th>Column</th><th></th><th>Meaning</th></tr></thead>
+      <tbody>
+        {{range .Columns}}
+        <tr>
+          <td class="mono">{{.Name}}</td>
+          <td>{{if .Required}}<span class="pill pill-down">required</span>{{end}}</td>
+          <td>{{.Note}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+
+    <p class="hint">An asset is identified by its path, so this file is valid:</p>
+<pre class="code-sample">parent,name,kind
+,dc-a,site
+dc-a,rack-1,rack
+dc-a/rack-1,esx-01,hypervisor</pre>
+    <p class="hint">
+      Rows may appear in any order — a row whose parent is created further down
+      the file still resolves.
+    </p>
+  </div>
+</div>
+{{end}}

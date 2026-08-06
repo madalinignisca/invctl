@@ -52,6 +52,10 @@
 {{template "asset_table" .}}
 
 {{if .CanWrite}}
+  <p class="hint" style="margin-top:12px">
+    Adding many at once? <a href="/import/assets">Import a CSV</a> — it creates
+    the whole file or none of it, and previews first if you ask.
+  </p>
   {{/* Teams and Roles come from .FormData, not from the page: assetListPage
        has no such fields, and html/template resolves a missing dict key to the
        zero value without erroring — so omitting them made {{range .Teams}}

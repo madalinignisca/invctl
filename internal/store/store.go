@@ -86,6 +86,17 @@ func (t *tx) get(ctx context.Context, dest any, query string, args ...any) error
 	return t.tx.GetContext(ctx, dest, t.rebind(query), args...)
 }
 
+// selectAll reads many rows inside the transaction.
+//
+// Inside it, not through s.read, and the difference matters: the reader pool is
+// a separate connection that cannot see this transaction's uncommitted writes.
+// A bulk import resolves each row's parent against assets earlier rows just
+// created, so reading from outside would miss exactly the rows the resolution
+// depends on.
+func (t *tx) selectAll(ctx context.Context, dest any, query string, args ...any) error {
+	return t.tx.SelectContext(ctx, dest, t.rebind(query), args...)
+}
+
 // log writes the audit row. Callers pass a pre-rendered JSON diff.
 func (t *tx) log(ctx context.Context, entityType, entityID, action, diff string) error {
 	_, err := t.exec(ctx,
