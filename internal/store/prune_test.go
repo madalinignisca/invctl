@@ -849,9 +849,14 @@ func goStringLiterals(t *testing.T, path string) []string {
 	return out
 }
 
-// stripSQLComments removes `--` comments so a migration explaining a rule is
-// not read as breaking it.
+// stripSQLComments removes comments so a migration explaining a rule is not
+// read as breaking it.
+//
+// Both forms. `--` is what this codebase writes, but a rule explained in a
+// `/* */` block is doing the same job, and a guard that flagged the explanation
+// is a guard somebody switches off.
 func stripSQLComments(sql string) string {
+	sql = sqlBlockComment.ReplaceAllString(sql, " ")
 	lines := strings.Split(sql, "\n")
 	for i, line := range lines {
 		if idx := strings.Index(line, "--"); idx >= 0 {

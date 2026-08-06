@@ -8,7 +8,8 @@
 
 package domain
 
-// Optimistic concurrency.
+// VersionField is the name of the optimistic-concurrency token, in the database
+// and in the form that carries it back.
 //
 // Every entity that can be updated carries a RowVersion: an integer the store
 // increments on each write, and compares against the value the caller was

@@ -71,7 +71,6 @@ func NewInterface(id, assetID, name, formFactor string) (*Interface, error) {
 	return i, nil
 }
 
-// SetMAC normalizes and assigns a MAC address.
 // Validate checks a port against its business rules.
 //
 // SEPARATE FROM THE CONSTRUCTOR so an update runs the same rules. The checks
@@ -102,6 +101,7 @@ func (i *Interface) Validate() error {
 	return ve.OrNil()
 }
 
+// SetMAC normalises and assigns a MAC address.
 func (i *Interface) SetMAC(mac string) error {
 	if mac == "" {
 		i.MAC = nil

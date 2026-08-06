@@ -45,6 +45,10 @@ var exempt = map[string]string{
 // something that is the same in every other file. So it is a test.
 func TestEverySourceFileCarriesTheLicence(t *testing.T) {
 	root := repoRoot(t)
+	// The only variable is root, which repoRoot derived by walking up from the
+	// test's own working directory to the go.mod above it. Nothing here comes
+	// from a request, a flag or an environment variable.
+	//nolint:gosec // G204: fixed argv; the single variable is the repository root
 	out, err := exec.Command("git", "-C", root, "ls-files").Output()
 	if err != nil {
 		t.Fatalf("listing tracked files: %v", err)
