@@ -269,7 +269,16 @@
   {{end}}
   {{if .CanWrite}}
   <div class="panel-body" style="border-top:1px solid var(--line-soft)">
-    {{template "dependency_form" .DependencyForm}}
+    {{/* Behind a disclosure: the panel is a RECORD by default and a form on
+         request. Sitting open between the table and the next panel, the form
+         read as part of the data — on a screenshot for a client deck there was
+         nothing to say which rows were declared and which were empty inputs. */}}
+    <details>
+      <summary style="cursor:pointer;color:var(--muted)">Add a dependency</summary>
+      <div style="margin-top:12px">
+        {{template "dependency_form" .DependencyForm}}
+      </div>
+    </details>
   </div>
   {{end}}
 </div>

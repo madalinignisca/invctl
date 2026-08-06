@@ -461,7 +461,18 @@ func notANumber(field string) map[string]string {
 	return map[string]string{field: "must be a whole number"}
 }
 
-func queryInt(r *http.Request, key string, fallback int) int {
+// queryInt reads a whole number from the query string, clamped to a range.
+//
+// CLAMPED RATHER THAN REFUSED, unlike a submitted form field. A query
+// parameter is part of a URL somebody may have bookmarked, pasted into a
+// ticket or shortened; answering a stale link with 422 helps nobody, and these
+// values only ever choose how much of a report to show. So an out-of-range
+// horizon becomes the nearest sensible one instead of being silently dropped
+// to the default — which is what it did before, so ?months=-5 and ?months=6
+// produced the same page with no way to tell them apart.
+//
+// A form field is different and is refused: see intValue.
+func queryInt(r *http.Request, key string, fallback, min, max int) int {
 	v := strings.TrimSpace(r.URL.Query().Get(key))
 	if v == "" {
 		return fallback
@@ -469,6 +480,12 @@ func queryInt(r *http.Request, key string, fallback int) int {
 	n, err := strconv.Atoi(v)
 	if err != nil {
 		return fallback
+	}
+	if n < min {
+		return min
+	}
+	if n > max {
+		return max
 	}
 	return n
 }

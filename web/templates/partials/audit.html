@@ -128,6 +128,12 @@
           {{with index .Errors "to"}}<div class="field-error">{{.}}</div>{{end}}
           <div class="field-hint">Both ends included, whole days, UTC.</div>
         </div>
+        {{/* A page link that would not parse says so here. Without a
+             rendering site the message went into a map and nowhere else,
+             which reads to the operator exactly like a page that
+             legitimately had nothing on it. */}}
+        {{with index .Errors "before"}}<div class="field"><div class="field-error">{{.}}</div></div>{{end}}
+        {{with index .Errors "after"}}<div class="field"><div class="field-error">{{.}}</div></div>{{end}}
         <div class="field" style="align-self:flex-end">
           <button class="btn btn-primary" type="submit">Apply</button>
           <a class="btn" href="/changes" hx-get="/changes" hx-target="#change-log" hx-swap="outerHTML" hx-push-url="true">Clear</a>
@@ -152,7 +158,44 @@
             <td class="mono" style="font-size:12px">{{.EntityType}}</td>
             <td><span class="pill {{if eq .Action "retire"}}pill-degraded{{else}}pill-muted{{end}}">{{.Action}}</span></td>
             <td>{{template "actor_cell" .}}</td>
-            <td class="mono" style="font-size:11.5px;color:var(--muted);max-width:640px;overflow-wrap:anywhere">{{.Diff}}</td>
+            {{/* Field rows, not the serialised payload. The audit trail is
+                 this product's strongest claim and this is the screen that
+                 demonstrates it, so it has to be scannable: one line per
+                 field, old on the left, new on the right. A create records
+                 every field and collapses behind a disclosure — otherwise one
+                 row of fourteen fields buries the update above it. */}}
+            <td style="max-width:640px">
+              {{with index $.Details .ID}}
+                {{if not .Parsed}}
+                  {{/* Kept visible on purpose: a screen that blanks what it
+                       could not read is worse than one that shows JSON. */}}
+                  <div class="mono" style="font-size:11.5px;color:var(--muted);overflow-wrap:anywhere">{{.Raw}}</div>
+                {{else if .Snapshot}}
+                  <details>
+                    <summary style="cursor:pointer;color:var(--muted);font-size:12px">
+                      created — {{pluralise (len .Fields) "field" "fields"}}
+                    </summary>
+                    <table class="diff-table">
+                      {{range .Fields}}
+                      <tr><td class="diff-field">{{.Field}}</td>
+                          <td class="diff-new">{{truncate .New 80}}</td></tr>
+                      {{end}}
+                    </table>
+                  </details>
+                {{else}}
+                  <table class="diff-table">
+                    {{range .Fields}}
+                    <tr>
+                      <td class="diff-field">{{.Field}}</td>
+                      <td class="diff-old" title="{{.Old}}">{{truncate .Old 40}}</td>
+                      <td class="diff-arrow">→</td>
+                      <td class="diff-new" title="{{.New}}">{{truncate .New 40}}</td>
+                    </tr>
+                    {{end}}
+                  </table>
+                {{end}}
+              {{end}}
+            </td>
           </tr>
           {{end}}
         </tbody>

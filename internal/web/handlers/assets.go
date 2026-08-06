@@ -698,7 +698,7 @@ func (a *App) AssetImpact(w http.ResponseWriter, r *http.Request) {
 			http.StatusUnprocessableEntity)
 		return
 	}
-	window := queryInt(r, "window", 180)
+	window := queryInt(r, "window", 180, 1, 3650)
 
 	assets := make([]impactAsset, 0, len(ids))
 	for i, id := range ids {

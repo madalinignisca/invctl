@@ -91,6 +91,13 @@ func newHarness(t *testing.T) *harness {
 	return newHarnessWith(t, testAgentCredentials())
 }
 
+// newSecureHarness is the same application declaring itself to be behind TLS,
+// which is the only thing that turns HSTS on.
+func newSecureHarness(t *testing.T) *harness {
+	t.Helper()
+	return newHarnessSecure(t, testAgentCredentials(), true)
+}
+
 // newHarnessWithoutAgents builds the same deployment with no monitoring
 // credentials configured, which mounts no machine-facing route and registers no
 // CSRF exemption.
@@ -100,6 +107,10 @@ func newHarnessWithoutAgents(t *testing.T) *harness {
 }
 
 func newHarnessWith(t *testing.T, creds []config.AgentCredential) *harness {
+	return newHarnessSecure(t, creds, false)
+}
+
+func newHarnessSecure(t *testing.T, creds []config.AgentCredential, secure bool) *harness {
 	t.Helper()
 
 	dsn := "file:" + filepath.Join(t.TempDir(), "web.db")
@@ -153,7 +164,7 @@ func newHarnessWith(t *testing.T, creds []config.AgentCredential) *harness {
 		t.Fatalf("parsing templates: %v", err)
 	}
 
-	cfg := &config.Config{AdminUsers: []string{"admin"}, AuthLocal: true}
+	cfg := &config.Config{AdminUsers: []string{"admin"}, AuthLocal: true, SecureCookies: secure}
 	authz := auth.NewAuthorizer(cfg.AdminUsers)
 
 	app := &handlers.App{
@@ -1485,4 +1496,43 @@ func TestVocabularyValidationRerendersTheForm(t *testing.T) {
 	if !strings.Contains(page, "rent") {
 		t.Error("the re-rendered form lost the code that was typed")
 	}
+}
+
+// HSTS follows the deployment's own statement that it is behind TLS.
+//
+// Sent unconditionally it would be a lie from a development box and, worse, a
+// year-long self-inflicted outage on any host that later has to serve plain
+// HTTP. INV_SECURE_COOKIES already means "this is behind TLS", so it is the
+// same switch rather than a second one that can disagree with the first.
+func TestHSTSFollowsTheTLSDeclaration(t *testing.T) {
+	t.Run("absent when the deployment is not declared HTTPS", func(t *testing.T) {
+		h := newHarness(t)
+		resp := h.get("/login", false)
+		resp.Body.Close()
+		if got := resp.Header.Get("Strict-Transport-Security"); got != "" {
+			t.Errorf("HSTS sent over plain HTTP: %q", got)
+		}
+	})
+
+	t.Run("present when it is", func(t *testing.T) {
+		h := newSecureHarness(t)
+		resp := h.get("/login", false)
+		resp.Body.Close()
+		got := resp.Header.Get("Strict-Transport-Security")
+		if !strings.Contains(got, "max-age=31536000") {
+			t.Errorf("HSTS = %q, want a year", got)
+		}
+		if !strings.Contains(got, "includeSubDomains") {
+			t.Errorf("HSTS = %q, want includeSubDomains", got)
+		}
+	})
+
+	t.Run("a feature this app never uses is denied to anything injected", func(t *testing.T) {
+		h := newHarness(t)
+		resp := h.get("/login", false)
+		resp.Body.Close()
+		if got := resp.Header.Get("Permissions-Policy"); !strings.Contains(got, "camera=()") {
+			t.Errorf("Permissions-Policy = %q", got)
+		}
+	})
 }

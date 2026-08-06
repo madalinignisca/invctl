@@ -87,6 +87,14 @@ func ParseChangeCursor(v string) (ChangeCursor, bool) {
 	if !ok || at == "" || id == "" {
 		return ChangeCursor{}, false
 	}
+	// THE TIMESTAMP HAS TO BE ONE. Checking only for a space accepted
+	// "notatime <uuid>", which then went into a WHERE clause comparing
+	// lexicographically against RFC3339 text -- so it did not error, it just
+	// silently selected a window nobody asked for. An external review found it
+	// by typing exactly that.
+	if _, err := domain.ParseTime(at); err != nil {
+		return ChangeCursor{}, false
+	}
 	return ChangeCursor{At: at, ID: id}, true
 }
 

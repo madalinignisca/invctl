@@ -238,7 +238,7 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	// log exists for.
 	return middleware.Chain(mux,
 		middleware.Recover,
-		middleware.SecurityHeaders,
+		middleware.SecurityHeaders(app.Config.SecureCookies),
 		// Before anything reads a body. CSRF parses the form to find its token,
 		// so a limit applied after it would already have lost the argument.
 		middleware.LimitBody,

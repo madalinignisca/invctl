@@ -300,9 +300,39 @@ func CSRF(secure bool, exempt ...ExactPath) func(http.Handler) http.Handler {
 // htmx and alpine are vendored as files, and the only inline JavaScript is
 // Alpine's x-data attributes, which are attribute values rather than inline
 // script tags and so are not covered by script-src.
-func SecurityHeaders(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		h := w.Header()
+// HSTS IS CONDITIONAL, on the signal the deployment already gives.
+//
+// Strict-Transport-Security tells a browser never to use plain HTTP for this
+// host again, for a year. Sent from a development box on http://localhost it
+// is ignored by the browser but it is still a lie, and sent from a host that
+// later has to serve HTTP for any reason it is a self-inflicted outage with no
+// quick undo. INV_SECURE_COOKIES already means "this deployment is behind
+// TLS" — the same fact, so the same switch, rather than a second knob that can
+// disagree with the first.
+//
+// A reverse proxy may well set this too. Both is fine: the header is
+// idempotent, and the application asserting its own transport requirement does
+// not depend on remembering to configure the edge.
+func SecurityHeaders(overHTTPS bool) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			h := w.Header()
+			if overHTTPS {
+				h.Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+			}
+			// Deny-all: this application uses none of these, and a feature it
+			// does not use is a feature an injected script cannot reach for.
+			h.Set("Permissions-Policy",
+				"accelerometer=(), camera=(), geolocation=(), gyroscope=(), "+
+					"magnetometer=(), microphone=(), payment=(), usb=()")
+			securityHeaders(h)
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+func securityHeaders(h http.Header) {
+	{
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("X-Frame-Options", "DENY")
 		h.Set("Referrer-Policy", "same-origin")
@@ -315,8 +345,7 @@ func SecurityHeaders(next http.Handler) http.Handler {
 				"frame-ancestors 'none'; "+
 				"base-uri 'none'; "+
 				"form-action 'self'")
-		next.ServeHTTP(w, r)
-	})
+	}
 }
 
 // Chain applies middleware in the order given, so the first entry is the

@@ -11,7 +11,11 @@ package store
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"reflect"
+	"sort"
+	"strconv"
+	"strings"
 
 	"github.com/madalinignisca/invctl/internal/domain"
 )
@@ -168,4 +172,128 @@ func deref(v reflect.Value) any {
 		return nil
 	}
 	return v.Interface()
+}
+
+// ---------- reading a diff back ----------
+
+// FieldChange is one field's movement, rendered for a person.
+type FieldChange struct {
+	Field string
+	Old   string
+	New   string
+	// Added is true for a create, where there is no old value to show and
+	// printing an empty left-hand side would read as "it was blank".
+	Added bool
+}
+
+// ChangeDetail is a stored diff turned into something a human can scan.
+type ChangeDetail struct {
+	// Fields is one row per field, sorted so two entries for the same entity
+	// line up when read one after the other.
+	Fields []FieldChange
+	// Snapshot is true for a create entry, which records every field rather
+	// than a movement. A screen collapses it: "created, 14 fields", with the
+	// detail behind a disclosure.
+	Snapshot bool
+	// Raw is the stored text, kept so a diff this cannot parse is still
+	// readable rather than silently blank. An audit screen that hides what it
+	// failed to understand is worse than one that shows JSON.
+	Raw string
+	// Parsed is false when the text was not in either known shape.
+	Parsed bool
+}
+
+// ParseDiff turns a stored change_log diff into display rows.
+//
+// BESIDE THE WRITER ON PURPOSE. The two shapes below are produced by diffJSON
+// and snapshotJSON a few lines up; a parser living in the web layer would be
+// one refactor away from disagreeing with them silently, and the thing that
+// disagrees is the audit trail. TestADiffRoundTrips pins them together.
+//
+//	update:  {"name":{"old":"a","new":"b"}}
+//	create:  {"new":{"name":"a","tier":2}}
+func ParseDiff(raw string) ChangeDetail {
+	out := ChangeDetail{Raw: raw}
+	if strings.TrimSpace(raw) == "" {
+		out.Parsed = true
+		return out
+	}
+
+	var generic map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(raw), &generic); err != nil {
+		return out
+	}
+
+	// A create carries exactly one key, "new", holding the whole row.
+	if snapshot, ok := generic["new"]; ok && len(generic) == 1 {
+		var fields map[string]any
+		if err := json.Unmarshal(snapshot, &fields); err != nil {
+			return out
+		}
+		out.Snapshot, out.Parsed = true, true
+		for _, name := range sortedKeys(fields) {
+			out.Fields = append(out.Fields, FieldChange{
+				Field: name, New: renderValue(fields[name]), Added: true,
+			})
+		}
+		return out
+	}
+
+	for _, name := range sortedKeys(generic) {
+		var move struct {
+			Old any `json:"old"`
+			New any `json:"new"`
+		}
+		if err := json.Unmarshal(generic[name], &move); err != nil {
+			// One unreadable field must not blank the whole entry.
+			return out
+		}
+		out.Fields = append(out.Fields, FieldChange{
+			Field: name, Old: renderValue(move.Old), New: renderValue(move.New),
+		})
+	}
+	out.Parsed = len(out.Fields) > 0
+	return out
+}
+
+// renderValue prints one JSON value the way an operator reads it.
+//
+// A missing value is an em dash rather than an empty cell, because "" and "not
+// set" are different facts and a blank cell reads as neither.
+func renderValue(v any) string {
+	switch value := v.(type) {
+	case nil:
+		return "—"
+	case string:
+		if value == "" {
+			return `""`
+		}
+		return value
+	case bool:
+		if value {
+			return "true"
+		}
+		return "false"
+	case float64:
+		// Whole numbers print without the .0 that JSON decoding introduces.
+		if value == math.Trunc(value) && math.Abs(value) < 1e15 {
+			return strconv.FormatInt(int64(value), 10)
+		}
+		return strconv.FormatFloat(value, 'f', -1, 64)
+	default:
+		encoded, err := json.Marshal(value)
+		if err != nil {
+			return fmt.Sprintf("%v", value)
+		}
+		return string(encoded)
+	}
+}
+
+func sortedKeys[V any](m map[string]V) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }

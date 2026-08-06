@@ -185,6 +185,8 @@ type changesPage struct {
 	// Errors carries a bad date back to the form. A filter is a form, and a
 	// form that silently ignores what was typed is worse than one that refuses.
 	Errors map[string]string
+	// Details is each entry's diff, parsed, keyed by entry id.
+	Details map[string]store.ChangeDetail
 }
 
 // changesFilterForm is what the operator typed, echoed back so the controls
@@ -224,10 +226,24 @@ func (a *App) ChangeLog(w http.ResponseWriter, r *http.Request) {
 	} else if form.To != "" {
 		errors["to"] = "use a date like 2026-07-28"
 	}
-	if cursor, ok := store.ParseChangeCursor(q.Get("before")); ok {
-		filter.Before = &cursor
-	} else if cursor, ok := store.ParseChangeCursor(q.Get("after")); ok {
-		filter.After = &cursor
+	// A cursor that will not parse is REFUSED, not quietly dropped. Falling
+	// back to page one looks identical to reaching page one legitimately, so a
+	// paginated export against a mistyped cursor comes back short and nothing
+	// says so. The date filter above already refuses; this now matches it.
+	for _, side := range []struct {
+		key   string
+		field **store.ChangeCursor
+	}{{"before", &filter.Before}, {"after", &filter.After}} {
+		raw := q.Get(side.key)
+		if raw == "" {
+			continue
+		}
+		cursor, ok := store.ParseChangeCursor(raw)
+		if !ok {
+			errors[side.key] = "that page link is not readable — start from the newest again"
+			continue
+		}
+		*side.field = &cursor
 	}
 
 	status := http.StatusOK
@@ -249,6 +265,7 @@ func (a *App) ChangeLog(w http.ResponseWriter, r *http.Request) {
 	data := changesPage{
 		Base:        a.base(r, "Change log", "changes"),
 		Page:        page,
+		Details:     changeDetails(page.Changes),
 		EntityTypes: store.ChangeEntityTypes(),
 		Filter:      form,
 		Errors:      errors,
@@ -262,6 +279,20 @@ func (a *App) ChangeLog(w http.ResponseWriter, r *http.Request) {
 	// The pager and the filter both swap the same wrapper, so following a page
 	// link does not rebuild the shell around it.
 	a.Render.Respond(w, r, status, "changes", "change_log", data)
+}
+
+// changeDetails parses each entry's stored diff once, keyed by entry id, so
+// the template renders field rows rather than the serialised payload.
+//
+// Parsed here rather than in the template because a template cannot report a
+// failure: ParseDiff keeps the raw text when it cannot read a shape, and the
+// screen shows that instead of a blank cell.
+func changeDetails(changes []domain.ChangeLog) map[string]store.ChangeDetail {
+	out := make(map[string]store.ChangeDetail, len(changes))
+	for _, c := range changes {
+		out[c.ID] = store.ParseDiff(c.Diff)
+	}
+	return out
 }
 
 // changesURL builds a page link that carries the filter with it. Losing the
@@ -342,7 +373,7 @@ type expiryPage struct {
 // is a query parameter because a budget conversation and a next-sprint
 // conversation want different windows, and both are legitimate.
 func (a *App) ExpiryReport(w http.ResponseWriter, r *http.Request) {
-	months := queryInt(r, "months", store.ExpiryHorizonMonths)
+	months := queryInt(r, "months", store.ExpiryHorizonMonths, 1, 120)
 	if months < 1 || months > 120 {
 		months = store.ExpiryHorizonMonths
 	}

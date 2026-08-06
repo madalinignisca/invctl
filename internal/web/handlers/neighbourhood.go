@@ -193,7 +193,7 @@ func (a *App) AssetNeighbourhood(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	hops := clampHops(queryInt(r, "hops", store.NeighbourhoodDefaultHops))
+	hops := clampHops(queryInt(r, "hops", store.NeighbourhoodDefaultHops, 1, 10))
 	graph, err := a.Store.Neighbourhood(r.Context(), store.NeighbourhoodQuery{
 		AssetID: id, Hops: hops,
 	})

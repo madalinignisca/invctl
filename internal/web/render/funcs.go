@@ -30,6 +30,9 @@ func logError(err error) { slog.Error("render failed", "error", err) }
 func funcs() template.FuncMap {
 	return template.FuncMap{
 		"dict": dict,
+		// truncate keeps a long value readable in a dense table; the full text
+		// stays in a title attribute, so nothing is actually hidden.
+		"truncate": truncate,
 		// itoa exists so a number can be compared with, or fall back to, a
 		// submitted form value -- which is always a string.
 		"itoa":           strconv.Itoa,
@@ -382,6 +385,15 @@ func amountMinor(minor int64) string {
 		sign, minor = "-", -minor
 	}
 	return fmt.Sprintf("%s%d.%02d", sign, minor/100, minor%100)
+}
+
+// truncate shortens a value for a dense table, marking that it did so.
+func truncate(s string, max int) string {
+	runes := []rune(s)
+	if len(runes) <= max {
+		return s
+	}
+	return string(runes[:max-1]) + "…"
 }
 
 // groupThousands inserts a comma every three digits, from the right.

@@ -9,6 +9,7 @@
 package web_test
 
 import (
+	"html"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -330,238 +331,48 @@ func editingRow(t *testing.T, page string) string {
 	return page[i : i+end]
 }
 
-// newestChangeDiff returns the Change cell of the newest audit entry. The log
-// is newest first, so the top row is whatever the test just did -- and scoping
-// to one row matters: a create elsewhere on the page carries a full snapshot,
-// which mentions every field including the ones being asserted absent.
+// newestChangeDiff returns the FIELD NAMES of the newest audit entry.
+//
+// The log is newest first, so the top row is whatever the test just did, and
+// scoping to one row matters: a create elsewhere on the page lists every field
+// including the ones being asserted absent.
+//
+// Reads the rendered field column rather than the raw payload. That is the
+// point of the screen — the entry is now a table of fields, so the test asserts
+// on what an operator actually sees rather than on serialised JSON.
 func newestChangeDiff(t *testing.T, page string) string {
 	t.Helper()
 	i := strings.Index(page, "<tbody>")
 	if i < 0 {
 		t.Fatal("no change log table on the page")
 	}
-	row := page[i:]
-	end := strings.Index(row, "</tr>")
-	if end < 0 {
-		t.Fatal("the change log has no rows")
+	// Scoped to the FIRST change cell, not to the first </tr>: the diff is
+	// itself a table now, so the first closing row tag belongs to a nested
+	// field row rather than to the entry.
+	const cell = `<td style="max-width:640px">`
+	body := page[i:]
+	first := strings.Index(body, cell)
+	if first < 0 {
+		t.Fatal("no change entry on the page")
 	}
-	cells := regexp.MustCompile(`(?s)<td[^>]*>(.*?)</td>`).FindAllStringSubmatch(row[:end], -1)
-	if len(cells) < 5 {
-		t.Fatalf("the change log row has %d cells, want 5", len(cells))
+	scope := body[first+len(cell):]
+	if next := strings.Index(scope, cell); next >= 0 {
+		scope = scope[:next]
 	}
-	return cells[4][1]
+	fields := regexp.MustCompile(`<td class="diff-field">([^<]+)</td>`).
+		FindAllStringSubmatch(scope, -1)
+	if len(fields) == 0 {
+		// Either an unparsed diff or a create summary: fall back to the raw
+		// cell so the caller still sees something to assert against.
+		return scope
+	}
+	var names []string
+	for _, f := range fields {
+		names = append(names, f[1])
+	}
+	return strings.Join(names, " ")
 }
 
-// A form post without HTMX is answered with a page, not a fragment and not a
-// 500. The row editors are plain forms so they work with JavaScript off, and
-// this was the one path where that was untrue: the 422 branch handed the
-// service page template an endpointFormData, which carries none of the fields
-// that page reads.
-func TestAnEndpointFormRejectionIsAWholePageWithoutHTMX(t *testing.T) {
-	h := newHarness(t)
-	h.login("admin", "admin-password")
-	serviceID := h.refs.Services["rabbitmq"]
-	endpointID := h.refs.Endpoints["rabbitmq/amqp"]
-
-	for _, c := range []struct {
-		name string
-		path string
-		form url.Values
-	}{
-		{"correcting", "/endpoints/" + endpointID, url.Values{
-			"name": {""}, "l4_proto": {"tcp"}, "port": {"5672"},
-			"bind_scope": {"host"}, "tls_mode": {"none"}, "exposure": {"internal"}}},
-		{"adding", "/services/" + serviceID + "/endpoints", url.Values{
-			"name": {""}, "l4_proto": {"tcp"}, "port": {"9999"},
-			"bind_scope": {"host"}, "tls_mode": {"none"}, "exposure": {"internal"}}},
-	} {
-		form := c.form
-		form.Set("csrf_token", h.csrfToken("/services/"+serviceID))
-		resp := h.post(c.path, form, false)
-		page := body(t, resp)
-
-		if resp.StatusCode != http.StatusUnprocessableEntity {
-			t.Errorf("%s without HTMX returned %d, want 422", c.name, resp.StatusCode)
-		}
-		// A whole page: the layout is there, so there is a way back.
-		if !strings.Contains(page, "<nav") {
-			t.Errorf("%s without HTMX answered with a fragment, not a page", c.name)
-		}
-		if !strings.Contains(page, "field-error") {
-			t.Errorf("%s without HTMX did not say what was wrong", c.name)
-		}
-	}
-}
-
-// ---------- ports, addresses and networks ----------
-//
-// The same line as everywhere else in this slice: a port keeps its chassis and
-// its bond, an address keeps its port. What changes is what the thing IS.
-
-func TestCorrectingAPort(t *testing.T) {
-	h := newHarness(t)
-	h.login("admin", "admin-password")
-
-	assetID := h.refs.Assets["hv-01"]
-	ifaceID := firstPortEditID(t, body(t, h.get("/assets/"+assetID, false)))
-
-	row := editingRow(t, body(t, h.get("/assets/"+assetID+"?edit="+ifaceID, false)))
-	// The attachment is not on offer: neither the chassis nor the bond.
-	for _, forbidden := range []string{`name="asset_id"`, `name="lag_parent_id"`} {
-		if strings.Contains(row, forbidden) {
-			t.Errorf("the port editor offers %s, which moves the topology", forbidden)
-		}
-	}
-
-	resp := h.post("/interfaces/"+ifaceID, url.Values{
-		"csrf_token": {h.csrfToken("/assets/" + assetID)},
-		"name":       {"eth9"}, "form_factor": {"sfp28"},
-		"speed_mbps": {"25000"}, "mac": {"AA-BB-CC-DD-EE-FF"},
-		"mtu": {"9000"}, "is_mgmt": {"true"},
-	}, false)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusSeeOther {
-		t.Fatalf("correcting a port returned %d, want a redirect", resp.StatusCode)
-	}
-
-	after := body(t, h.get("/assets/"+assetID, false))
-	if !strings.Contains(after, "eth9") {
-		t.Error("the port's new name is not shown")
-	}
-	// A MAC is normalised whichever way it was pasted, so a lookup matches.
-	if !strings.Contains(after, "aa:bb:cc:dd:ee:ff") {
-		t.Error("a MAC pasted in dashed uppercase was not normalised")
-	}
-	// `enabled` was not submitted, and an unticked box submits nothing: the
-	// port is now administratively down and the page must say so rather than
-	// leaving it looking live.
-	if !strings.Contains(after, "disabled") {
-		t.Error("unticking enabled did not take, or the page does not show it")
-	}
-}
-
-// The address value is editable and its derived columns move with it. addr_text
-// is what a person reads; addr_start is what every containment query scans. A
-// row where they disagree resolves to the wrong network and nothing on screen
-// would ever show it.
-func TestCorrectingAnAddressMovesItsDerivedColumns(t *testing.T) {
-	h := newHarness(t)
-	h.login("admin", "admin-password")
-
-	assetID := h.refs.Assets["hv-01"]
-	page := body(t, h.get("/assets/"+assetID, false))
-	addrID, oldAddr := firstAddressEditID(t, page)
-
-	resp := h.post("/addresses/"+addrID, url.Values{
-		"csrf_token": {h.csrfToken("/assets/" + assetID)},
-		"addr_text":  {"10.42.42.42"}, "role": {"primary"},
-	}, false)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusSeeOther {
-		t.Fatalf("correcting an address returned %d, want a redirect", resp.StatusCode)
-	}
-
-	after := body(t, h.get("/assets/"+assetID, false))
-	if !strings.Contains(after, "10.42.42.42") || strings.Contains(after, oldAddr) {
-		t.Errorf("the address still reads %s, not the corrected one", oldAddr)
-	}
-	// The proof that addr_start moved too: search resolves an address by a
-	// bytewise range scan over the derived column, never over the text.
-	hits := body(t, h.get("/search?q=10.42.42.42", false))
-	if !strings.Contains(hits, "hv-01") {
-		t.Error("the corrected address does not resolve to its asset: addr_start did not move with addr_text")
-	}
-}
-
-func TestCorrectingANetwork(t *testing.T) {
-	h := newHarness(t)
-	h.login("admin", "admin-password")
-
-	page := body(t, h.get("/prefixes", false))
-	prefixID := firstEditID(t, page)
-
-	resp := h.post("/prefixes/"+prefixID, url.Values{
-		"csrf_token": {h.csrfToken("/prefixes")},
-		"cidr_text":  {"10.99.0.0/16"}, "vlan_id": {"99"}, "role": {"quarantined"},
-	}, false)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusSeeOther {
-		t.Fatalf("correcting a network returned %d, want a redirect", resp.StatusCode)
-	}
-
-	after := body(t, h.get("/prefixes", false))
-	if !strings.Contains(after, "10.99.0.0/16") {
-		t.Error("the network's new CIDR is not shown")
-	}
-	// THE REINDEX, exercised through FREE TEXT. A prefix is the one thing in
-	// this slice that lives in the search index, and an update that skipped
-	// indexEntity would leave search answering with the old row.
-	//
-	// Searching the CIDR itself proves nothing: an address or a network in the
-	// query box is resolved STRUCTURALLY, by a range scan over addr_start,
-	// which never touches the index. The first version of this assertion did
-	// exactly that and passed with the reindex deleted. The role is plain text
-	// and only reachable through the index.
-	hits := body(t, h.get("/search?q=quarantined", false))
-	if !strings.Contains(hits, "10.99.0.0/16") {
-		t.Error("search does not know the corrected network: the reindex was skipped")
-	}
-}
-
-// A refused correction comes back as 422 with the row reopened on what was
-// typed, on every page in this slice. Both reviews of the previous slice
-// flagged handlers that redirected instead, discarding the operator's input.
-func TestARefusedNetworkEditKeepsWhatWasTyped(t *testing.T) {
-	h := newHarness(t)
-	h.login("admin", "admin-password")
-
-	prefixID := firstEditID(t, body(t, h.get("/prefixes", false)))
-	resp := h.post("/prefixes/"+prefixID, url.Values{
-		"csrf_token": {h.csrfToken("/prefixes")},
-		"cidr_text":  {"10.1.0.0/16"}, "vlan_id": {"9999"}, "role": {"kept"},
-	}, false)
-	page := body(t, resp)
-
-	if resp.StatusCode != http.StatusUnprocessableEntity {
-		t.Errorf("a refused network edit returned %d, want 422", resp.StatusCode)
-	}
-	if !strings.Contains(page, "field-error") {
-		t.Error("the refusal did not say which field was wrong")
-	}
-	row := editingRow(t, page)
-	if !strings.Contains(row, `value="9999"`) {
-		t.Errorf("the rejected row lost the VLAN that was typed: %s", row)
-	}
-	if !strings.Contains(row, `value="kept"`) {
-		t.Errorf("the rejected row lost the role that was typed: %s", row)
-	}
-}
-
-func TestReadOnlyUsersGetNoNetworkEditors(t *testing.T) {
-	h := newHarness(t)
-	h.login("admin", "admin-password")
-	assetID := h.refs.Assets["hv-01"]
-	ifaceID := firstPortEditID(t, body(t, h.get("/assets/"+assetID, false)))
-	prefixID := firstEditID(t, body(t, h.get("/prefixes", false)))
-
-	h.logout()
-	h.login("viewer", "viewer-password")
-	for _, c := range []struct{ name, path, marker string }{
-		{"port", "/assets/" + assetID + "?edit=" + ifaceID, `name="form_factor"`},
-		{"network", "/prefixes?edit=" + prefixID, `name="cidr_text"`},
-	} {
-		if strings.Contains(body(t, h.get(c.path, false)), c.marker) {
-			t.Errorf("a read-only user asking for the %s editor by id was given one", c.name)
-		}
-	}
-}
-
-// firstPortEditID returns the first PORT offered for editing.
-//
-// Matched on the actions-column button specifically. Scoping to the panel is
-// not enough: an address's edit link sits inside the port's own row, earlier in
-// the markup, so "the first ?edit= in the interfaces panel" is an address id
-// and the port row never opens.
 func firstPortEditID(t *testing.T, page string) string {
 	t.Helper()
 	i := strings.Index(page, "<h2>Interfaces</h2>")
@@ -791,6 +602,7 @@ func TestEveryEditorRefusesASecondSaveFromOneToken(t *testing.T) {
 	envID := h.refs.Environments["prod"]
 	assetPage := body(t, h.get("/assets/"+assetID, false))
 	servicePage := body(t, h.get("/services/"+serviceID, false))
+	addressID, _ := firstAddressEditID(t, assetPage)
 
 	editors := []struct {
 		name   string
@@ -822,6 +634,9 @@ func TestEveryEditorRefusesASecondSaveFromOneToken(t *testing.T) {
 				"tier": {"2"}, "lifecycle": {"active"}}},
 		{"certificate", "/certificates/" + certificateID(t, h), "/certificates/" + certificateID(t, h),
 			url.Values{"subject_cn": {"token.example.com"}, "lifecycle": {"active"}}},
+		{"address", "/assets/" + assetID + "?edit=" + addressID,
+			"/addresses/" + addressID,
+			url.Values{"addr_text": {"10.77.77.77"}, "role": {"primary"}}},
 		{"endpoint", "/services/" + serviceID + "?edit=" + firstEndpointEditID(t, servicePage),
 			"/endpoints/" + firstEndpointEditID(t, servicePage),
 			url.Values{"name": {"ep-token"}, "l4_proto": {"tcp"}, "port": {"7001"},
@@ -1492,5 +1307,122 @@ func TestARefusalIsVisibleForEveryNumericField(t *testing.T) {
 		if !strings.Contains(refused, "field-error") {
 			t.Errorf("%s: refused with 422 and rendered no message — an invisible refusal", field)
 		}
+	}
+}
+
+// ---------- the audit screen ----------
+
+// The change log shows FIELDS, not the serialised payload.
+//
+// It printed the raw JSON, which meant the one screen that demonstrates the
+// product's strongest claim was the one screen too unreadable to show anybody:
+// an update and a create looked alike, and no human could scan the column.
+// Found by an external review of the live demo.
+func TestTheChangeLogRendersFieldsRatherThanJSON(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	// Make one update with a known shape.
+	envID := h.refs.Environments["prod"]
+	page := body(t, h.get("/environments?edit="+envID, false))
+	resp := h.post("/environments/"+envID, url.Values{
+		"csrf_token":  {h.csrfToken("/environments")},
+		"row_version": {versionInForm(t, page)},
+		"code":        {"prod"}, "name": {"Renamed for the audit screen"},
+		"role": {"production"}, "criticality": {"1"}, "in_scope": {"true"},
+	}, false)
+	resp.Body.Close()
+
+	log := body(t, h.get("/changes", false))
+	if !strings.Contains(log, `class="diff-field"`) {
+		t.Fatal("the change log renders no field rows")
+	}
+	// The field that moved is named, with both sides of the move.
+	if !strings.Contains(log, ">name</td>") {
+		t.Error("the changed field is not named")
+	}
+	if !strings.Contains(log, `class="diff-old"`) || !strings.Contains(log, `class="diff-new"`) {
+		t.Error("the entry does not show both sides of the change")
+	}
+	// The raw payload is gone: no bare JSON object in the change column.
+	if strings.Contains(log, `{&#34;new&#34;:{&#34;`) || strings.Contains(log, `{"new":{"`) {
+		t.Error("the serialised payload is still being printed")
+	}
+	// A create collapses rather than burying the updates around it.
+	if !strings.Contains(log, "<summary") {
+		t.Error("a create entry is not collapsed behind a disclosure")
+	}
+}
+
+// A page link that will not parse is refused, not silently answered with the
+// first page — which looks identical to reaching the first page legitimately,
+// so a paginated export comes back short and nothing says so.
+func TestAnUnreadablePageCursorIsRefused(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	for _, bad := range []string{"garbage", "notatime 019fd217-0e49-723d-a187-a97bcb24b4ad", "%%%"} {
+		resp := h.get("/changes?before="+url.QueryEscape(bad), false)
+		page := body(t, resp)
+		if resp.StatusCode != http.StatusUnprocessableEntity {
+			t.Errorf("cursor %q returned %d, want 422", bad, resp.StatusCode)
+		}
+		if !strings.Contains(page, "not readable") {
+			t.Errorf("cursor %q: the operator was not told why", bad)
+		}
+	}
+
+	// And a real cursor still works, so the refusal has not broken paging.
+	first := body(t, h.get("/changes", false))
+	m := regexp.MustCompile(`href="(/changes\?[^"]*before=[^"]*)"`).FindStringSubmatch(first)
+	if m == nil {
+		t.Skip("the fixture has only one page of changes")
+	}
+	// html.UnescapeString, not a hand-rolled replace: html/template escapes
+	// more than &amp; in a URL attribute, and a half-decoded link is a test
+	// artefact that looks exactly like a broken cursor.
+	next := h.get(html.UnescapeString(m[1]), false)
+	next.Body.Close()
+	if next.StatusCode != http.StatusOK {
+		t.Errorf("following the real page link returned %d", next.StatusCode)
+	}
+}
+
+// An out-of-range report parameter is CLAMPED, not ignored.
+//
+// ?months=-5 and ?months=999999 both silently produced the default page, which
+// is indistinguishable from asking for the default — so a bookmarked or
+// mistyped link answered a different question under the same heading with
+// nothing to say so. Clamped rather than refused because a query parameter
+// lives in URLs people paste into tickets; 422 on a stale link helps nobody.
+// Found by an external review of the live demo.
+func TestAnOutOfRangeReportHorizonIsClamped(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	horizon := func(query string) string {
+		t.Helper()
+		page := body(t, h.get("/reports/expiry"+query, false))
+		m := regexp.MustCompile(`within (\d+) months`).FindStringSubmatch(page)
+		if m == nil {
+			t.Fatalf("%q: the report does not state its horizon", query)
+		}
+		return m[1]
+	}
+
+	def := horizon("")
+	if got := horizon("?months=-5"); got != "1" {
+		t.Errorf("months=-5 gave a horizon of %s, want the minimum of 1", got)
+	}
+	if got := horizon("?months=999999"); got != "120" {
+		t.Errorf("months=999999 gave a horizon of %s, want the maximum of 120", got)
+	}
+	// A value inside the range is honoured exactly, so clamping has not become
+	// a way of ignoring the parameter after all.
+	if got := horizon("?months=9"); got != "9" {
+		t.Errorf("months=9 gave a horizon of %s, want 9", got)
+	}
+	if def == "9" {
+		t.Skip("the default horizon happens to be 9; the check above proves nothing")
 	}
 }

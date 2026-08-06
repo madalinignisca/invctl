@@ -35,7 +35,7 @@ func (a *App) ServiceList(w http.ResponseWriter, r *http.Request) {
 		Kind:          q.Get("kind"),
 		Availability:  q.Get("availability"),
 		ProjectID:     q.Get("project"),
-		Tier:          queryInt(r, "tier", 0),
+		Tier:          queryInt(r, "tier", 0, 0, 4),
 		Query:         q.Get("q"),
 	}
 

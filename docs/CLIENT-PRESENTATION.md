@@ -130,12 +130,18 @@ Infrastructure inventory and impact analysis
 - Every asset, service, certificate and project can carry a **team** and a **role**
 - **No individuals are stored.** Teams and roles, never people
 - Contact is a *reference* — a group address, a rota link — never a person's details
-- Audit records an opaque user id, not a name or an email
+- The audit **row** stores an opaque id; the **screen** resolves it to a display name when it renders
 
-> **Speaker note:** This is a GDPR answer, and worth saying in those words if the
-> client is EU-based. "Who do I call" is answered by a team and a role, so the
-> record survives somebody leaving the company and there is no personal data to
-> erase. The audit trail can be kept indefinitely with no retention argument.
+> **Speaker note:** This is a GDPR answer, and worth saying in those words if
+> the client is EU-based. "Who do I call" is answered by a team and a role, so
+> the record survives somebody leaving the company.
+>
+> Be precise about the audit trail, because a reviewer will open the screen and
+> see a name: the append-only row holds an **opaque id**, and the name is
+> resolved by joining the live user record at render time. That is what makes
+> erasure work — scrub the user record and the log keeps every entry and its
+> integrity, and simply stops resolving to a person. Saying "the log contains no
+> names" while the screen shows one is the version that loses you the room.
 
 ---
 
