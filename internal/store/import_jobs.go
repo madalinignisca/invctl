@@ -136,16 +136,20 @@ func (s *SQLStore) MarkImportRunning(ctx context.Context, id string) error {
 	return err
 }
 
-// ImportProgress records how far through the FILE a running job is.
+// Progress is DELIBERATELY NOT WRITTEN HERE, and this comment is the headstone
+// of a bug worth remembering.
 //
-// Written on its own connection outside the import's transaction, because a
-// progress figure inside it would be invisible until the commit -- which is
-// exactly when it stops being useful.
-func (s *SQLStore) ImportProgress(ctx context.Context, id string, done int) error {
-	_, err := s.db.Writer.ExecContext(ctx, s.db.Rebind(
-		`UPDATE import_job SET rows_done = ? WHERE id = ?`), done, id)
-	return err
-}
+// There was an ImportProgress method that updated rows_done on db.Writer while
+// the import ran, with a comment explaining that it wrote "on its own
+// connection outside the import's transaction". That was false: the SQLite
+// writer pool is ONE connection, held by the import for its whole duration, so
+// the progress update queued for a connection that could not be released until
+// the thing it was reporting on had finished. The first real import deadlocked
+// and took every other write in the process with it.
+//
+// A running job's progress now lives in memory in the runner and is read from
+// there. This table records only what survives a restart -- queued, running,
+// and the outcome -- and rows_done is set once, at the end.
 
 // FinishImportJob records the outcome.
 func (s *SQLStore) FinishImportJob(ctx context.Context, id, status string, created int,

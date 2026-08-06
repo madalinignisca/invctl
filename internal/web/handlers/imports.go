@@ -284,6 +284,13 @@ func (a *App) ImportJobPage(w http.ResponseWriter, r *http.Request) {
 		a.handleStoreError(w, r, err)
 		return
 	}
+	// The live figure comes from the runner, not the row: a running import
+	// holds the single SQLite writer, so nothing can update the row until it is
+	// finished. See importRunner.
+	if n, running := a.importer().progressOf(job.ID); running {
+		job.RowsDone = n
+	}
+
 	// Respond, not Page: HTMX asks for the fragment on each poll and a browser
 	// with JavaScript off gets the whole page and a meta refresh. Both work.
 	a.Render.Respond(w, r, http.StatusOK, "import_job", "import_job_status", importJobPage{

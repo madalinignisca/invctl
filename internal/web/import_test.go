@@ -11,8 +11,10 @@ package web_test
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -306,5 +308,53 @@ func TestAJobInterruptedByARestartSaysSoRatherThanPollingForever(t *testing.T) {
 		t.Errorf("the page does not say the interrupted import wrote nothing. It was one "+
 			"transaction and it went with the process, so there is no half-import to "+
 			"reason about:\n%s", page)
+	}
+}
+
+// TestAnImportInProgressDoesNotWedgeEveryOtherWrite is a regression test for a
+// deadlock I shipped and found on the live demo.
+//
+// The first version wrote progress to db.Writer while the import ran. The
+// SQLite writer pool is ONE connection, held by the import's transaction, so
+// the progress update queued for a connection that could only be released by
+// the thing it was reporting on. The import never finished and every other
+// write in the process queued behind it until a restart.
+//
+// So: start an import, and while it is running, do an ordinary write through
+// the ordinary form. If that ever hangs again, this fails instead of a demo
+// doing it.
+func TestAnImportInProgressDoesNotWedgeEveryOtherWrite(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	// Big enough to still be running when the next request arrives.
+	var file strings.Builder
+	file.WriteString("parent,name,kind\n,wedge-dc,site\n")
+	for i := 0; i < 800; i++ {
+		fmt.Fprintf(&file, "wedge-dc,wedge-%04d,rack\n", i)
+	}
+	resp := h.upload(file.String(), false)
+	resp.Body.Close()
+
+	// An unrelated write, immediately, through the real form. It must not hang.
+	done := make(chan int, 1)
+	go func() {
+		r := h.post("/teams", url.Values{
+			"csrf_token": {h.csrfToken("/teams")},
+			"code":       {"wedge-test"}, "name": {"Wedge Test"},
+		}, false)
+		r.Body.Close()
+		done <- r.StatusCode
+	}()
+
+	select {
+	case code := <-done:
+		if code >= 500 {
+			t.Errorf("an ordinary write during an import returned %d", code)
+		}
+	case <-time.After(45 * time.Second):
+		t.Fatal("an ordinary write hung while an import was running. The import holds " +
+			"the single SQLite writer, so nothing it does may itself need that " +
+			"connection -- which is exactly how the progress update deadlocked.")
 	}
 }

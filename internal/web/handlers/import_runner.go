@@ -12,6 +12,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/madalinignisca/invctl/internal/domain"
@@ -44,10 +45,24 @@ type importWork struct {
 	actor domain.Actor
 }
 
-// importRunner owns the queue and the single worker.
+// importRunner owns the queue, the single worker, and the live progress figures.
+//
+// PROGRESS IS IN MEMORY, NOT IN THE DATABASE, and that is not an optimisation.
+// The first version wrote rows_done as it went and deadlocked instantly: the
+// SQLite writer pool is one connection, the import's transaction holds it, and
+// the progress update queued for a connection that could only be released by
+// the thing it was reporting on. It took every other write in the process with
+// it until a restart.
+//
+// So the number a page shows while a job runs is read from here. It is lost if
+// the process dies -- which is correct, because a job that was running when the
+// process died is marked failed anyway and had written nothing.
 type importRunner struct {
 	store *store.SQLStore
 	queue chan importWork
+
+	mu   sync.Mutex
+	done map[string]int
 }
 
 // importQueueDepth is how many files may wait. Beyond it, submitting blocks the
@@ -56,7 +71,11 @@ type importRunner struct {
 const importQueueDepth = 16
 
 func newImportRunner(s *store.SQLStore) *importRunner {
-	r := &importRunner{store: s, queue: make(chan importWork, importQueueDepth)}
+	r := &importRunner{
+		store: s,
+		queue: make(chan importWork, importQueueDepth),
+		done:  map[string]int{},
+	}
 	go r.work()
 	return r
 }
@@ -81,12 +100,15 @@ func (r *importRunner) run(w importWork) {
 		slog.Error("marking import running", "error", err, "job", w.job.ID)
 	}
 	progress := func(done int) {
-		if err := r.store.ImportProgress(ctx, w.job.ID, done); err != nil {
-			// Logged, not fatal. Losing a progress update costs a stale number
-			// on a page; abandoning the import over one would cost the import.
-			slog.Warn("recording import progress", "error", err, "job", w.job.ID)
-		}
+		r.mu.Lock()
+		r.done[w.job.ID] = done
+		r.mu.Unlock()
 	}
+	defer func() {
+		r.mu.Lock()
+		delete(r.done, w.job.ID)
+		r.mu.Unlock()
+	}()
 
 	var report *store.ImportReport
 	var err error
@@ -121,6 +143,15 @@ func (r *importRunner) finish(ctx context.Context, id, status string, created in
 	if err := r.store.FinishImportJob(ctx, id, status, created, message, problems); err != nil {
 		slog.Error("recording import outcome", "error", err, "job", id, "status", status)
 	}
+}
+
+// progressOf is how far through the file a running job has got, and whether it
+// is this process running it at all.
+func (r *importRunner) progressOf(id string) (int, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n, ok := r.done[id]
+	return n, ok
 }
 
 // pollEvery is how often a running job's page refreshes itself.
