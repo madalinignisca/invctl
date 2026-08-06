@@ -115,6 +115,8 @@ var importColumns = []importColumn{
 	{"lifecycle", false, "defaults to active"},
 	{"eol_date", false, "YYYY-MM-DD"},
 	{"environments", false, "environment codes, comma separated: prod,dr"},
+	{"team", false, "the owning team's code — a team, never a person"},
+	{"manager_role", false, "the capacity that team holds: owner, operator…  needs a team"},
 }
 
 func (a *App) renderImport(w http.ResponseWriter, r *http.Request, status int,

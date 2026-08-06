@@ -10,6 +10,7 @@ package store
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -444,4 +445,134 @@ func TestTheFileFormatRefusesWhatItCannotHonour(t *testing.T) {
 			t.Fatalf("rows = %d, want 0", len(rows))
 		}
 	})
+}
+
+func TestImportingOwnershipNamesATeamAndNeverAPerson(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			s, ctx := newStore(t, e)
+			team, err := domain.NewTeam(NewID(), domain.TeamSpec{Code: "platform", Name: "Platform"}, s.Now())
+			if err != nil {
+				t.Fatalf("building the team: %v", err)
+			}
+			if err := s.CreateTeam(ctx, testActor, team); err != nil {
+				t.Fatalf("creating the team: %v", err)
+			}
+
+			t.Run("a team code and a role are resolved and stored", func(t *testing.T) {
+				rows, problems := ParseAssetCSV(strings.NewReader(
+					"name,kind,team,manager_role\nowned-01,server,platform,owner\n"))
+				if len(problems) > 0 {
+					t.Fatalf("parsing: %+v", problems)
+				}
+				report, err := s.ImportAssets(ctx, testActor, rows, false)
+				if err != nil {
+					t.Fatalf("importing: %v", err)
+				}
+				if len(report.Problems) > 0 {
+					t.Fatalf("a row naming a real team was refused: %+v", report.Problems)
+				}
+
+				list, err := s.ListAssets(ctx, AssetFilter{Query: "owned-01"})
+				if err != nil || len(list) != 1 {
+					t.Fatalf("reading back: %v (%d rows)", err, len(list))
+				}
+				// Read the ID back rather than trusting "no error": an
+				// unresolved code silently left as nil is the exact shape that
+				// reports success and stores nothing.
+				if list[0].TeamID == nil || *list[0].TeamID != team.ID {
+					t.Errorf("team_id = %v, want the platform team's id", list[0].TeamID)
+				}
+				if list[0].ManagerRole == nil || *list[0].ManagerRole != "owner" {
+					t.Errorf("manager_role = %v, want \"owner\"", list[0].ManagerRole)
+				}
+			})
+
+			t.Run("an unknown team code is named, not dropped", func(t *testing.T) {
+				rows, _ := ParseAssetCSV(strings.NewReader(
+					"name,kind,team\nghost-01,server,no-such-team\n"))
+				report, err := s.ImportAssets(ctx, testActor, rows, false)
+				if err != nil {
+					t.Fatalf("importing: %v", err)
+				}
+				if len(problemsAbout(report, "no-such-team")) != 1 {
+					t.Fatalf("problems = %+v, want one quoting the unknown code.\n"+
+						"Leaving it unset would import the asset with no owner and "+
+						"report success -- nobody to call at 03:00, and nothing said so.",
+						report.Problems)
+				}
+			})
+
+			t.Run("a role without a team is refused", func(t *testing.T) {
+				// The rule already exists in the domain; this proves the import
+				// path goes through it rather than around it.
+				rows, _ := ParseAssetCSV(strings.NewReader(
+					"name,kind,manager_role\norphan-01,server,owner\n"))
+				report, err := s.ImportAssets(ctx, testActor, rows, false)
+				if err != nil {
+					t.Fatalf("importing: %v", err)
+				}
+				if len(report.Problems) == 0 {
+					t.Fatal("an asset was imported with a responsibility role and no team " +
+						"to hold it")
+				}
+			})
+		})
+	}
+}
+
+// TestTheDocumentedExampleActuallyImports reads the CSV block out of
+// docs/IMPORT.md and runs it.
+//
+// A worked example is the first thing anybody copies, and a broken one costs
+// more trust than no example at all -- they assume the tool is wrong before they
+// assume the documentation is. Reading the real file rather than a copy is the
+// point: a copy drifts silently, which is the failure this is guarding against.
+func TestTheDocumentedExampleActuallyImports(t *testing.T) {
+	doc := readFile(t, filepath.Join(repoRoot(t), "docs", "IMPORT.md"))
+
+	_, after, found := strings.Cut(doc, "```csv\n")
+	if !found {
+		t.Fatal("docs/IMPORT.md has no ```csv example block. If the example moved, " +
+			"point this test at it; do not delete it.")
+	}
+	example, _, found := strings.Cut(after, "```")
+	if !found {
+		t.Fatal("the csv block in docs/IMPORT.md is not closed")
+	}
+
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			s, ctx := newStore(t, e)
+
+			// The example names a team, so the estate has to have one for it to
+			// be a fair test of the FILE rather than of the fixture.
+			team, err := domain.NewTeam(NewID(), domain.TeamSpec{Code: "platform", Name: "Platform"}, s.Now())
+			if err != nil {
+				t.Fatalf("building the team: %v", err)
+			}
+			if err := s.CreateTeam(ctx, testActor, team); err != nil {
+				t.Fatalf("creating the team: %v", err)
+			}
+			mustEnvironment(t, s, ctx, "prod", domain.EnvRoleProduction)
+			mustEnvironment(t, s, ctx, "dr", domain.EnvRoleProduction)
+
+			rows, problems := ParseAssetCSV(strings.NewReader(example))
+			if len(problems) > 0 {
+				t.Fatalf("the documented example does not parse: %+v", problems)
+			}
+			report, err := s.ImportAssets(ctx, testActor, rows, false)
+			if err != nil {
+				t.Fatalf("importing the documented example: %v", err)
+			}
+			if len(report.Problems) > 0 {
+				t.Fatalf("the documented example was refused: %+v\n"+
+					"Somebody will copy this block first. Fix the example or fix the "+
+					"importer, but they cannot disagree.", report.Problems)
+			}
+			if len(report.Created) != 4 {
+				t.Errorf("the example created %d assets, want 4", len(report.Created))
+			}
+		})
+	}
 }

@@ -51,14 +51,18 @@ import (
 // assetImportColumns are the headers a file may carry. `name` and `kind` are
 // required; everything else is optional and an absent column is not an error.
 //
-// DELIBERATELY NOT EVERY COLUMN. Team and manager role are missing because both
-// are references that need their own natural key to be nameable in a file, and
-// guessing one now would be a second key to live with. Attributes are missing
-// because attrs is opaque by design. Both are additive later.
+// `team` and `manager_role` name a team by its code and a capacity by its own,
+// both of which already have natural keys -- team.code is UNIQUE and
+// responsibility_role.code is a primary key -- so neither needed one invented.
+//
+// DELIBERATELY NOT EVERY COLUMN. `attrs` is missing because it is opaque by
+// design: a file that could write into it would be a file that could put
+// anything anywhere, and a value worth filtering on should be a real column.
 var assetImportColumns = map[string]bool{
 	"parent": true, "name": true, "kind": true, "serial": true,
 	"asset_tag": true, "vendor": true, "model": true,
 	"lifecycle": true, "eol_date": true, "environments": true,
+	"team": true, "manager_role": true,
 }
 
 // AssetImportRow is one line of the file, before anything has been resolved.
@@ -78,6 +82,11 @@ type AssetImportRow struct {
 	Lifecycle    string
 	EOLDate      string
 	Environments string
+	// Team is a team CODE, and ManagerRole a responsibility_role code. Neither
+	// is a person: this system records who is ACCOUNTABLE as a team and a
+	// capacity, never an individual, and an import is not an exception to that.
+	Team        string
+	ManagerRole string
 }
 
 // Path is where this row's asset would sit, which is also its natural key.
@@ -210,6 +219,8 @@ func ParseAssetCSV(r io.Reader) ([]AssetImportRow, []ImportProblem) {
 			Lifecycle:    at(record, "lifecycle"),
 			EOLDate:      at(record, "eol_date"),
 			Environments: at(record, "environments"),
+			Team:         at(record, "team"),
+			ManagerRole:  at(record, "manager_role"),
 		}
 		// A wholly blank line is a spreadsheet artefact, not an intention.
 		if row == (AssetImportRow{Line: line}) {
@@ -283,6 +294,10 @@ func (s *SQLStore) ImportAssets(ctx context.Context, actor domain.Actor, rows []
 		if err != nil {
 			return err
 		}
+		teams, err := teamIDsByCode(ctx, t)
+		if err != nil {
+			return err
+		}
 
 		// Rows resolve against the estate PLUS everything created so far in
 		// this run, so a file may introduce a site and the racks inside it. The
@@ -322,7 +337,7 @@ func (s *SQLStore) ImportAssets(ctx context.Context, actor domain.Actor, rows []
 					continue
 				}
 
-				asset, envIDs, envCodes, problems := buildImportedAsset(row, parentID, environments, s.Now())
+				asset, envIDs, envCodes, problems := buildImportedAsset(row, parentID, environments, teams, s.Now())
 				if len(problems) > 0 {
 					report.Problems = append(report.Problems, problems...)
 					continue
@@ -392,7 +407,7 @@ func (s *SQLStore) ImportAssets(ctx context.Context, actor domain.Actor, rows []
 // domain constructor already works that way; this keeps the same contract at the
 // file level, for the same reason -- an operator who has to re-upload once per
 // mistake stops using the feature.
-func buildImportedAsset(row AssetImportRow, parentID *string, environments map[string]string, now time.Time) (*domain.Asset, []string, []string, []ImportProblem) {
+func buildImportedAsset(row AssetImportRow, parentID *string, environments, teams map[string]string, now time.Time) (*domain.Asset, []string, []string, []ImportProblem) {
 	var problems []ImportProblem
 	add := func(field, format string, args ...any) {
 		problems = append(problems, ImportProblem{
@@ -422,6 +437,18 @@ func buildImportedAsset(row AssetImportRow, parentID *string, environments map[s
 	if row.Lifecycle != "" {
 		asset.Lifecycle = row.Lifecycle
 	}
+	if row.Team != "" {
+		id, ok := teams[strings.ToLower(row.Team)]
+		if !ok {
+			add("team", "there is no team with the code %q", row.Team)
+		} else {
+			asset.TeamID = &id
+		}
+	}
+	// Not resolved here: requireRole checks it against the live vocabulary
+	// inside the transaction, which is the same check the form goes through.
+	// Duplicating it would be a second list to keep in step.
+	asset.ManagerRole = optionalText(row.ManagerRole)
 
 	// Validate covers lifecycle and the EOL date shape. The DB CHECK behind it
 	// is the second line of defence, and a constraint failure mid-file would
@@ -519,6 +546,27 @@ func existingAssetPaths(ctx context.Context, t *tx) (map[string]string, error) {
 		}
 	}
 	return paths, nil
+}
+
+// teamIDsByCode maps lower-cased team codes to ids.
+//
+// Retired teams included on purpose. An asset whose owning team has been wound
+// up still has a history worth importing accurately, and refusing the row would
+// force somebody to either resurrect the team or drop the ownership -- both of
+// which put a wrong answer in the inventory to satisfy a rule about tidiness.
+func teamIDsByCode(ctx context.Context, t *tx) (map[string]string, error) {
+	var rows []struct {
+		ID   string `db:"id"`
+		Code string `db:"code"`
+	}
+	if err := t.selectAll(ctx, &rows, `SELECT id, code FROM team`); err != nil {
+		return nil, fmt.Errorf("reading teams: %w", err)
+	}
+	out := make(map[string]string, len(rows))
+	for _, r := range rows {
+		out[strings.ToLower(r.Code)] = r.ID
+	}
+	return out, nil
 }
 
 // environmentIDsByCode maps lower-cased environment codes to ids, so a file can
