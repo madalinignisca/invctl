@@ -153,7 +153,12 @@ var DeclaredColumns = map[string][]string{
 	},
 	"asset": {
 		"id", "kind", "name", "parent_id", "serial", "asset_tag", "vendor",
-		"model", "device_type_id", "lifecycle", "team_id", "manager_role",
+		"model", "device_type_id",
+		// Where it physically sits (migration 00027). Declared: somebody put it
+		// there. u_height on a RACK is its capacity; a mounted box's height comes
+		// from its catalogued model.
+		"u_height", "rack_position", "rack_face",
+		"lifecycle", "team_id", "manager_role",
 		"eol_date", "attrs",
 		"created_at", "updated_at",
 		"row_version",

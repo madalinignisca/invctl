@@ -83,6 +83,12 @@ func (f assetFormData) Value(field string) string {
 			stored = orBlank(a.Model)
 		case "device_type_id":
 			stored = orBlank(a.DeviceTypeID)
+		case "u_height":
+			stored = orBlankInt(a.UHeight)
+		case "rack_position":
+			stored = orBlankInt(a.RackPosition)
+		case "rack_face":
+			stored = orBlank(a.RackFace)
 		case "serial":
 			stored = orBlank(a.Serial)
 		case "asset_tag":
@@ -562,4 +568,14 @@ func submittedEnvironments(r *http.Request) []string {
 		return values
 	}
 	return []string{}
+}
+
+// orBlankInt renders an optional number for a form input, empty when unset --
+// so "not recorded" comes back as an empty box rather than as a zero somebody
+// then saves.
+func orBlankInt(n *int) string {
+	if n == nil {
+		return ""
+	}
+	return strconv.Itoa(*n)
 }

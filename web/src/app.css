@@ -1007,3 +1007,9 @@ form.htmx-request .btn-primary { opacity: 0.6; pointer-events: none; }
   color: var(--muted);
   font-size: 12px;
 }
+
+/* Rack elevation. Deliberately a table, not a drawing: it reads with a screen
+   reader, it prints, and "which U is free" is a question about rows. */
+.rack-elevation td { padding: 2px 8px; height: 1.4rem; }
+.rack-elevation .rack-filled { background: color-mix(in oklab, var(--accent) 14%, transparent); }
+.rack-elevation tbody tr:hover .rack-filled { background: color-mix(in oklab, var(--accent) 24%, transparent); }

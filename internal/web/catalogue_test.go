@@ -11,6 +11,7 @@ package web_test
 import (
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -259,5 +260,74 @@ func TestFilteringAssetsByModelActuallyFilters(t *testing.T) {
 	seeded := h.asset("hv-01")
 	if strings.Contains(page, `href="/assets/`+seeded+`"`) {
 		t.Error("the filtered list includes seeded assets with no model at all")
+	}
+}
+
+// TestARackDrawsItsElevationAndSaysWhatItCannotPlace covers the two halves of
+// the rack page: what is drawn, and what is admitted to be missing from it.
+func TestARackDrawsItsElevationAndSaysWhatItCannotPlace(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	rack := h.asset("rack-a1")
+	// Give the rack a height through the real form.
+	h.setRackHeight(t, rack, 12)
+
+	// One box placed, one in the rack with no position -- the ordinary state.
+	resp := h.post("/assets", url.Values{
+		"csrf_token": {h.csrfToken("/assets")}, "name": {"placed-1"}, "kind": {"server"},
+		"parent_id": {rack}, "rack_position": {"4"},
+	}, false)
+	resp.Body.Close()
+	resp = h.post("/assets", url.Values{
+		"csrf_token": {h.csrfToken("/assets")}, "name": {"somewhere-1"}, "kind": {"server"},
+		"parent_id": {rack},
+	}, false)
+	resp.Body.Close()
+
+	page := body(t, h.get("/assets/"+rack, false))
+	if !strings.Contains(page, "Elevation") {
+		t.Fatalf("the rack page has no elevation:\n%s", page)
+	}
+	if !strings.Contains(page, "placed-1") {
+		t.Error("the elevation does not show the box that has a position")
+	}
+	// The admission, which is the half that keeps the diagram honest.
+	if !strings.Contains(page, "no\n      position recorded") &&
+		!strings.Contains(page, "no position recorded") {
+		t.Errorf("the page does not say an asset is in the rack without a position. A "+
+			"diagram of one box in a rack of twelve is misleading on its own:\n%s", page)
+	}
+	if !strings.Contains(page, "somewhere-1") {
+		t.Error("the unpositioned asset is not named")
+	}
+
+	// And a collision is refused with a message on the field.
+	resp = h.post("/assets", url.Values{
+		"csrf_token": {h.csrfToken("/assets")}, "name": {"collide-1"}, "kind": {"server"},
+		"parent_id": {rack}, "rack_position": {"4"},
+	}, false)
+	collide := body(t, resp)
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Errorf("status = %d, want 422 for a unit that is already taken", resp.StatusCode)
+	}
+	if !strings.Contains(collide, "placed-1 is already there") {
+		t.Errorf("the refusal does not name what is in the way:\n%s", collide)
+	}
+}
+
+// setRackHeight records a rack's capacity through the asset form.
+func (h *harness) setRackHeight(t *testing.T, rackID string, units int) {
+	t.Helper()
+	row := h.lookup(`SELECT name FROM asset WHERE id = ?`, rackID)
+	version := h.lookup(`SELECT row_version FROM asset WHERE id = ?`, rackID)
+	resp := h.post("/assets/"+rackID, url.Values{
+		"csrf_token": {h.csrfToken("/assets/" + rackID)},
+		"name":       {row}, "kind": {"rack"}, "lifecycle": {"active"},
+		"u_height": {strconv.Itoa(units)}, "row_version": {version},
+	}, false)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("setting the rack height returned %d, want 303", resp.StatusCode)
 	}
 }

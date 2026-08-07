@@ -269,6 +269,9 @@ type AssetRow struct {
 	// single expression of the override rule.
 	DeviceTypeLabel string  `db:"device_type_label"`
 	DeviceTypeEOL   *string `db:"device_type_eol"`
+	// The model's physical shape, for rack elevations.
+	DeviceTypeUHeight   *int `db:"device_type_u_height"`
+	DeviceTypeFullDepth bool `db:"device_type_full_depth"`
 	// Behaviour comes from the asset_kind lookup row rather than a switch in
 	// Go, so a kind added by INSERT is usable rather than merely storable.
 	// Populated by decorateAssets; the zero value is "may do nothing", which is
@@ -425,12 +428,15 @@ func (s *SQLStore) decorateAssets(ctx context.Context, assets []domain.Asset) ([
 	// join on every asset select, the same shape as the responsibility and
 	// vocabulary loads below.
 	var models []struct {
-		AssetID string  `db:"asset_id"`
-		Label   string  `db:"label"`
-		EOLDate *string `db:"eol_date"`
+		AssetID   string  `db:"asset_id"`
+		Label     string  `db:"label"`
+		EOLDate   *string `db:"eol_date"`
+		UHeight   *int    `db:"u_height"`
+		FullDepth bool    `db:"full_depth"`
 	}
 	if err := s.read(ctx, &models, `
-		SELECT a.id AS asset_id, mf.name || ' ' || dt.model AS label, dt.eol_date
+		SELECT a.id AS asset_id, mf.name || ' ' || dt.model AS label, dt.eol_date,
+		       dt.u_height, dt.full_depth
 		FROM asset a
 		JOIN device_type dt ON dt.id = a.device_type_id
 		JOIN manufacturer mf ON mf.id = dt.manufacturer_id
@@ -441,6 +447,8 @@ func (s *SQLStore) decorateAssets(ctx context.Context, assets []domain.Asset) ([
 		if i, ok := index[m.AssetID]; ok {
 			rows[i].DeviceTypeLabel = m.Label
 			rows[i].DeviceTypeEOL = m.EOLDate
+			rows[i].DeviceTypeUHeight = m.UHeight
+			rows[i].DeviceTypeFullDepth = m.FullDepth
 		}
 	}
 
@@ -586,6 +594,16 @@ func (s *SQLStore) CreateAsset(ctx context.Context, actor domain.Actor, a *domai
 	if err != nil {
 		return err
 	}
+	// Rack space before the transaction opens: it reads the rack and its
+	// contents, and doing that inside the writer would hold the single SQLite
+	// connection for a set of pure reads. The partial-overlap window this
+	// leaves is the same one requireUniqueSiblingName lives with, and the same
+	// answer applies -- two people racking the same U in the same second is a
+	// race nobody has, and the recheck below would cost every create a rack
+	// read it does not need.
+	if err := s.requireFreeRackSpace(ctx, a); err != nil {
+		return err
+	}
 	return s.write(ctx, actor, func(t *tx) error {
 		return s.insertAsset(ctx, t, a, environmentIDs, codes)
 	})
@@ -617,11 +635,13 @@ func (s *SQLStore) insertAsset(ctx context.Context, t *tx, a *domain.Asset, envi
 	}
 	_, err := t.exec(ctx,
 		`INSERT INTO asset (id, kind, name, parent_id, serial, asset_tag, vendor, model,
-		                    device_type_id, lifecycle, team_id, manager_role, eol_date, attrs,
+		                    device_type_id, u_height, rack_position, rack_face,
+		                    lifecycle, team_id, manager_role, eol_date, attrs,
 		                    created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		a.ID, a.Kind, a.Name, a.ParentID, a.Serial, a.AssetTag, a.Vendor, a.Model,
-		a.DeviceTypeID, a.Lifecycle, a.TeamID, a.ManagerRole, a.EOLDate, a.Attrs,
+		a.DeviceTypeID, a.UHeight, a.RackPosition, a.RackFace,
+		a.Lifecycle, a.TeamID, a.ManagerRole, a.EOLDate, a.Attrs,
 		a.CreatedAt, a.UpdatedAt)
 	if err != nil {
 		return translateWriteErr(err, "creating asset")
@@ -651,6 +671,10 @@ func (s *SQLStore) UpdateAsset(ctx context.Context, actor domain.Actor, a *domai
 	a.CreatedAt = before.CreatedAt
 	a.ParentID = before.ParentID // reparenting goes through ReparentAsset
 	a.UpdatedAt = domain.FormatTime(s.now())
+
+	if err := s.requireFreeRackSpace(ctx, a); err != nil {
+		return err
+	}
 
 	beforeCodes := make([]string, 0, len(before.Environments))
 	for _, env := range before.Environments {
@@ -682,11 +706,14 @@ func (s *SQLStore) UpdateAsset(ctx context.Context, actor domain.Actor, a *domai
 		}
 		res, err := t.exec(ctx,
 			`UPDATE asset SET kind = ?, name = ?, serial = ?, asset_tag = ?, vendor = ?,
-			                  model = ?, device_type_id = ?, lifecycle = ?, team_id = ?,
+			                  model = ?, device_type_id = ?, u_height = ?,
+			                  rack_position = ?, rack_face = ?,
+			                  lifecycle = ?, team_id = ?,
 			                  manager_role = ?, eol_date = ?, attrs = ?, updated_at = ?,
 			                  row_version = row_version + 1
 			 WHERE id = ? AND row_version = ?`,
 			a.Kind, a.Name, a.Serial, a.AssetTag, a.Vendor, a.Model, a.DeviceTypeID,
+			a.UHeight, a.RackPosition, a.RackFace,
 			a.Lifecycle, a.TeamID, a.ManagerRole, a.EOLDate, a.Attrs, a.UpdatedAt,
 			a.ID, a.RowVersion)
 		if err != nil {

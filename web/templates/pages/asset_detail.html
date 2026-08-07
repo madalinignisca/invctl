@@ -344,4 +344,57 @@
   </div>
 </div>
 
+
+{{with .Elevation}}
+{{/* Front and rear, because depth decides what "occupied" means. A full-depth
+     box shows in both columns; two half-depth panels mounted back to back
+     share a unit, which is how a network rack is actually built. */}}
+<div class="panel">
+  <div class="panel-head">
+    <h2>Elevation</h2>
+    <p class="panel-note">
+      {{if .HeightKnown}}{{.Height}}U{{else}}Height not recorded — drawn as {{.Height}}U{{end}},
+      {{pluralise .FreeUnits "unit" "units"}} free.
+      {{if not .HeightKnown}}Nothing is refused for exceeding a height nobody stated.{{end}}
+    </p>
+  </div>
+  <div class="panel-body">
+    <table class="grid rack-elevation">
+      <thead><tr><th style="width:3rem">U</th><th>Front</th><th>Rear</th></tr></thead>
+      <tbody>
+        {{range .Units}}
+        <tr>
+          <td class="mono muted">{{.Number}}</td>
+          <td class="{{if .Front}}rack-filled{{end}}">
+            {{if and .Front .FrontStart}}
+              <a class="id" href="/assets/{{.Front.AssetID}}">{{.Front.Name}}</a>
+              {{if gt .Front.Height 1}}<span class="muted">{{.Front.Height}}U</span>{{end}}
+              {{if not .Front.HeightKnown}}<span class="muted" title="No catalogued model, so assumed 1U">·&nbsp;assumed&nbsp;1U</span>{{end}}
+            {{else if .Front}}<span class="muted">│</span>{{end}}
+          </td>
+          <td class="{{if .Rear}}rack-filled{{end}}">
+            {{if and .Rear .RearStart}}
+              <a class="id" href="/assets/{{.Rear.AssetID}}">{{.Rear.Name}}</a>
+              {{if gt .Rear.Height 1}}<span class="muted">{{.Rear.Height}}U</span>{{end}}
+            {{else if .Rear}}<span class="muted">│</span>{{end}}
+          </td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+
+    {{if .Unpositioned}}
+    {{/* Listed, never hidden: a diagram of three boxes in a rack of forty is
+         misleading on its own, and this is the ordinary starting state. */}}
+    <p class="hint" style="margin-top:12px">
+      <strong>{{pluralise (len .Unpositioned) "asset is" "assets are"}} in this rack with no
+      position recorded</strong>, so {{if eq (len .Unpositioned) 1}}it does{{else}}they do{{end}}
+      not appear above:
+      {{range $i, $a := .Unpositioned}}{{if $i}}, {{end}}<a href="/assets/{{$a.ID}}">{{$a.Name}}</a>{{end}}.
+    </p>
+    {{end}}
+  </div>
+</div>
+{{end}}
+
 {{end}}

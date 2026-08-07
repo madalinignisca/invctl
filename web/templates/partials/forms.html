@@ -115,6 +115,36 @@
         <label for="{{.Prefix}}-model">Model</label>
         <input id="{{.Prefix}}-model" type="text" name="model" value="{{.Value "model"}}">
       </div>
+      {{/* A rack states its own capacity; anything else states where it sits.
+           Two different questions, so the form asks only the relevant one. */}}
+      {{if eq ($f.Value "kind") "rack"}}
+      <div class="field">
+        <label for="{{.Prefix}}-uheight">Rack units</label>
+        <input id="{{.Prefix}}-uheight" type="number" name="u_height" min="1" max="60"
+               value="{{.Value "u_height"}}" placeholder="42">
+        <div class="field-hint">Counted from the floor. Leave empty if nobody has measured it.</div>
+        {{with index .Errors "u_height"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      {{else}}
+      <div class="field">
+        <label for="{{.Prefix}}-rackpos">Rack position (U)</label>
+        <input id="{{.Prefix}}-rackpos" type="number" name="rack_position" min="1" max="60"
+               value="{{.Value "rack_position"}}">
+        <div class="field-hint">The lowest unit it occupies. Optional.</div>
+        {{with index .Errors "rack_position"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="{{.Prefix}}-rackface">Face</label>
+        <select id="{{.Prefix}}-rackface" name="rack_face">
+          <option value="">—</option>
+          <option value="front" {{if eq ($f.Value "rack_face") "front"}}selected{{end}}>Front</option>
+          <option value="rear" {{if eq ($f.Value "rack_face") "rear"}}selected{{end}}>Rear</option>
+        </select>
+        <div class="field-hint">Only matters for half-depth kit.</div>
+        {{with index .Errors "rack_face"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      {{end}}
+
       <div class="field">
         <label for="{{.Prefix}}-devicetype">Catalogued model</label>
         <select id="{{.Prefix}}-devicetype" name="device_type_id">

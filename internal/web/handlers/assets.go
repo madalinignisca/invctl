@@ -304,6 +304,8 @@ type assetDetailPage struct {
 	// Where it takes power from, and the feeds it could take it from.
 	PowerInputs []store.PowerInputRow
 	PowerFeeds  []store.PowerFeedRow
+	// Elevation is set only for a rack: what is mounted in it and where.
+	Elevation *store.RackElevation
 }
 
 // AssetDetail renders one asset with its containment, ports and workloads.
@@ -439,8 +441,21 @@ func (a *App) renderAssetDetail(w http.ResponseWriter, r *http.Request, status i
 		slog.Error("listing power feeds", "error", err, "asset", id)
 	}
 
+	// The elevation, for racks only. A failure leaves the section absent rather
+	// than failing the page: an asset page is what somebody opens during an
+	// incident.
+	var elevation *store.RackElevation
+	if asset.Kind == domain.KindRack {
+		if e, err := a.Store.Elevation(r.Context(), id); err != nil {
+			slog.Error("resolving the rack elevation", "error", err, "asset", id)
+		} else {
+			elevation = e
+		}
+	}
+
 	a.Render.Page(w, status, "asset_detail", assetDetailPage{
 		Base:           assetBase,
+		Elevation:      elevation,
 		PowerInputs:    powerInputs,
 		PowerFeeds:     powerFeeds,
 		Edit:           edit,
@@ -498,6 +513,9 @@ func (a *App) AssetCreate(w http.ResponseWriter, r *http.Request) {
 		asset.Vendor = optionalString(r, "vendor")
 		asset.Model = optionalString(r, "model")
 		asset.DeviceTypeID = optionalString(r, "device_type_id")
+		asset.UHeight, _ = optionalInt(r, "u_height")
+		asset.RackPosition, _ = optionalInt(r, "rack_position")
+		asset.RackFace = optionalString(r, "rack_face")
 		asset.TeamID = optionalString(r, "team_id")
 		asset.ManagerRole = optionalString(r, "manager_role")
 		asset.EOLDate = optionalString(r, "eol_date")
@@ -542,6 +560,21 @@ func (a *App) AssetUpdate(w http.ResponseWriter, r *http.Request) {
 	// catalogue picker is the same shape, and getting it wrong would silently
 	// drop an asset's model -- taking its inherited end-of-support date with it.
 	updated.DeviceTypeID = submittedString(r, "device_type_id", updated.DeviceTypeID)
+	// Refused, not silently dropped: a rack height that quietly became nothing
+	// would take every capacity answer with it, and a position that vanished
+	// would move a box off the diagram without saying so.
+	height, heightOK := optionalInt(r, "u_height")
+	position, positionOK := optionalInt(r, "rack_position")
+	if !heightOK || !positionOK {
+		field := "u_height"
+		if heightOK {
+			field = "rack_position"
+		}
+		a.renderAssetFormError(w, r, notANumber(field))
+		return
+	}
+	updated.UHeight, updated.RackPosition = height, position
+	updated.RackFace = submittedString(r, "rack_face", updated.RackFace)
 	updated.TeamID = submittedString(r, "team_id", updated.TeamID)
 	updated.ManagerRole = submittedString(r, "manager_role", updated.ManagerRole)
 	updated.EOLDate = optionalString(r, "eol_date")

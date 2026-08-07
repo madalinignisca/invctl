@@ -171,6 +171,16 @@ type Asset struct {
 	// is editable like vendor and model -- unlike parent_id, which moves the
 	// graph and has its own flow.
 	DeviceTypeID *string `db:"device_type_id"`
+	// UHeight is a RACK's own capacity in units. Nil on everything else -- a
+	// mounted box's height is a property of its catalogued model, not of the
+	// box.
+	UHeight *int `db:"u_height"`
+	// RackPosition is the lowest unit this box occupies, counting from the
+	// floor, and RackFace which side it is mounted on. Both nil until somebody
+	// records where it actually is, which is the ordinary state of an estate
+	// that has just been entered.
+	RackPosition *int    `db:"rack_position"`
+	RackFace     *string `db:"rack_face"`
 	Lifecycle    string  `db:"lifecycle"`
 	// Who looks after it, and in what capacity. Both optional; see team.go.
 	TeamID      *string `db:"team_id"`
