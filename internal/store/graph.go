@@ -175,6 +175,13 @@ func (s *SQLStore) LoadGraph(ctx context.Context) (*impact.Graph, error) {
 	}
 	g.Net = netGraph
 
+	// WP-I1: the declared structures whose members are ports on assets.
+	structures, err := s.loadStructures(ctx)
+	if err != nil {
+		return nil, err
+	}
+	g.Structures = structures
+
 	return g, nil
 }
 
@@ -364,4 +371,99 @@ func (s *SQLStore) Simulate(ctx context.Context, req impact.Request) (impact.Res
 	return impact.Analyse(graph, req, impact.Inputs{
 		DownInstanceIDs: down, DownAssetIDs: downAssets, Net: graph.Net,
 	}), nil
+}
+
+// loadStructures reads the declared things that exist only because ports on
+// assets belong to them: VLANs, first-hop redundancy groups, overlays.
+//
+// WP-I1. Each of these arrived as a work package with a model, a page and its
+// own findings, and none reached the impact engine -- so simulating the loss of
+// a switch reported the services on it and said nothing about the broadcast
+// domain that switch was the only port of. Three queries, each the obvious
+// join, and an estate that has declared none of them gets an empty slice and a
+// result byte-identical to a build without the feature.
+//
+// A row per MEMBER, not per structure: a switch with four ports in one VLAN
+// appears four times, and the engine counts distinct surviving assets because
+// losing the switch takes all four at once. Deduplicating here would be tidier
+// and would throw away the difference between four ports on one box and four
+// boxes with one each.
+func (s *SQLStore) loadStructures(ctx context.Context) ([]impact.Structure, error) {
+	type memberRow struct {
+		Kind    string `db:"kind"`
+		ID      string `db:"id"`
+		Name    string `db:"name"`
+		AssetID string `db:"asset_id"`
+	}
+	byID := map[string]*impact.Structure{}
+	order := []string{}
+
+	collect := func(rows []memberRow) {
+		for _, r := range rows {
+			st, ok := byID[r.ID]
+			if !ok {
+				st = &impact.Structure{Kind: r.Kind, ID: r.ID, Name: r.Name}
+				byID[r.ID] = st
+				order = append(order, r.ID)
+			}
+			st.AssetIDs = append(st.AssetIDs, r.AssetID)
+		}
+	}
+
+	// A VLAN's members are the ports in it.
+	var vlans []memberRow
+	err := s.read(ctx, &vlans, `
+		SELECT 'vlan' AS kind, v.id, v.name, i.asset_id
+		FROM vlan v
+		JOIN interface_vlan iv ON iv.vlan_id = v.id
+		JOIN interface i ON i.id = iv.interface_id
+		WHERE v.lifecycle <> 'retired'
+		ORDER BY v.vid, i.asset_id`)
+	if err != nil {
+		return nil, fmt.Errorf("loading VLAN membership for the graph: %w", err)
+	}
+	collect(vlans)
+
+	// A redundancy group's members are the routers in it.
+	var fhrp []memberRow
+	err = s.read(ctx, &fhrp, `
+		SELECT 'fhrp' AS kind, g.id, g.name, i.asset_id
+		FROM fhrp_group g
+		JOIN fhrp_member m ON m.group_id = g.id
+		JOIN interface i ON i.id = m.interface_id
+		WHERE g.lifecycle <> 'retired'
+		ORDER BY g.name, i.asset_id`)
+	if err != nil {
+		return nil, fmt.Errorf("loading redundancy membership for the graph: %w", err)
+	}
+	collect(fhrp)
+
+	// An overlay's members are what terminates into it -- a port directly, or
+	// every port in the VLAN that terminates. The second is the join that
+	// matters: a VXLAN mapping VLAN 30 at each site is held up by the switches
+	// carrying VLAN 30, and nothing else names them.
+	var overlays []memberRow
+	err = s.read(ctx, &overlays, `
+		SELECT 'l2vpn' AS kind, l.id, l.name, i.asset_id
+		FROM l2vpn l
+		JOIN l2vpn_termination t ON t.l2vpn_id = l.id AND t.lifecycle <> 'retired'
+		JOIN interface i ON i.id = t.interface_id
+		WHERE l.lifecycle <> 'retired'
+		UNION ALL
+		SELECT 'l2vpn' AS kind, l.id, l.name, i.asset_id
+		FROM l2vpn l
+		JOIN l2vpn_termination t ON t.l2vpn_id = l.id AND t.lifecycle <> 'retired'
+		JOIN interface_vlan iv ON iv.vlan_id = t.vlan_id
+		JOIN interface i ON i.id = iv.interface_id
+		WHERE l.lifecycle <> 'retired'`)
+	if err != nil {
+		return nil, fmt.Errorf("loading overlay terminations for the graph: %w", err)
+	}
+	collect(overlays)
+
+	out := make([]impact.Structure, 0, len(order))
+	for _, id := range order {
+		out = append(out, *byID[id])
+	}
+	return out, nil
 }

@@ -256,7 +256,34 @@
         </div>
         {{end}}
 
-        {{if and (not .Result.Isolated) (not .Result.Partitions) (not .Result.Unreachable) (not .Result.RedundancyLost)}}
+        {{/* WP-I1. Declared structures the outage empties or leaves standing
+             alone: a VLAN whose last port went, a redundancy group whose last
+             router went, an overlay left terminating in one place. Reported and
+             never propagated -- no service here declares that it needs a VLAN
+             or a virtual gateway, so changing a status on that basis would
+             assert a dependency nobody wrote down. */}}
+        {{if .Result.Structures}}
+        <div class="scroll-x" style="margin-bottom:8px">
+          <table>
+            <thead><tr><th></th><th>Structure</th><th class="num">Left</th><th>What it means</th></tr></thead>
+            <tbody>
+              {{range .Result.Structures}}
+              <tr>
+                <td>
+                  {{if .Emptied}}<span class="pill pill-down">{{.Kind}}</span>
+                  {{else}}<span class="pill pill-degraded">{{.Kind}}</span>{{end}}
+                </td>
+                <td><a href="{{.Href}}">{{.Name}}</a></td>
+                <td class="num">{{.Remaining}} of {{.Total}}</td>
+                <td class="reason">{{.Detail}}</td>
+              </tr>
+              {{end}}
+            </tbody>
+          </table>
+        </div>
+        {{end}}
+
+        {{if and (not .Result.Isolated) (not .Result.Partitions) (not .Result.Unreachable) (not .Result.RedundancyLost) (not .Result.Structures)}}
         <div class="empty">Nothing isolated, partitioned or newly at risk on the declared network.</div>
         {{end}}
       {{end}}

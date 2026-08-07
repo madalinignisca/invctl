@@ -132,6 +132,12 @@ type Result struct {
 	// Coverage is the modelled/unmodelled split this run saw, so a report can
 	// say honestly how much of the estate it actually has an opinion about.
 	Coverage ReachCoverage
+	// Structures names declared things the outage empties or reduces to one:
+	// a VLAN whose last port went, a redundancy group whose last router went,
+	// an overlay left terminating in one place. Reported, never propagated --
+	// no service in this model declares that it needs a VLAN or a VIP, so
+	// changing a status on that basis would assert a dependency nobody wrote.
+	Structures []StructureFinding
 }
 
 // Analyse runs the three phases and returns the impact of the request.
@@ -275,6 +281,12 @@ func Analyse(g *Graph, req Request, in Inputs) Result {
 	result.Partitions = computePartitions(g, g.Deps, reachOfDep)
 	result.Unreachable = unreachable
 	result.RedundancyLost = computeRedundancyLost(netInput, groupStatusesOrNil(net), in.DownAssetIDs)
+	// WP-I1. Declared structures the outage empties or leaves standing alone.
+	// Reported beside the other findings and propagated into nothing: no
+	// service here declares that it needs a VLAN or a virtual gateway, so
+	// changing a status on that basis would assert a dependency nobody wrote
+	// down. Inert when no structure is declared, exactly like the reach model.
+	result.Structures = analyseStructures(g.Structures, in.DownAssetIDs)
 	result.Coverage = coverage
 
 	return result

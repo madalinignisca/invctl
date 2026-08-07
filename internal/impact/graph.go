@@ -81,6 +81,12 @@ type Graph struct {
 	ServiceClusterAssetID map[string]string   // service id -> cluster asset id
 	ClusterNodes          map[string][]string // cluster asset id -> k8s_node descendant asset ids
 
+	// Structures are the declared things that exist only because ports on
+	// assets belong to them: VLANs, first-hop redundancy groups, overlays.
+	// Empty whenever none is declared, which makes the whole feature inert on
+	// an estate that has not modelled any -- the same way Net is.
+	Structures []Structure
+
 	// Net is the reachability picture LoadGraph loads alongside everything
 	// else, nil whenever the estate has declared no topology at all. Kept on
 	// Graph (rather than threaded separately) so "the whole dependency
