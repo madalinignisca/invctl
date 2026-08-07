@@ -117,10 +117,12 @@ func (r *importRunner) run(w importWork) {
 	case store.ImportKindAssets:
 		// Batched, not one transaction: at measured speed a big file would hold
 		// SQLite's single writer for half a minute and stop everybody else
-		// saving anything. See ImportAssetsBatched for what that costs.
+		// saving anything. Both kinds batch -- a catalogue is small, but an
+		// import that sometimes holds the database is a rule with an exception
+		// in it. See ImportAssetsBatched for what the batching costs.
 		report, err = r.store.ImportAssetsBatched(ctx, w.actor, w.assets, progress)
 	case store.ImportKindDeviceTypes:
-		report, err = r.store.ImportDeviceTypes(ctx, w.actor, w.types, false, progress)
+		report, err = r.store.ImportDeviceTypesBatched(ctx, w.actor, w.types, progress)
 	default:
 		err = errUnknownImportKind
 	}

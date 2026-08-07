@@ -841,3 +841,54 @@ func TestACatalogueImportIsAuditedAndIndexed(t *testing.T) {
 		})
 	}
 }
+
+func TestABatchedCatalogueImportWritesAndRefusesTheSameWay(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			s, ctx := newStore(t, e)
+			mustManufacturer(t, s, ctx, "dell", "Dell")
+
+			report, err := s.ImportDeviceTypesBatched(ctx, testActor,
+				catalogueCSV(t, catalogueHeader+"dell,R650\ndell,R750\n"), nil)
+			if err != nil {
+				t.Fatalf("importing: %v", err)
+			}
+			if len(report.Problems) > 0 {
+				t.Fatalf("a valid file was refused: %+v", report.Problems)
+			}
+			if len(report.Created) != 2 || report.PartialRows != 0 {
+				t.Fatalf("created %v, partial %d; want 2 and 0", report.Created, report.PartialRows)
+			}
+
+			// Create only, on the path that writes -- the gap the asset version
+			// had until mutation testing found it.
+			again, err := s.ImportDeviceTypesBatched(ctx, testActor,
+				catalogueCSV(t, catalogueHeader+"dell,R650\n"), nil)
+			if err != nil {
+				t.Fatalf("re-importing: %v", err)
+			}
+			if len(problemsAbout(again, "already catalogued")) != 1 {
+				t.Fatalf("problems = %+v, want one saying it already exists", again.Problems)
+			}
+
+			// An unknown manufacturer is still refused before anything is
+			// written, so a bad row in a batched file leaves nothing half-done.
+			bad, err := s.ImportDeviceTypesBatched(ctx, testActor,
+				catalogueCSV(t, catalogueHeader+"dell,R850\nnosuchmaker,R950\n"), nil)
+			if err != nil {
+				t.Fatalf("importing: %v", err)
+			}
+			if len(bad.Created) != 0 || bad.PartialRows != 0 {
+				t.Errorf("a refused file created %v (partial %d); validation runs over the "+
+					"whole file before any batch is written", bad.Created, bad.PartialRows)
+			}
+			list, err := s.ListDeviceTypes(ctx, DeviceTypeFilter{})
+			if err != nil {
+				t.Fatalf("listing: %v", err)
+			}
+			if len(list) != 2 {
+				t.Errorf("catalogue has %d models after a refused file, want 2", len(list))
+			}
+		})
+	}
+}

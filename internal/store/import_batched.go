@@ -237,3 +237,124 @@ func (s *SQLStore) ImportAssetsBatched(ctx context.Context, actor domain.Actor,
 	}
 	return report, nil
 }
+
+// ImportDeviceTypesBatched validates a catalogue file, then writes it in
+// batches.
+//
+// Simpler than the asset version because a model has no parent: every row
+// references a manufacturer that must already exist, so there is nothing to
+// order and nothing to resolve between batches. The reason it batches anyway is
+// the same one, and it is not about the size of a catalogue -- it is that an
+// import must not be the one write in this application that can hold the
+// database against everybody else. A rule with an exception in it is a rule
+// somebody has to remember.
+func (s *SQLStore) ImportDeviceTypesBatched(ctx context.Context, actor domain.Actor,
+	rows []DeviceTypeImportRow, progress func(done int)) (*ImportReport, error) {
+
+	report := &ImportReport{Rows: len(rows)}
+	if len(rows) == 0 {
+		report.Problems = append(report.Problems, ImportProblem{
+			Message: "the file has a header but no rows",
+		})
+		return report, nil
+	}
+
+	var makers map[string]manufacturerRef
+	var existing map[string]string
+	if err := s.write(ctx, actor, func(t *tx) error {
+		var err error
+		if makers, err = manufacturersByCode(ctx, t); err != nil {
+			return err
+		}
+		existing, err = existingDeviceTypePaths(ctx, t)
+		return err
+	}); err != nil {
+		return nil, fmt.Errorf("reading the catalogue: %w", err)
+	}
+
+	seen := map[string]int{}
+	built := make([]*domain.DeviceType, 0, len(rows))
+	names := make([]string, 0, len(rows))
+	keep := make([]DeviceTypeImportRow, 0, len(rows))
+
+	for _, row := range rows {
+		maker, known := makers[row.Manufacturer]
+		if problems := validateDeviceTypeRow(row, known); len(problems) > 0 {
+			report.Problems = append(report.Problems, problems...)
+			continue
+		}
+		if first, dup := seen[row.Path()]; dup {
+			report.Problems = append(report.Problems, ImportProblem{
+				Line: row.Line, Path: row.Path(), Field: "model",
+				Message: fmt.Sprintf("line %d already claims this model", first),
+			})
+			continue
+		}
+		seen[row.Path()] = row.Line
+
+		if _, clash := existing[row.Path()]; clash {
+			report.Problems = append(report.Problems, ImportProblem{
+				Line: row.Line, Path: row.Path(), Field: "model",
+				Message: "this model is already catalogued; import creates, it does not update",
+			})
+			continue
+		}
+
+		d, problems := buildImportedDeviceType(row, maker.id, s.Now())
+		if len(problems) > 0 {
+			report.Problems = append(report.Problems, problems...)
+			continue
+		}
+		built = append(built, d)
+		names = append(names, maker.name)
+		keep = append(keep, row)
+	}
+
+	if len(report.Problems) > 0 {
+		return report, nil
+	}
+
+	done := 0
+	for start := 0; start < len(built); start += ImportBatchSize {
+		end := min(start+ImportBatchSize, len(built))
+
+		err := s.write(ctx, actor, func(t *tx) error {
+			for i := start; i < end; i++ {
+				if err := s.insertDeviceType(ctx, t, built[i], names[i]); err != nil {
+					var ve *domain.ValidationError
+					if errors.As(err, &ve) {
+						for _, f := range ve.Fields {
+							report.Problems = append(report.Problems, ImportProblem{
+								Line: keep[i].Line, Path: keep[i].Path(),
+								Field: f.Field, Message: f.Message,
+							})
+						}
+						return errRefused
+					}
+					return fmt.Errorf("importing %s (line %d): %w", keep[i].Path(), keep[i].Line, err)
+				}
+			}
+			return nil
+		})
+		switch {
+		case errors.Is(err, errRefused):
+			report.PartialRows = done
+			return report, nil
+		case err != nil:
+			report.Problems = append(report.Problems, ImportProblem{
+				Message: fmt.Sprintf("stopped after %d rows: %v", done, err),
+			})
+			report.PartialRows = done
+			return report, nil
+		}
+
+		for i := start; i < end; i++ {
+			report.Created = append(report.Created, keep[i].Path())
+		}
+		done = end
+		if progress != nil {
+			progress(done)
+		}
+	}
+	return report, nil
+}
