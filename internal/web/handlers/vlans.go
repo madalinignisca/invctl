@@ -97,16 +97,25 @@ func (a *App) VLANDetail(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	options, err := a.Store.ListPortOptions(r.Context())
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
 	a.Render.Page(w, http.StatusOK, "vlan_detail", struct {
 		Base
 		VLAN     *domain.VLAN
 		Ports    []store.VLANPort
 		Prefixes []store.PrefixTreeRow
+		Options  []store.InterfaceOption
+		Modes    []string
 	}{
 		Base:     a.base(r, "VLAN "+vlan.Name, "vlans"),
 		VLAN:     vlan,
 		Ports:    ports,
 		Prefixes: on,
+		Options:  options,
+		Modes:    domain.VLANModes,
 	})
 }
 
@@ -149,6 +158,38 @@ func (a *App) VLANCreate(w http.ResponseWriter, r *http.Request) {
 
 	a.setFlash(r, "success", "VLAN "+vlan.Name+" declared.")
 	render.Redirect(w, r, "/vlans")
+}
+
+// VLANPortAdd puts a port in this VLAN.
+func (a *App) VLANPortAdd(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Could not read that form.", http.StatusBadRequest)
+		return
+	}
+	vlanID := r.PathValue("id")
+	mode := formValue(r, "mode")
+	if mode != domain.VLANModeTagged && mode != domain.VLANModeUntagged {
+		mode = domain.VLANModeUntagged
+	}
+	err := a.Store.AddPortToVLAN(r.Context(), actor(r), vlanID, formValue(r, "interface_id"), mode)
+	if err != nil {
+		a.handleStoreError(w, r, err)
+		return
+	}
+	a.setFlash(r, "success", "Port added to the VLAN.")
+	render.Redirect(w, r, "/vlans/"+vlanID)
+}
+
+// VLANPortRemove takes a port out of this VLAN.
+func (a *App) VLANPortRemove(w http.ResponseWriter, r *http.Request) {
+	vlanID := r.PathValue("id")
+	err := a.Store.RemovePortFromVLAN(r.Context(), actor(r), vlanID, r.PathValue("ifaceID"))
+	if err != nil {
+		a.handleStoreError(w, r, err)
+		return
+	}
+	a.setFlash(r, "success", "Port removed from the VLAN.")
+	render.Redirect(w, r, "/vlans/"+vlanID)
 }
 
 // VLANRetire withdraws a broadcast domain, refusing while anything is on it.

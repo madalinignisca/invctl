@@ -26,7 +26,7 @@
     {{if .Ports}}
     <div class="scroll-x">
       <table>
-        <thead><tr><th>Asset</th><th>Port</th><th>Mode</th></tr></thead>
+        <thead><tr><th>Asset</th><th>Port</th><th>Mode</th>{{if .CanWrite}}<th></th>{{end}}</tr></thead>
         <tbody>
           {{range .Ports}}
           <tr>
@@ -36,6 +36,14 @@
               {{if eq .Mode "untagged"}}<span class="pill pill-ok">access</span>
               {{else}}<span class="pill pill-info">trunk</span>{{end}}
             </td>
+            {{if $.CanWrite}}
+            <td style="white-space:nowrap">
+              <form method="post" action="/vlans/{{$.VLAN.ID}}/ports/{{.InterfaceID}}/remove" style="display:inline">
+                <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+                <button class="btn btn-sm btn-danger" type="submit">Remove</button>
+              </form>
+            </td>
+            {{end}}
           </tr>
           {{end}}
         </tbody>
@@ -47,6 +55,30 @@
       It is a declared record rather than a broadcast domain — nothing can reach
       anything through it.
     </div>
+    {{end}}
+    {{if .CanWrite}}
+    <form class="panel-body" method="post" action="/vlans/{{.VLAN.ID}}/ports">
+      <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+      <div class="field-row">
+        <div class="field">
+          <label for="vlan-port">Port</label>
+          <select id="vlan-port" name="interface_id" required>
+            {{range .Options}}<option value="{{.ID}}">{{.AssetName}} · {{.Name}}</option>{{end}}
+          </select>
+        </div>
+        <div class="field">
+          <label for="vlan-mode">Mode</label>
+          <select id="vlan-mode" name="mode">
+            {{range .Modes}}<option value="{{.}}">{{.}}</option>{{end}}
+          </select>
+          <div class="field-hint">
+            Untagged is the access VLAN and a port has only one — choosing it
+            replaces whatever was there.
+          </div>
+        </div>
+      </div>
+      <button class="btn btn-primary" type="submit">Add port</button>
+    </form>
     {{end}}
   </div>
 

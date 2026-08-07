@@ -235,6 +235,8 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	// a span of addresses only means anything beside the network it falls in.
 	write("POST /vlans", app.VLANCreate)
 	write("POST /vlans/{id}/retire", app.VLANRetire)
+	write("POST /vlans/{id}/ports", app.VLANPortAdd)
+	write("POST /vlans/{id}/ports/{ifaceID}/remove", app.VLANPortRemove)
 	write("POST /ip-ranges", app.IPRangeCreate)
 	write("POST /ip-ranges/{id}/retire", app.IPRangeRetire)
 

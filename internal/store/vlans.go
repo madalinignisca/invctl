@@ -489,3 +489,93 @@ func (s *SQLStore) linkPrefixVLAN(ctx context.Context, actor domain.Actor,
 }
 
 func strPtrVLAN(s string) *string { return &s }
+
+// ListPortOptions returns every port, with its box, for a "put this in the
+// VLAN" picker.
+//
+// Unlike ListAvailableInterfaces this does NOT exclude patched ports: a cable
+// and a VLAN are different facts about a port, and a switch port is normally
+// both patched and in a VLAN. Excluding them would offer only the ports nobody
+// has plugged anything into.
+func (s *SQLStore) ListPortOptions(ctx context.Context) ([]InterfaceOption, error) {
+	var opts []InterfaceOption
+	err := s.read(ctx, &opts, `
+		SELECT i.*, a.name AS asset_name
+		FROM interface i
+		JOIN asset a ON a.id = i.asset_id
+		WHERE a.lifecycle <> 'retired'
+		ORDER BY a.name, i.name`)
+	if err != nil {
+		return nil, fmt.Errorf("listing ports: %w", err)
+	}
+	return opts, nil
+}
+
+// AddPortToVLAN puts one port in one VLAN, keeping its other memberships.
+//
+// The set table is replaced wholesale, so adding one member means reading the
+// port's current set and writing it back with the new one -- which is why this
+// goes through SetInterfaceVLANs rather than inserting directly. Doing the
+// INSERT here would skip the validation AND the audit fold, and the audit fold
+// is the thing this codebase has now got wrong four times.
+func (s *SQLStore) AddPortToVLAN(ctx context.Context, actor domain.Actor,
+	vlanID, interfaceID, mode string) error {
+
+	current, err := s.currentMembership(ctx, interfaceID)
+	if err != nil {
+		return err
+	}
+	for i, m := range current {
+		if m.VLANID == vlanID {
+			current[i].Mode = mode // already in it: this is a change of mode
+			return s.SetInterfaceVLANs(ctx, actor, interfaceID, current)
+		}
+	}
+	// An untagged VLAN replaces whatever untagged VLAN was there, because a
+	// port has only one and the alternative is refusing with an error the
+	// operator would fix by doing exactly this.
+	if mode == domain.VLANModeUntagged {
+		kept := current[:0]
+		for _, m := range current {
+			if m.Mode != domain.VLANModeUntagged {
+				kept = append(kept, m)
+			}
+		}
+		current = kept
+	}
+	current = append(current, domain.InterfaceVLAN{
+		InterfaceID: interfaceID, VLANID: vlanID, Mode: mode,
+	})
+	return s.SetInterfaceVLANs(ctx, actor, interfaceID, current)
+}
+
+// RemovePortFromVLAN takes one port out of one VLAN, keeping the rest.
+func (s *SQLStore) RemovePortFromVLAN(ctx context.Context, actor domain.Actor,
+	vlanID, interfaceID string) error {
+
+	current, err := s.currentMembership(ctx, interfaceID)
+	if err != nil {
+		return err
+	}
+	kept := make([]domain.InterfaceVLAN, 0, len(current))
+	for _, m := range current {
+		if m.VLANID != vlanID {
+			kept = append(kept, m)
+		}
+	}
+	if len(kept) == len(current) {
+		return nil // not in it; nothing to record
+	}
+	return s.SetInterfaceVLANs(ctx, actor, interfaceID, kept)
+}
+
+func (s *SQLStore) currentMembership(ctx context.Context, interfaceID string) ([]domain.InterfaceVLAN, error) {
+	var rows []domain.InterfaceVLAN
+	err := s.read(ctx, &rows,
+		`SELECT interface_id, vlan_id, mode FROM interface_vlan WHERE interface_id = ?`,
+		interfaceID)
+	if err != nil {
+		return nil, fmt.Errorf("reading vlan membership: %w", err)
+	}
+	return rows, nil
+}
