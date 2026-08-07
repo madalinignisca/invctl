@@ -259,7 +259,7 @@ var DeclaredColumns = map[string][]string{
 	},
 	"prefix": {
 		"id", "cidr_text", "addr_family", "addr_start", "addr_end",
-		"vlan_id", "environment_id", "role", "vrf_id", "vlan_ref_id",
+		"environment_id", "role", "vrf_id", "vlan_ref_id",
 		"created_at", "updated_at", "row_version",
 	},
 	// Circuits, migration 00035. Declared throughout: somebody signed a

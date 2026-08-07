@@ -158,7 +158,6 @@ type Prefix struct {
 	AddrFamily    int     `db:"addr_family"`
 	AddrStart     []byte  `db:"addr_start"`
 	AddrEnd       []byte  `db:"addr_end"`
-	VLANID        *int    `db:"vlan_id"`
 	EnvironmentID *string `db:"environment_id"`
 	Role          *string `db:"role"`
 	// VRFID scopes the prefix. NULL is the global table, which is what every
@@ -167,10 +166,10 @@ type Prefix struct {
 	// the column exists now because widening a unique constraint on a loaded
 	// database is a different job from adding a nullable column to an empty one.
 	VRFID *string `db:"vrf_id"`
-	// VLANRefID points at a real VLAN. VLANID above is the LEGACY loose integer
-	// it replaces: migration 00031 widened the schema, BackfillPrefixVLANs
-	// fills this, and a later migration drops the integer. Until then both
-	// exist and this one is the truth.
+	// VLANRefID is the VLAN this network is on, and the only place that fact
+	// lives. It replaced a loose integer in 00031/00036 -- the two coexisted
+	// for one release and promptly disagreed, because the form wrote one and
+	// the VLAN pages read the other.
 	VLANRefID  *string `db:"vlan_ref_id"`
 	CreatedAt  *string `db:"created_at"`
 	UpdatedAt  *string `db:"updated_at"`
@@ -212,10 +211,6 @@ func (p *Prefix) Validate() error {
 	ve := &ValidationError{}
 	if p.CIDRText == "" || len(p.AddrStart) == 0 || len(p.AddrEnd) == 0 {
 		ve.Add("cidr_text", "a network is required")
-	}
-	// 802.1Q: 0 and 4095 are reserved, so a real tag is 1..4094.
-	if p.VLANID != nil && (*p.VLANID < 1 || *p.VLANID > 4094) {
-		ve.Add("vlan_id", "must be between 1 and 4094, or blank")
 	}
 	return ve.OrNil()
 }

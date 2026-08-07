@@ -61,7 +61,6 @@ func seedSearchable(t *testing.T, s *SQLStore, ctx context.Context) (assetID, se
 		t.Fatalf("building prefix: %v", err)
 	}
 	prefix.Role = strPtr("production-workloads")
-	prefix.VLANID = intPtr(30)
 	if err := s.CreatePrefix(ctx, testActor, prefix); err != nil {
 		t.Fatalf("creating prefix: %v", err)
 	}

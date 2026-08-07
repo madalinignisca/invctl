@@ -211,6 +211,7 @@ type prefixListPage struct {
 	Prefixes     []store.PrefixTreeRow
 	Environments []domain.Environment
 	Ranges       []store.IPRangeRow
+	VLANs        []store.VLANRow
 	// Edit is set only when a correction was refused; see editState.
 	Edit      *editState
 	FormData  prefixFormData
@@ -239,6 +240,14 @@ func (a *App) renderPrefixes(w http.ResponseWriter, r *http.Request, status int,
 		a.serverError(w, r, err)
 		return
 	}
+	// The VLAN picker. A prefix names a VLAN by reference now, so the form
+	// needs the list -- and an estate with no VLANs declared gets an empty
+	// select rather than a free-text box that could invent one.
+	vlans, err := a.Store.ListVLANs(r.Context())
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
 	base := a.base(r, "Prefixes", "prefixes")
 	if edit != nil {
 		base.EditRow = edit.ID
@@ -248,8 +257,9 @@ func (a *App) renderPrefixes(w http.ResponseWriter, r *http.Request, status int,
 		Prefixes:     prefixes,
 		Environments: envs,
 		Ranges:       ranges,
+		VLANs:        vlans,
 		Edit:         edit,
-		FormData:     a.newPrefixForm(r, nil, envs),
+		FormData:     a.newPrefixForm(r, nil, envs, vlans),
 		RangeForm:    a.newRangeForm(r, nil),
 	})
 }
@@ -263,7 +273,7 @@ func (a *App) PrefixCreate(w http.ResponseWriter, r *http.Request) {
 	nums := optionalNumbers(r)
 	prefix, err := domain.NewPrefix(store.NewID(), formValue(r, "cidr_text"))
 	if err == nil {
-		prefix.VLANID = nums.opt("vlan_id")
+		prefix.VLANRefID = optionalString(r, "vlan_ref_id")
 		prefix.EnvironmentID = optionalString(r, "environment_id")
 		prefix.Role = optionalString(r, "role")
 		if msgs := nums.messages(); msgs != nil {
@@ -287,8 +297,13 @@ func (a *App) PrefixCreate(w http.ResponseWriter, r *http.Request) {
 			a.serverError(w, r, listErr)
 			return
 		}
+		vlans, listErr := a.Store.ListVLANs(r.Context())
+		if listErr != nil {
+			a.serverError(w, r, listErr)
+			return
+		}
 		a.Render.Partial(w, http.StatusUnprocessableEntity, "prefix_form",
-			a.newPrefixForm(r, messages, envs))
+			a.newPrefixForm(r, messages, envs, vlans))
 		return
 	}
 
@@ -400,7 +415,7 @@ func (a *App) PrefixUpdate(w http.ResponseWriter, r *http.Request) {
 
 	nums := optionalNumbers(r)
 	updated := *existing
-	updated.VLANID = nums.opt("vlan_id")
+	updated.VLANRefID = optionalString(r, "vlan_ref_id")
 	updated.EnvironmentID = optionalString(r, "environment_id")
 	updated.Role = optionalString(r, "role")
 	updated.RowVersion = submittedVersion(r, updated.RowVersion)

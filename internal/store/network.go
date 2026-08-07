@@ -390,11 +390,11 @@ func (s *SQLStore) UpdatePrefix(ctx context.Context, actor domain.Actor, p *doma
 	return s.write(ctx, actor, func(t *tx) error {
 		res, err := t.exec(ctx, `
 			UPDATE prefix SET cidr_text = ?, addr_family = ?, addr_start = ?, addr_end = ?,
-			                  vlan_id = ?, environment_id = ?, role = ?,
+			                  vlan_ref_id = ?, environment_id = ?, role = ?,
 			                  updated_at = ?, row_version = row_version + 1
 			WHERE id = ? AND row_version = ?`,
 			p.CIDRText, p.AddrFamily, p.AddrStart, p.AddrEnd,
-			p.VLANID, p.EnvironmentID, p.Role, at, p.ID, p.RowVersion)
+			p.VLANRefID, p.EnvironmentID, p.Role, at, p.ID, p.RowVersion)
 		if err != nil {
 			return translateWriteErr(err, "updating prefix")
 		}
@@ -422,10 +422,10 @@ func (s *SQLStore) CreatePrefix(ctx context.Context, actor domain.Actor, p *doma
 	return s.write(ctx, actor, func(t *tx) error {
 		_, err := t.exec(ctx, `
 			INSERT INTO prefix (id, cidr_text, addr_family, addr_start, addr_end,
-			                    vlan_id, environment_id, role, created_at, updated_at)
+			                    vlan_ref_id, environment_id, role, created_at, updated_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			p.ID, p.CIDRText, p.AddrFamily, p.AddrStart, p.AddrEnd,
-			p.VLANID, p.EnvironmentID, p.Role, p.CreatedAt, p.UpdatedAt)
+			p.VLANRefID, p.EnvironmentID, p.Role, p.CreatedAt, p.UpdatedAt)
 		if err != nil {
 			return translateWriteErr(err, "creating prefix")
 		}
@@ -448,6 +448,10 @@ type PrefixRow struct {
 	// should display. BuildPrefixTree turns it into the direct figure.
 	AddressCount int    `db:"address_count"`
 	VRFName      string `db:"vrf_name"`
+	// The VLAN this network is on, resolved for display. VLANVID is nil when
+	// no VLAN is set -- which is a real answer, not a missing one.
+	VLANName string `db:"vlan_name"`
+	VLANVID  *int   `db:"vlan_vid"`
 }
 
 // PrefixTreeRow is a prefix positioned in its hierarchy, with the display
@@ -456,6 +460,8 @@ type PrefixTreeRow struct {
 	domain.PrefixNode
 	EnvironmentCode string
 	VRFName         string
+	VLANName        string
+	VLANVID         *int
 	// NextFree is the lowest address nothing has taken, and whether there was
 	// one. Computed for every row from ONE pass over the reservations and
 	// assignments rather than a query each: the page shows it for every
@@ -505,6 +511,8 @@ func (s *SQLStore) ListPrefixTree(ctx context.Context) ([]PrefixTreeRow, error) 
 			PrefixNode:      n,
 			EnvironmentCode: d.EnvironmentCode,
 			VRFName:         d.VRFName,
+			VLANName:        d.VLANName,
+			VLANVID:         d.VLANVID,
 		}
 		spans := taken.within(n.AddrFamily, n.AddrStart, n.AddrEnd)
 		// Child prefixes are delegated, so they are exclusions too -- and the
@@ -606,6 +614,8 @@ func (s *SQLStore) ListPrefixes(ctx context.Context) ([]PrefixRow, error) {
 	err := s.read(ctx, &rows, `
 		SELECT p.*, COALESCE(e.code, '') AS environment_code,
 		       COALESCE(v.name, '') AS vrf_name,
+		       COALESCE(vl.name, '') AS vlan_name,
+		       vl.vid AS vlan_vid,
 		       (SELECT COUNT(*) FROM ip_address ip
 		         WHERE ip.addr_family = p.addr_family
 		           AND ip.addr_start >= p.addr_start
@@ -613,6 +623,7 @@ func (s *SQLStore) ListPrefixes(ctx context.Context) ([]PrefixRow, error) {
 		FROM prefix p
 		LEFT JOIN environment e ON e.id = p.environment_id
 		LEFT JOIN vrf v ON v.id = p.vrf_id
+		LEFT JOIN vlan vl ON vl.id = p.vlan_ref_id
 		ORDER BY p.addr_family, p.addr_start, p.addr_end DESC`)
 	if err != nil {
 		return nil, fmt.Errorf("listing prefixes: %w", err)

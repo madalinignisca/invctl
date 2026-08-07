@@ -36,9 +36,14 @@
           <td><input form="pfx-{{.ID}}" class="mono {{if $.Edit.Err "cidr_text"}}invalid{{end}}" type="text" name="cidr_text"
                      value="{{$.Edit.Value "cidr_text" .CIDRText}}" aria-label="Network" required style="width:12em">
               {{with $.Edit.Err "cidr_text"}}<div class="field-error">{{.}}</div>{{end}}</td>
-          <td><input form="pfx-{{.ID}}" class="{{if $.Edit.Err "vlan_id"}}invalid{{end}}" type="number" name="vlan_id"
-                     value="{{$.Edit.Value "vlan_id" (derefInt .VLANID)}}" min="1" max="4094" aria-label="VLAN" style="width:5.5em">
-              {{with $.Edit.Err "vlan_id"}}<div class="field-error">{{.}}</div>{{end}}</td>
+          <td>
+            {{$vl := $.Edit.Value "vlan_ref_id" (deref $p.VLANRefID)}}
+            <select form="pfx-{{.ID}}" name="vlan_ref_id" aria-label="VLAN">
+              <option value="">—</option>
+              {{range $.VLANs}}<option value="{{.ID}}" {{if eq .ID $vl}}selected{{end}}>{{.VID}} · {{.Name}}</option>{{end}}
+            </select>
+            {{with $.Edit.Err "vlan_ref_id"}}<div class="field-error">{{.}}</div>{{end}}
+          </td>
           <td>
             {{$env := $.Edit.Value "environment_id" (deref $p.EnvironmentID)}}
             <select form="pfx-{{.ID}}" name="environment_id" aria-label="Environment">
@@ -70,7 +75,10 @@
             {{.CIDRText}}
             {{if .VRFName}}<span class="pill pill-muted" title="Route table">{{.VRFName}}</span>{{end}}
           </td>
-          <td class="num">{{if .VLANID}}{{derefInt .VLANID}}{{else}}—{{end}}</td>
+          <td class="num">
+            {{if .VLANRefID}}<a href="/vlans/{{deref .VLANRefID}}" title="{{.VLANName}}">{{derefInt .VLANVID}}</a>
+            {{else}}—{{end}}
+          </td>
           <td>{{if .EnvironmentCode}}<span class="pill pill-info">{{.EnvironmentCode}}</span>{{else}}—{{end}}</td>
           <td>{{if .Role}}{{deref .Role}}{{else}}—{{end}}</td>
           <td class="num" title="Addresses recorded directly here, not in a child network">{{.Addresses}}</td>

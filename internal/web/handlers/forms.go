@@ -272,6 +272,10 @@ type prefixFormData struct {
 	Base
 	Errors       map[string]string
 	Environments []domain.Environment
+	// VLANs the prefix can be put on. A reference now, not a typed number:
+	// the two coexisted for one release and disagreed the first time anybody
+	// edited a prefix.
+	VLANs []store.VLANRow
 }
 
 // newAssetForm builds the asset form context. Parents is the same list the
@@ -489,11 +493,14 @@ func (a *App) newLinkForm(r *http.Request, assetID string, errs map[string]strin
 	}
 }
 
-func (a *App) newPrefixForm(r *http.Request, errs map[string]string, envs []domain.Environment) prefixFormData {
+func (a *App) newPrefixForm(r *http.Request, errs map[string]string, envs []domain.Environment,
+	vlans []store.VLANRow) prefixFormData {
+
 	return prefixFormData{
 		Base:         a.base(r, "Prefixes", "prefixes"),
 		Errors:       orEmpty(errs),
 		Environments: envs,
+		VLANs:        vlans,
 	}
 }
 

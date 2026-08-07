@@ -656,7 +656,14 @@
       </div>
       <div class="field">
         <label for="prefix-vlan">VLAN</label>
-        <input id="prefix-vlan" type="number" name="vlan_id" min="1" max="4094" placeholder="30">
+        <select id="prefix-vlan" name="vlan_ref_id">
+          <option value="">—</option>
+          {{range .VLANs}}<option value="{{.ID}}">{{.VID}} · {{.Name}}</option>{{end}}
+        </select>
+        <div class="field-hint">
+          Declared on <a href="/vlans">the VLANs page</a>. Two networks on one
+          VLAN is normal — that is a dual-stack broadcast domain.
+        </div>
       </div>
       <div class="field">
         <label for="prefix-env">Environment</label>

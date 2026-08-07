@@ -200,24 +200,33 @@ func (s *SQLStore) searchStructured(ctx context.Context, query string) ([]Search
 			})
 		}
 
-		// Most specific containing prefix. Ordering by addr_start descending
-		// picks the narrowest range, because a longer prefix has a higher
-		// network address within the same containing range.
+		// Most specific containing prefix.
+		//
+		// BOTH ORDER TERMS, for the reason ResolveAddress spells out: sorting on
+		// addr_start alone cannot separate 10.20.0.0/16 from 10.20.0.0/24, and a
+		// subnetted range is normally aligned. The comment that used to sit here
+		// claimed a longer prefix has a higher network address within the same
+		// range, which is false exactly when it matters -- the first child
+		// carved out of any prefix shares its first address. Narrowest is the
+		// one that ends soonest.
 		var prefixHit struct {
 			ID       string  `db:"id"`
 			CIDRText string  `db:"cidr_text"`
 			Role     *string `db:"role"`
-			VLANID   *int    `db:"vlan_id"`
+			VLANName *string `db:"vlan_name"`
+			VLANVID  *int    `db:"vlan_vid"`
 		}
 		err = s.readOne(ctx, &prefixHit, `
-			SELECT id, cidr_text, role, vlan_id FROM prefix
-			WHERE addr_family = ? AND addr_start <= ? AND addr_end >= ?
-			ORDER BY addr_start DESC
+			SELECT p.id, p.cidr_text, p.role, v.name AS vlan_name, v.vid AS vlan_vid
+			FROM prefix p
+			LEFT JOIN vlan v ON v.id = p.vlan_ref_id
+			WHERE p.addr_family = ? AND p.addr_start <= ? AND p.addr_end >= ?
+			ORDER BY p.addr_start DESC, p.addr_end ASC
 			LIMIT 1`, av.Family, av.Start, av.Start)
 		if err == nil {
 			why := "contains " + av.Text
-			if prefixHit.VLANID != nil {
-				why += fmt.Sprintf(" (VLAN %d)", *prefixHit.VLANID)
+			if prefixHit.VLANVID != nil {
+				why += fmt.Sprintf(" (VLAN %d)", *prefixHit.VLANVID)
 			}
 			subtitle := "prefix"
 			if prefixHit.Role != nil {

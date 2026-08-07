@@ -459,6 +459,36 @@ func (b *builder) networking() {
 		{"10.20.99.0/24", "transit", "transit", 99},
 		{"2001:db8:20::/64", "production-v6", "prod", 30},
 	}
+	// The VLANs first, because a prefix names one by REFERENCE now. It used to
+	// carry a loose integer; the two coexisted for one release and disagreed
+	// the first time anybody edited a prefix, which is why 00036 dropped it.
+	//
+	// Note 10.20.30.0/24 and 2001:db8:20::/64 both sit on VLAN 30 and get the
+	// SAME row -- the v4 and v6 halves of one broadcast domain, which the
+	// integer had no way to say.
+	vlanIDs := map[int]string{}
+	for _, p := range prefixes {
+		if p.vlan == 0 || vlanIDs[p.vlan] != "" {
+			continue
+		}
+		if !b.ok() {
+			return
+		}
+		v, err := domain.NewVLAN(store.NewID(), p.vlan, p.role, nil)
+		if err != nil {
+			b.fail(fmt.Errorf("building vlan %d: %w", p.vlan, err))
+			return
+		}
+		if id := b.env(p.env); id != "" {
+			v.EnvironmentID = &id
+		}
+		if err := b.store.CreateVLAN(b.ctx, Actor, v); err != nil {
+			b.fail(fmt.Errorf("seeding vlan %d: %w", p.vlan, err))
+			return
+		}
+		vlanIDs[p.vlan] = v.ID
+	}
+
 	for _, p := range prefixes {
 		if !b.ok() {
 			return
@@ -469,8 +499,8 @@ func (b *builder) networking() {
 			return
 		}
 		prefix.Role = str(p.role)
-		if p.vlan > 0 {
-			prefix.VLANID = num(p.vlan)
+		if id := vlanIDs[p.vlan]; id != "" {
+			prefix.VLANRefID = &id
 		}
 		if id := b.env(p.env); id != "" {
 			prefix.EnvironmentID = &id

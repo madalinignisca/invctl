@@ -157,17 +157,6 @@ func run() error {
 		return err
 	}
 
-	// Expand, backfill, contract. Migration 00031 added the VLAN model beside
-	// the loose prefix.vlan_id integer; this turns each distinct number into a
-	// real VLAN once, and does nothing on every start after. It cannot live in
-	// the migration because every row it writes needs a UUIDv7 and an RFC3339
-	// timestamp, and both are generated in Go here and never in SQL.
-	if n, err := st.BackfillPrefixVLANs(ctx, domain.Actor{ID: "system", Name: "system", Kind: "system"}); err != nil {
-		return fmt.Errorf("backfilling VLANs: %w", err)
-	} else if n > 0 {
-		slog.Info("created VLANs from the legacy prefix.vlan_id column", "count", n)
-	}
-
 	// After ensureAdmin, because an override is declared state and needs a real
 	// operator to attribute it to. Best-effort: a demo without an override is
 	// still a demo, and refusing to start over presentation data would be

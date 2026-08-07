@@ -218,68 +218,78 @@ func TestAVLANInUseCannotBeRetired(t *testing.T) {
 	}
 }
 
-// TestTheBackfillIsIdempotentAndSharesAVLANBetweenFamilies.
+// TestTwoPrefixesCanShareOneVLAN.
 //
-// The v4 and v6 prefixes of one broadcast domain both carried "30" in the old
-// integer column and had no way to say they were the same domain. The backfill
-// must put them on ONE VLAN -- that is the fact the model exists to express --
-// and must do nothing at all on the second run.
-func TestTheBackfillIsIdempotentAndSharesAVLANBetweenFamilies(t *testing.T) {
+// This replaces the backfill test, which went with the backfill in 00036. The
+// property it was really protecting is this one: the v4 and v6 halves of a
+// broadcast domain are ONE place, which the loose integer had no way to say --
+// two prefixes each carrying "30" were two unrelated numbers. Now they point at
+// the same row, and the VLAN's own page counts both.
+func TestTwoPrefixesCanShareOneVLAN(t *testing.T) {
 	for _, e := range Engines(t) {
 		t.Run(e.Name, func(t *testing.T) {
 			s, ctx := newStore(t, e)
 
-			mk := func(cidr string, vid int) string {
+			vlanID := mustVLAN(t, s, ctx, 30, "workloads", nil)
+			for _, cidr := range []string{"10.80.30.0/24", "2001:db8:80::/64"} {
 				p, err := domain.NewPrefix(NewID(), cidr)
 				if err != nil {
 					t.Fatalf("building %s: %v", cidr, err)
 				}
-				p.VLANID = &vid
+				p.VLANRefID = &vlanID
 				if err := s.CreatePrefix(ctx, testActor, p); err != nil {
 					t.Fatalf("creating %s: %v", cidr, err)
 				}
-				return p.ID
 			}
-			v4 := mk("10.80.30.0/24", 30)
-			v6 := mk("2001:db8:80::/64", 30)
-			other := mk("10.80.40.0/24", 40)
 
-			created, err := s.BackfillPrefixVLANs(ctx, testActor)
+			rows, err := s.ListVLANs(ctx)
 			if err != nil {
-				t.Fatalf("backfilling: %v", err)
+				t.Fatalf("listing vlans: %v", err)
 			}
-			if created != 2 {
-				t.Errorf("created %d VLANs, want 2 -- 30 and 40, with the v4 and v6 "+
-					"prefixes of VLAN 30 sharing one", created)
-			}
-
-			got := func(id string) *string {
-				p, err := s.GetPrefix(ctx, id)
-				if err != nil {
-					t.Fatalf("getting prefix: %v", err)
+			for _, r := range rows {
+				if r.ID != vlanID {
+					continue
 				}
-				return p.VLANRefID
+				if r.PrefixCount != 2 {
+					t.Errorf("VLAN 30 holds %d networks, want 2 -- the v4 and v6 halves "+
+						"of one broadcast domain", r.PrefixCount)
+				}
+				return
 			}
-			a, b, c := got(v4), got(v6), got(other)
-			if a == nil || b == nil || c == nil {
-				t.Fatal("a prefix was left unlinked by the backfill")
-			}
-			if *a != *b {
-				t.Error("the v4 and v6 prefixes of VLAN 30 were put on DIFFERENT VLANs. " +
-					"That they are one broadcast domain is precisely what the loose " +
-					"integer could not say and this model exists to record")
-			}
-			if *a == *c {
-				t.Error("VLAN 30 and VLAN 40 were collapsed into one")
-			}
+			t.Fatal("the VLAN is not in the list")
+		})
+	}
+}
 
-			// The second run must be silent.
-			again, err := s.BackfillPrefixVLANs(ctx, testActor)
-			if err != nil {
-				t.Fatalf("re-running the backfill: %v", err)
+// TestAPrefixHasExactlyOnePlaceToSayItsVLAN.
+//
+// THE REGRESSION THIS EXISTS FOR IS DRIFT, and it shipped. 00031 added
+// vlan_ref_id beside a loose vlan_id integer and left every writer of the
+// integer in place, so editing a prefix's VLAN through the UI moved one and not
+// the other: /prefixes said 41 while /vlans still counted the network under 40.
+// Neither page was wrong about its own column.
+//
+// A test cannot easily assert "these two columns agree" once one of them is
+// gone, and that is the point -- the fix was to remove the second place, not to
+// synchronise it. So this asserts the structural property instead: the live
+// schema has exactly one column carrying a prefix's VLAN. If somebody adds a
+// convenience integer back, this fails.
+func TestAPrefixHasExactlyOnePlaceToSayItsVLAN(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			db := migrated(t, e)
+
+			var vlanish []string
+			for _, col := range liveColumns(t, db, "prefix") {
+				if strings.Contains(col, "vlan") {
+					vlanish = append(vlanish, col)
+				}
 			}
-			if again != 0 {
-				t.Errorf("the second run created %d more VLANs; it runs on every start", again)
+			if len(vlanish) != 1 || vlanish[0] != "vlan_ref_id" {
+				t.Errorf("prefix carries %v as its VLAN column(s), want exactly "+
+					"[vlan_ref_id]. Two columns for one fact drift the first time "+
+					"different code paths write each, which is what happened between "+
+					"migrations 00031 and 00036", vlanish)
 			}
 		})
 	}

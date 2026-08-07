@@ -215,7 +215,6 @@ func TestListPrefixesUtilisation(t *testing.T) {
 				t.Fatalf("building prefix: %v", err)
 			}
 			prefix.EnvironmentID = &envID
-			prefix.VLANID = intPtr(40)
 			if err := s.CreatePrefix(ctx, testActor, prefix); err != nil {
 				t.Fatalf("creating prefix: %v", err)
 			}
