@@ -472,10 +472,17 @@ func (s *SQLStore) ResolveAddress(ctx context.Context, addr string) (*domain.Pre
 		return nil, fmt.Errorf("resolving address: %w", err)
 	}
 	var p domain.Prefix
+	// BOTH ORDER TERMS ARE LOAD-BEARING, and the second is the one that was
+	// missing. Sorting on addr_start alone breaks whenever a child begins at the
+	// same address as its parent -- 10.0.0.0/8, /16 and /24 all start at
+	// 10.0.0.0, which is the ordinary shape of a subnetted range rather than a
+	// corner case. The starts tie, the engine picks whichever row it reaches
+	// first, and "most specific" silently returned the widest prefix in the
+	// chain. Narrowest is the one that ends soonest, so addr_end ASC decides it.
 	err = s.readOne(ctx, &p, `
 		SELECT * FROM prefix
 		WHERE addr_family = ? AND addr_start <= ? AND addr_end >= ?
-		ORDER BY addr_start DESC
+		ORDER BY addr_start DESC, addr_end ASC
 		LIMIT 1`, av.Family, av.Start, av.Start)
 	if err != nil {
 		return nil, fmt.Errorf("resolving address %s: %w", addr, err)

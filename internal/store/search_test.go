@@ -247,10 +247,25 @@ func TestResolveAddress(t *testing.T) {
 				t.Fatalf("creating v6 prefix: %v", err)
 			}
 
+			// A child ALIGNED to its parent's first address. The case above it
+			// passes on a broken query: 10.20.30.0/24 starts later than
+			// 10.20.0.0/16, so ordering on addr_start alone already separates
+			// them. Here the starts are identical and only addr_end can decide,
+			// which is the ordinary shape of a subnetted range and was the gap.
+			aligned, err := domain.NewPrefix(NewID(), "10.20.0.0/24")
+			if err != nil {
+				t.Fatalf("building the aligned child: %v", err)
+			}
+			if err := s.CreatePrefix(ctx, testActor, aligned); err != nil {
+				t.Fatalf("creating the aligned child: %v", err)
+			}
+
 			cases := []struct{ addr, want string }{
 				{"10.20.30.99", "10.20.30.0/24"}, // most specific wins
 				{"10.20.99.1", "10.20.0.0/16"},   // only the wider one contains it
 				{"2001:db8::5", "2001:db8::/32"}, // v6 resolves independently
+				// Both the /16 and the /24 start at 10.20.0.0.
+				{"10.20.0.5", "10.20.0.0/24"},
 			}
 			for _, tc := range cases {
 				got, err := s.ResolveAddress(ctx, tc.addr)
