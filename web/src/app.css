@@ -1036,3 +1036,36 @@ form.htmx-request .btn-primary { opacity: 0.6; pointer-events: none; }
 }
 .util-full { color: var(--amber); }
 .util-note { color: var(--faint); font-size: 11px; margin-left: .5em; }
+
+/* The navigation rail's groups.
+   A button rather than a div so it is keyboard-operable and announced as
+   expandable; the caret rotates rather than swapping glyph, so a screen
+   reader is told the state by aria-expanded and never reads a character. */
+.rail-home { margin-bottom: 6px; }
+.rail-group { margin-bottom: 2px; }
+.rail-group-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 8px;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--faint);
+  text-align: left;
+}
+.rail-group-head:hover { color: var(--muted); }
+.rail-caret {
+  display: inline-block;
+  font-size: 9px;
+  transition: transform .12s;
+}
+.rail-caret.is-open { transform: rotate(90deg); }
+@media (prefers-reduced-motion: reduce) { .rail-caret { transition: none; } }
+/* Indented under their heading, so the hierarchy reads without a rule. */
+.rail-group-links .rail-link { padding-left: 22px; }

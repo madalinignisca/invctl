@@ -78,7 +78,7 @@ type netAnchorFormData struct {
 
 func (a *App) newNetGroupForm(r *http.Request, errs map[string]string, spec domain.NetGroupSpec) netGroupFormData {
 	return netGroupFormData{
-		Base: a.base(r, "Networks", "network"), Errors: orEmpty(errs), Spec: spec,
+		Base: a.base(r, "Topology", "network"), Errors: orEmpty(errs), Spec: spec,
 		Kinds: domain.NetGroupKinds, Roles: domain.NetGroupRoles,
 		Availabilities: domain.NetGroupAvailabilities, FailoverModes: domain.FailoverModes,
 	}
@@ -86,27 +86,27 @@ func (a *App) newNetGroupForm(r *http.Request, errs map[string]string, spec doma
 
 func (a *App) newNetGroupMemberForm(r *http.Request, errs map[string]string, groups []store.NetGroupRow, assets []store.AssetRow) netGroupMemberFormData {
 	return netGroupMemberFormData{
-		Base: a.base(r, "Networks", "network"), Errors: orEmpty(errs),
+		Base: a.base(r, "Topology", "network"), Errors: orEmpty(errs),
 		Groups: groups, Assets: assets, MemberRoles: domain.NetGroupMemberRoles,
 	}
 }
 
 func (a *App) newNetUplinkForm(r *http.Request, errs map[string]string, groups []store.NetGroupRow) netUplinkFormData {
 	return netUplinkFormData{
-		Base: a.base(r, "Networks", "network"), Errors: orEmpty(errs), Groups: groups, Planes: domain.Planes,
+		Base: a.base(r, "Topology", "network"), Errors: orEmpty(errs), Groups: groups, Planes: domain.Planes,
 	}
 }
 
 func (a *App) newNetAttachmentForm(r *http.Request, errs map[string]string, groups []store.NetGroupRow, assets []store.AssetRow) netAttachmentFormData {
 	return netAttachmentFormData{
-		Base: a.base(r, "Networks", "network"), Errors: orEmpty(errs),
+		Base: a.base(r, "Topology", "network"), Errors: orEmpty(errs),
 		Groups: groups, Assets: assets, Planes: domain.Planes,
 	}
 }
 
 func (a *App) newNetAnchorForm(r *http.Request, errs map[string]string, groups []store.NetGroupRow) netAnchorFormData {
 	return netAnchorFormData{
-		Base: a.base(r, "Networks", "network"), Errors: orEmpty(errs), Groups: groups, Scopes: domain.AnchorScopes,
+		Base: a.base(r, "Topology", "network"), Errors: orEmpty(errs), Groups: groups, Scopes: domain.AnchorScopes,
 	}
 }
 
@@ -155,7 +155,7 @@ func (a *App) buildNetworkListPage(r *http.Request, status int,
 	}
 
 	return networkListPage{
-		Base:           a.base(r, "Networks", "network"),
+		Base:           a.base(r, "Topology", "network"),
 		Groups:         groups,
 		Anchors:        anchors,
 		Coverage:       coverage,
@@ -374,6 +374,6 @@ func (a *App) NetworkDerive(w http.ResponseWriter, r *http.Request) {
 		a.serverError(w, r, err)
 		return
 	}
-	data := networkDerivePage{Base: a.base(r, "Networks", "network"), Proposal: proposal}
+	data := networkDerivePage{Base: a.base(r, "Topology", "network"), Proposal: proposal}
 	a.Render.Respond(w, r, http.StatusOK, "network_derive", "network_derive_result", data)
 }

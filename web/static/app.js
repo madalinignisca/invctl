@@ -199,6 +199,63 @@ document.addEventListener('alpine:init', () => {
     },
   }));
 
+  // The navigation rail's collapsible sections.
+  //
+  // WHAT THE SERVER DECIDES AND WHAT THIS DOES. The group holding the current
+  // page arrives already open, because the server knows which page it just
+  // rendered and guessing that here would mean parsing the URL in two places.
+  // Everything after the first paint is the operator's: what they opened or
+  // closed is remembered, and it outranks the server's default on every later
+  // visit, because a section somebody deliberately shut should stay shut.
+  //
+  // The current section is the exception -- it always opens, even if it was
+  // collapsed last time. Landing on a page whose rail entry is hidden is
+  // disorienting in a way that no amount of remembered state justifies.
+  //
+  // Arguments come through data-* rather than x-data("..."), because this is
+  // Alpine's CSP build: attribute values are property and method names, never
+  // expressions. diagramZoom reads data-width the same way.
+  Alpine.data('navGroup', () => ({
+    open: false,
+    key: '',
+    init() {
+      this.key = this.$el.dataset.group || '';
+      const current = this.$el.dataset.current === 'true';
+      if (current) {
+        this.open = true;
+        this.remember();
+        return;
+      }
+      const saved = this.recall();
+      this.open = saved === null ? this.$el.dataset.open === 'true' : saved;
+    },
+    toggle() {
+      this.open = !this.open;
+      this.remember();
+    },
+    // Storage is best-effort. A browser with it disabled, or a private window
+    // that throws on write, gets a rail that works and forgets -- which is a
+    // far better failure than a navigation that throws on every page.
+    remember() {
+      try {
+        window.localStorage.setItem('invctl.nav.' + this.key, this.open ? '1' : '0');
+      } catch (e) {
+        /* ignore */
+      }
+    },
+    recall() {
+      try {
+        const v = window.localStorage.getItem('invctl.nav.' + this.key);
+        return v === null ? null : v === '1';
+      } catch (e) {
+        return null;
+      }
+    },
+    get caretClass() {
+      return this.open ? 'is-open' : '';
+    },
+  }));
+
   Alpine.data('confirmAction', (message = 'Are you sure?') => ({
     confirm(event) {
       if (!window.confirm(message)) {

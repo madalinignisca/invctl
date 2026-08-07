@@ -64,10 +64,15 @@ type Flash struct {
 
 // Base is the data every page needs. Page structs embed it.
 type Base struct {
-	Title    string
-	Nav      string
-	User     *domain.AppUser
-	CanWrite bool
+	Title string
+	Nav   string
+	// NavGroups is the rail, with the group holding this page already open.
+	// Built per request rather than being a package-level value the layout
+	// reaches for, so two concurrent requests cannot race on which section is
+	// expanded. See nav.go for why the grouping lives in Go at all.
+	NavGroups []NavGroup
+	User      *domain.AppUser
+	CanWrite  bool
 	// CanSeeCosts is CanWrite's read-only sibling for money. It is true for
 	// every authenticated user today; it exists so that the day a deployment
 	// needs to hide commercial figures from part of its audience, the change is
@@ -246,6 +251,7 @@ func (a *App) base(r *http.Request, title, nav string) Base {
 	b := Base{
 		Title:       title,
 		Nav:         nav,
+		NavGroups:   NavFor(nav),
 		User:        user,
 		CanWrite:    a.Authz.CanWrite(user),
 		CanSeeCosts: a.Authz.CanSeeCosts(user),

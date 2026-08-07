@@ -95,7 +95,7 @@ func (a *App) PowerReport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.Render.Respond(w, r, http.StatusOK, "power_report", "power_findings", powerReportPage{
-		Base:   a.base(r, "Power findings", "power"),
+		Base:   a.base(r, "Power findings", "power-report"),
 		Report: report,
 	})
 }
