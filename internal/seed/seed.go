@@ -239,8 +239,12 @@ func num(n int) *int       { return &n }
 func (b *builder) physical() {
 	b.asset(domain.KindSite, "dc-oslo", "", []string{"prod"}, nil)
 
-	b.asset(domain.KindRack, "rack-a1", "dc-oslo", []string{"prod"}, nil)
-	b.asset(domain.KindRack, "rack-b1", "dc-oslo", []string{"prod"}, nil)
+	// Measured racks, so the elevation draws a real height rather than the
+	// display default -- and so the fixture demonstrates the difference.
+	b.asset(domain.KindRack, "rack-a1", "dc-oslo", []string{"prod"}, func(a *domain.Asset) {
+		a.UHeight = num(42)
+	})
+	b.asset(domain.KindRack, "rack-b1", "dc-oslo", []string{"prod"}, nil) // height not recorded
 
 	// The PDU is a containment parent for nothing, but losing it takes the
 	// rack with it -- modelled here as a sibling so the demo can show that
@@ -249,6 +253,7 @@ func (b *builder) physical() {
 		a.Vendor, a.Model = str("APC"), str("AP8853")
 		a.Serial = str("5A2134X09881")
 		a.DeviceTypeID = b.deviceType("AP8853")
+		a.RackPosition, a.RackFace = num(1), str(domain.FaceRear)
 	})
 
 	// The shared switch: it carries both production and development VLANs, so
@@ -261,6 +266,7 @@ func (b *builder) physical() {
 		// No date of its own: it INHERITS the model's, and every view says so.
 		// The catalogue's whole argument, sitting in the fixture.
 		a.DeviceTypeID = b.deviceType("DCS-7050SX3-48YC8")
+		a.RackPosition, a.RackFace = num(40), str(domain.FaceFront)
 	})
 
 	// The MC-LAG peer, in the other rack. It carries the same VLANs as
@@ -322,6 +328,15 @@ func (b *builder) physical() {
 			// its own, a model that has one.
 			if hh.name != "hv-03" {
 				a.DeviceTypeID = b.deviceType("PowerEdge R650")
+			}
+			// hv-01 and hv-02 share rack-a1; hv-03 is in rack-b1, whose height
+			// nobody recorded -- so the fixture shows a measured elevation and an
+			// assumed one side by side.
+			switch hh.name {
+			case "hv-01":
+				a.RackPosition = num(10)
+			case "hv-02":
+				a.RackPosition = num(11)
 			}
 		})
 	}
