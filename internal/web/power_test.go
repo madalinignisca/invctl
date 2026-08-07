@@ -317,8 +317,14 @@ func TestTracingARunThroughTwoPanelsOnScreen(t *testing.T) {
 				"answers \"a patch panel\", which is true and useless:\n%s", want, page)
 		}
 	}
-	if !strings.Contains(page, "complete") {
-		t.Error("the trace does not say whether it reached an end")
+	// The PILL, not the word. "incomplete" contains "complete", so asserting on
+	// the substring could never fail -- mutation testing caught that by removing
+	// the completeness flag entirely and watching this stay green.
+	if !strings.Contains(page, `pill-ok">complete`) {
+		t.Errorf("the trace does not report itself as complete:\n%s", page)
+	}
+	if strings.Contains(page, "pill-degraded\">incomplete") {
+		t.Error("a run that reaches the far end is reported as incomplete")
 	}
 	if !strings.Contains(page, "through the panel") {
 		t.Error("the trace does not distinguish a panel hop from a cable hop")
