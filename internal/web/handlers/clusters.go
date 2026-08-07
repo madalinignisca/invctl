@@ -1,0 +1,179 @@
+// invctl — infrastructure inventory
+// Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+//
+// Licensed under the GNU Affero General Public License, version 3 only —
+// no later version applies. See LICENSE for the full text.
+//
+// SPDX-License-Identifier: AGPL-3.0-only
+
+package handlers
+
+import (
+	"net/http"
+
+	"github.com/madalinignisca/invctl/internal/domain"
+	"github.com/madalinignisca/invctl/internal/store"
+	"github.com/madalinignisca/invctl/internal/web/render"
+)
+
+type clusterListPage struct {
+	Base
+	Clusters []store.ClusterRow
+	Kinds    []string
+	Policies []string
+	Errors   map[string]string
+}
+
+// ClusterList renders every cluster.
+func (a *App) ClusterList(w http.ResponseWriter, r *http.Request) {
+	a.renderClusters(w, r, http.StatusOK, nil)
+}
+
+func (a *App) renderClusters(w http.ResponseWriter, r *http.Request, status int, errs map[string]string) {
+	clusters, err := a.Store.ListClusters(r.Context())
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
+	a.Render.Page(w, status, "cluster_list", clusterListPage{
+		Base:     a.base(r, "Clusters", "clusters"),
+		Clusters: clusters,
+		Kinds:    domain.ClusterKinds,
+		Policies: domain.HAPolicies,
+		Errors:   orEmpty(errs),
+	})
+}
+
+// ClusterDetail shows one cluster, its hosts and what its policy means.
+func (a *App) ClusterDetail(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	cluster, err := a.Store.GetCluster(r.Context(), id)
+	if err != nil {
+		a.handleStoreError(w, r, err)
+		return
+	}
+	hosts, err := a.Store.ListClusterHosts(r.Context(), id)
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
+	candidates, err := a.Store.ClusterCandidates(r.Context(), id)
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
+	// What losing ONE host would do. The arithmetic an operator would
+	// otherwise do in their head, and the reason the page exists.
+	afterOne := domain.CanRelocate(cluster.HAPolicy, len(hosts)-1, cluster.MinHosts)
+
+	a.Render.Page(w, http.StatusOK, "cluster_detail", struct {
+		Base
+		Cluster    *domain.Cluster
+		Hosts      []store.ClusterHostRow
+		Candidates []store.AssetRow
+		AfterOne   domain.Relocation
+		PolicyNote string
+	}{
+		Base:       a.base(r, cluster.Name, "clusters"),
+		Cluster:    cluster,
+		Hosts:      hosts,
+		Candidates: candidates,
+		AfterOne:   afterOne,
+		PolicyNote: domain.HAPolicyDescription(cluster.HAPolicy),
+	})
+}
+
+// ClusterCreate declares a cluster.
+func (a *App) ClusterCreate(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Could not read that form.", http.StatusBadRequest)
+		return
+	}
+	c, err := domain.NewCluster(store.NewID(), formValue(r, "name"), formValue(r, "kind"))
+	if err == nil {
+		if p := formValue(r, "ha_policy"); p != "" {
+			c.HAPolicy = p
+		}
+		c.MinHosts = optionalNumbers(r).opt("min_hosts")
+		c.Description = optionalString(r, "description")
+		err = c.Validate()
+		if err == nil {
+			err = a.Store.CreateCluster(r.Context(), actor(r), c)
+		}
+	}
+	if err != nil {
+		messages, ok := validationErrors(err)
+		if !ok {
+			if isConflict(err) {
+				messages = map[string]string{"name": "a cluster with that name already exists"}
+			} else {
+				a.handleStoreError(w, r, err)
+				return
+			}
+		}
+		a.renderClusters(w, r, http.StatusUnprocessableEntity, messages)
+		return
+	}
+	a.setFlash(r, "success", "Cluster "+c.Name+" declared.")
+	render.Redirect(w, r, "/clusters")
+}
+
+// ClusterUpdate corrects a cluster, including the policy the engine reads.
+func (a *App) ClusterUpdate(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Could not read that form.", http.StatusBadRequest)
+		return
+	}
+	id := r.PathValue("id")
+	existing, err := a.Store.GetCluster(r.Context(), id)
+	if err != nil {
+		a.handleStoreError(w, r, err)
+		return
+	}
+	updated := *existing
+	updated.Name = formValue(r, "name")
+	updated.Kind = formValue(r, "kind")
+	updated.HAPolicy = formValue(r, "ha_policy")
+	updated.MinHosts = optionalNumbers(r).opt("min_hosts")
+	updated.Description = optionalString(r, "description")
+	updated.RowVersion = submittedVersion(r, updated.RowVersion)
+
+	if err := a.Store.UpdateCluster(r.Context(), actor(r), &updated); err != nil {
+		a.handleStoreError(w, r, err)
+		return
+	}
+	a.setFlash(r, "success", "Cluster updated.")
+	render.Redirect(w, r, "/clusters/"+id)
+}
+
+// ClusterSetHosts replaces which hosts are in the cluster.
+func (a *App) ClusterSetHosts(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Could not read that form.", http.StatusBadRequest)
+		return
+	}
+	id := r.PathValue("id")
+	var members []domain.ClusterMember
+	for _, assetID := range r.Form["asset_id"] {
+		if assetID == "" {
+			continue
+		}
+		members = append(members, domain.ClusterMember{ClusterID: id, AssetID: assetID})
+	}
+	if err := a.Store.SetClusterMembers(r.Context(), actor(r), id, members); err != nil {
+		a.handleStoreError(w, r, err)
+		return
+	}
+	a.setFlash(r, "success", "Cluster hosts updated.")
+	render.Redirect(w, r, "/clusters/"+id)
+}
+
+// ClusterRetire withdraws a cluster.
+func (a *App) ClusterRetire(w http.ResponseWriter, r *http.Request) {
+	if err := a.Store.RetireCluster(r.Context(), actor(r), r.PathValue("id")); err != nil {
+		a.handleStoreError(w, r, err)
+		return
+	}
+	a.setFlash(r, "success", "Cluster withdrawn.")
+	render.Redirect(w, r, "/clusters")
+}

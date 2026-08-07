@@ -81,6 +81,11 @@ type Graph struct {
 	ServiceClusterAssetID map[string]string   // service id -> cluster asset id
 	ClusterNodes          map[string][]string // cluster asset id -> k8s_node descendant asset ids
 
+	// Clusters are hosts that can carry each other's guests. Empty whenever
+	// none is declared, which makes cluster HA inert and every result
+	// byte-identical to a build without it.
+	Clusters []Cluster
+
 	// Structures are the declared things that exist only because ports on
 	// assets belong to them: VLANs, first-hop redundancy groups, overlays.
 	// Empty whenever none is declared, which makes the whole feature inert on

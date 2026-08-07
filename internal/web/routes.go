@@ -116,6 +116,8 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	read("GET /services/{id}", app.ServiceDetail)
 	read("GET /prefixes", app.PrefixList)
 	read("GET /vlans", app.VLANList)
+	read("GET /clusters", app.ClusterList)
+	read("GET /clusters/{id}", app.ClusterDetail)
 	read("GET /circuits", app.CircuitList)
 	read("GET /circuits/{id}", app.CircuitDetail)
 	read("GET /allocations", app.RegistryList)
@@ -240,6 +242,10 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	write("POST /prefixes", app.PrefixCreate)
 	// Reservations live on the prefixes page rather than a page of their own:
 	// a span of addresses only means anything beside the network it falls in.
+	write("POST /clusters", app.ClusterCreate)
+	write("POST /clusters/{id}", app.ClusterUpdate)
+	write("POST /clusters/{id}/hosts", app.ClusterSetHosts)
+	write("POST /clusters/{id}/retire", app.ClusterRetire)
 	write("POST /circuits", app.CircuitCreate)
 	write("POST /circuits/{id}/retire", app.CircuitRetire)
 	write("POST /circuits/{id}/terminations", app.CircuitLand)

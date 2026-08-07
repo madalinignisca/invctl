@@ -1,0 +1,108 @@
+{{/*
+  invctl — infrastructure inventory
+  Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+
+  Licensed under the GNU Affero General Public License, version 3 only —
+  no later version applies. See LICENSE for the full text.
+
+  SPDX-License-Identifier: AGPL-3.0-only
+*/}}
+{{define "content"}}
+<div class="page-head">
+  <div class="eyebrow">Hosts that carry each other</div>
+  <h1>Clusters</h1>
+  <p class="lede">
+    A guest is a child of the hypervisor it actually runs on, and losing that
+    host takes it — which is right for a standalone box and wrong for a cluster,
+    where the guests come back on a surviving member. This is the one page whose
+    values change <strong>what a simulation concludes</strong>, not just what a
+    report shows.
+  </p>
+</div>
+
+<div class="panel">
+  <div class="panel-head">
+    <h2>{{pluralise (len .Clusters) "cluster" "clusters"}}</h2>
+    <span class="panel-note">"At risk" means it cannot survive losing one host</span>
+  </div>
+  {{if .Clusters}}
+  <div class="scroll-x">
+    <table>
+      <thead><tr><th>Name</th><th>Runs</th><th>HA</th><th class="num">Hosts</th><th class="num">Guests</th><th>Losing one host</th>{{if .CanWrite}}<th></th>{{end}}</tr></thead>
+      <tbody>
+        {{range .Clusters}}
+        <tr>
+          <td><a href="/clusters/{{.ID}}">{{.Name}}</a></td>
+          <td class="mono">{{.Kind}}</td>
+          <td>
+            {{if eq .HAPolicy "restart"}}<span class="pill pill-info">restart</span>
+            {{else}}<span class="pill pill-muted" title="Guests stay down with their host">none</span>{{end}}
+          </td>
+          <td class="num">{{.Hosts}}</td>
+          <td class="num">{{.Guests}}</td>
+          <td>
+            {{if eq .HAPolicy "none"}}<span class="reason">its guests go down with it</span>
+            {{else if .AtRisk}}<span class="pill pill-degraded" title="HA is configured and cannot help">not survivable</span>
+            {{else}}<span class="pill pill-ok">guests relocate</span>{{end}}
+          </td>
+          {{if $.CanWrite}}
+          <td style="white-space:nowrap">
+            <form method="post" action="/clusters/{{.ID}}/retire" style="display:inline">
+              <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+              <button class="btn btn-sm btn-danger" type="submit">Withdraw</button>
+            </form>
+          </td>
+          {{end}}
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{else}}
+  <div class="empty">
+    <strong>No clusters declared.</strong>
+    Every hypervisor is treated as standalone, so losing one is reported as
+    losing everything on it.
+  </div>
+  {{end}}
+</div>
+
+{{if .CanWrite}}
+<form id="cluster-form" class="panel" method="post" action="/clusters"
+      hx-post="/clusters" hx-target="#cluster-form" hx-swap="outerHTML">
+  <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+  <div class="panel-head"><h2>Declare a cluster</h2></div>
+  <div class="panel-body">
+    <div class="field-row">
+      <div class="field">
+        <label for="cl-name">Name</label>
+        <input id="cl-name" class="{{if index .Errors "name"}}invalid{{end}}" type="text"
+               name="name" placeholder="prod-pve" required>
+        {{with index .Errors "name"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="cl-kind">Runs</label>
+        <select id="cl-kind" name="kind">
+          {{range .Kinds}}<option value="{{.}}">{{.}}</option>{{end}}
+        </select>
+      </div>
+      <div class="field">
+        <label for="cl-ha">HA policy</label>
+        <select id="cl-ha" name="ha_policy">
+          {{range .Policies}}<option value="{{.}}">{{.}}</option>{{end}}
+        </select>
+        <div class="field-hint">The engine branches on this.</div>
+      </div>
+      <div class="field">
+        <label for="cl-min">Hosts needed</label>
+        <input id="cl-min" class="{{if index .Errors "min_hosts"}}invalid{{end}}" type="number"
+               name="min_hosts" min="1" placeholder="2">
+        {{with index .Errors "min_hosts"}}<div class="field-error">{{.}}</div>{{end}}
+        <div class="field-hint">Capacity, not quorum. Blank means any survivor will do.</div>
+      </div>
+    </div>
+    <button class="btn btn-primary" type="submit">Declare cluster</button>
+  </div>
+</form>
+{{end}}
+{{end}}

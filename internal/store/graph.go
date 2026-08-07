@@ -182,6 +182,13 @@ func (s *SQLStore) LoadGraph(ctx context.Context) (*impact.Graph, error) {
 	}
 	g.Structures = structures
 
+	// WP-E2: hosts that can carry each other's guests.
+	clusters, err := s.loadClusters(ctx)
+	if err != nil {
+		return nil, err
+	}
+	g.Clusters = clusters
+
 	return g, nil
 }
 
@@ -464,6 +471,87 @@ func (s *SQLStore) loadStructures(ctx context.Context) ([]impact.Structure, erro
 	out := make([]impact.Structure, 0, len(order))
 	for _, id := range order {
 		out = append(out, *byID[id])
+	}
+	return out, nil
+}
+
+// loadClusters reads the clusters, their members, and the guests on each member.
+//
+// The guests come from asset_closure, which is the same containment the engine
+// already walks to take a VM down with its host -- so what cluster HA revives
+// is exactly what containment condemned, and the two cannot disagree about
+// which guests are on which box.
+//
+// DESCENDANTS, NOT CHILDREN. A guest may sit under a bridge under the host, and
+// the down set is closure-expanded, so the revival has to be as well or a
+// nested guest would stay down while its sibling came back.
+func (s *SQLStore) loadClusters(ctx context.Context) ([]impact.Cluster, error) {
+	var rows []struct {
+		ID       string `db:"id"`
+		Name     string `db:"name"`
+		HAPolicy string `db:"ha_policy"`
+		MinHosts *int   `db:"min_hosts"`
+	}
+	err := s.read(ctx, &rows, `
+		SELECT id, name, ha_policy, min_hosts FROM cluster
+		WHERE lifecycle <> 'retired' ORDER BY name`)
+	if err != nil {
+		return nil, fmt.Errorf("loading clusters for the graph: %w", err)
+	}
+	if len(rows) == 0 {
+		return nil, nil
+	}
+
+	var members []struct {
+		ClusterID string `db:"cluster_id"`
+		AssetID   string `db:"asset_id"`
+	}
+	err = s.read(ctx, &members, `
+		SELECT m.cluster_id, m.asset_id FROM cluster_member m
+		JOIN asset a ON a.id = m.asset_id
+		WHERE a.lifecycle <> 'retired'`)
+	if err != nil {
+		return nil, fmt.Errorf("loading cluster members: %w", err)
+	}
+
+	// Every live descendant of every member, excluding the member itself: a
+	// host is not its own guest, and reviving it would undo the outage.
+	var guests []struct {
+		HostID  string `db:"host_id"`
+		GuestID string `db:"guest_id"`
+	}
+	err = s.read(ctx, &guests, `
+		SELECT c.ancestor_id AS host_id, c.descendant_id AS guest_id
+		FROM asset_closure c
+		JOIN cluster_member m ON m.asset_id = c.ancestor_id
+		JOIN asset a ON a.id = c.descendant_id
+		WHERE c.ancestor_id <> c.descendant_id AND a.lifecycle <> 'retired'`)
+	if err != nil {
+		return nil, fmt.Errorf("loading cluster guests: %w", err)
+	}
+	guestsByHost := map[string][]string{}
+	for _, g := range guests {
+		guestsByHost[g.HostID] = append(guestsByHost[g.HostID], g.GuestID)
+	}
+
+	byID := map[string]*impact.Cluster{}
+	out := make([]impact.Cluster, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, impact.Cluster{
+			ID: r.ID, Name: r.Name, HAPolicy: r.HAPolicy, MinHosts: r.MinHosts,
+			GuestsByHost: map[string][]string{},
+		})
+		byID[r.ID] = &out[len(out)-1]
+	}
+	for _, m := range members {
+		c, ok := byID[m.ClusterID]
+		if !ok {
+			continue
+		}
+		c.MemberAssetIDs = append(c.MemberAssetIDs, m.AssetID)
+		if g := guestsByHost[m.AssetID]; len(g) > 0 {
+			c.GuestsByHost[m.AssetID] = g
+		}
 	}
 	return out, nil
 }

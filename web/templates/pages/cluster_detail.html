@@ -1,0 +1,132 @@
+{{/*
+  invctl — infrastructure inventory
+  Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+
+  Licensed under the GNU Affero General Public License, version 3 only —
+  no later version applies. See LICENSE for the full text.
+
+  SPDX-License-Identifier: AGPL-3.0-only
+*/}}
+{{define "content"}}
+<div class="crumbs">
+  <a href="/clusters">Clusters</a><span class="sep">/</span><span>{{.Cluster.Name}}</span>
+</div>
+<div class="page-head">
+  <div class="eyebrow">{{.Cluster.Kind}}</div>
+  <h1>{{.Cluster.Name}}</h1>
+  <p class="lede">{{.PolicyNote}}</p>
+</div>
+
+{{/* The question the page exists to answer, before anything else. */}}
+{{if eq (printf "%s" .AfterOne) "relocated"}}
+<div class="panel"><div class="panel-body">
+  <strong>Losing one host is survivable.</strong>
+  Its guests restart on the remaining {{len .Hosts}} — they are not serving during
+  the restart, and they are serving afterwards.
+</div></div>
+{{else if eq (printf "%s" .AfterOne) "no_capacity"}}
+<div class="callout callout-warn">
+  <h2>Losing one host is not survivable</h2>
+  <p class="reason">
+    HA is configured and cannot help: {{len .Hosts}} host(s) in the cluster and
+    {{if .Cluster.MinHosts}}{{derefInt .Cluster.MinHosts}}{{else}}1{{end}} needed to carry
+    the guests. This looks identical to a healthy cluster on every other page.
+  </p>
+</div>
+{{else}}
+<div class="callout">
+  <h2>No HA configured</h2>
+  <p class="reason">
+    Guests go down with their host, which is what the impact engine assumes for
+    every hypervisor that is not in a cluster with a policy.
+  </p>
+</div>
+{{end}}
+
+<div class="panel">
+  <div class="panel-head">
+    <h2>{{pluralise (len .Hosts) "host" "hosts"}}</h2>
+    <span class="panel-note">A host belongs to at most one cluster</span>
+  </div>
+  {{if .Hosts}}
+  <div class="scroll-x">
+    <table>
+      <thead><tr><th>Host</th><th class="num">Guests</th></tr></thead>
+      <tbody>
+        {{range .Hosts}}
+        <tr>
+          <td><a href="/assets/{{.AssetID}}">{{.AssetName}}</a></td>
+          <td class="num">{{.Guests}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{else}}
+  <div class="empty"><strong>No hosts in this cluster.</strong>It carries nothing and changes nothing.</div>
+  {{end}}
+
+  {{if .CanWrite}}
+  <form class="panel-body" method="post" action="/clusters/{{.Cluster.ID}}/hosts">
+    <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+    <div class="field">
+      <label for="cl-hosts">Hosts in this cluster</label>
+      <select id="cl-hosts" name="asset_id" multiple size="8">
+        {{$hosts := .Hosts}}
+        {{range .Candidates}}
+        {{$id := .ID}}
+        <option value="{{.ID}}" {{range $hosts}}{{if eq .AssetID $id}}selected{{end}}{{end}}>{{.Name}}</option>
+        {{end}}
+      </select>
+      <div class="field-hint">
+        Hold Ctrl or Cmd to select several. The whole membership is replaced by
+        what is selected here, and the change is recorded against the cluster.
+      </div>
+    </div>
+    <button class="btn btn-primary" type="submit">Set hosts</button>
+  </form>
+  {{end}}
+</div>
+
+{{if .CanWrite}}
+<form class="panel" method="post" action="/clusters/{{.Cluster.ID}}">
+  <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+  <input type="hidden" name="row_version" value="{{itoa .Cluster.RowVersion}}">
+  <div class="panel-head"><h2>Correct this cluster</h2></div>
+  <div class="panel-body">
+    <div class="field-row">
+      <div class="field">
+        <label for="ed-name">Name</label>
+        <input id="ed-name" type="text" name="name" value="{{.Cluster.Name}}" required>
+      </div>
+      <div class="field">
+        <label for="ed-kind">Runs</label>
+        <select id="ed-kind" name="kind">
+          {{$k := .Cluster.Kind}}
+          <option value="proxmox" {{if eq $k "proxmox"}}selected{{end}}>proxmox</option>
+          <option value="vmware" {{if eq $k "vmware"}}selected{{end}}>vmware</option>
+          <option value="hyperv" {{if eq $k "hyperv"}}selected{{end}}>hyperv</option>
+          <option value="xen" {{if eq $k "xen"}}selected{{end}}>xen</option>
+          <option value="nutanix" {{if eq $k "nutanix"}}selected{{end}}>nutanix</option>
+          <option value="other" {{if eq $k "other"}}selected{{end}}>other</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="ed-ha">HA policy</label>
+        <select id="ed-ha" name="ha_policy">
+          {{$p := .Cluster.HAPolicy}}
+          <option value="none" {{if eq $p "none"}}selected{{end}}>none</option>
+          <option value="restart" {{if eq $p "restart"}}selected{{end}}>restart</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="ed-min">Hosts needed</label>
+        <input id="ed-min" type="number" name="min_hosts" min="1"
+               value="{{if .Cluster.MinHosts}}{{derefInt .Cluster.MinHosts}}{{end}}">
+      </div>
+    </div>
+    <button class="btn btn-primary" type="submit">Save</button>
+  </div>
+</form>
+{{end}}
+{{end}}

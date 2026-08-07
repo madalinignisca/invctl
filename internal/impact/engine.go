@@ -132,6 +132,11 @@ type Result struct {
 	// Coverage is the modelled/unmodelled split this run saw, so a report can
 	// say honestly how much of the estate it actually has an opinion about.
 	Coverage ReachCoverage
+	// Relocations names what cluster HA did for the guests of a failed host:
+	// restarted them on a survivor, or found nowhere to put them. The second is
+	// the finding worth having -- an estate that believes it has HA and has
+	// outgrown it.
+	Relocations []RelocationFinding
 	// Structures names declared things the outage empties or reduces to one:
 	// a VLAN whose last port went, a redundancy group whose last router went,
 	// an overlay left terminating in one place. Reported, never propagated --
@@ -151,6 +156,40 @@ func Analyse(g *Graph, req Request, in Inputs) Result {
 	netInput := in.Net
 	if req.SkipNetwork {
 		netInput = nil
+	}
+
+	// CLUSTER HA RUNS FIRST, on the asset set, because everything after it --
+	// instances, capacity, propagation, reachability, shutdown order -- must
+	// reason about the estate as it will actually be. A guest whose host failed
+	// inside a cluster that can absorb the loss restarted elsewhere and is
+	// serving; leaving it in the down set here and patching the result
+	// afterwards would have the whole dependency walk answer a question about
+	// an outage that did not happen.
+	//
+	// Inert when no cluster is declared, and inert for a cluster whose policy
+	// is none -- both produce a result byte-identical to a build without this.
+	revived, relocations := applyClusterHA(g.Clusters, in.DownAssetIDs)
+	if len(revived) > 0 {
+		downAssets := make(map[string]bool, len(in.DownAssetIDs))
+		for id := range in.DownAssetIDs {
+			if !revived[id] {
+				downAssets[id] = true
+			}
+		}
+		in.DownAssetIDs = downAssets
+
+		// The instance set is rebuilt from the survivors rather than filtered
+		// by id: an instance is down because its host is, so the host is the
+		// fact and the instance set is a consequence of it.
+		downInstances := make(map[string]bool, len(in.DownInstanceIDs))
+		for _, instances := range g.Instances {
+			for _, inst := range instances {
+				if in.DownInstanceIDs[inst.ID] && !revived[inst.HostAssetID] {
+					downInstances[inst.ID] = true
+				}
+			}
+		}
+		in.DownInstanceIDs = downInstances
 	}
 	net := buildReachModel(netInput, in.DownAssetIDs)
 
@@ -287,6 +326,10 @@ func Analyse(g *Graph, req Request, in Inputs) Result {
 	// changing a status on that basis would assert a dependency nobody wrote
 	// down. Inert when no structure is declared, exactly like the reach model.
 	result.Structures = analyseStructures(g.Structures, in.DownAssetIDs)
+	// What a cluster did, or could not do, for the guests of a failed host. A
+	// cluster with no HA produces nothing here: it behaved exactly as an estate
+	// without the table, and saying so on every simulation is noise.
+	result.Relocations = relocations
 	result.Coverage = coverage
 
 	return result

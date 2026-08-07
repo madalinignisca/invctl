@@ -695,6 +695,10 @@ func TestTheOnlyFactDeletingStatementIsThePrune(t *testing.T) {
 		// replaced wholesale inside the group's transaction, folded into the
 		// group's audited value by auditedFHRPGroup.
 		"internal/store/fhrp.go": "fhrp_member: the routers in a group, replaced wholesale",
+		// cluster_member: the hosts in a cluster. Same rule, sixth time, and
+		// this one moves guests -- auditedCluster folds the names in so a host
+		// leaving cannot produce an empty diff on the cluster.
+		"internal/store/clusters.go": "cluster_member: the hosts in a cluster, replaced wholesale",
 	}
 
 	root := repoRoot(t)

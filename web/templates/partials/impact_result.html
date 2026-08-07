@@ -256,6 +256,32 @@
         </div>
         {{end}}
 
+        {{/* WP-E2. What cluster HA did for the guests of a failed host.
+             THIS ONE MUST BE SHOWN. It is the only finding here that explains
+             why the service list is SHORTER than the operator expects: a report
+             that silently turns an outage into nothing teaches people the tool
+             is optimistic, which is worse than the pessimism it replaced. */}}
+        {{if .Result.Relocations}}
+        <div class="scroll-x" style="margin-bottom:8px">
+          <table>
+            <thead><tr><th></th><th>Cluster</th><th class="num">Guests</th><th>What happened</th></tr></thead>
+            <tbody>
+              {{range .Result.Relocations}}
+              <tr>
+                <td>
+                  {{if .Relocated}}<span class="pill pill-ok">relocated</span>
+                  {{else}}<span class="pill pill-down">no capacity</span>{{end}}
+                </td>
+                <td>{{.ClusterName}}</td>
+                <td class="num">{{.Guests}}</td>
+                <td class="reason">{{.Detail}}</td>
+              </tr>
+              {{end}}
+            </tbody>
+          </table>
+        </div>
+        {{end}}
+
         {{/* WP-I1. Declared structures the outage empties or leaves standing
              alone: a VLAN whose last port went, a redundancy group whose last
              router went, an overlay left terminating in one place. Reported and
@@ -283,7 +309,7 @@
         </div>
         {{end}}
 
-        {{if and (not .Result.Isolated) (not .Result.Partitions) (not .Result.Unreachable) (not .Result.RedundancyLost) (not .Result.Structures)}}
+        {{if and (not .Result.Isolated) (not .Result.Partitions) (not .Result.Unreachable) (not .Result.RedundancyLost) (not .Result.Structures) (not .Result.Relocations)}}
         <div class="empty">Nothing isolated, partitioned or newly at risk on the declared network.</div>
         {{end}}
       {{end}}

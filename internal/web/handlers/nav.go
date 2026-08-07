@@ -68,6 +68,7 @@ var navGroups = []NavGroup{
 		{Label: "Assets", Href: "/assets", Nav: "assets"},
 		{Label: "Catalogue", Href: "/catalogue", Nav: "catalogue"},
 		{Label: "Power", Href: "/power", Nav: "power"},
+		{Label: "Clusters", Href: "/clusters", Nav: "clusters"},
 	}},
 	{Label: "Network", Links: []NavLink{
 		{Label: "Topology", Href: "/network", Nav: "network"},

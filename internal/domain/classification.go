@@ -262,6 +262,20 @@ var DeclaredColumns = map[string][]string{
 		"environment_id", "role", "vrf_id", "vlan_ref_id",
 		"created_at", "updated_at", "row_version",
 	},
+	// Clusters, migration 00037. Declared: somebody built a cluster and set its
+	// HA policy. A hypervisor REPORTS whether it is in quorum, and that is
+	// observed state about the host -- a different fact from the policy declared
+	// here, and the disagreement (HA configured, cluster not in quorum) is the
+	// finding.
+	//
+	// This is the first table the IMPACT ENGINE branches on rather than
+	// reports, so a wrong value here changes what a simulation concludes.
+	"cluster": {
+		"id", "name", "kind", "ha_policy", "min_hosts", "description",
+		"lifecycle", "created_at", "updated_at", "row_version",
+	},
+	// A set table, replaced wholesale with its cluster and audited on it.
+	"cluster_member": {"cluster_id", "asset_id"},
 	// Circuits, migration 00035. Declared throughout: somebody signed a
 	// contract. Nothing observes a circuit -- a router REPORTS whether the
 	// interface it lands on is up, and that is observed state about the port,
