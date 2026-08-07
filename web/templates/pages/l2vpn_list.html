@@ -1,0 +1,89 @@
+{{/*
+  invctl — infrastructure inventory
+  Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+
+  Licensed under the GNU Affero General Public License, version 3 only —
+  no later version applies. See LICENSE for the full text.
+
+  SPDX-License-Identifier: AGPL-3.0-only
+*/}}
+{{define "content"}}
+<div class="page-head">
+  <div class="eyebrow">Layer 2, stretched</div>
+  <h1>Overlays</h1>
+  <p class="lede">
+    A VLAN is a broadcast domain on one fabric. An overlay carries one
+    <strong>across</strong> a fabric — VXLAN over an IP underlay, VPLS over
+    MPLS. It is the case where two ports share an L2 domain with no cable, no
+    containment and no VLAN connecting them, so without a record here that
+    adjacency is invisible and a trace stops at the underlay.
+  </p>
+</div>
+
+<div class="panel">
+  <div class="panel-head"><h2>{{pluralise (len .Overlays) "overlay" "overlays"}}</h2></div>
+  {{if .Overlays}}
+  <div class="scroll-x">
+    <table>
+      <thead><tr><th>Name</th><th>Carried by</th><th class="num">Identifier</th><th>Reach</th>{{if .CanWrite}}<th></th>{{end}}</tr></thead>
+      <tbody>
+        {{range .Overlays}}
+        <tr>
+          <td><a href="/overlays/{{.ID}}">{{.Name}}</a></td>
+          <td class="mono">{{.Kind}}</td>
+          <td class="num">{{if .Identifier}}{{.Identifier}}{{else}}—{{end}}</td>
+          <td>
+            {{if eq (printf "%s" .Reach) "stretched"}}<span class="pill pill-ok">{{.Terminations}} attachments</span>
+            {{else if eq (printf "%s" .Reach) "one_end"}}<span class="pill pill-degraded" title="{{.ReachNote}}">one end</span>
+            {{else}}<span class="pill pill-down" title="{{.ReachNote}}">unattached</span>{{end}}
+          </td>
+          {{if $.CanWrite}}
+          <td style="white-space:nowrap">
+            <form method="post" action="/overlays/{{.ID}}/retire" style="display:inline">
+              <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+              <button class="btn btn-sm btn-danger" type="submit">Withdraw</button>
+            </form>
+          </td>
+          {{end}}
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{else}}
+  <div class="empty"><strong>No overlays declared.</strong>Two sites in one broadcast domain with no cable between them is invisible without a record here.</div>
+  {{end}}
+</div>
+
+{{if .CanWrite}}
+<form id="ovl-form" class="panel" method="post" action="/overlays"
+      hx-post="/overlays" hx-target="#ovl-form" hx-swap="outerHTML">
+  <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+  <div class="panel-head"><h2>Declare an overlay</h2></div>
+  <div class="panel-body">
+    <div class="field-row">
+      <div class="field">
+        <label for="ovl-name">Name</label>
+        <input id="ovl-name" class="{{if index .Errors "name"}}invalid{{end}}" type="text"
+               name="name" placeholder="prod-l2-stretch" required>
+        {{with index .Errors "name"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="ovl-kind">Carried by</label>
+        <select id="ovl-kind" name="kind">
+          {{range .Kinds}}<option value="{{.}}">{{.}}</option>{{end}}
+        </select>
+      </div>
+      <div class="field">
+        <label for="ovl-id">Identifier</label>
+        <input id="ovl-id" class="mono {{if index .Errors "identifier"}}invalid{{end}}" type="number"
+               name="identifier" min="0" max="16777215" placeholder="10030">
+        {{with index .Errors "identifier"}}<div class="field-error">{{.}}</div>{{end}}
+        <div class="field-hint">The VNI or VC-ID. Unique within its fabric, never estate-wide.</div>
+      </div>
+    </div>
+    <button class="btn btn-primary" type="submit">Declare overlay</button>
+  </div>
+</form>
+{{end}}
+{{end}}

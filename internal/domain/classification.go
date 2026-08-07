@@ -262,6 +262,21 @@ var DeclaredColumns = map[string][]string{
 		"vlan_id", "environment_id", "role", "vrf_id", "vlan_ref_id",
 		"created_at", "updated_at", "row_version",
 	},
+	// Overlays, migration 00034. Declared: somebody configured a VXLAN and
+	// mapped a VLAN into it. A fabric controller can REPORT which VNIs are
+	// programmed on which leaf, and that is observed state about the switch --
+	// a different fact from the overlay declared here, and the disagreement
+	// between them is the finding.
+	"l2vpn": {
+		"id", "name", "kind", "identifier", "description", "lifecycle",
+		"created_at", "updated_at", "row_version",
+	},
+	// Its own id and lifecycle, so it is audited like a dependency rather than
+	// folded into the overlay's diff.
+	"l2vpn_termination": {
+		"id", "l2vpn_id", "vlan_id", "interface_id", "lifecycle",
+		"created_at", "updated_at", "row_version",
+	},
 	// The registry layer, migration 00033. Declared: a registry delegated a
 	// block to this organisation and somebody wrote that down. Nothing observes
 	// a delegation -- a looking glass can report what is being ADVERTISED, and
