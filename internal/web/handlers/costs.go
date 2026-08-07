@@ -296,3 +296,28 @@ func joinMessages(messages map[string]string) string {
 	sort.Strings(parts)
 	return strings.Join(parts, "; ")
 }
+
+// The circuit surface. A monthly rate on a circuit is the same kind of money as
+// a monthly rate on a rack, so it goes through the same helpers rather than a
+// parallel set that would drift.
+func (a *App) CostAddToCircuit(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	c, err := costFromForm(r, a.Store.Now())
+	if err == nil {
+		err = a.Store.AddCircuitCost(r.Context(), actor(r), id, c)
+	}
+	a.afterCostWrite(w, r, err, "/circuits/"+id)
+}
+
+func (a *App) CostEditOnCircuit(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	costID := r.PathValue("costID")
+	err := a.editCost(r, costID, a.Store.GetCircuitCost, a.Store.UpdateCircuitCost, id)
+	a.afterCostEdit(w, r, err, "/circuits/"+id, costID)
+}
+
+func (a *App) CostRetireOnCircuit(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	err := a.Store.RetireCircuitCost(r.Context(), actor(r), id, r.PathValue("costID"))
+	a.afterCostWrite(w, r, err, "/circuits/"+id)
+}

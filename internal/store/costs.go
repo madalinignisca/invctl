@@ -36,6 +36,11 @@ var (
 	costOnAsset   = costTable{name: "asset_cost", column: "asset_id", entity: "asset_cost", parent: "asset", catalogued: true}
 	costOnService = costTable{name: "service_cost", column: "service_id", entity: "service_cost", parent: "service"}
 	costOnProject = costTable{name: "project_cost", column: "project_id", entity: "project_cost"}
+	// A circuit's life is its CONTRACT, not an end of support -- so a one-off
+	// install fee amortises to the day the contract ends, which is the honest
+	// horizon for money spent to get it working.
+	costOnCircuit = costTable{name: "circuit_cost", column: "circuit_id", entity: "circuit_cost",
+		parent: "circuit", eolColumn: "contract_end"}
 )
 
 type costTable struct {
@@ -48,6 +53,10 @@ type costTable struct {
 	// which is correct. A setup fee for a SaaS subscription bought nothing with
 	// a life.
 	parent string
+	// eolColumn is the parent's column holding the date a one-off amortises to.
+	// Empty means "eol_date", which is what assets and services call it; a
+	// circuit calls it contract_end because that is what it is.
+	eolColumn string
 	// catalogued means the parent can name a device type, and therefore that its
 	// end-of-support may be INHERITED rather than typed on the row. True only
 	// for assets: a service has a date or it has none.
@@ -69,7 +78,11 @@ type CostRow struct {
 func (t costTable) selectSQL() string {
 	eol, join := `NULL AS owner_eol_date`, ``
 	if t.parent != "" {
-		eol = `p.eol_date AS owner_eol_date`
+		column := t.eolColumn
+		if column == "" {
+			column = "eol_date"
+		}
+		eol = `p.` + column + ` AS owner_eol_date`
 		join = `
 		LEFT JOIN ` + t.parent + ` p ON p.id = c.` + t.column
 	}
@@ -267,6 +280,25 @@ func (s *SQLStore) RetireProjectCost(ctx context.Context, actor domain.Actor, ow
 	return s.retireCost(ctx, actor, costOnProject, ownerID, id)
 }
 
+// The circuit surface. Identical wrappers to the other three, deliberately:
+// the rollup, the validity windows and the amendment behaviour are the shared
+// machinery, and a circuit's monthly rate is not a different kind of money.
+func (s *SQLStore) ListCircuitCosts(ctx context.Context, circuitID string) ([]CostRow, error) {
+	return s.listCosts(ctx, costOnCircuit, circuitID)
+}
+
+func (s *SQLStore) AddCircuitCost(ctx context.Context, actor domain.Actor, circuitID string, c *domain.Cost) error {
+	return s.addCost(ctx, actor, costOnCircuit, circuitID, c)
+}
+
+func (s *SQLStore) UpdateCircuitCost(ctx context.Context, actor domain.Actor, c *domain.Cost) error {
+	return s.updateCost(ctx, actor, costOnCircuit, c)
+}
+
+func (s *SQLStore) RetireCircuitCost(ctx context.Context, actor domain.Actor, ownerID, id string) error {
+	return s.retireCost(ctx, actor, costOnCircuit, ownerID, id)
+}
+
 // retireCost soft-deletes, like every other entity here.
 //
 // A cost that stopped being paid is not a cost that never existed, and deleting
@@ -339,4 +371,9 @@ func TotalCosts(rows []CostRow, on string) domain.CostTotals {
 		}
 	}
 	return totals
+}
+
+// GetCircuitCost loads one line for the edit path.
+func (s *SQLStore) GetCircuitCost(ctx context.Context, id string) (*CostRow, error) {
+	return s.getCost(ctx, costOnCircuit, id)
 }

@@ -189,6 +189,27 @@ func (s *SQLStore) Expiring(ctx context.Context, asOf time.Time, horizonMonths i
 		return nil, fmt.Errorf("listing expiring services: %w", err)
 	}
 
+	// CIRCUITS, AND THE DATE HERE IS NOT AN END OF SUPPORT. Nothing stops
+	// working when a contract ends: somebody either renegotiates or is
+	// auto-renewed at a rate nobody checked, and the second is the failure this
+	// row exists to catch early. It sits in the same report because the
+	// question is identical -- what needs a decision before a date -- and a
+	// second report nobody opens is worse than a row in one they already do.
+	var circuits []ExpiringRow
+	if err := s.read(ctx, &circuits, `
+		SELECT 'circuit' AS entity_type, c.id, c.cid AS name,
+		       COALESCE(c.service_type, '') AS code,
+		       p.name AS kind, c.lifecycle,
+		       c.contract_end AS eol_date,
+		       'asset' AS eol_source, '' AS device_type_label,
+		       0 AS service_count, 0 AS best_tier, 0 AS tier
+		FROM circuit c
+		JOIN provider p ON p.id = c.provider_id
+		WHERE c.contract_end IS NOT NULL AND c.contract_end <= ? AND c.lifecycle <> ?
+		ORDER BY c.contract_end, c.cid`, until, domain.LifecycleRetired); err != nil {
+		return nil, fmt.Errorf("listing expiring circuits: %w", err)
+	}
+
 	if err := s.expiryWorkload(ctx, assets); err != nil {
 		return nil, err
 	}
@@ -205,7 +226,7 @@ func (s *SQLStore) Expiring(ctx context.Context, asOf time.Time, horizonMonths i
 		return nil, err
 	}
 
-	report.Rows = append(append(append([]ExpiringRow{}, assets...), services...), certificates...)
+	report.Rows = append(append(append(append([]ExpiringRow{}, assets...), services...), certificates...), circuits...)
 	for i := range report.Rows {
 		row := &report.Rows[i]
 		row.State = domain.ExpiryState(&row.EOLDate, asOf, domain.ExpirySoonDays*24*time.Hour)

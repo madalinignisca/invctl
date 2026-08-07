@@ -116,6 +116,8 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	read("GET /services/{id}", app.ServiceDetail)
 	read("GET /prefixes", app.PrefixList)
 	read("GET /vlans", app.VLANList)
+	read("GET /circuits", app.CircuitList)
+	read("GET /circuits/{id}", app.CircuitDetail)
 	read("GET /allocations", app.RegistryList)
 	read("GET /overlays", app.L2VPNList)
 	read("GET /overlays/{id}", app.L2VPNDetail)
@@ -238,6 +240,14 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	write("POST /prefixes", app.PrefixCreate)
 	// Reservations live on the prefixes page rather than a page of their own:
 	// a span of addresses only means anything beside the network it falls in.
+	write("POST /circuits", app.CircuitCreate)
+	write("POST /circuits/{id}/retire", app.CircuitRetire)
+	write("POST /circuits/{id}/terminations", app.CircuitLand)
+	write("POST /circuits/{id}/terminations/{termID}/retire", app.CircuitLift)
+	write("POST /circuits/{id}/costs", app.CostAddToCircuit)
+	write("POST /circuits/{id}/costs/{costID}", app.CostEditOnCircuit)
+	write("POST /circuits/{id}/costs/{costID}/retire", app.CostRetireOnCircuit)
+	write("POST /providers", app.ProviderCreate)
 	write("POST /overlays", app.L2VPNCreate)
 	write("POST /overlays/{id}/retire", app.L2VPNRetire)
 	write("POST /overlays/{id}/terminations", app.L2VPNAttach)

@@ -1,0 +1,165 @@
+{{/*
+  invctl — infrastructure inventory
+  Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+
+  Licensed under the GNU Affero General Public License, version 3 only —
+  no later version applies. See LICENSE for the full text.
+
+  SPDX-License-Identifier: AGPL-3.0-only
+*/}}
+{{define "content"}}
+<div class="page-head">
+  <div class="eyebrow">Contracted connectivity</div>
+  <h1>Circuits</h1>
+  <p class="lede">
+    The estate already records the <em>port</em> a handoff lands on. A circuit is
+    the other half: who sells it, what was committed, what it costs a month and
+    <strong>when the contract ends</strong>. Nothing stops working on that day —
+    somebody either renegotiates or is auto-renewed at a rate nobody checked, and
+    the second is why these join the <a href="/reports/expiry">expiry report</a>.
+  </p>
+</div>
+
+<div class="panel">
+  <div class="panel-head">
+    <h2>{{pluralise (len .Circuits) "circuit" "circuits"}}</h2>
+    <span class="panel-note">Soonest renewal first; undated last</span>
+  </div>
+  {{if .Circuits}}
+  <div class="scroll-x">
+    <table>
+      <thead><tr><th>Circuit ID</th><th>Provider</th><th>Service</th><th class="num">Commit</th><th>Contract ends</th><th>Ends recorded</th>{{if .CanWrite}}<th></th>{{end}}</tr></thead>
+      <tbody>
+        {{range .Circuits}}
+        <tr>
+          <td class="mono"><a href="/circuits/{{.ID}}">{{.CID}}</a></td>
+          <td>{{.ProviderName}}</td>
+          <td>{{if .ServiceType}}{{deref .ServiceType}}{{else}}—{{end}}</td>
+          <td class="num">{{if .CommitMbps}}{{derefInt .CommitMbps}} Mb{{else}}—{{end}}</td>
+          <td class="mono">
+            {{if .ContractEnd}}{{deref .ContractEnd}}
+            {{else}}<span class="util-note">not recorded</span>{{end}}
+          </td>
+          <td>
+            {{/* One end is half a fact: somebody knows where it arrives and not
+                 where it comes from, and the renewal conversation needs both. */}}
+            {{if .Landed}}<span class="pill pill-ok">both</span>
+            {{else}}<span class="pill pill-degraded" title="Only one end is recorded, or neither">{{.Terminations}} of 2</span>{{end}}
+          </td>
+          {{if $.CanWrite}}
+          <td style="white-space:nowrap">
+            <form method="post" action="/circuits/{{.ID}}/retire" style="display:inline">
+              <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+              <button class="btn btn-sm btn-danger" type="submit">Cease</button>
+            </form>
+          </td>
+          {{end}}
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{else}}
+  <div class="empty"><strong>No circuits recorded.</strong>A WAN port with no circuit behind it cannot say what it costs or when it renews.</div>
+  {{end}}
+</div>
+
+<div class="panel">
+  <div class="panel-head"><h2>{{pluralise (len .Providers) "provider" "providers"}}</h2></div>
+  {{if .Providers}}
+  <div class="scroll-x">
+    <table>
+      <thead><tr><th>Name</th><th>Account</th><th>Portal</th><th class="num">Circuits</th></tr></thead>
+      <tbody>
+        {{range .Providers}}
+        <tr>
+          <td>{{.Name}}</td>
+          <td class="mono">{{if .AccountRef}}{{deref .AccountRef}}{{else}}—{{end}}</td>
+          <td>{{if .PortalURL}}<a href="{{deref .PortalURL}}" rel="noreferrer noopener">portal</a>{{else}}—{{end}}</td>
+          <td class="num">{{.CircuitCount}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{else}}
+  <div class="empty"><strong>No providers recorded.</strong></div>
+  {{end}}
+</div>
+
+{{if .CanWrite}}
+<div class="grid-2">
+  <form id="circuit-form" class="panel" method="post" action="/circuits"
+        hx-post="/circuits" hx-target="#circuit-form" hx-swap="outerHTML">
+    <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+    <div class="panel-head"><h2>Record a circuit</h2></div>
+    <div class="panel-body">
+      <div class="field-row">
+        <div class="field">
+          <label for="c-cid">Circuit ID</label>
+          <input id="c-cid" class="mono {{if index .Errors "cid"}}invalid{{end}}" type="text"
+                 name="cid" placeholder="TN-4471182" required>
+          {{with index .Errors "cid"}}<div class="field-error">{{.}}</div>{{end}}
+          <div class="field-hint">The provider's own reference — what you quote when you ring them.</div>
+        </div>
+        <div class="field">
+          <label for="c-provider">Provider</label>
+          <select id="c-provider" name="provider_id" required>
+            {{range .Providers}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
+          </select>
+          {{with index .Errors "provider_id"}}<div class="field-error">{{.}}</div>{{end}}
+        </div>
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label for="c-type">Service</label>
+          <input id="c-type" type="text" name="service_type" placeholder="DIA">
+        </div>
+        <div class="field">
+          <label for="c-commit">Commit (Mb)</label>
+          <input id="c-commit" class="{{if index .Errors "commit_mbps"}}invalid{{end}}" type="number"
+                 name="commit_mbps" min="1" placeholder="1000">
+          {{with index .Errors "commit_mbps"}}<div class="field-error">{{.}}</div>{{end}}
+        </div>
+        <div class="field">
+          <label for="c-install">Installed</label>
+          <input id="c-install" type="date" name="install_date">
+        </div>
+        <div class="field">
+          <label for="c-end">Contract ends</label>
+          <input id="c-end" class="{{if index .Errors "contract_end"}}invalid{{end}}" type="date" name="contract_end">
+          {{with index .Errors "contract_end"}}<div class="field-error">{{.}}</div>{{end}}
+        </div>
+      </div>
+      <button class="btn btn-primary" type="submit">Record circuit</button>
+    </div>
+  </form>
+
+  <form id="provider-form" class="panel" method="post" action="/providers"
+        hx-post="/providers" hx-target="#provider-form" hx-swap="outerHTML">
+    <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+    <div class="panel-head"><h2>Record a provider</h2></div>
+    <div class="panel-body">
+      <div class="field">
+        <label for="p-name">Name</label>
+        <input id="p-name" class="{{if index .Errors "name"}}invalid{{end}}" type="text"
+               name="name" placeholder="Telenor" required>
+        {{with index .Errors "name"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label for="p-account">Account reference</label>
+          <input id="p-account" class="mono" type="text" name="account_ref" placeholder="ACC-88213">
+          <div class="field-hint">An account or customer reference — never a named person.</div>
+        </div>
+        <div class="field">
+          <label for="p-portal">Portal</label>
+          <input id="p-portal" type="text" name="portal_url" placeholder="https://…">
+        </div>
+      </div>
+      <button class="btn btn-primary" type="submit">Record provider</button>
+    </div>
+  </form>
+</div>
+{{end}}
+{{end}}

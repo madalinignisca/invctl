@@ -262,6 +262,34 @@ var DeclaredColumns = map[string][]string{
 		"vlan_id", "environment_id", "role", "vrf_id", "vlan_ref_id",
 		"created_at", "updated_at", "row_version",
 	},
+	// Circuits, migration 00035. Declared throughout: somebody signed a
+	// contract. Nothing observes a circuit -- a router REPORTS whether the
+	// interface it lands on is up, and that is observed state about the port,
+	// a different fact from the contract recorded here.
+	//
+	// provider.account_ref is governed by the team.contact_ref rule: an account
+	// or customer reference, never a named person. A CMDB kept for ever with an
+	// append-only change_log must carry nothing anybody could ask to erase.
+	"provider": {
+		"id", "name", "account_ref", "portal_url", "description", "lifecycle",
+		"created_at", "updated_at", "row_version",
+	},
+	"circuit": {
+		"id", "cid", "provider_id", "service_type", "commit_mbps", "install_date",
+		"contract_end", "description", "lifecycle", "created_at", "updated_at",
+		"row_version",
+	},
+	"circuit_termination": {
+		"id", "circuit_id", "side", "asset_id", "interface_id", "lifecycle",
+		"created_at", "updated_at", "row_version",
+	},
+	// The fourth cost surface. Same obligation as the other three: somebody
+	// read an invoice and typed it, and the rollups are derived at read time.
+	"circuit_cost": {
+		"id", "circuit_id", "kind", "period", "amount_minor", "note",
+		"valid_from", "valid_until", "lifecycle", "created_at", "updated_at",
+		"row_version",
+	},
 	// Overlays, migration 00034. Declared: somebody configured a VXLAN and
 	// mapped a VLAN into it. A fabric controller can REPORT which VNIs are
 	// programmed on which leaf, and that is observed state about the switch --

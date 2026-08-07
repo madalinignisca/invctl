@@ -85,6 +85,12 @@
               <a class="id" href="/assets/{{.ID}}">{{.Name}}</a>
             {{else if eq .EntityType "certificate"}}
               <a class="id" href="/certificates/{{.ID}}">{{.Name}}</a>
+            {{else if eq .EntityType "circuit"}}
+              {{/* Its own branch, and not for tidiness: the services branch
+                   below was catching circuits and linking them to
+                   /services/<circuit-id>, which is a 404 on every row. */}}
+              <a class="id" href="/circuits/{{.ID}}">{{.Name}}</a>
+              {{if .Code}}<div style="color:var(--muted);font-size:12px">{{.Code}}</div>{{end}}
             {{else}}
               <a class="id" href="/services/{{.ID}}">{{.Code}}</a>
               <div style="color:var(--muted);font-size:12px">{{.Name}}</div>
@@ -94,6 +100,11 @@
           <td>
             {{if .ProjectID}}
               <a class="id" href="/projects/{{.ProjectID}}">{{.ProjectName}}</a>
+            {{else if eq .EntityType "circuit"}}
+              {{/* Circuits are not owned by projects in this model, so
+                   "unowned" would be a warning about a gap that does not
+                   exist. The provider is already in the Kind column. */}}
+              <span style="color:var(--faint)">—</span>
             {{else}}
               <span class="pill pill-degraded" title="No project owns this">unowned</span>
             {{end}}
@@ -112,6 +123,11 @@
               {{else}}
                 <span style="color:var(--faint)">deployed nowhere</span>
               {{end}}
+            {{else if eq .EntityType "circuit"}}
+              {{/* A circuit has no tier. The services branch was rendering
+                   "tier 0" for every one of them, which is a fabricated fact
+                   wearing the same pill as a real one. */}}
+              <span style="color:var(--faint)">contract renewal</span>
             {{else}}
               <span class="{{tierClass .Tier}}">tier {{.Tier}}</span>
             {{end}}
