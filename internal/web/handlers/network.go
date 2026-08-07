@@ -210,9 +210,11 @@ type prefixListPage struct {
 	Base
 	Prefixes     []store.PrefixTreeRow
 	Environments []domain.Environment
+	Ranges       []store.IPRangeRow
 	// Edit is set only when a correction was refused; see editState.
-	Edit     *editState
-	FormData prefixFormData
+	Edit      *editState
+	FormData  prefixFormData
+	RangeForm rangeFormData
 }
 
 // PrefixList renders every network, with its environment, VLAN and how many
@@ -232,6 +234,11 @@ func (a *App) renderPrefixes(w http.ResponseWriter, r *http.Request, status int,
 		a.serverError(w, r, err)
 		return
 	}
+	ranges, err := a.Store.ListIPRanges(r.Context())
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
 	base := a.base(r, "Prefixes", "prefixes")
 	if edit != nil {
 		base.EditRow = edit.ID
@@ -240,8 +247,10 @@ func (a *App) renderPrefixes(w http.ResponseWriter, r *http.Request, status int,
 		Base:         base,
 		Prefixes:     prefixes,
 		Environments: envs,
+		Ranges:       ranges,
 		Edit:         edit,
 		FormData:     a.newPrefixForm(r, nil, envs),
+		RangeForm:    a.newRangeForm(r, nil),
 	})
 }
 

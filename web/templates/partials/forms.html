@@ -674,3 +674,46 @@
   </div>
 </form>
 {{end}}
+
+{{/* Reserving a span. Two addresses, not a CIDR: a reservation is rarely
+     aligned to a mask -- "the top half of the /24 is DHCP's" is 10.20.30.128
+     to .254, and forcing it into a prefix would either lie about the bounds or
+     require carving a subnet nobody routes. */}}
+{{define "range_form"}}
+<form id="range-form" class="panel" method="post" action="/ip-ranges"
+      hx-post="/ip-ranges" hx-target="#range-form" hx-swap="outerHTML">
+  <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+  <div class="panel-head"><h2>Reserve a span</h2></div>
+  <div class="panel-body">
+    <div class="field-row">
+      <div class="field">
+        <label for="range-start">First address</label>
+        <input id="range-start" class="mono {{if index .Errors "start_text"}}invalid{{end}}"
+               type="text" name="start_text" placeholder="10.20.30.100" required>
+        {{with index .Errors "start_text"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="range-end">Last address</label>
+        <input id="range-end" class="mono {{if index .Errors "end_text"}}invalid{{end}}"
+               type="text" name="end_text" placeholder="10.20.30.199" required>
+        {{with index .Errors "end_text"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="range-role">Held by</label>
+        <input id="range-role" type="text" name="role" placeholder="dhcp">
+      </div>
+    </div>
+    <div class="field">
+      <label for="range-desc">Note</label>
+      <input id="range-desc" type="text" name="description"
+             placeholder="issued by the office DHCP server, not tracked here">
+    </div>
+    <div class="field-hint">
+      A reserved span is never offered as a free address, whether or not anything
+      in it is recorded here. That is the point: whatever holds it will issue
+      from it without asking this system.
+    </div>
+    <button class="btn btn-primary" type="submit">Reserve</button>
+  </div>
+</form>
+{{end}}

@@ -9,8 +9,10 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"sort"
 
 	"github.com/madalinignisca/invctl/internal/domain"
 )
@@ -454,6 +456,13 @@ type PrefixTreeRow struct {
 	domain.PrefixNode
 	EnvironmentCode string
 	VRFName         string
+	// NextFree is the lowest address nothing has taken, and whether there was
+	// one. Computed for every row from ONE pass over the reservations and
+	// assignments rather than a query each: the page shows it for every
+	// network, and a per-row lookup would be an N+1 that grows with the
+	// estate the feature is most useful in.
+	NextFree    string
+	HasNextFree bool
 }
 
 // ListPrefixTree returns every prefix in tree order, with depth, parent and
@@ -479,14 +488,114 @@ func (s *SQLStore) ListPrefixTree(ctx context.Context) ([]PrefixTreeRow, error) 
 	}
 
 	nodes := domain.BuildPrefixTree(flat, counts)
+
+	// The exclusions, fetched once for the whole page. Sorted by address so
+	// each prefix can binary-search its own slice rather than scanning every
+	// row -- the difference between a page that stays fast on a real estate
+	// and one that is quadratic in it.
+	taken, err := s.allocationSpans(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	out := make([]PrefixTreeRow, 0, len(nodes))
 	for _, n := range nodes {
 		d := display[n.ID]
-		out = append(out, PrefixTreeRow{
+		row := PrefixTreeRow{
 			PrefixNode:      n,
 			EnvironmentCode: d.EnvironmentCode,
 			VRFName:         d.VRFName,
+		}
+		spans := taken.within(n.AddrFamily, n.AddrStart, n.AddrEnd)
+		// Child prefixes are delegated, so they are exclusions too -- and the
+		// tree already knows which they are, so no query finds them again.
+		for _, c := range nodes {
+			if c.ParentID != nil && *c.ParentID == n.ID {
+				spans = append(spans, domain.AddrSpan{Start: c.AddrStart, End: c.AddrEnd})
+			}
+		}
+		row.NextFree, row.HasNextFree = domain.FirstFreeAddress(n.CIDRText, spans)
+		out = append(out, row)
+	}
+	return out, nil
+}
+
+// allocationSpans is every reservation and every assignment, sorted, so a
+// caller can slice out the ones falling inside a prefix.
+type allocationSpans struct {
+	byFamily map[int][]domain.AddrSpan
+}
+
+// within returns the spans overlapping a range.
+//
+// NARROWING, NOT FILTERING. Correctness does not depend on this being exact:
+// FirstFreeAddress ignores a span that does not overlap and rejects one of the
+// wrong family outright, and both of those are tested there. Handing it every
+// span in the estate would produce the same answers, slowly. So the family
+// index and the early stop are bounds on work, not guards on the result --
+// mutating either leaves the suite green, which is the correct outcome for an
+// optimisation and worth saying rather than leaving a reader to assume a test
+// is watching.
+//
+// What IS load-bearing here is the step-back: the slice is sorted by START, so
+// a reservation beginning before this prefix and reaching into it sorts ahead
+// of the search position and would be missed. That one has a test.
+func (a allocationSpans) within(family int, start, end []byte) []domain.AddrSpan {
+	all := a.byFamily[family]
+	i := sort.Search(len(all), func(i int) bool {
+		// A span overlaps only if it ENDS at or after our start; sorting is by
+		// start, so this scans from the first span that could possibly reach us.
+		return bytes.Compare(all[i].Start, start) >= 0
+	})
+	// A span starting before the prefix may still reach into it, so step back
+	// while that is possible rather than assuming alignment.
+	for i > 0 && bytes.Compare(all[i-1].End, start) >= 0 {
+		i--
+	}
+	var out []domain.AddrSpan
+	for ; i < len(all); i++ {
+		if bytes.Compare(all[i].Start, end) > 0 {
+			break
+		}
+		if bytes.Compare(all[i].End, start) >= 0 {
+			out = append(out, all[i])
+		}
+	}
+	return out
+}
+
+func (s *SQLStore) allocationSpans(ctx context.Context) (allocationSpans, error) {
+	type span struct {
+		Family int    `db:"addr_family"`
+		Start  []byte `db:"addr_start"`
+		End    []byte `db:"addr_end"`
+	}
+	out := allocationSpans{byFamily: map[int][]domain.AddrSpan{}}
+
+	var ranges []span
+	err := s.read(ctx, &ranges, `
+		SELECT addr_family, addr_start, addr_end FROM ip_range
+		WHERE lifecycle <> 'retired'`)
+	if err != nil {
+		return out, fmt.Errorf("reading reservations: %w", err)
+	}
+	var addrs []span
+	err = s.read(ctx, &addrs, `
+		SELECT addr_family, addr_start, addr_start AS addr_end FROM ip_address`)
+	if err != nil {
+		return out, fmt.Errorf("reading assignments: %w", err)
+	}
+
+	for _, sp := range append(ranges, addrs...) {
+		out.byFamily[sp.Family] = append(out.byFamily[sp.Family],
+			domain.AddrSpan{Start: sp.Start, End: sp.End})
+	}
+	for f := range out.byFamily {
+		spans := out.byFamily[f]
+		sort.SliceStable(spans, func(i, j int) bool {
+			return bytes.Compare(spans[i].Start, spans[j].Start) < 0
 		})
+		out.byFamily[f] = spans
 	}
 	return out, nil
 }

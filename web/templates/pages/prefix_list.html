@@ -24,7 +24,7 @@
   {{if .Prefixes}}
   <div class="scroll-x">
     <table>
-      <thead><tr><th>CIDR</th><th>VLAN</th><th>Environment</th><th>Role</th><th class="num">Addresses</th><th>Allocated</th>{{if .CanWrite}}<th></th>{{end}}</tr></thead>
+      <thead><tr><th>CIDR</th><th>VLAN</th><th>Environment</th><th>Role</th><th class="num">Addresses</th><th>Allocated</th><th>Next free</th>{{if .CanWrite}}<th></th>{{end}}</tr></thead>
       <tbody>
         {{range .Prefixes}}
         {{$p := .}}
@@ -50,6 +50,7 @@
                      aria-label="Role" style="width:8em"></td>
           <td class="num">{{.Addresses}}</td>
           <td class="util-cell"><span class="util-pct">{{printf "%.0f" .UtilPercent}}%</span></td>
+          <td class="mono">—</td>
           <td style="white-space:nowrap">
             <form id="pfx-{{.ID}}" method="post" action="/prefixes/{{.ID}}" style="display:inline">
               <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
@@ -77,6 +78,10 @@
             <span class="util-pct{{if .IsFull}} util-full{{end}}">{{printf "%.0f" .UtilPercent}}%</span>
             {{if .Children}}<span class="util-note">{{pluralise .Children "child" "children"}}</span>{{end}}
           </td>
+          <td class="mono">
+            {{if .HasNextFree}}{{.NextFree}}
+            {{else}}<span class="util-full" title="Every usable address is assigned, reserved or inside a child network">none</span>{{end}}
+          </td>
           <td>{{if $.CanWrite}}<a class="btn btn-sm" href="/prefixes?edit={{.ID}}">Edit</a>{{end}}</td>
         </tr>
         {{end}}
@@ -89,7 +94,44 @@
   {{end}}
 </div>
 
+<div class="panel">
+  <div class="panel-head">
+    <h2>{{pluralise (len .Ranges) "reservation" "reservations"}}</h2>
+    <span class="panel-note">Never offered as free, whoever holds them</span>
+  </div>
+  {{if .Ranges}}
+  <div class="scroll-x">
+    <table>
+      <thead><tr><th>Span</th><th class="num">Addresses</th><th>Held by</th><th>Note</th>{{if .CanWrite}}<th></th>{{end}}</tr></thead>
+      <tbody>
+        {{range .Ranges}}
+        <tr>
+          <td class="mono">{{.StartText}} – {{.EndText}}
+            {{if .VRFName}}<span class="pill pill-muted">{{.VRFName}}</span>{{end}}</td>
+          <td class="num">{{.Size}}</td>
+          <td>{{if .Role}}<span class="pill pill-info">{{deref .Role}}</span>{{else}}—{{end}}</td>
+          <td>{{if .Description}}{{deref .Description}}{{else}}—{{end}}</td>
+          {{if $.CanWrite}}
+          <td style="white-space:nowrap">
+            <form method="post" action="/ip-ranges/{{.ID}}/retire"
+                  hx-post="/ip-ranges/{{.ID}}/retire" style="display:inline">
+              <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+              <button class="btn btn-sm btn-danger" type="submit">Withdraw</button>
+            </form>
+          </td>
+          {{end}}
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{else}}
+  <div class="empty"><strong>Nothing reserved.</strong>A span set aside for DHCP or a load balancer is never offered as a free address.</div>
+  {{end}}
+</div>
+
 {{if .CanWrite}}
   {{template "prefix_form" .FormData}}
+  {{template "range_form" .RangeForm}}
 {{end}}
 {{end}}

@@ -159,3 +159,68 @@ func TestRetiringAReservationIsAudited(t *testing.T) {
 		})
 	}
 }
+
+// TestTheBulkAndPerPrefixAllocatorsAgree.
+//
+// There are now two paths to "what is free here": NextFreeAddress, which
+// queries for one prefix, and ListPrefixTree, which fetches every reservation
+// and assignment once and slices per row. The second exists because the page
+// shows the answer for every network and a query each would be an N+1 that
+// grows with the estate the feature is most useful in.
+//
+// Two implementations of one question drift, and the drift is invisible --
+// both return a plausible address. So they are checked against each other on a
+// fixture built to make the slicing hard: spans before, inside, spanning and
+// after each prefix, in both families.
+func TestTheBulkAndPerPrefixAllocatorsAgree(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			s, ctx := newStore(t, e)
+
+			for _, cidr := range []string{
+				"10.70.0.0/16", "10.70.0.0/24", "10.70.1.0/24", "10.70.2.0/28",
+				"2001:db8:70::/64",
+			} {
+				mustPrefix(t, s, ctx, cidr)
+			}
+			// Reservations that start before a prefix and reach into it, sit
+			// wholly inside one, and start after another ends.
+			mustRange(t, s, ctx, "10.69.255.250", "10.70.0.10")
+			mustRange(t, s, ctx, "10.70.1.5", "10.70.1.9")
+			mustRange(t, s, ctx, "10.70.2.1", "10.70.2.3")
+			mustRange(t, s, ctx, "2001:db8:70::", "2001:db8:70::5")
+
+			assetID := mustAsset(t, s, ctx, domain.KindServer, "srv-agree", nil)
+			ifaceID := mustInterface(t, s, ctx, assetID, "eth0")
+			for _, ip := range []string{"10.70.0.11", "10.70.1.1", "2001:db8:70::9"} {
+				a, err := domain.NewIPAddress(NewID(), ip, &ifaceID, domain.IPRolePrimary)
+				if err != nil {
+					t.Fatalf("building %s: %v", ip, err)
+				}
+				if err := s.CreateIPAddress(ctx, testActor, a); err != nil {
+					t.Fatalf("creating %s: %v", ip, err)
+				}
+			}
+
+			rows, err := s.ListPrefixTree(ctx)
+			if err != nil {
+				t.Fatalf("listing the tree: %v", err)
+			}
+			if len(rows) == 0 {
+				t.Fatal("the tree is empty; this test would assert nothing")
+			}
+			for _, row := range rows {
+				one, err := s.NextFreeAddress(ctx, row.ID)
+				if err != nil {
+					t.Fatalf("next free for %s: %v", row.CIDRText, err)
+				}
+				if row.HasNextFree != one.Found || row.NextFree != one.Address {
+					t.Errorf("%s: the list says %q (found=%v) and the per-prefix query "+
+						"says %q (found=%v). Two answers to one question means one of "+
+						"the pages is handing out an address somebody holds",
+						row.CIDRText, row.NextFree, row.HasNextFree, one.Address, one.Found)
+				}
+			}
+		})
+	}
+}
