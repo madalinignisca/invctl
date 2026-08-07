@@ -12,6 +12,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/madalinignisca/invctl/internal/domain"
+	"github.com/madalinignisca/invctl/internal/seed"
+
 	"github.com/madalinignisca/invctl/internal/store"
 )
 
@@ -114,6 +117,103 @@ func TestTheFixtureShowsBothEOLProvenances(t *testing.T) {
 		if hv.InheritedEOL() {
 			t.Error("hv-01 inherits its model's date; the fixture is meant to show an " +
 				"override sitting beside an inheritance")
+		}
+	})
+}
+
+// TestTheCompanyLayerLoadsAndIsOffByDefault covers both halves of a gated
+// fixture: that it builds at all, and that a deployment which did not ask for
+// it does not get somebody else's company.
+func TestTheCompanyLayerLoadsAndIsOffByDefault(t *testing.T) {
+	eachEngine(t, func(t *testing.T, f *fixture) {
+		s, ctx := f.store, f.ctx
+		assets, err := s.ListAssets(ctx, store.AssetFilter{Limit: 500})
+		if err != nil {
+			t.Fatalf("listing: %v", err)
+		}
+		for _, a := range assets {
+			if a.Name == "colo-fra1" || a.Name == "fw-prod-1" {
+				t.Fatalf("%s is in the base fixture; the company layer must be gated, "+
+					"or several hundred tests describe an estate nobody chose", a.Name)
+			}
+		}
+	})
+}
+
+// TestTheCompanyLayerBuilds loads the gated layer and checks the shape it is
+// meant to produce: three racks on-prem, a rented colo, a firewall per
+// environment, three ISP handoffs, and an internal certificate per service.
+//
+// It asserts the SHAPE rather than exact counts, because the point of the layer
+// is that somebody can add a rack to it without a test objecting -- but not that
+// they can delete the colo without one.
+func TestTheCompanyLayerBuilds(t *testing.T) {
+	seed.CompanyEstate = true
+	t.Cleanup(func() { seed.CompanyEstate = false })
+
+	eachEngine(t, func(t *testing.T, f *fixture) {
+		s, ctx := f.store, f.ctx
+		assets, err := s.ListAssets(ctx, store.AssetFilter{Limit: 500})
+		if err != nil {
+			t.Fatalf("listing: %v", err)
+		}
+		byName := map[string]store.AssetRow{}
+		kinds := map[string]int{}
+		for _, a := range assets {
+			byName[a.Name] = a
+			kinds[a.Kind]++
+		}
+
+		for _, want := range []string{"rack-a2", "colo-fra1", "colo-rack-07", "sw-colo-1",
+			"srv-colo-1", "srv-colo-2", "srv-colo-3", "fw-prod-1", "fw-dev-1", "fw-colo-1"} {
+			if _, ok := byName[want]; !ok {
+				t.Errorf("the company estate has no %s", want)
+			}
+		}
+		if kinds[domain.KindRack] < 3 {
+			t.Errorf("%d racks, want at least 3", kinds[domain.KindRack])
+		}
+		if kinds[domain.KindFirewall] < 4 {
+			t.Errorf("%d firewalls, want at least 4 -- one per environment plus the upstream",
+				kinds[domain.KindFirewall])
+		}
+
+		// The rented machines carry a CONTRACT date of their own, which is what
+		// the override is for: same model as the on-prem boxes, different
+		// support.
+		colo := byName["srv-colo-1"]
+		if colo.EOLDate == nil {
+			t.Error("a rented server has no support date; the contract is the whole " +
+				"difference between it and a box you own")
+		}
+		if colo.InheritedEOL() {
+			t.Error("a rented server inherits its model's date rather than its contract's")
+		}
+
+		// The upstream firewall carries a port per ISP handoff.
+		edge := byName["fw-edge-1"]
+		ports, err := s.ListInterfaces(ctx, edge.ID)
+		if err != nil {
+			t.Fatalf("listing ports: %v", err)
+		}
+		var wan int
+		for _, p := range ports {
+			if strings.HasPrefix(p.Name, "wan") {
+				wan++
+			}
+		}
+		if wan < 3 {
+			t.Errorf("the upstream firewall has %d WAN ports, want 3 -- one per provider", wan)
+		}
+
+		// Certificates: a few, and at least one already lapsed so the expiry
+		// report has something to be loud about.
+		certs, err := s.ListCertificates(ctx, store.CertificateFilter{})
+		if err != nil {
+			t.Fatalf("listing certificates: %v", err)
+		}
+		if len(certs) < 6 {
+			t.Errorf("%d certificates, want the base fixture's plus the internal ones", len(certs))
 		}
 	})
 }

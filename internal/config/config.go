@@ -67,6 +67,11 @@ type Config struct {
 	// panels; an operator's first real run should show the honest empty state,
 	// so it is off unless asked for.
 	SeedObservations bool
+	// SeedCompany adds the small-company layer to the fixture: a third rack, a
+	// rented colo, a firewall per environment, three ISP handoffs and an
+	// internal certificate per service. Off by default -- a fresh deployment
+	// gets the honest small fixture rather than somebody else's company.
+	SeedCompany bool
 	// DevAdminPassword seeds the initial admin account. Empty means a random
 	// password is generated and logged once at startup.
 	DevAdminPassword string
@@ -116,6 +121,7 @@ func Load() (*Config, error) {
 		LogLevel:         envOr("INV_LOG_LEVEL", "info"),
 		SecureCookies:    envBool("INV_SECURE_COOKIES", false, &badBools),
 		SeedObservations: envBool("INV_SEED_OBSERVATIONS", false, &badBools),
+		SeedCompany:      envBool("INV_SEED_COMPANY", false, &badBools),
 		LDAP: LDAPConfig{
 			URL:            os.Getenv("INV_LDAP_URL"),
 			BindDNTemplate: os.Getenv("INV_LDAP_BIND_DN"),
