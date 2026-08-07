@@ -12,9 +12,10 @@
   <div class="eyebrow">Layer 1-3</div>
   <h1>Prefixes</h1>
   <p class="lede">
-    Enough IP modelling to resolve an address to an asset -- not an IPAM
-    replacement. Utilisation counts addresses actually assigned, not the size
-    of the range.
+    Enough IP modelling to resolve an address to an asset. Utilisation is
+    <strong>allocation</strong>: a child network counts against its parent in
+    full, however empty it is. A range carved up but not yet plugged in reads
+    as spent, because it is.
   </p>
 </div>
 
@@ -23,7 +24,7 @@
   {{if .Prefixes}}
   <div class="scroll-x">
     <table>
-      <thead><tr><th>CIDR</th><th>VLAN</th><th>Environment</th><th>Role</th><th>Addresses in use</th>{{if .CanWrite}}<th></th>{{end}}</tr></thead>
+      <thead><tr><th>CIDR</th><th>VLAN</th><th>Environment</th><th>Role</th><th class="num">Addresses</th><th>Allocated</th>{{if .CanWrite}}<th></th>{{end}}</tr></thead>
       <tbody>
         {{range .Prefixes}}
         {{$p := .}}
@@ -47,7 +48,8 @@
           </td>
           <td><input form="pfx-{{.ID}}" type="text" name="role" value="{{$.Edit.Value "role" (deref .Role)}}"
                      aria-label="Role" style="width:8em"></td>
-          <td class="num">{{.AddressCount}}</td>
+          <td class="num">{{.Addresses}}</td>
+          <td class="util-cell"><span class="util-pct">{{printf "%.0f" .UtilPercent}}%</span></td>
           <td style="white-space:nowrap">
             <form id="pfx-{{.ID}}" method="post" action="/prefixes/{{.ID}}" style="display:inline">
               <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
@@ -59,11 +61,22 @@
         </tr>
         {{else}}
         <tr>
-          <td class="mono">{{.CIDRText}}</td>
+          <td class="mono prefix-cell">
+            {{/* Indent on Depth alone: the store returns tree order, each
+                 prefix immediately followed by its descendants. */}}
+            {{range seq .Depth}}<span class="tree-indent"></span>{{end}}
+            {{if .Depth}}<span class="tree-branch" aria-hidden="true">└</span>{{end}}
+            {{.CIDRText}}
+            {{if .VRFName}}<span class="pill pill-muted" title="Route table">{{.VRFName}}</span>{{end}}
+          </td>
           <td class="num">{{if .VLANID}}{{derefInt .VLANID}}{{else}}—{{end}}</td>
           <td>{{if .EnvironmentCode}}<span class="pill pill-info">{{.EnvironmentCode}}</span>{{else}}—{{end}}</td>
           <td>{{if .Role}}{{deref .Role}}{{else}}—{{end}}</td>
-          <td class="num">{{.AddressCount}}</td>
+          <td class="num" title="Addresses recorded directly here, not in a child network">{{.Addresses}}</td>
+          <td class="util-cell">
+            <span class="util-pct{{if .IsFull}} util-full{{end}}">{{printf "%.0f" .UtilPercent}}%</span>
+            {{if .Children}}<span class="util-note">{{pluralise .Children "child" "children"}}</span>{{end}}
+          </td>
           <td>{{if $.CanWrite}}<a class="btn btn-sm" href="/prefixes?edit={{.ID}}">Edit</a>{{end}}</td>
         </tr>
         {{end}}

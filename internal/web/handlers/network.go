@@ -208,7 +208,7 @@ func (a *App) renderLinkFormError(w http.ResponseWriter, r *http.Request, assetI
 
 type prefixListPage struct {
 	Base
-	Prefixes     []store.PrefixRow
+	Prefixes     []store.PrefixTreeRow
 	Environments []domain.Environment
 	// Edit is set only when a correction was refused; see editState.
 	Edit     *editState
@@ -222,7 +222,7 @@ func (a *App) PrefixList(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) renderPrefixes(w http.ResponseWriter, r *http.Request, status int, edit *editState) {
-	prefixes, err := a.Store.ListPrefixes(r.Context())
+	prefixes, err := a.Store.ListPrefixTree(r.Context())
 	if err != nil {
 		a.serverError(w, r, err)
 		return

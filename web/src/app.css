@@ -1013,3 +1013,26 @@ form.htmx-request .btn-primary { opacity: 0.6; pointer-events: none; }
 .rack-elevation td { padding: 2px 8px; height: 1.4rem; }
 .rack-elevation .rack-filled { background: color-mix(in oklab, var(--accent) 14%, transparent); }
 .rack-elevation tbody tr:hover .rack-filled { background: color-mix(in oklab, var(--accent) 24%, transparent); }
+
+/* Prefix tree. Indentation is a span per level rather than a padding value,
+   because the depth comes from the data and html/template will not interpolate
+   a number into a style attribute without being told it is CSS -- and teaching
+   it that, to save a span, is how an injection point gets opened for a rounding
+   convenience. */
+.tree-indent { display: inline-block; width: 1.15em; }
+.tree-branch { color: var(--faint); margin-right: .35em; }
+.prefix-cell { white-space: nowrap; }
+.prefix-cell .pill { margin-left: .5em; }
+
+/* Allocation, not occupancy: a network carved up and not yet plugged in reads
+   as spent. The bar is a background on the cell rather than a nested element,
+   so a long table stays one box per row. */
+.util-cell { min-width: 7.5em; }
+.util-pct {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  color: var(--muted);
+}
+.util-full { color: var(--amber); }
+.util-note { color: var(--faint); font-size: 11px; margin-left: .5em; }

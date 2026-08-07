@@ -441,7 +441,54 @@ func (s *SQLStore) CreatePrefix(ctx context.Context, actor domain.Actor, p *doma
 type PrefixRow struct {
 	domain.Prefix
 	EnvironmentCode string `db:"environment_code"`
-	AddressCount    int    `db:"address_count"`
+	// AddressCount is every address inside the range, CHILDREN INCLUDED --
+	// which is what a range scan naturally returns and is not what the row
+	// should display. BuildPrefixTree turns it into the direct figure.
+	AddressCount int    `db:"address_count"`
+	VRFName      string `db:"vrf_name"`
+}
+
+// PrefixTreeRow is a prefix positioned in its hierarchy, with the display
+// fields the list needs carried alongside the derived ones.
+type PrefixTreeRow struct {
+	domain.PrefixNode
+	EnvironmentCode string
+	VRFName         string
+}
+
+// ListPrefixTree returns every prefix in tree order, with depth, parent and
+// utilisation derived.
+//
+// One query, then arithmetic. The containment is a range comparison the index
+// already serves; everything after it counts addresses, and a /64 holds more of
+// them than a BIGINT can express -- so the shape of the answer is decided here
+// and the size of it in Go. Nothing is stored: this is recomputed per request
+// exactly as cost rollups and project footprints are, and for the same reason.
+func (s *SQLStore) ListPrefixTree(ctx context.Context) ([]PrefixTreeRow, error) {
+	rows, err := s.ListPrefixes(ctx)
+	if err != nil {
+		return nil, err
+	}
+	flat := make([]domain.Prefix, 0, len(rows))
+	counts := make(map[string]int, len(rows))
+	display := make(map[string]PrefixRow, len(rows))
+	for _, r := range rows {
+		flat = append(flat, r.Prefix)
+		counts[r.ID] = r.AddressCount
+		display[r.ID] = r
+	}
+
+	nodes := domain.BuildPrefixTree(flat, counts)
+	out := make([]PrefixTreeRow, 0, len(nodes))
+	for _, n := range nodes {
+		d := display[n.ID]
+		out = append(out, PrefixTreeRow{
+			PrefixNode:      n,
+			EnvironmentCode: d.EnvironmentCode,
+			VRFName:         d.VRFName,
+		})
+	}
+	return out, nil
 }
 
 // ListPrefixes returns every network, narrowest last.
@@ -449,13 +496,15 @@ func (s *SQLStore) ListPrefixes(ctx context.Context) ([]PrefixRow, error) {
 	var rows []PrefixRow
 	err := s.read(ctx, &rows, `
 		SELECT p.*, COALESCE(e.code, '') AS environment_code,
+		       COALESCE(v.name, '') AS vrf_name,
 		       (SELECT COUNT(*) FROM ip_address ip
 		         WHERE ip.addr_family = p.addr_family
 		           AND ip.addr_start >= p.addr_start
 		           AND ip.addr_start <= p.addr_end) AS address_count
 		FROM prefix p
 		LEFT JOIN environment e ON e.id = p.environment_id
-		ORDER BY p.addr_family, p.addr_start`)
+		LEFT JOIN vrf v ON v.id = p.vrf_id
+		ORDER BY p.addr_family, p.addr_start, p.addr_end DESC`)
 	if err != nil {
 		return nil, fmt.Errorf("listing prefixes: %w", err)
 	}

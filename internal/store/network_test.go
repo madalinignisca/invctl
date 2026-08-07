@@ -487,3 +487,77 @@ func declareDependency(s *SQLStore, ctx context.Context, consumer, endpointID st
 	}
 	return s.CreateDependency(ctx, testActor, d, nil)
 }
+
+// TestListPrefixTreeDerivesFromTheRealRangeScan.
+//
+// The arithmetic is proven in internal/domain against hand-worked numbers.
+// What this covers is the join between the two: address_count comes back from a
+// bytewise range scan and contains the CHILDREN's addresses as well, so a wiring
+// that passed the direct figure in — or the child's count to the parent — would
+// leave every domain test passing and every page wrong.
+func TestListPrefixTreeDerivesFromTheRealRangeScan(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			s, ctx := newStore(t, e)
+
+			for _, cidr := range []string{"10.50.0.0/24", "10.50.0.0/26"} {
+				p, err := domain.NewPrefix(NewID(), cidr)
+				if err != nil {
+					t.Fatalf("building %s: %v", cidr, err)
+				}
+				if err := s.CreatePrefix(ctx, testActor, p); err != nil {
+					t.Fatalf("creating %s: %v", cidr, err)
+				}
+			}
+
+			assetID := mustAsset(t, s, ctx, domain.KindServer, "srv-tree", nil)
+			ifaceID := mustInterface(t, s, ctx, assetID, "eth0")
+			// Two inside the /26, one in the /24 but outside the child.
+			for _, ip := range []string{"10.50.0.5", "10.50.0.6", "10.50.0.200"} {
+				addr, err := domain.NewIPAddress(NewID(), ip, &ifaceID, domain.IPRolePrimary)
+				if err != nil {
+					t.Fatalf("building %s: %v", ip, err)
+				}
+				if err := s.CreateIPAddress(ctx, testActor, addr); err != nil {
+					t.Fatalf("creating %s: %v", ip, err)
+				}
+			}
+
+			rows, err := s.ListPrefixTree(ctx)
+			if err != nil {
+				t.Fatalf("listing the tree: %v", err)
+			}
+			byCIDR := map[string]PrefixTreeRow{}
+			for _, r := range rows {
+				byCIDR[r.CIDRText] = r
+			}
+
+			parent, ok := byCIDR["10.50.0.0/24"]
+			if !ok {
+				t.Fatal("the /24 is missing from the tree")
+			}
+			child, ok := byCIDR["10.50.0.0/26"]
+			if !ok {
+				t.Fatal("the /26 is missing from the tree")
+			}
+
+			if parent.Depth != 0 || child.Depth != 1 {
+				t.Errorf("depths are /24=%d /26=%d, want 0 and 1", parent.Depth, child.Depth)
+			}
+			if child.ParentID == nil || *child.ParentID != parent.ID {
+				t.Error("the /26 is not nested under the /24")
+			}
+			if parent.Addresses != 1 {
+				t.Errorf("the /24 holds %d addresses directly, want 1 -- the range scan "+
+					"returns 3 and the two inside the child are the child's", parent.Addresses)
+			}
+			if child.Addresses != 2 {
+				t.Errorf("the /26 holds %d addresses, want 2", child.Addresses)
+			}
+			// 64 for the child, plus the one loose address.
+			if got := parent.Allocated.String(); got != "65" {
+				t.Errorf("the /24 allocates %s, want 65", got)
+			}
+		})
+	}
+}
