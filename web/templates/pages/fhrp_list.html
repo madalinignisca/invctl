@@ -1,0 +1,90 @@
+{{/*
+  invctl — infrastructure inventory
+  Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+
+  Licensed under the GNU Affero General Public License, version 3 only —
+  no later version applies. See LICENSE for the full text.
+
+  SPDX-License-Identifier: AGPL-3.0-only
+*/}}
+{{define "content"}}
+<div class="page-head">
+  <div class="eyebrow">First-hop redundancy</div>
+  <h1>Redundancy groups</h1>
+  <p class="lede">
+    VRRP, HSRP and CARP all do one thing: several routers share a virtual
+    address, and if the one answering for it dies another takes over. The
+    number worth reading here is <strong>how many routers are actually in the
+    group</strong> — one is a single point of failure wearing the costume of a
+    redundant one, and it looks identical everywhere else.
+  </p>
+</div>
+
+<div class="panel">
+  <div class="panel-head"><h2>{{pluralise (len .Groups) "group" "groups"}}</h2></div>
+  {{if .Groups}}
+  <div class="scroll-x">
+    <table>
+      <thead><tr><th>Name</th><th>Protocol</th><th class="num">Group</th><th>Virtual address</th><th>Redundancy</th>{{if .CanWrite}}<th></th>{{end}}</tr></thead>
+      <tbody>
+        {{range .Groups}}
+        <tr>
+          <td><a href="/redundancy/{{.ID}}">{{.Name}}</a></td>
+          <td class="mono">{{.Protocol}}</td>
+          <td class="num">{{.GroupNumber}}</td>
+          <td class="mono">{{if .VIPs}}{{.VIPs}}{{else}}<span class="util-note">none recorded</span>{{end}}</td>
+          <td>
+            {{if eq (printf "%s" .Redundancy) "redundant"}}<span class="pill pill-ok">{{.MemberCount}} routers</span>
+            {{else if eq (printf "%s" .Redundancy) "single_member"}}<span class="pill pill-degraded" title="{{.RedundancyNote}}">1 router</span>
+            {{else}}<span class="pill pill-down" title="{{.RedundancyNote}}">empty</span>{{end}}
+          </td>
+          {{if $.CanWrite}}
+          <td style="white-space:nowrap">
+            <form method="post" action="/redundancy/{{.ID}}/retire" style="display:inline">
+              <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+              <button class="btn btn-sm btn-danger" type="submit">Withdraw</button>
+            </form>
+          </td>
+          {{end}}
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{else}}
+  <div class="empty"><strong>No redundancy groups declared.</strong>A shared gateway address is redundancy the impact engine can otherwise only guess at.</div>
+  {{end}}
+</div>
+
+{{if .CanWrite}}
+<form id="fhrp-form" class="panel" method="post" action="/redundancy"
+      hx-post="/redundancy" hx-target="#fhrp-form" hx-swap="outerHTML">
+  <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+  <div class="panel-head"><h2>Declare a group</h2></div>
+  <div class="panel-body">
+    <div class="field-row">
+      <div class="field">
+        <label for="fhrp-name">Name</label>
+        <input id="fhrp-name" class="{{if index .Errors "name"}}invalid{{end}}" type="text"
+               name="name" placeholder="gw-production" required>
+        {{with index .Errors "name"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="fhrp-proto">Protocol</label>
+        <select id="fhrp-proto" name="protocol">
+          {{range .Protocols}}<option value="{{.}}">{{.}}</option>{{end}}
+        </select>
+      </div>
+      <div class="field">
+        <label for="fhrp-num">Group number</label>
+        <input id="fhrp-num" class="{{if index .Errors "group_number"}}invalid{{end}}" type="number"
+               name="group_number" min="0" max="255" placeholder="10" required>
+        {{with index .Errors "group_number"}}<div class="field-error">{{.}}</div>{{end}}
+        <div class="field-hint">The VRID or HSRP group. Unique on its segment, never globally.</div>
+      </div>
+    </div>
+    <button class="btn btn-primary" type="submit">Declare group</button>
+  </div>
+</form>
+{{end}}
+{{end}}

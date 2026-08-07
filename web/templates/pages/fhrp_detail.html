@@ -1,0 +1,81 @@
+{{/*
+  invctl — infrastructure inventory
+  Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+
+  Licensed under the GNU Affero General Public License, version 3 only —
+  no later version applies. See LICENSE for the full text.
+
+  SPDX-License-Identifier: AGPL-3.0-only
+*/}}
+{{define "content"}}
+<div class="crumbs">
+  <a href="/redundancy">Redundancy groups</a><span class="sep">/</span><span>{{.Group.Name}}</span>
+</div>
+<div class="page-head">
+  <div class="eyebrow">{{.Label}} · group {{.Group.GroupNumber}}</div>
+  <h1>{{.Group.Name}}</h1>
+  {{if .Group.Description}}<p class="lede">{{deref .Group.Description}}</p>{{end}}
+</div>
+
+{{/* The finding first, because it is the reason to open this page. */}}
+{{if eq (printf "%s" .Redundancy) "redundant"}}
+<div class="panel"><div class="panel-body"><strong>Redundant.</strong> {{.Note}}</div></div>
+{{else}}
+<div class="callout callout-warn">
+  <h2>{{if eq (printf "%s" .Redundancy) "single_member"}}Not redundant{{else}}Nothing answers{{end}}</h2>
+  <p class="reason">{{.Note}}</p>
+</div>
+{{end}}
+
+<div class="panel">
+  <div class="panel-head">
+    <h2>{{pluralise (len .Members) "router" "routers"}}</h2>
+    <span class="panel-note">Higher priority answers first</span>
+  </div>
+  {{if .Members}}
+  <div class="scroll-x">
+    <table>
+      <thead><tr><th>Asset</th><th>Port</th><th class="num">Priority</th>{{if .CanWrite}}<th></th>{{end}}</tr></thead>
+      <tbody>
+        {{range .Members}}
+        <tr>
+          <td><a href="/assets/{{.AssetID}}">{{.AssetName}}</a></td>
+          <td class="mono">{{.InterfaceName}}</td>
+          <td class="num">{{if .Priority}}{{derefInt .Priority}}{{else}}<span class="util-note">default</span>{{end}}</td>
+          {{if $.CanWrite}}
+          <td style="white-space:nowrap">
+            <form method="post" action="/redundancy/{{$.Group.ID}}/members/{{.InterfaceID}}/remove" style="display:inline">
+              <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+              <button class="btn btn-sm btn-danger" type="submit">Remove</button>
+            </form>
+          </td>
+          {{end}}
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{else}}
+  <div class="empty"><strong>No routers in this group.</strong>The address is declared and nothing answers for it.</div>
+  {{end}}
+  {{if .CanWrite}}
+  <form class="panel-body" method="post" action="/redundancy/{{.Group.ID}}/members">
+    <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+    <div class="field-row">
+      <div class="field">
+        <label for="fhrp-port">Port</label>
+        <select id="fhrp-port" name="interface_id" required>
+          {{range .Options}}<option value="{{.ID}}">{{.AssetName}} · {{.Name}}</option>{{end}}
+        </select>
+      </div>
+      <div class="field">
+        <label for="fhrp-prio">Priority</label>
+        <input id="fhrp-prio" type="number" name="priority" min="0" max="255" placeholder="100">
+        <div class="field-hint">Leave blank to let the protocol's default decide.</div>
+      </div>
+    </div>
+    <button class="btn btn-primary" type="submit">Add router</button>
+  </form>
+  {{end}}
+</div>
+{{end}}

@@ -236,7 +236,7 @@ var DeclaredColumns = map[string][]string{
 		"lag_parent_id", "is_mgmt", "enabled",
 		"created_at", "updated_at", "row_version",
 	},
-	"ip_address": {"id", "addr_text", "addr_family", "addr_start", "interface_id", "role", "created_at", "updated_at", "row_version"},
+	"ip_address": {"id", "addr_text", "addr_family", "addr_start", "interface_id", "fhrp_group_id", "role", "created_at", "updated_at", "row_version"},
 	"link":       {"id", "a_interface_id", "b_interface_id", "medium", "length_m", "lifecycle"},
 	"net_anchor": {
 		"id", "code", "name", "scope", "group_id", "environment_id", "plane",
@@ -262,6 +262,17 @@ var DeclaredColumns = map[string][]string{
 		"vlan_id", "environment_id", "role", "vrf_id", "vlan_ref_id",
 		"created_at", "updated_at", "row_version",
 	},
+	// First-hop redundancy, migration 00032. Declared: somebody configured VRRP
+	// on two routers and gave the pair a virtual address. A router REPORTS which
+	// of them is currently master, and that is observed state about the group --
+	// a different fact from the membership declared here, and the one worth
+	// having beside it during an incident.
+	"fhrp_group": {
+		"id", "protocol", "group_number", "name", "description", "lifecycle",
+		"created_at", "updated_at", "row_version",
+	},
+	// A set table, replaced wholesale with its group and audited on it.
+	"fhrp_member": {"group_id", "interface_id", "priority"},
 	// The VLAN model, migration 00031. Declared throughout: a VLAN exists
 	// because somebody configured it, a group exists because somebody chose
 	// where the numbering applies, and a port is in a VLAN because somebody put

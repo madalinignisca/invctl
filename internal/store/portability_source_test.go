@@ -87,6 +87,14 @@ var dialectSpecific = []struct {
 	{regexp.MustCompile(`\bdistinct\s+on\b`), "DISTINCT ON",
 		"PostgreSQL only; use a window function or resolve the pick in Go"},
 
+	// String aggregation is spelled differently on each engine and there is no
+	// portable form. It slipped past this list once -- a GROUP_CONCAT joining a
+	// group's virtual addresses passed every test here and would have failed on
+	// PostgreSQL at runtime -- which is the whole failure mode this file exists
+	// to prevent, so both spellings are named rather than the SQLite one only.
+	{regexp.MustCompile(`\bgroup_concat\s*\(|\bstring_agg\s*\(`), "string aggregation",
+		"GROUP_CONCAT is SQLite and string_agg is PostgreSQL; fetch the rows and join them in Go"},
+
 	{regexp.MustCompile(`\bnow\s*\(|\bcurrent_(timestamp|date|time)\b`), "a database clock",
 		"timestamps are RFC3339 UTC TEXT generated in Go and passed as parameters, so they sort lexicographically and do not depend on which machine ran the statement"},
 

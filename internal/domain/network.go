@@ -243,6 +243,11 @@ type IPAddress struct {
 	AddrFamily  int     `db:"addr_family"`
 	AddrStart   []byte  `db:"addr_start"`
 	InterfaceID *string `db:"interface_id"`
+	// FHRPGroupID is set when this address is a VIRTUAL address answered for by
+	// a redundancy group rather than held by one port. The two are exclusive:
+	// a VIP that also claimed an interface would say the gateway lives on one
+	// box, which is the opposite of what a first-hop protocol is for.
+	FHRPGroupID *string `db:"fhrp_group_id"`
 	Role        string  `db:"role"`
 	CreatedAt   *string `db:"created_at"`
 	UpdatedAt   *string `db:"updated_at"`

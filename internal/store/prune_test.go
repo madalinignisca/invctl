@@ -691,6 +691,10 @@ func TestTheOnlyFactDeletingStatementIsThePrune(t *testing.T) {
 		// The VLANs themselves are soft-retired like every other entity, and
 		// RetireVLAN refuses while any prefix or port still names one.
 		"internal/store/vlans.go": "interface_vlan: the set of VLANs a port is in, replaced wholesale",
+		// fhrp_member: the routers in a redundancy group. Same rule, fifth time:
+		// replaced wholesale inside the group's transaction, folded into the
+		// group's audited value by auditedFHRPGroup.
+		"internal/store/fhrp.go": "fhrp_member: the routers in a group, replaced wholesale",
 	}
 
 	root := repoRoot(t)
