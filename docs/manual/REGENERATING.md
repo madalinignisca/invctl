@@ -1,4 +1,9 @@
-# Regenerating the manual — instructions for an agent
+# Regenerating this manual
+
+**Scope: `docs/manual/` only.** This is not repo-wide guidance for an agent --
+that is `CLAUDE.md` at the root. This file is the contract for rebuilding the
+operator manual in `parts/`, and it is written to be followed by whatever does
+the rebuilding, human or otherwise.
 
 You are reading the contract, not the manual. The manual is in `parts/`, written
 for a human operator. This file tells you how to rebuild it, and — more
@@ -30,9 +35,18 @@ by hand since.
 
 ## What you must not do
 
-**Do not invent screenshots.** Every image in `img/` must come from an actual
-navigation of a running instance. A drawn or described screenshot is worse than
-none: the reader trusts it and it silently stops matching.
+**Every image must come from an actual navigation.** Never describe a screen you
+have not opened and file the description as a capture; never generate an image.
+A reader trusts a screenshot in a way they do not trust prose, so a fabricated
+one is worse than a missing one.
+
+**And never list an image you have not captured.** This is the weaker, likelier
+version of the same fault, and it is the one that happened when this manual was
+first written: ten filenames sat under `screenshots:` in the manifest with no
+files behind them. Nothing was fabricated -- the entries were simply aspirational
+-- but the manifest read as complete. Anything not yet captured goes under
+`screenshots_pending`, and the staleness checker fails a fragment whose listed
+images are missing, so this cannot pass quietly again.
 
 **Do not write about features you have not opened.** If a page will not load,
 say so in the fragment and leave the section stubbed. A manual that describes a

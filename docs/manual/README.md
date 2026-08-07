@@ -29,7 +29,7 @@ make manual-stale-v      # ...and which files changed
 
 Regenerate **only** what that names. The contract for doing so — capture rules,
 what not to invent, how to update the manifest — is in
-[AGENT.md](AGENT.md), and it is written for an agent driving a browser.
+[REGENERATING.md](REGENERATING.md), and it is written for an agent driving a browser.
 
 The registry is [MANIFEST.yaml](MANIFEST.yaml). If a fragment starts describing
 something new, add the path there; a `depends_on` that is missing a path is the

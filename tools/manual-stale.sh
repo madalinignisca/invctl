@@ -112,5 +112,5 @@ if [ "$stale" -eq 0 ]; then
     echo "$checked fragment(s), all current."
     exit 0
 fi
-echo "$stale of $checked fragment(s) stale. Regenerate only those — see docs/manual/AGENT.md."
+echo "$stale of $checked fragment(s) stale. Regenerate only those — see docs/manual/REGENERATING.md."
 exit 1
