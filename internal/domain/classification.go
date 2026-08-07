@@ -262,6 +262,15 @@ var DeclaredColumns = map[string][]string{
 		"vlan_id", "environment_id", "role", "vrf_id",
 		"created_at", "updated_at", "row_version",
 	},
+	// A reservation is declared: somebody set the space aside. Nothing observes
+	// a DHCP pool -- a lease server knows what it has issued, and that would be
+	// observed state about ADDRESSES, a different fact from the reservation
+	// that gave it the range to issue from.
+	"ip_range": {
+		"id", "start_text", "end_text", "addr_family", "addr_start", "addr_end",
+		"vrf_id", "role", "description", "lifecycle",
+		"created_at", "updated_at", "row_version",
+	},
 	// A VRF is configuration in the purest sense: somebody decided that this
 	// address space is separate from that one. Nothing observes a VRF -- a
 	// router can report which table it consulted, but that is a reading of a
