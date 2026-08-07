@@ -115,6 +115,8 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	read("GET /services", app.ServiceList)
 	read("GET /services/{id}", app.ServiceDetail)
 	read("GET /prefixes", app.PrefixList)
+	read("GET /vlans", app.VLANList)
+	read("GET /vlans/{id}", app.VLANDetail)
 	read("GET /network", app.NetworkList)
 
 	// Authenticated writes. Every non-GET route goes through RequireAdmin,
@@ -231,6 +233,8 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	write("POST /prefixes", app.PrefixCreate)
 	// Reservations live on the prefixes page rather than a page of their own:
 	// a span of addresses only means anything beside the network it falls in.
+	write("POST /vlans", app.VLANCreate)
+	write("POST /vlans/{id}/retire", app.VLANRetire)
 	write("POST /ip-ranges", app.IPRangeCreate)
 	write("POST /ip-ranges/{id}/retire", app.IPRangeRetire)
 

@@ -1,0 +1,85 @@
+{{/*
+  invctl — infrastructure inventory
+  Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+
+  Licensed under the GNU Affero General Public License, version 3 only —
+  no later version applies. See LICENSE for the full text.
+
+  SPDX-License-Identifier: AGPL-3.0-only
+*/}}
+{{define "content"}}
+<div class="crumbs">
+  <a href="/vlans">VLANs</a><span class="sep">/</span><span>{{.VLAN.Name}}</span>
+</div>
+<div class="page-head">
+  <div class="eyebrow">VLAN {{.VLAN.VID}}</div>
+  <h1>{{.VLAN.Name}}</h1>
+  {{if .VLAN.Description}}<p class="lede">{{deref .VLAN.Description}}</p>{{end}}
+</div>
+
+<div class="grid-2">
+  <div class="panel">
+    <div class="panel-head">
+      <h2>{{pluralise (len .Ports) "port" "ports"}}</h2>
+      <span class="panel-note">One broadcast domain</span>
+    </div>
+    {{if .Ports}}
+    <div class="scroll-x">
+      <table>
+        <thead><tr><th>Asset</th><th>Port</th><th>Mode</th></tr></thead>
+        <tbody>
+          {{range .Ports}}
+          <tr>
+            <td><a href="/assets/{{.AssetID}}">{{.AssetName}}</a></td>
+            <td class="mono">{{.InterfaceName}}</td>
+            <td>
+              {{if eq .Mode "untagged"}}<span class="pill pill-ok">access</span>
+              {{else}}<span class="pill pill-info">trunk</span>{{end}}
+            </td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+    {{else}}
+    <div class="empty">
+      <strong>No ports in this VLAN.</strong>
+      It is a declared record rather than a broadcast domain — nothing can reach
+      anything through it.
+    </div>
+    {{end}}
+  </div>
+
+  <div class="panel">
+    <div class="panel-head"><h2>{{pluralise (len .Prefixes) "network" "networks"}}</h2></div>
+    {{if .Prefixes}}
+    <div class="scroll-x">
+      <table>
+        <thead><tr><th>CIDR</th><th>Role</th><th>Allocated</th><th>Next free</th></tr></thead>
+        <tbody>
+          {{range .Prefixes}}
+          <tr>
+            <td class="mono">{{.CIDRText}}</td>
+            <td>{{if .Role}}{{deref .Role}}{{else}}—{{end}}</td>
+            <td class="util-cell"><span class="util-pct">{{printf "%.0f" .UtilPercent}}%</span></td>
+            <td class="mono">{{if .HasNextFree}}{{.NextFree}}{{else}}<span class="util-full">none</span>{{end}}</td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+    {{if gt (len .Prefixes) 1}}
+    <div class="panel-body">
+      <div class="field-hint">
+        More than one network on one VLAN is normal and usually dual-stack: the
+        v4 and v6 prefixes of a broadcast domain are one place, which is exactly
+        what a bare VLAN number on each could never say.
+      </div>
+    </div>
+    {{end}}
+    {{else}}
+    <div class="empty"><strong>No networks on this VLAN.</strong>Nothing is addressed here yet.</div>
+    {{end}}
+  </div>
+</div>
+{{end}}

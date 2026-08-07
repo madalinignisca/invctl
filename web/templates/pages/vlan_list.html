@@ -1,0 +1,109 @@
+{{/*
+  invctl — infrastructure inventory
+  Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+
+  Licensed under the GNU Affero General Public License, version 3 only —
+  no later version applies. See LICENSE for the full text.
+
+  SPDX-License-Identifier: AGPL-3.0-only
+*/}}
+{{define "content"}}
+<div class="page-head">
+  <div class="eyebrow">Layer 2</div>
+  <h1>VLANs</h1>
+  <p class="lede">
+    A broadcast domain, not a number written on a network. Two ports in the same
+    VLAN can reach each other whether or not a cable was ever drawn between
+    them — which is why a VLAN with <strong>no ports</strong> is a record and
+    not yet a place.
+  </p>
+</div>
+
+<div class="panel">
+  <div class="panel-head">
+    <h2>{{pluralise (len .VLANs) "VLAN" "VLANs"}}</h2>
+    <span class="panel-note">A VLAN ID is only unique within its group</span>
+  </div>
+  {{if .VLANs}}
+  <div class="scroll-x">
+    <table>
+      <thead><tr><th class="num">VID</th><th>Name</th><th>Group</th><th>Environment</th><th>Role</th><th class="num">Networks</th><th class="num">Ports</th>{{if .CanWrite}}<th></th>{{end}}</tr></thead>
+      <tbody>
+        {{range .VLANs}}
+        <tr>
+          <td class="num"><a href="/vlans/{{.ID}}">{{.VID}}</a></td>
+          <td>{{.Name}}</td>
+          <td>
+            {{if .GroupName}}{{.GroupName}}
+              {{if .ScopeAssetName}}<span class="pill pill-muted">{{.ScopeAssetName}}</span>{{end}}
+            {{else}}<span class="util-note">estate-wide</span>{{end}}
+          </td>
+          <td>{{if .EnvironmentCode}}<span class="pill pill-info">{{.EnvironmentCode}}</span>{{else}}—{{end}}</td>
+          <td>{{if .Role}}{{deref .Role}}{{else}}—{{end}}</td>
+          <td class="num">{{.PrefixCount}}</td>
+          <td class="num">
+            {{if .PortCount}}{{.PortCount}}
+            {{else}}<span class="util-full" title="Nothing is in this VLAN, so it is a record rather than a broadcast domain">0</span>{{end}}
+          </td>
+          {{if $.CanWrite}}
+          <td style="white-space:nowrap">
+            <form method="post" action="/vlans/{{.ID}}/retire" style="display:inline">
+              <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+              <button class="btn btn-sm btn-danger" type="submit">Withdraw</button>
+            </form>
+          </td>
+          {{end}}
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{else}}
+  <div class="empty"><strong>No VLANs declared.</strong>Networks may still carry a raw VLAN tag; declaring the VLAN is what lets two of them share one broadcast domain.</div>
+  {{end}}
+</div>
+
+{{if .CanWrite}}
+<form id="vlan-form" class="panel" method="post" action="/vlans"
+      hx-post="/vlans" hx-target="#vlan-form" hx-swap="outerHTML">
+  <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+  <div class="panel-head"><h2>Declare a VLAN</h2></div>
+  <div class="panel-body">
+    <div class="field-row">
+      <div class="field">
+        <label for="vlan-vid">VLAN ID</label>
+        <input id="vlan-vid" class="{{if index .FormData.Errors "vid"}}invalid{{end}}"
+               type="number" name="vid" min="1" max="4094" placeholder="30" required>
+        {{with index .FormData.Errors "vid"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="vlan-name">Name</label>
+        <input id="vlan-name" class="{{if index .FormData.Errors "name"}}invalid{{end}}"
+               type="text" name="name" placeholder="production-workloads" required>
+        {{with index .FormData.Errors "name"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="vlan-group">Group</label>
+        <select id="vlan-group" name="group_id">
+          <option value="">Estate-wide</option>
+          {{range .FormData.Groups}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
+        </select>
+        <div class="field-hint">Where this numbering applies. Two sites can both use VLAN 10.</div>
+      </div>
+      <div class="field">
+        <label for="vlan-env">Environment</label>
+        <select id="vlan-env" name="environment_id">
+          <option value="">—</option>
+          {{range .FormData.Environments}}<option value="{{.ID}}">{{.Code}}</option>{{end}}
+        </select>
+      </div>
+      <div class="field">
+        <label for="vlan-role">Role</label>
+        <input id="vlan-role" type="text" name="role" placeholder="servers">
+      </div>
+    </div>
+    <button class="btn btn-primary" type="submit">Declare VLAN</button>
+  </div>
+</form>
+{{end}}
+{{end}}
