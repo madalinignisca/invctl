@@ -1,0 +1,159 @@
+{{/*
+  invctl — infrastructure inventory
+  Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+
+  Licensed under the GNU Affero General Public License, version 3 only —
+  no later version applies. See LICENSE for the full text.
+
+  SPDX-License-Identifier: AGPL-3.0-only
+*/}}
+{{define "content"}}
+<div class="page-head">
+  <div class="eyebrow">Above the prefixes</div>
+  <h1>Allocations</h1>
+  <p class="lede">
+    Where the address space came from. A prefix says a network exists; an
+    allocation says whether it is <strong>yours</strong> — a registry delegation
+    you keep, a slice of a provider's space that leaves with the contract, or
+    RFC1918 that was never anybody's to give. Three different answers to "can we
+    renumber out of this".
+  </p>
+</div>
+
+<div class="panel">
+  <div class="panel-head">
+    <h2>{{pluralise (len .Aggregates) "allocation" "allocations"}}</h2>
+    <span class="panel-note">Used counts the prefixes declared inside</span>
+  </div>
+  {{if .Aggregates}}
+  <div class="scroll-x">
+    <table>
+      <thead><tr><th>Block</th><th>Registry</th><th>Allocated</th><th class="num">Networks</th><th>Used</th>{{if .CanWrite}}<th></th>{{end}}</tr></thead>
+      <tbody>
+        {{range .Aggregates}}
+        <tr>
+          <td class="mono">{{.CIDRText}}</td>
+          <td>
+            {{if .RIRName}}{{.RIRName}}
+              {{if .IsPrivate}}<span class="pill pill-muted" title="Nobody delegated this; it was never anybody's to give">private</span>{{end}}
+            {{else}}<span class="util-note">unrecorded</span>{{end}}
+          </td>
+          <td class="mono">{{if .AllocatedOn}}{{deref .AllocatedOn}}{{else}}—{{end}}</td>
+          <td class="num">{{.Prefixes}}</td>
+          <td class="util-cell">
+            <span class="util-pct">{{printf "%.1f" .UtilPercent}}%</span>
+            {{/* An untouched private range is untidy; an untouched registry
+                 allocation is money nobody is using. */}}
+            {{if and .Unused (not .IsPrivate)}}<span class="util-full" title="Nothing has been carved out of this delegation">unused</span>{{end}}
+          </td>
+          {{if $.CanWrite}}
+          <td style="white-space:nowrap">
+            <form method="post" action="/allocations/{{.ID}}/retire" style="display:inline">
+              <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+              <button class="btn btn-sm btn-danger" type="submit">Withdraw</button>
+            </form>
+          </td>
+          {{end}}
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{else}}
+  <div class="empty"><strong>No allocations recorded.</strong>Without one, a prefix cannot say whether the space behind it is yours.</div>
+  {{end}}
+</div>
+
+<div class="panel">
+  <div class="panel-head"><h2>{{pluralise (len .ASNs) "AS number" "AS numbers"}}</h2></div>
+  {{if .ASNs}}
+  <div class="scroll-x">
+    <table>
+      <thead><tr><th>Number</th><th>Name</th><th>Registry</th>{{if .CanWrite}}<th></th>{{end}}</tr></thead>
+      <tbody>
+        {{range .ASNs}}
+        <tr>
+          <td class="mono">AS{{.Number}}
+            {{if .IsPrivate}}<span class="pill pill-degraded" title="A private-use AS number. Announcing one to a transit provider is a misconfiguration, not a design">private</span>{{end}}
+          </td>
+          <td>{{if .Name}}{{deref .Name}}{{else}}—{{end}}</td>
+          <td>{{if .RIRName}}{{.RIRName}}{{else}}<span class="util-note">unrecorded</span>{{end}}</td>
+          {{if $.CanWrite}}
+          <td style="white-space:nowrap">
+            <form method="post" action="/asn/{{.ID}}/retire" style="display:inline">
+              <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+              <button class="btn btn-sm btn-danger" type="submit">Withdraw</button>
+            </form>
+          </td>
+          {{end}}
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{else}}
+  <div class="empty"><strong>No AS numbers recorded.</strong></div>
+  {{end}}
+</div>
+
+{{if .CanWrite}}
+<div class="grid-2">
+  <form id="agg-form" class="panel" method="post" action="/allocations"
+        hx-post="/allocations" hx-target="#agg-form" hx-swap="outerHTML">
+    <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+    <div class="panel-head"><h2>Record an allocation</h2></div>
+    <div class="panel-body">
+      <div class="field">
+        <label for="agg-cidr">Block</label>
+        <input id="agg-cidr" class="mono {{if index .Errors "cidr_text"}}invalid{{end}}" type="text"
+               name="cidr_text" placeholder="185.12.44.0/22" required>
+        {{with index .Errors "cidr_text"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label for="agg-rir">Registry</label>
+          <select id="agg-rir" name="rir_id">
+            <option value="">—</option>
+            {{range .RIRs}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
+          </select>
+        </div>
+        <div class="field">
+          <label for="agg-date">Allocated on</label>
+          <input id="agg-date" class="{{if index .Errors "allocated_on"}}invalid{{end}}" type="date" name="allocated_on">
+          {{with index .Errors "allocated_on"}}<div class="field-error">{{.}}</div>{{end}}
+        </div>
+      </div>
+      <button class="btn btn-primary" type="submit">Record allocation</button>
+    </div>
+  </form>
+
+  <form id="asn-form" class="panel" method="post" action="/asn"
+        hx-post="/asn" hx-target="#asn-form" hx-swap="outerHTML">
+    <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+    <div class="panel-head"><h2>Record an AS number</h2></div>
+    <div class="panel-body">
+      <div class="field-row">
+        <div class="field">
+          <label for="asn-num">Number</label>
+          <input id="asn-num" class="mono {{if index .Errors "number"}}invalid{{end}}" type="number"
+                 name="number" min="1" max="4294967294" placeholder="64512" required>
+          {{with index .Errors "number"}}<div class="field-error">{{.}}</div>{{end}}
+        </div>
+        <div class="field">
+          <label for="asn-name">Name</label>
+          <input id="asn-name" type="text" name="name" placeholder="AS-EXAMPLE">
+        </div>
+      </div>
+      <div class="field">
+        <label for="asn-rir">Registry</label>
+        <select id="asn-rir" name="rir_id">
+          <option value="">—</option>
+          {{range .RIRs}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
+        </select>
+      </div>
+      <button class="btn btn-primary" type="submit">Record AS number</button>
+    </div>
+  </form>
+</div>
+{{end}}
+{{end}}

@@ -262,6 +262,24 @@ var DeclaredColumns = map[string][]string{
 		"vlan_id", "environment_id", "role", "vrf_id", "vlan_ref_id",
 		"created_at", "updated_at", "row_version",
 	},
+	// The registry layer, migration 00033. Declared: a registry delegated a
+	// block to this organisation and somebody wrote that down. Nothing observes
+	// a delegation -- a looking glass can report what is being ADVERTISED, and
+	// that is observed state about a route, a different fact from the allocation
+	// recorded here.
+	"rir": {
+		"id", "name", "is_private", "description", "lifecycle",
+		"created_at", "updated_at", "row_version",
+	},
+	"aggregate": {
+		"id", "cidr_text", "addr_family", "addr_start", "addr_end", "rir_id",
+		"allocated_on", "description", "lifecycle", "created_at", "updated_at",
+		"row_version",
+	},
+	"asn": {
+		"id", "number", "name", "rir_id", "description", "lifecycle",
+		"created_at", "updated_at", "row_version",
+	},
 	// First-hop redundancy, migration 00032. Declared: somebody configured VRRP
 	// on two routers and gave the pair a virtual address. A router REPORTS which
 	// of them is currently master, and that is observed state about the group --
