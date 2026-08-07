@@ -229,3 +229,98 @@ func TestPowerIsReadableByAnyoneAndWritableByAdminsOnly(t *testing.T) {
 		t.Errorf("feeds went from %d to %d under a read-only session", before, got)
 	}
 }
+
+// TestTracingARunThroughTwoPanelsOnScreen is B3 end to end through the forms.
+func TestTracingARunThroughTwoPanelsOnScreen(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	site := h.lookup(`SELECT id FROM asset WHERE kind = 'site' LIMIT 1`)
+	mk := func(kind, name string) string {
+		resp := h.post("/assets", url.Values{
+			"csrf_token": {h.csrfToken("/assets")}, "name": {name},
+			"kind": {kind}, "parent_id": {site},
+		}, false)
+		resp.Body.Close()
+		return h.lookup(`SELECT id FROM asset WHERE name = ?`, name)
+	}
+	port := func(assetID, name string) string {
+		resp := h.post("/assets/"+assetID+"/interfaces", url.Values{
+			"csrf_token": {h.csrfToken("/assets/" + assetID)},
+			"name":       {name}, "form_factor": {"rj45"},
+		}, false)
+		resp.Body.Close()
+		return h.lookup(`SELECT id FROM interface WHERE asset_id = ? AND name = ?`, assetID, name)
+	}
+	patch := func(assetID, front, rear string) {
+		resp := h.post("/assets/"+assetID+"/patch", url.Values{
+			"csrf_token":         {h.csrfToken("/assets/" + assetID)},
+			"front_interface_id": {front}, "rear_interface_id": {rear},
+		}, false)
+		resp.Body.Close()
+	}
+
+	sw := mk("switch", "trace-sw")
+	pa := mk("patch_panel", "trace-panel-a")
+	pb := mk("patch_panel", "trace-panel-b")
+	srv := mk("server", "trace-srv")
+
+	swPort := port(sw, "eth1")
+	aF, aR := port(pa, "a-front"), port(pa, "a-rear")
+	bR, bF := port(pb, "b-rear"), port(pb, "b-front")
+	srvPort := port(srv, "eth0")
+	if swPort == "" || aF == "" || srvPort == "" {
+		t.Fatal("the ports were not created through the forms")
+	}
+	patch(pa, aF, aR)
+	patch(pb, bF, bR)
+	// Assert the SETUP, not just the outcome. A test whose fixture silently
+	// failed to build reports the feature as broken, which is a slower way to
+	// find a wrong route name than saying so here.
+	if n := h.count(`SELECT COUNT(*) FROM port_pass_through`); n != 2 {
+		t.Fatalf("created %d pass-throughs, want 2", n)
+	}
+
+	// The REAL route and field names: POST /links, with the far end called
+	// target_interface_id and the asset carried alongside. Guessed both wrong
+	// first, and then three attempts to correct it silently did nothing because
+	// gofmt had realigned the literal and the patch no longer matched. The
+	// status is asserted here so a wrong route cannot look like a working one.
+	link := func(a, b string) {
+		t.Helper()
+		resp := h.post("/links", url.Values{
+			"csrf_token":          {h.csrfToken("/assets/" + sw)},
+			"asset_id":            {sw},
+			"a_interface_id":      {a},
+			"target_interface_id": {b},
+		}, false)
+		code := resp.StatusCode
+		resp.Body.Close()
+		if code != http.StatusSeeOther {
+			t.Fatalf("cabling returned %d, want 303", code)
+		}
+	}
+	link(swPort, aF)
+	link(aR, bR)
+	link(bF, srvPort)
+	if n := h.count(`SELECT COUNT(*) FROM link`); n < 3 {
+		t.Fatalf("created %d cables in total, want at least 3", n)
+	}
+	if n := h.count(`SELECT COUNT(*) FROM port_pass_through WHERE lifecycle = 'active'`); n != 2 {
+		t.Fatalf("%d live pass-throughs, want 2", n)
+	}
+
+	page := body(t, h.get("/interfaces/"+swPort+"/trace", false))
+	for _, want := range []string{"trace-panel-a", "a-rear", "trace-panel-b", "trace-srv", "eth0"} {
+		if !strings.Contains(page, want) {
+			t.Errorf("the trace does not name %q; a path that stops at the first cable "+
+				"answers \"a patch panel\", which is true and useless:\n%s", want, page)
+		}
+	}
+	if !strings.Contains(page, "complete") {
+		t.Error("the trace does not say whether it reached an end")
+	}
+	if !strings.Contains(page, "through the panel") {
+		t.Error("the trace does not distinguish a panel hop from a cable hop")
+	}
+}

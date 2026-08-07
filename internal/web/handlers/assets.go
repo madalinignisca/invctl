@@ -306,6 +306,8 @@ type assetDetailPage struct {
 	PowerFeeds  []store.PowerFeedRow
 	// Elevation is set only for a rack: what is mounted in it and where.
 	Elevation *store.RackElevation
+	// PassThroughs is what this panel does between its own ports.
+	PassThroughs []store.PassThroughRow
 }
 
 // AssetDetail renders one asset with its containment, ports and workloads.
@@ -453,9 +455,18 @@ func (a *App) renderAssetDetail(w http.ResponseWriter, r *http.Request, status i
 		}
 	}
 
+	// What this box patches through, if anything. Read for every asset rather
+	// than only for panels: an estate can and does patch through things that
+	// are not called patch panels.
+	passThroughs, err := a.Store.PassThroughsFor(r.Context(), id)
+	if err != nil {
+		slog.Error("listing pass-throughs", "error", err, "asset", id)
+	}
+
 	a.Render.Page(w, status, "asset_detail", assetDetailPage{
 		Base:           assetBase,
 		Elevation:      elevation,
+		PassThroughs:   passThroughs,
 		PowerInputs:    powerInputs,
 		PowerFeeds:     powerFeeds,
 		Edit:           edit,

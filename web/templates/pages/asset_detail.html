@@ -397,4 +397,68 @@
 </div>
 {{end}}
 
+
+{{/* What this box patches through, and how to trace a run from any of its
+     ports. Two panels and a trunk are invisible without this. */}}
+{{if .Interfaces}}
+<div class="panel">
+  <div class="panel-head">
+    <h2>Patching</h2>
+    <p class="panel-note">Front to rear, inside this box. Two boxes are joined by a cable, not by a patch.</p>
+  </div>
+  <div class="panel-body">
+    {{if .PassThroughs}}
+    <table class="grid">
+      <thead><tr><th>Front</th><th>Rear</th><th></th></tr></thead>
+      <tbody>
+        {{range .PassThroughs}}
+        <tr>
+          <td class="mono">{{.FrontName}}</td>
+          <td class="mono">{{.RearName}}</td>
+          <td class="row-actions">
+            <a class="btn btn-sm" href="/interfaces/{{.FrontInterfaceID}}/trace">Trace</a>
+            {{if $.CanWrite}}
+            <form method="post" action="/assets/{{$.Asset.ID}}/patch/{{.ID}}/retire" style="display:inline">
+              <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+              <button class="btn btn-sm" type="submit">Unpatch</button>
+            </form>
+            {{end}}
+          </td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+    {{else}}
+    <p class="empty">
+      Nothing patched through. Until a panel says which rear port sits behind
+      which front port, a run that crosses it cannot be traced past it.
+    </p>
+    {{end}}
+
+    {{if .CanWrite}}
+    <form method="post" action="/assets/{{.Asset.ID}}/patch" style="margin-top:12px">
+      <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+      <div class="field-row">
+        <div class="field">
+          <label for="pt-front">Front port</label>
+          <select id="pt-front" name="front_interface_id" required>
+            <option value="">Choose…</option>
+            {{range .Interfaces}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
+          </select>
+        </div>
+        <div class="field">
+          <label for="pt-rear">Rear port</label>
+          <select id="pt-rear" name="rear_interface_id" required>
+            <option value="">Choose…</option>
+            {{range .Interfaces}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
+          </select>
+        </div>
+      </div>
+      <div class="form-actions"><button type="submit" class="btn btn-sm">Patch through</button></div>
+    </form>
+    {{end}}
+  </div>
+</div>
+{{end}}
+
 {{end}}

@@ -1,0 +1,76 @@
+{{/*
+  invctl — infrastructure inventory
+  Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+
+  Licensed under the GNU Affero General Public License, version 3 only —
+  no later version applies. See LICENSE for the full text.
+
+  SPDX-License-Identifier: AGPL-3.0-only
+*/}}
+{{define "content"}}
+<div class="crumbs">
+  <a href="/assets/{{.Trace.StartAssetID}}">{{.Trace.StartAsset}}</a>
+  <span class="sep">/</span><span>trace {{.Trace.StartInterface}}</span>
+</div>
+
+<div class="page-head">
+  <div class="eyebrow">cabling</div>
+  <h1>{{.Trace.StartAsset}} · {{.Trace.StartInterface}}</h1>
+  <p class="lede">
+    Every hop between this port and the far end, panels included. "It goes
+    through panel-b, port 14" is something you can act on; "these two are
+    connected" is not.
+  </p>
+</div>
+
+{{template "trace_path" .}}
+{{end}}
+
+{{define "trace_path"}}
+<div id="trace-path">
+  <div class="panel">
+    <div class="panel-body">
+      <table class="grid">
+        <thead><tr><th></th><th>Where</th><th>Port</th><th>Reached by</th></tr></thead>
+        <tbody>
+          <tr>
+            <td class="mono muted">0</td>
+            <td><a class="id" href="/assets/{{.Trace.StartAssetID}}">{{.Trace.StartAsset}}</a></td>
+            <td class="mono">{{.Trace.StartInterface}}</td>
+            <td class="muted">start</td>
+          </tr>
+          {{range $i, $h := .Trace.Hops}}
+          <tr>
+            <td class="mono muted">{{add $i 1}}</td>
+            <td><a class="id" href="/assets/{{$h.AssetID}}">{{$h.AssetName}}</a>
+              <div class="muted" style="font-size:11.5px">{{$h.AssetKind}}</div></td>
+            <td class="mono">{{$h.Interface}}</td>
+            <td>
+              {{if eq $h.Kind "panel"}}
+                <span class="pill pill-muted">through the panel</span>
+              {{else}}
+                <span class="pill pill-info">cable</span>
+                {{if $h.Medium}}<span class="muted">{{$h.Medium}}</span>{{end}}
+                {{if $h.Length}}<span class="muted">{{derefInt $h.Length}} m</span>{{end}}
+              {{end}}
+            </td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+
+      {{/* Never blank. "The path ends here" and "we gave up" are different
+           answers, and a reader who cannot tell them apart plans with the
+           wrong one. */}}
+      <p class="hint" style="margin-top:12px">
+        {{if .Trace.Complete}}
+          <span class="pill pill-ok">complete</span>
+        {{else}}
+          <span class="pill pill-degraded">incomplete</span>
+        {{end}}
+        {{.Trace.Why}}
+      </p>
+    </div>
+  </div>
+</div>
+{{end}}

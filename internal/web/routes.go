@@ -98,6 +98,7 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	read("GET /certificates", app.CertificateList)
 	read("GET /certificates/{id}", app.CertificateDetail)
 	read("GET /catalogue", app.Catalogue)
+	read("GET /interfaces/{id}/trace", app.TracePort)
 	read("GET /power", app.Power)
 	read("GET /power/feeds/{id}/impact", app.PowerFeedImpact)
 	read("GET /power/sources/{id}/impact", app.PowerSourceImpact)
@@ -149,6 +150,8 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	write("POST /certificates/{id}/assets/{assetID}/retire", app.CertificateUndeployAsset)
 	write("POST /certificates/{id}/services", app.CertificateDeployService)
 	write("POST /certificates/{id}/services/{serviceID}/retire", app.CertificateUndeployService)
+	write("POST /assets/{id}/patch", app.PassThroughCreate)
+	write("POST /assets/{id}/patch/{patchID}/retire", app.PassThroughRetire)
 	write("POST /assets/{id}/power", app.PowerInputCreate)
 	write("POST /assets/{id}/power/{inputID}/retire", app.PowerInputRetire)
 
