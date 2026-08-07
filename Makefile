@@ -43,7 +43,15 @@ export INV_AGENT_SCOPES ?= mon-prod:prod|dev|transit,mon-oob:prod|dev|transit
 
 PG_DSN := postgres://invctl:invctl@127.0.0.1:5433/invctl?sslmode=disable
 
-.PHONY: help
+# Which manual fragments describe code that has changed since they were written.
+# See docs/manual/AGENT.md -- regenerate only what this names.
+manual-stale:
+	@./tools/manual-stale.sh
+
+manual-stale-v:
+	@./tools/manual-stale.sh -v
+
+.PHONY: help manual-stale manual-stale-v
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
 

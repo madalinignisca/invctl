@@ -1,0 +1,184 @@
+# The fragment registry.
+#
+# Each entry is one manual fragment and everything needed to decide whether it
+# is stale. `tools/manual-stale.sh` reads this file and nothing else.
+#
+# depends_on   the source paths this fragment DESCRIBES. Get these right and
+#              staleness is exact; get them wrong and the manual drifts silently,
+#              which is the only failure mode of this whole arrangement.
+# generated_at the commit the fragment was last written against. Bump it ONLY
+#              for the fragment you regenerated.
+# preconditions what must be true of the demo estate for the screenshots to
+#              teach anything. A page in its boring state loads fine and shows
+#              nothing, which is the trap: the capture succeeds and the manual
+#              gets worse.
+#
+# YAML kept to plain lists and scalars on purpose -- the checker parses it with
+# sed and awk, so it needs no yaml library on a machine that may not have one.
+
+fragments:
+  - id: getting-started
+    title: Getting started
+    file: parts/00-getting-started.md
+    pages:
+      - /login
+      - /
+    screenshots:
+      - img/getting-started-1-login.png
+      - img/getting-started-2-overview.png
+      - img/getting-started-3-rail.png
+    depends_on:
+      - internal/web/handlers/app.go
+      - internal/web/handlers/nav.go
+      - internal/web/handlers/misc.go
+      - internal/store/findings.go
+      - web/templates/layouts/base.html
+      - web/templates/pages/dashboard.html
+      - web/templates/pages/login.html
+    preconditions:
+      - "the overview shows at least one finding of each severity (fault, risk, gap)"
+    generated_at: c2b74b1ed728
+
+  - id: estate
+    title: The estate — assets, catalogue, power, clusters
+    file: parts/20-estate.md
+    pages:
+      - /assets
+      - /assets/{id}
+      - /catalogue
+      - /power
+      - /clusters
+      - /clusters/{id}
+    screenshots:
+      - img/estate-3-clusters.png
+    # Named but NOT YET CAPTURED. The manifest must never claim an image
+    # that does not exist -- a reader trusts it and it silently stops
+    # matching. Capture these and move them up.
+    screenshots_pending:
+      - img/estate-1-assets.png
+      - img/estate-2-asset-detail.png
+      - img/estate-4-cluster-detail.png
+    depends_on:
+      - internal/web/handlers/assets.go
+      - internal/web/handlers/clusters.go
+      - internal/web/handlers/power.go
+      - internal/web/handlers/hardware.go
+      - internal/domain/asset.go
+      - internal/domain/cluster.go
+      - internal/domain/hardware.go
+      - web/templates/pages/asset_list.html
+      - web/templates/pages/asset_detail.html
+      - web/templates/pages/cluster_list.html
+      - web/templates/pages/cluster_detail.html
+    preconditions:
+      - "one cluster whose min_hosts equals its host count, so the 'not survivable' row is visible"
+      - "one asset whose EOL date is inherited from its device type, so the source is shown"
+    generated_at: c2b74b1ed728
+
+  - id: addressing
+    title: Addressing — prefixes, VLANs, allocations
+    file: parts/30-addressing.md
+    pages:
+      - /prefixes
+      - /vlans
+      - /vlans/{id}
+      - /allocations
+    screenshots:
+      - img/addressing-1-prefixes.png
+    # Named but NOT YET CAPTURED. The manifest must never claim an image
+    # that does not exist -- a reader trusts it and it silently stops
+    # matching. Capture these and move them up.
+    screenshots_pending:
+      - img/addressing-2-vlans.png
+      - img/addressing-3-vlan-detail.png
+      - img/addressing-4-allocations.png
+    depends_on:
+      - internal/web/handlers/network.go
+      - internal/web/handlers/vlans.go
+      - internal/web/handlers/registry.go
+      - internal/domain/prefix_tree.go
+      - internal/domain/iprange.go
+      - internal/domain/vlan.go
+      - internal/domain/registry.go
+      - internal/store/network.go
+      - internal/store/vlans.go
+      - internal/store/registry.go
+      - web/templates/pages/prefix_list.html
+      - web/templates/pages/vlan_list.html
+      - web/templates/pages/vlan_detail.html
+      - web/templates/pages/registry_list.html
+    preconditions:
+      - "a prefix tree at least two levels deep, so containment and indentation are visible"
+      - "one VLAN carrying two prefixes (the dual-stack case)"
+      - "at least one reservation, so 'next free' visibly skips it"
+    generated_at: c2b74b1ed728
+
+  - id: network
+    title: Network — topology, circuits, overlays, redundancy
+    file: parts/40-network.md
+    pages:
+      - /network
+      - /paths
+      - /circuits
+      - /circuits/{id}
+      - /overlays
+      - /redundancy
+      - /redundancy/{id}
+    screenshots:
+      - img/network-2-redundancy.png
+    # Named but NOT YET CAPTURED. The manifest must never claim an image
+    # that does not exist -- a reader trusts it and it silently stops
+    # matching. Capture these and move them up.
+    screenshots_pending:
+      - img/network-1-circuits.png
+      - img/network-3-overlays.png
+    depends_on:
+      - internal/web/handlers/circuits.go
+      - internal/web/handlers/fhrp.go
+      - internal/web/handlers/l2vpn.go
+      - internal/web/handlers/reach.go
+      - internal/domain/circuit.go
+      - internal/domain/fhrp.go
+      - internal/domain/l2vpn.go
+      - web/templates/pages/circuit_list.html
+      - web/templates/pages/circuit_detail.html
+      - web/templates/pages/fhrp_list.html
+      - web/templates/pages/l2vpn_list.html
+    preconditions:
+      - "one redundancy group with a single member, so the finding is visible"
+      - "one circuit with a contract end inside the expiry horizon"
+      - "one overlay with fewer than two terminations"
+    generated_at: c2b74b1ed728
+
+  - id: reports
+    title: Reports — what expires, power, impact
+    file: parts/50-reports.md
+    pages:
+      - /reports/expiry
+      - /reports/power
+      - /reports/spanning
+      - /assets/{id}/impact
+      - /changes
+    screenshots:
+      - img/reports-3-impact.png
+    # Named but NOT YET CAPTURED. The manifest must never claim an image
+    # that does not exist -- a reader trusts it and it silently stops
+    # matching. Capture these and move them up.
+    screenshots_pending:
+      - img/reports-1-expiry.png
+      - img/reports-2-power.png
+    depends_on:
+      - internal/store/expiry.go
+      - internal/store/power_findings.go
+      - internal/impact/engine.go
+      - internal/impact/structures.go
+      - internal/impact/clusters.go
+      - internal/impact/reach.go
+      - internal/web/handlers/power.go
+      - web/templates/pages/expiry.html
+      - web/templates/partials/impact_result.html
+    preconditions:
+      - "at least one expired item and one expiring soon"
+      - "a power chain producing a false-redundancy finding"
+      - "an asset whose loss empties a VLAN or reduces a redundancy group"
+    generated_at: c2b74b1ed728
