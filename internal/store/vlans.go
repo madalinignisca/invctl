@@ -255,6 +255,13 @@ func (s *SQLStore) ListVLANPorts(ctx context.Context, vlanID string) ([]VLANPort
 	return rows, nil
 }
 
+// ListInterfaceVLANMembers returns a port's current membership, in the shape
+// SetInterfaceVLANs takes -- so a caller adding one VLAN reads, appends and
+// writes back rather than reconstructing what was already there.
+func (s *SQLStore) ListInterfaceVLANMembers(ctx context.Context, interfaceID string) ([]domain.InterfaceVLAN, error) {
+	return s.currentMembership(ctx, interfaceID)
+}
+
 // SetInterfaceVLANs replaces a port's whole membership set.
 //
 // REPLACED WHOLESALE, like asset_environment, and audited on the INTERFACE --

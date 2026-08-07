@@ -41,6 +41,9 @@ type Refs struct {
 	Endpoints    map[string]string // "service/endpoint" -> id
 	Routes       map[string]string // match value -> id
 	NetGroups    map[string]string // code -> id
+	// VLANs by name, so the phases that put ports in them and terminate
+	// overlays into them need no second lookup.
+	VLANs map[string]string // name -> id
 	// The hardware catalogue and the power chain.
 	Manufacturers map[string]string // code -> id
 	DeviceTypes   map[string]string // model -> id
@@ -95,6 +98,7 @@ func Load(ctx context.Context, s *store.SQLStore) (*Refs, error) {
 			Endpoints:    map[string]string{},
 			Routes:       map[string]string{},
 			NetGroups:    map[string]string{},
+			VLANs:        map[string]string{},
 
 			Manufacturers: map[string]string{},
 			DeviceTypes:   map[string]string{},
@@ -139,6 +143,11 @@ func Load(ctx context.Context, s *store.SQLStore) (*Refs, error) {
 	// and it must not run before projects() or the report would have nobody to
 	// attribute an expiring box to.
 	b.lifetimes()
+	// The edge types WP-I1 and WP-E2 taught the engine about: a cluster, VLAN
+	// membership, first-hop redundancy, an overlay and a circuit. After the
+	// estate and the topology, because every one of them names an interface or
+	// a host that must already exist.
+	b.engineEdges()
 	// Prices last of all: they attach to assets, services AND projects, so
 	// every one of those has to exist, and nothing else reads them.
 	b.costs()
@@ -487,6 +496,7 @@ func (b *builder) networking() {
 			return
 		}
 		vlanIDs[p.vlan] = v.ID
+		b.refs.VLANs[v.Name] = v.ID
 	}
 
 	for _, p := range prefixes {
