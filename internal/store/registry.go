@@ -70,30 +70,45 @@ func (s *SQLStore) ListAggregates(ctx context.Context) ([]AggregateRow, error) {
 		return rows, nil
 	}
 
-	var prefixes []struct {
-		CIDR   string `db:"cidr_text"`
-		Family int    `db:"addr_family"`
-		Start  []byte `db:"addr_start"`
-		End    []byte `db:"addr_end"`
-	}
-	err = s.read(ctx, &prefixes,
-		`SELECT cidr_text, addr_family, addr_start, addr_end FROM prefix`)
+	var flat []domain.Prefix
+	err = s.read(ctx, &flat, `SELECT * FROM prefix`)
 	if err != nil {
 		return nil, fmt.Errorf("reading prefixes: %w", err)
 	}
+	// The TREE, not the flat list, and the difference is a figure over 100%.
+	//
+	// A delegation contains a prefix AND every prefix nested inside it, so
+	// summing them all counts the same addresses at every level: 10.20.0.0/16
+	// plus its four /24s is 66560 of a 65536-address block, which the live demo
+	// duly reported as 101.6% used. Only the SHALLOWEST prefixes in the block
+	// count -- a child's addresses are already inside its parent, exactly as an
+	// address inside a child prefix is the child's and not the parent's.
+	nodes := domain.BuildPrefixTree(flat, map[string]int{})
+	byID := make(map[string]domain.PrefixNode, len(nodes))
+	for _, n := range nodes {
+		byID[n.ID] = n
+	}
 
 	for i := range rows {
+		inside := func(n domain.PrefixNode) bool {
+			return n.AddrFamily == rows[i].AddrFamily &&
+				withinRange(n.AddrStart, n.AddrEnd, rows[i].AddrStart, rows[i].AddrEnd)
+		}
 		total := new(big.Int)
 		count := 0
-		for _, p := range prefixes {
-			if p.Family != rows[i].AddrFamily {
-				continue
-			}
-			if !withinRange(p.Start, p.End, rows[i].AddrStart, rows[i].AddrEnd) {
+		for _, n := range nodes {
+			if !inside(n) {
 				continue
 			}
 			count++
-			if size := domain.PrefixSize(p.CIDR); size != nil {
+			// Its parent is in the block too, so its addresses are already
+			// counted there.
+			if n.ParentID != nil {
+				if parent, ok := byID[*n.ParentID]; ok && inside(parent) {
+					continue
+				}
+			}
+			if size := domain.PrefixSize(n.CIDRText); size != nil {
 				total.Add(total, size)
 			}
 		}

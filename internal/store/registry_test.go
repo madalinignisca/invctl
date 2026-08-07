@@ -69,17 +69,24 @@ func TestAnAggregateCountsWhatHasBeenCarvedOutOfIt(t *testing.T) {
 			// tested nothing at all.
 			mustPrefix(t, s, ctx, "a64:100::/64")
 
+			// THE SUPERNET ITSELF, which is what made the live demo report
+			// 101.6%. A delegation contains this prefix and its children, and
+			// summing all of them counts the same addresses at every level.
+			mustPrefix(t, s, ctx, "10.100.0.0/16")
+
 			got := find()
-			if got.Prefixes != 2 {
-				t.Errorf("the /16 contains %d prefixes, want 2 -- the /24 outside it and "+
+			if got.Allocated.String() != "65536" {
+				t.Errorf("allocated = %s, want 65536. The /16 prefix covers the whole "+
+					"delegation and its two /24s are inside it -- counting those again "+
+					"puts the figure over 100%%, which is what shipped", got.Allocated)
+			}
+			if pct := got.UtilPercent(); pct > 100 {
+				t.Errorf("utilisation = %.1f%%, which is more than the delegation holds", pct)
+			}
+
+			if got.Prefixes != 3 {
+				t.Errorf("the /16 contains %d prefixes, want 3 -- the /24 outside it and "+
 					"the v6 one must not count", got.Prefixes)
-			}
-			if want := "512"; got.Allocated.String() != want {
-				t.Errorf("allocated = %s, want %s (two /24s)", got.Allocated, want)
-			}
-			// 512 of 65536.
-			if pct := got.UtilPercent(); pct < 0.7 || pct > 0.8 {
-				t.Errorf("utilisation = %.3f%%, want ~0.78%%", pct)
 			}
 			if got.Unused() {
 				t.Error("a delegation with two prefixes in it reports unused")
