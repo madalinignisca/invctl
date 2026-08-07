@@ -44,9 +44,12 @@ func (b *builder) company() {
 	b.companyFirewalls()
 	b.companyUplinks()
 	b.companyCertificates()
-	// The compute build-out last: it prices assets the phases above create, and
-	// it is the one phase TopUp can also run on its own against a live estate.
+	// The compute build-out: it prices assets the phases above create.
 	b.companyCompute()
+	// The rented and cloud tier last, because it RETIRES the on-prem
+	// development hosts the compute phase created -- the migration that put
+	// development onto somebody else's metal.
+	b.companyRented()
 }
 
 // companySites adds the third on-prem rack and the rented colo.

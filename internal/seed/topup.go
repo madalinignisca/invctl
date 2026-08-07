@@ -34,6 +34,11 @@ import (
 // database directly would be faster and would silently produce an estate whose
 // history began mid-sentence.
 
+// AssetHydrationLimit bounds the hydration read. ListAssets defaults to a page
+// size meant for a screen; a top-up needs every asset, because a name it cannot
+// see is a name it will recreate.
+const AssetHydrationLimit = 100000
+
 // TopUp adds the phases below to a database that already holds an estate, and
 // is safe to run repeatedly: anything already present is left untouched.
 func TopUp(ctx context.Context, s *store.SQLStore) (*Refs, error) {
@@ -67,11 +72,16 @@ func TopUp(ctx context.Context, s *store.SQLStore) (*Refs, error) {
 		return nil, fmt.Errorf("reading the existing estate: %w", err)
 	}
 
-	// The compute build-out. Only this phase: the rest of company() creates
-	// interfaces and certificates whose uniqueness is not name-scoped, so
-	// re-running it would not skip, it would collide. A phase joins this list
-	// once it is idempotent, not merely because it is new.
+	// The compute build-out and the rented tier. Only these: the rest of
+	// company() creates interfaces and certificates whose uniqueness is not
+	// name-scoped, so re-running it would not skip, it would collide. A phase
+	// joins this list once it is idempotent, not merely because it is new.
+	//
+	// companyRented is idempotent in both halves -- b.asset skips a name that
+	// exists, assetCosts skips a matching line, and RetireAsset returns without
+	// writing when the asset is already retired.
 	b.companyCompute()
+	b.companyRented()
 
 	if b.err != nil {
 		return nil, b.err
@@ -90,7 +100,17 @@ func (b *builder) hydrate() error {
 		b.refs.Environments[e.Code] = e.ID
 	}
 
-	assets, err := b.store.ListAssets(b.ctx, store.AssetFilter{})
+	// RETIRED ASSETS INCLUDED, and this is not a detail. b.asset skips a name
+	// already in these refs, so a hydration that omitted retired rows would not
+	// see what a previous run had withdrawn -- and would helpfully recreate it.
+	// The partial unique index permits that (a name is unique among LIVE rows),
+	// so nothing would object: the second run would quietly resurrect three
+	// retired hypervisors and re-price them.
+	//
+	// Found by running the top-up twice and counting, which is the only way this
+	// surfaces. It appeared the moment a phase retired something, and would have
+	// been invisible for as long as every phase only created.
+	assets, err := b.store.ListAssets(b.ctx, store.AssetFilter{IncludeRetired: true, Limit: AssetHydrationLimit})
 	if err != nil {
 		return fmt.Errorf("assets: %w", err)
 	}

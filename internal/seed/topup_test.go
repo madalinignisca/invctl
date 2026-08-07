@@ -11,6 +11,7 @@ package seed_test
 import (
 	"testing"
 
+	"github.com/madalinignisca/invctl/internal/domain"
 	"github.com/madalinignisca/invctl/internal/seed"
 	"github.com/madalinignisca/invctl/internal/store"
 )
@@ -137,9 +138,26 @@ func TestEveryPricedKindOfAssetCarriesAFigure(t *testing.T) {
 		}
 		// A VM, a bridge and a k8s node cost nothing of their own -- their money
 		// is the host's, and pricing them would double-count it.
-		free := map[string]bool{"vm": true, "bridge": true, "k8s_node": true}
+		freeKinds := map[string]bool{"vm": true, "bridge": true, "k8s_node": true}
+
+		// AND THREE NAMED SITES, because kind alone cannot decide this. dc-oslo
+		// carries transit and colo-rack-07 carries rack rental, so "a site costs
+		// money" is true of the ones you rent space in. A PROVIDER REGION is not
+		// that: it is a failure-domain label, you pay per machine, and putting a
+		// figure on it would invent a bill nobody receives. Named individually
+		// rather than exempting sites wholesale, so dropping dc-oslo's
+		// connectivity line still fails this test.
+		freeAssets := map[string]string{
+			"hz-hel1":  "a Hetzner region: the machines are billed, the region is not",
+			"scw-par1": "a Scaleway region: same",
+			"ovh-gra":  "an OVHcloud region: same",
+		}
+
 		for _, a := range assets {
-			if free[a.Kind] {
+			if freeKinds[a.Kind] {
+				continue
+			}
+			if _, ok := freeAssets[a.Name]; ok {
 				continue
 			}
 			costs, err := s.ListAssetCosts(ctx, a.ID)
@@ -232,4 +250,59 @@ func countEstate(t *testing.T, f *fixture) map[string]int {
 	}
 	out["device types"] = len(types)
 	return out
+}
+
+// TestATopUpDoesNotResurrectWhatItRetired.
+//
+// THE BUG THIS EXISTS FOR SHIPPED, briefly, and was invisible until a phase
+// retired something. hydrate() read assets with the default filter, which
+// excludes retired rows, so a second run could not see the hosts the first had
+// withdrawn -- and b.asset, finding no such name in its refs, recreated them.
+// The partial unique index permits it, because a name is unique among LIVE rows
+// only. Nothing objected: three retired hypervisors came back with fresh cost
+// lines, every run.
+//
+// Counting is the only way this surfaces, which is why the assertion is on the
+// totals rather than on any one row.
+func TestATopUpDoesNotResurrectWhatItRetired(t *testing.T) {
+	seed.CompanyEstate = true
+	t.Cleanup(func() { seed.CompanyEstate = false })
+
+	eachEngine(t, func(t *testing.T, f *fixture) {
+		s, ctx := f.store, f.ctx
+
+		// The company layer retires the on-prem development hosts when it moves
+		// them to rented metal. If it has not, this test proves nothing.
+		retired := 0
+		assets, err := s.ListAssets(ctx, store.AssetFilter{Limit: 500, IncludeRetired: true})
+		if err != nil {
+			t.Fatalf("listing: %v", err)
+		}
+		for _, a := range assets {
+			if a.Lifecycle == domain.LifecycleRetired {
+				retired++
+			}
+		}
+		if retired == 0 {
+			t.Fatal("the estate contains nothing retired, so a resurrection could not " +
+				"be detected by this test")
+		}
+
+		before := countEstate(t, f)
+		if _, err := seed.TopUp(ctx, s); err != nil {
+			t.Fatalf("topping up: %v", err)
+		}
+		after := countEstate(t, f)
+
+		if after["assets"] != before["assets"] {
+			t.Errorf("assets went %d -> %d across a top-up. A retired row the "+
+				"hydration cannot see is a name the seed recreates, and the partial "+
+				"unique index allows it because retired rows do not hold their names",
+				before["assets"], after["assets"])
+		}
+		if after["asset costs"] != before["asset costs"] {
+			t.Errorf("asset costs went %d -> %d; resurrected assets get fresh price lines",
+				before["asset costs"], after["asset costs"])
+		}
+	})
 }
