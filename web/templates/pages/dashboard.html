@@ -10,12 +10,51 @@
 {{define "content"}}
 <div class="page-head">
   <div class="eyebrow">Overview</div>
-  <h1>What is here, and what crosses a boundary</h1>
+  <h1>What needs a decision</h1>
   <p class="lede">
-    Pick an asset and simulate losing it to see what actually breaks. The engine
-    accounts for availability policy, so losing one node of a quorum reports what
-    it should: nothing.
+    Everything below was already known — by the power report, the expiry report,
+    the redundancy page. What was missing is the one place that says it together,
+    because a finding on a page nobody opened this week is a finding nobody has.
   </p>
+</div>
+
+{{/* THE FINDINGS LEAD. Three severities, and the distinction is load-bearing:
+     a fault is wrong now, a risk is one failure from wrong, and a gap is the
+     inventory admitting it does not know. Collapsing the third into the second
+     would claim knowledge nobody wrote down — and a report that cannot say "I
+     do not know" is a report that guesses. */}}
+<div class="panel">
+  <div class="panel-head">
+    <h2>{{pluralise (len .Findings) "finding" "findings"}}</h2>
+    <span class="panel-note">Worst first. Every one links to the page that explains it.</span>
+  </div>
+  {{if .Findings}}
+  <div class="scroll-x">
+    <table>
+      <thead><tr><th></th><th class="num">Count</th><th>Finding</th><th>For example</th></tr></thead>
+      <tbody>
+        {{range .Findings}}
+        <tr>
+          <td>
+            {{if eq .Severity "fault"}}<span class="pill pill-down" title="Wrong now">fault</span>
+            {{else if eq .Severity "risk"}}<span class="pill pill-degraded" title="One failure away from wrong">risk</span>
+            {{else}}<span class="pill pill-muted" title="Not recorded, so not knowable">gap</span>{{end}}
+          </td>
+          <td class="num">{{.Count}}</td>
+          <td><a href="{{.Href}}">{{.Label}}</a></td>
+          <td class="reason">{{if .Detail}}{{.Detail}}{{else}}—{{end}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{else}}
+  <div class="empty">
+    <strong>Nothing needs a decision.</strong>
+    No expired dates, no single points of failure, and nothing unrecorded that
+    this software knows to look for.
+  </div>
+  {{end}}
 </div>
 
 <div class="stat-row">

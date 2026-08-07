@@ -22,6 +22,8 @@ import (
 
 type dashboardPage struct {
 	Base
+	// Findings lead the page: what needs a decision, worst first.
+	Findings      []store.Finding
 	Environments  []domain.Environment
 	Services      []store.ServiceRow
 	Spanning      []store.AssetRow
@@ -105,6 +107,15 @@ func (a *App) Dashboard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// WHAT NEEDS A DECISION, which is what somebody opens this page for. Every
+	// count comes from the same store method its own page uses, so the overview
+	// and the report cannot disagree.
+	findings, err := a.Store.EstateFindings(r.Context())
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
+
 	// Tier-1 services first: the dashboard should lead with what matters.
 	tier1 := make([]store.ServiceRow, 0, 8)
 	for _, s := range services {
@@ -115,6 +126,7 @@ func (a *App) Dashboard(w http.ResponseWriter, r *http.Request) {
 
 	a.Render.Page(w, http.StatusOK, "dashboard", dashboardPage{
 		Base:         a.base(r, "Overview", "dashboard"),
+		Findings:     findings,
 		Environments: envs,
 		Services:     tier1,
 		Spanning:     spanning,
