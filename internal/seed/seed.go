@@ -59,6 +59,11 @@ type builder struct {
 	refs  *Refs
 	err   error
 
+	// topUp makes the creators skip what a hydrated database already holds, so
+	// a phase can be re-run against a live estate instead of only an empty one.
+	// See topup.go for why that is a mode rather than the default.
+	topUp bool
+
 	interfaceIDs map[string]string // "asset/interface" -> id
 	identityIDs  map[string]string // name -> id
 	poolIDs      map[string]string // name -> id
@@ -145,6 +150,14 @@ func Load(ctx context.Context, s *store.SQLStore) (*Refs, error) {
 	// inventory, so a deployment gets the honest empty state unless somebody is
 	// presenting and wants the panels to have something to say. Staged through
 	// the real recorder, never by writing asset_health directly.
+	// The small-company layer, when a deployment asks for it. It sits after
+	// every declared phase because it references teams, services, device types
+	// and the base estate, and before the observations so telemetry can land on
+	// anything it adds.
+	if CompanyEstate {
+		b.company()
+	}
+
 	if ObserveDemo {
 		b.observations()
 	}
@@ -204,6 +217,14 @@ func (b *builder) env(code string) string { return b.refs.Environments[code] }
 func (b *builder) asset(kind, name, parent string, envs []string, fields func(*domain.Asset)) {
 	if !b.ok() {
 		return
+	}
+	// Topping up an estate that already holds this name: leave the live row
+	// alone. Only in top-up mode -- on a fresh seed a repeated name is a bug in
+	// the fixture, and silently skipping it would hide that.
+	if b.topUp {
+		if _, exists := b.refs.Assets[name]; exists {
+			return
+		}
 	}
 	var parentID *string
 	if parent != "" {

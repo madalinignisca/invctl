@@ -56,7 +56,9 @@ func run() error {
 	var (
 		migrateOnly = flag.Bool("migrate", false, "apply migrations and exit")
 		seedOnly    = flag.Bool("seed", false, "load the demo estate and exit")
-		devMode     = flag.Bool("dev", false, "reparse templates on every request")
+		topUpOnly   = flag.Bool("seed-topup", false,
+			"add newer demo phases to an estate that is already loaded, and exit")
+		devMode = flag.Bool("dev", false, "reparse templates on every request")
 
 		// The retention prune (docs/AUDIT.md rule 10). Admin-invoked, here,
 		// and nowhere else: never a handler, never a side effect of a write
@@ -120,12 +122,26 @@ func run() error {
 	// recorder after the inventory. Never on by default -- an operator's first
 	// run should show the honest empty state, not readings nobody sent.
 	seed.ObserveDemo = cfg.SeedObservations
+	seed.CompanyEstate = cfg.SeedCompany
 
 	if *pruneObserved {
 		return pruneObservedTransitions(ctx, st, cfg, *pruneKeepDays, *pruneAs, *pruneDryRun)
 	}
 	if *pruneUnmatched {
 		return pruneUnmatchedObservations(ctx, st, cfg, *pruneKeepDays, *pruneAs, *pruneDryRun)
+	}
+
+	// Topping up a RUNNING estate, which is the case -seed cannot serve: it
+	// refuses a populated database, and the demo must not be reset to gain what
+	// a later release added. Safe to repeat -- every phase it runs skips what is
+	// already there.
+	if *topUpOnly {
+		refs, err := seed.TopUp(ctx, st)
+		if err != nil {
+			return fmt.Errorf("topping up the demo estate: %w", err)
+		}
+		slog.Info("demo estate topped up", "assets", len(refs.Assets))
+		return nil
 	}
 
 	if *seedOnly || cfg.SeedOnStart {

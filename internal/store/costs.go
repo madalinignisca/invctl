@@ -33,7 +33,7 @@ import (
 
 // The three cost surfaces. Values, not strings from a caller.
 var (
-	costOnAsset   = costTable{name: "asset_cost", column: "asset_id", entity: "asset_cost", parent: "asset"}
+	costOnAsset   = costTable{name: "asset_cost", column: "asset_id", entity: "asset_cost", parent: "asset", catalogued: true}
 	costOnService = costTable{name: "service_cost", column: "service_id", entity: "service_cost", parent: "service"}
 	costOnProject = costTable{name: "project_cost", column: "project_id", entity: "project_cost"}
 )
@@ -48,6 +48,10 @@ type costTable struct {
 	// which is correct. A setup fee for a SaaS subscription bought nothing with
 	// a life.
 	parent string
+	// catalogued means the parent can name a device type, and therefore that its
+	// end-of-support may be INHERITED rather than typed on the row. True only
+	// for assets: a service has a date or it has none.
+	catalogued bool
 }
 
 // CostRow is a cost line with the label of its kind resolved, so a list view
@@ -68,6 +72,19 @@ func (t costTable) selectSQL() string {
 		eol = `p.eol_date AS owner_eol_date`
 		join = `
 		LEFT JOIN ` + t.parent + ` p ON p.id = c.` + t.column
+	}
+	// The SAME override rule domain.ResolveEOL states, expressed once more here
+	// because amortisation happens in SQL and cannot call it.
+	//
+	// It is not a refinement. Reading only the asset's own column means every
+	// box whose support date is INHERITED from its model amortises a one-off
+	// over no life at all and reports EUR 0.00 -- and a catalogue exists exactly
+	// so that most boxes inherit. The report was silently at its most wrong on
+	// the estates that used the feature properly.
+	if t.catalogued {
+		eol = `COALESCE(p.eol_date, dt.eol_date) AS owner_eol_date`
+		join += `
+		LEFT JOIN device_type dt ON dt.id = p.device_type_id`
 	}
 	return `
 		SELECT c.id, c.` + t.column + ` AS owner_id, c.kind, c.period, c.amount_minor,
