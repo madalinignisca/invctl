@@ -259,7 +259,15 @@ var DeclaredColumns = map[string][]string{
 	},
 	"prefix": {
 		"id", "cidr_text", "addr_family", "addr_start", "addr_end",
-		"vlan_id", "environment_id", "role",
+		"vlan_id", "environment_id", "role", "vrf_id",
+		"created_at", "updated_at", "row_version",
+	},
+	// A VRF is configuration in the purest sense: somebody decided that this
+	// address space is separate from that one. Nothing observes a VRF -- a
+	// router can report which table it consulted, but that is a reading of a
+	// decision already made here, never the source of one.
+	"vrf": {
+		"id", "name", "rd", "description", "lifecycle",
 		"created_at", "updated_at", "row_version",
 	},
 	// Projects are declared through and through: somebody asserts that a thing

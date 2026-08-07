@@ -161,9 +161,15 @@ type Prefix struct {
 	VLANID        *int    `db:"vlan_id"`
 	EnvironmentID *string `db:"environment_id"`
 	Role          *string `db:"role"`
-	CreatedAt     *string `db:"created_at"`
-	UpdatedAt     *string `db:"updated_at"`
-	RowVersion    int     `db:"row_version"`
+	// VRFID scopes the prefix. NULL is the global table, which is what every
+	// prefix written before migration 00029 means -- so nil here is a real
+	// answer rather than a missing one. The management surface comes later;
+	// the column exists now because widening a unique constraint on a loaded
+	// database is a different job from adding a nullable column to an empty one.
+	VRFID      *string `db:"vrf_id"`
+	CreatedAt  *string `db:"created_at"`
+	UpdatedAt  *string `db:"updated_at"`
+	RowVersion int     `db:"row_version"`
 }
 
 // NewPrefix parses and normalizes a CIDR into the stored representation.
