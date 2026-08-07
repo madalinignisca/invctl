@@ -681,6 +681,16 @@ func TestTheOnlyFactDeletingStatementIsThePrune(t *testing.T) {
 		// The DEPLOYMENTS are not deleted: certificate_asset and
 		// certificate_service are soft-retired like every other link.
 		"internal/store/certificates.go": "certificate_san: the set of names a certificate owns, replaced wholesale",
+		// interface_vlan holds the CURRENT set of VLANs a port is in, which the
+		// port owns. Replaced wholesale inside the interface's transaction, and
+		// foldVLANValue puts the VIDs into the audited value so the replacement
+		// cannot produce an empty diff -- a port moving from VLAN 10 to VLAN 20
+		// with no entry in change_log would be the fourth time this codebase
+		// made that exact mistake.
+		//
+		// The VLANs themselves are soft-retired like every other entity, and
+		// RetireVLAN refuses while any prefix or port still names one.
+		"internal/store/vlans.go": "interface_vlan: the set of VLANs a port is in, replaced wholesale",
 	}
 
 	root := repoRoot(t)

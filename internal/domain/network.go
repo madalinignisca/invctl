@@ -166,7 +166,12 @@ type Prefix struct {
 	// answer rather than a missing one. The management surface comes later;
 	// the column exists now because widening a unique constraint on a loaded
 	// database is a different job from adding a nullable column to an empty one.
-	VRFID      *string `db:"vrf_id"`
+	VRFID *string `db:"vrf_id"`
+	// VLANRefID points at a real VLAN. VLANID above is the LEGACY loose integer
+	// it replaces: migration 00031 widened the schema, BackfillPrefixVLANs
+	// fills this, and a later migration drops the integer. Until then both
+	// exist and this one is the truth.
+	VLANRefID  *string `db:"vlan_ref_id"`
 	CreatedAt  *string `db:"created_at"`
 	UpdatedAt  *string `db:"updated_at"`
 	RowVersion int     `db:"row_version"`

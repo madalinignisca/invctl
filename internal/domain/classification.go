@@ -259,9 +259,25 @@ var DeclaredColumns = map[string][]string{
 	},
 	"prefix": {
 		"id", "cidr_text", "addr_family", "addr_start", "addr_end",
-		"vlan_id", "environment_id", "role", "vrf_id",
+		"vlan_id", "environment_id", "role", "vrf_id", "vlan_ref_id",
 		"created_at", "updated_at", "row_version",
 	},
+	// The VLAN model, migration 00031. Declared throughout: a VLAN exists
+	// because somebody configured it, a group exists because somebody chose
+	// where the numbering applies, and a port is in a VLAN because somebody put
+	// it there. A switch can REPORT which VLANs a trunk carries, and that would
+	// be observed state about the port -- a different fact from the membership
+	// declared here, and the disagreement between them is the finding.
+	"vlan": {
+		"id", "vid", "name", "group_id", "role", "environment_id", "description",
+		"lifecycle", "created_at", "updated_at", "row_version",
+	},
+	"vlan_group": {
+		"id", "name", "scope_asset_id", "description", "lifecycle",
+		"created_at", "updated_at", "row_version",
+	},
+	// A set table, replaced wholesale with its interface and audited on it.
+	"interface_vlan": {"interface_id", "vlan_id", "mode"},
 	// A reservation is declared: somebody set the space aside. Nothing observes
 	// a DHCP pool -- a lease server knows what it has issued, and that would be
 	// observed state about ADDRESSES, a different fact from the reservation
