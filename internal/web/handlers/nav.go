@@ -40,9 +40,17 @@ type NavLink struct {
 	Label string
 	Href  string
 	// Nav is the page slug this link corresponds to, matched against Base.Nav
-	// to mark the current page. Empty for links that are a FILTERED VIEW of
-	// another page -- the firewall list is /assets with a query, and marking it
-	// current would light up two entries at once.
+	// to mark the current page.
+	//
+	// A FILTERED VIEW GETS ITS OWN SLUG, which is not the obvious answer and is
+	// the one that works. The firewall list is /assets with a query, so the
+	// tempting reading is that it is the asset page and should share its slug.
+	// It cannot: two links then hold one slug, both light up, and -- the bug
+	// this cost -- the group that OPENS is whichever holds the plain entry.
+	// Clicking Firewalls under Network expanded Estate instead.
+	//
+	// The query string is what tells the two apart, and it is a fact the
+	// request carries. See AssetListNav.
 	Nav string
 }
 
@@ -72,10 +80,11 @@ var navGroups = []NavGroup{
 	}},
 	{Label: "Network", Links: []NavLink{
 		{Label: "Topology", Href: "/network", Nav: "network"},
-		// A view, not a home. These are asset lists with a filter already
-		// applied, so they carry no Nav slug of their own.
-		{Label: "Firewalls", Href: "/assets?kind=firewall"},
-		{Label: "Switches", Href: "/assets?kind=switch"},
+		// A view, not a home: these are asset lists with a kind filter already
+		// applied. The slug is still their own, because it is what decides
+		// which group opens -- see NavLink.Nav and AssetListNav.
+		{Label: "Firewalls", Href: "/assets?kind=firewall", Nav: "assets-firewall"},
+		{Label: "Switches", Href: "/assets?kind=switch", Nav: "assets-switch"},
 		{Label: "Paths", Href: "/paths", Nav: "paths"},
 		{Label: "Circuits", Href: "/circuits", Nav: "circuits"},
 		{Label: "Overlays", Href: "/overlays", Nav: "l2vpn"},
@@ -123,6 +132,35 @@ func NavFor(current string) []NavGroup {
 		}
 	}
 	return out
+}
+
+// AssetListNav returns the rail slug for the asset list under a kind filter.
+//
+// The rail has entries under Network -- Firewalls, Switches -- that are this
+// same page with ?kind= already applied. Which entry a request belongs to is
+// therefore decided by the query string and nothing else: the handler is the
+// same handler and the page is the same page. Passing the plain slug for all
+// of them put the operator in Estate every time they clicked Firewalls.
+//
+// READ OUT OF THE RAIL RATHER THAN DECLARED BESIDE IT. The entry's Href is
+// where the kind-to-entry mapping already lives, and it is the URL a click
+// actually sends, so it is the truth rather than a copy of it. A second table
+// here would be the thing that drifts the first time somebody adds a kind.
+func AssetListNav(kind string) string {
+	if kind == "" {
+		return "assets"
+	}
+	href := "/assets?kind=" + kind
+	for _, g := range navGroups {
+		for _, l := range g.Links {
+			if l.Href == href && l.Nav != "" {
+				return l.Nav
+			}
+		}
+	}
+	// A kind with no rail entry of its own is still the asset list, reached
+	// through the filter box on it. Estate is the right group for that.
+	return "assets"
 }
 
 // IsCurrent reports whether this link is the page being rendered.

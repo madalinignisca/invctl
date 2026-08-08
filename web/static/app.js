@@ -222,8 +222,13 @@ document.addEventListener('alpine:init', () => {
       this.key = this.$el.dataset.group || '';
       const current = this.$el.dataset.current === 'true';
       if (current) {
+        // Open, and DELIBERATELY NOT REMEMBERED. "You are here" is a fact about
+        // this one render; what the operator collapsed is a preference. Writing
+        // the first into the store for the second meant a single visit to a
+        // page left its group expanded on every page afterwards -- so a rail
+        // somebody had tidied slowly un-tidied itself, with no way to stop it
+        // short of never opening that section again.
         this.open = true;
-        this.remember();
         return;
       }
       const saved = this.recall();

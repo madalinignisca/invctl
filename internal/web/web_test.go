@@ -1537,6 +1537,97 @@ func TestHSTSFollowsTheTLSDeclaration(t *testing.T) {
 	})
 }
 
+// railGroupsMarkedCurrent returns the rail groups this page tells the browser
+// it is in, read out of the rendered markup.
+//
+// Through the real router deliberately. The rail's group is chosen by a handler
+// from a slug, resolved by NavFor, and rendered by the layout -- three places,
+// and the bug this guards lived in the seam between the first two. A unit test
+// on any one of them would have passed throughout.
+var railGroupPattern = regexp.MustCompile(`data-group="([^"]+)"\s+data-open="[^"]*"\s+data-current="([^"]*)"`)
+
+func railGroupsMarkedCurrent(t *testing.T, page string) []string {
+	t.Helper()
+	matches := railGroupPattern.FindAllStringSubmatch(page, -1)
+	if len(matches) == 0 {
+		t.Fatal("no rail groups in the rendered page; this assertion would be vacuous")
+	}
+	var open []string
+	for _, m := range matches {
+		if m[2] == "true" {
+			open = append(open, m[1])
+		}
+	}
+	return open
+}
+
+// TestTheRailOpensTheSectionTheLinkWasClickedIn.
+//
+// THE BUG: the rail's Firewalls and Switches entries live under Network and
+// point at /assets with a kind filter. The asset list passed the plain "assets"
+// slug whatever the filter was, so it matched the Assets entry -- which is
+// under ESTATE. Clicking Firewalls under Network expanded Estate, and because
+// the rail then persisted that as a preference, Estate stayed expanded on every
+// page afterwards.
+//
+// Both directions are checked. Asserting only that Network opens would still
+// pass with a handler that opened everything.
+func TestTheRailOpensTheSectionTheLinkWasClickedIn(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	for _, tc := range []struct {
+		path, want string
+	}{
+		{"/assets", "Estate"},
+		{"/assets?kind=firewall", "Network"},
+		{"/assets?kind=switch", "Network"},
+		// A kind with no rail entry of its own is reached by the filter box on
+		// the asset page, so it is still Estate. Guards the fallback.
+		{"/assets?kind=server", "Estate"},
+	} {
+		t.Run(tc.path, func(t *testing.T) {
+			open := railGroupsMarkedCurrent(t, body(t, h.get(tc.path, false)))
+			if len(open) != 1 || open[0] != tc.want {
+				t.Errorf("%s marks %v as current, want exactly [%s]", tc.path, open, tc.want)
+			}
+		})
+	}
+}
+
+// TestTheRailNeverPersistsWhereYouAre. The other half of the same bug, and the
+// half that made it stick: "you are here" is a fact about one render, while a
+// collapsed group is a preference. The rail wrote the first into the store for
+// the second, so visiting a page left its group expanded for good.
+//
+// Asserted against the script because there is nothing else to assert it
+// against -- and the shape of the mistake is a call, which is visible.
+func TestTheRailNeverPersistsWhereYouAre(t *testing.T) {
+	src, err := fs.ReadFile(webassets.FS, "static/app.js")
+	if err != nil {
+		t.Fatalf("reading app.js: %v", err)
+	}
+	// Anchored on the component, because app.js holds more than one thing with
+	// a toggle() and cutting on the first one read a different component
+	// entirely -- which passed, having found no dataset.current in it.
+	_, component, found := strings.Cut(string(src), "Alpine.data('navGroup'")
+	if !found {
+		t.Fatal("app.js has no navGroup component; this test no longer reads what it thinks")
+	}
+	init, _, found := strings.Cut(component, "toggle()")
+	if !found {
+		t.Fatal("navGroup has no toggle; this test no longer reads what it thinks")
+	}
+	_, current, found := strings.Cut(init, "dataset.current")
+	if !found {
+		t.Fatal("app.js no longer branches on dataset.current; this test asserts nothing")
+	}
+	if strings.Contains(current, "this.remember()") {
+		t.Error("navGroup.init remembers the group the server marked current, so one " +
+			"visit to a page expands its rail section on every page afterwards")
+	}
+}
+
 // exec runs a statement against the harness database, for the handful of states
 // that cannot be produced through the application -- a job orphaned by a
 // process that died, for instance.

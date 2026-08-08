@@ -109,6 +109,16 @@ func slugsSetByHandlers(t *testing.T) map[string]bool {
 		t.Fatalf("reading the handler package: %v", err)
 	}
 	re := regexp.MustCompile(`a\.base\(r,\s*[^,]+,\s*"([^"]*)"\)`)
+	// A handler may DERIVE its slug instead of passing a literal, which the
+	// pattern above cannot see. Exactly one does: the asset list resolves its
+	// rail entry from the kind filter, because /assets?kind=firewall is the
+	// rail's Firewalls entry and must open Network rather than Estate.
+	//
+	// Matched on the call actually being there rather than exempted by name.
+	// An exemption would go on excusing these slugs after somebody deleted the
+	// call, which is precisely the dead link this test exists to catch.
+	derived := regexp.MustCompile(`a\.base\(r,\s*[^,]+,\s*AssetListNav\(`)
+
 	out := map[string]bool{}
 	files := 0
 	for _, e := range entries {
@@ -123,6 +133,18 @@ func slugsSetByHandlers(t *testing.T) map[string]bool {
 		for _, m := range re.FindAllStringSubmatch(string(b), -1) {
 			if m[1] != "" {
 				out[m[1]] = true
+			}
+		}
+		if derived.Match(b) {
+			// Every slug AssetListNav can return, which is every rail entry
+			// that filters the asset list -- asked of the rail, so adding an
+			// entry needs no edit here.
+			for _, g := range navGroups {
+				for _, l := range g.Links {
+					if strings.HasPrefix(l.Href, "/assets?kind=") && l.Nav != "" {
+						out[l.Nav] = true
+					}
+				}
 			}
 		}
 	}

@@ -248,7 +248,10 @@ func (a *App) AssetList(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := assetListPage{
-		Base:         a.base(r, "Assets", "assets"),
+		// Derived, not literal: /assets?kind=firewall is the rail's Firewalls
+		// entry under Network, and telling the rail "assets" would open Estate
+		// instead. See AssetListNav.
+		Base:         a.base(r, "Assets", AssetListNav(filter.Kind)),
 		Assets:       assets,
 		Environments: envs,
 		Kinds:        kinds,

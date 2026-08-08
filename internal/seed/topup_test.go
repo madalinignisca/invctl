@@ -181,6 +181,16 @@ func TestEveryPricedKindOfAssetCarriesAFigure(t *testing.T) {
 // say the report was at its most wrong on the estates using the catalogue
 // properly. Both directions are checked: the inherited date, and the contract
 // date that overrides a model's.
+//
+// THE OVERRIDE CASE IS ASSERTED AS A RELATIONSHIP, NOT A DATE, and the first
+// version of it was wrong for a reason worth keeping written down. The colo
+// machines are rented, so the fixture dates their contract RELATIVE TO NOW --
+// b.now.AddDate(1, 2, 0) -- while the catalogue dates are absolute. Writing the
+// resulting day down as a literal made the test pass on the afternoon it was
+// written and fail the next morning, having caught nothing in between. An
+// expectation computed from a moving fixture has to move with it or stop
+// mentioning it; this one stops mentioning it and asserts the thing that
+// actually matters instead.
 func TestAmortisationFollowsTheSameEOLRuleTheAssetPageShows(t *testing.T) {
 	seed.CompanyEstate = true
 	t.Cleanup(func() { seed.CompanyEstate = false })
@@ -188,36 +198,74 @@ func TestAmortisationFollowsTheSameEOLRuleTheAssetPageShows(t *testing.T) {
 	eachEngine(t, func(t *testing.T, f *fixture) {
 		s, ctx := f.store, f.ctx
 
-		for _, tc := range []struct {
-			asset, want, why string
-		}{
-			{"pdu-a1", "2028-06-30", "inherited from the AP8853 in the catalogue"},
-			{"srv-colo-1", "2027-10-07", "the rental contract, which overrides the R650's date"},
-			{"hv-win-01", "2031-10-31", "inherited from the DL380 Gen11"},
-		} {
-			id, ok := f.refs.Assets[tc.asset]
+		// amortisedTo is the date the report spreads a one-off over.
+		amortisedTo := func(t *testing.T, name string) *string {
+			t.Helper()
+			id, ok := f.refs.Assets[name]
 			if !ok {
-				t.Errorf("no %s in the estate", tc.asset)
-				continue
+				t.Fatalf("no %s in the estate", name)
 			}
 			costs, err := s.ListAssetCosts(ctx, id)
 			if err != nil {
-				t.Fatalf("costs for %s: %v", tc.asset, err)
+				t.Fatalf("costs for %s: %v", name, err)
 			}
 			if len(costs) == 0 {
-				t.Errorf("%s carries no cost, so this proves nothing", tc.asset)
-				continue
+				t.Fatalf("%s carries no cost, so this proves nothing", name)
 			}
-			got := costs[0].OwnerEOLDate
-			if got == nil {
-				t.Errorf("%s amortises over no life at all; expected %s (%s)",
-					tc.asset, tc.want, tc.why)
-				continue
-			}
-			if *got != tc.want {
-				t.Errorf("%s amortises to %s, want %s (%s)", tc.asset, *got, tc.want, tc.why)
-			}
+			return costs[0].OwnerEOLDate
 		}
+
+		// Inherited: the asset has no date of its own and the catalogue's is a
+		// fixed published one, so a literal here is stable and says what it
+		// means.
+		t.Run("inherited from the catalogue", func(t *testing.T) {
+			for _, tc := range []struct{ asset, want, why string }{
+				{"pdu-a1", "2028-06-30", "the AP8853 in the catalogue"},
+				{"hv-win-01", "2031-10-31", "the DL380 Gen11"},
+			} {
+				got := amortisedTo(t, tc.asset)
+				if got == nil {
+					t.Errorf("%s amortises over no life at all; expected %s from %s",
+						tc.asset, tc.want, tc.why)
+					continue
+				}
+				if *got != tc.want {
+					t.Errorf("%s amortises to %s, want %s from %s",
+						tc.asset, *got, tc.want, tc.why)
+				}
+			}
+		})
+
+		// Overridden: the rented machine carries its own contract date, which
+		// must beat the R650's published one.
+		t.Run("the asset's own date beats the model's", func(t *testing.T) {
+			asset, err := s.GetAsset(ctx, f.refs.Assets["srv-colo-1"])
+			if err != nil {
+				t.Fatalf("reading srv-colo-1: %v", err)
+			}
+			// Both halves have to exist or "overrides" is a claim about
+			// nothing -- an asset with no date of its own, or a model with
+			// none, would satisfy a naive equality check for the wrong reason.
+			if asset.EOLDate == nil {
+				t.Fatal("srv-colo-1 carries no contract date, so there is no override to check")
+			}
+			if asset.DeviceTypeEOL == nil {
+				t.Fatal("srv-colo-1 has no catalogued model date, so nothing is being overridden")
+			}
+			if *asset.EOLDate == *asset.DeviceTypeEOL {
+				t.Fatalf("srv-colo-1's contract date and the R650's are both %s, so this "+
+					"test cannot tell which one the report used", *asset.EOLDate)
+			}
+
+			got := amortisedTo(t, "srv-colo-1")
+			if got == nil {
+				t.Fatal("srv-colo-1 amortises over no life at all")
+			}
+			if *got != *asset.EOLDate {
+				t.Errorf("srv-colo-1 amortises to %s; want its contract date %s, not the "+
+					"R650's %s", *got, *asset.EOLDate, *asset.DeviceTypeEOL)
+			}
+		})
 	})
 }
 
