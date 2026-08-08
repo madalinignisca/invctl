@@ -186,20 +186,52 @@ Completes the IPAM hierarchy above prefixes. Parity item.
 **WP-D7 · L2VPN overlays** — M — depends: D4
 Overlay modelling and terminations. Parity item; matters for service providers.
 
+**WP-D8 · L2 domains as reachability edges** — **CLOSED, will not build**
+*Decided 2026-08-07. Recorded so it is not reopened.*
+
+The proposal was to make VLAN membership a reachability edge, so the engine could
+say two hosts in one broadcast domain are adjacent. It is redundant at best and
+misleading at worst:
+
+- The reach model asks whether an asset reaches its declared **anchor**, which is
+  a routed question. Hosts in different VLANs routing through a firewall reach
+  each other normally — VLANs sit below the resolution the model works at.
+- Two hosts in one VLAN are **already** connected in that model, through their
+  attachments to the same forwarder group. Adding VLAN edges computes the same
+  partitions a second way.
+- The one thing VLAN membership uniquely decides is whether the VLAN is actually
+  **configured on the trunk it must cross** — and a declared inventory cannot
+  know that. Somebody typed the membership; the switch either has it or does not.
+
+That is the boundary of declared data, not a gap in the model. The useful
+declared half already ships as WP-I1's structure findings: losing a switch
+reports the VLAN it empties and the ones it halves.
+
+*If it ever returns, it returns as an agent reporting real per-port membership,
+and the finding is DRIFT against observed state — closer to WP-G6 than to this
+group.*
+
 ---
 
 ### Group E — Circuits and virtualization
 
-**WP-E1 · Providers and circuits** — M — depends: none — unlocks: cost + reachability
-Provider, provider network, circuit type, circuit (install date, commit rate,
-contract end), terminations to site or interface. Virtual circuits for parity.
+**WP-E1a · Providers and circuits — cost and expiry** — S — **DONE**
+Provider, circuit (install date, commit rate, contract end), terminations to site
+or interface, and a fourth cost surface. Monthly run rate lands natively in the
+existing cost model with validity windows; a one-off amortises to the **contract
+end**, because a circuit has no end-of-support. Contract end joins the expiry
+report — not because anything stops working on the day, but because somebody is
+either renegotiating or being auto-renewed at a rate nobody checked.
 
-Integration: monthly run rate lands natively in the existing cost model with
-validity windows and amendments. Contract end joins the expiry report. A circuit is
-a reachability edge — losing it partitions the sites it joins; a single-circuit site
-reports redundancy lost.
+**WP-E1b · Circuits as a reachability edge** — S — depends: E1a
+A circuit joining two forwarder groups is a connectivity edge; losing it
+partitions the sites it joins, and a single-circuit site reports redundancy lost.
 
-*See the appendix: this bundles two very different sizes and should be split.*
+*Smaller than the original note claimed — see the appendix. Partitioning is
+union-find over group-to-group edges, so this derives an edge and changes nothing
+else. Worth building when an estate has several sites and a partial mesh; on two
+sites and one circuit the finding is a sentence you can read off the
+terminations page.*
 
 **WP-E2 · Clusters and cluster groups** — M — depends: A3
 Cluster type, group, cluster, VM placement, VM type, virtual disks.
@@ -244,6 +276,44 @@ immediately.
 
 **WP-G5 · Export templates** — S
 User-defined output formats over any object list.
+
+**WP-G6 · Cloud resource discovery** — L — depends: the agent surface
+Inventory of resources at a cloud or hosting provider: instances, volumes,
+managed databases, object storage, load balancers, and what they cost.
+
+**ON THE OBSERVED SIDE, AND THAT IS THE WHOLE DESIGN DECISION.** A rented
+*server* already models perfectly as a declared asset with a monthly cost and no
+acquisition — the demo estate runs development on two Hetzner boxes, staging on
+Scaleway and monitoring on OVHcloud, and needed no new model to do it. True cloud
+resources are a different shape and declaring them would be wrong:
+
+- They are **discovered, not asserted**. The provider's API is authoritative and
+  always current; anything typed here is a stale copy of it, and the copy is
+  wrong within a day.
+- They are **ephemeral**. An autoscaling group's instances outlive nobody's data
+  entry, and an inventory that lists yesterday's instance ids is worse than one
+  that lists none.
+
+It also collides with invariant 9 as tested: `TestNothingReachesOutOfThisProcess`
+refuses any outbound HTTP capability in this codebase, with a single allowlisted
+exception for the LDAP bind authentication needs. A cloud API client inside the
+application would break that guard, and the guard is right.
+
+So the shape is the one monitoring already uses: an **external collector** reads
+the provider API and posts to the agent endpoint; invctl records the result as
+observed state with a reporter and an age, and never reaches out itself. The
+valuable output is then **drift**, which this architecture already knows how to
+express:
+
+- resources running that nobody declared — shadow IT, or a forgotten test stack
+  still being billed;
+- declared things the provider no longer has;
+- spend that appears in no cost line.
+
+**Do not start this before the agent surface and `unmatched_observation` are
+carrying real traffic.** Every part of the value depends on the observed side
+working, and building the collector first would produce a second inventory with
+nowhere to put its disagreements.
 
 ---
 
@@ -395,12 +465,41 @@ the "this touches the existing address model, so earlier is cheaper" urgency doe
 not follow from it. Judge D1 against D2 and D4 on merit, not on a bug that is not
 there.
 
-**WP-E1 bundles two different sizes.** The cost and expiry half is small (below).
-The reachability half is not: a circuit joins *sites*, and the reach model
-(`internal/impact/reach.go`) works over network groups, members, uplinks,
-attachments and anchors — there is no site concept in it at all, so there is no
-site-to-site edge to extend. Split the work package. The cost and expiry half
-alone delivers most of the visible value and can ship first.
+**WP-E1 bundles two different sizes.** The cost and expiry half is small and
+**shipped** (WP-E1a). The reachability half has not.
+
+*Corrected 2026-08-07, and the original note sent two people down the wrong
+path.* It said a circuit joins *sites*, the reach model has no site concept, and
+therefore there is no edge to extend. The first two clauses are true and the
+conclusion does not follow.
+
+`computePartitions` resolves connectivity with **union-find over uplink edges**
+(`uf.union(e.GroupID, e.UpstreamGroupID)`). So the reach model is not a
+hierarchy — for partitioning it is an undirected graph of forwarder groups. A
+circuit whose two terminations land on interfaces of assets in **different
+groups** already *is* such an edge:
+
+```
+circuit → terminations → interfaces → assets → the groups they attach to
+        → one connectivity edge, exactly like an uplink
+```
+
+No site model, no new hierarchy, no change to the walk. **WP-E1b is deriving
+that edge**, and the existing machinery does the rest.
+
+Three cases to decide rather than discover, which is why it is a day and not an
+hour:
+
+- **Most circuits do not join two of your sites.** A DIA circuit ends at the
+  provider — one end inside the estate, one outside — and correctly produces no
+  internal edge. The feature fires on site-to-site circuits only, a smaller set
+  than "all circuits".
+- **A termination may land on a site rather than an interface.** The schema
+  allows both, and a site-terminated circuit has no interface and therefore no
+  group. Skip them and say so, or resolve the site's assets' groups — which is
+  more work and fuzzier. Recommendation: skip.
+- **A circuit with one end recorded** produces nothing, which the overview
+  already reports as a gap. Consistent; no extra work.
 
 ## Confirmed, and cheaper than stated
 
