@@ -56,13 +56,20 @@ current page opens itself.
 
 ![The navigation rail with Estate, Network and Addressing expanded, showing Assets, Catalogue, Power, Clusters under Estate and Topology, Firewalls, Switches, Paths, Circuits, Overlays, Redundancy under Network.](../img/getting-started-3-rail.png)
 
-What you open or close is remembered in your browser, so the rail settles into
-the shape you use.
+**Only what you open or close is remembered**, so the rail settles into the
+shape you use. A group that opens because you happen to be on a page inside it
+opens for that page and no longer than that — otherwise every section you ever
+visited would still be expanded a week later, and the rail you arranged would
+slowly stop being yours.
 
 Two entries under **Network** — Firewalls and Switches — are the asset list with
 a filter already applied. They are a view, not a second home: a firewall lives
 in the Estate because it also sits in a rack, costs money, draws power and has a
 support date. One place it lives, several places it appears.
+
+Using one of them puts you in **Network**, not in the Estate, because that is
+the entry you clicked. The rail marks the view you are in rather than the page
+underneath it.
 
 The search box at the top takes an IP address, a MAC, a serial, a hostname, a
 service code or a port number, and resolves it to whatever holds it. It is the

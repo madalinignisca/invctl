@@ -10,9 +10,11 @@ Written for somebody who has to use this during an incident, not evaluate it.
 | [Network](parts/40-network.md) | topology, circuits, overlays, redundancy groups |
 | [Reports](parts/50-reports.md) | outage simulation, what expires, power findings, the change log |
 
-Screenshots are of the public demo at `https://invctl.madalin.me`, which has a
-small Norwegian estate in it. Your estate will look nothing like it; the
-software works the same.
+Screenshots are of the public demo at `https://invctl.madalin.me`: a small
+company that owns its production hardware in Oslo, rents a rack in a colo for
+disaster recovery, and puts development, staging and monitoring on rented
+machines at three different providers. Your estate will look nothing like it;
+the software works the same.
 
 ---
 

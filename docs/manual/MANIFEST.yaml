@@ -37,7 +37,7 @@ fragments:
       - web/templates/pages/login.html
     preconditions:
       - "the overview shows at least one finding of each severity (fault, risk, gap)"
-    generated_at: c2b74b1ed728
+    generated_at: 9e1eea224a5c
 
   - id: estate
     title: The estate — assets, catalogue, power, clusters
@@ -50,13 +50,9 @@ fragments:
       - /clusters
       - /clusters/{id}
     screenshots:
-      - img/estate-3-clusters.png
-    # Named but NOT YET CAPTURED. The manifest must never claim an image
-    # that does not exist -- a reader trusts it and it silently stops
-    # matching. Capture these and move them up.
-    screenshots_pending:
       - img/estate-1-assets.png
       - img/estate-2-asset-detail.png
+      - img/estate-3-clusters.png
       - img/estate-4-cluster-detail.png
     depends_on:
       - internal/web/handlers/assets.go
@@ -73,7 +69,7 @@ fragments:
     preconditions:
       - "one cluster whose min_hosts equals its host count, so the 'not survivable' row is visible"
       - "one asset whose EOL date is inherited from its device type, so the source is shown"
-    generated_at: c2b74b1ed728
+    generated_at: 9e1eea224a5c
 
   - id: addressing
     title: Addressing — prefixes, VLANs, allocations

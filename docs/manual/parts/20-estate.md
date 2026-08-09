@@ -13,6 +13,16 @@ hypervisor, a virtual machine, a bridge. They nest — a VM inside a hypervisor
 inside a rack inside a site — and that containment is what makes *"this rack
 loses power"* and *"reboot this VM"* the same kind of question.
 
+![The asset list. Filters for name or serial, kind and environment sit above a table of 65 assets with columns for name, kind, contained by, environments, serial and lifecycle. A bridge shows DEV and PROD together with a SPANS tag.](../img/estate-1-assets.png)
+
+The **contained by** column is the tree; nothing else on the row is. Environment
+membership in particular is a set rather than a place, and an asset in more than
+one carries a `SPANS` tag — a bridge on both the development and production
+networks is either deliberate or the most interesting thing on the page.
+
+`Include retired` is off by default, which is why the count here is smaller than
+the number of rows the database holds.
+
 Two rules are worth knowing before you type anything:
 
 **Nothing is ever deleted.** An asset you retire keeps its row, its history and
@@ -42,9 +52,24 @@ shows **where it came from**: recorded on this asset, or inherited from a named
 model. A report that renders those identically has merged a fact with an
 assumption.
 
+![The hv-win-01 asset page. Under Details, "supported until" reads 2031-10-31, in 5 years, with the line "inherited from Hewlett Packard Enterprise ProLiant DL380 Gen11 — this asset has no date of its own". Panels for Contains, Observed health and Workloads sit beside and below it.](../img/estate-2-asset-detail.png)
+
+The asset page is where that shows plainly. `hv-win-01` has no date of its own,
+so the page names the model it took one from — and had somebody typed a date
+here, the same line would say so instead.
+
+Three panels below it answer three different questions, and the difference
+between them is the difference between an inventory and an impact report.
+**Contains** is what falls with it. **Workloads** is what an outage actually
+takes away, which is not the same thing — an empty hypervisor loses nothing but
+itself. **Observed health** is the only part of the page the estate wrote rather
+than a person: it carries its reporter and its age, and once a reading is older
+than three of that reporter's intervals it shows as `unknown` rather than as a
+last value that has stopped being true.
+
 ## Clusters
 
-![The clusters page listing five clusters — dev-pve, dr-pve, prod-pve, stg-vmware, win-hyperv — with columns for what they run, HA policy, host and guest counts, and what losing one host would do.](../img/estate-3-clusters.png)
+![The clusters page listing six clusters — dev-hetzner, dev-pve, dr-pve, prod-pve, stg-vmware, win-hyperv — with columns for what they run, HA policy, host and guest counts, and what losing one host would do. The last column reads GUESTS RELOCATE, "its guests go down with it", or NOT SURVIVABLE.](../img/estate-3-clusters.png)
 
 This is the one page whose values change **what a simulation concludes**, not
 just what a report shows.
@@ -65,14 +90,27 @@ guests to fit. Leave it blank and any single survivor is assumed to do, which is
 optimistic — and optimistic on purpose, because it is what an operator believes
 before checking, and therefore the belief worth testing against reality.
 
-The last column does the arithmetic for you. In the screenshot, `win-hyperv` has
-three hosts, needs three, and reads **not survivable**: HA is configured and
-cannot help. That cluster looks identical to a healthy one on every other page
-in the software, which is exactly why the column exists.
+The last column does the arithmetic for you, and the demo shows all three
+answers side by side. `dev-hetzner` has two hosts and no floor, so its guests
+**relocate**. `stg-vmware` has no HA at all, so its guests **go down with it** —
+the honest answer, not a failure. And `win-hyperv` has three hosts, needs three,
+and reads **not survivable**: HA is configured and cannot help.
+
+That last one is the case worth understanding, because it looks identical to a
+healthy cluster on every other page in the software. The detail page says it in
+full:
+
+![The win-hyperv cluster page. A banner reads "Losing one host is not survivable — HA is configured and cannot help: 3 host(s) in the cluster and 3 needed to carry the guests." Below it, a table of the three hosts and a multi-select for setting the membership.](../img/estate-4-cluster-detail.png)
 
 A host belongs to at most one cluster — two would make "where do its guests go"
 ambiguous — and the membership is replaced wholesale when you save it, with the
 change recorded against the cluster.
+
+**Retiring every host does not retire the cluster.** It keeps its row and shows
+with no members, as `dev-pve` does in the screenshot. That is deliberate rather
+than an oversight: the cluster is something a person declared, and only a person
+withdraws it. An empty one is worth seeing — it is either a migration nobody
+finished tidying up or a name about to be reused.
 
 ## Power
 
