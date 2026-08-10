@@ -214,9 +214,47 @@ leads land on one box in a cabinet with no side channel.
 The interesting part is that **most of the input is already in the database**.
 invctl knows the interfaces, knows the cables and knows the rack, so the finding
 is derived rather than typed: *48 leads terminate on a front-facing panel in a
-600mm cabinet*. What must be declared is small — port face and airflow direction
-on the device type. Worth doing after C2, because a depth model it can lean on
-makes the clearance half of it real rather than notional.
+600mm cabinet*. What must be declared is small — port face on the device type, and the
+cabinet width that C4 brings. Worth doing after C2, because a depth model it can
+lean on makes the clearance half of it real rather than notional.
+
+**WP-C4 · Airflow and thermal adjacency** — S — depends: C1
+*Raised 2026-08-10 from a real case: a side-intake, rear-exhaust, short-depth
+firewall in a densely cabled cabinet.*
+
+Two declared facts: `airflow` on the device type (`front-to-rear`,
+`rear-to-front`, `side-to-rear`, `side-to-side`, `passive`) and `width_mm` on
+the rack. Whichever of C3 and C4 lands first brings `width_mm` with it.
+
+From those, three findings — all derived, because the rack already knows what
+sits at which unit on which face:
+
+- **A side-breather in a standard-width cabinet.** 19" is fixed at 482.6mm, so a
+  600mm cabinet leaves roughly 55mm a side and an 800mm one roughly 155mm. In
+  the narrow case the vertical cable channel and the device's intake are the
+  same 55mm, which is why network cabinets are wide.
+- **Neighbours breathing against each other.** A rear-to-front switch directly
+  above a rear-exhaust firewall eats its exhaust. The predicate is *opposing
+  airflow between vertical neighbours*, NOT position in the rack — "it is in
+  the middle" was the first instinct and it is the wrong axis, since a
+  side-breather does not care what is above it.
+- **Short depth in a deep cabinet.** Hot rear air recirculates around the box
+  unless it is blanked. Needs C2's `depth_mm` to be worth computing.
+
+**Risk, not fault.** A side-breather in a 600mm cabinet with clear channels is
+fine; it is one tidy-up away from a thermal incident, which is what risk means.
+
+**IT MUST NOT INFER THAT THE CHANNELS ARE FULL.** Cable routing is not modelled
+— B4 is deferred — so "48 leads terminate here, therefore the intake is
+blocked" is a confident claim about something nobody recorded. The finding names
+the risk and sends a person to look.
+
+*A derivation asymmetry worth keeping straight, because it contradicts C2 on
+purpose: C2 forbids deriving usable depth from an external datasheet figure,
+since nothing pins where the door sits. Side clearance MAY be derived from
+cabinet width, because 19" is a standard and equipment width is therefore a
+constant rather than an unknown. The test is whether a standard fixes the
+missing term, not whether the arithmetic looks similar.*
 
 ---
 
