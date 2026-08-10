@@ -136,22 +136,27 @@ func (a *App) ManufacturerRetire(w http.ResponseWriter, r *http.Request) {
 
 // DeviceTypeCreate catalogues a model.
 func (a *App) DeviceTypeCreate(w http.ResponseWriter, r *http.Request) {
-	height, numeric := optionalInt(r, "u_height")
+	nums := optionalNumbers(r)
+	height := nums.opt("u_height")
 	spec := domain.DeviceTypeSpec{
 		ManufacturerID: formValue(r, "manufacturer_id"),
 		Model:          formValue(r, "model"),
 		PartNumber:     optional(formValue(r, "part_number")),
 		UHeight:        height,
 		FullDepth:      formValue(r, "full_depth") != "",
+		DepthMM:        nums.opt("depth_mm"),
+		WeightGrams:    nums.kilos("weight_kg"),
+		Airflow:        optional(formValue(r, "airflow")),
 		EOLDate:        optional(formValue(r, "eol_date")),
 		Notes:          optional(formValue(r, "notes")),
 		Lifecycle:      formValue(r, "lifecycle"),
 	}
 	// Refused, not silently zeroed. A rack height that quietly became 0 would
-	// put the model in every elevation calculation as occupying nothing.
-	if !numeric {
+	// put the model in every elevation calculation as occupying nothing, and a
+	// depth that became 0 would report as fitting any cabinet.
+	if msgs := nums.messages(); msgs != nil {
 		a.renderCatalogue(w, r, http.StatusUnprocessableEntity,
-			notANumber("u_height"), domain.ManufacturerSpec{}, spec)
+			msgs, domain.ManufacturerSpec{}, spec)
 		return
 	}
 
@@ -182,9 +187,12 @@ func (a *App) DeviceTypeUpdate(w http.ResponseWriter, r *http.Request) {
 		a.handleStoreError(w, r, err)
 		return
 	}
-	height, numeric := optionalInt(r, "u_height")
-	if !numeric {
-		a.renderCatalogueEditing(w, r, notANumber("u_height"), id)
+	nums := optionalNumbers(r)
+	height := nums.opt("u_height")
+	depth := nums.opt("depth_mm")
+	weight := nums.kilos("weight_kg")
+	if msgs := nums.messages(); msgs != nil {
+		a.renderCatalogueEditing(w, r, msgs, id)
 		return
 	}
 
@@ -193,6 +201,9 @@ func (a *App) DeviceTypeUpdate(w http.ResponseWriter, r *http.Request) {
 	updated.PartNumber = optional(formValue(r, "part_number"))
 	updated.UHeight = height
 	updated.FullDepth = formValue(r, "full_depth") != ""
+	updated.DepthMM = depth
+	updated.WeightGrams = weight
+	updated.Airflow = optional(formValue(r, "airflow"))
 	updated.EOLDate = optional(formValue(r, "eol_date"))
 	updated.Notes = optional(formValue(r, "notes"))
 	updated.Lifecycle = formValue(r, "lifecycle")

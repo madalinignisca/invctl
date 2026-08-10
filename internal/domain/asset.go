@@ -181,7 +181,20 @@ type Asset struct {
 	// that has just been entered.
 	RackPosition *int    `db:"rack_position"`
 	RackFace     *string `db:"rack_face"`
-	Lifecycle    string  `db:"lifecycle"`
+	// A RACK's own physical measurements, nil on everything else and usually nil
+	// on racks too -- an estate that has not been round with a tape measure is
+	// the ordinary starting state, and every check built on these reports "not
+	// recorded" rather than assuming a value. See domain/fit.go.
+	//
+	// UsableDepthMM is rail face to rear door and is MEASURED, never derived
+	// from a cabinet's external depth: where the rails sit is an installation
+	// choice. WidthMM is the external width, and side clearance MAY be derived
+	// from it, because EIA-310 fixes the equipment width and a standard pinning
+	// the missing term is what separates arithmetic from a guess.
+	UsableDepthMM *int   `db:"usable_depth_mm"`
+	WidthMM       *int   `db:"width_mm"`
+	MaxLoadGrams  *int   `db:"max_load_grams"`
+	Lifecycle     string `db:"lifecycle"`
 	// Who looks after it, and in what capacity. Both optional; see team.go.
 	TeamID      *string `db:"team_id"`
 	ManagerRole *string `db:"manager_role"`
@@ -226,6 +239,9 @@ func (a *Asset) Validate() error {
 		ve.Add("parent_id", "an asset cannot contain itself")
 	}
 	a.EOLDate = checkDate(ve, "eol_date", a.EOLDate)
+	checkMillimetres(ve, "usable_depth_mm", a.UsableDepthMM)
+	checkMillimetres(ve, "width_mm", a.WidthMM)
+	checkGrams(ve, "max_load_grams", a.MaxLoadGrams)
 	a.TeamID, a.ManagerRole = checkResponsibility(ve, a.TeamID, a.ManagerRole)
 	if strings.TrimSpace(a.Attrs) == "" {
 		a.Attrs = "{}"

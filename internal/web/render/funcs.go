@@ -62,6 +62,15 @@ func funcs() template.FuncMap {
 		"seq":    seq,
 		"coord":  coord,
 		"expiry": expiryOf,
+		// Physical fit. kilograms renders the grams a column stores; airflow
+		// renders the enum a model declares, and NAMES the unknown case rather
+		// than printing an empty cell that reads like "front to rear".
+		"kilograms":      kilograms,
+		"kg":             domain.Kilograms,
+		"kilogramsValue": kilogramsValue,
+		"airflowLabel":   airflowLabel,
+		"airflowName":    airflowName,
+		"airflows":       func() []string { return domain.Airflows },
 	}
 }
 
@@ -414,4 +423,52 @@ func groupThousands(n int64) string {
 		b.WriteString(digits[i : i+3])
 	}
 	return b.String()
+}
+
+// kilograms renders a stored weight for a person. Empty rather than "0 kg" when
+// nobody has weighed it: a zero is a claim.
+func kilograms(g *int) string {
+	if g == nil {
+		return ""
+	}
+	return domain.Kilograms(*g)
+}
+
+// airflowLabel names a direction, and says so when there is none.
+//
+// "not declared" rather than a blank, because a blank in a column of directions
+// reads as the common one -- which is exactly the default this feature refuses
+// to apply.
+func airflowLabel(a *string) string {
+	if a == nil || *a == "" {
+		return "not declared"
+	}
+	if label, ok := domain.AirflowLabels[*a]; ok {
+		return label
+	}
+	return *a
+}
+
+// kilogramsValue is kilograms for a form FIELD rather than for prose: the
+// number with no unit on it, because the unit is already in the label and
+// "8.5 kg" in a text input is a value that fails to parse when resubmitted.
+func kilogramsValue(g *int) string {
+	if g == nil {
+		return ""
+	}
+	whole, frac := *g/1000, (*g%1000)/100
+	if frac == 0 {
+		return strconv.Itoa(whole)
+	}
+	return strconv.Itoa(whole) + "." + strconv.Itoa(frac)
+}
+
+// airflowName labels a direction held as a plain string, for a select's
+// options. airflowLabel takes the pointer a row carries and names the nil case;
+// this one is only ever called with a member of the set.
+func airflowName(a string) string {
+	if label, ok := domain.AirflowLabels[a]; ok {
+		return label
+	}
+	return a
 }

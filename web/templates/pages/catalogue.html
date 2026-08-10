@@ -79,6 +79,44 @@
                  {{if .TypeSpec.FullDepth}}checked{{end}}>
           Full depth
         </label>
+        <div class="field-hint">
+          Which faces it occupies in the elevation. Not a measurement — the
+          millimetres below are.
+        </div>
+      </div>
+    </div>
+    <div class="field-row">
+      <div class="field">
+        <label for="dt-depth-mm">Chassis depth (mm)</label>
+        <input id="dt-depth-mm" type="number" name="depth_mm" min="1" max="2000"
+               value="{{derefInt .TypeSpec.DepthMM}}" placeholder="772">
+        <div class="field-hint">
+          From the datasheet. A rack needs this plus room for the cabling
+          behind it, which the fit check adds for you.
+        </div>
+        {{with index .Errors "depth_mm"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="dt-weight">Weight (kg)</label>
+        <input id="dt-weight" type="text" name="weight_kg" inputmode="decimal"
+               value="{{kilogramsValue .TypeSpec.WeightGrams}}" placeholder="19.5">
+        <div class="field-hint">One decimal is plenty. Used to total what a rack carries.</div>
+        {{with index .Errors "weight_kg"}}<div class="field-error">{{.}}</div>{{end}}
+        {{with index .Errors "weight_grams"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="dt-airflow">Airflow</label>
+        <select id="dt-airflow" name="airflow">
+          <option value="">not declared</option>
+          {{range airflows}}
+          <option value="{{.}}" {{if eq (deref $.TypeSpec.Airflow) .}}selected{{end}}>{{airflowName .}}</option>
+          {{end}}
+        </select>
+        <div class="field-hint">
+          Leave unset if nobody has checked — it is not assumed to be front to
+          rear. A box drawing from the sides needs a wide cabinet.
+        </div>
+        {{with index .Errors "airflow"}}<div class="field-error">{{.}}</div>{{end}}
       </div>
     </div>
     <div class="field">
@@ -182,11 +220,34 @@
                       {{with index $.Errors "lifecycle"}}<div class="field-error">{{.}}</div>{{end}}
                     </div>
                   </div>
-                  <div class="field">
-                    <label class="check" for="e-depth-{{.ID}}">
-                      <input id="e-depth-{{.ID}}" type="checkbox" name="full_depth" value="1" {{if .FullDepth}}checked{{end}}>
-                      Full depth
-                    </label>
+                  <div class="field-row">
+                    <div class="field">
+                      <label class="check" for="e-depth-{{.ID}}">
+                        <input id="e-depth-{{.ID}}" type="checkbox" name="full_depth" value="1" {{if .FullDepth}}checked{{end}}>
+                        Full depth
+                      </label>
+                    </div>
+                    <div class="field">
+                      <label for="e-depthmm-{{.ID}}">Chassis depth (mm)</label>
+                      <input id="e-depthmm-{{.ID}}" type="number" name="depth_mm" min="1" max="2000" value="{{derefInt .DepthMM}}">
+                      {{with index $.Errors "depth_mm"}}<div class="field-error">{{.}}</div>{{end}}
+                    </div>
+                    <div class="field">
+                      <label for="e-weight-{{.ID}}">Weight (kg)</label>
+                      <input id="e-weight-{{.ID}}" type="text" name="weight_kg" inputmode="decimal" value="{{kilogramsValue .WeightGrams}}">
+                      {{with index $.Errors "weight_kg"}}<div class="field-error">{{.}}</div>{{end}}
+                    </div>
+                    <div class="field">
+                      <label for="e-air-{{.ID}}">Airflow</label>
+                      <select id="e-air-{{.ID}}" name="airflow">
+                        {{$row := .}}
+                        <option value="">not declared</option>
+                        {{range airflows}}
+                          <option value="{{.}}" {{if eq (deref $row.Airflow) .}}selected{{end}}>{{airflowName .}}</option>
+                        {{end}}
+                      </select>
+                      {{with index $.Errors "airflow"}}<div class="field-error">{{.}}</div>{{end}}
+                    </div>
                   </div>
                   <div class="form-actions">
                     <button type="submit" class="btn btn-primary">Save</button>

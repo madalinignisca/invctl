@@ -98,6 +98,17 @@ type DeviceType struct {
 	// one.
 	UHeight   *int `db:"u_height"`
 	FullDepth bool `db:"full_depth"`
+	// DepthMM is the chassis as the manufacturer states it. What the box needs
+	// in a cabinet is larger -- see domain.RearClearanceMM, applied where the
+	// check runs rather than baked in here, so a finding can show its working.
+	DepthMM *int `db:"depth_mm"`
+	// WeightGrams, in grams for the reason money is in minor units. See
+	// domain.Kilograms.
+	WeightGrams *int `db:"weight_grams"`
+	// Airflow is which way the air goes, and nil means NOBODY SAID -- never
+	// front-to-rear. Defaulting it would let every uncatalogued box pass the
+	// opposing-neighbours check in silence.
+	Airflow *string `db:"airflow"`
 	// EOLDate is the MANUFACTURER's end of support for this model. An asset that
 	// states its own overrides it -- see AssetExpiry.
 	EOLDate   *string `db:"eol_date"`
@@ -116,6 +127,9 @@ type DeviceTypeSpec struct {
 	PartNumber     *string
 	UHeight        *int
 	FullDepth      bool
+	DepthMM        *int
+	WeightGrams    *int
+	Airflow        *string
 	EOLDate        *string
 	Notes          *string
 	Lifecycle      string
@@ -128,19 +142,25 @@ func NewDeviceType(id string, spec DeviceTypeSpec, now time.Time) (*DeviceType, 
 	model := checkRequired(ve, "model", spec.Model)
 	eol := checkDate(ve, "eol_date", spec.EOLDate)
 	checkUHeight(ve, spec.UHeight)
+	checkMillimetres(ve, "depth_mm", spec.DepthMM)
+	checkGrams(ve, "weight_grams", spec.WeightGrams)
+	checkOptionalEnum(ve, "airflow", spec.Airflow, Airflows)
 	lifecycle := defaultedLifecycle(ve, spec.Lifecycle)
 	if err := ve.OrNil(); err != nil {
 		return nil, err
 	}
 	return &DeviceType{
 		ID: id, ManufacturerID: manufacturer, Model: model,
-		PartNumber: blankToNil(spec.PartNumber),
-		UHeight:    spec.UHeight,
-		FullDepth:  spec.FullDepth,
-		EOLDate:    eol,
-		Notes:      blankToNil(spec.Notes),
-		Lifecycle:  lifecycle,
-		CreatedAt:  FormatTime(now), UpdatedAt: FormatTime(now),
+		PartNumber:  blankToNil(spec.PartNumber),
+		UHeight:     spec.UHeight,
+		FullDepth:   spec.FullDepth,
+		DepthMM:     spec.DepthMM,
+		WeightGrams: spec.WeightGrams,
+		Airflow:     blankToNil(spec.Airflow),
+		EOLDate:     eol,
+		Notes:       blankToNil(spec.Notes),
+		Lifecycle:   lifecycle,
+		CreatedAt:   FormatTime(now), UpdatedAt: FormatTime(now),
 	}, nil
 }
 
@@ -153,6 +173,10 @@ func (d *DeviceType) Validate() error {
 	d.PartNumber = blankToNil(d.PartNumber)
 	d.Notes = blankToNil(d.Notes)
 	checkUHeight(ve, d.UHeight)
+	checkMillimetres(ve, "depth_mm", d.DepthMM)
+	checkGrams(ve, "weight_grams", d.WeightGrams)
+	d.Airflow = blankToNil(d.Airflow)
+	checkOptionalEnum(ve, "airflow", d.Airflow, Airflows)
 	checkEnum(ve, "lifecycle", d.Lifecycle, HardwareLifecycles)
 	return ve.OrNil()
 }

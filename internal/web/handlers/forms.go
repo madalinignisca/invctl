@@ -85,6 +85,15 @@ func (f assetFormData) Value(field string) string {
 			stored = orBlank(a.DeviceTypeID)
 		case "u_height":
 			stored = orBlankInt(a.UHeight)
+		case "usable_depth_mm":
+			stored = orBlankInt(a.UsableDepthMM)
+		case "width_mm":
+			stored = orBlankInt(a.WidthMM)
+		case "max_load_kg":
+			// Stored in grams, typed in kilograms. The form field must render
+			// what it will accept back, or a save with no edit at all would
+			// refuse -- "600 kg" is not a number.
+			stored = orBlankKilograms(a.MaxLoadGrams)
 		case "rack_position":
 			stored = orBlankInt(a.RackPosition)
 		case "rack_face":
@@ -585,4 +594,17 @@ func orBlankInt(n *int) string {
 		return ""
 	}
 	return strconv.Itoa(*n)
+}
+
+// orBlankKilograms renders grams as the kilograms the form asks for, with no
+// unit suffix -- the field has to give back something it will accept.
+func orBlankKilograms(g *int) string {
+	if g == nil {
+		return ""
+	}
+	whole, frac := *g/1000, (*g%1000)/100
+	if frac == 0 {
+		return strconv.Itoa(whole)
+	}
+	return strconv.Itoa(whole) + "." + strconv.Itoa(frac)
 }

@@ -309,6 +309,9 @@ type assetDetailPage struct {
 	PowerFeeds  []store.PowerFeedRow
 	// Elevation is set only for a rack: what is mounted in it and where.
 	Elevation *store.RackElevation
+	// Fit is set only for a rack: whether what is in it physically fits, what
+	// it weighs and whether it can breathe.
+	Fit *store.RackFitReport
 	// PassThroughs is what this panel does between its own ports.
 	PassThroughs []store.PassThroughRow
 }
@@ -450,11 +453,20 @@ func (a *App) renderAssetDetail(w http.ResponseWriter, r *http.Request, status i
 	// than failing the page: an asset page is what somebody opens during an
 	// incident.
 	var elevation *store.RackElevation
+	var fit *store.RackFitReport
 	if asset.Kind == domain.KindRack {
 		if e, err := a.Store.Elevation(r.Context(), id); err != nil {
 			slog.Error("resolving the rack elevation", "error", err, "asset", id)
 		} else {
 			elevation = e
+		}
+		// Same treatment as the elevation: logged and absent rather than fatal.
+		// A physical-fit panel is worth having and is not worth taking an asset
+		// page down for during an incident.
+		if f, err := a.Store.RackFit(r.Context(), id); err != nil {
+			slog.Error("resolving the rack fit", "error", err, "asset", id)
+		} else {
+			fit = f
 		}
 	}
 
@@ -469,6 +481,7 @@ func (a *App) renderAssetDetail(w http.ResponseWriter, r *http.Request, status i
 	a.Render.Page(w, status, "asset_detail", assetDetailPage{
 		Base:           assetBase,
 		Elevation:      elevation,
+		Fit:            fit,
 		PassThroughs:   passThroughs,
 		PowerInputs:    powerInputs,
 		PowerFeeds:     powerFeeds,
@@ -530,6 +543,17 @@ func (a *App) AssetCreate(w http.ResponseWriter, r *http.Request) {
 		asset.UHeight, _ = optionalInt(r, "u_height")
 		asset.RackPosition, _ = optionalInt(r, "rack_position")
 		asset.RackFace = optionalString(r, "rack_face")
+		// The cabinet's own measurements. Only a rack's form renders these, and
+		// domain.Validate refuses a nonsense value on any kind, so a stray
+		// width on a switch cannot arrive quietly.
+		nums := optionalNumbers(r)
+		asset.UsableDepthMM = nums.opt("usable_depth_mm")
+		asset.WidthMM = nums.opt("width_mm")
+		asset.MaxLoadGrams = nums.kilos("max_load_kg")
+		if msgs := nums.messages(); msgs != nil {
+			a.renderAssetFormError(w, r, msgs)
+			return
+		}
 		asset.TeamID = optionalString(r, "team_id")
 		asset.ManagerRole = optionalString(r, "manager_role")
 		asset.EOLDate = optionalString(r, "eol_date")
@@ -588,6 +612,16 @@ func (a *App) AssetUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	updated.UHeight, updated.RackPosition = height, position
+	// Same rule as the height above: a measurement that quietly became nothing
+	// would turn every fit answer for this cabinet into "not recorded", which
+	// reads as reassurance rather than as the loss it is.
+	nums := optionalNumbers(r)
+	depth, width, load := nums.opt("usable_depth_mm"), nums.opt("width_mm"), nums.kilos("max_load_kg")
+	if msgs := nums.messages(); msgs != nil {
+		a.renderAssetFormError(w, r, msgs)
+		return
+	}
+	updated.UsableDepthMM, updated.WidthMM, updated.MaxLoadGrams = depth, width, load
 	updated.RackFace = submittedString(r, "rack_face", updated.RackFace)
 	updated.TeamID = submittedString(r, "team_id", updated.TeamID)
 	updated.ManagerRole = submittedString(r, "manager_role", updated.ManagerRole)

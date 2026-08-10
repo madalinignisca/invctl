@@ -82,6 +82,9 @@ func TopUp(ctx context.Context, s *store.SQLStore) (*Refs, error) {
 	// writing when the asset is already retired.
 	b.companyCompute()
 	b.companyRented()
+	// Idempotent: it UPDATES models and racks to the same values on a second
+	// run, and b.asset skips the firewall once it exists.
+	b.companyFit()
 
 	if b.err != nil {
 		return nil, b.err

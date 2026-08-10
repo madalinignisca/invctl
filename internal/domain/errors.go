@@ -147,6 +147,59 @@ func checkEnum(ve *ValidationError, field, value string, allowed []string) {
 	}
 }
 
+// checkOptionalEnum is checkEnum for a column where NOT SAYING is a legitimate
+// answer distinct from every value in the set.
+//
+// nil passes. Empty string does NOT -- it reaches here from a form that
+// submitted a blank select, and the caller is expected to have run it through
+// blankToNil first; letting "" through would store a value that is neither a
+// declaration nor an absence and matches no CHECK.
+func checkOptionalEnum(ve *ValidationError, field string, value *string, allowed []string) {
+	if value == nil {
+		return
+	}
+	checkEnum(ve, field, *value, allowed)
+}
+
+// checkMillimetres refuses a physical dimension that is not one.
+//
+// Bounded above as well as below, for the reason checkUHeight is: a typo of
+// 7720 for 772 does not look wrong in a form and does look wrong in a finding
+// that says the cabinet needs to be eight metres deep. Nothing that mounts in a
+// nineteen-inch rack is over two metres in any direction.
+func checkMillimetres(ve *ValidationError, field string, mm *int) {
+	if mm == nil {
+		return
+	}
+	switch {
+	case *mm <= 0:
+		ve.Add(field, "must be a positive measurement in millimetres, or left empty if nobody has measured it")
+	case *mm > MaxMillimetres:
+		ve.Add(field, "is larger than any rack-mounted thing; the unit is millimetres")
+	}
+}
+
+// checkGrams refuses a weight that is not one.
+func checkGrams(ve *ValidationError, field string, g *int) {
+	if g == nil {
+		return
+	}
+	switch {
+	case *g <= 0:
+		ve.Add(field, "must be a positive weight in grams, or left empty if nobody has weighed it")
+	case *g > MaxGrams:
+		ve.Add(field, "is heavier than any rack can hold; the unit is grams")
+	}
+}
+
+// MaxMillimetres and MaxGrams are typo fences rather than engineering limits.
+// Two metres and two tonnes are both past anything that goes in a cabinet, so a
+// value beyond them is a units mistake or a slipped finger.
+const (
+	MaxMillimetres = 2000
+	MaxGrams       = 2000000
+)
+
 // MaxVocabularyCodeLen bounds a lookup-table code. Nothing in the estate needs
 // more; a longer value is a pasted sentence in the wrong field.
 const MaxVocabularyCodeLen = 64

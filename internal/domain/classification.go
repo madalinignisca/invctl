@@ -158,6 +158,12 @@ var DeclaredColumns = map[string][]string{
 		// there. u_height on a RACK is its capacity; a mounted box's height comes
 		// from its catalogued model.
 		"u_height", "rack_position", "rack_face",
+		// What the CABINET measures (migration 00038). Declared, and not a
+		// close call in either direction: a tape measure is held by a person,
+		// and nothing reports these. usable_depth_mm is measured rather than
+		// derived; width_mm is external and side clearance follows from it,
+		// because EIA-310 fixes the equipment width.
+		"usable_depth_mm", "width_mm", "max_load_grams",
 		"lifecycle", "team_id", "manager_role",
 		"eol_date", "attrs",
 		"created_at", "updated_at",
@@ -491,6 +497,10 @@ var DeclaredColumns = map[string][]string{
 	},
 	"device_type": {
 		"id", "manufacturer_id", "model", "part_number", "u_height", "full_depth",
+		// The model's physical facts (migration 00038). Declared: they come
+		// off a datasheet somebody read. airflow NULL means nobody said, which
+		// is a third state and not front_to_rear.
+		"depth_mm", "weight_grams", "airflow",
 		"eol_date", "notes", "lifecycle", "created_at", "updated_at",
 		"row_version",
 	},

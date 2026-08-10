@@ -272,6 +272,12 @@ type AssetRow struct {
 	// The model's physical shape, for rack elevations.
 	DeviceTypeUHeight   *int `db:"device_type_u_height"`
 	DeviceTypeFullDepth bool `db:"device_type_full_depth"`
+	// The model's physical facts, for the fit and airflow checks (migration
+	// 00038). Carried rather than resolved here for the same reason the EOL is:
+	// one expression of each rule, in domain/fit.go.
+	DeviceTypeDepthMM     *int    `db:"device_type_depth_mm"`
+	DeviceTypeWeightGrams *int    `db:"device_type_weight_grams"`
+	DeviceTypeAirflow     *string `db:"device_type_airflow"`
 	// Behaviour comes from the asset_kind lookup row rather than a switch in
 	// Go, so a kind added by INSERT is usable rather than merely storable.
 	// Populated by decorateAssets; the zero value is "may do nothing", which is
@@ -428,15 +434,18 @@ func (s *SQLStore) decorateAssets(ctx context.Context, assets []domain.Asset) ([
 	// join on every asset select, the same shape as the responsibility and
 	// vocabulary loads below.
 	var models []struct {
-		AssetID   string  `db:"asset_id"`
-		Label     string  `db:"label"`
-		EOLDate   *string `db:"eol_date"`
-		UHeight   *int    `db:"u_height"`
-		FullDepth bool    `db:"full_depth"`
+		AssetID     string  `db:"asset_id"`
+		Label       string  `db:"label"`
+		EOLDate     *string `db:"eol_date"`
+		UHeight     *int    `db:"u_height"`
+		FullDepth   bool    `db:"full_depth"`
+		DepthMM     *int    `db:"depth_mm"`
+		WeightGrams *int    `db:"weight_grams"`
+		Airflow     *string `db:"airflow"`
 	}
 	if err := s.read(ctx, &models, `
 		SELECT a.id AS asset_id, mf.name || ' ' || dt.model AS label, dt.eol_date,
-		       dt.u_height, dt.full_depth
+		       dt.u_height, dt.full_depth, dt.depth_mm, dt.weight_grams, dt.airflow
 		FROM asset a
 		JOIN device_type dt ON dt.id = a.device_type_id
 		JOIN manufacturer mf ON mf.id = dt.manufacturer_id
@@ -449,6 +458,9 @@ func (s *SQLStore) decorateAssets(ctx context.Context, assets []domain.Asset) ([
 			rows[i].DeviceTypeEOL = m.EOLDate
 			rows[i].DeviceTypeUHeight = m.UHeight
 			rows[i].DeviceTypeFullDepth = m.FullDepth
+			rows[i].DeviceTypeDepthMM = m.DepthMM
+			rows[i].DeviceTypeWeightGrams = m.WeightGrams
+			rows[i].DeviceTypeAirflow = m.Airflow
 		}
 	}
 
@@ -636,11 +648,13 @@ func (s *SQLStore) insertAsset(ctx context.Context, t *tx, a *domain.Asset, envi
 	_, err := t.exec(ctx,
 		`INSERT INTO asset (id, kind, name, parent_id, serial, asset_tag, vendor, model,
 		                    device_type_id, u_height, rack_position, rack_face,
+		                    usable_depth_mm, width_mm, max_load_grams,
 		                    lifecycle, team_id, manager_role, eol_date, attrs,
 		                    created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		a.ID, a.Kind, a.Name, a.ParentID, a.Serial, a.AssetTag, a.Vendor, a.Model,
 		a.DeviceTypeID, a.UHeight, a.RackPosition, a.RackFace,
+		a.UsableDepthMM, a.WidthMM, a.MaxLoadGrams,
 		a.Lifecycle, a.TeamID, a.ManagerRole, a.EOLDate, a.Attrs,
 		a.CreatedAt, a.UpdatedAt)
 	if err != nil {
@@ -708,12 +722,14 @@ func (s *SQLStore) UpdateAsset(ctx context.Context, actor domain.Actor, a *domai
 			`UPDATE asset SET kind = ?, name = ?, serial = ?, asset_tag = ?, vendor = ?,
 			                  model = ?, device_type_id = ?, u_height = ?,
 			                  rack_position = ?, rack_face = ?,
+			                  usable_depth_mm = ?, width_mm = ?, max_load_grams = ?,
 			                  lifecycle = ?, team_id = ?,
 			                  manager_role = ?, eol_date = ?, attrs = ?, updated_at = ?,
 			                  row_version = row_version + 1
 			 WHERE id = ? AND row_version = ?`,
 			a.Kind, a.Name, a.Serial, a.AssetTag, a.Vendor, a.Model, a.DeviceTypeID,
 			a.UHeight, a.RackPosition, a.RackFace,
+			a.UsableDepthMM, a.WidthMM, a.MaxLoadGrams,
 			a.Lifecycle, a.TeamID, a.ManagerRole, a.EOLDate, a.Attrs, a.UpdatedAt,
 			a.ID, a.RowVersion)
 		if err != nil {

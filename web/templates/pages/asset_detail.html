@@ -345,6 +345,82 @@
 </div>
 
 
+{{with .Fit}}
+{{/* Physical fit: will it go in, will the rack hold it, will it stay cool.
+     Above the elevation because it is the answer somebody came for, and the
+     drawing is the evidence for it.
+
+     NOTHING HERE REFUSED A PLACEMENT. A box that does not fit is in the rack
+     with the door open, and the inventory has to be able to say so -- see
+     domain/fit.go. */}}
+<div class="panel">
+  <div class="panel-head">
+    <h2>Physical fit</h2>
+    <p class="panel-note">
+      {{if .Measured}}
+        Checked against what somebody measured. Blank measurements are reported
+        as unknown, never as a pass.
+      {{else}}
+        Nothing measured yet. Record the usable depth, the width and the load
+        rating on this cabinet and these checks start answering.
+      {{end}}
+    </p>
+  </div>
+  <div class="panel-body">
+    <div class="stat-row">
+      <div class="stat">
+        <div class="stat-label">Usable depth</div>
+        <div class="stat-value">{{if .Fit.UsableDepthMM}}{{derefInt .Fit.UsableDepthMM}} mm{{else}}<span class="muted">not measured</span>{{end}}</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Width</div>
+        <div class="stat-value">{{if .Fit.WidthMM}}{{derefInt .Fit.WidthMM}} mm{{else}}<span class="muted">not recorded</span>{{end}}</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Carrying</div>
+        <div class="stat-value">
+          {{if .Load.Weighed}}
+            {{if .Load.Unweighed}}at least {{end}}{{kg .Load.TotalGrams}}
+          {{else}}<span class="muted">nothing weighed</span>{{end}}
+        </div>
+        <div class="stat-note">
+          {{if .Fit.MaxLoadGrams}}of {{kilograms .Fit.MaxLoadGrams}} rated{{else}}no rating recorded{{end}}
+          {{if .Load.Unweighed}}· {{.Load.Unweighed}} unweighed{{end}}
+        </div>
+      </div>
+    </div>
+
+    {{if .Problems}}
+    <table class="grid">
+      <thead>
+        <tr><th>Severity</th><th>What</th><th>Finding</th></tr>
+      </thead>
+      <tbody>
+        {{range .Problems}}
+        <tr>
+          {{/* The same three pills the overview uses, so a fault means the
+               same thing on both pages. statusClass is for observed health and
+               takes a domain.Status -- a severity is a different vocabulary. */}}
+          <td>
+            {{if eq .Severity "fault"}}<span class="pill pill-down" title="Wrong now">fault</span>
+            {{else if eq .Severity "risk"}}<span class="pill pill-degraded" title="One failure away from wrong">risk</span>
+            {{else}}<span class="pill pill-muted" title="Not recorded, so not knowable">gap</span>{{end}}
+          </td>
+          <td>{{if .AssetID}}<a href="/assets/{{.AssetID}}">{{.Asset}}</a>{{else}}<span class="muted">this rack</span>{{end}}</td>
+          <td>{{.Detail}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+    {{else}}
+    <p class="empty">
+      {{if .Measured}}Nothing to report against what has been measured.{{else}}Nothing measured, so nothing checked.{{end}}
+    </p>
+    {{end}}
+  </div>
+</div>
+{{end}}
+
 {{with .Elevation}}
 {{/* Front and rear, because depth decides what "occupied" means. A full-depth
      box shows in both columns; two half-depth panels mounted back to back

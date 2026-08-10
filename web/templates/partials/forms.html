@@ -125,6 +125,35 @@
         <div class="field-hint">Counted from the floor. Leave empty if nobody has measured it.</div>
         {{with index .Errors "u_height"}}<div class="field-error">{{.}}</div>{{end}}
       </div>
+      <div class="field">
+        <label for="{{.Prefix}}-usabledepth">Usable depth (mm)</label>
+        <input id="{{.Prefix}}-usabledepth" type="number" name="usable_depth_mm" min="1" max="2000"
+               value="{{.Value "usable_depth_mm"}}" placeholder="900">
+        <div class="field-hint">
+          Rail face to the rear door — <strong>measured</strong>, not the cabinet's
+          external depth. Where the rails sit is an installation choice, so it
+          cannot be worked out from a datasheet.
+        </div>
+        {{with index .Errors "usable_depth_mm"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="{{.Prefix}}-width">Width (mm)</label>
+        <input id="{{.Prefix}}-width" type="number" name="width_mm" min="1" max="2000"
+               value="{{.Value "width_mm"}}" placeholder="600">
+        <div class="field-hint">
+          External. 600 is a standard cabinet, 800 a network one — the extra
+          goes to the side channels, which is what a side-breathing box needs.
+        </div>
+        {{with index .Errors "width_mm"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="{{.Prefix}}-maxload">Load rating (kg)</label>
+        <input id="{{.Prefix}}-maxload" type="text" name="max_load_kg" inputmode="decimal"
+               value="{{.Value "max_load_kg"}}" placeholder="600">
+        <div class="field-hint">Static rating from the cabinet's datasheet.</div>
+        {{with index .Errors "max_load_kg"}}<div class="field-error">{{.}}</div>{{end}}
+        {{with index .Errors "max_load_grams"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
       {{else}}
       <div class="field">
         <label for="{{.Prefix}}-rackpos">Rack position (U)</label>

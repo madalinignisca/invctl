@@ -50,6 +50,9 @@ func (b *builder) company() {
 	// development hosts the compute phase created -- the migration that put
 	// development onto somebody else's metal.
 	b.companyRented()
+	// Measurements go after everything that creates a rack or a model, since
+	// this phase reads them back and fills them in.
+	b.companyFit()
 }
 
 // companySites adds the third on-prem rack and the rented colo.

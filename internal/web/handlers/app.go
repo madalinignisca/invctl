@@ -445,6 +445,48 @@ func (n *numbers) opt(key string) *int {
 	return v
 }
 
+// kilos reads a weight typed in KILOGRAMS and returns it in grams.
+//
+// THE FORM ASKS FOR WHAT PEOPLE KNOW AND THE COLUMN STORES WHAT SUMS EXACTLY.
+// A datasheet says 8.5 kg and nobody types 8500, so the input is kilograms with
+// one decimal; the column is grams for the reason money is minor units, since
+// twenty boxes rounded to whole kilograms lose ten kilograms off a rack total.
+//
+// Parsed by hand rather than through a float. "8.5" via ParseFloat then
+// multiplied by 1000 is 8499.999... on the way to an int, which truncates to
+// 8499 -- a gram nobody would notice and an arithmetic sin that spreads.
+func (n *numbers) kilos(key string) *int {
+	v := strings.TrimSpace(formValue(n.r, key))
+	if v == "" {
+		return nil
+	}
+	whole, frac, hasFrac := strings.Cut(v, ".")
+	grams, err := strconv.Atoi(whole)
+	if err != nil {
+		n.bad = append(n.bad, key)
+		return nil
+	}
+	grams *= 1000
+	if hasFrac {
+		// One decimal place is the precision a datasheet publishes. More is
+		// accepted and truncated rather than refused: somebody pasting 8.53
+		// means 8.5 kg, not an error message.
+		if frac == "" || len(frac) > 3 {
+			frac = (frac + "000")[:3]
+		}
+		for len(frac) < 3 {
+			frac += "0"
+		}
+		f, err := strconv.Atoi(frac)
+		if err != nil {
+			n.bad = append(n.bad, key)
+			return nil
+		}
+		grams += f
+	}
+	return &grams
+}
+
 // messages is nil when every field was usable, and otherwise names each one
 // that was not — so an operator is told which box to look at rather than that
 // something, somewhere, was wrong.

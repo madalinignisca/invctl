@@ -45,13 +45,18 @@ import (
 // people leave out and it is the one that makes the other two trustworthy --
 // a report that cannot say "I do not know" is a report that guesses.
 
+// DEFINED FROM domain, not beside it. domain/fit.go has to name a severity --
+// it computes findings and may not import this package -- so the spelling lives
+// there and these are aliases. Two independent string literals would drift
+// silently: nothing would fail to compile, and a finding would simply stop
+// sorting into the right band.
 const (
 	// FindingFault: wrong now.
-	FindingFault = "fault"
+	FindingFault = domain.FindingFaultSeverity
 	// FindingRisk: survivable now, not survivable after one failure.
-	FindingRisk = "risk"
+	FindingRisk = domain.FindingRiskSeverity
 	// FindingGap: not recorded, so not knowable.
-	FindingGap = "gap"
+	FindingGap = domain.FindingGapSeverity
 )
 
 // Finding is one line on the overview.
@@ -231,6 +236,22 @@ func (s *SQLStore) EstateFindings(ctx context.Context) ([]Finding, error) {
 		}
 	}
 	add(FindingGap, unused, "allocation unused", firstAgg, "/allocations")
+
+	// Physical fit: will it go in, will the rack hold it, will it stay cool.
+	//
+	// Href is /assets filtered to racks rather than a report of its own. These
+	// are per-cabinet answers and the cabinet is where somebody goes to act on
+	// one -- a list page would be a second place to read the same sentence.
+	fit, err := s.EstateFit(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("gathering fit findings: %w", err)
+	}
+	add(FindingFault, fit.TooDeep, "too deep for the rack", fit.FirstTooDeep, "/assets?kind=rack")
+	add(FindingFault, fit.Overloaded, "rack over its load rating", fit.FirstOverloaded, "/assets?kind=rack")
+	add(FindingRisk, fit.SideStarved, "side-breathing box in a narrow cabinet", fit.FirstSideStarve, "/assets?kind=rack")
+	add(FindingRisk, fit.OpposedAirflow, "neighbours breathing against each other", fit.FirstOpposed, "/assets?kind=rack")
+	add(FindingGap, fit.UnmeasuredRacks, "rack with no depth recorded", "", "/assets?kind=rack")
+	add(FindingGap, fit.UndeclaredAirflow, "placed box with no declared airflow", "", "/catalogue")
 
 	sort.SliceStable(out, func(i, j int) bool {
 		if a, b := severityRank(out[i].Severity), severityRank(out[j].Severity); a != b {
