@@ -154,6 +154,70 @@ Engine: expiry resolves an asset's support date from its type when the asset has
 none — **and says which source it used.** Provenance, not silent inference. Search
 resolves part numbers and serials.
 
+**WP-C2 · Physical fit — will it actually go in that rack** — S — depends: C1
+*Decided 2026-08-10: warn, never refuse. Depth and weight in the first pass.*
+
+The vertical half already works. `CheckPlacement` refuses a box whose top passes
+the rack's recorded height, and refuses an overlap, per face. What it cannot
+answer is the question people actually argue about in front of the rack: a 2U
+server fits the units and is 780mm long, and the cabinet is 600mm deep.
+
+Four nullable numbers, two each side:
+
+| On the rack (`asset`) | On the model (`device_type`) |
+|---|---|
+| `usable_depth_mm` — rail face to door | `depth_mm` — chassis |
+| `max_load_kg` | `weight_kg` |
+
+`usable_depth_mm` is **measured, not derived from the external dimension on a
+datasheet**. Deriving it would be enforcing a guess, which the placement check
+already refuses to do for height and should not start doing for depth.
+
+**IT WARNS, IT DOES NOT REFUSE, AND THAT IS THE WHOLE DESIGN DECISION.** Two
+boxes in one unit is impossible, so the record is false and 422 is right. Too
+deep is entirely possible: it is in there, the rear door does not close, and
+somebody did it anyway. Refusing that placement does not stop it happening, it
+stops it being *recorded* — the operator either lies to the form or leaves the
+box out, and the inventory gets worse to make the validator tidier. So this
+lands in the fault/risk/gap vocabulary in `store/findings.go`, beside the rest.
+
+**Unknown is a third answer, and it is the reason to build this here.** A rack
+with no measured depth does not report "fits" — it reports a **gap**. Most tools
+can only say yes or no, so an unmeasured rack silently reads as fine. This one
+already has somewhere to put "I do not know".
+
+Two details decide whether anybody trusts the output:
+
+- **A clearance allowance, not a bare comparison.** `depth_mm <= usable_depth_mm`
+  passes a 772mm server into an 800mm cabinet, which does not fit once power
+  cords and a bend radius are behind it. A named default in `domain` (~75mm),
+  applied and stated in the finding text. Without it the check passes the exact
+  case it was built for and gets ignored inside a month.
+- **Weight is a rollup and must say what it could not see.** Depth is per box;
+  load is the sum of everything in the rack against its rating. Summing over
+  partial data and printing a total is the dishonest version. The finding reads
+  *"at least 412 kg of a 600 kg rating, with 4 of 11 boxes unweighed"* — a lower
+  bound labelled as one.
+
+Not in this pass: mounting type (2-post/4-post, rail kits) and width. Both are
+real and both are an enum with a CHECK constraint and a matching Go constant
+set, which is a different size of change.
+
+**WP-C3 · Is the cabling workable** — M — depends: C2
+Split from C2 deliberately, on the E1 precedent: bundling a measurement with a
+graph question produced one work package that was two.
+
+"Will it fit" is arithmetic on four numbers. "Can it be cabled" is about port
+face against mounted face, airflow direction against the aisle, and how many
+leads land on one box in a cabinet with no side channel.
+
+The interesting part is that **most of the input is already in the database**.
+invctl knows the interfaces, knows the cables and knows the rack, so the finding
+is derived rather than typed: *48 leads terminate on a front-facing panel in a
+600mm cabinet*. What must be declared is small — port face and airflow direction
+on the device type. Worth doing after C2, because a depth model it can lean on
+makes the clearance half of it real rather than notional.
+
 ---
 
 ### Group D — Addressing
