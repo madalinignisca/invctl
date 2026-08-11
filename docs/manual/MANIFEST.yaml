@@ -39,6 +39,39 @@ fragments:
       - "the overview shows at least one finding of each severity (fault, risk, gap)"
     generated_at: 9e1eea224a5c
 
+  - id: installation
+    title: Installing and running invctl
+    file: parts/10-installation.md
+    pages: []
+    # NO SCREENSHOTS, and that is the honest answer rather than an omission.
+    # This fragment documents a systemd unit, a checksum command and an upgrade
+    # sequence; a picture of a terminal would be a picture of text somebody
+    # cannot copy. The screenshot rules exist to stop a manual describing
+    # screens nobody opened, not to require an image per section.
+    screenshots: []
+    depends_on:
+      - cmd/invctl/main.go
+      - internal/config/config.go
+      - internal/store/migrate.go
+      - internal/version/version.go
+    preconditions:
+      - "none: nothing here is read off a running instance"
+    generated_at: 567556aee363
+
+  - id: directory
+    title: Directory authentication — LDAP and Active Directory
+    file: parts/12-directory.md
+    pages:
+      - /login
+    screenshots: []
+    depends_on:
+      - internal/auth/ldap.go
+      - internal/auth/auth.go
+      - internal/config/config.go
+    preconditions:
+      - "none: the worked examples are configuration, not estate data"
+    generated_at: 567556aee363
+
   - id: estate
     title: The estate — assets, catalogue, power, clusters
     file: parts/20-estate.md
