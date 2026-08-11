@@ -89,6 +89,11 @@
           <button class="btn btn-sm" type="submit">Sign out</button>
         </form>
       {{end}}
+      {{/* Which build this is. Signed-in users only -- an unauthenticated
+           login page has no business naming a version to whoever asks. It is
+           here so "did the upgrade land" is answered by looking, and so a bug
+           report carries the build without anybody being asked for it. */}}
+      {{if .User}}<div class="build" title="Build in service">{{.Version}}</div>{{end}}
     </div>
   </nav>
 

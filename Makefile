@@ -9,6 +9,27 @@
 SHELL := /bin/bash
 BIN   := bin/invctl
 
+# What this build calls itself.
+#
+# TAKEN FROM GIT, NEVER TYPED. A version somebody edits by hand is wrong for the
+# window between the release and them remembering, and that window has no upper
+# bound. `git describe` says v0.1.0 on the tag, v0.1.0-3-gabc1234 three commits
+# later, and appends -dirty when the tree has uncommitted changes -- so a build
+# can never quietly claim to be a release it is not.
+#
+# An untagged clone with no tags at all falls back to "dev", which is what the
+# package defaults to anyway.
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+COMMIT  ?= $(shell git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
+# SOURCE_DATE_EPOCH is honoured so a reproducible build stays reproducible.
+DATE    ?= $(shell date -u -d "@$${SOURCE_DATE_EPOCH:-$$(date +%s)}" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u +%Y-%m-%dT%H:%M:%SZ)
+
+VERSION_PKG := github.com/madalinignisca/invctl/internal/version
+LDFLAGS     := -s -w \
+	-X '$(VERSION_PKG).Version=$(VERSION)' \
+	-X '$(VERSION_PKG).Commit=$(COMMIT)' \
+	-X '$(VERSION_PKG).Date=$(DATE)'
+
 # Tailwind standalone CLI: no Node runtime in the build pipeline. DaisyUI was
 # considered and dropped -- it is an npm package that has to be on disk, which
 # would drag a second runtime into the build for styling convenience. The
@@ -61,7 +82,13 @@ help:
 
 .PHONY: build
 build: css ## Build the static binary
-	CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o $(BIN) ./cmd/invctl
+	CGO_ENABLED=0 go build -trimpath -ldflags="$(LDFLAGS)" -o $(BIN) ./cmd/invctl
+
+.PHONY: version
+version: ## Print what a build here would call itself
+	@echo "version $(VERSION)"
+	@echo "commit  $(COMMIT)"
+	@echo "date    $(DATE)"
 
 $(TAILWIND):
 	@mkdir -p bin

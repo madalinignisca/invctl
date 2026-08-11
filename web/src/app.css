@@ -219,6 +219,19 @@ a:hover {
   color: var(--faint);
 }
 
+/* The build in service. Quiet on purpose -- it is reference material somebody
+   goes looking for during an upgrade or a bug report, not something to read
+   every day. Monospace because it is an identifier, and it wraps rather than
+   overflowing: `git describe` output on an untagged build is long. */
+.rail-foot .build {
+  margin-top: 10px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--faint);
+  opacity: 0.75;
+  overflow-wrap: anywhere;
+}
+
 .main {
   min-width: 0;
   display: flex;

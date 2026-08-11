@@ -39,6 +39,7 @@ import (
 	"github.com/madalinignisca/invctl/internal/domain"
 	"github.com/madalinignisca/invctl/internal/seed"
 	"github.com/madalinignisca/invctl/internal/store"
+	"github.com/madalinignisca/invctl/internal/version"
 	"github.com/madalinignisca/invctl/internal/web"
 	"github.com/madalinignisca/invctl/internal/web/handlers"
 	"github.com/madalinignisca/invctl/internal/web/render"
@@ -59,6 +60,10 @@ func run() error {
 		topUpOnly   = flag.Bool("seed-topup", false,
 			"add newer demo phases to an estate that is already loaded, and exit")
 		devMode = flag.Bool("dev", false, "reparse templates on every request")
+
+		// The first question asked of a deployment behaving oddly, and it must
+		// be answerable from the binary alone.
+		showVersion = flag.Bool("version", false, "print the version and exit")
 
 		// The retention prune (docs/AUDIT.md rule 10). Admin-invoked, here,
 		// and nowhere else: never a handler, never a side effect of a write
@@ -81,6 +86,14 @@ func run() error {
 			"delete resolved drift-queue entries older than -prune-keep-days and exit")
 	)
 	flag.Parse()
+
+	// BEFORE config.Load, deliberately. `invctl -version` has to work on a box
+	// with no environment set at all -- which is exactly the box somebody is
+	// standing at when they need to know what they have deployed.
+	if *showVersion {
+		fmt.Println(version.String())
+		return nil
+	}
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -452,7 +465,11 @@ func serve(server *http.Server, cfg *config.Config) error {
 		shutdownErr <- server.Shutdown(ctx)
 	}()
 
-	slog.Info("listening", "addr", cfg.Listen, "admins", cfg.AdminUsers)
+	// The version goes in the log the operator will actually be reading during
+	// an upgrade: "did it take" is answered by the startup line, not by
+	// checking a file's timestamp.
+	slog.Info("listening", "addr", cfg.Listen, "admins", cfg.AdminUsers,
+		"version", version.Short(), "commit", version.Revision())
 	if err := server.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
 		return fmt.Errorf("serving: %w", err)
 	}

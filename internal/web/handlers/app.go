@@ -24,6 +24,7 @@ import (
 	"github.com/madalinignisca/invctl/internal/config"
 	"github.com/madalinignisca/invctl/internal/domain"
 	"github.com/madalinignisca/invctl/internal/store"
+	"github.com/madalinignisca/invctl/internal/version"
 	"github.com/madalinignisca/invctl/internal/web/middleware"
 	"github.com/madalinignisca/invctl/internal/web/render"
 )
@@ -66,6 +67,10 @@ type Flash struct {
 type Base struct {
 	Title string
 	Nav   string
+	// Version is the build in service, rendered in the rail's footer for
+	// signed-in users. A constant for the process's lifetime, so it is set here
+	// rather than plumbed through every page struct.
+	Version string
 	// NavGroups is the rail, with the group holding this page already open.
 	// Built per request rather than being a package-level value the layout
 	// reaches for, so two concurrent requests cannot race on which section is
@@ -251,6 +256,7 @@ func (a *App) base(r *http.Request, title, nav string) Base {
 	b := Base{
 		Title:       title,
 		Nav:         nav,
+		Version:     version.Short(),
 		NavGroups:   NavFor(nav),
 		User:        user,
 		CanWrite:    a.Authz.CanWrite(user),
