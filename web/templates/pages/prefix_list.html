@@ -142,4 +142,11 @@
   {{template "prefix_form" .FormData}}
   {{template "range_form" .RangeForm}}
 {{end}}
+
+{{/* The same rows as a file, carrying the current query so what downloads is
+     what is on screen. */}}
+<p class="hint" style="margin-top:12px">
+  <a href="{{.CSVLink}}">Download this list as CSV</a>
+</p>
+
 {{end}}

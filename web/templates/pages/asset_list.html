@@ -51,6 +51,17 @@
 
 {{template "asset_table" .}}
 
+{{/* The same rows, as a file. The link carries the CURRENT query, so what
+     downloads is what is on screen -- an export button that quietly ignored
+     the filters would be the worst kind of wrong, since the file looks right.
+     The columns are the importer's own, so this round-trips: export, edit in
+     a spreadsheet, import again. */}}
+<p class="hint" style="margin-top:12px">
+  <a href="{{.CSVLink}}">Download this list as CSV</a> — the columns are the
+  ones <a href="/import/assets">the importer</a> reads, so an exported file can
+  be edited and loaded back.
+</p>
+
 {{if .CanWrite}}
   <p class="hint" style="margin-top:12px">
     Adding many at once? <a href="/import/assets">Import a CSV</a> — it creates

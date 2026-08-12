@@ -39,6 +39,10 @@ func (a *App) renderCircuits(w http.ResponseWriter, r *http.Request, status int,
 		a.serverError(w, r, err)
 		return
 	}
+	if render.WantsCSV(r) {
+		render.CSV(w, r, store.ExportCircuits(circuits), a.Store.Now())
+		return
+	}
 	a.Render.Page(w, status, "circuit_list", circuitListPage{
 		Base:      a.base(r, "Circuits", "circuits"),
 		Circuits:  circuits,

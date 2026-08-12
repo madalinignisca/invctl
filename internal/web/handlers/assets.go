@@ -247,6 +247,20 @@ func (a *App) AssetList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The same rows the page would have shown, as a file. SHARED HANDLER AND
+	// SHARED FILTER, deliberately: a separate export route would parse the
+	// query a second time, and the day the two readings diverge is the day
+	// somebody exports a filtered list and quietly gets everything.
+	if render.WantsCSV(r) {
+		table, err := a.Store.ExportAssets(r.Context(), assets)
+		if err != nil {
+			a.serverError(w, r, err)
+			return
+		}
+		render.CSV(w, r, table, a.Store.Now())
+		return
+	}
+
 	data := assetListPage{
 		// Derived, not literal: /assets?kind=firewall is the rail's Firewalls
 		// entry under Network, and telling the rail "assets" would open Estate

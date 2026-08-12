@@ -71,6 +71,14 @@ type Base struct {
 	// signed-in users. A constant for the process's lifetime, so it is set here
 	// rather than plumbed through every page struct.
 	Version string
+	// CSVLink is this exact page as a download: the same path and the same
+	// query with format=csv added.
+	//
+	// BUILT FROM THE REQUEST rather than assembled in each template, because a
+	// hand-built link is a link that forgets a filter -- and an export that
+	// silently ignores the filters is the worst kind of wrong, since the file
+	// looks right. Empty on a page that offers no export; the template checks.
+	CSVLink string
 	// NavGroups is the rail, with the group holding this page already open.
 	// Built per request rather than being a package-level value the layout
 	// reaches for, so two concurrent requests cannot race on which section is
@@ -257,6 +265,7 @@ func (a *App) base(r *http.Request, title, nav string) Base {
 		Title:       title,
 		Nav:         nav,
 		Version:     version.Short(),
+		CSVLink:     csvLinkFor(r),
 		NavGroups:   NavFor(nav),
 		User:        user,
 		CanWrite:    a.Authz.CanWrite(user),
@@ -614,4 +623,16 @@ func validationErrors(err error) (map[string]string, bool) {
 		return ve.Messages(), true
 	}
 	return nil, false
+}
+
+// csvLinkFor is the current request as a CSV download.
+//
+// It preserves every parameter except the ones that would make the file
+// something other than "this list": format itself, and the inline-edit marker,
+// which names a row being edited and has no meaning in a file.
+func csvLinkFor(r *http.Request) string {
+	q := r.URL.Query()
+	q.Del("edit")
+	q.Set("format", "csv")
+	return r.URL.Path + "?" + q.Encode()
 }

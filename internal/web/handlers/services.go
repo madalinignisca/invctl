@@ -60,6 +60,11 @@ func (a *App) ServiceList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if render.WantsCSV(r) {
+		render.CSV(w, r, store.ExportServices(services), a.Store.Now())
+		return
+	}
+
 	data := serviceListPage{
 		Base:         a.base(r, "Services", "services"),
 		Services:     services,

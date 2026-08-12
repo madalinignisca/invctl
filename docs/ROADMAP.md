@@ -388,8 +388,30 @@ changed, journal is what a human observed. Cheap, and heavily used in practice.
 Makes large estates usable. Pure quality of life, and users notice its absence
 immediately.
 
-**WP-G5 · Export templates** — S
-User-defined output formats over any object list.
+**WP-G5 · CSV export** — S — **DONE**
+*Renamed 2026-08-12. It was "export templates", meaning the NetBox feature:
+user-authored templates stored in the database and rendered per object type.
+That is an L and a code-execution surface, and it is not what people reach for
+— which is getting a list into a spreadsheet.*
+
+A download on every list that has one, carrying the page's current query so the
+file is what was on screen. `?format=csv` on the existing route rather than a
+route of its own, because a second route parses the filters a second time and
+the day the two readings diverge is the day somebody exports a filtered list and
+silently gets everything.
+
+**The asset export uses the importer's own columns**, so a file can be exported,
+edited in a spreadsheet and loaded back — which is bulk editing for free. That
+holds only while the two agree, so the parent is a PATH rather than a uuid and
+`device_type` is `manufacturer_code/model` rather than the display label the row
+carries.
+
+*Cells beginning with `=`, `+`, `-` or `@` are prefixed with an apostrophe.
+Spreadsheets evaluate those, so an asset named `=cmd|'/c calc'!A1` is code the
+moment a colleague opens the file; the database is right to store such a name
+and the defusing belongs at the boundary where text becomes a spreadsheet.
+Nothing is removed — an export that silently altered a name would be worse than
+the problem.*
 
 **WP-G6 · Cloud resource discovery** — L — depends: the agent surface
 Inventory of resources at a cloud or hosting provider: instances, volumes,

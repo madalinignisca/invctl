@@ -252,6 +252,10 @@ func (a *App) renderPrefixes(w http.ResponseWriter, r *http.Request, status int,
 	if edit != nil {
 		base.EditRow = edit.ID
 	}
+	if render.WantsCSV(r) {
+		render.CSV(w, r, store.ExportPrefixes(prefixes), a.Store.Now())
+		return
+	}
 	a.Render.Page(w, status, "prefix_list", prefixListPage{
 		Base:         base,
 		Prefixes:     prefixes,
