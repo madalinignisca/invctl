@@ -39,7 +39,13 @@ type circuitImpactPage struct {
 	// Cut is the CONNECTIVITY answer, which the impact Result cannot give on
 	// its own: a partition nothing depends on produces no findings and reads
 	// exactly like no partition at all.
-	Cut               store.CircuitCut
+	Cut store.CircuitCut
+	// HasImpact and HasNetworkFinding are read by the shared impact_result
+	// partial. THEY ARE NOT OPTIONAL: html/template errors on a field a struct
+	// does not have, so reusing that partial means carrying its whole contract
+	// -- which the first version of this page did not, and rendered a 500 that
+	// no test caught because none of them fetched the page.
+	HasImpact         bool
 	HasNetworkFinding bool
 }
 
@@ -75,10 +81,11 @@ func (a *App) CircuitImpact(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := circuitImpactPage{
-		Base:    a.base(r, fmt.Sprintf("If %s is cut", circuit.CID), "circuits"),
-		Circuit: circuit,
-		Result:  result,
-		Cut:     cut,
+		Base:      a.base(r, fmt.Sprintf("If %s is cut", circuit.CID), "circuits"),
+		Circuit:   circuit,
+		Result:    result,
+		Cut:       cut,
+		HasImpact: len(result.Services) > 0 || len(result.WontRestart) > 0,
 		HasNetworkFinding: len(result.Isolated) > 0 || len(result.Partitions) > 0 ||
 			len(result.Unreachable) > 0 || len(result.RedundancyLost) > 0,
 	}

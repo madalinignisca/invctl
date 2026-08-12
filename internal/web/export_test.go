@@ -229,3 +229,41 @@ func TestEveryExportingListOffersTheSameThing(t *testing.T) {
 		})
 	}
 }
+
+// TestEveryImpactPageRenders.
+//
+// WRITTEN BECAUSE ONE OF THEM DID NOT. The circuit impact page reuses the
+// shared impact_result partial, and html/template errors on a field the page
+// struct does not carry -- so it returned a 500 for every circuit while the
+// engine, the store and the seed tests were all green. Not one of them fetched
+// the page.
+//
+// Reusing a partial means carrying its whole contract, and the only thing that
+// checks a template contract in Go is rendering it.
+func TestEveryImpactPageRenders(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	asset := h.asset("hv-01")
+	circuit := h.lookup(`SELECT id FROM circuit LIMIT 1`)
+	if circuit == "" {
+		t.Fatal("no circuit in the fixture, so the circuit page cannot be checked")
+	}
+
+	for _, path := range []string{
+		"/assets/" + asset + "/impact",
+		"/circuits/" + circuit + "/impact",
+	} {
+		t.Run(path, func(t *testing.T) {
+			resp := h.get(path, false)
+			page := body(t, resp)
+			if resp.StatusCode != http.StatusOK {
+				t.Fatalf("GET %s returned %d, want 200:\n%.400s", path, resp.StatusCode, page)
+			}
+			// A 200 carrying a rendering error is the other way this fails.
+			if strings.Contains(page, "can't evaluate field") {
+				t.Errorf("%s rendered a template error into the page", path)
+			}
+		})
+	}
+}
