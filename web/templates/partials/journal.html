@@ -1,0 +1,119 @@
+{{/*
+  invctl — infrastructure inventory
+  Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+
+  Licensed under the GNU Affero General Public License, version 3 only —
+  no later version applies. See LICENSE for the full text.
+
+  SPDX-License-Identifier: AGPL-3.0-only
+*/}}
+{{/* The journal panel. Rendered from any page that carries a Journal field;
+     the resource segment tells the shared handler what it is attached to.
+
+     Expects: .Journal (rows), .JournalResource, .JournalID, .CanWrite, .CSRF,
+     .EditRow. */}}
+{{define "journal_panel"}}
+<div class="panel">
+  <div class="panel-head">
+    <h2>Notes</h2>
+    <span class="panel-note">
+      What a person knows that no column has a place for — why it is on that
+      firmware, which case covers it, what was decided and by whom. Notes appear
+      on the timeline beside the audit trail, labelled as notes.
+    </span>
+  </div>
+  <div class="panel-body">
+    {{if .Journal}}
+    <div class="notes">
+      {{range .Journal}}
+      <div class="note">
+        <div class="note-head">
+          <span class="pill pill-note">{{.KindLabel}}</span>
+          <span class="note-by">{{.DisplayAuthor}}</span>
+          <span class="note-at mono">{{shortTime .CreatedAt}}</span>
+          {{if ne .UpdatedAt .CreatedAt}}
+            <span class="note-at" title="Edited {{shortTime .UpdatedAt}}. The previous wording is in the change log.">edited</span>
+          {{end}}
+        </div>
+        {{/* html/template escapes this; it is text a person typed and is never
+             trusted as markup. */}}
+        <div class="note-body">{{.Body}}</div>
+        {{if $.CanWrite}}
+        <div class="note-actions">
+          <a class="btn btn-sm" href="?edit={{.ID}}">Edit</a>
+          {{/* hx-confirm, not Alpine. This uses the CSP build, which evaluates
+               NO expressions -- an x-data carrying a call does nothing at all
+               and nothing reports that it does nothing. The guard in
+               alpine_csp_test.go caught this exact line. */}}
+          <form method="post" action="/{{$.JournalResource}}/{{$.JournalID}}/journal/{{.ID}}/retire"
+                hx-post="/{{$.JournalResource}}/{{$.JournalID}}/journal/{{.ID}}/retire"
+                hx-confirm="Withdraw this note? Nothing is deleted — it stays in the change log.">
+            <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+            <button class="btn btn-sm btn-danger" type="submit">Withdraw</button>
+          </form>
+        </div>
+        {{end}}
+
+        {{if and $.CanWrite (eq $.EditRow .ID)}}
+        <form method="post" action="/{{$.JournalResource}}/{{$.JournalID}}/journal/{{.ID}}"
+              class="note-edit">
+          <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+          <input type="hidden" name="row_version" value="{{.RowVersion}}">
+          <div class="field">
+            <label for="note-kind-{{.ID}}">Kind</label>
+            <select id="note-kind-{{.ID}}" name="kind">
+              {{$row := .}}
+              {{range journalKinds}}
+                <option value="{{.}}" {{if eq $row.Kind .}}selected{{end}}>{{journalKindLabel .}}</option>
+              {{end}}
+            </select>
+          </div>
+          <div class="field">
+            <label for="note-body-{{.ID}}">Note</label>
+            <textarea id="note-body-{{.ID}}" name="body" rows="4">{{.Body}}</textarea>
+          </div>
+          <div class="form-actions">
+            <button class="btn btn-primary" type="submit">Save</button>
+            <a class="btn btn-sm" href="?">Cancel</a>
+          </div>
+        </form>
+        {{end}}
+      </div>
+      {{end}}
+    </div>
+    {{else}}
+    <p class="empty">Nothing written down yet.</p>
+    {{end}}
+
+    {{if .CanWrite}}
+    <form method="post" action="/{{.JournalResource}}/{{.JournalID}}/journal" class="note-new">
+      <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+      <div class="field-row">
+        <div class="field">
+          <label for="note-kind">Kind</label>
+          <select id="note-kind" name="kind">
+            {{range journalKinds}}
+              <option value="{{.}}">{{journalKindLabel .}}</option>
+            {{end}}
+          </select>
+        </div>
+      </div>
+      <div class="field">
+        <label for="note-body">Note</label>
+        <textarea id="note-body" name="body" rows="3"
+                  placeholder="What somebody should know six months from now."></textarea>
+        <div class="field-hint">
+          Kept indefinitely and attributed to you. Do not write anything here
+          about a person that you would not want kept — the audit trail beside
+          it deliberately holds no personal data, and this field is the one
+          place that rule is yours to keep.
+        </div>
+      </div>
+      <div class="form-actions">
+        <button class="btn btn-primary" type="submit">Add note</button>
+      </div>
+    </form>
+    {{end}}
+  </div>
+</div>
+{{end}}

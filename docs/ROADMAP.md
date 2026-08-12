@@ -380,7 +380,7 @@ that way: no templated payload that could carry a command.
 `internal/estate/guard_test.go`. That is deliberate — the guard makes the decision
 explicit rather than blocking it. Read the appendix before starting.*
 
-**WP-G3 · Journal entries** — S
+**WP-G3 · Journal entries** — S — **DONE**
 Free-text operational notes on entities. Distinct from audit: audit is what
 changed, journal is what a human observed. Cheap, and heavily used in practice.
 

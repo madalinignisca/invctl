@@ -356,7 +356,20 @@ type TimelineEntry struct {
 const (
 	TimelineDeclared = "change"
 	TimelineObserved = "observed"
+	// TimelineJournal is a note a person wrote. A THIRD SOURCE rather than a
+	// change_log action, because it is a different kind of statement: the audit
+	// trail says what the software did, and a note says what somebody knows.
+	// Rendering them identically would let one be mistaken for the other, which
+	// is the laundering rule 7 forbids in the other direction.
+	TimelineJournal = "journal"
 )
+
+// JournalTimelineBudget is how many notes one timeline may carry.
+//
+// A FIXED SHARE, not a slice of the declared budget. Notes are the scarcest
+// thing on the page and the most deliberately placed, so they are never made to
+// compete with the churn they are usually written about.
+const JournalTimelineBudget = 25
 
 // DisplayActor is what a template renders, matching domain.ChangeLog's.
 func (e TimelineEntry) DisplayActor() string {
@@ -374,6 +387,9 @@ func (e TimelineEntry) ActorKind() string { return e.Kind }
 
 // IsObserved reports whether this row came from the transition ledger.
 func (e TimelineEntry) IsObserved() bool { return e.Source == TimelineObserved }
+
+// IsJournal reports whether this row is a note somebody wrote.
+func (e TimelineEntry) IsJournal() bool { return e.Source == TimelineJournal }
 
 // IsFlapClose reports whether this row closes a compressed episode, and is
 // therefore the row that accounts for what compression hid (rule 9).
@@ -643,6 +659,25 @@ func (s *SQLStore) Timeline(ctx context.Context, refs []EntityRef, limit int) ([
 		ORDER BY ot.at DESC, ot.id DESC
 		LIMIT ?`
 
+	// The journal arm. Notes are declared state and are written by people, so
+	// they are the least numerous thing on this page by orders of magnitude --
+	// which is exactly why they get a budget of their own rather than sharing
+	// the declared one. A note somebody wrote during an incident being evicted
+	// by the edits that incident caused would defeat the reason for writing it.
+	journalWhere, journalArgs := refPredicate("j", refs, nil)
+	journalQuery := `
+		SELECT '` + TimelineJournal + `' AS source, j.id AS id, j.created_at AS at,
+		       j.entity_type AS entity_type, j.entity_id AS entity_id,
+		       j.kind AS label, j.author AS actor, 'user' AS actor_kind,
+		       COALESCE(u.display_name, u.username, '') AS actor_name,
+		       j.body AS detail, '' AS reporter, '' AS from_state, '' AS to_state,
+		       0 AS flap_count, '' AS window_start, '' AS window_end
+		FROM journal_entry j
+		LEFT JOIN app_user u ON u.id = j.author
+		WHERE j.lifecycle = ? AND ` + journalWhere + `
+		ORDER BY j.created_at DESC, j.id DESC
+		LIMIT ?`
+
 	// Each arm gets its own budget, and that is the whole point.
 	//
 	// A single LIMIT across a UNION lets whichever side is noisier evict the
@@ -669,6 +704,14 @@ func (s *SQLStore) Timeline(ctx context.Context, refs []EntityRef, limit int) ([
 			return nil, fmt.Errorf("reading observed timeline for %d entities: %w", len(refs), err)
 		}
 		entries = append(entries, observed...)
+	}
+	if journalWhere != "" {
+		var notes []TimelineEntry
+		args := append([]any{domain.LifecycleActive}, journalArgs...)
+		if err := s.read(ctx, &notes, journalQuery, append(args, JournalTimelineBudget)...); err != nil {
+			return nil, fmt.Errorf("reading journal timeline for %d entities: %w", len(refs), err)
+		}
+		entries = append(entries, notes...)
 	}
 	// Merged in Go rather than in SQL. Both timestamps are RFC3339 UTC TEXT and
 	// sort correctly as strings; id is the tiebreak, so the order is total and

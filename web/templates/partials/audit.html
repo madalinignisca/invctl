@@ -41,7 +41,14 @@
         <tr class="rail-row {{if .IsObserved}}{{if eq .ToState "down"}}is-down{{else if eq .ToState "degraded"}}is-degraded{{else}}is-ok{{end}}{{end}}">
           <td class="mono" style="font-size:12px;white-space:nowrap;color:var(--muted)">{{shortTime .At}}</td>
           <td>
-            {{if .IsObserved}}
+            {{if .IsJournal}}
+              {{/* A THIRD KIND OF ROW, and it must be tellable from the other
+                   two at a glance: the audit trail says what the software did,
+                   telemetry says what the estate reported, and this says what
+                   a person chose to write down. */}}
+              <span class="pill pill-note" title="Somebody wrote this down.">{{.Label}}</span>
+              <div class="mono" style="font-size:11.5px;color:var(--faint);margin-top:3px">journal</div>
+            {{else if .IsObserved}}
               <span class="pill pill-info" title="Telemetry. Nobody decided this.">observed</span>
               <div class="mono" style="font-size:11.5px;color:var(--muted);margin-top:3px">{{.Label}}</div>
             {{else}}
@@ -59,7 +66,12 @@
           </td>
           <td>{{template "actor_cell" .}}</td>
           <td class="mono" style="font-size:11.5px;color:var(--muted);max-width:520px;overflow-wrap:anywhere">
-            {{if .IsObserved}}
+            {{if .IsJournal}}
+              {{/* The note itself, in prose rather than the monospace a diff
+                   wants. html/template escapes it; it is user text and is
+                   never trusted as markup. */}}
+              <div style="font-family:var(--font-sans);white-space:pre-wrap">{{.Detail}}</div>
+            {{else if .IsObserved}}
               {{if .FromState}}{{.FromState}} → {{end}}{{.ToState}}
               {{/* Rule 9: a reader must ALWAYS see that compression happened
                    and how much it hid. The closing row is where that is

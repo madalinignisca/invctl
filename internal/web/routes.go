@@ -251,6 +251,17 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	write("POST /clusters/{id}/retire", app.ClusterRetire)
 	write("POST /circuits", app.CircuitCreate)
 	write("POST /circuits/{id}/retire", app.CircuitRetire)
+
+	// Journal entries, on whatever page somebody is standing on. One route set
+	// for every entity: {resource} is allow-listed in the handler, because the
+	// table has no foreign key and would otherwise accept a note against
+	// anything at all.
+	for _, res := range handlers.JournalResources() {
+		write("POST /"+res+"/{id}/journal", app.JournalCreate)
+		write("POST /"+res+"/{id}/journal/{noteID}", app.JournalUpdate)
+		write("POST /"+res+"/{id}/journal/{noteID}/retire", app.JournalRetire)
+	}
+
 	write("POST /circuits/{id}/terminations", app.CircuitLand)
 	write("POST /circuits/{id}/terminations/{termID}/retire", app.CircuitLift)
 	write("POST /circuits/{id}/costs", app.CostAddToCircuit)

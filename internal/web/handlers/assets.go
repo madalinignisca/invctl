@@ -314,6 +314,10 @@ type assetDetailPage struct {
 	Fit *store.RackFitReport
 	// PassThroughs is what this panel does between its own ports.
 	PassThroughs []store.PassThroughRow
+	// Notes somebody wrote about this asset, and what the panel posts to.
+	Journal         []store.JournalRow
+	JournalResource string
+	JournalID       string
 }
 
 // AssetDetail renders one asset with its containment, ports and workloads.
@@ -478,35 +482,46 @@ func (a *App) renderAssetDetail(w http.ResponseWriter, r *http.Request, status i
 		slog.Error("listing pass-throughs", "error", err, "asset", id)
 	}
 
+	// Notes. Logged and absent rather than fatal, like the elevation: an asset
+	// page is what somebody opens during an incident, and a panel is not worth
+	// taking it down for.
+	notes, err := a.Store.ListJournal(r.Context(), "asset", id)
+	if err != nil {
+		slog.Error("listing journal", "error", err, "asset", id)
+	}
+
 	a.Render.Page(w, status, "asset_detail", assetDetailPage{
-		Base:           assetBase,
-		Elevation:      elevation,
-		Fit:            fit,
-		PassThroughs:   passThroughs,
-		PowerInputs:    powerInputs,
-		PowerFeeds:     powerFeeds,
-		Edit:           edit,
-		AssetEdit:      assetEdit,
-		Asset:          asset,
-		Certificates:   certificates,
-		Costs:          costs,
-		CostTotals:     store.TotalCosts(costs, domain.FormatDate(a.Store.Now())),
-		CostKinds:      costKinds,
-		CostPeriods:    domain.CostPeriods,
-		Ancestors:      ancestors,
-		Children:       children,
-		Interfaces:     interfaces,
-		Instances:      instances,
-		Health:         health,
-		InstanceHealth: instanceHealth,
-		Timeline:       timeline,
-		Environments:   envs,
-		Kinds:          kinds,
-		Lifecycles:     domain.AssetLifecycles,
-		InterfaceForm:  a.newInterfaceForm(r, id, nil, formFactors),
-		IPAddressForm:  a.newIPAddressForm(r, id, nil, interfaces, ipRoles),
-		LinkForm:       a.newLinkForm(r, id, nil, interfaces, linkTargets),
-		OverrideForm:   a.newOverrideForm(r, targets, nil, overrideForm{}),
+		Base:            assetBase,
+		Journal:         notes,
+		JournalResource: "assets",
+		JournalID:       id,
+		Elevation:       elevation,
+		Fit:             fit,
+		PassThroughs:    passThroughs,
+		PowerInputs:     powerInputs,
+		PowerFeeds:      powerFeeds,
+		Edit:            edit,
+		AssetEdit:       assetEdit,
+		Asset:           asset,
+		Certificates:    certificates,
+		Costs:           costs,
+		CostTotals:      store.TotalCosts(costs, domain.FormatDate(a.Store.Now())),
+		CostKinds:       costKinds,
+		CostPeriods:     domain.CostPeriods,
+		Ancestors:       ancestors,
+		Children:        children,
+		Interfaces:      interfaces,
+		Instances:       instances,
+		Health:          health,
+		InstanceHealth:  instanceHealth,
+		Timeline:        timeline,
+		Environments:    envs,
+		Kinds:           kinds,
+		Lifecycles:      domain.AssetLifecycles,
+		InterfaceForm:   a.newInterfaceForm(r, id, nil, formFactors),
+		IPAddressForm:   a.newIPAddressForm(r, id, nil, interfaces, ipRoles),
+		LinkForm:        a.newLinkForm(r, id, nil, interfaces, linkTargets),
+		OverrideForm:    a.newOverrideForm(r, targets, nil, overrideForm{}),
 	})
 }
 

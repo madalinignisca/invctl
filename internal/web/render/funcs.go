@@ -65,12 +65,15 @@ func funcs() template.FuncMap {
 		// Physical fit. kilograms renders the grams a column stores; airflow
 		// renders the enum a model declares, and NAMES the unknown case rather
 		// than printing an empty cell that reads like "front to rear".
-		"kilograms":      kilograms,
-		"kg":             domain.Kilograms,
-		"kilogramsValue": kilogramsValue,
-		"airflowLabel":   airflowLabel,
-		"airflowName":    airflowName,
-		"airflows":       func() []string { return domain.Airflows },
+		"kilograms": kilograms,
+		"kg":        domain.Kilograms,
+		// Journal kinds, so the panel's select cannot drift from the CHECK.
+		"journalKinds":     func() []string { return domain.JournalKinds },
+		"journalKindLabel": journalKindLabel,
+		"kilogramsValue":   kilogramsValue,
+		"airflowLabel":     airflowLabel,
+		"airflowName":      airflowName,
+		"airflows":         func() []string { return domain.Airflows },
 	}
 }
 
@@ -471,4 +474,12 @@ func airflowName(a string) string {
 		return label
 	}
 	return a
+}
+
+// journalKindLabel names a journal kind for a reader.
+func journalKindLabel(kind string) string {
+	if l, ok := domain.JournalKindLabels[kind]; ok {
+		return l
+	}
+	return kind
 }

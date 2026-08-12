@@ -442,6 +442,29 @@ tr.row-editing > td:first-child {
                  background: color-mix(in srgb, var(--amber) 10%, transparent); }
 .pill-down     { color: var(--crimson);  border-color: color-mix(in srgb, var(--crimson) 50%, transparent);
                  background: color-mix(in srgb, var(--crimson) 12%, transparent); }
+/* The journal panel. Notes are prose, so they get the body face and real
+   line-height rather than the monospace the rest of these panels use for
+   identifiers. */
+.notes { display: flex; flex-direction: column; gap: 12px; margin-bottom: 18px; }
+.note {
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+  padding: 10px 12px;
+  background: color-mix(in srgb, var(--violet) 3%, transparent);
+}
+.note-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
+.note-by { font-size: 12px; color: var(--muted); }
+.note-at { font-size: 11px; color: var(--faint); }
+.note-body { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; }
+.note-actions { display: flex; gap: 6px; margin-top: 8px; }
+.note-edit { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line-soft); }
+.note-new { border-top: 1px solid var(--line-soft); padding-top: 14px; }
+
+/* A note somebody wrote. Distinct from the observed and declared pills, because
+   the whole point of putting three kinds of row on one timeline is that a
+   reader can tell them apart without reading the label. */
+.pill-note     { color: var(--violet);   border-color: color-mix(in srgb, var(--violet) 40%, transparent);
+                 background: color-mix(in srgb, var(--violet) 10%, transparent); }
 .pill-startup  { color: var(--violet);   border-color: color-mix(in srgb, var(--violet) 50%, transparent);
                  background: color-mix(in srgb, var(--violet) 12%, transparent); }
 .pill-tier1    { color: var(--crimson);  border-color: color-mix(in srgb, var(--crimson) 40%, transparent); }

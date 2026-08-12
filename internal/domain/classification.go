@@ -169,6 +169,23 @@ var DeclaredColumns = map[string][]string{
 		"created_at", "updated_at",
 		"row_version",
 	},
+	// Journal entries (migration 00039). DECLARED, and the interesting part is
+	// that it is not a close call: a note is somebody choosing to write
+	// something down, which is the definition. Nothing observes it and nothing
+	// derives it, so every write takes a change_log row like any other entity
+	// -- including the withdrawal, because removing an inconvenient note
+	// without trace is what the audit trail exists to prevent.
+	//
+	// `author` holds an app_user.id and never a name, the same rule as
+	// change_log.actor: the log is kept forever, so it must carry nothing
+	// anybody could ask to have erased. `body` is free text a human wrote and
+	// is the one column here where personal data could legitimately arrive --
+	// which is a deployment policy matter, said out loud in the field hint
+	// rather than pretended away.
+	"journal_entry": {
+		"id", "entity_type", "entity_id", "kind", "body", "author",
+		"lifecycle", "created_at", "updated_at", "row_version",
+	},
 	"asset_closure":     {"ancestor_id", "descendant_id", "depth"},
 	"asset_environment": {"asset_id", "environment_id", "note"},
 	"backend_member":    {"pool_id", "endpoint_id", "weight", "is_backup"},
