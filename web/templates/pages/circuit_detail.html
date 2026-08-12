@@ -17,6 +17,10 @@
   {{if .Circuit.Description}}<p class="lede">{{deref .Circuit.Description}}</p>{{end}}
 </div>
 
+<div style="margin-bottom:18px">
+  <a class="btn btn-primary" href="/circuits/{{.Circuit.ID}}/impact">Simulate cutting this</a>
+</div>
+
 <div class="stat-row">
   <div class="stat"><div class="k">Commit</div><div class="v">{{if .Circuit.CommitMbps}}{{derefInt .Circuit.CommitMbps}}<span style="font-size:13px"> Mb</span>{{else}}—{{end}}</div></div>
   <div class="stat"><div class="k">Installed</div><div class="v" style="font-size:15px">{{if .Circuit.InstallDate}}{{deref .Circuit.InstallDate}}{{else}}—{{end}}</div></div>

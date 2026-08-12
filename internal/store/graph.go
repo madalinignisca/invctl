@@ -238,6 +238,70 @@ func (s *SQLStore) loadNetGraph(ctx context.Context) (*impact.NetGraph, error) {
 		})
 	}
 
+	// Circuits as connectivity edges (WP-E1b).
+	//
+	// DERIVED, NOT DECLARED. A circuit's two terminations are already recorded;
+	// asking somebody to also declare a net_uplink for it would be asking them
+	// to say the same thing twice and keep the two in agreement forever. The
+	// reach model is an undirected graph of forwarder groups joined by edges,
+	// so a circuit whose ends land on interfaces of assets in DIFFERENT groups
+	// already is one of those edges -- this only reads it out.
+	//
+	// THE JOINS ARE THE SPECIFICATION, and each one excludes a case that would
+	// otherwise produce a wrong edge:
+	//
+	//   * both sides must terminate on an INTERFACE. A termination on a site is
+	//     "it arrives in this building", which names no forwarder and cannot
+	//     join anything.
+	//   * both interfaces' assets must be MEMBERS of a net group. A circuit
+	//     landing on a host that forwards nothing is not a path between groups.
+	//   * the two groups must DIFFER. Both ends inside one group is a circuit
+	//     between two members of the same group, which the group already
+	//     covers, and unioning a group with itself is a no-op that would only
+	//     make the edge list longer.
+	//   * everything must be active: a retired circuit, a retired termination
+	//     and a retired membership each mean the path is not there.
+	//
+	// Most circuits fail the first test, and that is correct -- a transit
+	// circuit ends at the provider, whose side of it this inventory does not
+	// model. Those still report their cost and their contract end; they simply
+	// join nothing, which is the truth about them.
+	//
+	// The plane is the data plane. A circuit carrying management traffic is a
+	// real thing and is not distinguishable here from any other, so claiming
+	// otherwise would be inventing a fact.
+	var circuitEdges []struct {
+		CircuitID string `db:"circuit_id"`
+		Label     string `db:"label"`
+		GroupA    string `db:"group_a"`
+		GroupZ    string `db:"group_z"`
+	}
+	if err := s.read(ctx, &circuitEdges, `
+		SELECT c.id AS circuit_id, c.cid AS label,
+		       ma.group_id AS group_a, mz.group_id AS group_z
+		FROM circuit c
+		JOIN circuit_termination ta ON ta.circuit_id = c.id AND ta.side = 'a'
+		JOIN circuit_termination tz ON tz.circuit_id = c.id AND tz.side = 'z'
+		JOIN interface ia ON ia.id = ta.interface_id
+		JOIN interface iz ON iz.id = tz.interface_id
+		JOIN net_group_member ma ON ma.asset_id = ia.asset_id
+		JOIN net_group_member mz ON mz.asset_id = iz.asset_id
+		WHERE c.lifecycle = ?
+		  AND ta.lifecycle = ? AND tz.lifecycle = ?
+		  AND ma.lifecycle = ? AND mz.lifecycle = ?
+		  AND ma.group_id <> mz.group_id`,
+		domain.LifecycleActive, domain.LifecycleActive, domain.LifecycleActive,
+		domain.LifecycleActive, domain.LifecycleActive); err != nil {
+		return nil, fmt.Errorf("loading circuit edges for graph: %w", err)
+	}
+	for _, e := range circuitEdges {
+		net.Uplinks = append(net.Uplinks, impact.NetUplinkInfo{
+			GroupID: e.GroupA, UpstreamGroupID: e.GroupZ,
+			Plane:     domain.PlaneData,
+			CircuitID: e.CircuitID, Label: e.Label,
+		})
+	}
+
 	var anchors []domain.NetAnchor
 	if err := s.read(ctx, &anchors, `SELECT * FROM net_anchor WHERE lifecycle = ?`, domain.LifecycleActive); err != nil {
 		return nil, fmt.Errorf("loading net anchors for graph: %w", err)
@@ -353,6 +417,131 @@ func (s *SQLStore) DownInstances(ctx context.Context, assetIDs []string) (map[st
 }
 
 // Simulate runs a full impact analysis for a set of assets.
+// CircuitJoinsGroups reports whether this circuit is a connectivity edge --
+// whether both its ends land on interfaces of assets that forward, in two
+// different groups.
+//
+// Asked of the model rather than inferred from an empty simulation, because the
+// two mean different things: a circuit that joins nothing and a circuit whose
+// loss happens to break nothing look identical in a Result and need opposite
+// sentences on the page.
+func (s *SQLStore) CircuitJoinsGroups(ctx context.Context, circuitID string) (bool, error) {
+	var n int
+	// The same joins as the edge derivation above, and they must stay the same
+	// -- a page saying "this joins two sites" about a circuit the engine does
+	// not treat as an edge would be worse than saying nothing.
+	if err := s.readOne(ctx, &n, `
+		SELECT count(*)
+		FROM circuit c
+		JOIN circuit_termination ta ON ta.circuit_id = c.id AND ta.side = 'a'
+		JOIN circuit_termination tz ON tz.circuit_id = c.id AND tz.side = 'z'
+		JOIN interface ia ON ia.id = ta.interface_id
+		JOIN interface iz ON iz.id = tz.interface_id
+		JOIN net_group_member ma ON ma.asset_id = ia.asset_id
+		JOIN net_group_member mz ON mz.asset_id = iz.asset_id
+		WHERE c.id = ?
+		  AND c.lifecycle = ? AND ta.lifecycle = ? AND tz.lifecycle = ?
+		  AND ma.lifecycle = ? AND mz.lifecycle = ?
+		  AND ma.group_id <> mz.group_id`,
+		circuitID, domain.LifecycleActive, domain.LifecycleActive, domain.LifecycleActive,
+		domain.LifecycleActive, domain.LifecycleActive); err != nil {
+		return false, fmt.Errorf("checking whether circuit %s joins groups: %w", circuitID, err)
+	}
+	return n > 0, nil
+}
+
+// CircuitCut is what cutting one circuit does to connectivity.
+//
+// THREE OUTCOMES, AND CONFLATING ANY TWO IS A LIE THE PAGE WOULD TELL:
+//
+//	Joins == false          it is not an edge at all. Most circuits end at the
+//	                        provider, whose side is not modelled.
+//	Separates == false      it is an edge and another path survives the cut.
+//	                        This is the answer redundancy is bought for.
+//	Separates == true       it is the only path, and the far side is cut off.
+//
+// The impact Result alone cannot tell the first from the second, and cannot
+// tell either from the third when nothing on the far side happens to depend on
+// anything -- a partition with no consumers produces no findings, which reads
+// identically to no partition. So the connectivity answer is computed here,
+// from the graph, and the service consequences are reported beside it.
+type CircuitCut struct {
+	Joins     bool
+	Separates bool
+	// Groups are the codes of the two groups it joins, for the sentence.
+	Groups []string
+}
+
+// CircuitCutEffect answers what cutting one circuit does.
+func (s *SQLStore) CircuitCutEffect(ctx context.Context, circuitID string) (CircuitCut, error) {
+	var out CircuitCut
+	g, err := s.LoadGraph(ctx)
+	if err != nil {
+		return out, err
+	}
+	if g.Net == nil {
+		return out, nil
+	}
+
+	// The edges this circuit contributes, and everything else.
+	var ends [][2]string
+	adjacency := map[string][]string{}
+	for _, u := range g.Net.Uplinks {
+		if u.CircuitID == circuitID {
+			ends = append(ends, [2]string{u.GroupID, u.UpstreamGroupID})
+			continue
+		}
+		// Undirected: the reach model treats an uplink as a connection, not as
+		// a direction of travel, and a path that only works one way would make
+		// this answer disagree with the engine's.
+		adjacency[u.GroupID] = append(adjacency[u.GroupID], u.UpstreamGroupID)
+		adjacency[u.UpstreamGroupID] = append(adjacency[u.UpstreamGroupID], u.GroupID)
+	}
+	if len(ends) == 0 {
+		return out, nil
+	}
+	out.Joins = true
+	for _, code := range []string{ends[0][0], ends[0][1]} {
+		if gi, ok := g.Net.Groups[code]; ok {
+			out.Groups = append(out.Groups, gi.Code)
+		} else {
+			out.Groups = append(out.Groups, code)
+		}
+	}
+
+	// Still connected without it? A breadth-first walk over what is left.
+	for _, e := range ends {
+		if !connected(adjacency, e[0], e[1]) {
+			out.Separates = true
+			break
+		}
+	}
+	return out, nil
+}
+
+// connected reports whether b is reachable from a over the given adjacency.
+func connected(adjacency map[string][]string, a, b string) bool {
+	if a == b {
+		return true
+	}
+	seen := map[string]bool{a: true}
+	queue := []string{a}
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+		for _, next := range adjacency[cur] {
+			if next == b {
+				return true
+			}
+			if !seen[next] {
+				seen[next] = true
+				queue = append(queue, next)
+			}
+		}
+	}
+	return false
+}
+
 func (s *SQLStore) Simulate(ctx context.Context, req impact.Request) (impact.Result, error) {
 	graph, err := s.LoadGraph(ctx)
 	if err != nil {

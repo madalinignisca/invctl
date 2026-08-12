@@ -1,0 +1,86 @@
+{{/*
+  invctl — infrastructure inventory
+  Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+
+  Licensed under the GNU Affero General Public License, version 3 only —
+  no later version applies. See LICENSE for the full text.
+
+  SPDX-License-Identifier: AGPL-3.0-only
+*/}}
+{{define "content"}}
+<div class="crumbs">
+  <a href="/circuits">circuits</a><span class="sep">/</span>
+  <a href="/circuits/{{.Circuit.ID}}">{{.Circuit.CID}}</a><span class="sep">/</span><span>impact</span>
+</div>
+
+<div class="page-head">
+  <div class="eyebrow">Outage simulation</div>
+  <h1>If <span class="mono">{{.Circuit.CID}}</span> is cut</h1>
+  <p class="lede">
+    The span is gone and the ports at both ends are fine — this asks what stops
+    being reachable when the two places it joins are no longer joined by it.
+    Nothing is taken out of the estate, so anything still reachable another way
+    is correctly reported as unaffected.
+  </p>
+</div>
+
+{{if not .Cut.Joins}}
+{{/* The common case, and it must not be shown as an empty result. A circuit
+     ending at the provider is not modelled on their side, so it joins nothing
+     here -- which is a fact about the model, not a finding that cutting it is
+     harmless. Those two look identical in a Result and need opposite
+     sentences. */}}
+<div class="panel">
+  <div class="panel-head"><h2>This circuit joins nothing that is modelled</h2></div>
+  <div class="panel-body">
+    <p>
+      A circuit becomes a connectivity edge when <strong>both</strong> ends land on
+      an interface, and both of those interfaces belong to an asset that forwards
+      — a member of a network group — in two <em>different</em> groups.
+    </p>
+    <p>
+      This one does not, which is ordinary rather than wrong: most circuits end at
+      the provider, and the provider's side of them is not modelled here. Its
+      cost and its contract end are still tracked, and its
+      <a href="/circuits/{{.Circuit.ID}}">terminations</a> are still recorded — it
+      simply cannot change what is reachable, so there is nothing below.
+    </p>
+  </div>
+</div>
+{{else if .Cut.Separates}}
+<div class="panel panel-warn">
+  <div class="panel-head"><h2>Cutting this separates the estate</h2></div>
+  <div class="panel-body">
+    <p>
+      It is the <strong>only</strong> path between
+      {{range $i, $g := .Cut.Groups}}{{if $i}} and {{end}}<span class="mono">{{$g}}</span>{{end}},
+      so cutting it leaves the two sides unable to reach each other.
+    </p>
+    {{if not .HasNetworkFinding}}
+    <p>
+      Nothing below is reported as unreachable, and that is not a contradiction:
+      the two sides are separated, and nothing currently recorded on the far side
+      depends on reaching this one. A partition with nothing behind it produces no
+      findings — which is worth knowing about a disaster-recovery site, because it
+      usually means the far side is not yet modelled rather than that it is safe.
+    </p>
+    {{end}}
+  </div>
+</div>
+{{else}}
+<div class="panel">
+  <div class="panel-head"><h2>Another path survives this</h2></div>
+  <div class="panel-body">
+    <p>
+      This circuit joins
+      {{range $i, $g := .Cut.Groups}}{{if $i}} and {{end}}<span class="mono">{{$g}}</span>{{end}},
+      and cutting it separates nothing — another path already joins them. That is
+      the answer redundancy is bought for, and it is worth knowing it is real
+      rather than assumed.
+    </p>
+  </div>
+</div>
+{{end}}
+
+{{template "impact_result" .}}
+{{end}}

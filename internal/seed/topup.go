@@ -85,6 +85,9 @@ func TopUp(ctx context.Context, s *store.SQLStore) (*Refs, error) {
 	// Idempotent: it UPDATES models and racks to the same values on a second
 	// run, and b.asset skips the firewall once it exists.
 	b.companyFit()
+	// Idempotent: the group, the interfaces and the circuit each skip when
+	// already present.
+	b.companyDRLink()
 
 	if b.err != nil {
 		return nil, b.err
@@ -143,6 +146,20 @@ func (b *builder) hydrate() error {
 	}
 	for _, d := range types {
 		b.refs.DeviceTypes[d.Model] = d.ID
+	}
+
+	// NET GROUPS, and this one was added after the top-up died on a duplicate.
+	// A phase that checks b.refs before creating is only idempotent if the refs
+	// were hydrated -- an empty map means "not there" for everything, so the
+	// check passes and the insert conflicts. That is the same failure the
+	// retired-asset hydration had, in a different map: the guard is not the
+	// check, it is the check PLUS the hydration that makes it true.
+	groups, err := b.store.ListNetGroups(b.ctx)
+	if err != nil {
+		return fmt.Errorf("net groups: %w", err)
+	}
+	for _, g := range groups {
+		b.refs.NetGroups[g.Code] = g.ID
 	}
 	return nil
 }

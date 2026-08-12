@@ -325,15 +325,27 @@ end**, because a circuit has no end-of-support. Contract end joins the expiry
 report — not because anything stops working on the day, but because somebody is
 either renegotiating or being auto-renewed at a rate nobody checked.
 
-**WP-E1b · Circuits as a reachability edge** — S — depends: E1a
+**WP-E1b · Circuits as a reachability edge** — S — **DONE**
 A circuit joining two forwarder groups is a connectivity edge; losing it
 partitions the sites it joins, and a single-circuit site reports redundancy lost.
 
-*Smaller than the original note claimed — see the appendix. Partitioning is
-union-find over group-to-group edges, so this derives an edge and changes nothing
-else. Worth building when an estate has several sites and a partial mesh; on two
-sites and one circuit the finding is a sentence you can read off the
-terminations page.*
+Built as forecast: the edge is DERIVED from the terminations rather than
+declared, so nobody has to say the same thing twice and keep two records in
+agreement. `/circuits/{id}/impact` answers "the fibre is cut, what goes dark" —
+a separate entry point from the asset simulator, because a circuit is not in the
+containment tree and cutting it removes an edge rather than a vertex.
+
+*Three outcomes, and conflating any two would be a lie the page tells: it joins
+nothing (most circuits end at the provider), it joins and another path survives,
+or it joins and the far side is cut off. The impact Result cannot tell the first
+from the third when nothing on the far side depends on anything — a partition
+with no consumers produces no findings — so the connectivity answer is computed
+from the graph and shown beside the service consequences.*
+
+*The estate gained a DR forwarder group to make this demonstrable, which closed
+a real hole: dr-bergen had a switch, a firewall and no group at all, so the
+reach model did not cover the one site whose entire purpose is to still be
+reachable.*
 
 **WP-E2 · Clusters and cluster groups** — M — depends: A3
 Cluster type, group, cluster, VM placement, VM type, virtual disks.

@@ -120,6 +120,9 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	read("GET /clusters/{id}", app.ClusterDetail)
 	read("GET /circuits", app.CircuitList)
 	read("GET /circuits/{id}", app.CircuitDetail)
+	// "The fibre is cut, what goes dark" (WP-E1b). A circuit is not an asset,
+	// so it cannot ride the asset simulator -- see circuit_impact.go.
+	read("GET /circuits/{id}/impact", app.CircuitImpact)
 	read("GET /allocations", app.RegistryList)
 	read("GET /overlays", app.L2VPNList)
 	read("GET /overlays/{id}", app.L2VPNDetail)

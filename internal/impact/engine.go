@@ -29,6 +29,18 @@ type Request struct {
 	// table, so that "reboot this VM" and "this rack loses power" arrive here
 	// in the same shape.
 	DownAssetIDs []string
+	// CutCircuitIDs are circuits treated as severed for this run.
+	//
+	// SEPARATE FROM DownAssetIDs BECAUSE A CIRCUIT IS NOT AN ASSET. It has no
+	// row in the containment tree, nothing is inside it, and taking it away
+	// removes a connectivity EDGE rather than a vertex -- so folding it into
+	// the down set would either do nothing or require the closure walk to
+	// understand a kind of thing that is not in it.
+	//
+	// This is what makes "the fibre is cut, what goes dark" askable, which is
+	// the question a circuit exists to answer and the one the terminations page
+	// could only hint at.
+	CutCircuitIDs []string
 	// WindowSeconds is how long the outage lasts. It matters only for async
 	// dependencies, where a 3-minute reboot and a 45-minute one genuinely
 	// differ for a consumer with a buffer.
@@ -191,7 +203,11 @@ func Analyse(g *Graph, req Request, in Inputs) Result {
 		}
 		in.DownInstanceIDs = downInstances
 	}
-	net := buildReachModel(netInput, in.DownAssetIDs)
+	cutCircuits := make(map[string]bool, len(req.CutCircuitIDs))
+	for _, id := range req.CutCircuitIDs {
+		cutCircuits[id] = true
+	}
+	net := buildReachModel(netInput, in.DownAssetIDs, cutCircuits)
 
 	// Seam 1. An empty needsNet makes isolation unable to reach the alive
 	// term, so phaseCapacity runs exactly as it did before reachability

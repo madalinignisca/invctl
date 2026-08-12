@@ -53,6 +53,8 @@ func (b *builder) company() {
 	// Measurements go after everything that creates a rack or a model, since
 	// this phase reads them back and fills them in.
 	b.companyFit()
+	// The DR fibre last: it needs the compute layer's Bergen switch.
+	b.companyDRLink()
 }
 
 // companySites adds the third on-prem rack and the rented colo.

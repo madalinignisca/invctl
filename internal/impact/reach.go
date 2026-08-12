@@ -61,6 +61,23 @@ type NetUplinkInfo struct {
 	GroupID         string
 	UpstreamGroupID string
 	Plane           string
+	// CircuitID is set when this edge was DERIVED from a circuit whose two ends
+	// land on interfaces of assets in different groups, and empty for a
+	// declared net_uplink row.
+	//
+	// It is here so the edge can be withdrawn again. A circuit is not an asset,
+	// so "simulate losing this" cannot go through the ordinary down-set; naming
+	// the circuit on the edge is what lets components() drop exactly the edges
+	// a cut fibre removes and nothing else.
+	//
+	// Derived rather than declared, deliberately: a circuit's terminations are
+	// already recorded, so asking somebody to ALSO declare an uplink for it
+	// would be asking them to say the same thing twice and to keep the two in
+	// agreement forever.
+	CircuitID string
+	// Label names the circuit for a finding. Empty for declared uplinks, which
+	// are described by their groups.
+	Label string
 }
 
 // NetAttachmentInfo is a host's attachment to a group on one plane.
@@ -299,7 +316,14 @@ func (uf *unionFind) union(a, b string) {
 
 // components unions every edge on one plane whose endpoints both satisfy
 // allow, and returns each allowed vertex's representative.
-func components(net *NetGraph, status map[string]domain.Status, plane string, allow func(domain.Status) bool) map[string]string {
+//
+// cutCircuits names circuits treated as severed for this run. An edge derived
+// from one is skipped, which is the whole of "simulate losing this circuit":
+// the fibre is not carrying anything, so the two groups it joined are no longer
+// joined by it -- and if another path joins them, the partition is unchanged
+// and the answer is correctly "nothing happens".
+func components(net *NetGraph, status map[string]domain.Status, plane string,
+	allow func(domain.Status) bool, cutCircuits map[string]bool) map[string]string {
 	nodes := make([]string, 0, len(net.Groups))
 	inSet := make(map[string]bool, len(net.Groups))
 	for id, st := range status {
@@ -317,6 +341,9 @@ func components(net *NetGraph, status map[string]domain.Status, plane string, al
 			continue
 		}
 		if !inSet[u.GroupID] || !inSet[u.UpstreamGroupID] {
+			continue
+		}
+		if u.CircuitID != "" && cutCircuits[u.CircuitID] {
 			continue
 		}
 		edges = append(edges, u)
@@ -372,23 +399,27 @@ type reachModel struct {
 
 	netOfCache    map[netKey][]string
 	modelledCache map[netKey]bool
+	// cutCircuits is carried so a finding can say which circuit it was.
+	cutCircuits map[string]bool
 }
 
 // buildReachModel returns nil when net is nil or declares nothing, which is
 // what makes every call site's `net == nil` check sufficient on its own.
-func buildReachModel(net *NetGraph, down map[string]bool) *reachModel {
+func buildReachModel(net *NetGraph, down map[string]bool, cutCircuits map[string]bool) *reachModel {
 	if net.IsEmpty() {
 		return nil
 	}
-	m := &reachModel{net: net, down: down}
+	m := &reachModel{net: net, down: down, cutCircuits: cutCircuits}
 	m.groupStatus = groupStatuses(net, down)
 
 	planes := []string{domain.PlaneData, domain.PlaneMgmt, domain.PlaneStorage}
 	m.compOptimistic = make(map[string]map[string]string, len(planes))
 	m.compPessimistic = make(map[string]map[string]string, len(planes))
 	for _, p := range planes {
-		m.compOptimistic[p] = components(net, m.groupStatus, p, func(s domain.Status) bool { return s != domain.StatusDown })
-		m.compPessimistic[p] = components(net, m.groupStatus, p, func(s domain.Status) bool { return s == domain.StatusOK })
+		m.compOptimistic[p] = components(net, m.groupStatus, p,
+			func(s domain.Status) bool { return s != domain.StatusDown }, cutCircuits)
+		m.compPessimistic[p] = components(net, m.groupStatus, p,
+			func(s domain.Status) bool { return s == domain.StatusOK }, cutCircuits)
 	}
 
 	m.attachmentsByAssetPlane = map[string]map[string][]int{}
