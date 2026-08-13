@@ -9,6 +9,14 @@ invctl.db-shm
 # Coverage output.
 coverage.out
 
+# Profiling leftovers. `go test -cpuprofile` writes the compiled test binary
+# beside the profile so pprof can resolve symbols, and a 29MB one was committed
+# and pushed by a `git add -A` during WP-I3 before this rule existed.
+*.test
+*.prof
+cpu.out
+mem.out
+
 # Browser tooling scratch.
 /.playwright-mcp/
 shot-*.png

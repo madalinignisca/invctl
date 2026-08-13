@@ -34,6 +34,52 @@ footnote.
 
 ---
 
+## [0.4.0] — 2026-08-13
+
+Performance. **No migration and no new setting** — replace the binary and
+restart.
+
+### Action required
+
+- **Nothing.** No migration runs, no configuration changes, and no page answers
+  differently. Back up before the upgrade as you would for any other, but there
+  is no schema change to reverse.
+
+### Changed
+
+- **The prefix list is about four times faster.** On a 10,000-prefix estate the
+  page went from **711ms to 181ms**. It was doing quadratic work: for every
+  prefix it rescanned every other prefix to find its children, which is a
+  hundred million comparisons at that size and is invisible until an estate gets
+  large. The output is identical — same prefixes, same order, same utilisation
+  and next-free figures.
+
+  If your IPAM has thousands of prefixes you will notice this. If it has dozens,
+  it was never slow and nothing changes.
+
+### Nothing else moved
+
+Measured on the same 10,000-prefix, 50,000-address estate, before and after:
+the overview at 16ms, an outage simulation at 4.9ms, an address search at 1.8ms
+and the asset list at 1.5ms are unchanged. They were not slow and were not
+touched — this release fixes one specific defect rather than tuning everything
+in reach.
+
+### Known limits
+
+Unchanged: **authorization is a flat username list** (`INV_ADMIN_USERS`),
+granting write access across the whole estate; directory groups are not
+consulted, and notes are readable by anyone who can read the entity they hang
+off.
+
+Worth stating for this release specifically: **the prefix page still renders
+every prefix in the estate**, computing next-free for each. Ten thousand rows is
+a large answer to a question nobody asked, and the remaining 181ms is mostly
+that. Paginating it is a change to how the page works rather than an
+optimisation, so it has not been done quietly.
+
+[0.4.0]: https://github.com/madalinignisca/invctl/releases/tag/v0.4.0
+
 ## [0.3.0] — 2026-08-13
 
 One feature: whether a rack can actually be cabled. It completes the physical
