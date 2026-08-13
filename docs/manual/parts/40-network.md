@@ -1,6 +1,6 @@
 # Network — topology, circuits, overlays, redundancy
 
-> Covers: `/network`, `/paths`, `/circuits`, `/circuits/{id}`, `/overlays`, `/redundancy`, `/redundancy/{id}`
+> Covers: `/network`, `/paths`, `/circuits`, `/circuits/{id}`, `/circuits/{id}/impact`, `/overlays`, `/redundancy`, `/redundancy/{id}`
 > Regenerated when: circuits, first-hop redundancy, overlays or the reachability
 > model changes.
 
@@ -37,6 +37,8 @@ by a group does not live on one box.
 
 ## Circuits
 
+![The circuits page. Four circuits — AB-FTTH-99312, TN-4471182, GC-88-21104 and DF-OSLO-BGO-01 — with provider, service type, commit, contract end and an "ends recorded" column reading BOTH or an amber "0 OF 2". Below, a table of the four providers with account references.](../img/network-1-circuits.png)
+
 The estate already records the *port* a handoff lands on. A circuit is the other
 half: who sells it, what was committed, what it costs a month, and **when the
 contract ends**.
@@ -55,7 +57,40 @@ windows. A one-off install fee is spread to the **contract end**, because a
 circuit has no end-of-support — it has a contract, and a fee spread over
 anything else is a made-up number.
 
+## If the fibre is cut
+
+A circuit's page has **Simulate cutting this**. It is a different question from
+losing an asset: nothing is taken out of the estate and the ports at both ends
+are fine — what goes away is the *span* joining two places.
+
+![The page "If DF-OSLO-BGO-01 is cut". A panel headed "Cutting this separates the estate" explains it is the only path between fw-edge and sw-dr. Beneath it, "Nothing breaks. No service loses enough capacity to matter, and no dependency propagates from here", then the network reachability panel.](../img/network-4-circuit-cut.png)
+
+The page leads with whether the circuit is a **connectivity edge** at all, and
+that is the first thing to read.
+
+**"This circuit joins nothing that is modelled"** is the common answer, and it
+is ordinary rather than wrong. A circuit only becomes an edge when both ends
+land on a port, each port belongs to something that forwards, and those two
+things are in different forwarder groups. Most circuits end at the provider, and
+the provider's side is not modelled here. Its cost and its contract end are
+still tracked and its terminations are still recorded — it simply cannot change
+what is reachable, so there is nothing below. Three of the demo's four circuits
+answer this way.
+
+**"Cutting this separates the estate"** is the other, and the screenshot is it.
+The dark fibre is the only path between the Oslo and Bergen forwarders, so
+cutting it leaves the two sides unable to reach each other.
+
+Then read what follows it, because this is the pairing that matters: the estate
+is genuinely cut in two and **nothing breaks**. That is not a contradiction and
+it is not a clean bill of health. Nothing currently recorded on the far side
+depends on reaching this one — which, about a disaster-recovery site, usually
+means the far side is not yet modelled rather than that it is safe. The page
+says so itself rather than letting a quiet result be read as reassurance.
+
 ## Overlays
+
+![The overlays page. Two overlays carried by vxlan: dr-replication with identifier 10040 tagged UNATTACHED in red, and prod-stretch with identifier 10030 showing "2 attachments".](../img/network-3-overlays.png)
 
 A VLAN is a broadcast domain on one fabric. An overlay carries one *across* a
 fabric — VXLAN over an IP underlay, VPLS over MPLS. It matters because every

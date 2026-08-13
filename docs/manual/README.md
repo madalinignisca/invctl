@@ -10,7 +10,8 @@ for the people using it.
 | [Installing and running](parts/10-installation.md) | install, configure, first run, upgrades, backups — **for administrators** |
 | [Directory authentication](parts/12-directory.md) | LDAP and Active Directory sign-in |
 | [Getting started](parts/00-getting-started.md) | signing in, the overview, finding your way around |
-| [The estate](parts/20-estate.md) | assets, the hardware catalogue, power, clusters |
+| [The estate](parts/20-estate.md) | assets, the hardware catalogue, notes, CSV, power, clusters |
+| [Racks](parts/25-racks.md) | elevations, whether a box fits, load, airflow, cabling |
 | [Addressing](parts/30-addressing.md) | prefixes, reservations, VLANs, allocations |
 | [Network](parts/40-network.md) | topology, circuits, overlays, redundancy groups |
 | [Reports](parts/50-reports.md) | outage simulation, what expires, power findings, the change log |

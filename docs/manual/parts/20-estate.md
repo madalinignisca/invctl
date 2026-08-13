@@ -13,7 +13,7 @@ hypervisor, a virtual machine, a bridge. They nest — a VM inside a hypervisor
 inside a rack inside a site — and that containment is what makes *"this rack
 loses power"* and *"reboot this VM"* the same kind of question.
 
-![The asset list. Filters for name or serial, kind and environment sit above a table of 65 assets with columns for name, kind, contained by, environments, serial and lifecycle. A bridge shows DEV and PROD together with a SPANS tag.](../img/estate-1-assets.png)
+![The asset list. Filters for name or serial, kind and environment sit above a table of 72 assets with columns for name, kind, contained by, environments, serial and lifecycle. A bridge shows DEV and PROD together with a SPANS tag.](../img/estate-1-assets.png)
 
 The **contained by** column is the tree; nothing else on the row is. Environment
 membership in particular is a set rather than a place, and an asset in more than
@@ -34,6 +34,21 @@ about what exists, and a retired asset does not.
 `R1` in different sites is normal, and so is `web-01` in two clusters. This is
 also the key a spreadsheet import can express, since a file does not know your
 UUIDs.
+
+## Taking a list away with you
+
+Under the table is **Download this list as CSV**. It exports what you are
+looking at, filters included — filter to firewalls and you get the eight
+firewalls, not all seventy-two.
+
+The columns are **the ones the importer reads**, so a file you export can be
+edited in a spreadsheet and loaded back. That round trip is the point: bulk
+correction is the job people actually have, and an export whose shape the
+importer rejects makes them retype it.
+
+Four lists export: assets, services, circuits and prefixes. A feature present on
+one page and missing on three is a feature nobody discovers, so the four behave
+identically and a test enforces it.
 
 ## The catalogue
 
@@ -66,6 +81,37 @@ itself. **Observed health** is the only part of the page the estate wrote rather
 than a person: it carries its reporter and its age, and once a reading is older
 than three of that reporter's intervals it shows as `unknown` rather than as a
 last value that has stopped being true.
+
+A rack's page carries two more panels — its elevation and its
+[physical fit](25-racks.md) — because a cabinet is asked different questions
+from the things inside it.
+
+## Notes
+
+What a person knows that no column has a place for: why it is on that firmware,
+which case covers it, what was decided and by whom.
+
+![The Notes panel on the rack-a2 page. A note tagged DECISION by "Seeded administrator" reads "The three ESX hosts stay in this cabinet until the A-row refresh. We know they overhang: the rear door is off and cable-tied open, and facilities have signed that off in writing until Q1." Below it a form with a Kind selector and a body field, and beneath that the Timeline showing the same note as a journal row beside declared changes.](../img/estate-5-notes.png)
+
+Four kinds, because a reader scanning a timeline wants to tell them apart:
+**note** for context, **incident** for what happened while it was happening,
+**maintenance** for planned work, and **decision** for a choice and its reason —
+the one that rots worst untold.
+
+Notes appear on the **timeline** beside the audit trail and are labelled there
+as notes, so what somebody wrote and what the software recorded never look like
+the same kind of statement. They sit on ten kinds of thing: assets, services,
+circuits, clusters, projects, overlays, redundancy groups, VLANs, prefixes and
+teams.
+
+A withdrawn note keeps its row like everything else here. Something that was
+said was still said, and the record of the withdrawal has to refer to something.
+
+**One warning, and it is the only place in the software that needs it.** The
+audit trail deliberately holds no personal data — it records an opaque account
+id, never a name — which is what lets it be kept for ever with no retention
+argument. This field is free text and is kept on the same terms. Do not write
+anything here about a person that you would not want kept indefinitely.
 
 ## Clusters
 

@@ -105,6 +105,19 @@ page is shut. If a screenshot is meant to show navigation, open the groups you
 are describing first; otherwise leave them as they are, because that is what the
 reader sees.
 
+**Clear `invctl.nav.*` from localStorage before the first capture.** The rail
+remembers what you opened, and a browser profile that survives between capture
+runs carries the *previous* run's expanded groups into this one. That happened:
+the August 9 overview shot showed Estate, Network and Addressing open on a page
+that opens none of them, and nothing in the process could catch it — the image
+was real, the page was real, and it still showed a state no first-time reader
+sees. Run this before capturing, then reload:
+
+```js
+Object.keys(localStorage).filter(k => k.startsWith('invctl.nav.'))
+  .forEach(k => localStorage.removeItem(k))
+```
+
 **Log in before capturing anything.** An unauthenticated request redirects to
 `/login`, and a screenshot of the login page filed as `assets-list` is the kind
 of error nobody notices for a year.
@@ -121,6 +134,13 @@ of error nobody notices for a year.
    redundancy group with one member, and if the demo has none, the image is
    worthless even though the page loaded. Fix the demo data first, or say in the
    fragment that the state could not be shown.
+
+   **One precondition the seed does not satisfy: the estate holds no journal
+   entries.** The notes panel is empty on every page, so the `estate` fragment's
+   notes capture is made by writing one on the local copy — which is exactly why
+   the local copy is preferred above. If that ever changes and the seed grows
+   notes of its own, drop this paragraph and the matching manifest line rather
+   than leaving two answers to the same question.
 4. Navigate, capture, write.
 5. Update that fragment's `generated_at` to the current `HEAD` sha. **Only that
    fragment's.**

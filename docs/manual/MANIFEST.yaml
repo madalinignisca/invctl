@@ -37,7 +37,8 @@ fragments:
       - web/templates/pages/login.html
     preconditions:
       - "the overview shows at least one finding of each severity (fault, risk, gap)"
-    generated_at: 9e1eea224a5c
+      - "no invctl.nav.* keys in localStorage before capturing: a persistent browser profile carries the previous run's expanded groups into the next, and a fresh reader sees everything collapsed"
+    generated_at: 8cc0d28bcf9d
 
   - id: installation
     title: Installing and running invctl
@@ -87,22 +88,56 @@ fragments:
       - img/estate-2-asset-detail.png
       - img/estate-3-clusters.png
       - img/estate-4-cluster-detail.png
+      - img/estate-5-notes.png
     depends_on:
       - internal/web/handlers/assets.go
       - internal/web/handlers/clusters.go
       - internal/web/handlers/power.go
       - internal/web/handlers/hardware.go
+      - internal/web/handlers/journal.go
+      - internal/web/render/csv.go
       - internal/domain/asset.go
       - internal/domain/cluster.go
       - internal/domain/hardware.go
+      - internal/domain/journal.go
       - web/templates/pages/asset_list.html
       - web/templates/pages/asset_detail.html
       - web/templates/pages/cluster_list.html
       - web/templates/pages/cluster_detail.html
+      - web/templates/partials/journal.html
     preconditions:
       - "one cluster whose min_hosts equals its host count, so the 'not survivable' row is visible"
       - "one asset whose EOL date is inherited from its device type, so the source is shown"
-    generated_at: 9e1eea224a5c
+      - "at least one journal entry exists — the seeded estate has NONE, so the notes capture is made by writing one on the local copy first (see REGENERATING.md)"
+    generated_at: 8cc0d28bcf9d
+
+  - id: racks
+    title: Racks — will it fit, will it hold, will it stay cool
+    file: parts/25-racks.md
+    pages:
+      - /assets/{id}
+      - /catalogue
+    screenshots:
+      - img/racks-1-fit.png
+      - img/racks-2-elevation.png
+      - img/racks-3-catalogue-measurements.png
+    depends_on:
+      - internal/domain/fit.go
+      - internal/domain/rack.go
+      - internal/store/fit.go
+      - internal/store/racks.go
+      - internal/web/handlers/assets.go
+      - internal/web/handlers/hardware.go
+      - web/templates/pages/asset_detail.html
+      - web/templates/pages/catalogue.html
+      - web/templates/partials/forms.html
+    preconditions:
+      - "one rack with a measured depth, width and load rating, holding at least one box too deep for it"
+      - "one side-breathing model placed in a cabinet under 700mm wide"
+      - "two vertically adjacent boxes with opposing airflow"
+      - "one box carrying 24 or more leads, and one declared cable length too short for its span"
+      - "rack-a2 and colo-rack-07 in the seeded estate hold all of the above between them"
+    generated_at: 8cc0d28bcf9d
 
   - id: addressing
     title: Addressing — prefixes, VLANs, allocations
@@ -114,10 +149,6 @@ fragments:
       - /allocations
     screenshots:
       - img/addressing-1-prefixes.png
-    # Named but NOT YET CAPTURED. The manifest must never claim an image
-    # that does not exist -- a reader trusts it and it silently stops
-    # matching. Capture these and move them up.
-    screenshots_pending:
       - img/addressing-2-vlans.png
       - img/addressing-3-vlan-detail.png
       - img/addressing-4-allocations.png
@@ -140,7 +171,8 @@ fragments:
       - "a prefix tree at least two levels deep, so containment and indentation are visible"
       - "one VLAN carrying two prefixes (the dual-stack case)"
       - "at least one reservation, so 'next free' visibly skips it"
-    generated_at: c2b74b1ed728
+      - "one registry allocation with nothing carved out of it, so 'unused' is visible"
+    generated_at: 8cc0d28bcf9d
 
   - id: network
     title: Network — topology, circuits, overlays, redundancy
@@ -154,15 +186,13 @@ fragments:
       - /redundancy
       - /redundancy/{id}
     screenshots:
-      - img/network-2-redundancy.png
-    # Named but NOT YET CAPTURED. The manifest must never claim an image
-    # that does not exist -- a reader trusts it and it silently stops
-    # matching. Capture these and move them up.
-    screenshots_pending:
       - img/network-1-circuits.png
+      - img/network-2-redundancy.png
       - img/network-3-overlays.png
+      - img/network-4-circuit-cut.png
     depends_on:
       - internal/web/handlers/circuits.go
+      - internal/web/handlers/circuit_impact.go
       - internal/web/handlers/fhrp.go
       - internal/web/handlers/l2vpn.go
       - internal/web/handlers/reach.go
@@ -171,13 +201,15 @@ fragments:
       - internal/domain/l2vpn.go
       - web/templates/pages/circuit_list.html
       - web/templates/pages/circuit_detail.html
+      - web/templates/pages/circuit_impact.html
       - web/templates/pages/fhrp_list.html
       - web/templates/pages/l2vpn_list.html
     preconditions:
       - "one redundancy group with a single member, so the finding is visible"
       - "one circuit with a contract end inside the expiry horizon"
       - "one overlay with fewer than two terminations"
-    generated_at: c2b74b1ed728
+      - "one circuit that IS a connectivity edge (both ends on ports, in two different forwarder groups) and one that is not — the manual documents both verdicts"
+    generated_at: 8cc0d28bcf9d
 
   - id: reports
     title: Reports — what expires, power, impact
@@ -189,13 +221,10 @@ fragments:
       - /assets/{id}/impact
       - /changes
     screenshots:
-      - img/reports-3-impact.png
-    # Named but NOT YET CAPTURED. The manifest must never claim an image
-    # that does not exist -- a reader trusts it and it silently stops
-    # matching. Capture these and move them up.
-    screenshots_pending:
       - img/reports-1-expiry.png
       - img/reports-2-power.png
+      - img/reports-3-impact.png
+      - img/reports-4-impact-network.png
     depends_on:
       - internal/store/expiry.go
       - internal/store/power_findings.go
@@ -208,6 +237,7 @@ fragments:
       - web/templates/partials/impact_result.html
     preconditions:
       - "at least one expired item and one expiring soon"
-      - "a power chain producing a false-redundancy finding"
+      - "a power chain producing a false-redundancy finding AND one converging upstream as designed — the manual turns on the difference"
       - "an asset whose loss empties a VLAN or reduces a redundancy group"
-    generated_at: c2b74b1ed728
+      - "an asset whose loss changes NO service status but does change reachability (sw-core-1 in the seeded estate)"
+    generated_at: 8cc0d28bcf9d

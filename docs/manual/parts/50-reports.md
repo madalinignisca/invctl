@@ -11,7 +11,7 @@ The pages that answer "so what".
 The most important page in the software, and the one to open first when
 something is on fire — or, better, long before.
 
-![The impact page for hv-01. It says "If hv-01 goes away", then "Nothing breaks. No service loses enough capacity to matter, and no dependency propagates from here." Below, a table shows RELOCATED / prod-pve / 4 guests / "4 guest(s) restarted on the 2 surviving host(s); they were not serving during the restart".](../img/reports-3-impact.png)
+![The impact page for hv-01. A "Taken away" panel names hv-01 with a control to add another asset, then an outage-length selector. Below, "Nothing breaks. No service loses enough capacity to matter, and no dependency propagates from here." Below that, a table shows RELOCATED / prod-pve / 4 guests / "4 guest(s) restarted on the 2 surviving host(s); they were not serving during the restart".](../img/reports-3-impact.png)
 
 Pick an asset and the engine takes it away, along with everything it contains,
 then propagates failure along the dependency edges until the answer stops
@@ -49,7 +49,23 @@ hosts have a modelled network attachment and how many do not. An unmodelled host
 is never reported as isolated, so without that count a quiet report could mean
 either "all fine" or "nothing modelled", and those are different.
 
+### When no service changes and the answer is still no
+
+![The impact page for sw-core-1. A banner reads "No service changes status — but the network does. Nothing loses enough capacity to matter and no dependency propagates from here, yet this outage still changes what can reach what." Below, a reachability table: FHRP gw-transit 0 of 1, "no router left to answer for the virtual address"; VLAN 30 and VLAN 99 each 1 of 2, "the broadcast domain does not survive the next failure".](../img/reports-4-impact-network.png)
+
+Losing `sw-core-1` costs no service its status, and the page still refuses to
+say the outage is free. The redundancy group behind the transit gateway has no
+router left to answer for its virtual address, and two VLANs drop to a single
+port each — one more failure and the broadcast domain is gone.
+
+This is the shape of finding a status-only view cannot produce. Every service is
+green, every dependency is satisfied, and the estate has quietly spent its
+margin. Read the reachability panel before treating a quiet simulation as a
+safe one.
+
 ## What expires
+
+![The "What expires" page. Three counts at the top: 6 already expired, 13 within 12 months, 57 with no date recorded. A horizon selector offers 3, 6, 12, 24 and 60 months. The table lists 19 things with a date, soonest first, each with what rides on it and a state badge reading EXPIRED 14 MONTHS AGO or IN 5 DAYS.](../img/reports-1-expiry.png)
 
 One list, ordered by date, of everything with a date: hardware support,
 certificates, service end-of-life, and circuit contract ends.
@@ -69,6 +85,8 @@ counterpart: a report of what expires is worth much less without a count of what
 has never been dated.
 
 ## Power findings
+
+![The power findings page. Four counts: 2 false redundancy, 1 single-fed carrying services, 0 feeds over their derating, 1 converging upstream as designed. The table shows hv-01 FALSE REDUNDANCY "inputs A and B converge on ups UPS-A", hv-02 CONVERGES UPSTREAM "on generator GEN-1 — which is the usual design rather than a fault", and hv-03 SINGLE-FED. A footer reads "5 assets have a power input recorded. 5 sites have no panel at all".](../img/reports-2-power.png)
 
 Three findings, and the separation between them is the point:
 
@@ -110,3 +128,13 @@ by writing a new one, never by editing the old.
 Reported health from monitoring does **not** appear here. It has its own trail,
 because a 30-second poll would bury the configuration change that caused an
 incident under millions of rows saying nothing changed.
+
+An entity's own page shows a **timeline** rather than this list: its changes, the
+things one hop from it, and any [notes](20-estate.md) somebody wrote, in one
+ordering. Notes are labelled as notes there, so what a person said and what the
+software recorded never read as the same kind of statement.
+
+Four lists — assets, services, circuits and prefixes — offer a **CSV download**
+of what you are looking at, filters included. See
+[the estate](20-estate.md) for what the columns are and why they match the
+importer's.

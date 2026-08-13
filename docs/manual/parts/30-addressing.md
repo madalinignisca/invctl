@@ -42,7 +42,14 @@ A reserved span is never offered as free, whether or not anything in it is
 recorded here. That is the entire point: whatever holds it will issue from it
 without asking.
 
+Reservations live on the prefixes page rather than a page of their own — a span
+of addresses only means anything beside the network it falls in. The demo holds
+two: a load balancer's VIP range and a DHCP pool, each with the note saying who
+issues from it.
+
 ## VLANs
+
+![The VLANs page listing four VLANs — 10, 30, 40 and 99 — each in the estate-wide group, with columns for networks and ports. VLAN 30 carries 2 networks; VLAN 10 has 5 ports. A caption reads "A VLAN ID is only unique within its group".](../img/addressing-2-vlans.png)
 
 A VLAN is a broadcast domain, not a number written on a network. Two ports in
 the same VLAN can reach each other whether or not a cable was drawn between
@@ -58,6 +65,8 @@ A VLAN's detail page leads with its **ports**, and says so when there are none �
 a VLAN with networks and no ports is a declared record rather than a broadcast
 domain, and nothing can reach anything through it.
 
+![The VLAN 30 detail page. A ports panel lists sw-core-1 and sw-core-2 on Ethernet1, both tagged TRUNK, with a form to add a port and choose tagged or untagged. Beside it a networks panel shows 10.20.30.0/24 and 2001:db8:20::/64, with a note explaining that more than one network on one VLAN is normally dual-stack.](../img/addressing-3-vlan-detail.png)
+
 More than one network on one VLAN is normal and usually dual-stack: the IPv4 and
 IPv6 halves of a broadcast domain are one place. A bare VLAN number written on
 each network could never say that.
@@ -67,6 +76,8 @@ have one unambiguous home — and choosing a new one replaces whatever was there
 rather than refusing.
 
 ## Allocations
+
+![The allocations page. Two allocations: 10.20.0.0/16 with 5 networks inside it and 100% used, and 185.42.128.0/22 allocated on 2019-06-14 with 0 networks and 0.0% marked "unused". Below, one AS number, AS64512, tagged PRIVATE.](../img/addressing-4-allocations.png)
 
 A prefix says a network exists. An allocation says whether the space is
 **yours**: a registry delegation you keep, a slice of a provider's range that

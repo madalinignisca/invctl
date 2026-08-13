@@ -26,11 +26,16 @@ pages. The rail's footer shows which you have.
 The first page is not a dashboard of counts. It is a list of **what needs a
 decision**.
 
-![The overview page. A table headed "8 findings" lists rows tagged FAULT, RISK or GAP, each with a count, a finding and an example — "past its date, 6, sw-core-1 lapsed on 2025-06-03". Below it are counts of assets, services and environments.](../img/getting-started-2-overview.png)
+![The overview page. A table headed "17 findings" lists rows tagged FAULT, RISK or GAP, each with a count, a finding and an example — "past its date, 6, sw-core-1 lapsed on 2025-06-03" and "too deep for the rack, 3, hv-esx-01 in rack-a2: 772mm chassis plus 75mm for cabling needs 847mm, and the cabinet has 600mm".](../img/getting-started-2-overview.png)
 
 Every row here was already computed by some other page. What this adds is the
 one place that says them together, because a finding on a page nobody opened
 this week is a finding nobody has.
+
+The example column carries the arithmetic, not just a verdict. A row saying
+*"too deep for the rack"* is an opinion; one saying *"772mm chassis plus 75mm
+for cabling needs 847mm, and the cabinet has 600mm"* is something you can
+disagree with, which is what makes it worth reading at all.
 
 The three severities are not decoration:
 
@@ -54,7 +59,7 @@ The rail groups pages by the question they answer rather than by what they
 store. Groups are collapsed until you open them, and the group holding your
 current page opens itself.
 
-![The navigation rail with Estate, Network and Addressing expanded, showing Assets, Catalogue, Power, Clusters under Estate and Topology, Firewalls, Switches, Paths, Circuits, Overlays, Redundancy under Network.](../img/getting-started-3-rail.png)
+![The Firewalls page. In the rail, Network is the only open group, with Firewalls highlighted; Estate is collapsed even though the page underneath is the asset list. The table lists eight firewalls with their kind, containing rack, environments, serial and lifecycle.](../img/getting-started-3-rail.png)
 
 **Only what you open or close is remembered**, so the rail settles into the
 shape you use. A group that opens because you happen to be on a page inside it
@@ -67,9 +72,10 @@ a filter already applied. They are a view, not a second home: a firewall lives
 in the Estate because it also sits in a rack, costs money, draws power and has a
 support date. One place it lives, several places it appears.
 
-Using one of them puts you in **Network**, not in the Estate, because that is
-the entry you clicked. The rail marks the view you are in rather than the page
-underneath it.
+The screenshot shows what follows from that. Firewalls is the page, so
+**Network** is the open group and Estate stays shut — even though the page
+underneath is the asset list. The rail marks the view you are in rather than the
+page underneath it, and it does not open a second group behind your back.
 
 The search box at the top takes an IP address, a MAC, a serial, a hostname, a
 service code or a port number, and resolves it to whatever holds it. It is the
