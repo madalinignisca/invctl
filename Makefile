@@ -154,17 +154,28 @@ clean-db:
 # Test
 # ---------------------------------------------------------------------------
 
+# THE TIMEOUT IS EXPLICIT HERE FOR THE REASON IT IS IN CI: Go's default is ten
+# minutes and the store package alone takes longer than that once both engines
+# are in play. A local run that dies on a timeout teaches somebody to reach for
+# test-sqlite, which is the habit this whole target exists to prevent.
 .PHONY: test
 test: compose-up ## Run the full suite against both engines
-	INV_TEST_POSTGRES_DSN="$(PG_DSN)" go test ./... -count=1
+	INV_TEST_POSTGRES_DSN="$(PG_DSN)" go test ./... -count=1 -timeout 30m
 
+# SQLITE ONLY, AND IT IS NOT THE GATE. Useful while iterating on something that
+# cannot be dialect-specific; useless as evidence that a change is finished.
+# `make test` is what CI runs and what the definition of done means, and a
+# change that passes here and fails there is the exact failure the dual-engine
+# rule exists to catch -- which has happened, on a release tag, after a whole
+# day of green SQLite runs.
 .PHONY: test-sqlite
-test-sqlite: ## Run the suite against SQLite only (no Docker needed)
-	go test ./... -count=1
+test-sqlite: ## Run against SQLite only — NOT the gate; see `make test`
+	@echo "SQLite only. This is not the gate: run 'make test' before calling anything done."
+	go test ./... -count=1 -timeout 20m
 
 .PHONY: test-race
 test-race: compose-up ## Run the suite with the race detector
-	INV_TEST_POSTGRES_DSN="$(PG_DSN)" go test ./... -race -count=1
+	INV_TEST_POSTGRES_DSN="$(PG_DSN)" go test ./... -race -count=1 -timeout 60m
 
 .PHONY: cover
 cover: compose-up ## Report test coverage

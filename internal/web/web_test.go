@@ -24,6 +24,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/alexedwards/scs/sqlite3store"
 	"github.com/alexedwards/scs/v2"
@@ -1044,9 +1045,25 @@ func TestAccessLogRecordsTheUser(t *testing.T) {
 	resp := h.get("/assets", false)
 	resp.Body.Close()
 
-	logged := buf.String()
+	// WAITED FOR, NOT READ IMMEDIATELY. The access line is written by the
+	// server's handler goroutine after the response is flushed, so the client
+	// can have its answer before the line exists -- a race that is invisible on
+	// an idle machine and cost a release on a loaded CI runner, where the
+	// buffer came back completely empty.
+	//
+	// A bounded wait rather than a sleep: it returns as soon as the line lands,
+	// so the ordinary case stays instant and only a genuine absence takes the
+	// full second.
+	logged := ""
+	for i := 0; i < 100; i++ {
+		logged = buf.String()
+		if strings.Contains(logged, "path=/assets") {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	if !strings.Contains(logged, "path=/assets") {
-		t.Fatalf("the request was not logged: %s", logged)
+		t.Fatalf("the request was not logged after waiting: %s", logged)
 	}
 	if strings.Contains(logged, "user=-") {
 		t.Errorf("an authenticated request logged user=-: %s", logged)

@@ -199,6 +199,8 @@ make build      # CGO_ENABLED=0 go build -o bin/invctl ./cmd/invctl
 
 Tests must pass against **both** engines. `make test` runs the store suite twice — SQLite in-memory and Postgres via a container. A change that only passes on SQLite is not done.
 
+**`go test ./...` on its own is NOT the gate.** With `INV_TEST_POSTGRES_DSN` unset the Postgres half is silently skipped, so it reports green on half the evidence — and a whole day of that ended in a release tag failing CI. Use `make test`. It brings the container up itself and carries the longer timeout the suite genuinely needs; Go's ten-minute default is below what both engines cost.
+
 ---
 
 ## Definition of done

@@ -52,8 +52,21 @@ jobs:
           cache: true
       - name: go vet
         run: go vet ./...
+
+      # THE TIMEOUT IS EXPLICIT BECAUSE GO'S DEFAULT IS TEN MINUTES AND THIS
+      # SUITE GENUINELY TAKES LONGER. It runs every store test twice -- SQLite
+      # in memory and PostgreSQL over a socket -- which is the project's central
+      # constraint and not something to trim to fit an arbitrary default.
+      #
+      # Measured: 586s at v0.2.0 and over the line at v0.3.0, so the release
+      # workflow failed on a timeout rather than on a broken test. Thirty
+      # minutes is roughly three times the current cost, which leaves room to
+      # grow and still fails fast on a genuine hang.
+      #
+      # If this number needs raising again, that is WP-I3 asking to be done
+      # rather than a number to increase.
       - name: test (both engines)
-        run: go test ./... -count=1
+        run: go test ./... -count=1 -timeout 30m
 
   build:
     needs: verify
