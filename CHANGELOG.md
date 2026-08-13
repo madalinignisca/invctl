@@ -34,6 +34,58 @@ footnote.
 
 ---
 
+## [0.3.0] — 2026-08-13
+
+One feature: whether a rack can actually be cabled. It completes the physical
+group — will it fit (0.1.0), will it stay cool (0.1.0), can it be wired (this).
+
+### Action required
+
+- **Migration `00040` runs at startup** and adds one nullable column
+  (`device_type.port_face`). It alters no data and rewrites no table; the
+  restart is the usual few seconds. Back up first regardless:
+  `sqlite3 invctl.db ".backup 'invctl-$(date -u +%Y%m%d).db'"`.
+- **Nothing you rely on changes.** No configuration, no defaults, and no
+  existing page answers differently.
+
+### Added
+
+- **Where the ports are, on a catalogued model** — front, rear, or both. One
+  field on the hardware catalogue, and the only thing this release asks you to
+  type. `both` exists so a patch panel is never reported as wrong-facing.
+
+- **Three cabling findings**, derived from cables, ports and rack positions you
+  already record:
+
+  - **Leads that cross the cabinet.** A lead between two boxes whose ports face
+    opposite ways leaves the front of one, travels round the cabinet and arrives
+    at the back of the other. That is the patch nobody wants to trace.
+  - **A heavily cabled box in a narrow cabinet.** Twenty-four or more leads
+    landing on one box where the side channel is about 58mm wide. It names the
+    count and the cabinet; it does **not** claim the channel is full, because
+    cable routing is not modelled and inferring it would be a confident guess.
+  - **A cable too short for the span it is declared across.** Within one
+    cabinet the distance is arithmetic on the rack unit, plus an allowance for
+    the fact that a lead runs to the channel and back rather than diagonally
+    between two ports. Either the length is wrong or something is under tension.
+
+  **The length check is same-cabinet only.** Two racks have no recorded distance
+  between them — there is no floor plan here — so between cabinets it stays
+  silent rather than guessing.
+
+### Known limits
+
+Unchanged and still worth repeating: **authorization is a flat username list**
+(`INV_ADMIN_USERS`), granting write access across the whole estate; directory
+groups are not consulted. A note written in 0.2.0 is readable by anyone who can
+read the entity it hangs off.
+
+New here: a model with no declared port face is **counted as a gap, not
+assumed** — so an estate that has catalogued nothing will report a number rather
+than a clean bill. That is the intended behaviour and it is the honest one.
+
+[0.3.0]: https://github.com/madalinignisca/invctl/releases/tag/v0.3.0
+
 ## [0.2.0] — 2026-08-13
 
 Three features and one bug that had been live for a day.
