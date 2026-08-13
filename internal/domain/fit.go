@@ -80,6 +80,61 @@ func DrawsFromSide(airflow string) bool {
 	return airflow == AirflowSideToRear || airflow == AirflowSideToSide
 }
 
+// Port faces a catalogued model can declare (WP-C3).
+//
+// NIL IS NOT front, for the reason nil airflow is not front_to_rear: it is the
+// common answer, so defaulting to it would let every uncatalogued box pass the
+// wrong-face check in silence.
+const (
+	PortFaceFront = "front"
+	PortFaceRear  = "rear"
+	// PortFaceBoth is a patch panel or a chassis switch with ports on each
+	// side. It is never wrong-facing, which is why it needs saying rather than
+	// being left to look like an unanswered question.
+	PortFaceBoth = "both"
+)
+
+// PortFaces is the allowed set, matching the CHECK in migration 00040.
+var PortFaces = []string{PortFaceFront, PortFaceRear, PortFaceBoth}
+
+// PortFaceLabels are what the UI shows.
+var PortFaceLabels = map[string]string{
+	PortFaceFront: "front",
+	PortFaceRear:  "rear",
+	PortFaceBoth:  "front and rear",
+}
+
+// DenseLeadCount is where a box stops being ordinary to cable.
+//
+// A NUMBER WITH A REASON, and the finding prints it so a reader can disagree.
+// A 600mm cabinet leaves roughly 55mm a side (see SideClearanceMM), which is a
+// vertical channel that manages a couple of dozen patch leads before it stops
+// being a channel and becomes a bundle. Twenty-four is one side of a 48-port
+// switch, which is the point at which somebody who has cabled a rack starts
+// thinking about where the slack goes.
+//
+// It is not a limit and nothing is refused by it: it is the threshold at which
+// the cabinet's width becomes worth mentioning.
+const DenseLeadCount = 24
+
+// RackUnitMM is the height of one rack unit, fixed by EIA-310.
+//
+// Exact, like RackFaceplateMM, which is what makes the distance between two
+// mounted boxes arithmetic rather than an estimate.
+const RackUnitMM = 44.45
+
+// CableRouteAllowanceMM is what a lead needs BEYOND the vertical drop.
+//
+// A cable does not travel diagonally between two ports. It leaves the port,
+// runs to the vertical channel, drops, comes back out and reaches the far port,
+// with a service loop so the box can be slid forward without unplugging it.
+// Comparing a declared length against the bare vertical distance would call
+// every correctly-specified cable long enough and catch nothing.
+//
+// Deliberately generous: this check exists to catch a lead that cannot possibly
+// reach, not to second-guess somebody's cable management.
+const CableRouteAllowanceMM = 500
+
 // RearClearanceMM is what a box needs BEHIND its chassis before it fits.
 //
 // A bare depth_mm <= usable_depth_mm comparison passes a 772mm server into an
@@ -139,6 +194,11 @@ const (
 	FitDepthUnknown  = "depth_unknown"
 	FitLoadUnknown   = "load_unknown"
 	FitAirflowUnkown = "airflow_unknown"
+	// Cabling (WP-C3).
+	FitPortsWrongFace  = "ports_wrong_face"
+	FitLeadDensity     = "lead_density"
+	FitCableTooShort   = "cable_too_short"
+	FitPortFaceUnknown = "port_face_unknown"
 )
 
 // FitInput is one placed box, resolved against its model.
@@ -158,6 +218,33 @@ type FitInput struct {
 	// RackLoad.
 	WeightGrams *int
 	Airflow     *string
+	// PortFace is where the catalogued model's ports are, and Leads is how many
+	// active cables actually terminate on this box. Both are needed together:
+	// a rear-ported box with nothing plugged into it is a fact about the
+	// catalogue, not a cabling problem.
+	PortFace *string
+	Leads    int
+}
+
+// CableRun is one cable between two boxes in the SAME cabinet, with the
+// distance it has to cover already resolved.
+//
+// Same-cabinet only, and that is a limit rather than an omission: two racks
+// have no recorded distance between them. invctl holds no floor plan, so the
+// span between cabinets is unknown, and a check that guessed it would be
+// inventing the one number the answer turns on.
+type CableRun struct {
+	LinkID   string
+	Label    string
+	LengthM  int
+	FromUnit int
+	ToUnit   int
+	// The port face at each end, when the catalogue says. A lead between two
+	// boxes whose ports face opposite ways has to travel round the cabinet.
+	FromFace *string
+	ToFace   *string
+	FromName string
+	ToName   string
 }
 
 // RackFit is the cabinet's own measurements.
@@ -388,6 +475,143 @@ func CheckAirflow(rack RackFit, boxes []FitInput) []FitProblem {
 	return out
 }
 
+// CheckCabling reports what makes this cabinet miserable to work in (WP-C3).
+//
+// NONE OF THIS REFUSES A PLACEMENT either. A rear-ported switch mounted the
+// wrong way round works perfectly; somebody just has to run every lead round
+// the cabinet, and will keep doing so until somebody notices. That is exactly
+// the sort of fact an inventory is for and a rack inspection is not.
+//
+// IT DOES NOT INFER THAT THE CHANNEL IS FULL. Cable ROUTING is not modelled --
+// which side a lead runs down, whether the manager is already packed -- so
+// "48 leads therefore blocked" would be a confident claim about something
+// nobody recorded. The finding names the count and the cabinet, and sends a
+// person to look.
+func CheckCabling(rack RackFit, boxes []FitInput, runs []CableRun) []FitProblem {
+	var out []FitProblem
+	undeclared := 0
+
+	for _, b := range boxes {
+		if b.PortFace == nil {
+			// Only counted when something is actually plugged in. An
+			// uncatalogued box with no cables is a gap in the catalogue, and
+			// reporting it here would bury the ones that matter.
+			if b.Leads > 0 {
+				undeclared++
+			}
+			continue
+		}
+		// A lot of cable on one box, in a cabinet with nowhere to put it.
+		if b.Leads >= DenseLeadCount && rack.WidthMM != nil && *rack.WidthMM < SideBreatherMinWidthMM {
+			out = append(out, FitProblem{
+				Kind:     FitLeadDensity,
+				Severity: FindingRiskSeverity,
+				AssetID:  b.AssetID, Asset: b.Name,
+				Detail: fmt.Sprintf("%s land on it in a %dmm cabinet, which leaves about "+
+					"%dmm a side for the whole channel", leads(b.Leads), *rack.WidthMM,
+					SideClearanceMM(*rack.WidthMM)),
+			})
+		}
+	}
+
+	// Leads that cross the cabinet.
+	//
+	// THE FIRST VERSION OF THIS CHECK COMPARED A BOX'S PORT FACE AGAINST THE
+	// FACE IT IS MOUNTED ON, and it fired on every server in the estate --
+	// which is correct arithmetic and a useless finding, because a server is
+	// universally racked from the front with its ports at the back and nothing
+	// about that is a problem. A check that reports the normal case is one
+	// people switch off.
+	//
+	// The real cost is a lead between two boxes whose ports face OPPOSITE ways:
+	// it leaves the front of one, travels round the cabinet and arrives at the
+	// back of the other. That is the patch nobody wants to trace, and it is
+	// what the declared faces can actually prove.
+	//
+	// `both` matches either side, which is the whole reason it is a value: a
+	// patch panel presenting ports on each face accommodates whatever it is
+	// cabled to.
+	crossing := map[string]int{}
+	firstFor := map[string]string{}
+	for _, run := range runs {
+		if run.FromFace == nil || run.ToFace == nil {
+			continue
+		}
+		if *run.FromFace == PortFaceBoth || *run.ToFace == PortFaceBoth {
+			continue
+		}
+		if *run.FromFace == *run.ToFace {
+			continue
+		}
+		crossing[run.FromName]++
+		crossing[run.ToName]++
+		if _, seen := firstFor[run.FromName]; !seen {
+			firstFor[run.FromName] = fmt.Sprintf("%s (%s ports) to %s (%s ports)",
+				run.FromName, *run.FromFace, run.ToName, *run.ToFace)
+		}
+	}
+	names := make([]string, 0, len(crossing))
+	for name := range crossing {
+		names = append(names, name)
+	}
+	sortStrings(names)
+	for _, name := range names {
+		detail, ok := firstFor[name]
+		if !ok {
+			continue // the far end of somebody else's crossing lead
+		}
+		out = append(out, FitProblem{
+			Kind:     FitPortsWrongFace,
+			Severity: FindingRiskSeverity,
+			Asset:    name,
+			Detail: fmt.Sprintf("%s — %s cross the cabinet to reach the far end",
+				detail, leads(crossing[name])),
+		})
+	}
+
+	// Cables that cannot reach.
+	for _, run := range runs {
+		if run.LengthM <= 0 {
+			continue // nobody declared a length; nothing to check it against
+		}
+		gap := run.FromUnit - run.ToUnit
+		if gap < 0 {
+			gap = -gap
+		}
+		needMM := int(float64(gap)*RackUnitMM) + CableRouteAllowanceMM
+		if run.LengthM*1000 >= needMM {
+			continue
+		}
+		out = append(out, FitProblem{
+			Kind:     FitCableTooShort,
+			Severity: FindingFaultSeverity,
+			Asset:    run.Label,
+			Detail: fmt.Sprintf("declared %dm across %d units, which needs about %dmm "+
+				"once routed (%d units of drop plus %dmm to reach the channel and back). "+
+				"Either the length is wrong or the cable is under tension",
+				run.LengthM, gap, needMM, gap, CableRouteAllowanceMM),
+		})
+	}
+
+	if undeclared > 0 {
+		out = append(out, FitProblem{
+			Kind:     FitPortFaceUnknown,
+			Severity: FindingGapSeverity,
+			Detail: fmt.Sprintf("%s cabled but with no declared port face, so nothing "+
+				"can be said about which way their leads run", boxCount(undeclared)),
+		})
+	}
+	return out
+}
+
+// leads writes a cable count as English.
+func leads(n int) string {
+	if n == 1 {
+		return "1 lead"
+	}
+	return fmt.Sprintf("%d leads", n)
+}
+
 // airflowOpposes reports whether one box is fed the other's exhaust.
 //
 // Only front-to-rear against rear-to-front. A side-breather is NOT counted as
@@ -431,4 +655,15 @@ func boxCount(n int) string {
 		return "1 placed box"
 	}
 	return fmt.Sprintf("%d placed boxes", n)
+}
+
+// sortStrings orders names so a finding list is the same on every run.
+// Insertion sort: a rack holds tens of things and importing sort into a package
+// that has managed without it would be a poor trade.
+func sortStrings(xs []string) {
+	for i := 1; i < len(xs); i++ {
+		for j := i; j > 0 && xs[j] < xs[j-1]; j-- {
+			xs[j], xs[j-1] = xs[j-1], xs[j]
+		}
+	}
 }

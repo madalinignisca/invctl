@@ -518,6 +518,8 @@ var DeclaredColumns = map[string][]string{
 		// off a datasheet somebody read. airflow NULL means nobody said, which
 		// is a third state and not front_to_rear.
 		"depth_mm", "weight_grams", "airflow",
+		// Where the ports are (migration 00040). Declared, off a datasheet.
+		"port_face",
 		"eol_date", "notes", "lifecycle", "created_at", "updated_at",
 		"row_version",
 	},

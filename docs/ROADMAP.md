@@ -203,7 +203,7 @@ Not in this pass: mounting type (2-post/4-post, rail kits) and width. Both are
 real and both are an enum with a CHECK constraint and a matching Go constant
 set, which is a different size of change.
 
-**WP-C3 · Is the cabling workable** — M — depends: C2
+**WP-C3 · Is the cabling workable** — M — **DONE**
 Split from C2 deliberately, on the E1 precedent: bundling a measurement with a
 graph question produced one work package that was two.
 
@@ -211,12 +211,22 @@ graph question produced one work package that was two.
 face against mounted face, airflow direction against the aisle, and how many
 leads land on one box in a cabinet with no side channel.
 
-The interesting part is that **most of the input is already in the database**.
-invctl knows the interfaces, knows the cables and knows the rack, so the finding
-is derived rather than typed: *48 leads terminate on a front-facing panel in a
-600mm cabinet*. What must be declared is small — port face on the device type, and the
-cabinet width that C4 brings. Worth doing after C2, because a depth model it can
-lean on makes the clearance half of it real rather than notional.
+Built as forecast: **one declared column** (`device_type.port_face`, migration
+00040) and everything else derived from rows already held. Three findings —
+leads crossing the cabinet, a heavily cabled box in a narrow one, and a cable
+too short for the span it is declared across.
+
+*The length check is SAME-CABINET ONLY, and that is a limit rather than an
+omission: two racks have no recorded distance between them. There is no floor
+plan here, so the span between cabinets is unknown and a check that guessed it
+would be inventing the number the answer turns on.*
+
+**The first version of the crossing check was wrong in the instructive way.** It
+compared a box's port face against the face it is mounted on and reported every
+server in the estate — correct arithmetic, useless finding, because a server is
+universally racked from the front with its ports at the back. The real cost is a
+lead between two boxes whose ports face OPPOSITE ways, which is what the
+declared faces can actually prove. Found by reading the output, not by a test.
 
 **WP-C4 · Airflow and thermal adjacency** — S — depends: C1
 *Raised 2026-08-10 from a real case: a side-intake, rear-exhaust, short-depth

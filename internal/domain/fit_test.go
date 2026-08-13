@@ -302,3 +302,136 @@ func mentions(haystack, needle string) bool {
 	}
 	return false
 }
+
+// ---------------------------------------------------------------------------
+// Cabling (WP-C3)
+// ---------------------------------------------------------------------------
+
+func face(s string) *string { return &s }
+
+// TestALeadCrossesTheCabinetOnlyWhenTheFacesDiffer.
+//
+// THE FIRST VERSION OF THIS CHECK COMPARED PORT FACE AGAINST MOUNTED FACE and
+// reported every server in the estate — a server is universally racked from the
+// front with its ports at the back, and nothing about that is a problem. The
+// case below is the one that costs somebody an afternoon: a front-ported panel
+// patched to rear-ported hosts.
+func TestALeadCrossesTheCabinetOnlyWhenTheFacesDiffer(t *testing.T) {
+	rack := RackFit{WidthMM: mm(600)}
+	boxes := []FitInput{
+		{AssetID: "p", Name: "pp-1", Position: 40, PortFace: face(PortFaceFront), Leads: 1},
+		{AssetID: "h", Name: "srv-1", Position: 10, PortFace: face(PortFaceRear), Leads: 1},
+	}
+	crossing := []CableRun{{
+		LinkID: "l1", FromName: "pp-1", ToName: "srv-1",
+		FromFace: face(PortFaceFront), ToFace: face(PortFaceRear),
+		FromUnit: 40, ToUnit: 10,
+	}}
+	if got := kinds(CheckCabling(rack, boxes, crossing))[FitPortsWrongFace]; got != 1 {
+		t.Errorf("a front-to-rear patch produced %d crossing findings, want 1", got)
+	}
+
+	// NEGATIVE CONTROL, and the one the first version failed: two rear-ported
+	// boxes patched together cross nothing. This is the ordinary case and must
+	// be silent.
+	same := []CableRun{{
+		LinkID: "l2", FromName: "srv-1", ToName: "srv-2",
+		FromFace: face(PortFaceRear), ToFace: face(PortFaceRear),
+		FromUnit: 10, ToUnit: 11,
+	}}
+	if got := kinds(CheckCabling(rack, boxes, same))[FitPortsWrongFace]; got != 0 {
+		t.Errorf("two rear-ported boxes patched together produced %d crossing "+
+			"findings, want none — that is how every rack in the world is wired", got)
+	}
+
+	// `both` accommodates either side, which is the whole reason it is a value.
+	panel := []CableRun{{
+		LinkID: "l3", FromName: "pp-both", ToName: "srv-1",
+		FromFace: face(PortFaceBoth), ToFace: face(PortFaceRear),
+		FromUnit: 40, ToUnit: 10,
+	}}
+	if got := kinds(CheckCabling(rack, boxes, panel))[FitPortsWrongFace]; got != 0 {
+		t.Errorf("a both-faced panel produced %d crossing findings, want none", got)
+	}
+}
+
+// TestLeadDensityNeedsBothTheCountAndTheNarrowCabinet.
+func TestLeadDensityNeedsBothTheCountAndTheNarrowCabinet(t *testing.T) {
+	dense := []FitInput{{AssetID: "p", Name: "pp-1", PortFace: face(PortFaceFront), Leads: DenseLeadCount}}
+
+	if got := kinds(CheckCabling(RackFit{WidthMM: mm(600)}, dense, nil))[FitLeadDensity]; got != 1 {
+		t.Errorf("%d leads in a 600mm cabinet produced %d findings, want 1", DenseLeadCount, got)
+	}
+	// A wide cabinet has the channel for it.
+	if got := kinds(CheckCabling(RackFit{WidthMM: mm(800)}, dense, nil))[FitLeadDensity]; got != 0 {
+		t.Errorf("%d leads in an 800mm network cabinet produced %d findings, want none — "+
+			"that is the cabinet you buy for it", DenseLeadCount, got)
+	}
+	// And one lead under the threshold is quiet, so the count matters too.
+	light := []FitInput{{AssetID: "p", Name: "pp-1", PortFace: face(PortFaceFront), Leads: DenseLeadCount - 1}}
+	if got := kinds(CheckCabling(RackFit{WidthMM: mm(600)}, light, nil))[FitLeadDensity]; got != 0 {
+		t.Errorf("%d leads produced %d findings, want none", DenseLeadCount-1, got)
+	}
+}
+
+// TestACableIsOnlyTooShortWhenItCannotReach.
+//
+// The allowance is the point: a bare vertical comparison calls every correctly
+// specified cable long enough, because a lead does not travel diagonally
+// between two ports.
+func TestACableIsOnlyTooShortWhenItCannotReach(t *testing.T) {
+	run := func(lengthM, from, to int) []CableRun {
+		return []CableRun{{
+			LinkID: "l", Label: "a to b", FromName: "a", ToName: "b",
+			LengthM: lengthM, FromUnit: from, ToUnit: to,
+		}}
+	}
+	// 30 units is 1333mm of drop, plus 500mm of routing = 1833mm. A 1m lead
+	// cannot do it; a 2m lead can.
+	if got := kinds(CheckCabling(RackFit{}, nil, run(1, 40, 10)))[FitCableTooShort]; got != 1 {
+		t.Errorf("a 1m lead across 30 units produced %d findings, want 1", got)
+	}
+	if got := kinds(CheckCabling(RackFit{}, nil, run(2, 40, 10)))[FitCableTooShort]; got != 0 {
+		t.Errorf("a 2m lead across 30 units produced %d findings, want none", got)
+	}
+	// THE ALLOWANCE IS WHAT THIS CASE TURNS ON, and without it the mutation
+	// that deletes it goes unnoticed. 34 units is 1511mm of bare drop and
+	// 2011mm once routed, so a 2m lead clears the drop and does NOT reach —
+	// which is exactly the cable somebody buys, fits under tension, and blames
+	// on the port six months later.
+	// Through a variable: `int(34 * RackUnitMM)` is a constant expression and Go
+	// refuses to truncate a non-integer constant.
+	units := 34.0
+	bareDrop := int(units * RackUnitMM)
+	routed := bareDrop + CableRouteAllowanceMM
+	if got := kinds(CheckCabling(RackFit{}, nil, run(2, 40, 6)))[FitCableTooShort]; got != 1 {
+		t.Errorf("a 2m lead across 34 units produced %d findings, want 1. It clears "+
+			"the %dmm vertical drop and not the %dmm it needs once routed — if this "+
+			"passes, the routing allowance is not being applied", got, bareDrop, routed)
+	}
+
+	// Direction must not matter: the same pair the other way round is the same
+	// cable.
+	if got := kinds(CheckCabling(RackFit{}, nil, run(1, 10, 40)))[FitCableTooShort]; got != 1 {
+		t.Errorf("the same lead measured the other way produced %d findings, want 1", got)
+	}
+	// A cable with no declared length is not a finding: nobody claimed
+	// anything, and reporting every unmeasured patch lead would bury the one
+	// that cannot reach.
+	if got := kinds(CheckCabling(RackFit{}, nil, run(0, 40, 10)))[FitCableTooShort]; got != 0 {
+		t.Errorf("an undeclared length produced %d findings, want none", got)
+	}
+}
+
+// TestAnUndeclaredPortFaceIsCountedOnlyWhenSomethingIsPluggedIn.
+func TestAnUndeclaredPortFaceIsCountedOnlyWhenSomethingIsPluggedIn(t *testing.T) {
+	cabled := []FitInput{{AssetID: "x", Name: "mystery", Leads: 3}}
+	if got := kinds(CheckCabling(RackFit{}, cabled, nil))[FitPortFaceUnknown]; got != 1 {
+		t.Errorf("a cabled box with no declared port face produced %d gap findings, want 1", got)
+	}
+	bare := []FitInput{{AssetID: "x", Name: "mystery"}}
+	if got := kinds(CheckCabling(RackFit{}, bare, nil))[FitPortFaceUnknown]; got != 0 {
+		t.Errorf("an uncabled box produced %d gap findings, want none — nothing is "+
+			"plugged into it, so which way its ports face changes nothing", got)
+	}
+}

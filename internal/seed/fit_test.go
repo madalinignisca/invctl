@@ -195,3 +195,67 @@ func TestNothingPhysicalEverRefusesAPlacement(t *testing.T) {
 
 func intPtr(n int) *int       { return &n }
 func strPtr(s string) *string { return &s }
+
+// TestTheFixtureHoldsEveryCablingCase (WP-C3).
+//
+// The estate held 28 cables and produced no cabling finding at all before the
+// patch panel was seeded: nothing densely patched, no opposing port faces, no
+// short length. Three checks with nothing to check are three checks nobody can
+// trust, and the only way that surfaces is counting.
+func TestTheFixtureHoldsEveryCablingCase(t *testing.T) {
+	seed.CompanyEstate = true
+	t.Cleanup(func() { seed.CompanyEstate = false })
+
+	eachEngine(t, func(t *testing.T, f *fixture) {
+		fit, err := f.store.EstateFit(f.ctx)
+		if err != nil {
+			t.Fatalf("sweeping the estate: %v", err)
+		}
+		for _, tc := range []struct {
+			what string
+			got  int
+			why  string
+		}{
+			{"leads crossing the cabinet", fit.WrongFace,
+				"pp-a2-1 has front ports and is patched to rear-ported hosts"},
+			{"heavily cabled box in a narrow cabinet", fit.DenseLeads,
+				"24 leads land on pp-a2-1 in the 600mm cabinet"},
+			{"cable too short", fit.ShortCables,
+				"one patch lead is declared 1m across a 30-unit gap"},
+		} {
+			if tc.got == 0 {
+				t.Errorf("the estate reports no %q, so any test naming that case proves "+
+					"nothing — expected because %s", tc.what, tc.why)
+			}
+		}
+	})
+}
+
+// TestOrdinaryRearToRearCablingIsSilent.
+//
+// THE NEGATIVE CONTROL FOR THE CHECK THAT WAS WRONG FIRST. Its first version
+// compared port face against mounted face and reported every server in the
+// estate — correct arithmetic, useless finding. Most of this fixture is
+// ordinary rear-ported kit patched to other rear-ported kit, and it must stay
+// quiet or the count above means nothing.
+func TestOrdinaryRearToRearCablingIsSilent(t *testing.T) {
+	seed.CompanyEstate = true
+	t.Cleanup(func() { seed.CompanyEstate = false })
+
+	eachEngine(t, func(t *testing.T, f *fixture) {
+		id, ok := f.refs.Assets["rack-a1"]
+		if !ok {
+			t.Fatal("no rack-a1 in the estate")
+		}
+		report, err := f.store.RackFit(f.ctx, id)
+		if err != nil {
+			t.Fatalf("resolving rack-a1: %v", err)
+		}
+		for _, p := range report.Problems {
+			if p.Kind == domain.FitPortsWrongFace {
+				t.Errorf("rack-a1 is ordinary rear-ported kit and reported a crossing "+
+					"lead: %s — %s", p.Asset, p.Detail)
+			}
+		}
+	})
+}

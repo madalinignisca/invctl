@@ -55,6 +55,9 @@ func (b *builder) company() {
 	b.companyFit()
 	// The DR fibre last: it needs the compute layer's Bergen switch.
 	b.companyDRLink()
+	// The patch panel and its leads: needs the cabinet measured and the port
+	// faces declared, so it runs after companyFit.
+	b.companyCabling()
 }
 
 // companySites adds the third on-prem rack and the rented colo.

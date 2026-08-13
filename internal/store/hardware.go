@@ -188,11 +188,11 @@ func (s *SQLStore) CreateDeviceType(ctx context.Context, actor domain.Actor, d *
 func (s *SQLStore) insertDeviceType(ctx context.Context, t *tx, d *domain.DeviceType, manufacturerName string) error {
 	_, err := t.exec(ctx, `
 		INSERT INTO device_type (id, manufacturer_id, model, part_number, u_height,
-		                         full_depth, depth_mm, weight_grams, airflow,
+		                         full_depth, depth_mm, weight_grams, airflow, port_face,
 		                         eol_date, notes, lifecycle, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		d.ID, d.ManufacturerID, d.Model, d.PartNumber, d.UHeight,
-		d.FullDepth, d.DepthMM, d.WeightGrams, d.Airflow,
+		d.FullDepth, d.DepthMM, d.WeightGrams, d.Airflow, d.PortFace,
 		d.EOLDate, d.Notes, d.Lifecycle, d.CreatedAt, d.UpdatedAt)
 	if err != nil {
 		return translateWriteErr(err, "creating device type")
@@ -225,11 +225,11 @@ func (s *SQLStore) UpdateDeviceType(ctx context.Context, actor domain.Actor, d *
 		res, err := t.exec(ctx, `
 			UPDATE device_type
 			SET model = ?, part_number = ?, u_height = ?, full_depth = ?,
-			    depth_mm = ?, weight_grams = ?, airflow = ?, eol_date = ?,
+			    depth_mm = ?, weight_grams = ?, airflow = ?, port_face = ?, eol_date = ?,
 			    notes = ?, lifecycle = ?, updated_at = ?, row_version = row_version + 1
 			WHERE id = ? AND row_version = ?`,
 			d.Model, d.PartNumber, d.UHeight, d.FullDepth,
-			d.DepthMM, d.WeightGrams, d.Airflow, d.EOLDate,
+			d.DepthMM, d.WeightGrams, d.Airflow, d.PortFace, d.EOLDate,
 			d.Notes, d.Lifecycle, d.UpdatedAt, d.ID, d.RowVersion)
 		if err != nil {
 			return translateWriteErr(err, "updating device type")

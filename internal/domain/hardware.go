@@ -109,6 +109,9 @@ type DeviceType struct {
 	// front-to-rear. Defaulting it would let every uncatalogued box pass the
 	// opposing-neighbours check in silence.
 	Airflow *string `db:"airflow"`
+	// PortFace is which side the ports are on (WP-C3). nil means nobody said,
+	// never "front".
+	PortFace *string `db:"port_face"`
 	// EOLDate is the MANUFACTURER's end of support for this model. An asset that
 	// states its own overrides it -- see AssetExpiry.
 	EOLDate   *string `db:"eol_date"`
@@ -130,6 +133,7 @@ type DeviceTypeSpec struct {
 	DepthMM        *int
 	WeightGrams    *int
 	Airflow        *string
+	PortFace       *string
 	EOLDate        *string
 	Notes          *string
 	Lifecycle      string
@@ -145,6 +149,7 @@ func NewDeviceType(id string, spec DeviceTypeSpec, now time.Time) (*DeviceType, 
 	checkMillimetres(ve, "depth_mm", spec.DepthMM)
 	checkGrams(ve, "weight_grams", spec.WeightGrams)
 	checkOptionalEnum(ve, "airflow", spec.Airflow, Airflows)
+	checkOptionalEnum(ve, "port_face", spec.PortFace, PortFaces)
 	lifecycle := defaultedLifecycle(ve, spec.Lifecycle)
 	if err := ve.OrNil(); err != nil {
 		return nil, err
@@ -157,6 +162,7 @@ func NewDeviceType(id string, spec DeviceTypeSpec, now time.Time) (*DeviceType, 
 		DepthMM:     spec.DepthMM,
 		WeightGrams: spec.WeightGrams,
 		Airflow:     blankToNil(spec.Airflow),
+		PortFace:    blankToNil(spec.PortFace),
 		EOLDate:     eol,
 		Notes:       blankToNil(spec.Notes),
 		Lifecycle:   lifecycle,
@@ -177,6 +183,8 @@ func (d *DeviceType) Validate() error {
 	checkGrams(ve, "weight_grams", d.WeightGrams)
 	d.Airflow = blankToNil(d.Airflow)
 	checkOptionalEnum(ve, "airflow", d.Airflow, Airflows)
+	d.PortFace = blankToNil(d.PortFace)
+	checkOptionalEnum(ve, "port_face", d.PortFace, PortFaces)
 	checkEnum(ve, "lifecycle", d.Lifecycle, HardwareLifecycles)
 	return ve.OrNil()
 }

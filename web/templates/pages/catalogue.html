@@ -105,6 +105,20 @@
         {{with index .Errors "weight_grams"}}<div class="field-error">{{.}}</div>{{end}}
       </div>
       <div class="field">
+        <label for="dt-ports">Ports</label>
+        <select id="dt-ports" name="port_face">
+          <option value="">not declared</option>
+          {{range portFaces}}
+          <option value="{{.}}" {{if eq (deref $.TypeSpec.PortFace) .}}selected{{end}}>{{portFaceName .}}</option>
+          {{end}}
+        </select>
+        <div class="field-hint">
+          Which side the cables come out of. A box mounted one way with its
+          ports the other way means every lead crosses the cabinet.
+        </div>
+        {{with index .Errors "port_face"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
         <label for="dt-airflow">Airflow</label>
         <select id="dt-airflow" name="airflow">
           <option value="">not declared</option>
@@ -236,6 +250,17 @@
                       <label for="e-weight-{{.ID}}">Weight (kg)</label>
                       <input id="e-weight-{{.ID}}" type="text" name="weight_kg" inputmode="decimal" value="{{kilogramsValue .WeightGrams}}">
                       {{with index $.Errors "weight_kg"}}<div class="field-error">{{.}}</div>{{end}}
+                    </div>
+                    <div class="field">
+                      <label for="e-ports-{{.ID}}">Ports</label>
+                      <select id="e-ports-{{.ID}}" name="port_face">
+                        {{$prow := .}}
+                        <option value="">not declared</option>
+                        {{range portFaces}}
+                          <option value="{{.}}" {{if eq (deref $prow.PortFace) .}}selected{{end}}>{{portFaceName .}}</option>
+                        {{end}}
+                      </select>
+                      {{with index $.Errors "port_face"}}<div class="field-error">{{.}}</div>{{end}}
                     </div>
                     <div class="field">
                       <label for="e-air-{{.ID}}">Airflow</label>

@@ -73,6 +73,8 @@ func funcs() template.FuncMap {
 		"kilogramsValue":   kilogramsValue,
 		"airflowLabel":     airflowLabel,
 		"airflowName":      airflowName,
+		"portFaces":        func() []string { return domain.PortFaces },
+		"portFaceName":     portFaceName,
 		"airflows":         func() []string { return domain.Airflows },
 	}
 }
@@ -482,4 +484,12 @@ func journalKindLabel(kind string) string {
 		return l
 	}
 	return kind
+}
+
+// portFaceName labels a port face for a select's options.
+func portFaceName(face string) string {
+	if l, ok := domain.PortFaceLabels[face]; ok {
+		return l
+	}
+	return face
 }

@@ -252,6 +252,13 @@ func (s *SQLStore) EstateFindings(ctx context.Context) ([]Finding, error) {
 	add(FindingRisk, fit.OpposedAirflow, "neighbours breathing against each other", fit.FirstOpposed, "/assets?kind=rack")
 	add(FindingGap, fit.UnmeasuredRacks, "rack with no depth recorded", "", "/assets?kind=rack")
 	add(FindingGap, fit.UndeclaredAirflow, "placed box with no declared airflow", "", "/catalogue")
+	// Cabling (WP-C3). A cable that cannot reach is a FAULT -- either the
+	// length is wrong or somebody has a lead under tension -- while the other
+	// two are risks: they work, and they make the next person's afternoon
+	// worse.
+	add(FindingFault, fit.ShortCables, "cable too short for the span", fit.FirstShortCable, "/assets?kind=rack")
+	add(FindingRisk, fit.WrongFace, "ports facing away from the mount", fit.FirstWrongFace, "/assets?kind=rack")
+	add(FindingRisk, fit.DenseLeads, "heavily cabled box in a narrow cabinet", fit.FirstDenseLeads, "/assets?kind=rack")
 
 	sort.SliceStable(out, func(i, j int) bool {
 		if a, b := severityRank(out[i].Severity), severityRank(out[j].Severity); a != b {

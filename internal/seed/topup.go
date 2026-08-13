@@ -88,6 +88,7 @@ func TopUp(ctx context.Context, s *store.SQLStore) (*Refs, error) {
 	// Idempotent: the group, the interfaces and the circuit each skip when
 	// already present.
 	b.companyDRLink()
+	b.companyCabling()
 
 	if b.err != nil {
 		return nil, b.err

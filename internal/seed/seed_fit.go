@@ -43,6 +43,62 @@ func (b *builder) companyFit() {
 	b.addTheStorageStack()
 	b.measureRacks()
 	b.placeTheSideBreather()
+	b.declarePortFaces()
+}
+
+// declarePortFaces says which side the cables come out of (WP-C3).
+//
+// THE ARISTA IS THE CASE, and it is the ordinary one rather than a contrivance.
+// A data-centre switch has its ports at the same end as its cold-air intake, so
+// the SKU that lets the ports face the cold aisle is the SKU whose ports face
+// the REAR when the box is racked front-mounted -- which is exactly what this
+// estate did. Every one of its leads crosses the cabinet, forever, and nothing
+// in the software could say so until now.
+//
+// SOME MODELS ARE LEFT UNDECLARED on purpose. An estate where every catalogue
+// entry is complete is not one anybody recognises, and the gap count is the
+// honesty number that makes the other two findings worth believing.
+func (b *builder) declarePortFaces() {
+	for _, m := range []struct{ model, face string }{
+		// Ports at the rear, mounted at the front. The finding.
+		{"DCS-7050SX3-48YC8", domain.PortFaceRear},
+		// Servers: management and data at the back, which is normal and is
+		// also where they are mounted from, so nothing reports.
+		{"PowerEdge R650", domain.PortFaceRear},
+		{"PowerEdge R660", domain.PortFaceRear},
+		{"ProLiant DL380 Gen11", domain.PortFaceRear},
+		// A firewall is a front-panel box, and it is mounted front. The
+		// NEGATIVE CONTROL: without something declared and correct, a check
+		// that fired on every declared model would pass every assertion.
+		{"FortiGate 121G", domain.PortFaceFront},
+		// A vertical PDU has outlets down its whole length.
+		{"AP8853", domain.PortFaceBoth},
+		// The storage shelves are deliberately NOT declared, so the gap
+		// finding has something to count.
+	} {
+		m := m
+		if !b.ok() {
+			return
+		}
+		id, ok := b.refs.DeviceTypes[m.model]
+		if !ok {
+			continue
+		}
+		dt, err := b.store.GetDeviceType(b.ctx, id)
+		if err != nil {
+			b.fail(fmt.Errorf("reading device type %s: %w", m.model, err))
+			return
+		}
+		if dt.PortFace != nil && *dt.PortFace == m.face {
+			continue // idempotent
+		}
+		updated := dt.DeviceType
+		updated.PortFace = str(m.face)
+		if err := b.store.UpdateDeviceType(b.ctx, Actor, &updated); err != nil {
+			b.fail(fmt.Errorf("declaring the port face of %s: %w", m.model, err))
+			return
+		}
+	}
 }
 
 // addTheStorageStack is where the weight in this estate actually lives.

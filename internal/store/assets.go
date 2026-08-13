@@ -278,6 +278,7 @@ type AssetRow struct {
 	DeviceTypeDepthMM     *int    `db:"device_type_depth_mm"`
 	DeviceTypeWeightGrams *int    `db:"device_type_weight_grams"`
 	DeviceTypeAirflow     *string `db:"device_type_airflow"`
+	DeviceTypePortFace    *string `db:"device_type_port_face"`
 	// Behaviour comes from the asset_kind lookup row rather than a switch in
 	// Go, so a kind added by INSERT is usable rather than merely storable.
 	// Populated by decorateAssets; the zero value is "may do nothing", which is
@@ -442,10 +443,11 @@ func (s *SQLStore) decorateAssets(ctx context.Context, assets []domain.Asset) ([
 		DepthMM     *int    `db:"depth_mm"`
 		WeightGrams *int    `db:"weight_grams"`
 		Airflow     *string `db:"airflow"`
+		PortFace    *string `db:"port_face"`
 	}
 	if err := s.read(ctx, &models, `
 		SELECT a.id AS asset_id, mf.name || ' ' || dt.model AS label, dt.eol_date,
-		       dt.u_height, dt.full_depth, dt.depth_mm, dt.weight_grams, dt.airflow
+		       dt.u_height, dt.full_depth, dt.depth_mm, dt.weight_grams, dt.airflow, dt.port_face
 		FROM asset a
 		JOIN device_type dt ON dt.id = a.device_type_id
 		JOIN manufacturer mf ON mf.id = dt.manufacturer_id
@@ -461,6 +463,7 @@ func (s *SQLStore) decorateAssets(ctx context.Context, assets []domain.Asset) ([
 			rows[i].DeviceTypeDepthMM = m.DepthMM
 			rows[i].DeviceTypeWeightGrams = m.WeightGrams
 			rows[i].DeviceTypeAirflow = m.Airflow
+			rows[i].DeviceTypePortFace = m.PortFace
 		}
 	}
 

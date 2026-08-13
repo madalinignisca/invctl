@@ -147,6 +147,7 @@ func (a *App) DeviceTypeCreate(w http.ResponseWriter, r *http.Request) {
 		DepthMM:        nums.opt("depth_mm"),
 		WeightGrams:    nums.kilos("weight_kg"),
 		Airflow:        optional(formValue(r, "airflow")),
+		PortFace:       optional(formValue(r, "port_face")),
 		EOLDate:        optional(formValue(r, "eol_date")),
 		Notes:          optional(formValue(r, "notes")),
 		Lifecycle:      formValue(r, "lifecycle"),
@@ -204,6 +205,7 @@ func (a *App) DeviceTypeUpdate(w http.ResponseWriter, r *http.Request) {
 	updated.DepthMM = depth
 	updated.WeightGrams = weight
 	updated.Airflow = optional(formValue(r, "airflow"))
+	updated.PortFace = optional(formValue(r, "port_face"))
 	updated.EOLDate = optional(formValue(r, "eol_date"))
 	updated.Notes = optional(formValue(r, "notes"))
 	updated.Lifecycle = formValue(r, "lifecycle")

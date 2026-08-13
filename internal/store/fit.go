@@ -11,6 +11,7 @@ package store
 import (
 	"context"
 	"fmt"
+	"sort"
 
 	"github.com/madalinignisca/invctl/internal/domain"
 )
@@ -57,12 +58,108 @@ func (s *SQLStore) RackFit(ctx context.Context, rackID string) (*RackFitReport, 
 	if err != nil {
 		return nil, fmt.Errorf("reading rack contents: %w", err)
 	}
-	return rackFitFrom(rack, contents), nil
+	leads, runs, err := s.rackCabling(ctx, contents)
+	if err != nil {
+		return nil, err
+	}
+	return rackFitFrom(rack, contents, leads, runs), nil
+}
+
+// rackCabling counts what is plugged into each box in one cabinet, and resolves
+// the cables running BETWEEN two boxes in it.
+//
+// SAME CABINET ONLY for the runs, which is a limit and not an omission: two
+// racks have no recorded distance between them. There is no floor plan here, so
+// the span between cabinets is unknown, and a length check that guessed it
+// would be inventing the number the answer turns on.
+func (s *SQLStore) rackCabling(ctx context.Context, contents []AssetRow) (map[string]int, []domain.CableRun, error) {
+	unitOf := make(map[string]int, len(contents))
+	nameOf := make(map[string]string, len(contents))
+	ids := make([]string, 0, len(contents))
+	for _, row := range contents {
+		if row.RackPosition == nil || row.Lifecycle == domain.LifecycleRetired {
+			continue
+		}
+		unitOf[row.ID] = *row.RackPosition
+		nameOf[row.ID] = row.Name
+		ids = append(ids, row.ID)
+	}
+	if len(ids) == 0 {
+		return map[string]int{}, nil, nil
+	}
+
+	// Every active cable with at least one end on a box in this cabinet, with
+	// the owning asset of each end resolved. One query rather than one per box.
+	faceOf := make(map[string]*string, len(contents))
+	for _, row := range contents {
+		faceOf[row.ID] = row.DeviceTypePortFace
+	}
+
+	var rows []struct {
+		LinkID  string `db:"link_id"`
+		LengthM *int   `db:"length_m"`
+		AAsset  string `db:"a_asset"`
+		BAsset  string `db:"b_asset"`
+		AName   string `db:"a_name"`
+		BName   string `db:"b_name"`
+	}
+	ph := placeholders(len(ids))
+	args := append(append([]any{domain.LifecycleActive}, anySlice(ids)...), anySlice(ids)...)
+	if err := s.read(ctx, &rows, `
+		SELECT l.id AS link_id, l.length_m AS length_m,
+		       ia.asset_id AS a_asset, ib.asset_id AS b_asset,
+		       ia.name AS a_name, ib.name AS b_name
+		FROM link l
+		JOIN interface ia ON ia.id = l.a_interface_id
+		JOIN interface ib ON ib.id = l.b_interface_id
+		WHERE l.lifecycle = ?
+		  AND (ia.asset_id IN (`+ph+`) OR ib.asset_id IN (`+ph+`))`, args...); err != nil {
+		return nil, nil, fmt.Errorf("reading rack cabling: %w", err)
+	}
+
+	leads := make(map[string]int, len(ids))
+	var runs []domain.CableRun
+	for _, r := range rows {
+		// A cable counts as a lead on each end that is in this cabinet, so a
+		// patch between two boxes here is one lead on each rather than two on
+		// one -- which is what somebody looking at the channel sees.
+		_, aHere := unitOf[r.AAsset]
+		_, bHere := unitOf[r.BAsset]
+		if aHere {
+			leads[r.AAsset]++
+		}
+		if bHere {
+			leads[r.BAsset]++
+		}
+		// Both ends in this cabinet is what makes a run comparable at all --
+		// the crossing check needs two faces, and the length check needs a
+		// distance that only exists inside one rack.
+		if !aHere || !bHere {
+			continue
+		}
+		run := domain.CableRun{
+			LinkID:   r.LinkID,
+			Label:    nameOf[r.AAsset] + "/" + r.AName + " to " + nameOf[r.BAsset] + "/" + r.BName,
+			FromUnit: unitOf[r.AAsset],
+			ToUnit:   unitOf[r.BAsset],
+			FromFace: faceOf[r.AAsset], ToFace: faceOf[r.BAsset],
+			FromName: nameOf[r.AAsset], ToName: nameOf[r.BAsset],
+		}
+		// A cable with no length recorded is not a finding: nobody claimed
+		// anything about it, and reporting every unmeasured patch lead would
+		// bury the one that cannot reach. Zero means the same as absent.
+		if r.LengthM != nil && *r.LengthM > 0 {
+			run.LengthM = *r.LengthM
+		}
+		runs = append(runs, run)
+	}
+	sort.Slice(runs, func(i, j int) bool { return runs[i].Label < runs[j].Label })
+	return leads, runs, nil
 }
 
 // rackFitFrom is the pure half, so the estate sweep can reuse it without a
 // second query per rack.
-func rackFitFrom(rack *AssetRow, contents []AssetRow) *RackFitReport {
+func rackFitFrom(rack *AssetRow, contents []AssetRow, leads map[string]int, runs []domain.CableRun) *RackFitReport {
 	r := &RackFitReport{
 		RackID: rack.ID, RackName: rack.Name,
 		Fit: domain.RackFit{
@@ -92,6 +189,8 @@ func rackFitFrom(rack *AssetRow, contents []AssetRow) *RackFitReport {
 			DepthMM:     row.DeviceTypeDepthMM,
 			WeightGrams: row.DeviceTypeWeightGrams,
 			Airflow:     row.DeviceTypeAirflow,
+			PortFace:    row.DeviceTypePortFace,
+			Leads:       leads[row.ID],
 		}
 		if row.RackFace != nil && *row.RackFace != "" {
 			box.Face = *row.RackFace
@@ -106,6 +205,7 @@ func rackFitFrom(rack *AssetRow, contents []AssetRow) *RackFitReport {
 	r.Problems = append(r.Problems, domain.CheckDepth(r.Fit, boxes)...)
 	r.Problems = append(r.Problems, domain.CheckLoad(r.Fit, boxes)...)
 	r.Problems = append(r.Problems, domain.CheckAirflow(r.Fit, boxes)...)
+	r.Problems = append(r.Problems, domain.CheckCabling(r.Fit, boxes, runs)...)
 	return r
 }
 
@@ -126,6 +226,14 @@ type FitFindings struct {
 	// UndeclaredAirflow counts PLACED boxes whose model does not say which way
 	// the air goes.
 	UndeclaredAirflow int
+
+	// Cabling (WP-C3).
+	WrongFace       int
+	FirstWrongFace  string
+	DenseLeads      int
+	FirstDenseLeads string
+	ShortCables     int
+	FirstShortCable string
 }
 
 // EstateFit sweeps every rack.
@@ -160,7 +268,11 @@ func (s *SQLStore) EstateFit(ctx context.Context) (*FitFindings, error) {
 
 	for i := range racks {
 		rack := racks[i]
-		report := rackFitFrom(&rack, byParent[rack.ID])
+		leads, runs, err := s.rackCabling(ctx, byParent[rack.ID])
+		if err != nil {
+			return nil, err
+		}
+		report := rackFitFrom(&rack, byParent[rack.ID], leads, runs)
 		if rack.UsableDepthMM == nil && len(byParent[rack.ID]) > 0 {
 			out.UnmeasuredRacks++
 		}
@@ -188,6 +300,24 @@ func (s *SQLStore) EstateFit(ctx context.Context) (*FitFindings, error) {
 				out.OpposedAirflow++
 				if out.FirstOpposed == "" {
 					out.FirstOpposed = fmt.Sprintf("%s in %s %s", p.Asset, rack.Name, p.Detail)
+				}
+			case domain.FitPortsWrongFace:
+				out.WrongFace++
+				if out.FirstWrongFace == "" {
+					// The detail already names both ends, so the summary adds
+					// only the cabinet -- "pp-a2-1 in rack-a2 is pp-a2-1 (front
+					// ports) to ..." named it twice.
+					out.FirstWrongFace = fmt.Sprintf("in %s, %s", rack.Name, p.Detail)
+				}
+			case domain.FitLeadDensity:
+				out.DenseLeads++
+				if out.FirstDenseLeads == "" {
+					out.FirstDenseLeads = fmt.Sprintf("%s in %s: %s", p.Asset, rack.Name, p.Detail)
+				}
+			case domain.FitCableTooShort:
+				out.ShortCables++
+				if out.FirstShortCable == "" {
+					out.FirstShortCable = fmt.Sprintf("%s %s", p.Asset, p.Detail)
 				}
 			}
 		}
