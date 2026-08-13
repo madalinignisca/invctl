@@ -491,10 +491,47 @@ Expiry (type EOL, circuit contract end, with provenance), cost (circuits, metere
 power draw), search (serials, part numbers, circuit IDs, VLAN IDs), project cost
 buckets for new cost-bearing entities.
 
-**WP-I3 · Performance** — M
-Prefix trees, path tracing and cluster-aware impact change the query profile. Build
-a fixture large enough to be slow — a few thousand assets — and assert bounds on
-impact simulation and prefix tree construction.
+**WP-I3 · Performance** — M — **DONE (first pass)**
+Built the fixture the entry asked for — 4,000 assets, 10,000 prefixes, 50,000
+addresses — and measured before changing anything. Two real findings, one of
+them a bug.
+
+**Measured, on a 12th-gen i5, SQLite:**
+
+| | before | after |
+|---|---|---|
+| Prefix tree (the IPAM page) | 711ms | **181ms** |
+| Estate findings (the overview) | 16ms | 16ms |
+| Estate fit sweep | 13ms | 13ms |
+| Simulate losing a rack | 4.9ms | 4.9ms |
+| Search by address | 1.8ms | 1.8ms |
+| Asset list | 1.5ms | 1.5ms |
+
+**The bug: `ListPrefixTree` was quadratic.** It rescanned every node for every
+node to find its children — a hundred million UUID comparisons at ten thousand
+prefixes — directly beneath a comment congratulating the line above it for not
+being quadratic. Indexing the children in one pass took the page from 711ms to
+181ms, and `TestPrefixTreeDoesNotGoQuadratic` now guards it by comparing the
+growth ratio at two sizes rather than by asserting a wall-clock number.
+
+**The test suite was replaying 40 migrations, hundreds of times.** Opening and
+migrating one SQLite database costs 295ms and this package has 306 test
+functions; the SQLite half of the store suite was 98s of almost pure migration.
+It now copies a template file that is migrated once per process — identical
+isolation, 98s → **11s**, and the whole suite 303s → 218s locally.
+
+*What is left, and deliberately not done: the remaining 181ms splits 74ms
+correlated subquery / 60ms allocation spans / ~51ms assembly, with no single
+culprit — further gains need pagination or an in-memory address index, both of
+which are design changes rather than fixes. And the Postgres half of the suite
+is now ~95% of its runtime: PostgreSQL has no `CREATE SCHEMA ... TEMPLATE`, so
+the same trick needs per-test databases instead of per-test schemas, which is a
+harness rewrite rather than an optimisation.*
+
+*One UI question this surfaced rather than answered: the prefix page computes
+next-free for every prefix in the estate and renders all of them. At ten
+thousand that is a large answer to a question nobody asked — pagination is a
+UX decision, not a performance one.*
 
 ---
 

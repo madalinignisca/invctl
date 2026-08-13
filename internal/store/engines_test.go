@@ -53,13 +53,81 @@ func Engines(t *testing.T) []Engine {
 	return engines
 }
 
+// openTestSQLite gives a test its own migrated database.
+//
+// BY COPYING A TEMPLATE, NOT BY REPLAYING THE MIGRATIONS. Measured: opening and
+// migrating one SQLite database costs 295ms, and this package alone has 306
+// test functions, most of which run against both engines and several of which
+// build more than one store. That is the great majority of a suite which had
+// crept to 586s on CI and failed a release tag on Go's ten-minute timeout.
+//
+// Every test still gets a private file with nobody else writing to it -- the
+// isolation is identical. What changes is how the file comes to exist: forty
+// migrations replayed, or a byte copy of the same result.
+//
+// The template is built once per process, under a mutex, and the migrated
+// database is CLOSED before it is copied so WAL frames are checkpointed back
+// into the main file. Copying an open WAL database is the torn read this
+// project has been bitten by in production, and it would be no less torn here.
 func openTestSQLite(t *testing.T) *DB {
 	t.Helper()
-	db := openTestSQLiteRaw(t)
-	if err := Migrate(context.Background(), db); err != nil {
-		t.Fatalf("migrating sqlite: %v", err)
+	template := sqliteTemplate(t)
+
+	dsn := filepath.Join(t.TempDir(), "test.db")
+	data, err := os.ReadFile(template)
+	if err != nil {
+		t.Fatalf("reading the sqlite template: %v", err)
 	}
+	if err := os.WriteFile(dsn, data, 0o600); err != nil {
+		t.Fatalf("writing the test database: %v", err)
+	}
+	db, err := Open(DriverSQLite, "file:"+dsn)
+	if err != nil {
+		t.Fatalf("opening sqlite: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
 	return db
+}
+
+var (
+	sqliteTemplateOnce sync.Once
+	sqliteTemplatePath string
+	sqliteTemplateErr  error
+)
+
+// sqliteTemplate returns the path to a migrated, closed database file.
+func sqliteTemplate(t *testing.T) string {
+	t.Helper()
+	sqliteTemplateOnce.Do(func() {
+		dir, err := os.MkdirTemp("", "invctl-sqlite-template")
+		if err != nil {
+			sqliteTemplateErr = err
+			return
+		}
+		path := filepath.Join(dir, "template.db")
+		db, err := Open(DriverSQLite, "file:"+path)
+		if err != nil {
+			sqliteTemplateErr = err
+			return
+		}
+		if err := Migrate(context.Background(), db); err != nil {
+			_ = db.Close()
+			sqliteTemplateErr = err
+			return
+		}
+		// CLOSED BEFORE IT IS COPIED. Close checkpoints the WAL into the main
+		// file; copying while it is open would hand every test a database
+		// missing whatever was still in the log.
+		if err := db.Close(); err != nil {
+			sqliteTemplateErr = err
+			return
+		}
+		sqliteTemplatePath = path
+	})
+	if sqliteTemplateErr != nil {
+		t.Fatalf("building the sqlite template: %v", sqliteTemplateErr)
+	}
+	return sqliteTemplatePath
 }
 
 func openTestSQLiteRaw(t *testing.T) *DB {
