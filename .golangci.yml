@@ -126,6 +126,20 @@ linters:
           - gosec
         text: "G404"
 
+      # gosec's G703 (path traversal via taint) in tests. Every variable path in
+      # a test here is built by the test process itself -- os.MkdirTemp or
+      # t.TempDir joined with a literal filename -- and there is no request, no
+      # flag and no environment value anywhere upstream of one. The taint
+      # analysis cannot see that a path came from MkdirTemp rather than from
+      # outside, so it reports the shape rather than the risk.
+      #
+      # PRODUCTION CODE KEEPS G703, which is where a path assembled from
+      # something a caller supplied would actually cost something.
+      - path: _test\.go
+        linters:
+          - gosec
+        text: "G703"
+
 formatters:
   enable:
     - gofmt

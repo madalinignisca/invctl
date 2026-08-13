@@ -296,7 +296,7 @@ func CheckDepth(rack RackFit, boxes []FitInput) []FitProblem {
 		out = append(out, FitProblem{
 			Kind:     FitDepthUnknown,
 			Severity: FindingGapSeverity,
-			Detail:   fmt.Sprintf("%s have no catalogued depth", boxCount(unmeasured)),
+			Detail:   boxCount(unmeasured) + " have no catalogued depth",
 		})
 	}
 	return out
@@ -469,7 +469,7 @@ func CheckAirflow(rack RackFit, boxes []FitInput) []FitProblem {
 		out = append(out, FitProblem{
 			Kind:     FitAirflowUnkown,
 			Severity: FindingGapSeverity,
-			Detail:   fmt.Sprintf("%s have no declared airflow", boxCount(undeclared)),
+			Detail:   boxCount(undeclared) + " have no declared airflow",
 		})
 	}
 	return out

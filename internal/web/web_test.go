@@ -153,7 +153,27 @@ func newHarnessSecure(t *testing.T, creds []config.AgentCredential, secure bool)
 	}
 
 	sessions := scs.New()
-	sessions.Store = sqlite3store.New(db.SQLDB())
+	// A CLEANUP GOROUTINE PER HARNESS, AND THIS PACKAGE BUILDS 243 OF THEM.
+	// sqlite3store.New starts one that runs for the life of the PROCESS, not
+	// the test; scs's own documentation names creating a store in a test as
+	// exactly the case where that matters. Interval 0 never starts it, and a
+	// test living for seconds has no sessions to expire.
+	//
+	// Measured: 495 goroutines still alive when the last test in this package
+	// finished, 243 of them this one, each waking every five minutes to DELETE
+	// from a database the test had already closed. That is where CI's "sql:
+	// database is closed" lines came from.
+	sessions.Store = sqlite3store.NewWithCleanupInterval(db.SQLDB(), 0)
+	// THE OTHER 243 ARE scs.New's OWN memstore, AND THEY STAY. It installs one
+	// before we can say otherwise, and MemStore.StopCleanup cannot remove it:
+	// startCleanup assigns m.stopCleanup INSIDE the goroutine, so calling it
+	// straight after New finds nil and silently does nothing, and calling it
+	// later is a data race the detector reports (verified both ways -- the
+	// delayed call does stop the goroutine and does fail under -race).
+	//
+	// So they are left alone deliberately. They tick once a minute over an
+	// empty map with no I/O, which is a fraction of what the sqlite3 ones cost.
+	// Do not "fix" this with a sleep or a retry; fix it upstream.
 	sessions.Cookie.Secure = false
 	// Named as production names it, because RequireAgent refuses a request
 	// carrying this cookie by name and a test against a different name would

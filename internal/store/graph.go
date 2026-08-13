@@ -416,7 +416,6 @@ func (s *SQLStore) DownInstances(ctx context.Context, assetIDs []string) (map[st
 	return down, nil
 }
 
-// Simulate runs a full impact analysis for a set of assets.
 // CircuitJoinsGroups reports whether this circuit is a connectivity edge --
 // whether both its ends land on interfaces of assets that forward, in two
 // different groups.

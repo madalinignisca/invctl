@@ -143,7 +143,6 @@ func (b *builder) drInterfaces() {
 		{"fw-edge-1", "dr-fibre", "sfp+"},
 		{"sw-dr-1", "uplink-oslo", "sfp+"},
 	} {
-		i := i
 		if !b.ok() {
 			return
 		}
@@ -243,7 +242,6 @@ func (b *builder) drCircuit() {
 		{domain.SideA, "fw-edge-1/dr-fibre"},
 		{domain.SideZ, "sw-dr-1/uplink-oslo"},
 	} {
-		end := end
 		ifaceID, ok := b.interfaceIDs[end.key]
 		if !ok {
 			// A circuit with one end is a gap the findings page already

@@ -81,7 +81,6 @@ func (b *builder) rentedSites() {
 		{"scw-par1", "Scaleway, Paris — staging and a build runner"},
 		{"ovh-gra", "OVHcloud, Gravelines — monitoring only, deliberately a third provider"},
 	} {
-		s := s
 		b.asset(domain.KindSite, s.name, "", []string{"dev"}, func(a *domain.Asset) {
 			a.Attrs = fmt.Sprintf(`{"note":%q}`, s.note)
 		})
@@ -119,7 +118,6 @@ func (b *builder) rentedHosts() {
 		{"bkp-hz-1", "hz-hel1", domain.KindStorage, "Hetzner", "Storage Box BX21", "prod",
 			"5 TB — the offsite backup copy, the '1' of 3-2-1"},
 	} {
-		h := h
 		b.asset(h.kind, h.name, h.site, []string{h.env}, func(a *domain.Asset) {
 			a.Vendor, a.Model = str(h.vendor), str(h.model)
 			a.TeamID = b.team("platform")

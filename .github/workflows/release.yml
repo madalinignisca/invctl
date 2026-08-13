@@ -53,6 +53,21 @@ jobs:
       - name: go vet
         run: go vet ./...
 
+      # LINT RUNS HERE TOO, and the reason is not belt-and-braces.
+      #
+      # CI was red on every push from 2026-08-07 and v0.2.0, v0.3.0 and v0.4.0
+      # all shipped anyway -- because this workflow is a different workflow, and
+      # it did not ask. A release gate that omits a check the project considers
+      # mandatory does not merely fail to catch a problem; it launders a red
+      # tree into a signed artefact.
+      #
+      # Same action major and same pinned version as ci.yml. Two files agreeing
+      # by copy is a real risk, and the smaller one than a tag that ships over
+      # a gate nobody ran.
+      - uses: golangci/golangci-lint-action@v7
+        with:
+          version: v2.11.1
+
       # THE TIMEOUT IS EXPLICIT BECAUSE GO'S DEFAULT IS TEN MINUTES AND THIS
       # SUITE GENUINELY TAKES LONGER. It runs every store test twice -- SQLite
       # in memory and PostgreSQL over a socket -- which is the project's central

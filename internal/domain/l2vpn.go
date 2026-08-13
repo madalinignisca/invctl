@@ -152,10 +152,10 @@ const (
 
 // Reach classifies a termination count.
 func Reach(terminationCount int) L2VPNReach {
-	switch {
-	case terminationCount == 0:
+	switch terminationCount {
+	case 0:
 		return L2VPNUnattached
-	case terminationCount == 1:
+	case 1:
 		return L2VPNOneEnd
 	default:
 		return L2VPNStretched

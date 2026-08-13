@@ -501,6 +501,13 @@ func setupLogging(level string) {
 // scs ships a separate implementation per driver because the expiry column
 // has a different type in each.
 func newSessionManager(db *store.DB, cfg *config.Config) (*scs.SessionManager, error) {
+	// scs.New installs an in-memory store with a cleanup goroutine, and the
+	// switch below always replaces it, so that goroutine ticks for ever over a
+	// store nothing can reach. It is left alone on purpose: MemStore.StopCleanup
+	// assigns its stop channel inside the goroutine, so calling it here is a
+	// silent no-op and calling it later is a data race. One orphaned ticker per
+	// process costs nothing measurable; the test harness says the same thing at
+	// 243 times the scale.
 	sessions := scs.New()
 	sessions.Lifetime = cfg.SessionTimeout
 	sessions.IdleTimeout = cfg.SessionTimeout

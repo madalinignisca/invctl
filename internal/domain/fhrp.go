@@ -146,10 +146,10 @@ const (
 
 // Redundancy classifies a member count.
 func Redundancy(memberCount int) FHRPRedundancy {
-	switch {
-	case memberCount == 0:
+	switch memberCount {
+	case 0:
 		return FHRPNoMembers
-	case memberCount == 1:
+	case 1:
 		return FHRPSingleMember
 	default:
 		return FHRPRedundant

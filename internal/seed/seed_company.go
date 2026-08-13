@@ -9,6 +9,7 @@
 package seed
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/madalinignisca/invctl/internal/domain"
@@ -100,7 +101,6 @@ func (b *builder) companySites() {
 		{"srv-colo-3", "JX774K2200A3", 40},
 	}
 	for _, r := range rented {
-		r := r
 		b.asset(domain.KindServer, r.name, "colo-rack-07", []string{"prod"}, func(a *domain.Asset) {
 			a.Vendor, a.Model = str("Dell"), str("PowerEdge R650")
 			a.Serial = str(r.serial)
@@ -126,7 +126,6 @@ func (b *builder) companyFirewalls() {
 		{"fw-colo-1", "colo-rack-07", "prod", "MikroTik", "CCR2004-1G-12S+2XS"},
 	}
 	for _, f := range firewalls {
-		f := f
 		b.asset(domain.KindFirewall, f.name, f.rack, []string{f.env, "transit"}, func(a *domain.Asset) {
 			a.Vendor, a.Model = str(f.vendor), str(f.model)
 			a.TeamID = b.team("network")
@@ -142,7 +141,6 @@ func (b *builder) companyFirewalls() {
 		{"sw-tor-a2", "rack-a2", "dev"},
 	}
 	for _, s := range tors {
-		s := s
 		b.asset(domain.KindSwitch, s.name, s.rack, []string{s.env}, func(a *domain.Asset) {
 			a.Vendor, a.Model = str("MikroTik"), str("CRS326-24G-2S+")
 			a.TeamID = b.team("network")
@@ -163,7 +161,7 @@ func (b *builder) companyFirewalls() {
 func (b *builder) companyUplinks() {
 	edge, ok := b.refs.Assets["fw-edge-1"]
 	if !ok {
-		b.fail(fmt.Errorf("seeding uplinks: fw-edge-1 is missing"))
+		b.fail(errors.New("seeding uplinks: fw-edge-1 is missing"))
 		return
 	}
 	uplinks := []struct{ name, note string }{

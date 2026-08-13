@@ -76,7 +76,6 @@ func (b *builder) declarePortFaces() {
 		// The storage shelves are deliberately NOT declared, so the gap
 		// finding has something to count.
 	} {
-		m := m
 		if !b.ok() {
 			return
 		}
@@ -132,7 +131,6 @@ func (b *builder) addTheStorageStack() {
 		{"DS4486 disk shelf", 610, 130000},
 		{"FAS2820 controller", 610, 29000},
 	} {
-		m := m
 		if !b.ok() {
 			return
 		}
@@ -163,7 +161,6 @@ func (b *builder) addTheStorageStack() {
 		{"stor-shelf-3", "DS4486 disk shelf", 11},
 		{"stor-ctrl-1", "FAS2820 controller", 16},
 	} {
-		u := u
 		b.asset(domain.KindStorage, u.name, "colo-rack-07", []string{"prod"},
 			func(a *domain.Asset) {
 				a.Vendor, a.Model = str("NetApp"), str(u.model)
@@ -227,7 +224,6 @@ func (b *builder) measureModels() {
 		// counting toward the undeclared gap.
 		{"AP8853", 0, 4500, domain.AirflowPassive},
 	} {
-		m := m
 		if !b.ok() {
 			return
 		}
@@ -279,7 +275,6 @@ func (b *builder) measureRacks() {
 		// estate always has one cabinet nobody has been round to yet. Its
 		// contents report as unknown rather than as fitting.
 	} {
-		r := r
 		if !b.ok() {
 			return
 		}

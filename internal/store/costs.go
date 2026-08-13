@@ -283,6 +283,11 @@ func (s *SQLStore) RetireProjectCost(ctx context.Context, actor domain.Actor, ow
 // The circuit surface. Identical wrappers to the other three, deliberately:
 // the rollup, the validity windows and the amendment behaviour are the shared
 // machinery, and a circuit's monthly rate is not a different kind of money.
+//
+// Detached from the declaration by a blank line on purpose: it describes the
+// four methods below, not the first one. Attached, it becomes ListCircuitCosts'
+// doc comment and reads as though the function were named after a paragraph.
+
 func (s *SQLStore) ListCircuitCosts(ctx context.Context, circuitID string) ([]CostRow, error) {
 	return s.listCosts(ctx, costOnCircuit, circuitID)
 }

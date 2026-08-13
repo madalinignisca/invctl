@@ -202,8 +202,9 @@ func contains(outer, inner PrefixNode) bool {
 	}
 	// Identical ranges are siblings, not parent and child. Within one VRF the
 	// unique index forbids them; across the tree they can only be the same row.
-	return !(bytes.Equal(outer.AddrStart, inner.AddrStart) &&
-		bytes.Equal(outer.AddrEnd, inner.AddrEnd))
+	sameRange := bytes.Equal(outer.AddrStart, inner.AddrStart) &&
+		bytes.Equal(outer.AddrEnd, inner.AddrEnd)
+	return !sameRange
 }
 
 // vrfKey makes a nil VRF comparable. The empty string is the global table, and

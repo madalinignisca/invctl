@@ -162,6 +162,11 @@ func (s *SQLStore) EstateFindings(ctx context.Context) ([]Finding, error) {
 			}
 		case domain.FHRPNoMembers:
 			empty++
+		case domain.FHRPRedundant:
+			// Named rather than left to fall through, and rather than covered by
+			// a bare `default`. A healthy group produces no finding, which is a
+			// decision; a default would make the same silence look like an
+			// oversight and would swallow a fourth state nobody had considered.
 		}
 	}
 	add(FindingRisk, single, "redundancy group with one member", firstSingle, "/redundancy")
@@ -182,6 +187,9 @@ func (s *SQLStore) EstateFindings(ctx context.Context) ([]Finding, error) {
 			}
 		case domain.L2VPNUnattached:
 			unattached++
+		case domain.L2VPNStretched:
+			// An overlay reaching two or more places is doing its job. No
+			// finding, said out loud for the reason above.
 		}
 	}
 	add(FindingRisk, oneEnd, "overlay with one end", firstOverlay, "/overlays")

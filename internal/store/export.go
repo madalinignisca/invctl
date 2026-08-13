@@ -41,7 +41,9 @@ type Table struct {
 }
 
 // The render.Table interface, so the web layer can write one without importing
-// this package's concrete type into its signature.
+// this package's concrete type into its signature. Detached from the
+// declaration: it describes all three methods, not CSVName.
+
 func (t Table) CSVName() string     { return t.Name }
 func (t Table) CSVHeader() []string { return t.Header }
 func (t Table) CSVRows() [][]string { return t.Rows }

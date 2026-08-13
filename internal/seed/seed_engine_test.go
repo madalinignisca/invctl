@@ -134,6 +134,10 @@ func TestTheFixtureHasARedundancyGroupThatIsNotRedundancy(t *testing.T) {
 				single++
 			case domain.FHRPRedundant:
 				redundant++
+			case domain.FHRPNoMembers:
+				// Counted by neither total on purpose: this test asserts the
+				// fixture can show the difference between one router and
+				// several, and an empty group demonstrates neither.
 			}
 		}
 		if single == 0 {

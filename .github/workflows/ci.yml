@@ -45,7 +45,17 @@ jobs:
       - name: go vet
         run: go vet ./...
 
-      - uses: golangci/golangci-lint-action@v6
+      # THE ACTION MAJOR AND THE LINTER MAJOR MUST MATCH, and nothing warns you
+      # when they stop. .golangci.yml is `version: "2"`, which action v6 cannot
+      # load: it refuses at setup with "golangci-lint v2 is not supported by
+      # golangci-lint-action v6" and never lints a line.
+      #
+      # That is how this repository ran for a fortnight. The lint job failed on
+      # every push from 2026-08-07 onward while the linter itself had never
+      # executed, so 29 findings accumulated behind a step that looked like it
+      # was checking them. A gate that fails without running is the same lie as
+      # one that passes without running -- both report on work nobody did.
+      - uses: golangci/golangci-lint-action@v7
         with:
           version: v2.11.1
 

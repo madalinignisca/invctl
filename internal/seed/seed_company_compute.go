@@ -150,9 +150,7 @@ func (b *builder) clusters() {
 		{"hv-dr", "dr-rack-01", []string{"dr"}, "Proxmox VE 8",
 			"Dell", "PowerEdge R660", "JX881M55", 10, 1, "platform"},
 	} {
-		c := c
 		for i := 1; i <= 3; i++ {
-			i := i
 			name := fmt.Sprintf("%s-%02d", c.prefix, i)
 			b.asset(domain.KindHypervisor, name, c.rack, c.envs, func(a *domain.Asset) {
 				a.Vendor, a.Model = str(c.vendor), str(c.model)
@@ -206,7 +204,6 @@ func (b *builder) computeCosts() {
 		{"hv-dr", 9600, "1U, dual 12-core, 384 GB", 500, domain.CostYearly,
 			"Proxmox VE Standard, per socket -- DR carries production data", -420},
 	} {
-		p := p
 		for i := 1; i <= 3; i++ {
 			name := fmt.Sprintf("%s-%02d", p.prefix, i)
 			lines = append(lines,
