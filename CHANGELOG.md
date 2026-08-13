@@ -34,6 +34,85 @@ footnote.
 
 ---
 
+## [0.2.0] — 2026-08-13
+
+Three features and one bug that had been live for a day.
+
+### Action required
+
+- **Migration `00039` runs at startup** and adds one table (`journal_entry`).
+  It creates rather than alters, so no existing row can fail it and no table is
+  rewritten — the restart is the usual few seconds. Back up first anyway, as
+  every upgrade should:
+  `sqlite3 invctl.db ".backup 'invctl-$(date -u +%Y%m%d).db'"`.
+- **Nothing else changes behaviour you rely on.** No configuration is added, no
+  default moves, and no existing page answers differently.
+
+### Added
+
+- **Circuits are connectivity edges, and a circuit can be cut.** A circuit whose
+  two ends land on interfaces of assets in *different* forwarder groups now
+  joins those groups in the reachability model — derived from the terminations
+  you already record, not declared a second time. `Simulate cutting this` on a
+  circuit answers *"the fibre is cut, what goes dark"*, which the asset
+  simulator could not: a circuit is not in the containment tree, and cutting it
+  removes an edge rather than a vertex.
+
+  The page distinguishes three outcomes, because they need opposite responses
+  and an impact result cannot tell them apart: it **joins nothing** (most
+  circuits end at the provider, whose side you do not model), it **joins and
+  another path survives**, or it **joins and the far side is cut off**.
+
+- **Notes, on anything.** Free-text entries against assets, services, circuits,
+  clusters, projects, overlays, redundancy groups, VLANs, prefixes and teams —
+  for what a person knows that no column has a place for: why a box is held on
+  old firmware, which vendor case covers a fault, what was decided and why.
+
+  Notes appear on the entity's timeline beside the audit trail and observed
+  transitions, **labelled as notes**, and they get a reserved share of that
+  timeline so a note written during an incident is never pushed off it by the
+  churn the incident caused. They are editable — the edit is audited, so the
+  previous wording stays recoverable — and withdrawal is soft.
+
+  The author is stored as an opaque user id, like every other actor here, so
+  the record carries no personal data. **The body is free text you write**, and
+  it is the one field in this system where personal data can legitimately
+  arrive; the form says so.
+
+- **CSV download on the asset, service, circuit and prefix lists.** The link
+  carries the page's current filters, so the file is what was on screen.
+
+  **The asset export uses the importer's own columns**, so a file can be
+  exported, edited in a spreadsheet and loaded back — bulk editing without a
+  bulk editor. The parent is a path (`dc-oslo/rack-a1/hv-01`) and the device
+  type is `manufacturer_code/model`, because those are what the importer
+  resolves.
+
+  Cells beginning `=`, `+`, `-` or `@` are prefixed with an apostrophe.
+  Spreadsheets evaluate those, so an asset named `=cmd|'/c calc'!A1` would
+  otherwise become code when a colleague opens the file. Nothing is removed and
+  the apostrophe does not display.
+
+### Fixed
+
+- **The circuit impact page returned 500 for every circuit**, for about a day
+  in the 0.1.x line. It reused a shared template fragment without carrying all
+  the fields that fragment reads, which Go's templates refuse at render time.
+  Every layer beneath it was tested and green; nothing fetched the page. There
+  is now a test that renders both impact pages.
+
+### Known limits
+
+Unchanged from 0.1.0, and worth repeating: **authorization is still a flat
+username list** (`INV_ADMIN_USERS`), granting write access across the whole
+estate. Directory groups are not consulted.
+
+New in this release: a **note is visible to anyone who can read the entity** —
+there is no per-note visibility, and there is no way to restrict who reads one.
+Write what you would be comfortable with any signed-in user reading.
+
+[0.2.0]: https://github.com/madalinignisca/invctl/releases/tag/v0.2.0
+
 ## [0.1.0] — 2026-08-11
 
 First tagged release. There is no upgrade path to write about, so this entry
