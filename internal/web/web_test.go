@@ -11,6 +11,7 @@ package web_test
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"html"
 	"io"
 	"io/fs"
@@ -19,6 +20,7 @@ import (
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -111,46 +113,130 @@ func newHarnessWith(t *testing.T, creds []config.AgentCredential) *harness {
 	return newHarnessSecure(t, creds, false)
 }
 
+var (
+	webTemplateOnce sync.Once
+	webTemplatePath string
+	webTemplateRefs *seed.Refs
+	webTemplateErr  error
+)
+
+// webTemplate returns a migrated, seeded, user-populated database file that has
+// been CLOSED, and the refs from that one seeding.
+//
+// BUILT ONCE PER PROCESS AND COPIED, NOT REBUILT PER TEST. This package builds
+// 243 harnesses and each one was replaying forty migrations and the whole seed.
+// Measured per harness: 296ms migrating, 126ms seeding, 45ms hashing the two
+// passwords -- 475ms of setup before a single request, or 115s of the package's
+// 164s. Under the race detector on a four-core runner that package did not
+// finish inside an hour, and the release gate's own comment says a timeout that
+// needs raising is WP-I3 asking to be done rather than a number to increase.
+//
+// The same trick internal/store already uses, and sound for the same reason
+// plus one more: the template is seeded ONCE, so the ids it contains are fixed,
+// which is what lets every copy share a single Refs. Re-seeding per harness
+// would generate fresh UUIDs and no shared map could name them.
+//
+// SAFE TO SHARE because nothing in this package sets t.Parallel and no test
+// writes to refs -- both checked, and both worth re-checking before adding one.
+// Every harness still gets a private file that nobody else writes to; what
+// changed is how the file comes to exist.
+//
+// CLOSED BEFORE IT IS COPIED, so the WAL is checkpointed back into the main
+// file. Copying an open WAL database is the torn read this project has been
+// bitten by before, and it would be no less torn here.
+//
+// The clock is the one thing a shared template changes: seed timestamps are
+// fixed at the moment the template is built rather than at each harness. The
+// drift is bounded by how long the package takes, which is under two minutes,
+// and no test here asserts on the seed's own timestamps at finer granularity
+// than that -- the health tests insert their own rows with their own times.
+func webTemplate(t *testing.T) (string, *seed.Refs) {
+	t.Helper()
+	webTemplateOnce.Do(func() {
+		dir, err := os.MkdirTemp("", "invctl-web-template")
+		if err != nil {
+			webTemplateErr = err
+			return
+		}
+		path := filepath.Join(dir, "template.db")
+		db, err := store.Open(store.DriverSQLite, "file:"+path)
+		if err != nil {
+			webTemplateErr = err
+			return
+		}
+		ctx := context.Background()
+		if err := store.Migrate(ctx, db); err != nil {
+			_ = db.Close()
+			webTemplateErr = fmt.Errorf("migrating: %w", err)
+			return
+		}
+		st := store.New(db)
+		refs, err := seed.Load(ctx, st)
+		if err != nil {
+			_ = db.Close()
+			webTemplateErr = fmt.Errorf("seeding: %w", err)
+			return
+		}
+
+		// Two accounts: one with write access, one without. The read-only user
+		// is the whole point of having an authorization model at all. Baked
+		// into the template because argon2id is deliberately expensive -- 22ms
+		// a hash here, which is 11s across the package when done per harness.
+		for _, u := range []struct{ name, password string }{
+			{"admin", "admin-password"},
+			{"viewer", "viewer-password"},
+		} {
+			hash, err := auth.HashPassword(u.password)
+			if err != nil {
+				_ = db.Close()
+				webTemplateErr = fmt.Errorf("hashing password: %w", err)
+				return
+			}
+			user, err := domain.NewAppUser(store.NewID(), u.name, domain.UserSourceLocal, st.Now())
+			if err != nil {
+				_ = db.Close()
+				webTemplateErr = fmt.Errorf("building user: %w", err)
+				return
+			}
+			user.PasswordHash = &hash
+			if err := st.CreateUser(ctx, domain.SystemActor, user); err != nil {
+				_ = db.Close()
+				webTemplateErr = fmt.Errorf("creating user: %w", err)
+				return
+			}
+		}
+
+		if err := db.Close(); err != nil {
+			webTemplateErr = fmt.Errorf("closing the template: %w", err)
+			return
+		}
+		webTemplatePath, webTemplateRefs = path, refs
+	})
+	if webTemplateErr != nil {
+		t.Fatalf("building the web template: %v", webTemplateErr)
+	}
+	return webTemplatePath, webTemplateRefs
+}
+
 func newHarnessSecure(t *testing.T, creds []config.AgentCredential, secure bool) *harness {
 	t.Helper()
 
-	dsn := "file:" + filepath.Join(t.TempDir(), "web.db")
-	db, err := store.Open(store.DriverSQLite, dsn)
+	template, refs := webTemplate(t)
+
+	dsn := filepath.Join(t.TempDir(), "web.db")
+	data, err := os.ReadFile(template)
+	if err != nil {
+		t.Fatalf("reading the web template: %v", err)
+	}
+	if err := os.WriteFile(dsn, data, 0o600); err != nil {
+		t.Fatalf("writing the test database: %v", err)
+	}
+	db, err := store.Open(store.DriverSQLite, "file:"+dsn)
 	if err != nil {
 		t.Fatalf("opening database: %v", err)
 	}
 	t.Cleanup(func() { db.Close() })
-
-	ctx := context.Background()
-	if err := store.Migrate(ctx, db); err != nil {
-		t.Fatalf("migrating: %v", err)
-	}
 	st := store.New(db)
-
-	refs, err := seed.Load(ctx, st)
-	if err != nil {
-		t.Fatalf("seeding: %v", err)
-	}
-
-	// Two accounts: one with write access, one without. The read-only user is
-	// the whole point of having an authorization model at all.
-	for _, u := range []struct{ name, password string }{
-		{"admin", "admin-password"},
-		{"viewer", "viewer-password"},
-	} {
-		hash, err := auth.HashPassword(u.password)
-		if err != nil {
-			t.Fatalf("hashing password: %v", err)
-		}
-		user, err := domain.NewAppUser(store.NewID(), u.name, domain.UserSourceLocal, st.Now())
-		if err != nil {
-			t.Fatalf("building user: %v", err)
-		}
-		user.PasswordHash = &hash
-		if err := st.CreateUser(ctx, domain.SystemActor, user); err != nil {
-			t.Fatalf("creating user: %v", err)
-		}
-	}
 
 	sessions := scs.New()
 	// A CLEANUP GOROUTINE PER HARNESS, AND THIS PACKAGE BUILDS 243 OF THEM.
