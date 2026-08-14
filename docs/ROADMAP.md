@@ -566,12 +566,24 @@ changed, by how much. **No schema change** — the validity windows on `cost` ha
 been recording this since the first release. Against a hand-maintained inflation
 series it answers "did this rise faster than money fell".
 
-**WP-J3 · Capacity model** — L — depends: none — unlocks: J4, J5
-Hosts get cores, memory and storage; virtual machines get their allocation;
-storage kinds get a raw-to-usable ratio (Ceph 3×, RAID6, local 1:1). The estate
-models rack units and weight but nothing about compute, and this is the
-prerequisite for every figure in J4. Useful before any money is involved: it
-answers *"is this cluster oversubscribed?"*.
+**WP-J3 · Capacity model** — L — depends: none — unlocks: J4, J5, J7
+Hosts get cores, memory and storage; storage kinds get a raw-to-usable ratio
+(Ceph 3×, RAID6, local 1:1); clusters get a declared safe overcommit ratio. A
+workload carries **three declared numbers** per dimension -- contracted,
+provisioned and soft-allocated -- because one figure cannot answer three
+different questions. See `docs/COST-ATTRIBUTION.md` §5.5. The estate models rack
+units and weight but nothing about compute, and this is the prerequisite for
+every figure in J4. Useful before any money is involved: it answers *"is this
+cluster oversubscribed?"*.
+
+**WP-J7 · Capacity findings** — M — depends: J3 — unlocks: the 03:00 question
+Three findings from the three numbers: provisioned above contracted (commercial
+-- somebody should renegotiate), provisioned above the safe overcommit ratio
+(operational), and **contracted above physical capacity** (management). The
+third is invisible on every utilisation dashboard: a cluster at 35% CPU and 65%
+memory looks healthy and says nothing about whether every contract could be
+honoured at once. That is a solvency question, and declared figures are the only
+thing that can answer it. Needs no money and can ship before J4.
 
 **WP-J4 · Cost attribution** — L — depends: J3, I2 — unlocks: the CEO's question
 Cluster cost divided by *usable* capacity gives a price per unit; the redundancy
@@ -609,8 +621,9 @@ A2 API                 (no deps)
 G1..G5                 (no deps)
 every group ──► I1 / I2
 J1 lineage ──► J2 price movement ──► J6 supplier dimension
-J3 capacity ──┐
-I2 reports ───┴──► J4 attribution ──► J5 shared occupancy
+J3 capacity ──┬──► J7 capacity findings   (no money needed)
+              └──┐
+I2 reports ──────┴──► J4 attribution ──► J5 shared occupancy
 ```
 
 Anything with no inbound arrow can start immediately and in parallel: **A1, A2,

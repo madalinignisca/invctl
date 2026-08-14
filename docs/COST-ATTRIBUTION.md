@@ -136,6 +136,67 @@ When the percentages do not total 100, that is a finding, not a silent rounding.
 
 ---
 
+## 5.5 Three numbers, not one
+
+*Added 2026-08-14 from the operator who will run this for the first client. It
+replaces an earlier draft that carried a single "allocated" figure, which could
+not have answered any of the questions below.*
+
+Each resource dimension carries **three declared numbers**:
+
+| | what it is | what it answers |
+|---|---|---|
+| **Contracted** | what was promised commercially | are we solvent against our own agreements |
+| **Provisioned** | the hard limit actually configured | what can this workload really take |
+| **Allocated (soft)** | the figure money is computed on | what does this cost |
+
+All three are **declared** — a commercial assertion, a configuration assertion
+and a financial one. None requires telemetry, each is somebody's decision, and
+each carries an audit entry. This is why the model does not strain against
+`docs/AUDIT.md`: adding two more numbers adds no new *class* of fact.
+
+### The three findings that follow
+
+1. **Provisioned above contracted** — giving away more than was sold. The action
+   is commercial: renegotiate, or amend the terms to match what is already being
+   delivered. It appears as the infrastructure team responds to demand, which is
+   exactly when nobody thinks to tell an account manager.
+2. **Provisioned above what is safe to run** — the cluster is oversubscribed
+   beyond its declared overcommit ratio. The action is operational.
+3. **Contracted above physical capacity** — *more has been promised than exists*.
+
+The third is the one that motivated this section, and it is invisible on every
+utilisation dashboard. Clusters routinely sit at 30–40% CPU and 60–70% memory
+and look entirely healthy while being abusively overcommitted, because
+utilisation measures what is being taken, not what could be claimed. **Whether
+every contract could be honoured at once is a solvency question, and it is
+answerable only from declared figures — which is precisely what this system
+holds.**
+
+### The overcommit ratio is declared, per cluster
+
+CPU is routinely overcommitted, memory rarely, storage differently again. The
+safe ratio is a property of the cluster and a judgement its operator makes, so
+it is declared rather than derived, with an estate default. It is the divisor in
+finding 2 and it must never be inferred from observed load — a quiet cluster
+would raise the apparent safe ratio and licence the very overcommit this is
+meant to catch.
+
+### Cost of generosity, kept separate from headroom
+
+Money is attributed on **soft allocation**. Where provisioning exceeds it, that
+capacity costs real money that nobody is paying for, and it is not the same as
+headroom held on purpose. §5.3's reconciliation therefore has three parts, not
+two:
+
+```
+attributed to projects   (soft allocated)
+provisioned beyond it    (unfunded — a decision somebody made without pricing it)
+headroom                 (deliberate, and the reason the cluster survives a node)
+```
+
+---
+
 ## 6. Allocated, not used — and how the door stays open
 
 **Decided: allocation is the basis.** See `DECISIONS.md` for the full reasoning.
