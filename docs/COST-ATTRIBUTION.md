@@ -144,11 +144,11 @@ not have answered any of the questions below.*
 
 Each resource dimension carries **three declared numbers**:
 
-| | what it is | what it answers |
-|---|---|---|
-| **Contracted** | what was promised commercially | are we solvent against our own agreements |
-| **Provisioned** | the hard limit actually configured | what can this workload really take |
-| **Allocated (soft)** | the figure money is computed on | what does this cost |
+| | what it is | where it lives | what it answers |
+|---|---|---|---|
+| **Priced-for** | the resource assumption the deal was quoted on | the **project** | is this engagement still worth what we charge |
+| **Provisioned** | the hard limit actually configured | the workload | what can this really take |
+| **Allocated (soft)** | the figure money is computed on | the workload | what does this cost |
 
 All three are **declared** — a commercial assertion, a configuration assertion
 and a financial one. None requires telemetry, each is somebody's decision, and
@@ -157,21 +157,35 @@ each carries an audit entry. This is why the model does not strain against
 
 ### The three findings that follow
 
-1. **Provisioned above contracted** — giving away more than was sold. The action
-   is commercial: renegotiate, or amend the terms to match what is already being
-   delivered. It appears as the infrastructure team responds to demand, which is
-   exactly when nobody thinks to tell an account manager.
+1. **A project allocated above what it was priced for** — the engagement has
+   grown past its own quote. Nothing is broken and nobody is in breach; the
+   margin is eroding quietly. This is the CEO's alert, and it fires because the
+   infrastructure team responded to demand, which is exactly the moment nobody
+   thinks to tell whoever owns the commercial relationship.
 2. **Provisioned above what is safe to run** — the cluster is oversubscribed
    beyond its declared overcommit ratio. The action is operational.
-3. **Contracted above physical capacity** — *more has been promised than exists*.
+3. **Priced-for totals above physical capacity** — more work has been sold than
+   the estate can host, whatever today's load looks like.
 
-The third is the one that motivated this section, and it is invisible on every
-utilisation dashboard. Clusters routinely sit at 30–40% CPU and 60–70% memory
-and look entirely healthy while being abusively overcommitted, because
-utilisation measures what is being taken, not what could be claimed. **Whether
-every contract could be honoured at once is a solvency question, and it is
-answerable only from declared figures — which is precisely what this system
-holds.**
+The third is invisible on every utilisation dashboard. Clusters routinely sit at
+30–40% CPU and 60–70% memory, look entirely healthy, and are abusively
+overcommitted underneath — because utilisation measures what is being *taken*,
+never what could be *claimed*. Whether every engagement could be served at once
+is a planning question, and declared figures are the only thing that can answer
+it.
+
+### Why it is not called "contracted"
+
+An earlier draft called this figure `contracted`, and that was wrong in a way
+worth recording. **These contracts do not specify hardware or software
+resources at all.** No client was promised a number of cores. What exists is the
+assumption the price was built on.
+
+The name matters beyond tidiness: a field called `contracted` that appears in no
+contract will eventually be quoted at a client, or in a dispute, as though it
+were one. `priced_for` cannot be misread that way. It is an internal planning
+figure, it is somebody's estimate, and it should read like one everywhere it
+appears.
 
 ### The overcommit ratio is declared, per cluster
 
