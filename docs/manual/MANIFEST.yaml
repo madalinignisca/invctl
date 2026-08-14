@@ -38,7 +38,7 @@ fragments:
     preconditions:
       - "the overview shows at least one finding of each severity (fault, risk, gap)"
       - "no invctl.nav.* keys in localStorage before capturing: a persistent browser profile carries the previous run's expanded groups into the next, and a fresh reader sees everything collapsed"
-    generated_at: 7ba77afbb08a
+    generated_at: 7f71c0c81fc2
 
   - id: installation
     title: Installing and running invctl
@@ -109,7 +109,7 @@ fragments:
       - "one cluster whose min_hosts equals its host count, so the 'not survivable' row is visible"
       - "one asset whose EOL date is inherited from its device type, so the source is shown"
       - "at least one journal entry exists — the seeded estate has NONE, so the notes capture is made by writing one on the local copy first (see REGENERATING.md)"
-    generated_at: 8cc0d28bcf9d
+    generated_at: 7f71c0c81fc2
 
   - id: racks
     title: Racks — will it fit, will it hold, will it stay cool
