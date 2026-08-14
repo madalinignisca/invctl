@@ -10,6 +10,8 @@ package store
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -557,6 +559,55 @@ func (s *SQLStore) GetAsset(ctx context.Context, id string) (*AssetRow, error) {
 // `parent_id`, and that is the only input the move form has. A message attached
 // to a field the form does not render is a refusal with nowhere to appear,
 // which this project has shipped three times.
+// requireNoReplacementCycle refuses a lineage that loops back on itself.
+//
+// A CHAIN IS THE POINT: C replaces B replaces A is three generations of price
+// movement, and the report walks it deliberately. A CYCLE is not a strange
+// lineage, it is a lie -- it says a box succeeded the box that succeeded it,
+// and any reader walking it never stops.
+//
+// domain.Validate already refuses the one-hop case (an asset replacing itself)
+// because it needs no other row to see it. The longer loop needs both ends, so
+// it is refused here, where the transaction can follow the chain.
+//
+// Bounded rather than trusting the data: the walk stops at replacementChainMax
+// hops and refuses. If a cycle ever did reach the table -- by a migration, by a
+// direct write -- this must return an error rather than spin, because the
+// alternative is a request that never completes and a connection that never
+// returns to the pool.
+func requireNoReplacementCycle(ctx context.Context, t *tx, assetID string, replaces *string) error {
+	if replaces == nil || *replaces == "" {
+		return nil
+	}
+	seen := map[string]bool{assetID: true}
+	at := *replaces
+	for hops := 0; hops < replacementChainMax; hops++ {
+		if seen[at] {
+			return fmt.Errorf("replacement chain loops back on itself: %w", domain.ErrConflict)
+		}
+		seen[at] = true
+		var next *string
+		err := t.get(ctx, &next,
+			`SELECT replaces_asset_id FROM asset WHERE id = ?`, at)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil // the predecessor does not exist; the FK will say so
+		}
+		if err != nil {
+			return fmt.Errorf("walking the replacement chain: %w", err)
+		}
+		if next == nil || *next == "" {
+			return nil
+		}
+		at = *next
+	}
+	return fmt.Errorf("replacement chain is longer than %d hops, which is a loop "+
+		"or a mistake: %w", replacementChainMax, domain.ErrConflict)
+}
+
+// replacementChainMax bounds the walk. Twenty generations of the same box is
+// beyond any real estate and well within a refresh history worth keeping.
+const replacementChainMax = 20
+
 func requireUniqueSiblingName(ctx context.Context, t *tx, field, name string, parentID *string, lifecycle, excludeID string) error {
 	if lifecycle == domain.LifecycleRetired {
 		return nil
@@ -648,16 +699,21 @@ func (s *SQLStore) insertAsset(ctx context.Context, t *tx, a *domain.Asset, envi
 	if err := requireUniqueSiblingName(ctx, t, "name", a.Name, a.ParentID, a.Lifecycle, a.ID); err != nil {
 		return err
 	}
+	if err := requireNoReplacementCycle(ctx, t, a.ID, a.ReplacesAssetID); err != nil {
+		return err
+	}
 	_, err := t.exec(ctx,
 		`INSERT INTO asset (id, kind, name, parent_id, serial, asset_tag, vendor, model,
 		                    device_type_id, u_height, rack_position, rack_face,
 		                    usable_depth_mm, width_mm, max_load_grams,
+		                    replaces_asset_id,
 		                    lifecycle, team_id, manager_role, eol_date, attrs,
 		                    created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		a.ID, a.Kind, a.Name, a.ParentID, a.Serial, a.AssetTag, a.Vendor, a.Model,
 		a.DeviceTypeID, a.UHeight, a.RackPosition, a.RackFace,
 		a.UsableDepthMM, a.WidthMM, a.MaxLoadGrams,
+		a.ReplacesAssetID,
 		a.Lifecycle, a.TeamID, a.ManagerRole, a.EOLDate, a.Attrs,
 		a.CreatedAt, a.UpdatedAt)
 	if err != nil {
@@ -721,11 +777,15 @@ func (s *SQLStore) UpdateAsset(ctx context.Context, actor domain.Actor, a *domai
 		if err := requireUniqueSiblingName(ctx, t, "name", a.Name, a.ParentID, a.Lifecycle, a.ID); err != nil {
 			return err
 		}
+		if err := requireNoReplacementCycle(ctx, t, a.ID, a.ReplacesAssetID); err != nil {
+			return err
+		}
 		res, err := t.exec(ctx,
 			`UPDATE asset SET kind = ?, name = ?, serial = ?, asset_tag = ?, vendor = ?,
 			                  model = ?, device_type_id = ?, u_height = ?,
 			                  rack_position = ?, rack_face = ?,
 			                  usable_depth_mm = ?, width_mm = ?, max_load_grams = ?,
+			                  replaces_asset_id = ?,
 			                  lifecycle = ?, team_id = ?,
 			                  manager_role = ?, eol_date = ?, attrs = ?, updated_at = ?,
 			                  row_version = row_version + 1
@@ -733,6 +793,7 @@ func (s *SQLStore) UpdateAsset(ctx context.Context, actor domain.Actor, a *domai
 			a.Kind, a.Name, a.Serial, a.AssetTag, a.Vendor, a.Model, a.DeviceTypeID,
 			a.UHeight, a.RackPosition, a.RackFace,
 			a.UsableDepthMM, a.WidthMM, a.MaxLoadGrams,
+			a.ReplacesAssetID,
 			a.Lifecycle, a.TeamID, a.ManagerRole, a.EOLDate, a.Attrs, a.UpdatedAt,
 			a.ID, a.RowVersion)
 		if err != nil {

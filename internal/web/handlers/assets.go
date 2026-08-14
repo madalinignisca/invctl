@@ -326,6 +326,8 @@ type assetDetailPage struct {
 	// Fit is set only for a rack: whether what is in it physically fits, what
 	// it weighs and whether it can breathe.
 	Fit *store.RackFitReport
+	// Replacement is what this asset took over from, or nil. WP-J1.
+	Replacement *store.ReplacementComparison
 	// PassThroughs is what this panel does between its own ports.
 	PassThroughs []store.PassThroughRow
 	// Notes somebody wrote about this asset, and what the panel posts to.
@@ -496,6 +498,13 @@ func (a *App) renderAssetDetail(w http.ResponseWriter, r *http.Request, status i
 		slog.Error("listing pass-throughs", "error", err, "asset", id)
 	}
 
+	// What this replaced, when it replaced anything (WP-J1). Same treatment as
+	// the elevation: logged and absent rather than fatal.
+	replacement, err := a.Store.ReplacementFor(r.Context(), id, a.Store.Now())
+	if err != nil {
+		slog.Error("resolving the replacement", "error", err, "asset", id)
+	}
+
 	// Notes. Logged and absent rather than fatal, like the elevation: an asset
 	// page is what somebody opens during an incident, and a panel is not worth
 	// taking it down for.
@@ -511,6 +520,7 @@ func (a *App) renderAssetDetail(w http.ResponseWriter, r *http.Request, status i
 		JournalID:       id,
 		Elevation:       elevation,
 		Fit:             fit,
+		Replacement:     replacement,
 		PassThroughs:    passThroughs,
 		PowerInputs:     powerInputs,
 		PowerFeeds:      powerFeeds,
@@ -627,6 +637,10 @@ func (a *App) AssetUpdate(w http.ResponseWriter, r *http.Request) {
 	// catalogue picker is the same shape, and getting it wrong would silently
 	// drop an asset's model -- taking its inherited end-of-support date with it.
 	updated.DeviceTypeID = submittedString(r, "device_type_id", updated.DeviceTypeID)
+	// Same treatment for the lineage: a form that did not carry the field must
+	// not read as an operator clearing it, and a form that did carry it empty
+	// must clear it. submittedString is the one helper that tells those apart.
+	updated.ReplacesAssetID = submittedString(r, "replaces_asset_id", updated.ReplacesAssetID)
 	// Refused, not silently dropped: a rack height that quietly became nothing
 	// would take every capacity answer with it, and a position that vanished
 	// would move a box off the diagram without saying so.

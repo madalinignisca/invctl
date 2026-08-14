@@ -186,6 +186,30 @@
         </div>
         {{with index .Errors "device_type_id"}}<div class="field-error">{{.}}</div>{{end}}
       </div>
+
+      {{/* What this took over from (WP-J1). Only when correcting: a lineage is
+           recorded once the successor exists, and offering it on the add form
+           would ask for it before the reason to know it. Retired assets are in
+           the list on purpose -- a predecessor usually is one. */}}
+      {{if .Editing}}
+      <div class="field">
+        <label for="{{.Prefix}}-replaces">Replaces</label>
+        <select id="{{.Prefix}}-replaces" name="replaces_asset_id">
+          <option value="">— nothing —</option>
+          {{$cur := $f.Value "replaces_asset_id"}}
+          {{range .Predecessors}}
+          {{if ne .ID ($f.Value "id")}}
+          <option value="{{.ID}}" {{if eq .ID $cur}}selected{{end}}>{{.Name}}{{if eq .Lifecycle "retired"}} · retired{{end}}</option>
+          {{end}}
+          {{end}}
+        </select>
+        <div class="field-hint">
+          The box this one took over from, so a refresh can be priced against
+          what it succeeded. Usually something retired.
+        </div>
+        {{with index .Errors "replaces_asset_id"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      {{end}}
       <div class="field">
         <label for="{{.Prefix}}-serial">Serial</label>
         <input id="{{.Prefix}}-serial" class="mono" type="text" name="serial" value="{{.Value "serial"}}">

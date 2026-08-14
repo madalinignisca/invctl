@@ -50,6 +50,14 @@ type assetFormData struct {
 	// DeviceTypes is the catalogue, so an asset can be pointed at a model and
 	// inherit its end-of-support date.
 	DeviceTypes []store.DeviceTypeRow
+	// Predecessors is what this asset may be recorded as replacing (WP-J1).
+	//
+	// A SEPARATE LIST FROM Parents, AND THE DIFFERENCE IS THE WHOLE POINT: a
+	// parent must be live, because nothing is contained by a retired thing,
+	// while a predecessor is USUALLY retired -- that is what being replaced
+	// means. Reusing Parents here would have offered exactly the wrong set and
+	// made the feature look broken to the first person who tried it.
+	Predecessors []store.AssetRow
 	// Asset is the row being corrected, or nil when adding. One partial serves
 	// both, so a field cannot be added to one and forgotten on the other --
 	// which is how a form ends up quietly unable to set something.
@@ -83,6 +91,13 @@ func (f assetFormData) Value(field string) string {
 			stored = orBlank(a.Model)
 		case "device_type_id":
 			stored = orBlank(a.DeviceTypeID)
+		case "replaces_asset_id":
+			stored = orBlank(a.ReplacesAssetID)
+		case "id":
+			// So the picker can exclude the asset being edited: an asset
+			// cannot replace itself, and offering it would invite a refusal
+			// the form could have prevented.
+			stored = a.ID
 		case "u_height":
 			stored = orBlankInt(a.UHeight)
 		case "usable_depth_mm":
@@ -299,6 +314,12 @@ func (a *App) newAssetForm(r *http.Request, errs map[string]string, envs []domai
 	if err != nil {
 		slog.Error("listing device types for the asset form", "error", err, "path", r.URL.Path)
 	}
+	// Retired included, deliberately: see Predecessors. Same treatment on
+	// failure -- an empty picker, never a failed page.
+	predecessors, err := a.Store.ListAssets(r.Context(), store.AssetFilter{IncludeRetired: true})
+	if err != nil {
+		slog.Error("listing predecessors for the asset form", "error", err, "path", r.URL.Path)
+	}
 	return assetFormData{
 		Base:         a.base(r, "Assets", "assets"),
 		Errors:       orEmpty(errs),
@@ -309,6 +330,7 @@ func (a *App) newAssetForm(r *http.Request, errs map[string]string, envs []domai
 		Teams:        teams,
 		Roles:        roles,
 		DeviceTypes:  deviceTypes,
+		Predecessors: predecessors,
 		Action:       "/assets",
 		Submit:       "Add asset",
 		Prefix:       "asset-new",

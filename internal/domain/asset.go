@@ -191,10 +191,17 @@ type Asset struct {
 	// choice. WidthMM is the external width, and side clearance MAY be derived
 	// from it, because EIA-310 fixes the equipment width and a standard pinning
 	// the missing term is what separates arithmetic from a guess.
-	UsableDepthMM *int   `db:"usable_depth_mm"`
-	WidthMM       *int   `db:"width_mm"`
-	MaxLoadGrams  *int   `db:"max_load_grams"`
-	Lifecycle     string `db:"lifecycle"`
+	UsableDepthMM *int `db:"usable_depth_mm"`
+	WidthMM       *int `db:"width_mm"`
+	MaxLoadGrams  *int `db:"max_load_grams"`
+	// ReplacesAssetID is the box this one took over from (WP-J1). The only
+	// fact needed to compare what a refresh cost against what it succeeded --
+	// both assets already carry their own cost lines, vendor and dates.
+	//
+	// Nil is the ordinary case and never an error. An asset that replaced
+	// nothing is most assets.
+	ReplacesAssetID *string `db:"replaces_asset_id"`
+	Lifecycle       string  `db:"lifecycle"`
 	// Who looks after it, and in what capacity. Both optional; see team.go.
 	TeamID      *string `db:"team_id"`
 	ManagerRole *string `db:"manager_role"`
@@ -237,6 +244,23 @@ func (a *Asset) Validate() error {
 	checkEnum(ve, "lifecycle", a.Lifecycle, AssetLifecycles)
 	if a.ParentID != nil && *a.ParentID == a.ID {
 		ve.Add("parent_id", "an asset cannot contain itself")
+	}
+	// A box cannot succeed itself. The same shape as the containment check
+	// above, and refused for the same reason: it is not a strange lineage, it
+	// is a row that makes every reader of the comparison ask what it means.
+	//
+	// A CHAIN IS FINE AND WANTED -- C replaces B replaces A gives price
+	// movement over three generations, which is the whole point. Only the
+	// self-reference is nonsense, and a longer cycle cannot be built without
+	// the store seeing both ends, so it is refused there rather than guessed
+	// at here.
+	if a.ReplacesAssetID != nil {
+		if *a.ReplacesAssetID == a.ID {
+			ve.Add("replaces_asset_id", "an asset cannot replace itself")
+		}
+		if strings.TrimSpace(*a.ReplacesAssetID) == "" {
+			a.ReplacesAssetID = nil
+		}
 	}
 	a.EOLDate = checkDate(ve, "eol_date", a.EOLDate)
 	checkMillimetres(ve, "usable_depth_mm", a.UsableDepthMM)

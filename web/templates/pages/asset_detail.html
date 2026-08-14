@@ -347,6 +347,63 @@
 </div>
 
 
+{{with .Replacement}}
+{{/* What this took over from (WP-J1). Above the fit panel because it answers a
+     question somebody arrives with -- "did that refresh cost us?" -- rather than
+     one they discover here.
+
+     THE PERCENTAGE ONLY APPEARS WHEN BOTH ENDS CARRY AN ACQUISITION PRICE. Half
+     a comparison rendered as a whole one is the failure this panel could most
+     easily have: a rise computed against a missing number looks authoritative
+     and is invented. */}}
+<div class="panel">
+  <div class="panel-head">
+    <h2>Replaced</h2>
+    <span class="panel-note">what this took over from</span>
+  </div>
+  <div class="panel-body">
+    <p>
+      <a href="/assets/{{.PredecessorID}}">{{.PredecessorName}}</a>
+      {{if .PredecessorRetired}}<span class="pill pill-muted">retired</span>
+      {{else}}<span class="pill pill-warn">still active</span>{{end}}
+      {{if .VendorThen}}<span class="muted">{{.VendorThen}}</span>{{end}}
+    </p>
+
+    {{if .Comparable}}
+    <div class="stat-row">
+      <div class="stat">
+        <div class="stat-label">Then · {{.ThenDate}}</div>
+        <div class="stat-value">{{money .ThenMinor}}</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Now · {{.NowDate}}</div>
+        <div class="stat-value">{{money .NowMinor}}</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Difference</div>
+        <div class="stat-value">{{money .DifferenceMinor}}</div>
+        <div class="stat-note">{{.PercentChange}}% on the old price</div>
+      </div>
+    </div>
+    {{if .Annualisable}}
+    <p class="muted">
+      About <strong>{{.AnnualisedPercent}}% a year</strong> over the {{printf "%.1f" .YearsApart}}
+      years between the two purchases — the figure worth holding against
+      inflation for the period.
+    </p>
+    {{end}}
+    {{else}}
+    <div class="empty">
+      <strong>Not comparable yet.</strong>
+      {{if not .ThenKnown}}The predecessor has no recorded acquisition cost.{{end}}
+      {{if not .NowKnown}}This asset has no recorded acquisition cost.{{end}}
+      A one-off cost line on both is what turns this into a price comparison.
+    </div>
+    {{end}}
+  </div>
+</div>
+{{end}}
+
 {{with .Fit}}
 {{/* Physical fit: will it go in, will the rack hold it, will it stay cool.
      Above the elevation because it is the answer somebody came for, and the

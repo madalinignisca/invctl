@@ -154,6 +154,10 @@ var DeclaredColumns = map[string][]string{
 	"asset": {
 		"id", "kind", "name", "parent_id", "serial", "asset_tag", "vendor",
 		"model", "device_type_id",
+		// What this took over from (migration 00042). Declared: a person says
+		// this box succeeded that one. Nothing observes a refresh, and nothing
+		// derives it -- a serial number changing is not evidence of lineage.
+		"replaces_asset_id",
 		// Where it physically sits (migration 00027). Declared: somebody put it
 		// there. u_height on a RACK is its capacity; a mounted box's height comes
 		// from its catalogued model.
