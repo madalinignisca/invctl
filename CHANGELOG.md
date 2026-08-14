@@ -34,6 +34,70 @@ footnote.
 
 ---
 
+## [0.4.1] — 2026-08-14
+
+**A security release, and the only one so far.** No feature changes, no
+migration, no new setting. Every binary published before this one — 0.1.0
+through 0.4.0 — was built against a Go standard library carrying six known
+vulnerabilities. **Replace the binary.**
+
+### Action required
+
+- **Replace any invctl binary you downloaded before 2026-08-14.** Stop the
+  service, swap the file, start it. Nothing else changes: the database is
+  untouched, no migration runs, and no configuration is different.
+
+- **Two of the six are worth knowing about specifically**, because they sit on
+  paths this application actually uses rather than on code it merely links:
+
+  | | |
+  |---|---|
+  | `GO-2026-5856` | an Encrypted Client Hello privacy leak in `crypto/tls`, reached through **LDAP over TLS** — `StartTLS` and `DialURL` |
+  | `GO-2026-6091` | JavaScript regexp context tracking in `html/template`, reached through **every page this software renders** |
+
+  The other four — `GO-2026-6090` (post-handshake messages in `crypto/tls`),
+  `GO-2026-6089` (`ReadHeaderTimeout` on the unencrypted HTTP/2 check in
+  `net/http`), `GO-2026-6088` (`encoding/xml` recursion), `GO-2026-5972`
+  (`encoding/asn1` recursion) — are reachable but on narrower paths.
+
+  If your deployment uses **directory authentication**, or terminates **TLS in
+  invctl itself** rather than behind a proxy, treat this as the reason to
+  upgrade today rather than at your convenience.
+
+- **Nothing here was exploited, and nothing here is known to have been.** These
+  are library flaws found and fixed upstream, not incidents. The reason to move
+  is that they are published and the fix is a file copy.
+
+### Fixed
+
+- **Built with Go 1.26.6**, which carries the fix for all six. The pin lives in
+  `go.mod` and both workflows resolve their toolchain from it, so the version
+  that builds a release is the version the repository declares.
+
+### Why you were not told sooner
+
+Worth stating plainly, because it is the actual failure and it was ours.
+
+The vulnerability scan runs in CI, in the same job as the linter. That job had
+been **failing on every push since 2026-08-07** — not because anything was
+wrong with the code, but because the linter action could not load its own
+configuration file and died before starting. `govulncheck` never ran. The
+release workflow is a separate workflow that did not run either check, so four
+releases went out green over a tree that had not been scanned in a fortnight.
+
+Both are fixed: the action version matches the configuration format, and the
+release gate now runs the same checks CI does, so a tag cannot ship over a red
+tree again.
+
+One consequence to expect rather than debug: **this check can go red on a
+morning when nobody has touched the repository.** Five of the six advisories
+above landed overnight against a Go version that had been clean the previous
+evening. That is the scanner working.
+
+[0.4.1]: https://github.com/madalinignisca/invctl/releases/tag/v0.4.1
+
+---
+
 ## [0.4.0] — 2026-08-13
 
 Performance. **No migration and no new setting** — replace the binary and
