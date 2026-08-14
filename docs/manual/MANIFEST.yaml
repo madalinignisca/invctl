@@ -38,7 +38,7 @@ fragments:
     preconditions:
       - "the overview shows at least one finding of each severity (fault, risk, gap)"
       - "no invctl.nav.* keys in localStorage before capturing: a persistent browser profile carries the previous run's expanded groups into the next, and a fresh reader sees everything collapsed"
-    generated_at: 8cc0d28bcf9d
+    generated_at: 7ba77afbb08a
 
   - id: installation
     title: Installing and running invctl
@@ -57,7 +57,7 @@ fragments:
       - internal/version/version.go
     preconditions:
       - "none: nothing here is read off a running instance"
-    generated_at: 567556aee363
+    generated_at: 7ba77afbb08a
 
   - id: directory
     title: Directory authentication — LDAP and Active Directory
@@ -137,7 +137,7 @@ fragments:
       - "two vertically adjacent boxes with opposing airflow"
       - "one box carrying 24 or more leads, and one declared cable length too short for its span"
       - "rack-a2 and colo-rack-07 in the seeded estate hold all of the above between them"
-    generated_at: 8cc0d28bcf9d
+    generated_at: 7ba77afbb08a
 
   - id: addressing
     title: Addressing — prefixes, VLANs, allocations
@@ -172,7 +172,7 @@ fragments:
       - "one VLAN carrying two prefixes (the dual-stack case)"
       - "at least one reservation, so 'next free' visibly skips it"
       - "one registry allocation with nothing carved out of it, so 'unused' is visible"
-    generated_at: 8cc0d28bcf9d
+    generated_at: 7ba77afbb08a
 
   - id: network
     title: Network — topology, circuits, overlays, redundancy
@@ -209,7 +209,7 @@ fragments:
       - "one circuit with a contract end inside the expiry horizon"
       - "one overlay with fewer than two terminations"
       - "one circuit that IS a connectivity edge (both ends on ports, in two different forwarder groups) and one that is not — the manual documents both verdicts"
-    generated_at: 8cc0d28bcf9d
+    generated_at: 7ba77afbb08a
 
   - id: reports
     title: Reports — what expires, power, impact
