@@ -1,0 +1,134 @@
+{{/*
+  invctl — infrastructure inventory
+  Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+
+  Licensed under the GNU Affero General Public License, version 3 only —
+  no later version applies. See LICENSE for the full text.
+
+  SPDX-License-Identifier: AGPL-3.0-only
+
+  COVERAGE IS RENDERED BEFORE THE READER CAN LEAVE, not in a footnote. The
+  headline number here is the one most likely to be quoted in a meeting and
+  least likely to be questioned, and it is a floor rather than a total whenever
+  anything is unpriced. Every other report in this codebase says what it cannot
+  see; this one has more reason to than any of them.
+*/}}
+{{define "content"}}
+<div class="crumbs">
+  <span>reports</span><span class="sep">/</span><span>cost</span>
+</div>
+
+<div class="page-head">
+  <div class="eyebrow">analysis</div>
+  <h1>What it costs</h1>
+  <p class="lede">
+    Every live cost line in the estate, totalled as at {{.Report.On}}. Capital is
+    what has already been spent; the run rate is what leaves the bank each month
+    to keep this running. Amortisation is shown beside the run rate and never
+    added to it — it is an accounting view of money that has already gone.
+  </p>
+</div>
+
+{{template "cost_report" .}}
+{{end}}
+
+{{define "cost_report"}}
+<div id="cost-report">
+{{/* The uncertainty first, and only when there is some. A page that leads with
+     a caveat it does not need trains people to skip the caveat. */}}
+{{if not .Report.FullyPriced}}
+<div class="panel panel-warn">
+  <div class="panel-body">
+    <strong>These totals are a floor, not a total.</strong>
+    {{.Report.PricedEntities}} of {{.Report.TotalEntities}} cost-bearing things
+    carry a price. Whatever the rest cost is not in the figures below — so this
+    number can only go up as the estate is priced, never down.
+  </div>
+</div>
+{{end}}
+
+<div class="stat-row">
+  <div class="stat">
+    <div class="stat-label">Capital, spent</div>
+    <div class="stat-value">{{money .Report.Totals.CapitalMinor}}</div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">Per month</div>
+    <div class="stat-value">{{money .Report.Totals.MonthlyMinor}}</div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">Per year</div>
+    <div class="stat-value">{{money .Report.Totals.AnnualMinor}}</div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">Amortised monthly</div>
+    <div class="stat-value">{{money .Report.Totals.AmortisedMonthlyMinor}}</div>
+    <div class="stat-note">capital spread over its life — not part of the run rate</div>
+  </div>
+</div>
+
+<div class="panel">
+  <div class="panel-head">
+    <h2>Where the money is attached</h2>
+    <span class="panel-note">and how much of each has been priced</span>
+  </div>
+  <div class="scroll-x">
+    <table>
+      <thead>
+        <tr>
+          <th>Surface</th><th>Capital</th><th>Per month</th><th>Per year</th>
+          <th>Priced</th><th>Coverage</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .Report.Surfaces}}
+        <tr>
+          <td>{{.Name}}</td>
+          <td>{{money .Totals.CapitalMinor}}</td>
+          <td>{{money .Totals.MonthlyMinor}}</td>
+          <td>{{money .Totals.AnnualMinor}}</td>
+          <td>{{.Priced}} of {{.Total}}</td>
+          <td>
+            {{if eq .Total 0}}<span class="muted">none exist</span>
+            {{else if eq .Priced .Total}}<span class="pill pill-ok">complete</span>
+            {{else}}<span class="pill pill-warn">{{.Coverage}}%</span>
+              <span class="muted">{{.Unpriced}} unpriced</span>{{end}}
+          </td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="panel">
+  <div class="panel-head">
+    <h2>What dominates the run rate</h2>
+    <span class="panel-note">largest recurring lines, biggest first</span>
+  </div>
+  {{if .Report.Largest}}
+  <div class="scroll-x">
+    <table>
+      <thead><tr><th>What</th><th>Surface</th><th>Kind</th><th>Per month</th></tr></thead>
+      <tbody>
+        {{range .Report.Largest}}
+        <tr>
+          <td><a href="{{.Href}}">{{.OwnerLabel}}</a></td>
+          <td>{{.Surface}}</td>
+          <td>{{.Kind}}</td>
+          <td>{{money .MonthlyCost}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{else}}
+  <div class="empty">
+    <strong>Nothing recurring is recorded.</strong>
+    Either the estate genuinely costs nothing each month, or nobody has entered
+    a monthly line yet — and the coverage above says which.
+  </div>
+  {{end}}
+</div>
+</div>
+{{end}}

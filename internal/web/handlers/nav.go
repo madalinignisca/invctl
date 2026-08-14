@@ -102,6 +102,7 @@ var navGroups = []NavGroup{
 	{Label: "Reports", Links: []NavLink{
 		{Label: "What expires", Href: "/reports/expiry", Nav: "expiry"},
 		{Label: "Power findings", Href: "/reports/power", Nav: "power-report"},
+		{Label: "What it costs", Href: "/reports/cost", Nav: "cost-report"},
 		{Label: "Environment spans", Href: "/reports/spanning", Nav: "reports"},
 		{Label: "Change log", Href: "/changes", Nav: "changes"},
 	}},

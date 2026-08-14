@@ -100,6 +100,24 @@ func (a *App) PowerReport(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// CostReport totals what the estate costs, and what it could not price.
+func (a *App) CostReport(w http.ResponseWriter, r *http.Request) {
+	report, err := a.Store.EstateCosts(r.Context(), a.Store.Now())
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
+	a.Render.Respond(w, r, http.StatusOK, "cost_report", "cost_report", costReportPage{
+		Base:   a.base(r, "What it costs", "cost-report"),
+		Report: report,
+	})
+}
+
+type costReportPage struct {
+	Base
+	Report *store.EstateCostReport
+}
+
 // PowerPanelCreate adds a distribution board.
 func (a *App) PowerPanelCreate(w http.ResponseWriter, r *http.Request) {
 	spec, ok := a.panelSpecFrom(w, r)
