@@ -162,6 +162,44 @@ func NewProjectServiceLink(projectID, serviceID, relation string, note *string, 
 	}, nil
 }
 
+// ProjectCircuitLink joins a project to a circuit with one of the two
+// relations.
+//
+// THE THIRD LINK, AND IT EXISTS BECAUSE A NUMBER WAS WRONG. The project cost
+// rollup gathered lines from assets and services and stopped; circuits carry a
+// monthly rate and an install fee, and nothing said which project a circuit
+// served. Every project depending on connectivity reported less than it cost.
+//
+// `uses` is the ordinary relation here, more so than for assets: one transit
+// circuit commonly serves everything in a rack. `owns` is what puts the cost in
+// a project's Own total, and the partial unique index in migration 00041 allows
+// only one owner -- two would land the same monthly rate in two rollups.
+type ProjectCircuitLink struct {
+	ProjectID string  `db:"project_id"`
+	CircuitID string  `db:"circuit_id"`
+	Relation  string  `db:"relation"`
+	Note      *string `db:"note"`
+	Lifecycle string  `db:"lifecycle"`
+	CreatedAt string  `db:"created_at"`
+	UpdatedAt string  `db:"updated_at"`
+}
+
+// NewProjectCircuitLink validates and constructs the link.
+func NewProjectCircuitLink(projectID, circuitID, relation string, note *string, now time.Time) (*ProjectCircuitLink, error) {
+	ve := &ValidationError{}
+	checkRequired(ve, "project_id", projectID)
+	checkRequired(ve, "circuit_id", circuitID)
+	relation = checkRelation(ve, relation)
+	if err := ve.OrNil(); err != nil {
+		return nil, err
+	}
+	return &ProjectCircuitLink{
+		ProjectID: projectID, CircuitID: circuitID, Relation: relation, Note: note,
+		Lifecycle: LifecycleActive,
+		CreatedAt: FormatTime(now), UpdatedAt: FormatTime(now),
+	}, nil
+}
+
 // checkRelation normalises and validates a relation for either link type.
 // Shared because two constructors disagreeing about what `owns` means is the
 // kind of drift that only shows up as a cost report nobody can reconcile.

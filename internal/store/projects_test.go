@@ -27,6 +27,7 @@ type projectFixture struct {
 	projects map[string]string
 	assets   map[string]string
 	services map[string]string
+	circuits map[string]string
 }
 
 func newProjectFixture(t *testing.T, e Engine) *projectFixture {
@@ -97,6 +98,46 @@ func (f *projectFixture) linkService(t *testing.T, project, service, relation st
 		t.Fatalf("building service link: %v", err)
 	}
 	return f.s.LinkProjectService(f.ctx, testActor, l)
+}
+
+// circuit creates one on demand, with its provider. Not built in
+// newProjectFixture because most tests here have nothing to do with
+// connectivity, and a fixture that carries what nobody asked for makes the
+// tests that DO care harder to read.
+func (f *projectFixture) circuit(t *testing.T, cid string) string {
+	t.Helper()
+	if f.circuits == nil {
+		f.circuits = map[string]string{}
+	}
+	if id, ok := f.circuits[cid]; ok {
+		return id
+	}
+	p, err := domain.NewProvider(NewID(), "provider-for-"+cid)
+	if err != nil {
+		t.Fatalf("building the provider: %v", err)
+	}
+	if err := f.s.CreateProvider(f.ctx, testActor, p); err != nil {
+		t.Fatalf("creating the provider: %v", err)
+	}
+	c, err := domain.NewCircuit(NewID(), cid, p.ID)
+	if err != nil {
+		t.Fatalf("building the circuit: %v", err)
+	}
+	if err := f.s.CreateCircuit(f.ctx, testActor, c); err != nil {
+		t.Fatalf("creating the circuit: %v", err)
+	}
+	f.circuits[cid] = c.ID
+	return c.ID
+}
+
+// linkCircuit is link for a circuit.
+func (f *projectFixture) linkCircuit(t *testing.T, project, cid, relation string) error {
+	t.Helper()
+	l, err := domain.NewProjectCircuitLink(f.projects[project], f.circuit(t, cid), relation, nil, f.s.Now())
+	if err != nil {
+		t.Fatalf("building the link: %v", err)
+	}
+	return f.s.LinkProjectCircuit(f.ctx, testActor, l)
 }
 
 func (f *projectFixture) changeRows(t *testing.T, entityType string) int64 {

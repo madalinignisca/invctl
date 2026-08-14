@@ -189,6 +189,18 @@ func (s *SQLStore) ListProjectAssets(ctx context.Context, projectID string) ([]P
 	return rows, nil
 }
 
+// ProjectCircuitRow is the same for a linked circuit, carrying the provider so
+// the page can say who to ring without a second lookup.
+type ProjectCircuitRow struct {
+	ProjectID string  `db:"project_id"`
+	CircuitID string  `db:"circuit_id"`
+	Relation  string  `db:"relation"`
+	Note      *string `db:"note"`
+	CID       string  `db:"cid"`
+	Provider  string  `db:"provider"`
+	Lifecycle string  `db:"lifecycle"`
+}
+
 // ListProjectServices returns a project's linked services, owned first.
 func (s *SQLStore) ListProjectServices(ctx context.Context, projectID string) ([]ProjectServiceRow, error) {
 	var rows []ProjectServiceRow
@@ -492,6 +504,64 @@ func (t *tx) checkOwnerFree(ctx context.Context, table, column, entityID, projec
 // RetireProjectAsset releases one asset link.
 func (s *SQLStore) RetireProjectAsset(ctx context.Context, actor domain.Actor, projectID, assetID string) error {
 	return s.retireLink(ctx, actor, "project_asset", "asset_id", projectID, assetID)
+}
+
+// ListProjectCircuits returns a project's linked circuits, owned first.
+func (s *SQLStore) ListProjectCircuits(ctx context.Context, projectID string) ([]ProjectCircuitRow, error) {
+	var rows []ProjectCircuitRow
+	err := s.read(ctx, &rows, `
+		SELECT pc.project_id, pc.circuit_id, pc.relation, pc.note,
+		       c.cid, pr.name AS provider, c.lifecycle
+		FROM project_circuit pc
+		JOIN circuit c ON c.id = pc.circuit_id
+		JOIN provider pr ON pr.id = c.provider_id
+		WHERE pc.project_id = ? AND pc.lifecycle = ? AND c.lifecycle <> ?
+		ORDER BY pc.relation, c.cid, pc.circuit_id`,
+		projectID, domain.LifecycleActive, domain.LifecycleRetired)
+	if err != nil {
+		return nil, fmt.Errorf("listing circuits of project %s: %w", projectID, err)
+	}
+	return rows, nil
+}
+
+// LinkProjectCircuit links a circuit to a project, or updates an existing link.
+func (s *SQLStore) LinkProjectCircuit(ctx context.Context, actor domain.Actor, l *domain.ProjectCircuitLink) error {
+	return s.writeSerializable(ctx, actor, func(t *tx) error {
+		if l.Relation == domain.ProjectOwns {
+			if err := t.checkOwnerFree(ctx, "project_circuit", "circuit_id", l.CircuitID, l.ProjectID); err != nil {
+				return err
+			}
+		}
+		var before domain.ProjectCircuitLink
+		hadRow := true
+		if err := t.get(ctx, &before,
+			`SELECT * FROM project_circuit WHERE project_id = ? AND circuit_id = ?`,
+			l.ProjectID, l.CircuitID); err != nil {
+			if !errors.Is(err, sql.ErrNoRows) {
+				return fmt.Errorf("checking existing project link: %w", err)
+			}
+			hadRow = false
+		}
+		_, err := t.exec(ctx, `
+			INSERT INTO project_circuit (project_id, circuit_id, relation, note, lifecycle, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT (project_id, circuit_id) DO UPDATE SET
+				relation = excluded.relation, note = excluded.note,
+				lifecycle = excluded.lifecycle, updated_at = excluded.updated_at`,
+			l.ProjectID, l.CircuitID, l.Relation, l.Note, l.Lifecycle, l.CreatedAt, l.UpdatedAt)
+		if err != nil {
+			return translateWriteErr(err, "linking circuit to project")
+		}
+		if hadRow {
+			return t.logUpdate(ctx, "project_circuit", l.ProjectID+"/"+l.CircuitID, &before, l)
+		}
+		return t.logCreate(ctx, "project_circuit", l.ProjectID+"/"+l.CircuitID, l)
+	})
+}
+
+// RetireProjectCircuit releases one circuit link.
+func (s *SQLStore) RetireProjectCircuit(ctx context.Context, actor domain.Actor, projectID, circuitID string) error {
+	return s.retireLink(ctx, actor, "project_circuit", "circuit_id", projectID, circuitID)
 }
 
 // RetireProjectService releases one service link.

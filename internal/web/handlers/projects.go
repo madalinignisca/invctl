@@ -69,6 +69,7 @@ type projectPage struct {
 	// Declared.
 	Assets   []store.ProjectAssetRow
 	Services []store.ProjectServiceRow
+	Circuits []store.ProjectCircuitRow
 	// Derived, and labelled as such everywhere it is shown.
 	Footprint *store.ProjectFootprint
 	Depends   *store.ProjectDependencyReport
@@ -83,6 +84,7 @@ type projectPage struct {
 	// Pickers for the link forms.
 	AllAssets   []store.AssetRow
 	AllServices []store.ServiceRow
+	AllCircuits []store.CircuitRow
 	Relations   []string
 }
 
@@ -172,6 +174,11 @@ func (a *App) renderProjectWith(w http.ResponseWriter, r *http.Request, status i
 		a.serverError(w, r, err)
 		return
 	}
+	circuits, err := a.Store.ListProjectCircuits(r.Context(), id)
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
 	services, err := a.Store.ListProjectServices(r.Context(), id)
 	if err != nil {
 		a.serverError(w, r, err)
@@ -204,6 +211,11 @@ func (a *App) renderProjectWith(w http.ResponseWriter, r *http.Request, status i
 	}
 
 	allAssets, err := a.Store.ListAssets(r.Context(), store.AssetFilter{})
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
+	allCircuits, err := a.Store.ListCircuits(r.Context())
 	if err != nil {
 		a.serverError(w, r, err)
 		return
@@ -249,6 +261,7 @@ func (a *App) renderProjectWith(w http.ResponseWriter, r *http.Request, status i
 		Project:     project,
 		Assets:      assets,
 		Services:    services,
+		Circuits:    circuits,
 		Footprint:   footprint,
 		Depends:     depends,
 		Costs:       costs,
@@ -257,6 +270,7 @@ func (a *App) renderProjectWith(w http.ResponseWriter, r *http.Request, status i
 		CostPeriods: domain.CostPeriods,
 		AllAssets:   allAssets,
 		AllServices: allServices,
+		AllCircuits: allCircuits,
 		Relations:   domain.ProjectRelations,
 	})
 }
@@ -375,6 +389,32 @@ func (a *App) linkFailed(w http.ResponseWriter, r *http.Request, err error, fiel
 func (a *App) ProjectAssetRetire(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if err := a.Store.RetireProjectAsset(r.Context(), actor(r), id, r.PathValue("assetID")); err != nil {
+		a.handleStoreError(w, r, err)
+		return
+	}
+	render.Redirect(w, r, "/projects/"+id)
+}
+
+// ProjectCircuitLink links a circuit, or changes how it is linked.
+func (a *App) ProjectCircuitLink(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	link, err := domain.NewProjectCircuitLink(id, formValue(r, "circuit_id"),
+		formValue(r, "relation"), optional(formValue(r, "note")), a.Store.Now())
+	if err != nil {
+		a.linkFailed(w, r, err, "circuit_id")
+		return
+	}
+	if err := a.Store.LinkProjectCircuit(r.Context(), actor(r), link); err != nil {
+		a.linkFailed(w, r, err, "circuit_id")
+		return
+	}
+	render.Redirect(w, r, "/projects/"+id)
+}
+
+// ProjectCircuitRetire releases one circuit link.
+func (a *App) ProjectCircuitRetire(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if err := a.Store.RetireProjectCircuit(r.Context(), actor(r), id, r.PathValue("circuitID")); err != nil {
 		a.handleStoreError(w, r, err)
 		return
 	}

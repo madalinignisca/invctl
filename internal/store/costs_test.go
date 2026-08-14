@@ -652,3 +652,84 @@ func TestAFootprintLargerThanTheDriverParameterLimit(t *testing.T) {
 		})
 	}
 }
+
+// priceCircuit attaches a cost to a circuit.
+func (f *projectFixture) priceCircuit(t *testing.T, cid, kind, period string, minor int64) string {
+	t.Helper()
+	return f.price(t, func(c *domain.Cost) error {
+		return f.s.AddCircuitCost(f.ctx, testActor, f.circuit(t, cid), c)
+	}, kind, period, minor)
+}
+
+// TestProjectCostsIncludeCircuits is the assertion that was false until
+// migration 00041.
+//
+// THIS IS A WRONG NUMBER, NOT A MISSING FEATURE, and that distinction is why
+// the test asserts a total rather than the presence of a row. The rollup
+// gathered cost lines from assets and services and stopped. Circuits carry a
+// monthly rate -- often the largest single recurring line a project has -- and
+// nothing recorded which project a circuit served, so every project paying for
+// connectivity reported less than it costs. The page was not wrong about what
+// it gathered; it was wrong about what it implied.
+//
+// Both relations are asserted because they land in different buckets and the
+// difference is the whole point of having two. An OWNED circuit is the
+// project's own cost. A USED one is somebody else's cost that this project
+// depends on -- the transit link serving a whole rack -- and counting it as Own
+// would have every tenant of that rack reporting the same monthly rate.
+func TestProjectCostsIncludeCircuits(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newProjectFixture(t, e)
+
+			if err := f.linkCircuit(t, "orders", "DIA-1", domain.ProjectOwns); err != nil {
+				t.Fatalf("linking the owned circuit: %v", err)
+			}
+			if err := f.linkCircuit(t, "orders", "TRANSIT-1", domain.ProjectUses); err != nil {
+				t.Fatalf("linking the used circuit: %v", err)
+			}
+			f.priceCircuit(t, "DIA-1", "operating", domain.CostMonthly, 90000)
+			f.priceCircuit(t, "TRANSIT-1", "operating", domain.CostMonthly, 40000)
+
+			got := f.costs(t, "orders")
+			if got.Own.MonthlyMinor != 90000 {
+				t.Errorf("Own monthly = %d, want 90000: an owned circuit's rate is the "+
+					"project's own cost, and before 00041 it reached no total at all",
+					got.Own.MonthlyMinor)
+			}
+			if got.Shared.MonthlyMinor != 40000 {
+				t.Errorf("Shared monthly = %d, want 40000: a used circuit is somebody "+
+					"else's cost this project depends on", got.Shared.MonthlyMinor)
+			}
+		})
+	}
+}
+
+// TestOneProjectMayOwnACircuit refuses the second owner.
+//
+// The partial unique index in 00041 is the authority. Two owners would land one
+// monthly rate in two rollups, and the estate would report more spend than it
+// has -- the same failure TestProjectCostsCountAnAssetOnce exists to prevent,
+// arriving by a different route.
+func TestOneProjectMayOwnACircuit(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newProjectFixture(t, e)
+			if err := f.linkCircuit(t, "orders", "DIA-1", domain.ProjectOwns); err != nil {
+				t.Fatalf("first owner: %v", err)
+			}
+			err := f.linkCircuit(t, "platform", "DIA-1", domain.ProjectOwns)
+			if err == nil {
+				t.Fatal("a second project owned the same circuit; one rate would be " +
+					"counted twice")
+			}
+			if !errors.Is(err, domain.ErrConflict) {
+				t.Errorf("error is %v, want a conflict the handler maps to 409", err)
+			}
+			// Using it is not owning it, and must still be allowed.
+			if err := f.linkCircuit(t, "platform", "DIA-1", domain.ProjectUses); err != nil {
+				t.Errorf("a second project could not USE the circuit: %v", err)
+			}
+		})
+	}
+}

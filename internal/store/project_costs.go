@@ -144,6 +144,16 @@ func (s *SQLStore) ProjectCosts(ctx context.Context, f *ProjectFootprint, asOf t
 	if err != nil {
 		return nil, err
 	}
+	// Circuits. No Elsewhere split, and that is not an omission: the partial
+	// unique index in 00041 allows only one owner, so a circuit this project
+	// does not own is one it merely uses -- there is no third case where
+	// another project owns something inside our footprint, because a circuit
+	// contains nothing.
+	circuitCosts, err := s.costsFor(ctx, costOnCircuit,
+		concatIDs(f.OwnedCircuitIDs, f.UsedCircuitIDs))
+	if err != nil {
+		return nil, err
+	}
 	projectCosts, err := s.ListProjectCosts(ctx, f.ProjectID)
 	if err != nil {
 		return nil, err
@@ -177,6 +187,8 @@ func (s *SQLStore) ProjectCosts(ctx context.Context, f *ProjectFootprint, asOf t
 	fold(elsewhereServiceIDs, serviceCosts, &summary.Elsewhere)
 	fold(f.UsedAssetIDs, assetCosts, &summary.Shared)
 	fold(f.UsedServiceIDs, serviceCosts, &summary.Shared)
+	fold(f.OwnedCircuitIDs, circuitCosts, &summary.Own)
+	fold(f.UsedCircuitIDs, circuitCosts, &summary.Shared)
 
 	summary.Direct = TotalCosts(projectCosts, on)
 	summary.Own = summary.Own.Plus(summary.Direct)

@@ -545,6 +545,10 @@ var DeclaredColumns = map[string][]string{
 		"project_id", "service_id", "relation", "note", "lifecycle",
 		"created_at", "updated_at",
 	},
+	"project_circuit": {
+		"project_id", "circuit_id", "relation", "note", "lifecycle",
+		"created_at", "updated_at",
+	},
 	"route": {
 		"id", "frontend_endpoint_id", "match_type", "match_value",
 		"backend_pool_id", "tls_termination", "priority",

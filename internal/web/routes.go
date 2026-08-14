@@ -194,6 +194,11 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	write("POST /projects/{id}/assets/{assetID}/retire", app.ProjectAssetRetire)
 	write("POST /projects/{id}/services", app.ProjectServiceLink)
 	write("POST /projects/{id}/services/{serviceID}/retire", app.ProjectServiceRetire)
+	// Circuits belong to projects too (WP-I2). Without this the project cost
+	// rollup gathered assets and services and quietly understated every project
+	// that depends on connectivity.
+	write("POST /projects/{id}/circuits", app.ProjectCircuitLink)
+	write("POST /projects/{id}/circuits/{circuitID}/retire", app.ProjectCircuitRetire)
 
 	// Cost lines. One route per surface rather than a generic
 	// /costs/{type}/{id}: an entity type arriving in a URL is an entity type

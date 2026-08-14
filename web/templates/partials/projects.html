@@ -131,6 +131,48 @@
       <div class="empty"><strong>No services linked.</strong></div>
       {{end}}
     </div>
+
+    {{/* Circuits (WP-I2). Not decoration: until these were linkable the cost
+         rollup gathered assets and services only, so a project paying for its
+         own transit reported less than it costs. `uses` is the ordinary
+         relation -- one circuit commonly serves a whole rack -- and only one
+         project may own a circuit, which is what stops a monthly rate landing
+         in two rollups. */}}
+    <div class="panel">
+      <div class="panel-head">
+        <h2>Circuits</h2>
+        <span class="panel-note">declared</span>
+      </div>
+      {{if .Circuits}}
+      <div class="scroll-x">
+        <table>
+          <thead><tr><th>Circuit</th><th>Provider</th><th>Relation</th><th></th></tr></thead>
+          <tbody>
+            {{range .Circuits}}
+            <tr>
+              <td><a href="/circuits/{{.CircuitID}}">{{.CID}}</a></td>
+              <td>{{.Provider}}</td>
+              <td><span class="pill {{if eq .Relation "owns"}}pill-info{{else}}pill-muted{{end}}">{{.Relation}}</span></td>
+              <td>
+                <form method="post" action="/projects/{{.ProjectID}}/circuits/{{.CircuitID}}/retire"
+                      hx-post="/projects/{{.ProjectID}}/circuits/{{.CircuitID}}/retire"
+                      hx-target="#project" hx-swap="outerHTML">
+                  <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+                  <button class="btn btn-sm btn-danger" type="submit">Unlink</button>
+                </form>
+              </td>
+            </tr>
+            {{end}}
+          </tbody>
+        </table>
+      </div>
+      {{else}}
+      <div class="empty">
+        <strong>No circuits linked.</strong>
+        Connectivity this project pays for will not appear in its costs until it is.
+      </div>
+      {{end}}
+    </div>
   </div>
 
   {{/* 2. What that implies. Labelled derived in the heading AND in the prose,
@@ -273,6 +315,31 @@
           </select>
         </div>
         <button class="btn btn-primary" type="submit">Link service</button>
+      </form>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head"><h2>Link a circuit</h2></div>
+      <form class="panel-body" method="post" action="/projects/{{.Project.ID}}/circuits"
+            hx-post="/projects/{{.Project.ID}}/circuits" hx-target="#project" hx-swap="outerHTML">
+        <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+        <div class="field">
+          <label for="l-cir">Circuit</label>
+          <select id="l-cir" name="circuit_id" class="{{if index .Errors "circuit_id"}}invalid{{end}}">
+            {{range .AllCircuits}}<option value="{{.ID}}">{{.CID}}</option>{{end}}
+          </select>
+          {{with index .Errors "circuit_id"}}<div class="field-error">{{.}}</div>{{end}}
+        </div>
+        <div class="field">
+          <label for="l-cir-rel">Relation</label>
+          <select id="l-cir-rel" name="relation">
+            {{range .Relations}}<option value="{{.}}">{{.}}</option>{{end}}
+          </select>
+          <div class="field-hint">
+            Only one project may own a circuit; any number may use it.
+          </div>
+        </div>
+        <button class="btn btn-primary" type="submit">Link circuit</button>
       </form>
     </div>
   </div>

@@ -44,6 +44,12 @@ type ProjectFootprint struct {
 	UsedAssetIDs    []string
 	OwnedServiceIDs []string
 	UsedServiceIDs  []string
+	// Circuits carry a monthly rate and an install fee, and until migration
+	// 00041 there was no way to say which project one served -- so every
+	// project depending on connectivity totalled less than it cost. They imply
+	// nothing downward: a circuit contains no assets and hosts no services.
+	OwnedCircuitIDs []string
+	UsedCircuitIDs  []string
 
 	// ImpliedAssets are assets INSIDE an owned asset -- guests of an owned
 	// hypervisor, hardware in an owned rack. Never includes the owned assets
@@ -163,6 +169,22 @@ func (s *SQLStore) ProjectFootprint(ctx context.Context, projectID string) (*Pro
 			continue
 		}
 		f.UsedServiceIDs = append(f.UsedServiceIDs, svc.ServiceID)
+	}
+
+	// Circuits, which imply nothing. An owned hypervisor drags its guests into
+	// the footprint; an owned circuit drags nothing, because a circuit contains
+	// no assets and hosts no services. It is a cost and a dependency and that is
+	// all -- which is why there is no impliedCircuits to match impliedAssets.
+	circuits, err := s.ListProjectCircuits(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	for _, c := range circuits {
+		if c.Relation == domain.ProjectOwns {
+			f.OwnedCircuitIDs = append(f.OwnedCircuitIDs, c.CircuitID)
+			continue
+		}
+		f.UsedCircuitIDs = append(f.UsedCircuitIDs, c.CircuitID)
 	}
 
 	if len(f.OwnedAssetIDs) > 0 {
