@@ -487,9 +487,24 @@ Every new edge type must appear in impact simulation, reachability findings,
 shutdown order, and the fixture. Audit that they do; add the missing ones.
 
 **WP-I2 · Report consolidation** — M, recurring
-Expiry (type EOL, circuit contract end, with provenance), cost (circuits, metered
-power draw), search (serials, part numbers, circuit IDs, VLAN IDs), project cost
+Expiry (type EOL, circuit contract end, with provenance), cost (circuits, power
+draw), search (serials, part numbers, circuit IDs, VLAN IDs), project cost
 buckets for new cost-bearing entities.
+
+*Audited 2026-08-14, and most of it was already done. Expiry covers device-type
+EOL with provenance and circuit contract ends. Search resolves serials, part
+numbers, VLAN IDs **and circuit IDs** — a circuit is indexed with its CID as
+both title and body. Two real gaps remain: circuits were absent from the project
+cost rollup (a wrong number, not a missing feature — fixed by migration 00041),
+and there is no `/reports/cost` page at all.*
+
+*The entry used to say "metered power draw". **Nothing meters anything** — this
+system never touches the estate, and the form says so: "Draw (VA) — nameplate or
+allocated. Nothing measures this." Decided 2026-08-14: power cost is an
+**estimate**, declared nameplate draw times a tariff, and it must be labelled as
+one everywhere it appears. It is useful for the comparison the estate actually
+makes — keep this platform or move to another — and it must never be mistaken
+for a reading. A figure that looks measured and is not is worse than no figure.*
 
 **WP-I3 · Performance** — M — **DONE (first pass)**
 Built the fixture the entry asked for — 4,000 assets, 10,000 prefixes, 50,000
