@@ -601,10 +601,11 @@ I2 reports ───┴──► J4 attribution ──► J5 shared occupancy
 Anything with no inbound arrow can start immediately and in parallel: **A1, A2,
 A3, A4, B2, B5, D1, D4, E1, G1–G5, J1, J3.**
 
-**J4 has a soft dependency nothing else has: G1.** Cost attribution produces
-per-client money, and today `INV_ADMIN_USERS` is a flat list — client A's spend
-would be readable by client B's engineer. Tolerable for an inventory, not
-obviously tolerable for a cost report. See `docs/COST-ATTRIBUTION.md` §9.
+**J4 does not depend on G1**, though an earlier draft claimed it did. That draft
+assumed clients sign in. They do not: one company owns the estate, every user is
+its employee, and a project is an internal bucket — the work done for a client,
+or one of the company's own products. Attribution rearranges figures its readers
+are already entitled to. See `docs/COST-ATTRIBUTION.md` §9.
 
 ---
 

@@ -181,18 +181,31 @@ year later. Cheap now, impossible to retrofit honestly.
    designed.
 3. **When does `vendor` become a real reference?** Needed for per-supplier
    analysis, and it is a migration over hand-typed data.
-4. **Who may see cost per client?** See §9.
+4. **Does a project always map to one client?** The bucket is deliberately
+   general — it holds the work done for a client *or* one of the company's own
+   products, and the arithmetic does not care which. Worth confirming that
+   nothing downstream starts assuming the first.
 
-## 9. This raises the cost of not having WP-G1
+## 9. Who this is for, and why that is not an access-control problem
 
-Cost attribution produces **per-client money**, which is the most sensitive data
-this system would hold. Today authorisation is a flat list: `INV_ADMIN_USERS`
-grants estate-wide write, and everything else is readable by anyone who can sign
-in. Client A's spend would be visible to client B's engineer.
+**One company owns the whole estate and every user is its employee.** A project
+is an internal bucket: sometimes the work done for a client, sometimes one of the
+company's own SaaS products. **Clients do not sign in.** This was corrected on
+2026-08-14 after an earlier draft of this document assumed multi-tenancy.
 
-That is tolerable for an inventory. It is not obviously tolerable for a cost
-report. **G1 (object-level permissions) should be reconsidered as a dependency
-rather than a parallel item** once this ships.
+It follows that cost attribution needs **no new authorisation work**. Anyone who
+can already read a rack's acquisition cost and a circuit's monthly rate can read
+these figures; attribution rearranges numbers those people are already entitled
+to, and adds no class of data the system did not already hold.
+
+So **WP-G1 is not a dependency of J4.** Its case stands where the roadmap already
+makes it — multi-team and MSP deployments — and this work neither strengthens nor
+weakens it.
+
+The one condition that would change the answer: if a client is ever given a
+read-only login to see the project run for them, then per-project visibility
+becomes a real constraint and G1 becomes a prerequisite. That is a product
+decision, not a technical one, and nobody has taken it.
 
 ---
 
