@@ -17,8 +17,9 @@ In her words, reordered but not softened:
    be compared against the one it succeeds.
 3. **Which suppliers raise prices beyond inflation?** The company would rather
    leave a supplier that abuses pricing than absorb it, and would rather hire
-   people than renew a licence that has stopped being reasonable — the worked
-   example being VMware to Proxmox plus two good Linux engineers.
+   people than renew a licence that has stopped being reasonable — the shape of
+   the decision being a proprietary platform swapped for an open-source one plus
+   the engineers to run it.
 4. **What slice of shared infrastructure does a project or client use?** Starting
    with the virtualisation platform, later combined with network, rack, power and
    transit.
@@ -208,6 +209,100 @@ attributed to projects   (soft allocated)
 provisioned beyond it    (unfunded — a decision somebody made without pricing it)
 headroom                 (deliberate, and the reason the cluster survives a node)
 ```
+
+---
+
+## 5.6 Not every cost divides across everything
+
+*This rule exists because a worked example broke the previous draft within
+minutes of meeting real infrastructure. §5.1 said "cluster cost ÷ usable
+capacity", and that is wrong for any cost which only some consumers benefit
+from.*
+
+Three shapes of cost, and only the first divides the way §5.1 describes:
+
+**Universal.** Hardware amortisation, power, rack share, the hypervisor platform
+itself. Every guest benefits, so it divides across the whole cluster's capacity.
+
+**Conditional.** A per-core datacentre operating-system licence that grants
+unlimited guests on the hosts it covers benefits **only the guests running that
+operating system**. Divide it evenly across every guest and every workload
+running something else silently subsidises the ones that do. The same applies to
+a per-core database licence, which benefits exactly one virtual machine.
+
+**Per-consumer.** A backup product licensed per virtual machine or per socket
+applies only to what is actually backed up, and not everything is.
+
+So **a cost line declares which consumers it applies to**, and is divided across
+that subset's share rather than the cluster's total. Without it the arithmetic is
+confidently wrong in the direction nobody checks: the workloads carrying no
+expensive licence look more expensive than they are, and the ones carrying it
+look cheaper.
+
+This is also the shape that makes a platform-migration argument possible. A
+licence that applies to a named subset can be removed from the model and the
+difference read off, which is the whole point of asking whether to keep paying
+for it.
+
+## 5.7 Worked example — the acceptance test
+
+*Anonymised, and drawn from a real estate. No organisation, supplier or product
+is named: the lesson is in the arithmetic, not in whose kit it is. If the model
+cannot produce numbers a person who knows this estate would recognise, the model
+is wrong — that is what this example is for.*
+
+**The cluster.** Three nodes, 32 cores and 256 GB memory each. Block storage of
+10 TB on fast media, plus 30 TB of bulk storage for backups. HA is configured
+and the cluster must survive losing one node.
+
+**The project.** Two application servers, 4 vCPU and 8 GB each. One database
+server on its own virtual machine, 2 vCPU and 16 GB. Roughly 200 GB of database
+files on block storage, 300 GB of backups on bulk storage, and a 50 GB system
+disk per machine. A second copy of backups goes to off-site object storage.
+
+**The division.** Surviving one node leaves 64 cores and 512 GB. Memory is not
+overcommitted; CPU is, at a declared ratio — 3:1 here, giving 192 sellable vCPU.
+
+| dimension | project | sellable | share |
+|---|---|---|---|
+| CPU | 10 vCPU | 192 vCPU | **5.2%** |
+| Memory | 32 GB | 512 GB | **6.25%** |
+| Block storage | 350 GB | 10 TB | **3.4%** |
+| Bulk storage | 300 GB | 30 TB | **1.0%** |
+
+**Four different percentages, and that is the point.** There is no single
+"project share" to compute. Each pool of cost divides by its own dimension, and
+a report offering one blended number would be inventing it.
+
+Note which dimension binds: **memory, at 6.25% against CPU's 5.2%.** This matches
+the estate's own experience of clusters sitting at 30–40% CPU and 60–70% memory
+while looking comfortable — and it is why a capacity finding that watches only
+CPU would say nothing useful.
+
+**What this example exposed**, and why it earned a place in the specification:
+
+- The operating-system licence covers the hosts and grants unlimited guests of
+  that kind. It is **conditional** (§5.6), not universal, and the first draft
+  would have spread it across guests that derive nothing from it.
+- Block and bulk storage are different products at different prices per GB. One
+  storage figure would be meaningless.
+- The off-site copy is a per-GB service, not capacity in the cluster at all, and
+  belongs to a different pool again.
+
+**On missing history.** The costs here were agreed six or seven years ago, before
+anyone now managing the estate was involved, and the invoices are gone. This does
+not block anything: current invoices give current costs, and the model is useful
+from those alone. Where an old acquisition price is worth recording, it is
+recorded as an estimate with a note saying so — the `note` field and the validity
+window already exist for exactly that, and an honest estimate beats a blank.
+
+**And one absent price is the strongest case for J2.** A perpetual platform
+licence bought once, whose vendor later withdrew perpetual licensing entirely and
+moved every customer to an annual subscription, is the textbook instance of the
+question the CEO asked: a supplier raising prices far beyond inflation. Recording
+the original as an estimate and the subscription as it renews turns "this feels
+outrageous" into a figure, which is the difference between a grievance and a
+decision.
 
 ---
 

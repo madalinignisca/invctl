@@ -592,6 +592,13 @@ ship before J4.
 **WP-J4 · Cost attribution** — L — depends: J3, I2 — unlocks: the CEO's question
 Cluster cost divided by *usable* capacity gives a price per unit; the redundancy
 premium falls out of `cluster.min_hosts` rather than a hand-kept multiplier.
+**Not every cost divides across everything**: a per-core OS licence granting
+unlimited guests benefits only the guests running it, and spreading it evenly
+makes every other workload subsidise them. A cost line therefore declares which
+consumers it applies to (`COST-ATTRIBUTION.md` §5.6). There is also no single
+"project share" — a worked example against a real estate produced 5.2% of CPU,
+6.25% of memory, 3.4% of block storage and 1.0% of bulk storage for one project,
+and a blended figure would have been invented (§5.7).
 Slices per project, **summing to 100%**, with idle capacity shown as its own
 slice rather than dropped. Allocation is the basis, not usage — see
 `DECISIONS.md`.
