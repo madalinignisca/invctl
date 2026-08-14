@@ -569,21 +569,25 @@ series it answers "did this rise faster than money fell".
 **WP-J3 · Capacity model** — L — depends: none — unlocks: J4, J5, J7
 Hosts get cores, memory and storage; storage kinds get a raw-to-usable ratio
 (Ceph 3×, RAID6, local 1:1); clusters get a declared safe overcommit ratio. A
-workload carries **three declared numbers** per dimension -- contracted,
-provisioned and soft-allocated -- because one figure cannot answer three
-different questions. See `docs/COST-ATTRIBUTION.md` §5.5. The estate models rack
+workload carries **provisioned** (the hard limit) and **soft-allocated** (what
+money is computed on), and a project carries **priced-for** (the resource
+assumption its quote was built on). Deliberately not "contracted": these
+contracts specify no resources at all, and a field named for a promise nobody
+made will one day be quoted as though it were one. See
+`docs/COST-ATTRIBUTION.md` §5.5. The estate models rack
 units and weight but nothing about compute, and this is the prerequisite for
 every figure in J4. Useful before any money is involved: it answers *"is this
 cluster oversubscribed?"*.
 
 **WP-J7 · Capacity findings** — M — depends: J3 — unlocks: the 03:00 question
-Three findings from the three numbers: provisioned above contracted (commercial
--- somebody should renegotiate), provisioned above the safe overcommit ratio
-(operational), and **contracted above physical capacity** (management). The
-third is invisible on every utilisation dashboard: a cluster at 35% CPU and 65%
-memory looks healthy and says nothing about whether every contract could be
-honoured at once. That is a solvency question, and declared figures are the only
-thing that can answer it. Needs no money and can ship before J4.
+Three findings, three audiences. A project allocated **above what it was priced
+for** is the CEO's alert: nobody is in breach, the engagement has simply grown
+past its own quote and the margin is eroding quietly. Provisioned above the safe
+overcommit ratio is operational. Priced-for totals above physical capacity is
+planning -- more work sold than the estate can host. The last is invisible on
+every utilisation dashboard: a cluster at 35% CPU and 65% memory looks healthy
+and says nothing about what could be claimed at once. Needs no money and can
+ship before J4.
 
 **WP-J4 · Cost attribution** — L — depends: J3, I2 — unlocks: the CEO's question
 Cluster cost divided by *usable* capacity gives a price per unit; the redundancy
