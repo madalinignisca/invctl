@@ -535,6 +535,49 @@ UX decision, not a performance one.*
 
 ---
 
+### Group J — Money
+
+*Added 2026-08-14, from the first adopting company. The full specification is
+**`docs/COST-ATTRIBUTION.md`**; these are the packages, not the reasoning.*
+
+**WP-J1 · Replacement lineage** — S — depends: none — unlocks: J2
+One nullable self-reference on `asset` — *this replaces that* — and the page that
+compares them. Both boxes already carry their own cost history, so the comparison
+is a join. Soft delete is why the predecessor is still there to compare against.
+
+**WP-J2 · Price movement** — S — depends: J1 (light) — unlocks: supplier analysis
+A view over cost lines already stored: what it cost, what it costs, when it
+changed, by how much. **No schema change** — the validity windows on `cost` have
+been recording this since the first release. Against a hand-maintained inflation
+series it answers "did this rise faster than money fell".
+
+**WP-J3 · Capacity model** — L — depends: none — unlocks: J4, J5
+Hosts get cores, memory and storage; virtual machines get their allocation;
+storage kinds get a raw-to-usable ratio (Ceph 3×, RAID6, local 1:1). The estate
+models rack units and weight but nothing about compute, and this is the
+prerequisite for every figure in J4. Useful before any money is involved: it
+answers *"is this cluster oversubscribed?"*.
+
+**WP-J4 · Cost attribution** — L — depends: J3, I2 — unlocks: the CEO's question
+Cluster cost divided by *usable* capacity gives a price per unit; the redundancy
+premium falls out of `cluster.min_hosts` rather than a hand-kept multiplier.
+Slices per project, **summing to 100%**, with idle capacity shown as its own
+slice rather than dropped. Allocation is the basis, not usage — see
+`DECISIONS.md`.
+
+**WP-J5 · Shared occupancy** — M — depends: J4
+For estates that pack several tenants into one VM to save on licensing: occupants
+with a declared percentage each, never inferred. Percentages that do not total
+100 are a finding.
+
+**WP-J6 · Supplier as a dimension** — M — depends: J2
+Promotes `vendor` from free text on an asset to a real reference, so "which
+suppliers raise prices beyond inflation" can be asked across the estate rather
+than one item at a time. A migration over data typed by hand, which is why it is
+separate and later.
+
+---
+
 ## 2. Dependency graph
 
 ```
@@ -550,10 +593,18 @@ E1 circuits            (no deps)
 A2 API                 (no deps)
 G1..G5                 (no deps)
 every group ──► I1 / I2
+J1 lineage ──► J2 price movement ──► J6 supplier dimension
+J3 capacity ──┐
+I2 reports ───┴──► J4 attribution ──► J5 shared occupancy
 ```
 
 Anything with no inbound arrow can start immediately and in parallel: **A1, A2,
-A3, A4, B2, B5, D1, D4, E1, G1–G5.**
+A3, A4, B2, B5, D1, D4, E1, G1–G5, J1, J3.**
+
+**J4 has a soft dependency nothing else has: G1.** Cost attribution produces
+per-client money, and today `INV_ADMIN_USERS` is a flat list — client A's spend
+would be readable by client B's engineer. Tolerable for an inventory, not
+obviously tolerable for a cost report. See `docs/COST-ATTRIBUTION.md` §9.
 
 ---
 

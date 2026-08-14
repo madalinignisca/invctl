@@ -2116,3 +2116,51 @@ same list-versus-page agreement as the other three.
 The reverse view's own test asserts absences in both directions — a certificate
 deployed elsewhere must not appear, and a team that does not renew one must not
 list it. Removing the `WHERE asset_id = ?` clause fails it.
+
+---
+
+## Cost attribution: allocated, not used — *2026-08-14*
+
+**Cost is attributed on what a workload is ALLOCATED, not on what it uses.**
+
+The full specification is `docs/COST-ATTRIBUTION.md`; this records the decision
+and why, because it is the one that will be argued with.
+
+**It is argued with because the other answer sounds better.** "Charge for what
+they actually consume" is fairer in principle and is what a cloud provider does.
+It was considered and rejected for this system, for reasons that are structural
+rather than preference:
+
+**Allocation is declared; usage is observed.** A person agreeing that a virtual
+machine gets eight cores is an assertion someone made and can be held to. A
+hypervisor reporting thirty percent CPU is telemetry — it changes constantly,
+nobody decided it, and most readings repeat the last. `docs/AUDIT.md` separates
+those two classes absolutely: observed state never writes a declared column, it
+records transitions rather than heartbeats, and it arrives through
+`RecordObservation` and nowhere else.
+
+So a usage basis could never be a configuration flag that quietly repoints the
+same column at a different number. It would be a second source of fact with its
+own audit obligations, its own retention argument, and its own failure mode when
+a collector goes silent. That is a work package, not a switch.
+
+**A bill nobody agreed to is not defensible.** Allocation is what a person signed
+up for; a slice computed from it can be explained in a meeting. A slice computed
+from a fortnight of samples cannot be reproduced once the samples are pruned —
+and this system prunes observed transitions by design.
+
+### How the door stays open
+
+The seam is **one function** taking a capacity figure and returning a slice,
+indifferent to which class of fact produced the figure. Not an interface with a
+single implementation, not a strategy registry. If keeping even that costs more
+than slight indirection, collapse it: the second basis does not exist, and
+speculative structure for it would be the mess this note exists to prevent.
+
+### The part that must not be deferred
+
+**Every computed slice records the basis it was computed on.** A switch that
+silently changes what a number *means* produces two months of figures on one
+basis, a flag flip, and a graph with a discontinuity nobody can explain a year
+later. Stamping `basis` on the result costs nothing now and cannot be retrofitted
+honestly — the old rows would have to be guessed at.
