@@ -443,6 +443,11 @@ var DeclaredColumns = map[string][]string{
 		"id", "code", "name", "description", "team_id", "lifecycle",
 		"created_at", "updated_at",
 		"row_version",
+		// What the deal was priced on (migration 00045). Declared: a person
+		// records the assumption a quote was built on. Deliberately not called
+		// "contracted" -- these contracts name no resources, and a column named
+		// for a promise nobody made will one day be quoted as one.
+		"priced_for_vcpu", "priced_for_memory_mb",
 	},
 	// Who looks after what (migration 00014). Declared without argument:
 	// somebody decided that this team is answerable for this box. Nothing

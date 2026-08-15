@@ -72,6 +72,21 @@ type assetFormData struct {
 // Editing reports whether this form is correcting an existing asset.
 func (f assetFormData) Editing() bool { return f.Asset != nil }
 
+// ShowsCapacity reports whether to ask how big this thing is.
+//
+// GATED ON THE DATA COLUMN, NOT ON A LIST OF KINDS IN GO. can_host_instances
+// already answers "can a workload sit here", which is exactly the population
+// whose size is worth recording -- and capacity.go says why the answer belongs
+// in the table: a switch compiled into Go can only speak for the kinds it was
+// built with, so a kind added by INSERT would be silently unsizeable.
+//
+// EDIT ONLY. Adding an asset establishes what it is; measuring it is a
+// separate act, usually by a different person with the machine in front of
+// them. The add form already says as much -- "What it is, not where it sits".
+func (f assetFormData) ShowsCapacity() bool {
+	return f.Asset != nil && f.Asset.CanHostInstances()
+}
+
 // Value is what a field should show: what the operator typed if their save was
 // refused, otherwise what is stored, otherwise blank.
 func (f assetFormData) Value(field string) string {
@@ -123,6 +138,18 @@ func (f assetFormData) Value(field string) string {
 			stored = orBlank(a.ManagerRole)
 		case "eol_date":
 			stored = orBlank(a.EOLDate)
+		case "cpu_cores":
+			stored = orBlankInt(a.CPUCores)
+		case "memory_mb":
+			stored = orBlankInt(a.MemoryMB)
+		case "vcpu_provisioned":
+			stored = orBlankInt(a.VCPUProvisioned)
+		case "vcpu_allocated":
+			stored = orBlankInt(a.VCPUAllocated)
+		case "memory_provisioned_mb":
+			stored = orBlankInt(a.MemoryProvisionedMB)
+		case "memory_allocated_mb":
+			stored = orBlankInt(a.MemoryAllocatedMB)
 		}
 	}
 	return f.Edit.Value(field, stored)

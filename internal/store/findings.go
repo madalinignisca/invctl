@@ -172,6 +172,41 @@ func (s *SQLStore) EstateFindings(ctx context.Context) ([]Finding, error) {
 	add(FindingRisk, single, "redundancy group with one member", firstSingle, "/redundancy")
 	add(FindingGap, empty, "redundancy group with no members", "", "/redundancy")
 
+	// Capacity (WP-J7). Three questions with three audiences, and none of them
+	// needs money: an engagement grown past its quote is commercial, a cluster
+	// promising more than it can serve is operational, and more priced-for than
+	// the estate can host is a planning question no utilisation dashboard can
+	// answer.
+	capacity, err := s.CapacityFindings(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("gathering capacity findings: %w", err)
+	}
+	byKind := map[string]int{}
+	firstOfKind := map[string]string{}
+	hrefOfKind := map[string]string{}
+	sevOfKind := map[string]string{}
+	for _, f := range capacity {
+		byKind[f.Kind]++
+		if _, seen := firstOfKind[f.Kind]; !seen {
+			firstOfKind[f.Kind] = f.Subject + ": " + f.Detail
+			hrefOfKind[f.Kind] = f.Href
+			sevOfKind[f.Kind] = f.Severity
+		}
+	}
+	for _, k := range []struct{ kind, label string }{
+		{CapacitySoldBeyondEstate, "priced for more than the estate can host"},
+		{CapacityOversubscribed, "cluster promising more than it can serve"},
+		{CapacityOverPriced, "project grown past what it was priced for"},
+		{CapacityUnmeasured, "cluster with unmeasured hosts"},
+		{CapacityUnallocated, "workload with no allocation recorded"},
+	} {
+		// The severity travels with the finding rather than being decided here:
+		// memory oversubscription is a fault and CPU is a risk, and a label
+		// cannot know which it got.
+		add(sevOfKind[k.kind], byKind[k.kind], k.label,
+			firstOfKind[k.kind], hrefOfKind[k.kind])
+	}
+
 	// Overlays that carry nothing, or carry it to one place.
 	overlays, err := s.ListL2VPNs(ctx)
 	if err != nil {

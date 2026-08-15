@@ -46,6 +46,52 @@ func (b *builder) companyMoney() {
 	b.coloRentRenewals()
 	b.inflationSeries()
 	b.computeCapacity()
+	b.pricedFor()
+}
+
+// pricedFor records what two engagements were quoted on (WP-J7).
+//
+// ONE PROJECT OVER ITS QUOTE AND ONE INSIDE IT, because a fixture where nothing
+// has drifted cannot demonstrate the alert and one where everything has cannot
+// demonstrate the calm. `platform` owns the three prod hosts and everything
+// inside them, which is 28 vCPU allocated -- priced for 24, it is the CEO's
+// alert: nobody is in breach and the margin is eroding.
+//
+// NOT CALLED CONTRACTED ANYWHERE, including here. See migration 00045.
+func (b *builder) pricedFor() {
+	if !b.ok() {
+		return
+	}
+	for _, q := range []struct {
+		code     string
+		vcpu     int
+		memoryMB int
+	}{
+		// Priced for less than it now uses: the engagement grew.
+		{"platform", 24, 81920},
+		// Priced generously and still inside it: the quiet case, which must be
+		// visible or the finding looks like it fires on everything.
+		{"orders", 16, 32768},
+	} {
+		id, ok := b.refs.Projects[q.code]
+		if !ok {
+			continue
+		}
+		row, err := b.store.GetProject(b.ctx, id)
+		if err != nil {
+			b.fail(fmt.Errorf("reading project %s: %w", q.code, err))
+			return
+		}
+		if row.PricedForVCPU != nil {
+			continue // already recorded
+		}
+		p := row.Project
+		p.PricedForVCPU, p.PricedForMemoryMB = num(q.vcpu), num(q.memoryMB)
+		if err := b.store.UpdateProject(b.ctx, Actor, &p); err != nil {
+			b.fail(fmt.Errorf("pricing project %s: %w", q.code, err))
+			return
+		}
+	}
 }
 
 // computeCapacity measures the machines, so a cluster can be divided (WP-J3).

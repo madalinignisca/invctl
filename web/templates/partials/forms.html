@@ -243,6 +243,70 @@
         <div class="field-hint">Optional. Nothing happens when it passes — it changes what the expiry report says.</div>
       </div>
     </div>
+    {{/* How big it is, and how much of that it has given away (WP-J3).
+
+         SIX FIELDS IN TWO GROUPS, BECAUSE THEY ANSWER DIFFERENT QUESTIONS. The
+         first pair is what the machine HAS and is read from a cluster's member
+         hosts; the second is what a guest CLAIMS and is read from what sits
+         inside those hosts. An asset can legitimately carry both.
+
+         Provisioned and allocated are deliberately separate inputs. Collapsing
+         them into one number is the thing that makes generosity invisible:
+         somebody grants 16 vCPU, bills for 8, and no report can see the
+         difference until the cluster runs out. */}}
+    {{if .ShowsCapacity}}
+    <fieldset class="field-group">
+      <legend>Capacity</legend>
+      <p class="field-hint">
+        All optional. Blank means <strong>nobody has measured it</strong>, which is
+        reported as a gap — never as a zero.
+      </p>
+      <div class="field-row">
+        <div class="field">
+          <label for="{{.Prefix}}-cores">Physical CPU cores</label>
+          <input id="{{.Prefix}}-cores" type="number" name="cpu_cores" min="1"
+                 value="{{.Value "cpu_cores"}}" placeholder="32">
+          <div class="field-hint">Cores in the box. Counts towards a cluster only while this is a member of one.</div>
+          {{with index .Errors "cpu_cores"}}<div class="field-error">{{.}}</div>{{end}}
+        </div>
+        <div class="field">
+          <label for="{{.Prefix}}-memory">Physical memory (MB)</label>
+          <input id="{{.Prefix}}-memory" type="number" name="memory_mb" min="1"
+                 value="{{.Value "memory_mb"}}" placeholder="262144">
+          <div class="field-hint">Never overcommitted, whatever the CPU ratio says.</div>
+          {{with index .Errors "memory_mb"}}<div class="field-error">{{.}}</div>{{end}}
+        </div>
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label for="{{.Prefix}}-vcpuprov">vCPU provisioned</label>
+          <input id="{{.Prefix}}-vcpuprov" type="number" name="vcpu_provisioned" min="1"
+                 value="{{.Value "vcpu_provisioned"}}" placeholder="8">
+          <div class="field-hint">The hard limit the hypervisor enforces. Oversubscription is judged on this.</div>
+          {{with index .Errors "vcpu_provisioned"}}<div class="field-error">{{.}}</div>{{end}}
+        </div>
+        <div class="field">
+          <label for="{{.Prefix}}-vcpualloc">vCPU allocated</label>
+          <input id="{{.Prefix}}-vcpualloc" type="number" name="vcpu_allocated" min="1"
+                 value="{{.Value "vcpu_allocated"}}" placeholder="4">
+          <div class="field-hint">What is billed. Cost attribution divides on this, not on the limit above.</div>
+          {{with index .Errors "vcpu_allocated"}}<div class="field-error">{{.}}</div>{{end}}
+        </div>
+        <div class="field">
+          <label for="{{.Prefix}}-memprov">Memory provisioned (MB)</label>
+          <input id="{{.Prefix}}-memprov" type="number" name="memory_provisioned_mb" min="1"
+                 value="{{.Value "memory_provisioned_mb"}}" placeholder="16384">
+          {{with index .Errors "memory_provisioned_mb"}}<div class="field-error">{{.}}</div>{{end}}
+        </div>
+        <div class="field">
+          <label for="{{.Prefix}}-memalloc">Memory allocated (MB)</label>
+          <input id="{{.Prefix}}-memalloc" type="number" name="memory_allocated_mb" min="1"
+                 value="{{.Value "memory_allocated_mb"}}" placeholder="8192">
+          {{with index .Errors "memory_allocated_mb"}}<div class="field-error">{{.}}</div>{{end}}
+        </div>
+      </div>
+    </fieldset>
+    {{end}}
     <div class="field">
       <label>Environments</label>
       <div class="checks">

@@ -100,6 +100,13 @@
         {{with index .Errors "min_hosts"}}<div class="field-error">{{.}}</div>{{end}}
         <div class="field-hint">Capacity, not quorum. Blank means any survivor will do.</div>
       </div>
+      <div class="field">
+        <label for="cl-overcommit">CPU overcommit</label>
+        <input id="cl-overcommit" class="{{if index .Errors "cpu_overcommit"}}invalid{{end}}"
+               type="text" inputmode="decimal" name="cpu_overcommit" placeholder="3">
+        {{with index .Errors "cpu_overcommit"}}<div class="field-error">{{.}}</div>{{end}}
+        <div class="field-hint">vCPU per physical core. Blank is read at 1:1.</div>
+      </div>
     </div>
     <button class="btn btn-primary" type="submit">Declare cluster</button>
   </div>

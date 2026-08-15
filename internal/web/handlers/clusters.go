@@ -105,8 +105,14 @@ func (a *App) ClusterCreate(w http.ResponseWriter, r *http.Request) {
 		if p := formValue(r, "ha_policy"); p != "" {
 			c.HAPolicy = p
 		}
-		c.MinHosts = optionalNumbers(r).opt("min_hosts")
+		nums := optionalNumbers(r)
+		c.MinHosts = nums.opt("min_hosts")
+		c.CPUOvercommit = nums.ratio("cpu_overcommit")
 		c.Description = optionalString(r, "description")
+		if msgs := nums.messages(); msgs != nil {
+			a.renderClusters(w, r, http.StatusUnprocessableEntity, msgs)
+			return
+		}
 		err = c.Validate()
 		if err == nil {
 			err = a.Store.CreateCluster(r.Context(), actor(r), c)
@@ -145,8 +151,23 @@ func (a *App) ClusterUpdate(w http.ResponseWriter, r *http.Request) {
 	updated.Name = formValue(r, "name")
 	updated.Kind = formValue(r, "kind")
 	updated.HAPolicy = formValue(r, "ha_policy")
-	updated.MinHosts = optionalNumbers(r).opt("min_hosts")
+	nums := optionalNumbers(r)
+	updated.MinHosts = nums.opt("min_hosts")
+	// sub-shaped for the same reason as the asset's capacity, through ratio:
+	// a form variant without the field must not silently drop the ratio and
+	// quietly re-read the cluster at a conservative 1:1.
+	if r.PostForm.Has("cpu_overcommit") {
+		updated.CPUOvercommit = nums.ratio("cpu_overcommit")
+	}
 	updated.Description = optionalString(r, "description")
+	// 422 with a message rather than a re-rendered form: this page has no
+	// per-field error path, and every other refusal here already lands the
+	// same way. Refused and said out loud beats accepted and dropped.
+	if nums.messages() != nil {
+		http.Error(w, "Those numbers were not numbers. The overcommit ratio is "+
+			"written the way it reads: 3, or 1.5.", http.StatusUnprocessableEntity)
+		return
+	}
 	updated.RowVersion = submittedVersion(r, updated.RowVersion)
 
 	if err := a.Store.UpdateCluster(r.Context(), actor(r), &updated); err != nil {

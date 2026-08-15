@@ -267,9 +267,13 @@ func (s *SQLStore) CreateProject(ctx context.Context, actor domain.Actor, p *dom
 	p.RowVersion = 1
 	return s.write(ctx, actor, func(t *tx) error {
 		_, err := t.exec(ctx, `
-			INSERT INTO project (id, code, name, description, team_id, lifecycle, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-			p.ID, p.Code, p.Name, p.Description, p.TeamID, p.Lifecycle, p.CreatedAt, p.UpdatedAt)
+			INSERT INTO project (id, code, name, description, team_id,
+			                     priced_for_vcpu, priced_for_memory_mb,
+			                     lifecycle, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			p.ID, p.Code, p.Name, p.Description, p.TeamID,
+			p.PricedForVCPU, p.PricedForMemoryMB,
+			p.Lifecycle, p.CreatedAt, p.UpdatedAt)
 		if err != nil {
 			return translateWriteErr(err, "creating project")
 		}
@@ -306,9 +310,11 @@ func (s *SQLStore) UpdateProject(ctx context.Context, actor domain.Actor, p *dom
 		p.CreatedAt = before.CreatedAt
 		res, err := t.exec(ctx, `
 			UPDATE project SET code = ?, name = ?, description = ?, team_id = ?,
+			                   priced_for_vcpu = ?, priced_for_memory_mb = ?,
 			                   lifecycle = ?, updated_at = ?, row_version = row_version + 1
 			WHERE id = ? AND row_version = ?`,
-			p.Code, p.Name, p.Description, p.TeamID, p.Lifecycle, p.UpdatedAt,
+			p.Code, p.Name, p.Description, p.TeamID,
+			p.PricedForVCPU, p.PricedForMemoryMB, p.Lifecycle, p.UpdatedAt,
 			p.ID, p.RowVersion)
 		if err != nil {
 			return translateWriteErr(err, "updating project")

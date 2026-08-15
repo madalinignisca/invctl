@@ -396,6 +396,38 @@
       </div>
       {{end}}
     </div>
+    {{/* What the deal was priced on (WP-J7). Editing only: a quote exists
+         before the project is recorded here, but asking for it on the add form
+         puts a commercial number in front of whoever is filing infrastructure.
+
+         DELIBERATELY NOT "CONTRACTED". These contracts name no resources, so
+         exceeding this is a margin signal and not a breach -- and a field
+         called "contracted" will one day be screenshotted and quoted at a
+         client as though somebody had promised it. See migration 00045. */}}
+    {{if .Editing}}
+    <fieldset class="field-group">
+      <legend>Priced for</legend>
+      <p class="field-hint">
+        Optional, and blank is ordinary — internal work and flat fees are priced
+        on no resource assumption at all. When set, growing past it is reported
+        as a <strong>risk to the margin</strong>, never as a breach.
+      </p>
+      <div class="field-row">
+        <div class="field">
+          <label for="{{.Prefix}}-pfvcpu">vCPU</label>
+          <input id="{{.Prefix}}-pfvcpu" type="number" name="priced_for_vcpu" min="1"
+                 value="{{derefInt .Spec.PricedForVCPU}}" placeholder="24">
+          {{with index .Errors "priced_for_vcpu"}}<div class="field-error">{{.}}</div>{{end}}
+        </div>
+        <div class="field">
+          <label for="{{.Prefix}}-pfmem">Memory (MB)</label>
+          <input id="{{.Prefix}}-pfmem" type="number" name="priced_for_memory_mb" min="1"
+                 value="{{derefInt .Spec.PricedForMemoryMB}}" placeholder="81920">
+          {{with index .Errors "priced_for_memory_mb"}}<div class="field-error">{{.}}</div>{{end}}
+        </div>
+      </div>
+    </fieldset>
+    {{end}}
     <div class="field">
       <label for="{{.Prefix}}-desc">What is it for?</label>
       <textarea id="{{.Prefix}}-desc" name="description" rows="2"

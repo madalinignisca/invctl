@@ -58,9 +58,17 @@ type Project struct {
 	// they meant. Not a vocabulary, not parsed, never queried.
 	Description *string `db:"description"`
 	TeamID      *string `db:"team_id"`
-	Lifecycle   string  `db:"lifecycle"`
-	CreatedAt   string  `db:"created_at"`
-	UpdatedAt   string  `db:"updated_at"`
+	// What the deal was priced on (WP-J7). Deliberately not "contracted":
+	// these contracts specify no resources, so this is the assumption the
+	// quote was built on, and exceeding it is a MARGIN signal rather than a
+	// breach. Nil is ordinary -- internal projects and flat-fee work are
+	// priced on no resource assumption at all.
+	PricedForVCPU     *int `db:"priced_for_vcpu"`
+	PricedForMemoryMB *int `db:"priced_for_memory_mb"`
+
+	Lifecycle string `db:"lifecycle"`
+	CreatedAt string `db:"created_at"`
+	UpdatedAt string `db:"updated_at"`
 	// RowVersion is the optimistic-concurrency token; see version.go.
 	RowVersion int `db:"row_version"`
 }
@@ -72,6 +80,13 @@ type ProjectSpec struct {
 	Description *string
 	TeamID      *string
 	Lifecycle   string
+	// What the quote was built on. Carried through the SPEC rather than
+	// assigned to the struct afterwards, because NewProject returns a fresh
+	// Project: anything the spec does not carry is nil by the time the store
+	// sees it, so an update through the form would silently clear it. That is
+	// not hypothetical -- it was the behaviour the day these columns landed.
+	PricedForVCPU     *int
+	PricedForMemoryMB *int
 }
 
 // NewProject validates and constructs a project.
@@ -88,6 +103,10 @@ func NewProject(id string, spec ProjectSpec, now time.Time) (*Project, error) {
 	if !containsString(ProjectLifecycles, lifecycle) {
 		ve.Add("lifecycle", "must be one of %s", strings.Join(ProjectLifecycles, ", "))
 	}
+	// The DB CHECK says the same thing; this is the first line of defence and
+	// says which field, which a constraint violation cannot.
+	checkPositive(ve, "priced_for_vcpu", spec.PricedForVCPU)
+	checkPositive(ve, "priced_for_memory_mb", spec.PricedForMemoryMB)
 	if err := ve.OrNil(); err != nil {
 		return nil, err
 	}
@@ -98,9 +117,13 @@ func NewProject(id string, spec ProjectSpec, now time.Time) (*Project, error) {
 		Name:        name,
 		Description: spec.Description,
 		TeamID:      blankToNil(spec.TeamID),
-		Lifecycle:   lifecycle,
-		CreatedAt:   FormatTime(now),
-		UpdatedAt:   FormatTime(now),
+
+		PricedForVCPU:     spec.PricedForVCPU,
+		PricedForMemoryMB: spec.PricedForMemoryMB,
+
+		Lifecycle: lifecycle,
+		CreatedAt: FormatTime(now),
+		UpdatedAt: FormatTime(now),
 	}, nil
 }
 

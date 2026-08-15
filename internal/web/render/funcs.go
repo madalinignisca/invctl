@@ -66,7 +66,11 @@ func funcs() template.FuncMap {
 		// renders the enum a model declares, and NAMES the unknown case rather
 		// than printing an empty cell that reads like "front to rear".
 		"kilograms": kilograms,
-		"kg":        domain.Kilograms,
+		// A ratio stored in hundredths, rendered as it is written. The form
+		// field must offer back exactly what it will accept, or saving a
+		// cluster without touching the ratio would refuse.
+		"ratio": ratioText,
+		"kg":    domain.Kilograms,
 		// Journal kinds, so the panel's select cannot drift from the CHECK.
 		"journalKinds":     func() []string { return domain.JournalKinds },
 		"journalKindLabel": journalKindLabel,
@@ -247,6 +251,15 @@ func deref(s *string) string {
 		return ""
 	}
 	return *s
+}
+
+// ratioText is domain.RatioText for an optional column: blank means nobody has
+// declared a ratio, which is not the same as declaring 1:1.
+func ratioText(hundredths *int) string {
+	if hundredths == nil {
+		return ""
+	}
+	return domain.RatioText(*hundredths)
 }
 
 func derefInt(n *int) string {

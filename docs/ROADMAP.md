@@ -555,18 +555,18 @@ UX decision, not a performance one.*
 *Added 2026-08-14, from the first adopting company. The full specification is
 **`docs/COST-ATTRIBUTION.md`**; these are the packages, not the reasoning.*
 
-**WP-J1 · Replacement lineage** — S — depends: none — unlocks: J2
+**WP-J1 · Replacement lineage** — S — **DONE**
 One nullable self-reference on `asset` — *this replaces that* — and the page that
 compares them. Both boxes already carry their own cost history, so the comparison
 is a join. Soft delete is why the predecessor is still there to compare against.
 
-**WP-J2 · Price movement** — S — depends: J1 (light) — unlocks: supplier analysis
+**WP-J2 · Price movement** — S — **DONE**
 A view over cost lines already stored: what it cost, what it costs, when it
 changed, by how much. **No schema change** — the validity windows on `cost` have
 been recording this since the first release. Against a hand-maintained inflation
 series it answers "did this rise faster than money fell".
 
-**WP-J3 · Capacity model** — L — depends: none — unlocks: J4, J5, J7
+**WP-J3 · Capacity model** — L — **DONE**
 Hosts get cores, memory and storage; storage kinds get a raw-to-usable ratio
 (Ceph 3×, RAID6, local 1:1); clusters get a declared safe overcommit ratio. A
 workload carries **provisioned** (the hard limit) and **soft-allocated** (what
@@ -579,7 +579,7 @@ units and weight but nothing about compute, and this is the prerequisite for
 every figure in J4. Useful before any money is involved: it answers *"is this
 cluster oversubscribed?"*.
 
-**WP-J7 · Capacity findings** — M — depends: J3 — unlocks: the 03:00 question
+**WP-J7 · Capacity findings** — M — **DONE**
 Three findings, three audiences. A project allocated **above what it was priced
 for** is the CEO's alert: nobody is in breach, the engagement has simply grown
 past its own quote and the margin is eroding quietly. Provisioned above the safe
@@ -588,6 +588,16 @@ planning -- more work sold than the estate can host. The last is invisible on
 every utilisation dashboard: a cluster at 35% CPU and 65% memory looks healthy
 and says nothing about what could be claimed at once. Needs no money and can
 ship before J4.
+
+Closing it also closed a gap J3 had left open: the columns, the arithmetic and
+the capacity panel all shipped, and **no form anywhere set a single one of the
+numbers**. Every capacity figure could only come from the seed. Sizing a host,
+recording a workload's allocation, declaring an overcommit ratio and stating
+what an engagement was priced on are now all editable, each with the audit
+entry that declared state owes. Two of the three seeded findings appear on the
+demo estate; the two that need an estate genuinely in trouble are asserted in
+`internal/store/capacity_findings_test.go` rather than forced into the fixture,
+following the precedent `seed_engine.go` set for cluster relocation.
 
 **WP-J4 · Cost attribution** — L — depends: J3, I2 — unlocks: the CEO's question
 Cluster cost divided by *usable* capacity gives a price per unit; the redundancy

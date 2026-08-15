@@ -8,6 +8,11 @@
 
 package domain
 
+import (
+	"fmt"
+	"strconv"
+)
+
 // What a cluster can carry, and what has been claimed against it (WP-J3).
 //
 // SEPARATE FROM cluster.go BECAUSE IT ANSWERS A DIFFERENT QUESTION. cluster.go
@@ -30,6 +35,29 @@ package domain
 // and can say so; one who has not thought about it gets the conservative
 // reading, which is the safe direction to be wrong in.
 const DefaultCPUOvercommit = 100
+
+// RatioText renders an overcommit stored in hundredths the way an operator
+// writes it: 300 is "3", 150 is "1.5", 205 is "2.05".
+//
+// HERE RATHER THAN IN A TEMPLATE HELPER because three places need it and they
+// were disagreeing: the capacity panel printed "250:100", the findings printed
+// "2.50:1", and the form field has to offer back exactly what it accepts or
+// saving a cluster without touching the ratio is refused. One unit, one
+// rendering.
+func RatioText(hundredths int) string {
+	whole, frac := hundredths/100, hundredths%100
+	switch {
+	case frac == 0:
+		return strconv.Itoa(whole)
+	case frac%10 == 0:
+		return fmt.Sprintf("%d.%d", whole, frac/10)
+	default:
+		return fmt.Sprintf("%d.%02d", whole, frac)
+	}
+}
+
+// OvercommitRatio is the ratio as prose: "3:1".
+func (c ClusterCapacity) OvercommitRatio() string { return RatioText(c.Overcommit) + ":1" }
 
 // HostCapacity is one machine's contribution.
 type HostCapacity struct {

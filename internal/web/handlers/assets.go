@@ -669,6 +669,21 @@ func (a *App) AssetUpdate(w http.ResponseWriter, r *http.Request) {
 	// reads as reassurance rather than as the loss it is.
 	nums := optionalNumbers(r)
 	depth, width, load := nums.opt("usable_depth_mm"), nums.opt("width_mm"), nums.kilos("max_load_kg")
+	// What it has, and what it has given out (WP-J3). Read through sub rather
+	// than opt because the inputs are conditional on the kind -- see its doc
+	// comment for what opt would have cost here.
+	//
+	// BOTH GROUPS ON ONE ASSET, WHICH IS NOT A REDUNDANCY. cpu_cores is read
+	// only from a cluster's member hosts and vcpu_allocated only from what sits
+	// inside them, so a VM that is itself a member of a cluster of VMs is
+	// legitimately both: what it was given by its hypervisor, and what it in
+	// turn has to give.
+	updated.CPUCores = nums.sub("cpu_cores", updated.CPUCores)
+	updated.MemoryMB = nums.sub("memory_mb", updated.MemoryMB)
+	updated.VCPUProvisioned = nums.sub("vcpu_provisioned", updated.VCPUProvisioned)
+	updated.VCPUAllocated = nums.sub("vcpu_allocated", updated.VCPUAllocated)
+	updated.MemoryProvisionedMB = nums.sub("memory_provisioned_mb", updated.MemoryProvisionedMB)
+	updated.MemoryAllocatedMB = nums.sub("memory_allocated_mb", updated.MemoryAllocatedMB)
 	if msgs := nums.messages(); msgs != nil {
 		a.renderAssetFormError(w, r, msgs)
 		return

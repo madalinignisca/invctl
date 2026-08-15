@@ -242,6 +242,13 @@ func (a *App) renderProjectWith(w http.ResponseWriter, r *http.Request, status i
 		if submitted != nil {
 			spec = *submitted
 		}
+		// The stored figures, so a form that renders them can also give them
+		// back unchanged. Taken from the spec, which after a refusal is what
+		// the operator typed.
+		if submitted == nil {
+			spec.PricedForVCPU, spec.PricedForMemoryMB =
+				project.PricedForVCPU, project.PricedForMemoryMB
+		}
 		edit = &projectEditForm{
 			ProjectID: project.ID, Spec: spec, Lifecycle: spec.Lifecycle,
 			RowVersion: project.RowVersion, Teams: teams,
@@ -283,12 +290,21 @@ func (a *App) ProjectUpdate(w http.ResponseWriter, r *http.Request) {
 		a.handleStoreError(w, r, err)
 		return
 	}
+	nums := optionalNumbers(r)
 	spec := domain.ProjectSpec{
 		Code:        formValue(r, "code"),
 		Name:        formValue(r, "name"),
 		Description: optional(formValue(r, "description")),
 		TeamID:      optional(formValue(r, "team_id")),
 		Lifecycle:   formValue(r, "lifecycle"),
+		// sub, not opt: a variant of this form that does not carry the fields
+		// must read as "not stated". See numbers.sub.
+		PricedForVCPU:     nums.sub("priced_for_vcpu", existing.PricedForVCPU),
+		PricedForMemoryMB: nums.sub("priced_for_memory_mb", existing.PricedForMemoryMB),
+	}
+	if msgs := nums.messages(); msgs != nil {
+		a.renderProject(w, r, http.StatusUnprocessableEntity, msgs)
+		return
 	}
 	updated, err := domain.NewProject(id, spec, a.Store.Now())
 	if err != nil {

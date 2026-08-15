@@ -466,6 +466,65 @@ func (n *numbers) opt(key string) *int {
 	return v
 }
 
+// ratio reads an overcommit typed the way operators say it -- "3", "1.5",
+// "2.5:1" -- and returns hundredths.
+//
+// THE SAME ARGUMENT AS kilos, ARRIVED AT THE SAME WAY. The column stores
+// hundredths so the arithmetic is exact; nobody types 300 for a 3:1 ratio, and
+// a form that demanded it would be answered wrong at least once. Parsed by
+// hand rather than through a float for kilos's reason: 1.5 * 100 through a
+// float is 149.999... on the way to an int.
+func (n *numbers) ratio(key string) *int {
+	v := strings.TrimSpace(formValue(n.r, key))
+	// ":1" is how the ratio is written everywhere else in this product, so it
+	// is accepted rather than refused -- somebody copying the figure off the
+	// capacity panel is not making a mistake.
+	v = strings.TrimSuffix(v, ":1")
+	if v == "" {
+		return nil
+	}
+	whole, frac, hasFrac := strings.Cut(v, ".")
+	hundredths, err := strconv.Atoi(whole)
+	if err != nil {
+		n.bad = append(n.bad, key)
+		return nil
+	}
+	hundredths *= 100
+	if hasFrac {
+		if frac == "" || len(frac) > 2 {
+			frac = (frac + "00")[:2]
+		}
+		for len(frac) < 2 {
+			frac += "0"
+		}
+		f, err := strconv.Atoi(frac)
+		if err != nil {
+			n.bad = append(n.bad, key)
+			return nil
+		}
+		hundredths += f
+	}
+	return &hundredths
+}
+
+// sub reads a number the way submittedString reads a string: a field the
+// rendered form did not carry leaves the stored value alone.
+//
+// NEEDED THE MOMENT A FIELD BECAME CONDITIONAL. The capacity inputs appear only
+// on kinds that can carry a workload, so a plain opt() would read "absent" as
+// "cleared" and a hypervisor edited through any other variant of this form
+// would silently lose its size -- taking every capacity figure for its cluster
+// with it, and reporting the loss as an unmeasured host rather than as a bug.
+func (n *numbers) sub(key string, current *int) *int {
+	if n.r.PostForm == nil {
+		_ = n.r.ParseForm()
+	}
+	if !n.r.PostForm.Has(key) {
+		return current
+	}
+	return n.opt(key)
+}
+
 // kilos reads a weight typed in KILOGRAMS and returns it in grams.
 //
 // THE FORM ASKS FOR WHAT PEOPLE KNOW AND THE COLUMN STORES WHAT SUMS EXACTLY.

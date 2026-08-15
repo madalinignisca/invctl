@@ -124,6 +124,18 @@
         <input id="ed-min" type="number" name="min_hosts" min="1"
                value="{{if .Cluster.MinHosts}}{{derefInt .Cluster.MinHosts}}{{end}}">
       </div>
+      {{/* Declared by its operator, never inferred from load: a quiet cluster
+           would raise its own apparent safe ratio and licence exactly the
+           overcommitment the finding exists to catch. */}}
+      <div class="field">
+        <label for="ed-overcommit">CPU overcommit</label>
+        <input id="ed-overcommit" type="text" inputmode="decimal" name="cpu_overcommit"
+               placeholder="3" value="{{ratio .Cluster.CPUOvercommit}}">
+        <div class="field-hint">
+          vCPU per physical core, written as it reads — 3, or 1.5. Blank is read
+          at a conservative 1:1. Memory is never overcommitted.
+        </div>
+      </div>
     </div>
     <button class="btn btn-primary" type="submit">Save</button>
   </div>
@@ -163,7 +175,7 @@
         <div class="stat-label">Usable vCPU</div>
         <div class="stat-value">{{.UsableVCPU}}</div>
         <div class="stat-note">
-          {{.RawCores}} cores{{if .OvercommitDeclared}} at {{.Overcommit}}:100{{else}} at 1:1, undeclared{{end}}
+          {{.RawCores}} cores{{if .OvercommitDeclared}} at {{.OvercommitRatio}}{{else}} at 1:1, undeclared{{end}}
         </div>
       </div>
       <div class="stat">
