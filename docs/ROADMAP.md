@@ -566,7 +566,7 @@ changed, by how much. **No schema change** — the validity windows on `cost` ha
 been recording this since the first release. Against a hand-maintained inflation
 series it answers "did this rise faster than money fell".
 
-**WP-J3 · Capacity model** — L — **DONE**
+**WP-J3 · Capacity model** — L — **DONE for compute; storage outstanding**
 Hosts get cores, memory and storage; storage kinds get a raw-to-usable ratio
 (Ceph 3×, RAID6, local 1:1); clusters get a declared safe overcommit ratio. A
 workload carries **provisioned** (the hard limit) and **soft-allocated** (what
