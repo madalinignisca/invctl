@@ -89,6 +89,10 @@ func TopUp(ctx context.Context, s *store.SQLStore) (*Refs, error) {
 	// already present.
 	b.companyDRLink()
 	b.companyCabling()
+	// Idempotent in both halves: a lineage already recorded is left alone, and
+	// a renewal whose effective date is already in force is skipped rather than
+	// stacked on top.
+	b.companyMoney()
 
 	if b.err != nil {
 		return nil, b.err

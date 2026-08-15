@@ -59,6 +59,7 @@ func (b *builder) company() {
 	// The patch panel and its leads: needs the cabinet measured and the port
 	// faces declared, so it runs after companyFit.
 	b.companyCabling()
+	b.companyMoney()
 }
 
 // companySites adds the third on-prem rack and the rented colo.
