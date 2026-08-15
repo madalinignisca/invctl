@@ -306,7 +306,7 @@
 
 {{template "cost_panel" dict
     "Action" (printf "/services/%s/costs" .Service.ID) "Slug" "service"
-    "Return" (printf "/services/%s" .Service.ID) "EditID" .EditRow
+    "Return" (printf "/services/%s" .Service.ID) "EditID" .EditRow "RepriceID" .RepriceRow
     "Costs" .Costs "Totals" .CostTotals "Kinds" .CostKinds "Periods" .CostPeriods
     "CSRF" .CSRF "CanWrite" .CanWrite "CanSeeCosts" .CanSeeCosts
     "Heading" "What it costs"

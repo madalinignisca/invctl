@@ -96,7 +96,7 @@
 
 {{template "cost_panel" dict
     "Action" (printf "/circuits/%s/costs" .Circuit.ID) "Slug" "circuit"
-    "Return" (printf "/circuits/%s" .Circuit.ID) "EditID" .EditRow
+    "Return" (printf "/circuits/%s" .Circuit.ID) "EditID" .EditRow "RepriceID" .RepriceRow
     "Costs" .Costs "Totals" .CostTotals "Kinds" .CostKinds "Periods" .Periods
     "CSRF" .CSRF "CanWrite" .CanWrite "CanSeeCosts" .CanSeeCosts
     "Heading" "What it costs"

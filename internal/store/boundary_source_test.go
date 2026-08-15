@@ -335,6 +335,21 @@ var dynamicTargetAllowlist = map[string]string{
 	// are separate URLs rather than /certificates/{id}/deploy/{type}. The
 	// statements set lifecycle and note, neither of which change_log has.
 	"internal/store/certificates.go": "deployCertificate/undeployCertificate: two literal link tables from four fixed call sites",
+
+	// reprice names one of the FOUR costTable values, by exactly the argument
+	// costs.go is on this list for: they are package-level values, each public
+	// method (RepriceAssetCost and its three siblings) names its own, and no
+	// entity type travels in from a request -- which is why the routes are four
+	// URLs rather than /costs/{type}/{id}/reprice.
+	//
+	// The statements set valid_until and amount_minor, neither of which
+	// change_log has, so the audit table is unreachable in fact as well as by
+	// construction. And repricing must be ONE transaction closing a line and
+	// opening its successor; four copies of that pair would diverge the first
+	// time somebody fixed one, and a price series assembled from subtly
+	// different shapes is a worse failure than a generated name whose inputs
+	// are four constants.
+	"internal/store/reprice.go": "reprice: four package-level costTable values, never a caller's string",
 }
 
 // dynamicTargetBudget is how many dynamic non-insert writes each allowlisted
@@ -346,6 +361,12 @@ var dynamicTargetBudget = map[string]int{
 	"internal/store/vocabulary.go": 2, // UpsertVocabularyTerm: its INSERT and its UPDATE
 	"internal/store/projects.go":   2, // releaseLinks, retireLink
 	"internal/store/costs.go":      3, // addCost's INSERT, updateCost, retireCost
+	// reprice is TWO by construction and must stay two: the UPDATE that closes
+	// the superseded line and the INSERT that opens its successor. If this ever
+	// reads one, the pair has been split and a price change is no longer atomic
+	// -- which would leave an estate with a closed line and no replacement, or
+	// two open lines claiming the same day.
+	"internal/store/reprice.go": 2,
 	// deployCertificate: the existence SELECT is not a write; its reactivation
 	// UPDATE and its INSERT are, and undeployCertificate's UPDATE makes three.
 	"internal/store/certificates.go": 3,

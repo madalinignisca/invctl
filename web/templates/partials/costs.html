@@ -14,7 +14,7 @@
   page struct, so the asset, service and project pages can each hand it their
   own action URL without three near-identical copies drifting apart.
 
-  Expects: Action, Return, EditID, Costs, Totals, Kinds, Periods, CSRF,
+  Expects: Action, Return, EditID, RepriceID, Costs, Totals, Kinds, Periods, CSRF,
            CanWrite, CanSeeCosts, Heading, Note.
 */}}
 {{define "cost_panel"}}
@@ -125,6 +125,39 @@
             <a class="btn btn-sm" href="{{$.Return}}#costs">Cancel</a>
           </td>
         </tr>
+        {{else if and $.CanWrite (ne .Lifecycle "retired") (eq .ID $.RepriceID)}}
+        {{/* Repricing this line. The old amount is shown and NOT editable: the
+             point of the action is that the old figure survives untouched. */}}
+        <tr>
+          <td colspan="7">
+            <form method="post" action="{{$.Action}}/{{.ID}}/reprice"
+                  hx-post="{{$.Action}}/{{.ID}}/reprice">
+              <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+              <div class="field-row">
+                <div class="field">
+                  <label>Was</label>
+                  <div class="mono">{{money .AmountMinor}} · {{.Period}} · from {{.ValidFrom}}</div>
+                  <div class="field-hint">Kept exactly as it is. This is the figure the estate loses if you edit instead.</div>
+                </div>
+                <div class="field">
+                  <label for="rp-amount-{{.ID}}">New amount</label>
+                  <input id="rp-amount-{{.ID}}" name="amount" inputmode="decimal" required>
+                </div>
+                <div class="field">
+                  <label for="rp-from-{{.ID}}">Effective from</label>
+                  <input id="rp-from-{{.ID}}" type="date" name="effective_from" required>
+                  <div class="field-hint">The old line closes the day before.</div>
+                </div>
+                <div class="field">
+                  <label for="rp-note-{{.ID}}">Why</label>
+                  <input id="rp-note-{{.ID}}" name="note" placeholder="annual uplift">
+                </div>
+              </div>
+              <button class="btn btn-primary" type="submit">Reprice</button>
+              <a class="btn btn-sm" href="{{$.Return}}#costs">Cancel</a>
+            </form>
+          </td>
+        </tr>
         {{else}}
         <tr {{if eq .Lifecycle "retired"}}style="opacity:.5"{{end}}>
           <td><span class="pill pill-muted">{{.KindLabel}}</span></td>
@@ -141,6 +174,15 @@
                  editing one would rewrite a fact that was already withdrawn. */}}
             {{if ne .Lifecycle "retired"}}
             <a class="btn btn-sm" href="{{$.Return}}?edit={{.ID}}#costs">Edit</a>
+            {{/* REPRICE IS A DIFFERENT VERB FROM EDIT, and only recurring lines
+                 have it. Edit amends a figure that was never true -- somebody
+                 typed 840 for 8400. Reprice says the old figure WAS true and
+                 stopped being true on a date, so it closes this line and opens
+                 a new one. A one-off is a payment that happened; there is no
+                 "from now on" for it, which is why it gets no button. */}}
+            {{if ne .Period "once"}}
+            <a class="btn btn-sm" href="{{$.Return}}?reprice={{.ID}}#costs">Reprice</a>
+            {{end}}
             <form method="post" action="{{$.Action}}/{{.ID}}/retire"
                   hx-post="{{$.Action}}/{{.ID}}/retire" style="display:inline">
               <input type="hidden" name="csrf_token" value="{{$.CSRF}}">

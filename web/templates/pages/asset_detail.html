@@ -274,7 +274,7 @@
 
 {{template "cost_panel" dict
     "Action" (printf "/assets/%s/costs" .Asset.ID) "Slug" "asset"
-    "Return" (printf "/assets/%s" .Asset.ID) "EditID" .EditRow
+    "Return" (printf "/assets/%s" .Asset.ID) "EditID" .EditRow "RepriceID" .RepriceRow
     "Costs" .Costs "Totals" .CostTotals "Kinds" .CostKinds "Periods" .CostPeriods
     "CSRF" .CSRF "CanWrite" .CanWrite "CanSeeCosts" .CanSeeCosts
     "Heading" "What it costs"

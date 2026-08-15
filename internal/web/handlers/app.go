@@ -102,6 +102,11 @@ type Base struct {
 	// would look tidier and break every URL bookmarked or tested against today
 	// for no gain. Each template still checks CanWrite before comparing.
 	EditRow string
+	// RepriceRow is the id of the one cost line opened for repricing (WP-J2).
+	// Separate from EditRow because they are different verbs on the same row and
+	// one field would make them mutually exclusive by accident rather than by
+	// decision -- opening "reprice" would silently close an edit in progress.
+	RepriceRow string
 }
 
 // submittedVersion reads the optimistic-concurrency token out of a form.
@@ -276,7 +281,8 @@ func (a *App) base(r *http.Request, title, nav string) Base {
 		// page re-renders either way, which it must, because correcting an
 		// amount moves the totals at the top of the same panel. A fragment swap
 		// would leave those stale and stale money is worse than a page load.
-		EditRow: r.URL.Query().Get("edit"),
+		EditRow:    r.URL.Query().Get("edit"),
+		RepriceRow: r.URL.Query().Get("reprice"),
 	}
 	if kind, text := a.takeFlash(r); text != "" {
 		b.Flash = &Flash{Kind: kind, Text: text}

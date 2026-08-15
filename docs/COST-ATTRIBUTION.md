@@ -36,8 +36,19 @@ More than expected, and it changes the shape of the work.
   reopened here.
 - **Cost lines carry validity windows** (`valid_from` / `valid_until`), and
   `cost.go` says why: *"without it a renewal at a new price overwrites its
-  predecessor and the history is gone"*. **Price history is therefore already
-  being recorded** — every renewal is a separate line, retained.
+  predecessor and the history is gone"*.
+
+  **But nothing records history, and an earlier draft of this document claimed
+  it did.** Corrected 2026-08-15 by looking at the data rather than the comment.
+  The schema can express a renewal — two rows, the old one closed — and the
+  windows are editable on the form. What is missing is the verb: `updateCost`
+  overwrites `amount_minor` in place, so the obvious operator action destroys
+  exactly the figure this design exists to keep. The seeded estate has **zero**
+  entities whose same cost kind is priced more than once; every multiple is
+  different kinds starting on one day.
+
+  So J2 is not "a view over data already stored". It is a **reprice** action
+  that closes one line and opens another atomically, and then the view.
 - **`cluster.min_hosts`** is documented as *"CAPACITY, not quorum: how many
   members must survive for the guests to fit"*.
 - A **`provider`** table exists, referenced by circuits only.

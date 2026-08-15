@@ -213,7 +213,7 @@
 
   {{template "cost_panel" dict
       "Action" (printf "/projects/%s/costs" .Project.ID) "Slug" "project"
-      "Return" (printf "/projects/%s" .Project.ID) "EditID" .EditRow
+      "Return" (printf "/projects/%s" .Project.ID) "EditID" .EditRow "RepriceID" .RepriceRow
       "Costs" .CostLines "Totals" .Costs.Direct
       "Kinds" .CostKinds "Periods" .CostPeriods
       "CSRF" .CSRF "CanWrite" .CanWrite "CanSeeCosts" .CanSeeCosts

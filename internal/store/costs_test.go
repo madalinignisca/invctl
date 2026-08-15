@@ -61,7 +61,7 @@ func (f *projectFixture) setAssetEOLOn(t *testing.T, name, date string) {
 
 // priceAssetFrom is priceAsset with an explicit acquisition date -- which for a
 // one-off is what ValidFrom means.
-func (f *projectFixture) priceAssetFrom(t *testing.T, name, kind, period string, minor int64, from string) {
+func (f *projectFixture) priceAssetFrom(t *testing.T, name, kind, period string, minor int64, from string) string {
 	t.Helper()
 	c, err := domain.NewCost(NewID(), domain.CostSpec{
 		Kind: kind, Period: period, AmountMinor: minor, ValidFrom: &from,
@@ -72,6 +72,7 @@ func (f *projectFixture) priceAssetFrom(t *testing.T, name, kind, period string,
 	if err := f.s.AddAssetCost(f.ctx, testActor, f.assets[name], c); err != nil {
 		t.Fatalf("attaching the cost: %v", err)
 	}
+	return c.ID
 }
 
 func (f *projectFixture) price(t *testing.T, attach func(*domain.Cost) error,

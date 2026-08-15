@@ -152,6 +152,71 @@ func (a *App) CostRetireOnProject(w http.ResponseWriter, r *http.Request) {
 	a.afterCostWrite(w, r, err, "/projects/"+r.PathValue("id"))
 }
 
+// Repricing (WP-J2): the action that makes price history exist.
+//
+// A SEPARATE VERB FROM EDITING, and the distinction is the feature. Editing
+// amends a figure that was never true -- somebody typed 840 for 8400. Repricing
+// says the old figure WAS true and stopped being true on a date, so it closes
+// that line and opens a new one. Offering only "edit" is what left this estate
+// with no price history at all despite a schema built to hold it.
+//
+// Detached from the declaration by a blank line: it describes all four handlers
+// below, not CostRepriceOnAsset alone.
+
+func (a *App) CostRepriceOnAsset(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	spec, err := repriceFromForm(r)
+	if err == nil {
+		_, err = a.Store.RepriceAssetCost(r.Context(), actor(r), id, spec)
+	}
+	a.afterCostWrite(w, r, err, "/assets/"+id)
+}
+
+// CostRepriceOnService supersedes a line on a service.
+func (a *App) CostRepriceOnService(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	spec, err := repriceFromForm(r)
+	if err == nil {
+		_, err = a.Store.RepriceServiceCost(r.Context(), actor(r), id, spec)
+	}
+	a.afterCostWrite(w, r, err, "/services/"+id)
+}
+
+// CostRepriceOnProject supersedes a line on a project.
+func (a *App) CostRepriceOnProject(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	spec, err := repriceFromForm(r)
+	if err == nil {
+		_, err = a.Store.RepriceProjectCost(r.Context(), actor(r), id, spec)
+	}
+	a.afterCostWrite(w, r, err, "/projects/"+id)
+}
+
+// CostRepriceOnCircuit supersedes a line on a circuit -- the renewal this was
+// built for.
+func (a *App) CostRepriceOnCircuit(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	spec, err := repriceFromForm(r)
+	if err == nil {
+		_, err = a.Store.RepriceCircuitCost(r.Context(), actor(r), id, spec)
+	}
+	a.afterCostWrite(w, r, err, "/circuits/"+id)
+}
+
+// repriceFromForm reads a price change out of a submitted form.
+func repriceFromForm(r *http.Request) (store.RepriceSpec, error) {
+	amount, err := parseAmountMinor(formValue(r, "amount"))
+	if err != nil {
+		return store.RepriceSpec{}, err
+	}
+	return store.RepriceSpec{
+		LineID:         r.PathValue("costID"),
+		NewAmountMinor: amount,
+		EffectiveFrom:  formValue(r, "effective_from"),
+		Note:           optional(formValue(r, "note")),
+	}, nil
+}
+
 // afterCostWrite sends the operator back where they were, or tells them why not.
 //
 // A validation failure flashes and redirects rather than re-rendering the form
