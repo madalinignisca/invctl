@@ -222,3 +222,86 @@ func TestAnOperatorCanDeclareTheOvercommitRatio(t *testing.T) {
 		t.Errorf("a ratio that is not a number returned %d, want 422", bad.StatusCode)
 	}
 }
+
+// TestTheClusterPageSaysWhoHoldsIt.
+//
+// The panel is fetched rather than trusted to compile, for the reason the
+// circuit impact page taught this codebase: a template referencing a field the
+// page struct does not carry returns 500 for every request while every other
+// test stays green.
+func TestTheClusterPageSaysWhoHoldsIt(t *testing.T) {
+	h := newHarness(t)
+	h.login("viewer", "viewer-password")
+	id := firstClusterID(t, body(t, h.get("/clusters", false)))
+	page := body(t, h.get("/clusters/"+id, false))
+
+	if !strings.Contains(page, "Who holds this cluster") {
+		t.Fatal("the cluster page does not divide the cluster between its claimants")
+	}
+	// Both dimensions, because the whole point is that they differ.
+	for _, want := range []string{">CPU<", ">Memory<"} {
+		if !strings.Contains(page, want) {
+			t.Errorf("no %s division on the page", want)
+		}
+	}
+	// The basis is on the page, not only in the database. A percentage whose
+	// meaning is not stated is one somebody will read as usage.
+	if !strings.Contains(page, "allocated") {
+		t.Error("the page does not say the shares are computed on allocation")
+	}
+	// The idle slice is asserted where this test can create the data for it:
+	// see the pool page below. The base fixture allocates nothing, so this
+	// cluster correctly reports that there is nothing to divide, and asserting
+	// headroom here would only prove the fixture was seeded.
+	if !strings.Contains(page, "Nothing to divide") && !strings.Contains(page, "idle capacity") {
+		t.Error("the panel neither divides the cluster nor says why it cannot")
+	}
+}
+
+// TestAnOperatorCanRecordWhatAWorkloadHolds. J3's storage half, which shipped
+// as arithmetic with no way to enter a number -- the same gap J7 closed for
+// compute, closed here before the feature could repeat it.
+func TestAnOperatorCanRecordWhatAWorkloadHolds(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+	vm := h.refs.Assets["vm-app-1"]
+	pool := h.refs.Assets["ceph-block"]
+	if pool == "" {
+		t.Skip("the base fixture has no storage pool")
+	}
+
+	page := body(t, h.get("/assets/"+vm, false))
+	if !strings.Contains(page, `name="allocated_gb"`) {
+		t.Fatal("the asset page cannot record what a workload holds")
+	}
+
+	resp := h.post("/assets/"+vm+"/storage", url.Values{
+		"csrf_token": {h.csrfToken("/assets/" + vm)},
+		"pool_id":    {pool}, "allocated_gb": {"275"}, "note": {"test claim"},
+	}, false)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("recording a claim returned %d, want a redirect", resp.StatusCode)
+	}
+	if after := body(t, h.get("/assets/"+vm, false)); !strings.Contains(after, "275 GB") {
+		t.Error("the recorded claim does not appear on the workload's page")
+	}
+	// Declared state, so it owes an audit entry.
+	if !strings.Contains(body(t, h.get("/changes", false)), "275 GB") {
+		t.Error("recording what a workload holds wrote no change_log entry")
+	}
+	// And the pool's own page divides it.
+	poolPage := body(t, h.get("/assets/"+pool, false))
+	if !strings.Contains(poolPage, "This pool") {
+		t.Fatal("a storage pool's page does not report its capacity")
+	}
+	if !strings.Contains(poolPage, "Lost to redundancy") {
+		t.Error("the pool does not say what replication costs it")
+	}
+	// §5.3 made visible: headroom is a slice, so a reader can see the shares
+	// sum to the whole pool rather than to whatever was claimed.
+	if !strings.Contains(poolPage, "idle capacity") {
+		t.Error("free space is not shown as its own slice, so the slices do not " +
+			"visibly account for the pool")
+	}
+}

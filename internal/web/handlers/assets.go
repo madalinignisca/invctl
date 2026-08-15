@@ -330,6 +330,13 @@ type assetDetailPage struct {
 	Replacement *store.ReplacementComparison
 	// Movement is how each of its cost kinds has moved. WP-J2.
 	Movement []store.PriceSeries
+	// What this workload holds, and where it could hold it (WP-J4).
+	Storage []domain.StorageClaim
+	Pools   []domain.StoragePool
+	// Occupancy is set only when this asset IS a pool: what it holds and for
+	// whom, so a pool's page answers the question its own capacity raises.
+	Occupancy *domain.StorageOccupancy
+	PoolShare *domain.Division
 	// PassThroughs is what this panel does between its own ports.
 	PassThroughs []store.PassThroughRow
 	// Notes somebody wrote about this asset, and what the panel posts to.
@@ -513,6 +520,30 @@ func (a *App) renderAssetDetail(w http.ResponseWriter, r *http.Request, status i
 		slog.Error("resolving price movement", "error", err, "asset", id)
 	}
 
+	// What it holds, and what it could hold (WP-J4). Same treatment: an asset
+	// page is opened during an incident and a panel is not worth taking it
+	// down for.
+	storage, err := a.Store.StorageClaimsFor(r.Context(), id)
+	if err != nil {
+		slog.Error("reading storage claims", "error", err, "asset", id)
+	}
+	pools, err := a.Store.ListStoragePools(r.Context())
+	if err != nil {
+		slog.Error("listing storage pools", "error", err, "asset", id)
+	}
+	// Set only when this asset IS a pool. GetStoragePool answers ErrNotFound
+	// for everything else, which is the ordinary case and not worth logging.
+	var occupancy *domain.StorageOccupancy
+	var poolShare *domain.Division
+	if _, poolErr := a.Store.GetStoragePool(r.Context(), id); poolErr == nil {
+		if occupancy, err = a.Store.StorageOccupancyFor(r.Context(), id); err != nil {
+			slog.Error("reading pool occupancy", "error", err, "asset", id)
+		}
+		if poolShare, err = a.Store.PoolAttribution(r.Context(), id); err != nil {
+			slog.Error("dividing the pool", "error", err, "asset", id)
+		}
+	}
+
 	// Notes. Logged and absent rather than fatal, like the elevation: an asset
 	// page is what somebody opens during an incident, and a panel is not worth
 	// taking it down for.
@@ -530,6 +561,10 @@ func (a *App) renderAssetDetail(w http.ResponseWriter, r *http.Request, status i
 		Fit:             fit,
 		Replacement:     replacement,
 		Movement:        movement,
+		Storage:         storage,
+		Pools:           pools,
+		Occupancy:       occupancy,
+		PoolShare:       poolShare,
 		PassThroughs:    passThroughs,
 		PowerInputs:     powerInputs,
 		PowerFeeds:      powerFeeds,
@@ -620,6 +655,45 @@ func (a *App) AssetCreate(w http.ResponseWriter, r *http.Request) {
 	render.Redirect(w, r, "/assets/"+asset.ID)
 }
 
+// AssetStorageClaim records what a workload holds in a pool.
+//
+// One handler for record, correct and withdraw, because they are the same act:
+// a claim is a declared figure, and setting it to zero says the workload now
+// holds none. A separate "delete" route would have implied the fact was being
+// removed rather than corrected -- which is exactly the distinction soft delete
+// exists to keep.
+func (a *App) AssetStorageClaim(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Could not read that form.", http.StatusBadRequest)
+		return
+	}
+	id := r.PathValue("id")
+	nums := optionalNumbers(r)
+	gb := nums.opt("allocated_gb")
+	if nums.messages() != nil || gb == nil {
+		a.setFlash(r, "error", "How much storage? A whole number of gigabytes, or zero to withdraw the claim.")
+		render.Redirect(w, r, "/assets/"+id)
+		return
+	}
+	err := a.Store.SetStorageClaim(r.Context(), actor(r), id,
+		formValue(r, "pool_id"), *gb, optionalString(r, "note"))
+	if err != nil {
+		if errors.Is(err, domain.ErrInvalid) {
+			a.setFlash(r, "error", "That claim was refused: "+err.Error())
+			render.Redirect(w, r, "/assets/"+id)
+			return
+		}
+		a.handleStoreError(w, r, err)
+		return
+	}
+	if *gb == 0 {
+		a.setFlash(r, "success", "Claim withdrawn.")
+	} else {
+		a.setFlash(r, "success", "Storage recorded.")
+	}
+	render.Redirect(w, r, "/assets/"+id)
+}
+
 // AssetUpdate saves field changes.
 func (a *App) AssetUpdate(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
@@ -684,6 +758,11 @@ func (a *App) AssetUpdate(w http.ResponseWriter, r *http.Request) {
 	updated.VCPUAllocated = nums.sub("vcpu_allocated", updated.VCPUAllocated)
 	updated.MemoryProvisionedMB = nums.sub("memory_provisioned_mb", updated.MemoryProvisionedMB)
 	updated.MemoryAllocatedMB = nums.sub("memory_allocated_mb", updated.MemoryAllocatedMB)
+	// A pool's own size. submittedString for the kind, for the reason every
+	// other picker on this form uses it: a select that failed to render must
+	// not read as an operator clearing the field.
+	updated.RawCapacityGB = nums.sub("raw_capacity_gb", updated.RawCapacityGB)
+	updated.StorageKind = submittedString(r, "storage_kind", updated.StorageKind)
 	if msgs := nums.messages(); msgs != nil {
 		a.renderAssetFormError(w, r, msgs)
 		return

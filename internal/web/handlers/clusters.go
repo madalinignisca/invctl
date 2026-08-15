@@ -75,22 +75,31 @@ func (a *App) ClusterDetail(w http.ResponseWriter, r *http.Request) {
 		slog.Error("resolving cluster capacity", "error", err, "cluster", id)
 	}
 
+	// Who holds what share of it (WP-J4). Logged and absent rather than fatal,
+	// like the capacity above: this page is opened during an incident.
+	attribution, err := a.Store.AttributionFor(r.Context(), id)
+	if err != nil {
+		slog.Error("dividing the cluster", "error", err, "cluster", id)
+	}
+
 	a.Render.Page(w, http.StatusOK, "cluster_detail", struct {
 		Base
-		Cluster    *domain.Cluster
-		Hosts      []store.ClusterHostRow
-		Candidates []store.AssetRow
-		AfterOne   domain.Relocation
-		PolicyNote string
-		Capacity   *domain.ClusterCapacity
+		Cluster     *domain.Cluster
+		Hosts       []store.ClusterHostRow
+		Candidates  []store.AssetRow
+		AfterOne    domain.Relocation
+		PolicyNote  string
+		Capacity    *domain.ClusterCapacity
+		Attribution *store.Attribution
 	}{
-		Base:       a.base(r, cluster.Name, "clusters"),
-		Cluster:    cluster,
-		Hosts:      hosts,
-		Candidates: candidates,
-		AfterOne:   afterOne,
-		PolicyNote: domain.HAPolicyDescription(cluster.HAPolicy),
-		Capacity:   capacity,
+		Base:        a.base(r, cluster.Name, "clusters"),
+		Cluster:     cluster,
+		Hosts:       hosts,
+		Candidates:  candidates,
+		AfterOne:    afterOne,
+		PolicyNote:  domain.HAPolicyDescription(cluster.HAPolicy),
+		Capacity:    capacity,
+		Attribution: attribution,
 	})
 }
 

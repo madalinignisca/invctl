@@ -50,6 +50,8 @@ type assetFormData struct {
 	// DeviceTypes is the catalogue, so an asset can be pointed at a model and
 	// inherit its end-of-support date.
 	DeviceTypes []store.DeviceTypeRow
+	// StorageKinds is the replication vocabulary, offered only on a pool.
+	StorageKinds []store.VocabularyTerm
 	// Predecessors is what this asset may be recorded as replacing (WP-J1).
 	//
 	// A SEPARATE LIST FROM Parents, AND THE DIFFERENCE IS THE WHOLE POINT: a
@@ -150,6 +152,10 @@ func (f assetFormData) Value(field string) string {
 			stored = orBlankInt(a.MemoryProvisionedMB)
 		case "memory_allocated_mb":
 			stored = orBlankInt(a.MemoryAllocatedMB)
+		case "storage_kind":
+			stored = orBlank(a.StorageKind)
+		case "raw_capacity_gb":
+			stored = orBlankInt(a.RawCapacityGB)
 		}
 	}
 	return f.Edit.Value(field, stored)
@@ -341,6 +347,12 @@ func (a *App) newAssetForm(r *http.Request, errs map[string]string, envs []domai
 	if err != nil {
 		slog.Error("listing device types for the asset form", "error", err, "path", r.URL.Path)
 	}
+	// Same treatment as the catalogue: an unreadable vocabulary leaves the
+	// picker empty rather than failing the page.
+	storageKinds, err := a.Store.StorageKinds(r.Context())
+	if err != nil {
+		slog.Error("listing storage kinds for the asset form", "error", err, "path", r.URL.Path)
+	}
 	// Retired included, deliberately: see Predecessors. Same treatment on
 	// failure -- an empty picker, never a failed page.
 	predecessors, err := a.Store.ListAssets(r.Context(), store.AssetFilter{IncludeRetired: true})
@@ -357,6 +369,7 @@ func (a *App) newAssetForm(r *http.Request, errs map[string]string, envs []domai
 		Teams:        teams,
 		Roles:        roles,
 		DeviceTypes:  deviceTypes,
+		StorageKinds: storageKinds,
 		Predecessors: predecessors,
 		Action:       "/assets",
 		Submit:       "Add asset",

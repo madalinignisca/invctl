@@ -47,6 +47,7 @@ const (
 	vocabContainerEngine     = "container_engine"
 	vocabCostKind            = "cost_kind"
 	vocabResponsibilityRole  = "responsibility_role"
+	vocabStorageKind         = "storage_kind"
 )
 
 // VocabularyTerm is one row of a lookup table.
@@ -92,6 +93,17 @@ var vocabularyQueries = map[string]string{
 	vocabContainerEngine:     `SELECT code, label, sort_order, description FROM container_engine ORDER BY sort_order, code`,
 	vocabCostKind:            `SELECT code, label, sort_order, description FROM cost_kind ORDER BY sort_order, code`,
 	vocabResponsibilityRole:  `SELECT code, label, sort_order, description FROM responsibility_role ORDER BY sort_order, code`,
+	vocabStorageKind:         `SELECT code, label, sort_order, description FROM storage_kind ORDER BY sort_order, code`,
+}
+
+// StorageKinds returns the storage replication vocabulary in display order.
+//
+// The ratio is deliberately NOT carried here: VocabularyTerm is the shape every
+// picker in the product renders, and a field only one of them uses would be
+// blank on nine others. A pool resolves its own ratio through the join in
+// ListStoragePools, which is where the number is actually needed.
+func (s *SQLStore) StorageKinds(ctx context.Context) ([]VocabularyTerm, error) {
+	return s.listVocabulary(ctx, vocabStorageKind)
 }
 
 // AssetKinds returns the asset.kind vocabulary in display order.

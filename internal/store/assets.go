@@ -710,9 +710,10 @@ func (s *SQLStore) insertAsset(ctx context.Context, t *tx, a *domain.Asset, envi
 		                    cpu_cores, memory_mb,
 		                    vcpu_provisioned, vcpu_allocated,
 		                    memory_provisioned_mb, memory_allocated_mb,
+		                    storage_kind, raw_capacity_gb,
 		                    lifecycle, team_id, manager_role, eol_date, attrs,
 		                    created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		a.ID, a.Kind, a.Name, a.ParentID, a.Serial, a.AssetTag, a.Vendor, a.Model,
 		a.DeviceTypeID, a.UHeight, a.RackPosition, a.RackFace,
 		a.UsableDepthMM, a.WidthMM, a.MaxLoadGrams,
@@ -720,6 +721,7 @@ func (s *SQLStore) insertAsset(ctx context.Context, t *tx, a *domain.Asset, envi
 		a.CPUCores, a.MemoryMB,
 		a.VCPUProvisioned, a.VCPUAllocated,
 		a.MemoryProvisionedMB, a.MemoryAllocatedMB,
+		a.StorageKind, a.RawCapacityGB,
 		a.Lifecycle, a.TeamID, a.ManagerRole, a.EOLDate, a.Attrs,
 		a.CreatedAt, a.UpdatedAt)
 	if err != nil {
@@ -795,6 +797,7 @@ func (s *SQLStore) UpdateAsset(ctx context.Context, actor domain.Actor, a *domai
 			                  cpu_cores = ?, memory_mb = ?,
 			                  vcpu_provisioned = ?, vcpu_allocated = ?,
 			                  memory_provisioned_mb = ?, memory_allocated_mb = ?,
+			                  storage_kind = ?, raw_capacity_gb = ?,
 			                  lifecycle = ?, team_id = ?,
 			                  manager_role = ?, eol_date = ?, attrs = ?, updated_at = ?,
 			                  row_version = row_version + 1
@@ -806,6 +809,7 @@ func (s *SQLStore) UpdateAsset(ctx context.Context, actor domain.Actor, a *domai
 			a.CPUCores, a.MemoryMB,
 			a.VCPUProvisioned, a.VCPUAllocated,
 			a.MemoryProvisionedMB, a.MemoryAllocatedMB,
+			a.StorageKind, a.RawCapacityGB,
 			a.Lifecycle, a.TeamID, a.ManagerRole, a.EOLDate, a.Attrs, a.UpdatedAt,
 			a.ID, a.RowVersion)
 		if err != nil {

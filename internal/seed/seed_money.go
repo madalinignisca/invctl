@@ -47,6 +47,7 @@ func (b *builder) companyMoney() {
 	b.inflationSeries()
 	b.computeCapacity()
 	b.pricedFor()
+	b.storagePools()
 }
 
 // pricedFor records what two engagements were quoted on (WP-J7).
@@ -427,4 +428,75 @@ func (b *builder) currentRent(assetID string) (*store.CostRow, error) {
 		}
 	}
 	return found, nil
+}
+
+// storagePools gives the estate two pools at different prices and different
+// shapes (WP-J4).
+//
+// TWO, NOT ONE, AND THAT IS THE WHOLE DEMONSTRATION. §5.7's lesson is that a
+// project holding 350 GB of fast media and 300 GB of bulk has two different
+// shares of two different pools, and one storage figure would be meaningless.
+// A fixture with a single pool could show a percentage but never that.
+//
+// The ratios differ too: three-times replication on the block pool loses two
+// thirds of the array, and a RAID6 bulk pool loses far less. That difference is
+// invisible until somebody records the raw figure and lets the model divide.
+func (b *builder) storagePools() {
+	if !b.ok() {
+		return
+	}
+	// The pools themselves. Parented to the rack they sit in, so containment
+	// answers "where is this" like it does for everything else.
+	pools := []struct {
+		name, kind, parent string
+		rawGB              int
+	}{
+		{"ceph-block", "ceph_3x", "rack-a2", 30720},
+		{"nas-bulk", "raid6", "rack-a2", 61440},
+	}
+	for _, p := range pools {
+		b.asset(domain.KindStorage, p.name, p.parent, []string{"prod"}, func(a *domain.Asset) {
+			a.StorageKind, a.RawCapacityGB = str(p.kind), num(p.rawGB)
+		})
+	}
+	if !b.ok() {
+		return
+	}
+
+	// And what they cost, which is what WP-J4 divides by their usable capacity.
+	// Two pools at very different prices per usable gigabyte -- fast replicated
+	// media against bulk parity -- which is the difference §5.7 says one
+	// storage figure would hide.
+	b.assetCosts([]costLine{
+		{"ceph-block", "acquisition", domain.CostOnce, 46000, -1100, "30 TB raw NVMe across three nodes"},
+		{"ceph-block", "support", domain.CostYearly, 5200, -1100, ""},
+		{"nas-bulk", "acquisition", domain.CostOnce, 18400, -1600, "60 TB raw, spinning"},
+		{"nas-bulk", "support", domain.CostYearly, 1400, -1600, ""},
+	})
+
+	// What holds what. The database VMs carry their files on fast media and
+	// their backups on bulk, which is the shape that produces two different
+	// shares for one project.
+	//
+	// vm-proxy-1 is DELIBERATELY LEFT WITHOUT A CLAIM, for the same reason
+	// hv-03 is left unmeasured: an estate where everything has been recorded
+	// is not one anybody recognises, and the gap is what makes the honest
+	// "cannot be attributed" line appear rather than being taken on trust.
+	claims := []struct {
+		asset, pool string
+		gb          int
+		note        string
+	}{
+		{"vm-db-1", "ceph-block", 400, "database files"},
+		{"vm-db-2", "ceph-block", 400, "database files"},
+		{"vm-app-1", "ceph-block", 50, "system disk"},
+		{"vm-vault-1", "ceph-block", 50, "system disk"},
+		{"vm-vault-2", "ceph-block", 50, "system disk"},
+		{"vm-db-1", "nas-bulk", 1200, "nightly dumps, 14 days"},
+		{"vm-db-2", "nas-bulk", 1200, "nightly dumps, 14 days"},
+		{"vm-queue-1", "nas-bulk", 200, "message spool archive"},
+	}
+	for _, c := range claims {
+		b.storageClaim(c.asset, c.pool, c.gb, c.note)
+	}
 }

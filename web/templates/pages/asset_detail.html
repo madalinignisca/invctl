@@ -286,6 +286,123 @@
 
 {{template "timeline_panel" .Timeline}}
 
+{{/* Storage (WP-J4). Two panels, because a pool and a workload ask opposite
+     questions: what do I hold, and who holds me. */}}
+{{if .Occupancy}}
+<div class="panel">
+  <div class="panel-head">
+    <h2>This pool</h2>
+    <p class="panel-note">
+      What it can hold, and who holds it. Shares are computed on what was
+      <strong>allocated</strong>, never on what is in use.
+    </p>
+  </div>
+  <div class="panel-body">
+    <div class="stat-row">
+      <div class="stat">
+        <div class="k">Usable</div>
+        <div class="v">{{.Occupancy.Pool.UsableGB}} <small>GB</small></div>
+      </div>
+      <div class="stat">
+        <div class="k">Raw</div>
+        <div class="v">{{derefInt .Occupancy.Pool.RawGB}} <small>GB</small></div>
+      </div>
+      <div class="stat">
+        <div class="k">Lost to redundancy</div>
+        <div class="v">{{.Occupancy.Pool.LostToRedundancyGB}} <small>GB</small></div>
+      </div>
+      <div class="stat">
+        <div class="k">Claimed</div>
+        <div class="v">{{.Occupancy.ClaimedGB}} <small>GB</small></div>
+      </div>
+    </div>
+    {{if not .Occupancy.Pool.KindDeclared}}
+    <p class="reason">
+      No redundancy is declared, so this is read at 1:1 — exactly what was
+      recorded, and no assumed loss. Set it on the asset form if the pool
+      replicates.
+    </p>
+    {{end}}
+    {{if .Occupancy.Oversubscribed}}
+    <p class="diag-note">
+      More has been promised than the pool holds. Thin provisioning is ordinary
+      practice, not an error — it is shown because nobody else will show it.
+    </p>
+    {{end}}
+    {{if .PoolShare}}
+    <table class="grid">
+      <thead><tr><th>Held by</th><th class="num">GB</th><th class="num">Share</th></tr></thead>
+      <tbody>
+        {{range .PoolShare.Total}}
+        <tr>
+          <td>{{if .SubjectID}}<a href="/projects/{{.SubjectID}}">{{.Subject}}</a>{{else}}<span class="muted">{{.Subject}}</span>{{end}}</td>
+          <td class="num">{{.Amount}}</td>
+          <td class="num">{{.Percent}}%</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+    {{end}}
+  </div>
+</div>
+{{end}}
+
+{{if .Pools}}
+<div class="panel">
+  <div class="panel-head">
+    <h2>Storage held</h2>
+    <p class="panel-note">
+      What this workload was <strong>given</strong> in each pool. Not what
+      <code>df</code> reports — that is telemetry, and a different fact.
+    </p>
+  </div>
+  <div class="panel-body">
+    {{if .Storage}}
+    <table class="grid">
+      <thead><tr><th>Pool</th><th class="num">Allocated</th><th>Note</th></tr></thead>
+      <tbody>
+        {{range .Storage}}
+        <tr>
+          <td><a href="/assets/{{.PoolID}}">{{.AssetName}}</a></td>
+          <td class="num">{{.AllocatedGB}} GB</td>
+          <td>{{deref .Note}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+    {{else}}
+    <div class="empty"><strong>Nothing recorded</strong>
+      Storage held here cannot be attributed to a project until somebody says how much.</div>
+    {{end}}
+    {{if .CanWrite}}
+    <form class="toolbar" method="post" action="/assets/{{.Asset.ID}}/storage"
+          hx-post="/assets/{{.Asset.ID}}/storage">
+      <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+      <div class="field">
+        <label for="st-pool">Pool</label>
+        <select id="st-pool" name="pool_id" required>
+          {{$self := .Asset.ID}}
+          {{range .Pools}}{{if ne .AssetID $self}}
+          <option value="{{.AssetID}}">{{.Name}}{{if .KindLabel}} · {{.KindLabel}}{{end}}</option>
+          {{end}}{{end}}
+        </select>
+      </div>
+      <div class="field">
+        <label for="st-gb">Allocated (GB)</label>
+        <input id="st-gb" type="number" name="allocated_gb" min="0" required placeholder="200">
+        <div class="field-hint">Zero withdraws the claim.</div>
+      </div>
+      <div class="field">
+        <label for="st-note">Note</label>
+        <input id="st-note" type="text" name="note" placeholder="database files">
+      </div>
+      <button class="btn btn-primary" type="submit">Record</button>
+    </form>
+    {{end}}
+  </div>
+</div>
+{{end}}
+
 {{/* Power. Two inputs on one panel is the finding this exists for, so the
      panel is shown on every row rather than hidden behind the feed. */}}
 <div class="panel">

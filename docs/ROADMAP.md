@@ -566,7 +566,7 @@ changed, by how much. **No schema change** — the validity windows on `cost` ha
 been recording this since the first release. Against a hand-maintained inflation
 series it answers "did this rise faster than money fell".
 
-**WP-J3 · Capacity model** — L — **DONE for compute; storage outstanding**
+**WP-J3 · Capacity model** — L — **DONE**
 Hosts get cores, memory and storage; storage kinds get a raw-to-usable ratio
 (Ceph 3×, RAID6, local 1:1); clusters get a declared safe overcommit ratio. A
 workload carries **provisioned** (the hard limit) and **soft-allocated** (what
@@ -599,7 +599,7 @@ demo estate; the two that need an estate genuinely in trouble are asserted in
 `internal/store/capacity_findings_test.go` rather than forced into the fixture,
 following the precedent `seed_engine.go` set for cluster relocation.
 
-**WP-J4 · Cost attribution** — L — depends: J3, I2 — unlocks: the CEO's question
+**WP-J4 · Cost attribution** — L — **shares DONE; money outstanding** — depends: J3, I2
 Cluster cost divided by *usable* capacity gives a price per unit; the redundancy
 premium falls out of `cluster.min_hosts` rather than a hand-kept multiplier.
 **Not every cost divides across everything**: a per-core OS licence granting
@@ -612,6 +612,22 @@ and a blended figure would have been invented (§5.7).
 Slices per project, **summing to 100%**, with idle capacity shown as its own
 slice rather than dropped. Allocation is the basis, not usage — see
 `DECISIONS.md`.
+
+**What shipped: the shares.** Every dimension divides on its own — the demo
+estate puts `platform` at 12.5% of CPU, 15.63% of memory, 8.79% of the block
+pool and 5.63% of bulk, which is §5.7's four-different-percentages lesson on
+real data, memory binding hardest. Basis points by largest remainder so the
+slices sum to exactly 100%, idle capacity as its own slice, workloads no
+project owns gathered under one subject rather than dropped, and every division
+stamped with its basis. Ownership resolves upwards through containment to the
+NEAREST owning ancestor, never through `uses`.
+
+**What is outstanding: the money.** Dividing actual spend across those shares
+needs §5.6 — a per-core OS licence benefits only the guests running it, so a
+cost line has to declare which consumers it applies to, and that is a schema
+change of its own. Shipping the shares first is not a half-measure: *"who is 6%
+of this cluster"* is the question people ask out loud, and it is answerable
+with no money in the system at all.
 
 **WP-J5 · Shared occupancy** — M — depends: J4
 For estates that pack several tenants into one VM to save on licensing: occupants

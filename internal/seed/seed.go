@@ -409,6 +409,54 @@ func (b *builder) physical() {
 			a.TeamID = b.team(gg.team)
 		})
 	}
+
+	// One storage pool, and a claim against it (migration 00046, WP-J4).
+	//
+	// IN THE BASE FIXTURE RATHER THAN ONLY THE COMPANY ONE, because this is the
+	// estate every web test runs against and a feature the fixture cannot
+	// exercise is one the tests cannot prove. That has been true four times
+	// here already -- cabling, physical fit, notes and the whole of group J each
+	// shipped before anything in the seed exercised them.
+	//
+	// Three-times replication is the case worth carrying: two thirds of the
+	// array buys nothing anybody can put a workload on, and a reader seeing
+	// 3 TB raw report 1 TB usable learns more from that one line than from any
+	// amount of documentation about ratios.
+	b.asset(domain.KindStorage, "ceph-block", "rack-a1", []string{"prod"}, func(a *domain.Asset) {
+		a.StorageKind, a.RawCapacityGB = str("ceph_3x"), num(3072)
+		a.TeamID = b.team("platform")
+	})
+	b.storageClaim("vm-db-1", "ceph-block", 200, "database files")
+}
+
+// storageClaim records what one workload holds in one pool, skipping anything
+// the estate does not contain so a partial deployment neither fails nor
+// invents a claim.
+func (b *builder) storageClaim(asset, pool string, gb int, note string) {
+	if !b.ok() {
+		return
+	}
+	assetID, ok := b.refs.Assets[asset]
+	if !ok {
+		return
+	}
+	poolID, ok := b.refs.Assets[pool]
+	if !ok {
+		return
+	}
+	held, err := b.store.StorageClaimsFor(b.ctx, assetID)
+	if err != nil {
+		b.fail(fmt.Errorf("reading claims for %s: %w", asset, err))
+		return
+	}
+	for _, h := range held {
+		if h.PoolID == poolID {
+			return // already recorded, so a top-up neither rewrites nor fails
+		}
+	}
+	if err := b.store.SetStorageClaim(b.ctx, Actor, assetID, poolID, gb, &note); err != nil {
+		b.fail(fmt.Errorf("recording %s in %s: %w", asset, pool, err))
+	}
 }
 
 // hypervisor is one physical compute host.

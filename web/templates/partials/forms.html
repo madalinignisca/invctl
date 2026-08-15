@@ -277,6 +277,35 @@
           {{with index .Errors "memory_mb"}}<div class="field-error">{{.}}</div>{{end}}
         </div>
       </div>
+      {{/* A POOL'S OWN SIZE, and only a pool has one. Raw rather than usable:
+           an operator knows how many disks went in, and how much survives
+           replication is arithmetic that belongs in one place rather than in
+           whoever typed the number. */}}
+      {{if eq ($f.Value "kind") "storage"}}
+      <div class="field-row">
+        <div class="field">
+          <label for="{{.Prefix}}-storagekind">Redundancy</label>
+          <select id="{{.Prefix}}-storagekind" name="storage_kind">
+            <option value="">— not stated, read at 1:1 —</option>
+            {{range .StorageKinds}}
+            <option value="{{.Code}}" {{if eq .Code ($f.Value "storage_kind")}}selected{{end}}>{{.Label}}</option>
+            {{end}}
+          </select>
+          <div class="field-hint">
+            What the technology costs in raw capacity. Blank reports exactly what
+            was recorded — it never invents a loss nobody declared.
+          </div>
+          {{with index .Errors "storage_kind"}}<div class="field-error">{{.}}</div>{{end}}
+        </div>
+        <div class="field">
+          <label for="{{.Prefix}}-rawgb">Raw capacity (GB)</label>
+          <input id="{{.Prefix}}-rawgb" type="number" name="raw_capacity_gb" min="1"
+                 value="{{.Value "raw_capacity_gb"}}" placeholder="30720">
+          <div class="field-hint">Before replication. Usable is worked out from the redundancy above.</div>
+          {{with index .Errors "raw_capacity_gb"}}<div class="field-error">{{.}}</div>{{end}}
+        </div>
+      </div>
+      {{end}}
       <div class="field-row">
         <div class="field">
           <label for="{{.Prefix}}-vcpuprov">vCPU provisioned</label>

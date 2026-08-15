@@ -212,6 +212,18 @@ type Asset struct {
 	MemoryProvisionedMB *int `db:"memory_provisioned_mb"`
 	MemoryAllocatedMB   *int `db:"memory_allocated_mb"`
 
+	// A storage POOL's own size (migration 00046). Nil on everything that is
+	// not a pool, which is almost everything -- the ordinary state, as with
+	// every other capacity column here.
+	//
+	// RAW, NOT USABLE. An operator knows how many disks went in the box; how
+	// much survives replication is arithmetic, and it belongs in one place
+	// rather than in whoever typed the number. The ratio comes from
+	// StorageKind, which is a lookup row so a site with an unusual erasure
+	// profile can add one without a release.
+	StorageKind   *string `db:"storage_kind"`
+	RawCapacityGB *int    `db:"raw_capacity_gb"`
+
 	// ReplacesAssetID is the box this one took over from (WP-J1). The only
 	// fact needed to compare what a refresh cost against what it succeeded --
 	// both assets already carry their own cost lines, vendor and dates.
@@ -288,6 +300,7 @@ func (a *Asset) Validate() error {
 	checkPositive(ve, "memory_mb", a.MemoryMB)
 	checkPositive(ve, "vcpu_provisioned", a.VCPUProvisioned)
 	checkPositive(ve, "vcpu_allocated", a.VCPUAllocated)
+	checkPositive(ve, "raw_capacity_gb", a.RawCapacityGB)
 	checkPositive(ve, "memory_provisioned_mb", a.MemoryProvisionedMB)
 	checkPositive(ve, "memory_allocated_mb", a.MemoryAllocatedMB)
 	checkMillimetres(ve, "usable_depth_mm", a.UsableDepthMM)

@@ -699,6 +699,16 @@ func TestTheOnlyFactDeletingStatementIsThePrune(t *testing.T) {
 		// this one moves guests -- auditedCluster folds the names in so a host
 		// leaving cannot produce an empty diff on the cluster.
 		"internal/store/clusters.go": "cluster_member: the hosts in a cluster, replaced wholesale",
+		// asset_storage_claim: what a workload holds in one pool. Same rule,
+		// seventh time. The row is the CURRENT VALUE of a declared figure --
+		// how much this machine was given in this pool -- so correcting it is
+		// a replacement and withdrawing it is setting that figure to none,
+		// neither of which removes a fact from the history. What the history
+		// keeps is in change_log: storageAudit folds every claim into the
+		// workload's audited value, so a claim that vanishes cannot produce an
+		// empty diff. The one-row-per-pair key is what makes it a set rather
+		// than a ledger.
+		"internal/store/storage.go": "asset_storage_claim: what a workload holds in a pool, replaced wholesale",
 	}
 
 	root := repoRoot(t)

@@ -85,6 +85,15 @@ func (b *builder) costs() {
 		{"hv-03", "acquisition", domain.CostOnce, 9100, -670, "2U, dual socket, 768 GB"},
 		{"hv-03", "support", domain.CostYearly, 1020, -670, "next business day"},
 
+		// The storage pool. Bought once and supported yearly like the compute,
+		// because that is what an array is -- and it is the line that gives
+		// WP-J4 a price to divide by a pool's usable capacity. Worth reading
+		// next to the ratio: EUR 11,200 buys 3 TB raw and 1 TB usable, so
+		// three-times replication is not an abstraction, it is what two thirds
+		// of that invoice bought.
+		{"ceph-block", "acquisition", domain.CostOnce, 11200, -900, "3 TB raw across the nodes"},
+		{"ceph-block", "support", domain.CostYearly, 1250, -900, ""},
+
 		// Network. Out of support, which is why the expiry report has something
 		// to say about them -- and they still cost nothing per month, so they
 		// are invisible to a run-rate-only view. Both facts matter.

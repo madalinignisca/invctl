@@ -237,4 +237,72 @@
 </div>
 {{end}}
 
+{{/* Who holds what share of it (WP-J4).
+
+     ONE TABLE PER DIMENSION AND NO BLENDED FIGURE. A project is routinely a
+     different percentage of CPU than of memory, and the dimension that BINDS
+     is the one a single number hides. docs/COST-ATTRIBUTION.md §5.7. */}}
+{{with .Attribution}}
+<div class="panel">
+  <div class="panel-head">
+    <h2>Who holds this cluster</h2>
+    <p class="panel-note">
+      Computed on what was <strong>allocated</strong> — declared figures, never
+      observed usage.
+    </p>
+  </div>
+  <div class="panel-body">
+    {{if not .Complete}}
+    <p class="reason">
+      Not every figure behind these shares was recorded, so they divide what the
+      estate knows about rather than what exists. The capacity panel above says
+      what is missing.
+    </p>
+    {{end}}
+    <div class="grid-2">
+      {{range .Divisions}}
+      <div>
+        <h3 class="eyebrow">{{.Dimension}}</h3>
+        {{if .Shares}}
+        <table class="grid">
+          <thead>
+            <tr><th>Project</th><th class="num">{{.Unit}}</th><th class="num">Share</th></tr>
+          </thead>
+          <tbody>
+            {{range .Total}}
+            <tr>
+              <td>
+                {{if .SubjectID}}<a href="/projects/{{.SubjectID}}">{{.Subject}}</a>
+                {{else}}<span class="muted">{{.Subject}}</span>{{end}}
+              </td>
+              <td class="num">{{.Amount}}</td>
+              <td class="num">{{.Percent}}%</td>
+            </tr>
+            {{end}}
+          </tbody>
+        </table>
+        {{if .Oversubscribed}}
+        <p class="diag-note">
+          More {{.Unit}} is claimed than the cluster can carry, so there is no
+          headroom slice and the whole cost falls on the claimants.
+        </p>
+        {{end}}
+        {{else}}
+        <div class="empty">
+          <strong>Nothing to divide</strong>
+          No workload here has a recorded allocation, so no share can be computed.
+        </div>
+        {{end}}
+      </div>
+      {{end}}
+    </div>
+    <p class="field-hint" style="margin-top:12px">
+      Storage divides separately, on each pool's own page: a pool commonly
+      serves several clusters, and folding it in here would attribute it to
+      whichever cluster was looked at first.
+    </p>
+  </div>
+</div>
+{{end}}
+
 {{end}}

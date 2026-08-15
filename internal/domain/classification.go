@@ -165,6 +165,11 @@ var DeclaredColumns = map[string][]string{
 		"cpu_cores", "memory_mb",
 		"vcpu_provisioned", "vcpu_allocated",
 		"memory_provisioned_mb", "memory_allocated_mb",
+		// A storage POOL's own size (migration 00046). Declared for the same
+		// reason: somebody put the disks in, and the raw figure is what an
+		// operator knows. How much survives replication is arithmetic, which
+		// is why the ratio lives on storage_kind and not here.
+		"storage_kind", "raw_capacity_gb",
 		// Where it physically sits (migration 00027). Declared: somebody put it
 		// there. u_height on a RACK is its capacity; a mounted box's height comes
 		// from its catalogued model.
@@ -199,8 +204,14 @@ var DeclaredColumns = map[string][]string{
 	},
 	"asset_closure":     {"ancestor_id", "descendant_id", "depth"},
 	"asset_environment": {"asset_id", "environment_id", "note"},
-	"backend_member":    {"pool_id", "endpoint_id", "weight", "is_backup"},
-	"backend_pool":      {"id", "service_id", "name", "lb_algorithm"},
+	// What a workload holds in a pool (migration 00046). DECLARED, and the
+	// distinction is the usual one: this is what somebody agreed the workload
+	// gets, never what df(1) reports. A filesystem filling up is telemetry and
+	// would arrive through the observed path with its own obligations.
+	"asset_storage_claim": {"asset_id", "pool_id", "allocated_gb", "note",
+		"created_at", "updated_at"},
+	"backend_member": {"pool_id", "endpoint_id", "weight", "is_backup"},
+	"backend_pool":   {"id", "service_id", "name", "lb_algorithm"},
 	// The seven domain vocabularies (migration 00004). Declared, and not a
 	// close call: a lookup row is somebody asserting that a kind of thing
 	// exists in this estate. Nothing observes it, nothing reports it, and it
@@ -222,7 +233,11 @@ var DeclaredColumns = map[string][]string{
 	// happens to have rows.
 	// Declared, including the behaviour flags: what a kind is permitted to do is
 	// something an operator asserts, not something the estate reports.
-	"asset_kind":            {"code", "label", "sort_order", "description", "can_host_instances", "is_attachable"},
+	"asset_kind": {"code", "label", "sort_order", "description", "can_host_instances", "is_attachable"},
+	// raw_per_usable is the same kind of fact as can_host_instances: what a
+	// technology costs in raw capacity is asserted by whoever configured it,
+	// and a pool never reports its own replication factor here.
+	"storage_kind":          {"code", "label", "sort_order", "description", "raw_per_usable"},
 	"service_kind":          {"code", "label", "sort_order", "description"},
 	"interface_form_factor": {"code", "label", "sort_order", "description"},
 	"environment_role":      {"code", "label", "sort_order", "description", "is_transit"},
