@@ -1,0 +1,103 @@
+{{/*
+  invctl — infrastructure inventory
+  Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+
+  Licensed under the GNU Affero General Public License, version 3 only —
+  no later version applies. See LICENSE for the full text.
+
+  SPDX-License-Identifier: AGPL-3.0-only
+*/}}
+{{define "content"}}
+<div class="crumbs">
+  <span>settings</span><span class="sep">/</span><span>inflation</span>
+</div>
+
+<div class="page-head">
+  <div class="eyebrow">reference data</div>
+  <h1>Inflation</h1>
+  <p class="lede">
+    What money did each year, so a price rise can be judged rather than merely
+    reported. Nothing here is fetched — this system makes no outbound calls, so
+    every figure is one a person read from a published source and typed. Record
+    the source beside it: a rate nobody can attribute is a rate nobody can
+    defend in the conversation this exists to support.
+  </p>
+</div>
+
+{{template "inflation_table" .}}
+{{end}}
+
+{{define "inflation_table"}}
+<div id="inflation">
+<div class="panel">
+  <div class="panel-head">
+    <h2>{{len .Rates}} year{{if ne (len .Rates) 1}}s{{end}} on record</h2>
+    <span class="panel-note">a gap makes any span crossing it unanswerable</span>
+  </div>
+  {{if .Rates}}
+  <div class="scroll-x">
+    <table>
+      <thead><tr><th>Year</th><th>Rate</th><th>Source</th></tr></thead>
+      <tbody>
+        {{range .Rates}}
+        <tr>
+          <td class="mono">{{.Year}}</td>
+          <td class="num">{{printf "%.2f" .Percent}}%</td>
+          <td style="color:var(--muted);font-size:12.5px">
+            {{if .Source}}{{deref .Source}}{{else}}<span class="pill pill-warn">no source</span>{{end}}
+          </td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{else}}
+  <div class="empty">
+    <strong>No rates recorded.</strong>
+    Until at least one year is here, every price movement shows its nominal
+    figure only — which says a supplier raised prices without saying whether
+    money moved further.
+  </div>
+  {{end}}
+</div>
+
+{{if .CanWrite}}
+<div class="panel">
+  <div class="panel-head"><h2>Record a year</h2></div>
+  <form class="panel-body" method="post" action="/inflation"
+        hx-post="/inflation" hx-target="#inflation" hx-swap="outerHTML">
+    <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+    <div class="field-row">
+      <div class="field">
+        <label for="inf-year">Year</label>
+        <input id="inf-year" name="year" inputmode="numeric" placeholder="2025"
+               class="{{if index .Errors "year"}}invalid{{end}}" required>
+        {{with index .Errors "year"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="inf-pct">Rate</label>
+        <input id="inf-pct" name="percent" inputmode="decimal" placeholder="3.2"
+               class="{{if index .Errors "percent"}}invalid{{end}}" required>
+        <div class="field-hint">
+          A percentage. Negative for a year prices fell — deflation is real and
+          must round-trip.
+        </div>
+        {{with index .Errors "percent"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="inf-src">Source</label>
+        <input id="inf-src" name="source" placeholder="national statistics office, HICP">
+        {{with index .Errors "basis_points"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+    </div>
+    <button class="btn btn-primary" type="submit">Record year</button>
+    <div class="field-hint">
+      Recording a year that already exists corrects it. A revised index was
+      always one figure somebody had wrong, unlike a price, which was true until
+      a date and then was not.
+    </div>
+  </form>
+</div>
+{{end}}
+</div>
+{{end}}

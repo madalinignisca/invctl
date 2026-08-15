@@ -9,6 +9,7 @@
 package handlers
 
 import (
+	"log/slog"
 	"net/http"
 
 	"github.com/madalinignisca/invctl/internal/domain"
@@ -69,6 +70,10 @@ func (a *App) renderCircuitDetail(w http.ResponseWriter, r *http.Request, id str
 		a.serverError(w, r, err)
 		return
 	}
+	movement, err := a.Store.PriceMovementForCircuit(r.Context(), id)
+	if err != nil {
+		slog.Error("resolving price movement", "error", err, "circuit", id)
+	}
 	costs, err := a.Store.ListCircuitCosts(r.Context(), id)
 	if err != nil {
 		a.serverError(w, r, err)
@@ -95,6 +100,7 @@ func (a *App) renderCircuitDetail(w http.ResponseWriter, r *http.Request, id str
 		Circuit      *domain.Circuit
 		Terminations []store.CircuitTerminationRow
 		Costs        []store.CostRow
+		Movement     []store.PriceSeries
 		CostTotals   domain.CostTotals
 		CostKinds    []store.VocabularyTerm
 		Periods      []string
@@ -107,6 +113,7 @@ func (a *App) renderCircuitDetail(w http.ResponseWriter, r *http.Request, id str
 		Circuit:      circuit,
 		Terminations: terms,
 		Costs:        costs,
+		Movement:     movement,
 		CostTotals:   store.TotalCosts(costs, domain.FormatDate(a.Store.Now())),
 		CostKinds:    kinds,
 		Periods:      domain.CostPeriods,

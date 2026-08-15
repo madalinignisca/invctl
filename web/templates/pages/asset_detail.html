@@ -280,6 +280,8 @@
     "Heading" "What it costs"
     "Note" "Attached to this asset, because this is what the invoice names."}}
 
+{{template "price_movement_panel" .}}
+
 {{template "journal_panel" .}}
 
 {{template "timeline_panel" .Timeline}}
@@ -388,9 +390,25 @@
     {{if .Annualisable}}
     <p class="muted">
       About <strong>{{.AnnualisedPercent}}% a year</strong> over the {{printf "%.1f" .YearsApart}}
-      years between the two purchases — the figure worth holding against
-      inflation for the period.
+      years between the two purchases.
     </p>
+    {{end}}
+    {{/* And what money did over the same span, which is the half that turns a
+         number into an answer. Shown only when every year is on record: a
+         missing one counts as zero inflation, understating what money did and
+         so flattering the supplier. */}}
+    {{if .Real}}
+    {{if .Real.Known}}
+    <p>
+      After inflation that is <strong>{{.Real.PercentChange}}%</strong> in real terms.
+    </p>
+    {{else}}
+    <p class="muted">
+      Whether that beat inflation is not known — no rate is recorded for
+      {{.Real.MissingYear}}. <a href="/inflation">Record it</a> and this becomes
+      answerable.
+    </p>
+    {{end}}
     {{end}}
     {{else}}
     <div class="empty">

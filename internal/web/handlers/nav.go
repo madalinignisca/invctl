@@ -111,6 +111,7 @@ var navGroups = []NavGroup{
 	// foot of the rail where it already lived.
 	{Label: "Settings", Links: []NavLink{
 		{Label: "Vocabularies", Href: "/vocabularies", Nav: "vocabularies"},
+		{Label: "Inflation", Href: "/inflation", Nav: "inflation"},
 	}},
 }
 

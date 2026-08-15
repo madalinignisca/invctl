@@ -1,0 +1,83 @@
+{{/*
+  invctl — infrastructure inventory
+  Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+
+  Licensed under the GNU Affero General Public License, version 3 only —
+  no later version applies. See LICENSE for the full text.
+
+  SPDX-License-Identifier: AGPL-3.0-only
+
+  How a price moved (WP-J2).
+
+  Expects: Movement ([]store.PriceSeries).
+
+  THE REAL FIGURE IS SHOWN ONLY WHEN THE SERIES COVERS THE SPAN. A missing year
+  counts as zero inflation, which understates what money did and so flatters the
+  supplier -- the wrong way to be wrong on a page whose output is an argument
+  with that supplier. Where a year is missing the panel names it and asks for it
+  rather than printing a number.
+*/}}
+{{define "price_movement_panel"}}
+{{if .Movement}}
+<div class="panel">
+  <div class="panel-head">
+    <h2>How the price moved</h2>
+    <span class="panel-note">each cost kind on its own, oldest first</span>
+  </div>
+  <div class="panel-body">
+    {{range .Movement}}
+    {{if .Moved}}
+    <div style="margin-bottom:18px">
+      <div class="stat-row">
+        <div class="stat">
+          <div class="stat-label">{{.Label}} · {{.Period}}</div>
+          <div class="stat-value">{{money .FirstMinor}} → {{money .CurrentMinor}}</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">Nominal</div>
+          <div class="stat-value">{{.TotalPercentChange}}%</div>
+        </div>
+        {{if .RealKnown}}
+        <div class="stat">
+          <div class="stat-label">After inflation</div>
+          <div class="stat-value">{{.Real.PercentChange}}%</div>
+          <div class="stat-note">what it really rose, once money is accounted for</div>
+        </div>
+        {{else if .Real}}
+        <div class="stat">
+          <div class="stat-label">After inflation</div>
+          <div class="stat-value muted">not known</div>
+          <div class="stat-note">
+            no inflation rate recorded for {{.Real.MissingYear}} —
+            <a href="/inflation">add it</a> and this becomes answerable
+          </div>
+        </div>
+        {{end}}
+      </div>
+      <div class="scroll-x">
+        <table>
+          <thead><tr><th>From</th><th>Until</th><th>Amount</th><th>Change</th><th>Why</th></tr></thead>
+          <tbody>
+            {{range .Steps}}
+            <tr>
+              <td class="mono" style="font-size:12px">{{.From}}</td>
+              <td class="mono" style="font-size:12px">
+                {{if .IsCurrent}}<span class="pill pill-ok">in force</span>{{else}}{{.Until}}{{end}}
+              </td>
+              <td class="num">{{money .AmountMinor}}</td>
+              <td class="num">
+                {{if .ChangeMinor}}{{money .ChangeMinor}} ({{.PercentChange}}%){{else}}<span class="muted">—</span>{{end}}
+              </td>
+              <td style="color:var(--muted);font-size:12.5px">{{.Note}}</td>
+            </tr>
+            {{end}}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {{end}}
+    {{end}}
+  </div>
+</div>
+{{end}}
+{{end}}

@@ -553,6 +553,11 @@ var DeclaredColumns = map[string][]string{
 		"project_id", "circuit_id", "relation", "note", "lifecycle",
 		"created_at", "updated_at",
 	},
+	// A published statistic somebody typed. Declared: nothing observes it and
+	// invariant 7 forbids fetching it, so it can only ever arrive from a person.
+	"inflation_rate": {
+		"year", "basis_points", "source", "created_at", "updated_at", "row_version",
+	},
 	"route": {
 		"id", "frontend_endpoint_id", "match_type", "match_value",
 		"backend_pool_id", "tls_termination", "priority",

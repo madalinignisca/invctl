@@ -328,6 +328,8 @@ type assetDetailPage struct {
 	Fit *store.RackFitReport
 	// Replacement is what this asset took over from, or nil. WP-J1.
 	Replacement *store.ReplacementComparison
+	// Movement is how each of its cost kinds has moved. WP-J2.
+	Movement []store.PriceSeries
 	// PassThroughs is what this panel does between its own ports.
 	PassThroughs []store.PassThroughRow
 	// Notes somebody wrote about this asset, and what the panel posts to.
@@ -505,6 +507,12 @@ func (a *App) renderAssetDetail(w http.ResponseWriter, r *http.Request, status i
 		slog.Error("resolving the replacement", "error", err, "asset", id)
 	}
 
+	// How its prices moved (WP-J2). Logged and absent rather than fatal.
+	movement, err := a.Store.PriceMovementForAsset(r.Context(), id)
+	if err != nil {
+		slog.Error("resolving price movement", "error", err, "asset", id)
+	}
+
 	// Notes. Logged and absent rather than fatal, like the elevation: an asset
 	// page is what somebody opens during an incident, and a panel is not worth
 	// taking it down for.
@@ -521,6 +529,7 @@ func (a *App) renderAssetDetail(w http.ResponseWriter, r *http.Request, status i
 		Elevation:       elevation,
 		Fit:             fit,
 		Replacement:     replacement,
+		Movement:        movement,
 		PassThroughs:    passThroughs,
 		PowerInputs:     powerInputs,
 		PowerFeeds:      powerFeeds,

@@ -56,6 +56,10 @@ type ReplacementComparison struct {
 	YearsApart float64
 	VendorNow  string
 	VendorThen string
+	// Real is the rise with inflation removed, when the series covers the span.
+	// Nil when it does not, and the page says so rather than showing a figure
+	// computed over years treated as zero.
+	Real *RealChange
 }
 
 // Comparable reports whether both ends carry an acquisition price. Without
@@ -77,6 +81,22 @@ func (c ReplacementComparison) PercentChange() int64 {
 	}
 	return (c.NowMinor - c.ThenMinor) * 100 / c.ThenMinor
 }
+
+// RealChange is a price movement with inflation stripped out, and whether it
+// could be computed at all.
+//
+// Set by the caller rather than computed here, because it needs a table this
+// type knows nothing about. A nil RealChange means the series does not cover
+// the span -- shown as "not known" rather than as zero, since a missing year
+// counts as no inflation and therefore flatters the supplier.
+type RealChange struct {
+	PercentChange int64
+	// MissingYear names the first year with no rate, when there is one.
+	MissingYear int
+}
+
+// Known reports whether the figure could be computed at all.
+func (r RealChange) Known() bool { return r.MissingYear == 0 }
 
 // Annualisable reports whether the two purchases are far enough apart for a
 // per-year figure to mean anything.
@@ -150,6 +170,21 @@ func (s *SQLStore) ReplacementFor(ctx context.Context, assetID string, now time.
 		nowAt, errNow := domain.ParseDate(c.NowDate)
 		if errThen == nil && errNow == nil {
 			c.YearsApart = nowAt.Sub(then).Hours() / 24 / 365.25
+			// What money did over the same span. Only attached when every year
+			// between the two purchases has a rate: a partial series produces a
+			// number that looks authoritative and is arithmetic over zeros.
+			series, err := s.InflationSeries(ctx)
+			if err != nil {
+				return nil, err
+			}
+			from, to := then.Year(), nowAt.Year()
+			if covered, missing := series.Covers(from, to); covered {
+				c.Real = &RealChange{
+					PercentChange: series.RealPercentChange(c.PercentChange(), from, to),
+				}
+			} else if to > from {
+				c.Real = &RealChange{MissingYear: missing}
+			}
 		}
 	}
 	return c, nil

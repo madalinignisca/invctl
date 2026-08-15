@@ -52,6 +52,8 @@ type PriceSeries struct {
 	Label  string
 	Period string
 	Steps  []PriceStep
+	// Real is the movement with inflation removed. See RealKnown.
+	Real *RealChange
 }
 
 // Moved reports whether there is more than one figure to compare. A single step
@@ -81,6 +83,14 @@ func (s PriceSeries) TotalPercentChange() int64 {
 	}
 	return (s.CurrentMinor() - s.FirstMinor()) * 100 / s.FirstMinor()
 }
+
+// RealKnown reports whether the inflation-adjusted figure could be computed.
+//
+// The series is attached by the caller only when the inflation table covers the
+// span. Nil means it does not, and the page must say "not known" rather than
+// show a figure computed over years treated as zero -- which would understate
+// what money did and so flatter the supplier.
+func (s PriceSeries) RealKnown() bool { return s.Real != nil && s.Real.Known() }
 
 // PriceMovementFor returns one series per cost kind that has moved, plus the
 // ones that have not, so a reader can tell "steady" from "unrecorded".
@@ -127,6 +137,31 @@ func (s *SQLStore) PriceMovementFor(ctx context.Context, t costTable, ownerID st
 		}
 		out = append(out, series)
 	}
+	// What money did over each series' own span, so a rise can be judged rather
+	// than merely reported. Attached only where the table covers the years.
+	series, err := s.InflationSeries(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for i := range out {
+		if !out[i].Moved() {
+			continue
+		}
+		first, errF := domain.ParseDate(out[i].Steps[0].From)
+		last, errL := domain.ParseDate(out[i].Steps[len(out[i].Steps)-1].From)
+		if errF != nil || errL != nil || last.Year() <= first.Year() {
+			continue
+		}
+		from, to := first.Year(), last.Year()
+		if covered, missing := series.Covers(from, to); covered {
+			out[i].Real = &RealChange{
+				PercentChange: series.RealPercentChange(out[i].TotalPercentChange(), from, to),
+			}
+		} else {
+			out[i].Real = &RealChange{MissingYear: missing}
+		}
+	}
+
 	// Moved first, then by label. What changed is what somebody came to see,
 	// and a stable secondary key stops the panel reshuffling between visits.
 	sort.Slice(out, func(i, j int) bool {

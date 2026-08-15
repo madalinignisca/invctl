@@ -44,6 +44,45 @@ import (
 func (b *builder) companyMoney() {
 	b.refreshLineage()
 	b.coloRentRenewals()
+	b.inflationSeries()
+}
+
+// inflationSeries records what money did, so a rise can be judged rather than
+// merely reported.
+//
+// ILLUSTRATIVE FIGURES, AND THE SEED SAYS SO IN EVERY ROW. The shape is a
+// plausible one -- a couple of quiet years, a spike, then a slow settling --
+// and it is deliberately NOT a citation of any index. The whole point of the
+// feature is that a person types a figure they can defend from a published
+// source, so a fixture pretending to BE that source would teach exactly the
+// wrong lesson.
+//
+// It is also why the years are relative to the clock rather than anchored: the
+// shape ages with the demo, so it must not claim to be any particular year's
+// history. Each row carries a source field saying it is demo data.
+//
+// Relative to the seeding clock so the demo ages, like every other date here:
+// the series ends at last year, because this year's index is not published
+// until it is over.
+func (b *builder) inflationSeries() {
+	if !b.ok() {
+		return
+	}
+	// Basis points: hundredths of a percent, so 810 is 8.1%.
+	shape := []int{240, 810, 540, 290, 240, 220, 210, 200}
+	thisYear := b.store.Now().Year()
+	source := "illustrative demo data, not a published index"
+
+	for i, bp := range shape {
+		year := thisYear - len(shape) + i
+		r := &domain.InflationRate{Year: year, BasisPoints: bp, Source: &source}
+		// Idempotent by construction: SetInflationRate upserts on the year, so
+		// a second run rewrites the same figure rather than adding a row.
+		if err := b.store.SetInflationRate(b.ctx, Actor, r); err != nil {
+			b.fail(fmt.Errorf("recording inflation for %d: %w", year, err))
+			return
+		}
+	}
 }
 
 // refreshLineage records that the ESX hosts took over from the dev ones.
