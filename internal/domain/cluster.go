@@ -64,12 +64,21 @@ type Cluster struct {
 	// MinHosts is CAPACITY, not quorum: how many members must survive for the
 	// guests to fit. Nil means unknown, and unknown is treated as "any single
 	// survivor will do" -- optimistic, and better stated than silently assumed.
-	MinHosts    *int    `db:"min_hosts"`
-	Description *string `db:"description"`
-	Lifecycle   string  `db:"lifecycle"`
-	CreatedAt   *string `db:"created_at"`
-	UpdatedAt   *string `db:"updated_at"`
-	RowVersion  int     `db:"row_version"`
+	MinHosts *int `db:"min_hosts"`
+	// CPUOvercommit is how far this cluster's CPU may be oversubscribed, in
+	// hundredths: 300 is 3.0:1. Declared by its operator and NEVER inferred
+	// from observed load -- a quiet cluster would raise its own apparent safe
+	// ratio and licence exactly the overcommitment the finding exists to catch.
+	//
+	// Memory has no equivalent on purpose: it is rarely overcommitted and the
+	// failure mode differs from CPU contention, so one ratio covering both
+	// would be a single number pretending to be two.
+	CPUOvercommit *int    `db:"cpu_overcommit"`
+	Description   *string `db:"description"`
+	Lifecycle     string  `db:"lifecycle"`
+	CreatedAt     *string `db:"created_at"`
+	UpdatedAt     *string `db:"updated_at"`
+	RowVersion    int     `db:"row_version"`
 }
 
 // NewCluster validates and constructs.
@@ -98,6 +107,9 @@ func (c *Cluster) Validate() error {
 	}
 	if !known {
 		ve.Add("kind", "%q is not a cluster technology", c.Kind)
+	}
+	if c.CPUOvercommit != nil && (*c.CPUOvercommit < 100 || *c.CPUOvercommit > 6400) {
+		ve.Add("cpu_overcommit", "must be between 1.0 and 64.0 to one")
 	}
 	if c.HAPolicy != HANone && c.HAPolicy != HARestart {
 		ve.Add("ha_policy", "%q is not an HA policy", c.HAPolicy)

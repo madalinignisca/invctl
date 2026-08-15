@@ -129,4 +129,100 @@
   </div>
 </form>
 {{end}}
+
+{{with .Capacity}}
+{{/* How much there is, and what has been claimed (WP-J3).
+
+     EVERY FIGURE CARRIES WHAT IT COULD NOT SEE. A cluster with an unmeasured
+     host is not one with less capacity, it is one nobody has finished
+     measuring, and a total that quietly omits it under-reports while looking
+     exact. Same obligation the power report and the cost report meet. */}}
+<div class="panel">
+  <div class="panel-head">
+    <h2>Capacity</h2>
+    <span class="panel-note">what it has, and what has been claimed against it</span>
+  </div>
+  <div class="panel-body">
+    {{if not .Complete}}
+    <div class="empty" style="margin-bottom:14px">
+      <strong>These figures are a floor, not a total.</strong>
+      {{if .UnmeasuredHosts}}{{.UnmeasuredHosts}} host(s) have no recorded size, so their capacity is missing from every number below.{{end}}
+      {{if .UnallocatedWorkloads}} {{.UnallocatedWorkloads}} workload(s) have no allocation recorded, so their claim is uncounted and their cost cannot be attributed.{{end}}
+      {{if not .SurvivorsDeclared}} No survivor floor is declared, so the redundancy premium is not knowable.{{end}}
+      {{if not .OvercommitDeclared}} No overcommit ratio is declared, so CPU is read at a conservative 1:1.{{end}}
+    </div>
+    {{end}}
+
+    <div class="stat-row">
+      <div class="stat">
+        <div class="stat-label">Hosts</div>
+        <div class="stat-value">{{.Hosts}}</div>
+        {{if .SurvivorsDeclared}}<div class="stat-note">{{.Survivors}} must survive</div>{{end}}
+      </div>
+      <div class="stat">
+        <div class="stat-label">Usable vCPU</div>
+        <div class="stat-value">{{.UsableVCPU}}</div>
+        <div class="stat-note">
+          {{.RawCores}} cores{{if .OvercommitDeclared}} at {{.Overcommit}}:100{{else}} at 1:1, undeclared{{end}}
+        </div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Usable memory</div>
+        <div class="stat-value">{{.UsableMemoryMB}} MB</div>
+        <div class="stat-note">never overcommitted</div>
+      </div>
+      {{if .RedundancyPremium}}
+      <div class="stat">
+        <div class="stat-label">Redundancy premium</div>
+        <div class="stat-value">{{.RedundancyPremium}}%</div>
+        <div class="stat-note">what each usable unit costs extra, to survive a loss</div>
+      </div>
+      {{end}}
+    </div>
+
+    <div class="stat-row">
+      <div class="stat">
+        <div class="stat-label">Allocated</div>
+        <div class="stat-value">{{.AllocatedVCPU}} vCPU</div>
+        <div class="stat-note">{{.AllocatedMemoryMB}} MB — what money is computed on</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">Provisioned</div>
+        <div class="stat-value">{{.ProvisionedVCPU}} vCPU</div>
+        <div class="stat-note">{{.ProvisionedMemoryMB}} MB — the hard limits actually set</div>
+      </div>
+      {{if .UnfundedVCPU}}
+      <div class="stat">
+        <div class="stat-label">Handed out, unpaid</div>
+        <div class="stat-value">{{.UnfundedVCPU}} vCPU</div>
+        <div class="stat-note">
+          provisioned beyond what anybody is charged for — a decision, not waste
+        </div>
+      </div>
+      {{end}}
+    </div>
+
+    {{if .CPUOversubscribed}}
+    <div class="panel panel-warn" style="margin-top:12px">
+      <div class="panel-body">
+        <strong>Oversubscribed on CPU.</strong>
+        {{.ProvisionedVCPU}} vCPU are promised to guests against {{.UsableVCPU}} usable.
+        Judged on what was <em>provisioned</em> rather than allocated: allocation is
+        a billing figure, provisioning is what the hypervisor hands out under
+        contention.
+      </div>
+    </div>
+    {{end}}
+    {{if .MemoryOversubscribed}}
+    <div class="panel panel-warn" style="margin-top:12px">
+      <div class="panel-body">
+        <strong>Oversubscribed on memory</strong>, which is not overcommitted:
+        {{.ProvisionedMemoryMB}} MB promised against {{.UsableMemoryMB}} MB usable.
+      </div>
+    </div>
+    {{end}}
+  </div>
+</div>
+{{end}}
+
 {{end}}

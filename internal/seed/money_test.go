@@ -98,3 +98,66 @@ func TestTheFixtureShowsARefreshAndAPriceSeries(t *testing.T) {
 		}
 	})
 }
+
+// TestTheFixtureShowsCapacityAndItsGaps.
+//
+// BOTH HALVES, DELIBERATELY. A fixture where everything is measured and nothing
+// is oversubscribed demonstrates arithmetic that always succeeds, and every
+// capacity finding would have nothing to find. So one cluster is complete and
+// carries a redundancy premium, and the other has an unmeasured host, workloads
+// nobody allocated, and capacity handed out beyond what is paid for.
+func TestTheFixtureShowsCapacityAndItsGaps(t *testing.T) {
+	seed.CompanyEstate = true
+	t.Cleanup(func() { seed.CompanyEstate = false })
+
+	eachEngine(t, func(t *testing.T, f *fixture) {
+		clusters, err := f.store.ListClusters(f.ctx)
+		if err != nil {
+			t.Fatalf("listing clusters: %v", err)
+		}
+
+		var complete, withGaps int
+		var sawPremium, sawUnfunded bool
+		for _, c := range clusters {
+			cp, err := f.store.ClusterCapacityFor(f.ctx, c.ID)
+			if err != nil {
+				t.Fatalf("capacity of %s: %v", c.Name, err)
+			}
+			if cp.Hosts == 0 {
+				continue
+			}
+			if cp.Complete() {
+				complete++
+			} else {
+				withGaps++
+			}
+			if cp.RedundancyPremium() > 0 {
+				sawPremium = true
+			}
+			if cp.UnfundedVCPU() > 0 {
+				sawUnfunded = true
+			}
+			// Whatever else is true, a measured cluster must produce capacity.
+			if cp.UnmeasuredHosts < cp.Hosts && cp.UsableVCPU == 0 {
+				t.Errorf("%s has measured hosts and no usable vCPU", c.Name)
+			}
+		}
+
+		if complete == 0 {
+			t.Error("no cluster is fully measured; the arithmetic has nothing to " +
+				"demonstrate on a complete estate")
+		}
+		if withGaps == 0 {
+			t.Error("every cluster is complete; the gap findings have nothing to find, " +
+				"and an estate that has measured everything is not one anybody recognises")
+		}
+		if !sawPremium {
+			t.Error("no cluster holds capacity back for a failure, so the redundancy " +
+				"premium is never demonstrated")
+		}
+		if !sawUnfunded {
+			t.Error("no workload is provisioned beyond what it is allocated, so " +
+				"capacity nobody pays for is never demonstrated")
+		}
+	})
+}

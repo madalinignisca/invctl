@@ -158,6 +158,13 @@ var DeclaredColumns = map[string][]string{
 		// this box succeeded that one. Nothing observes a refresh, and nothing
 		// derives it -- a serial number changing is not evidence of lineage.
 		"replaces_asset_id",
+		// Compute capacity (migration 00044). Declared: a person agrees a VM
+		// gets eight cores. A hypervisor REPORTING thirty percent CPU is
+		// telemetry and belongs to the observed path with its own audit
+		// obligations, which is why adding these adds no new class of fact.
+		"cpu_cores", "memory_mb",
+		"vcpu_provisioned", "vcpu_allocated",
+		"memory_provisioned_mb", "memory_allocated_mb",
 		// Where it physically sits (migration 00027). Declared: somebody put it
 		// there. u_height on a RACK is its capacity; a mounted box's height comes
 		// from its catalogued model.
@@ -300,6 +307,7 @@ var DeclaredColumns = map[string][]string{
 	"cluster": {
 		"id", "name", "kind", "ha_policy", "min_hosts", "description",
 		"lifecycle", "created_at", "updated_at", "row_version",
+		"cpu_overcommit",
 	},
 	// A set table, replaced wholesale with its cluster and audited on it.
 	"cluster_member": {"cluster_id", "asset_id"},

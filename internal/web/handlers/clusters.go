@@ -9,6 +9,7 @@
 package handlers
 
 import (
+	"log/slog"
 	"net/http"
 
 	"github.com/madalinignisca/invctl/internal/domain"
@@ -66,6 +67,14 @@ func (a *App) ClusterDetail(w http.ResponseWriter, r *http.Request) {
 	// otherwise do in their head, and the reason the page exists.
 	afterOne := domain.CanRelocate(cluster.HAPolicy, len(hosts)-1, cluster.MinHosts)
 
+	// How much there is and what has been claimed (WP-J3). Logged and absent
+	// rather than fatal, like the elevation on an asset page: a capacity panel
+	// is worth having and is not worth taking the page down for.
+	capacity, err := a.Store.ClusterCapacityFor(r.Context(), id)
+	if err != nil {
+		slog.Error("resolving cluster capacity", "error", err, "cluster", id)
+	}
+
 	a.Render.Page(w, http.StatusOK, "cluster_detail", struct {
 		Base
 		Cluster    *domain.Cluster
@@ -73,6 +82,7 @@ func (a *App) ClusterDetail(w http.ResponseWriter, r *http.Request) {
 		Candidates []store.AssetRow
 		AfterOne   domain.Relocation
 		PolicyNote string
+		Capacity   *domain.ClusterCapacity
 	}{
 		Base:       a.base(r, cluster.Name, "clusters"),
 		Cluster:    cluster,
@@ -80,6 +90,7 @@ func (a *App) ClusterDetail(w http.ResponseWriter, r *http.Request) {
 		Candidates: candidates,
 		AfterOne:   afterOne,
 		PolicyNote: domain.HAPolicyDescription(cluster.HAPolicy),
+		Capacity:   capacity,
 	})
 }
 

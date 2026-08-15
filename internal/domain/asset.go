@@ -194,6 +194,24 @@ type Asset struct {
 	UsableDepthMM *int `db:"usable_depth_mm"`
 	WidthMM       *int `db:"width_mm"`
 	MaxLoadGrams  *int `db:"max_load_grams"`
+	// Compute capacity (WP-J3). Nil throughout is the ordinary state and never
+	// an error: most assets are neither a host nor a workload, and an estate
+	// that has recorded nothing must report that it knows nothing rather than
+	// that everything fits.
+	//
+	// CPUCores and MemoryMB are what the machine HAS -- a host's own capacity.
+	CPUCores *int `db:"cpu_cores"`
+	MemoryMB *int `db:"memory_mb"`
+	// What a workload may take, and what it is charged for. Both are kept
+	// because they answer different questions and routinely differ: a VM given
+	// twice the memory "to be safe" while the deal was priced on half is not a
+	// mistake, it is a decision somebody made without pricing it, and the gap
+	// between these two is what makes that visible.
+	VCPUProvisioned     *int `db:"vcpu_provisioned"`
+	VCPUAllocated       *int `db:"vcpu_allocated"`
+	MemoryProvisionedMB *int `db:"memory_provisioned_mb"`
+	MemoryAllocatedMB   *int `db:"memory_allocated_mb"`
+
 	// ReplacesAssetID is the box this one took over from (WP-J1). The only
 	// fact needed to compare what a refresh cost against what it succeeded --
 	// both assets already carry their own cost lines, vendor and dates.
@@ -263,6 +281,15 @@ func (a *Asset) Validate() error {
 		}
 	}
 	a.EOLDate = checkDate(ve, "eol_date", a.EOLDate)
+	// Capacity: positive or absent. Zero cores is not a small machine, it is a
+	// value somebody typed by accident, and it would divide a cluster's cost by
+	// nothing.
+	checkPositive(ve, "cpu_cores", a.CPUCores)
+	checkPositive(ve, "memory_mb", a.MemoryMB)
+	checkPositive(ve, "vcpu_provisioned", a.VCPUProvisioned)
+	checkPositive(ve, "vcpu_allocated", a.VCPUAllocated)
+	checkPositive(ve, "memory_provisioned_mb", a.MemoryProvisionedMB)
+	checkPositive(ve, "memory_allocated_mb", a.MemoryAllocatedMB)
 	checkMillimetres(ve, "usable_depth_mm", a.UsableDepthMM)
 	checkMillimetres(ve, "width_mm", a.WidthMM)
 	checkGrams(ve, "max_load_grams", a.MaxLoadGrams)
@@ -285,3 +312,15 @@ func (a *Asset) IsRetired() bool { return a.Lifecycle == LifecycleRetired }
 // had been compiled with, so a kind added by INSERT -- the entire point of the
 // lookup table -- was storable and then silently unusable. Two sources of truth
 // for the same fact is worse than one in the less convenient place.
+
+// checkPositive refuses a recorded quantity of zero or less.
+//
+// ABSENT AND ZERO ARE DIFFERENT and the distinction is load-bearing here. Nil
+// means nobody has measured it, which every capacity check reports as a gap.
+// Zero means somebody asserted the machine has no cores, which is not a small
+// machine -- it is a typo that would divide a cluster's cost by nothing.
+func checkPositive(ve *ValidationError, field string, v *int) {
+	if v != nil && *v <= 0 {
+		ve.Add(field, "must be greater than zero, or left empty if nobody has measured it")
+	}
+}

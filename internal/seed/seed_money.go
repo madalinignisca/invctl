@@ -45,6 +45,179 @@ func (b *builder) companyMoney() {
 	b.refreshLineage()
 	b.coloRentRenewals()
 	b.inflationSeries()
+	b.computeCapacity()
+}
+
+// computeCapacity measures the machines, so a cluster can be divided (WP-J3).
+//
+// THE ESTATE MUST SHOW BOTH ANSWERS, not just the tidy one. A fixture where
+// everything is measured and nothing is oversubscribed demonstrates arithmetic
+// that always succeeds -- and every capacity finding would have nothing to
+// find. So prod-pve is measured, declared at 3:1, and deliberately
+// oversubscribed by what its guests are PROVISIONED, while one host elsewhere
+// is left unmeasured so "this cluster is not fully measured" has something to
+// report.
+func (b *builder) computeCapacity() {
+	if !b.ok() {
+		return
+	}
+
+	// The hosts. Sizes are ordinary rather than remarkable: two sockets of
+	// sixteen cores and 256 GB is what a mid-range hypervisor has been for
+	// several years.
+	hosts := []struct {
+		name  string
+		cores int
+		memMB int
+	}{
+		{"hv-01", 32, 262144},
+		{"hv-02", 32, 262144},
+		// hv-03 is deliberately LEFT UNMEASURED. An estate that has finished
+		// measuring everything is not one anybody recognises, and the gap is
+		// what the "not fully measured" finding exists to report.
+		{"srv-hz-1", 16, 65536},
+		{"srv-hz-2", 16, 65536},
+		{"hv-esx-01", 24, 196608},
+		{"hv-esx-02", 24, 196608},
+		{"hv-esx-03", 24, 196608},
+	}
+	for _, h := range hosts {
+		if err := b.measureAsset(h.name, func(a *domain.Asset) {
+			a.CPUCores, a.MemoryMB = num(h.cores), num(h.memMB)
+		}); err != nil {
+			b.fail(err)
+			return
+		}
+	}
+
+	// The guests. Provisioned deliberately exceeds allocated on two of them:
+	// somebody was generous with a limit while the deal was priced on less,
+	// which is the gap WP-J4 reports as capacity nobody is paying for.
+	guests := []struct {
+		name                  string
+		vcpuAlloc, vcpuProv   int
+		memAllocMB, memProvMB int
+	}{
+		{"vm-db-1", 8, 16, 32768, 65536},
+		{"vm-db-2", 8, 16, 32768, 65536},
+		{"vm-app-1", 4, 4, 16384, 16384},
+		{"vm-vault-1", 2, 2, 4096, 4096},
+		{"vm-vault-2", 2, 2, 4096, 4096},
+		{"vm-proxy-1", 4, 4, 8192, 8192},
+		// vm-queue-1 is left UNALLOCATED, so "its cost cannot be attributed"
+		// has an example.
+	}
+	for _, g := range guests {
+		if err := b.measureAsset(g.name, func(a *domain.Asset) {
+			a.VCPUAllocated, a.VCPUProvisioned = num(g.vcpuAlloc), num(g.vcpuProv)
+			a.MemoryAllocatedMB, a.MemoryProvisionedMB = num(g.memAllocMB), num(g.memProvMB)
+		}); err != nil {
+			b.fail(err)
+			return
+		}
+	}
+
+	// What the operators are willing to oversubscribe, declared per cluster.
+	// prod-pve must survive losing one of three, which is the case the
+	// availability premium is computed from.
+	// prod-virt's floor of three is DELIBERATE and load-bearing -- the seed
+	// comment says clustering it with spare capacity would break
+	// TestContainmentResolvesThroughClosure -- so only the ratio is declared
+	// here. dev-hetzner gets an explicit floor of one, which is what a nil
+	// floor already meant to the impact engine and which gives the redundancy
+	// premium something to demonstrate.
+	for _, c := range []struct {
+		name       string
+		overcommit int
+		minHosts   int
+	}{
+		{"prod-virt", 300, 0},
+		{"dev-hetzner", 400, 1},
+	} {
+		if err := b.declareClusterCapacity(c.name, c.overcommit, c.minHosts); err != nil {
+			b.fail(err)
+			return
+		}
+	}
+}
+
+// measureAsset applies a measurement, skipping an asset that already carries
+// one so a top-up neither rewrites nor fails.
+func (b *builder) measureAsset(name string, apply func(*domain.Asset)) error {
+	id, ok := b.refs.Assets[name]
+	if !ok {
+		return nil // a deployment without this layer has no such asset
+	}
+	row, err := b.store.GetAsset(b.ctx, id)
+	if err != nil {
+		return fmt.Errorf("reading %s: %w", name, err)
+	}
+	a := row.Asset
+	before := a
+	apply(&a)
+	if sameCapacity(before, a) {
+		return nil
+	}
+	envIDs := make([]string, len(row.Environments))
+	for i, env := range row.Environments {
+		envIDs[i] = env.ID
+	}
+	if err := b.store.UpdateAsset(b.ctx, Actor, &a, envIDs); err != nil {
+		return fmt.Errorf("measuring %s: %w", name, err)
+	}
+	return nil
+}
+
+// sameCapacity reports whether a measurement would change nothing, which is
+// what makes the phase idempotent.
+func sameCapacity(a, b domain.Asset) bool {
+	return sameInt(a.CPUCores, b.CPUCores) && sameInt(a.MemoryMB, b.MemoryMB) &&
+		sameInt(a.VCPUAllocated, b.VCPUAllocated) && sameInt(a.VCPUProvisioned, b.VCPUProvisioned) &&
+		sameInt(a.MemoryAllocatedMB, b.MemoryAllocatedMB) &&
+		sameInt(a.MemoryProvisionedMB, b.MemoryProvisionedMB)
+}
+
+func sameInt(a, b *int) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
+}
+
+// declareClusterCapacity records the overcommit ratio and, when given, how many
+// hosts must survive.
+func (b *builder) declareClusterCapacity(name string, overcommit, minHosts int) error {
+	// Looked up by name rather than from Refs, which carries no cluster map:
+	// the phase runs after the clusters exist and this is a handful of rows.
+	all, err := b.store.ListClusters(b.ctx)
+	if err != nil {
+		return fmt.Errorf("listing clusters: %w", err)
+	}
+	var id string
+	for _, row := range all {
+		if row.Name == name {
+			id = row.ID
+			break
+		}
+	}
+	if id == "" {
+		return nil // a deployment without this cluster
+	}
+	c, err := b.store.GetCluster(b.ctx, id)
+	if err != nil {
+		return fmt.Errorf("reading cluster %s: %w", name, err)
+	}
+	if c.CPUOvercommit != nil && (minHosts == 0 || c.MinHosts != nil) {
+		return nil // already declared
+	}
+	c.CPUOvercommit = num(overcommit)
+	if minHosts > 0 && c.MinHosts == nil {
+		c.MinHosts = num(minHosts)
+	}
+	if err := b.store.UpdateCluster(b.ctx, Actor, c); err != nil {
+		return fmt.Errorf("declaring capacity on %s: %w", name, err)
+	}
+	return nil
 }
 
 // inflationSeries records what money did, so a rise can be judged rather than
