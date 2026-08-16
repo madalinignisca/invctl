@@ -128,6 +128,18 @@
            would raise its own apparent safe ratio and licence exactly the
            overcommitment the finding exists to catch. */}}
       <div class="field">
+        <label for="ed-split">Cost split (% CPU)</label>
+        <input id="ed-split" type="number" name="cost_split_cpu" min="0" max="100"
+               value="{{if .Cluster.CostSplitCPU}}{{derefInt .Cluster.CostSplitCPU}}{{end}}"
+               placeholder="60">
+        <div class="field-hint">
+          How much of this cluster's cost is attributable to CPU; memory takes
+          the rest. One invoice buys both, and no arithmetic separates them —
+          only a judgement. <strong>Blank divides no money at all</strong>, which
+          is deliberate: half and half is not cautious, it is arbitrary.
+        </div>
+      </div>
+      <div class="field">
         <label for="ed-overcommit">CPU overcommit</label>
         <input id="ed-overcommit" type="text" inputmode="decimal" name="cpu_overcommit"
                placeholder="3" value="{{ratio .Cluster.CPUOvercommit}}">
@@ -303,6 +315,101 @@
     </p>
   </div>
 </div>
+{{end}}
+
+{{/* And what that share costs (§5.1–§5.6). Behind the same permission the cost
+     panels use: a reader who cannot see a rack's price cannot see it divided. */}}
+{{if and .CanSeeCosts .Cost}}
+{{with .Cost}}
+<div class="panel">
+  <div class="panel-head">
+    <h2>What that share costs</h2>
+    <p class="panel-note">
+      As at {{.On}}. Run rate and capital spread are kept apart — folding a
+      one-off into a monthly figure is a lie, however convenient.
+    </p>
+  </div>
+  <div class="panel-body">
+    {{range .Gaps}}
+    <p class="diag-note">{{.}}</p>
+    {{end}}
+
+    <div class="stat-row">
+      <div class="stat">
+        <div class="k">Run rate</div>
+        <div class="v">{{money .RunRateMinor}}</div>
+      </div>
+      <div class="stat">
+        <div class="k">Capital, spread</div>
+        <div class="v">{{money .AmortisedMinor}}</div>
+      </div>
+      {{if .DirectMinor}}
+      <div class="stat">
+        <div class="k">Named consumers</div>
+        <div class="v">{{money .DirectMinor}}</div>
+      </div>
+      {{end}}
+      {{if .UnattributableMinor}}
+      <div class="stat">
+        <div class="k">Reaching nobody</div>
+        <div class="v">{{money .UnattributableMinor}}</div>
+      </div>
+      {{end}}
+    </div>
+
+    {{if .Divisible}}
+    <table class="grid">
+      <thead>
+        <tr>
+          <th>Project</th>
+          <th class="num">CPU</th><th class="num">Memory</th>
+          <th class="num">Blended</th>
+          <th class="num">Run rate</th><th class="num">Capital</th>
+          <th class="num">Named</th><th class="num">Total</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .Shares}}
+        <tr>
+          <td>{{if .SubjectID}}<a href="/projects/{{.SubjectID}}">{{.Subject}}</a>{{else}}<span class="muted">{{.Subject}}</span>{{end}}</td>
+          <td class="num">{{.CPUPoints}}</td>
+          <td class="num">{{.MemoryPoints}}</td>
+          <td class="num">{{.BasisPoints}}</td>
+          <td class="num">{{money .RunRateMinor}}</td>
+          <td class="num">{{money .AmortisedMinor}}</td>
+          <td class="num">{{money .DirectMinor}}</td>
+          <td class="num">{{money .TotalMinor}}</td>
+        </tr>
+        {{end}}
+        <tr>
+          <td><span class="muted">{{.Idle.Subject}}</span></td>
+          <td class="num">{{.Idle.CPUPoints}}</td>
+          <td class="num">{{.Idle.MemoryPoints}}</td>
+          <td class="num">{{.Idle.BasisPoints}}</td>
+          <td class="num">{{money .Idle.RunRateMinor}}</td>
+          <td class="num">{{money .Idle.AmortisedMinor}}</td>
+          <td class="num">—</td>
+          <td class="num">{{money .Idle.TotalMinor}}</td>
+        </tr>
+      </tbody>
+    </table>
+    <p class="field-hint">
+      CPU and memory are shown in basis points beside the blend so the
+      arithmetic can be checked rather than taken on trust: the blend is
+      {{derefInt .SplitCPU}}% of the CPU share plus the rest of the memory
+      share. Headroom is a row because somebody is paying for it.
+    </p>
+    {{else}}
+    <div class="empty">
+      <strong>Not divided</strong>
+      This cluster's cost is not split between CPU and memory, so there is no
+      honest way to turn a capacity share into money. Declare it above — the
+      capacity shares are unaffected either way.
+    </div>
+    {{end}}
+  </div>
+</div>
+{{end}}
 {{end}}
 
 {{end}}

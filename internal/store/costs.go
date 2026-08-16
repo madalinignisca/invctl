@@ -11,6 +11,7 @@ package store
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/madalinignisca/invctl/internal/domain"
 )
@@ -33,7 +34,7 @@ import (
 
 // The three cost surfaces. Values, not strings from a caller.
 var (
-	costOnAsset   = costTable{name: "asset_cost", column: "asset_id", entity: "asset_cost", parent: "asset", catalogued: true}
+	costOnAsset   = costTable{name: "asset_cost", column: "asset_id", entity: "asset_cost", parent: "asset", catalogued: true, scoped: true}
 	costOnService = costTable{name: "service_cost", column: "service_id", entity: "service_cost", parent: "service"}
 	costOnProject = costTable{name: "project_cost", column: "project_id", entity: "project_cost"}
 	// A circuit's life is its CONTRACT, not an end of support -- so a one-off
@@ -61,6 +62,12 @@ type costTable struct {
 	// end-of-support may be INHERITED rather than typed on the row. True only
 	// for assets: a service has a date or it has none.
 	catalogued bool
+	// scoped means the line can declare which consumers it applies to
+	// (migration 00047). Only asset costs can: a cluster's shared cost is the
+	// lines on its member hosts, and that is the only pool anything divides.
+	// A service, project or circuit cost attaches to something that is already
+	// the unit of attribution, so the column would have no reader there.
+	scoped bool
 }
 
 // CostRow is a cost line with the label of its kind resolved, so a list view
@@ -99,10 +106,18 @@ func (t costTable) selectSQL() string {
 		join += `
 		LEFT JOIN device_type dt ON dt.id = p.device_type_id`
 	}
+	// Read as a literal for the three unscoped tables rather than left out of
+	// the struct: a caller reading a service cost gets `universal`, which is
+	// true of it, instead of a zero value that would fail the enum check on
+	// the way back in.
+	appliesTo := `'` + domain.CostUniversal + `' AS applies_to`
+	if t.scoped {
+		appliesTo = `c.applies_to`
+	}
 	return `
 		SELECT c.id, c.` + t.column + ` AS owner_id, c.kind, c.period, c.amount_minor,
 		       c.note, c.valid_from, c.valid_until, c.lifecycle, c.created_at, c.updated_at,
-		       c.row_version,
+		       c.row_version, ` + appliesTo + `,
 		       COALESCE(k.label, c.kind) AS kind_label,
 		       ` + eol + `
 		FROM ` + t.name + ` c
@@ -191,12 +206,17 @@ func (s *SQLStore) addCost(ctx context.Context, actor domain.Actor, t costTable,
 		if err := tx.requireVocabulary(ctx, vocabCostKind, "kind", c.Kind); err != nil {
 			return err
 		}
+		columns, values := "", ""
+		args := []any{c.ID, ownerID, c.Kind, c.Period, c.AmountMinor, c.Note,
+			c.ValidFrom, c.ValidUntil, c.Lifecycle, c.CreatedAt, c.UpdatedAt}
+		if t.scoped {
+			columns, values = ", applies_to", ", ?"
+			args = append(args, c.AppliesTo)
+		}
 		_, err := tx.exec(ctx, `
 			INSERT INTO `+t.name+` (id, `+t.column+`, kind, period, amount_minor, note,
-			                        valid_from, valid_until, lifecycle, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			c.ID, ownerID, c.Kind, c.Period, c.AmountMinor, c.Note,
-			c.ValidFrom, c.ValidUntil, c.Lifecycle, c.CreatedAt, c.UpdatedAt)
+			                        valid_from, valid_until, lifecycle, created_at, updated_at`+columns+`)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?`+values+`)`, args...)
 		if err != nil {
 			return translateWriteErr(err, "adding a cost line")
 		}
@@ -247,13 +267,19 @@ func (s *SQLStore) updateCost(ctx context.Context, actor domain.Actor, t costTab
 		if err := tx.requireVocabulary(ctx, vocabCostKind, "kind", c.Kind); err != nil {
 			return err
 		}
+		scope := ""
+		args := []any{c.Kind, c.Period, c.AmountMinor, c.Note,
+			c.ValidFrom, c.ValidUntil, c.Lifecycle, c.UpdatedAt}
+		if t.scoped {
+			scope = "applies_to = ?, "
+			args = append(args, c.AppliesTo)
+		}
+		args = append(args, c.ID, c.RowVersion)
 		res, err := tx.exec(ctx, `
 			UPDATE `+t.name+` SET kind = ?, period = ?, amount_minor = ?, note = ?,
 			                      valid_from = ?, valid_until = ?, lifecycle = ?, updated_at = ?,
-			                      row_version = row_version + 1
-			WHERE id = ? AND row_version = ?`,
-			c.Kind, c.Period, c.AmountMinor, c.Note,
-			c.ValidFrom, c.ValidUntil, c.Lifecycle, c.UpdatedAt, c.ID, c.RowVersion)
+			                      `+scope+`row_version = row_version + 1
+			WHERE id = ? AND row_version = ?`, args...)
 		if err != nil {
 			return translateWriteErr(err, "updating a cost line")
 		}
@@ -381,4 +407,85 @@ func TotalCosts(rows []CostRow, on string) domain.CostTotals {
 // GetCircuitCost loads one line for the edit path.
 func (s *SQLStore) GetCircuitCost(ctx context.Context, id string) (*CostRow, error) {
 	return s.getCost(ctx, costOnCircuit, id)
+}
+
+// Which consumers a cost line applies to (migration 00047, §5.6).
+//
+// SEPARATE FROM UpdateAssetCost because the set is not a field. Folding it into
+// the update would mean every caller that edits an amount has to carry the
+// consumer list or silently clear it -- the exact shape that has cost this
+// codebase its audit trail three times. A caller that does not mention
+// consumers does not change them.
+
+// CostConsumers returns the assets a line applies to, by id.
+func (s *SQLStore) CostConsumers(ctx context.Context, costID string) ([]string, error) {
+	var ids []string
+	if err := s.read(ctx, &ids, `
+		SELECT c.asset_id
+		FROM asset_cost_consumer c
+		JOIN asset a ON a.id = c.asset_id
+		WHERE c.cost_id = ? AND a.lifecycle <> ?
+		ORDER BY a.name`, costID, domain.LifecycleRetired); err != nil {
+		return nil, fmt.Errorf("reading the consumers of cost %s: %w", costID, err)
+	}
+	return ids, nil
+}
+
+// SetCostConsumers replaces which assets a line applies to.
+func (s *SQLStore) SetCostConsumers(ctx context.Context, actor domain.Actor,
+	costID string, assetIDs []string) error {
+
+	before, err := s.GetAssetCost(ctx, costID)
+	if err != nil {
+		return err
+	}
+	at := domain.FormatTime(s.Now())
+	return s.write(ctx, actor, func(t *tx) error {
+		beforeAudit, err := costScopeAudit(ctx, t, &before.Cost)
+		if err != nil {
+			return err
+		}
+		if _, err := t.exec(ctx,
+			`DELETE FROM asset_cost_consumer WHERE cost_id = ?`, costID); err != nil {
+			return translateWriteErr(err, "clearing the consumers of a cost line")
+		}
+		for _, id := range assetIDs {
+			if _, err := t.exec(ctx,
+				`INSERT INTO asset_cost_consumer (cost_id, asset_id, created_at)
+				 VALUES (?, ?, ?)`, costID, id, at); err != nil {
+				return translateWriteErr(err, "naming the consumers of a cost line")
+			}
+		}
+		afterAudit, err := costScopeAudit(ctx, t, &before.Cost)
+		if err != nil {
+			return err
+		}
+		return t.logUpdate(ctx, "asset_cost", costID, beforeAudit, afterAudit)
+	})
+}
+
+// costScopeAudit is the audited shape when the consumer set changes: the line
+// plus the names it applies to.
+//
+// Names rather than ids, because an audit entry is read by people -- the same
+// choice auditedAsset makes for environment codes.
+type scopedCostAudit struct {
+	domain.Cost
+	Consumers string `db:"consumers"`
+}
+
+// costScopeAudit reads the audited value inside the transaction, because the
+// reader pool cannot see this transaction's uncommitted writes and the "after"
+// snapshot would otherwise be identical to the "before" one.
+func costScopeAudit(ctx context.Context, t *tx, c *domain.Cost) (*scopedCostAudit, error) {
+	var names []string
+	if err := t.selectAll(ctx, &names, `
+		SELECT a.name
+		FROM asset_cost_consumer cc
+		JOIN asset a ON a.id = cc.asset_id
+		WHERE cc.cost_id = ?
+		ORDER BY a.name, a.id`, c.ID); err != nil {
+		return nil, fmt.Errorf("reading consumers for the audit trail: %w", err)
+	}
+	return &scopedCostAudit{Cost: *c, Consumers: strings.Join(names, ", ")}, nil
 }

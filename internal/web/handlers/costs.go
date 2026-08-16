@@ -42,6 +42,27 @@ func (a *App) CostAddToAsset(w http.ResponseWriter, r *http.Request) {
 	a.afterCostWrite(w, r, err, "/assets/"+id)
 }
 
+// CostConsumersOnAsset records which guests a scoped cost line covers (§5.6).
+//
+// A SEPARATE ROUTE FROM THE EDIT, because the set is not a field. Folding it
+// into the row form would mean every correction of an amount carried the whole
+// consumer list or silently cleared it -- the shape that has cost this codebase
+// its audit trail three times.
+func (a *App) CostConsumersOnAsset(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Could not read that form.", http.StatusBadRequest)
+		return
+	}
+	id, costID := r.PathValue("id"), r.PathValue("costID")
+	err := a.Store.SetCostConsumers(r.Context(), actor(r), costID, r.PostForm["consumers"])
+	if err != nil {
+		a.handleStoreError(w, r, err)
+		return
+	}
+	a.setFlash(r, "success", "Recorded who that cost covers.")
+	render.Redirect(w, r, "/assets/"+id+"#costs")
+}
+
 // CostAddToService attaches a cost line to a service.
 func (a *App) CostAddToService(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
@@ -263,6 +284,10 @@ func costFromForm(r *http.Request, now time.Time) (*domain.Cost, error) {
 		Note:        optional(formValue(r, "note")),
 		ValidFrom:   optional(formValue(r, "valid_from")),
 		ValidUntil:  optional(formValue(r, "valid_until")),
+		// Blank is universal, which is what every line meant before the column
+		// existed. Only the asset form offers the field; the store ignores it
+		// on the other three, where there is nothing to subdivide.
+		AppliesTo: formValue(r, "applies_to"),
 	}
 	c, err := domain.NewCost(store.NewID(), spec, now)
 	if err != nil {

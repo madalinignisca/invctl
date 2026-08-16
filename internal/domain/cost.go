@@ -47,6 +47,44 @@ const (
 // CostPeriods is the Go side of the three period CHECK constraints.
 var CostPeriods = []string{CostOnce, CostMonthly, CostYearly}
 
+// What a cost line divides across (migration 00047, COST-ATTRIBUTION.md §5.6).
+//
+// BEHAVIOURAL, like the periods above and unlike the kinds: each value selects
+// a different arithmetic, so it is a Go constant set with a matching CHECK
+// rather than a lookup table somebody can add a row to. A fourth shape would
+// need code, which is the test of whether something belongs in a vocabulary.
+const (
+	// CostUniversal: every consumer benefits, so it divides across the whole
+	// capacity. Hardware, power, rack space, the hypervisor platform itself.
+	CostUniversal = "universal"
+	// CostConditional: only the named consumers benefit, in proportion to what
+	// they hold. A per-core operating-system or database licence.
+	CostConditional = "conditional"
+	// CostPerConsumer: only the named consumers, EQUALLY, per head.
+	//
+	// THE DISTINCTION FROM CONDITIONAL IS NOT PEDANTRY. A backup product
+	// licensed per virtual machine costs the same for a 64 GB machine as for a
+	// 2 GB one. Dividing it by capacity share would charge the large one
+	// thirty times over for a single licence and the small one almost nothing,
+	// and the total would still reconcile -- which is exactly the sort of wrong
+	// number nobody catches.
+	CostPerConsumer = "per_consumer"
+)
+
+// CostScopes is the Go side of the asset_cost.applies_to CHECK constraint.
+var CostScopes = []string{CostUniversal, CostConditional, CostPerConsumer}
+
+// NeedsConsumers reports whether a scope is meaningless without a named set.
+//
+// A conditional line naming nobody is not a line that applies to everybody --
+// it is a line whose scope somebody started declaring and did not finish, and
+// it is reported as a gap rather than quietly falling back to universal. The
+// fallback would be the laundering this whole file guards against: a default
+// wearing the clothes of a declaration.
+func NeedsConsumers(scope string) bool {
+	return scope == CostConditional || scope == CostPerConsumer
+}
+
 // CostPeriodDescription is the help text for each, engine-defined the same way
 // the availability policies are: the code branches on these values, so what they
 // mean is a property of this package rather than a row somebody can reword.
@@ -89,9 +127,13 @@ type Cost struct {
 	// this one the first time somebody edited either.
 	ValidFrom  string  `db:"valid_from"`
 	ValidUntil *string `db:"valid_until"`
-	Lifecycle  string  `db:"lifecycle"`
-	CreatedAt  string  `db:"created_at"`
-	UpdatedAt  string  `db:"updated_at"`
+	// AppliesTo is which consumers this line divides across (§5.6). Only an
+	// asset cost carries a meaningful value; the other three attach to
+	// something that is already the unit of attribution.
+	AppliesTo string `db:"applies_to"`
+	Lifecycle string `db:"lifecycle"`
+	CreatedAt string `db:"created_at"`
+	UpdatedAt string `db:"updated_at"`
 	// RowVersion is the optimistic-concurrency token; see version.go.
 	RowVersion int `db:"row_version"`
 }
@@ -104,6 +146,9 @@ type CostSpec struct {
 	Note        *string
 	ValidFrom   *string
 	ValidUntil  *string
+	// AppliesTo defaults to universal when blank, which is what every cost in
+	// this system meant before the column existed.
+	AppliesTo string
 }
 
 // NewCost validates and constructs a cost line.
@@ -115,11 +160,18 @@ func NewCost(id string, spec CostSpec, now time.Time) (*Cost, error) {
 		Period:      strings.ToLower(strings.TrimSpace(spec.Period)),
 		AmountMinor: spec.AmountMinor,
 		Note:        spec.Note,
+		AppliesTo:   strings.ToLower(strings.TrimSpace(spec.AppliesTo)),
 		Lifecycle:   LifecycleActive,
 		CreatedAt:   FormatTime(now),
 		UpdatedAt:   FormatTime(now),
 	}
 	checkEnum(ve, "period", c.Period, CostPeriods)
+	// Blank is universal, which is what every line in this system meant before
+	// the column existed. Anything else must be one of the three.
+	if c.AppliesTo == "" {
+		c.AppliesTo = CostUniversal
+	}
+	checkEnum(ve, "applies_to", c.AppliesTo, CostScopes)
 
 	// A negative cost is a credit, and a credit is an accounting concept this
 	// system has no way to report honestly -- it would simply subtract from a
@@ -156,6 +208,10 @@ func (c *Cost) Validate() error {
 	c.Kind = checkVocabulary(ve, "kind", c.Kind)
 	checkEnum(ve, "period", c.Period, CostPeriods)
 	checkEnum(ve, "lifecycle", c.Lifecycle, []string{LifecycleActive, LifecycleRetired})
+	if c.AppliesTo == "" {
+		c.AppliesTo = CostUniversal
+	}
+	checkEnum(ve, "applies_to", c.AppliesTo, CostScopes)
 	if c.AmountMinor < 0 {
 		ve.Add("amount", "cannot be negative")
 	}

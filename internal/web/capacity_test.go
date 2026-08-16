@@ -305,3 +305,60 @@ func TestAnOperatorCanRecordWhatAWorkloadHolds(t *testing.T) {
 			"visibly account for the pool")
 	}
 }
+
+// TestTheClusterPageSaysWhatTheShareCosts.
+//
+// The money panel, fetched rather than trusted to compile. It also asserts the
+// two figures stay APART: cost.go is emphatic that folding a one-off into a
+// monthly run rate is a lie, and a panel that added them into one number would
+// undo that quietly.
+func TestTheClusterPageSaysWhatTheShareCosts(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+	id := firstClusterID(t, body(t, h.get("/clusters", false)))
+
+	// Declare the split, which is what makes the money divisible at all.
+	resp := h.post("/clusters/"+id, url.Values{
+		"csrf_token": {h.csrfToken("/clusters/" + id)},
+		"name":       {"prod-virt"}, "kind": {"proxmox"}, "ha_policy": {"restart"},
+		"min_hosts": {"2"}, "cost_split_cpu": {"60"},
+	}, false)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("declaring the cost split returned %d", resp.StatusCode)
+	}
+
+	page := body(t, h.get("/clusters/"+id, false))
+	if !strings.Contains(page, "What that share costs") {
+		t.Fatal("the cluster page does not divide its cost")
+	}
+	for _, want := range []string{"Run rate", "Capital, spread"} {
+		if !strings.Contains(page, want) {
+			t.Errorf("%q is missing: run rate and capital must stay apart", want)
+		}
+	}
+	if strings.Contains(page, "Not divided") {
+		t.Error("the split was declared and the page still refuses to divide")
+	}
+	if !strings.Contains(page, `value="60"`) {
+		t.Error("the declared split does not come back on the form")
+	}
+}
+
+// TestWithoutASplitThePageSaysSoRatherThanGuessing. Half and half is not
+// cautious, it is arbitrary — so the page says what is missing.
+func TestWithoutASplitThePageSaysSoRatherThanGuessing(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+	id := firstClusterID(t, body(t, h.get("/clusters", false)))
+
+	page := body(t, h.get("/clusters/"+id, false))
+	if !strings.Contains(page, "Not divided") {
+		t.Error("a cluster with no declared split does not say its cost cannot " +
+			"be divided")
+	}
+	// And it offers the field that fixes it.
+	if !strings.Contains(page, `name="cost_split_cpu"`) {
+		t.Error("the page reports the gap and offers no way to close it")
+	}
+}

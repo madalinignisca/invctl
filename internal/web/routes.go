@@ -210,6 +210,7 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	write("POST /assets/{id}/costs/{costID}", app.CostEditOnAsset)
 	write("POST /assets/{id}/costs/{costID}/retire", app.CostRetireOnAsset)
 	write("POST /assets/{id}/costs/{costID}/reprice", app.CostRepriceOnAsset)
+	write("POST /assets/{id}/costs/{costID}/consumers", app.CostConsumersOnAsset)
 	write("POST /services/{id}/costs", app.CostAddToService)
 	write("POST /services/{id}/costs/{costID}", app.CostEditOnService)
 	write("POST /services/{id}/costs/{costID}/retire", app.CostRetireOnService)

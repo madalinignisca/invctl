@@ -172,17 +172,23 @@ func TestCorrectingACostLine(t *testing.T) {
 	for _, want := range []string{
 		`value="acquisition" selected`,
 		`value="once" selected`,
+		// Who benefits (§5.6). Third select on an ASSET cost row, and it obeys
+		// the same rule for the same reason: an unset one would post
+		// `universal` over a licence somebody had scoped to two database
+		// guests, moving real money and saying nothing.
+		`value="universal" selected`,
 		`value="8400.00"`,
 	} {
 		if !strings.Contains(row, want) {
 			t.Errorf("the edit row does not show the stored value %s", want)
 		}
 	}
-	// The negative control: nothing ELSE may be preselected in those two
+	// The negative control: nothing ELSE may be preselected in those three
 	// selects, or the browser posts the last one and the assertion above is
 	// satisfied by a form that is still wrong.
-	if n := strings.Count(row, " selected>"); n != 2 {
-		t.Errorf("the row preselects %d options, want exactly 2 (kind and period)", n)
+	if n := strings.Count(row, " selected>"); n != 3 {
+		t.Errorf("the row preselects %d options, want exactly 3 (kind, period "+
+			"and who benefits)", n)
 	}
 
 	resp := h.post("/assets/"+id+"/costs/"+costID, url.Values{

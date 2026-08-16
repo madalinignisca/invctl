@@ -120,9 +120,49 @@
                    re-rendering, so there is no editState to carry a stale token back.
                    The operator retypes from scratch either way. */}}
               <input type="hidden" name="row_version" value="{{.RowVersion}}">
+              {{if $.Scoped}}
+              <select form="cost-{{.ID}}" name="applies_to" aria-label="Who benefits">
+                <option value="universal" {{if eq $row.AppliesTo "universal"}}selected{{end}}>everything here</option>
+                <option value="conditional" {{if eq $row.AppliesTo "conditional"}}selected{{end}}>some guests, by size</option>
+                <option value="per_consumer" {{if eq $row.AppliesTo "per_consumer"}}selected{{end}}>some guests, per machine</option>
+              </select>
+              {{end}}
               <button class="btn btn-sm btn-primary" type="submit">Save</button>
             </form>
             <a class="btn btn-sm" href="{{$.Return}}#costs">Cancel</a>
+          </td>
+        </tr>
+        {{else if and $.Scoped (ne .AppliesTo "universal") (ne .Lifecycle "retired")}}
+        {{/* A scoped line names the guests it covers (§5.6). Rendered under the
+             line rather than in the edit row: the set is not a field, and
+             folding it into the row form would mean every amount correction
+             carried the whole list or silently cleared it. */}}
+        <tr>
+          <td>{{.KindLabel}}</td>
+          <td>{{.Period}}</td>
+          <td class="num">{{money .AmountMinor}}</td>
+          <td colspan="4">
+            {{$named := index $.Consumers .ID}}
+            {{if $named}}
+            <span class="pill pill-info">{{if eq .AppliesTo "per_consumer"}}per machine{{else}}by size{{end}}</span>
+            {{else}}
+            <span class="pill pill-degraded">names nobody</span>
+            <span class="reason">Until it names a guest this cost reaches no project at all — it is reported, never spread.</span>
+            {{end}}
+            {{if $.CanWrite}}
+            <form method="post" action="{{$.Action}}/{{.ID}}/consumers" style="margin-top:6px">
+              <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+              <div class="checks">
+                {{range $.Guests}}
+                <label class="check">
+                  <input type="checkbox" name="consumers" value="{{.ID}}"
+                         {{if has $named .ID}}checked{{end}}> {{.Name}}
+                </label>
+                {{end}}
+              </div>
+              <button class="btn btn-sm" type="submit">Set who it covers</button>
+            </form>
+            {{end}}
           </td>
         </tr>
         {{else if and $.CanWrite (ne .Lifecycle "retired") (eq .ID $.RepriceID)}}
@@ -230,6 +270,25 @@
         <div class="field-hint">Leave blank for open-ended.</div>
       </div>
     </div>
+    {{/* Who benefits (§5.6). Offered only where it can be honoured: a service,
+         project or circuit cost attaches to something that is already the unit
+         of attribution, so there is nothing to subdivide. */}}
+    {{if .Scoped}}
+    <div class="field">
+      <label for="cost-scope-{{.Slug}}">Who benefits</label>
+      <select id="cost-scope-{{.Slug}}" name="applies_to">
+        <option value="universal">Everything on this host — hardware, power, the platform itself</option>
+        <option value="conditional">Only some guests, by what they hold — a per-core OS or database licence</option>
+        <option value="per_consumer">Only some guests, equally per machine — a backup product</option>
+      </select>
+      <div class="field-hint">
+        A licence only some guests benefit from, divided across all of them,
+        makes every other workload subsidise the ones that do — and the total
+        stays right, so nothing prompts anybody to look. Naming the guests comes
+        next, on the saved line.
+      </div>
+    </div>
+    {{end}}
     <div class="field">
       <label for="cost-note-{{.Slug}}">Note</label>
       <input id="cost-note-{{.Slug}}" type="text" name="note" placeholder="contract reference, what it covers">

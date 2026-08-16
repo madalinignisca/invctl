@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"html/template"
 	"log/slog"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -49,9 +50,16 @@ func funcs() template.FuncMap {
 		"deref":          deref,
 		"derefInt":       derefInt,
 		"join":           strings.Join,
-		"title":          titleCase,
-		"pluralise":      pluralise,
-		"queryString":    queryString,
+		// has reports membership in a string slice, for a checkbox that has to
+		// render what is already stored. slices.Contains is not reachable from
+		// a template, and the alternative is a map built in every handler that
+		// needs one.
+		"has": func(haystack []string, needle string) bool {
+			return slices.Contains(haystack, needle)
+		},
+		"title":       titleCase,
+		"pluralise":   pluralise,
+		"queryString": queryString,
 		"add": func(nums ...int) int {
 			total := 0
 			for _, n := range nums {

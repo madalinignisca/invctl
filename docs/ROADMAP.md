@@ -599,7 +599,7 @@ demo estate; the two that need an estate genuinely in trouble are asserted in
 `internal/store/capacity_findings_test.go` rather than forced into the fixture,
 following the precedent `seed_engine.go` set for cluster relocation.
 
-**WP-J4 · Cost attribution** — L — **shares DONE; money outstanding** — depends: J3, I2
+**WP-J4 · Cost attribution** — L — **DONE**
 Cluster cost divided by *usable* capacity gives a price per unit; the redundancy
 premium falls out of `cluster.min_hosts` rather than a hand-kept multiplier.
 **Not every cost divides across everything**: a per-core OS licence granting
@@ -622,12 +622,26 @@ project owns gathered under one subject rather than dropped, and every division
 stamped with its basis. Ownership resolves upwards through containment to the
 NEAREST owning ancestor, never through `uses`.
 
-**What is outstanding: the money.** Dividing actual spend across those shares
-needs §5.6 — a per-core OS licence benefits only the guests running it, so a
-cost line has to declare which consumers it applies to, and that is a schema
-change of its own. Shipping the shares first is not a half-measure: *"who is 6%
-of this cluster"* is the question people ask out loud, and it is answerable
-with no money in the system at all.
+**And the money.** A cost line declares who benefits (§5.6, migration `00047`):
+**universal** divides across the whole capacity, **conditional** across the
+named guests in proportion to what they hold, **per-consumer** across them
+equally per head — because a per-VM backup licence costs the same for a 64 GB
+machine as for a 2 GB one, and dividing it by capacity would charge the large
+one many times over while reconciling perfectly. A scoped line naming nobody is
+reported, never spread: the fallback would be a default wearing a declaration's
+clothes.
+
+**One invoice buys cores and memory, and the specification did not say how to
+separate them.** §5.1 asserts a per-core and a per-GB price both fall out of
+"cluster cost ÷ usable capacity", which is true of storage — a pool is its own
+asset with its own invoice — and silently under-specified for compute. The
+answer taken is a **declared split per cluster** (migration `00048`): one
+number, audited like every other decision here. An undeclared split divides no
+money at all and says so, because unlike the overcommit ratio there is no
+conservative direction — half and half is not cautious, it is arbitrary.
+
+Run rate and amortised capital stay apart the whole way through, per
+`cost.go`'s rule that folding a one-off into a monthly figure is a lie.
 
 **WP-J5 · Shared occupancy** — M — depends: J4
 For estates that pack several tenants into one VM to save on licensing: occupants

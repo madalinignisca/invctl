@@ -202,8 +202,9 @@ var DeclaredColumns = map[string][]string{
 		"id", "entity_type", "entity_id", "kind", "body", "author",
 		"lifecycle", "created_at", "updated_at", "row_version",
 	},
-	"asset_closure":     {"ancestor_id", "descendant_id", "depth"},
-	"asset_environment": {"asset_id", "environment_id", "note"},
+	"asset_closure":       {"ancestor_id", "descendant_id", "depth"},
+	"asset_cost_consumer": {"cost_id", "asset_id", "created_at"},
+	"asset_environment":   {"asset_id", "environment_id", "note"},
 	// What a workload holds in a pool (migration 00046). DECLARED, and the
 	// distinction is the usual one: this is what somebody agreed the workload
 	// gets, never what df(1) reports. A filesystem filling up is telemetry and
@@ -323,6 +324,10 @@ var DeclaredColumns = map[string][]string{
 		"id", "name", "kind", "ha_policy", "min_hosts", "description",
 		"lifecycle", "created_at", "updated_at", "row_version",
 		"cpu_overcommit",
+		// How much of the cluster's cost is CPU (migration 00048). Declared,
+		// and a judgement rather than a reading: nothing on an invoice says
+		// 60/40, so a person decides it and the audit trail records who.
+		"cost_split_cpu",
 	},
 	// A set table, replaced wholesale with its cluster and audited on it.
 	"cluster_member": {"cluster_id", "asset_id"},
@@ -442,6 +447,12 @@ var DeclaredColumns = map[string][]string{
 		"id", "asset_id", "kind", "period", "amount_minor", "note",
 		"valid_from", "valid_until", "lifecycle", "created_at", "updated_at",
 		"row_version",
+		// Which consumers this line divides across (migration 00047).
+		// Declared: somebody read a licence and decided who benefits from it.
+		// Nothing observes it and nothing derives it -- and a reporter that
+		// could write it could move a licence's cost onto any workload in the
+		// estate without changing a single figure's total.
+		"applies_to",
 	},
 	"service_cost": {
 		"id", "service_id", "kind", "period", "amount_minor", "note",

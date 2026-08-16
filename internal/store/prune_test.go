@@ -709,6 +709,11 @@ func TestTheOnlyFactDeletingStatementIsThePrune(t *testing.T) {
 		// empty diff. The one-row-per-pair key is what makes it a set rather
 		// than a ledger.
 		"internal/store/storage.go": "asset_storage_claim: what a workload holds in a pool, replaced wholesale",
+		// asset_cost_consumer: which consumers a cost line applies to. Same
+		// rule, eighth time. The set is the current value of a declaration --
+		// who benefits from this licence -- replaced inside the line's own
+		// transaction and folded into its audited value by costScopeAudit.
+		"internal/store/costs.go": "asset_cost_consumer: which consumers a cost line applies to, replaced wholesale",
 	}
 
 	root := repoRoot(t)

@@ -351,6 +351,19 @@ year later. Cheap now, impossible to retrofit honestly.
 
 ## 8. Open questions
 
+0. **RESOLVED — how one invoice splits across two dimensions.** §5.1 asserted
+   that a price per core and a price per GB both fall out of "cluster cost ÷
+   usable capacity". That is true of storage, where a pool is its own asset with
+   its own invoice, and under-specified for compute: a hypervisor costs one
+   number and provides both, while a project routinely holds 12.5% of the CPU
+   and 15.63% of the memory. Three answers were weighed — a declared split, a
+   rule weighting each project by its binding dimension, and a dimension per
+   cost line — and the **declared split per cluster** was taken (migration
+   `00048`, 2026-08-16). It reconciles by construction and is one figure a
+   person can state and defend. What it costs, said plainly: the number is a
+   judgement, and because it is declared it is audited and attributable rather
+   than assumed. An undeclared split divides no money and is reported as a gap.
+
 1. **Attribution requires modelling.** Ten clients' databases in one VM cannot be
    sliced, because there is nothing to slice. *Proposal, to discuss:* invctl
    reports where attribution is impossible — "this hypervisor carries workloads

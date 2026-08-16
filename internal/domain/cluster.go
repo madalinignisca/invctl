@@ -73,12 +73,17 @@ type Cluster struct {
 	// Memory has no equivalent on purpose: it is rarely overcommitted and the
 	// failure mode differs from CPU contention, so one ratio covering both
 	// would be a single number pretending to be two.
-	CPUOvercommit *int    `db:"cpu_overcommit"`
-	Description   *string `db:"description"`
-	Lifecycle     string  `db:"lifecycle"`
-	CreatedAt     *string `db:"created_at"`
-	UpdatedAt     *string `db:"updated_at"`
-	RowVersion    int     `db:"row_version"`
+	CPUOvercommit *int `db:"cpu_overcommit"`
+	// CostSplitCPU is what percent of this cluster's cost is attributable to
+	// CPU; memory takes the remainder (migration 00048). Nil means nobody has
+	// decided, and nil divides NO money -- there is no conservative reading of
+	// an undeclared split the way there is for an undeclared overcommit ratio.
+	CostSplitCPU *int    `db:"cost_split_cpu"`
+	Description  *string `db:"description"`
+	Lifecycle    string  `db:"lifecycle"`
+	CreatedAt    *string `db:"created_at"`
+	UpdatedAt    *string `db:"updated_at"`
+	RowVersion   int     `db:"row_version"`
 }
 
 // NewCluster validates and constructs.
@@ -110,6 +115,9 @@ func (c *Cluster) Validate() error {
 	}
 	if c.CPUOvercommit != nil && (*c.CPUOvercommit < 100 || *c.CPUOvercommit > 6400) {
 		ve.Add("cpu_overcommit", "must be between 1.0 and 64.0 to one")
+	}
+	if c.CostSplitCPU != nil && (*c.CostSplitCPU < 0 || *c.CostSplitCPU > 100) {
+		ve.Add("cost_split_cpu", "is a percent of the cluster's cost, so it lies between 0 and 100")
 	}
 	if c.HAPolicy != HANone && c.HAPolicy != HARestart {
 		ve.Add("ha_policy", "%q is not an HA policy", c.HAPolicy)

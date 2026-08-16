@@ -48,6 +48,7 @@ func (b *builder) companyMoney() {
 	b.computeCapacity()
 	b.pricedFor()
 	b.storagePools()
+	b.conditionalLicence()
 }
 
 // pricedFor records what two engagements were quoted on (WP-J7).
@@ -177,11 +178,16 @@ func (b *builder) computeCapacity() {
 		name       string
 		overcommit int
 		minHosts   int
+		splitCPU   int
 	}{
-		{"prod-virt", 300, 0},
-		{"dev-hetzner", 400, 1},
+		// 60/40 towards CPU: an ordinary judgement for a general-purpose
+		// virtualisation cluster, and the point is that somebody made it.
+		{"prod-virt", 300, 0, 60},
+		// dev-hetzner declares NO split, so the estate demonstrates a cluster
+		// whose cost cannot be divided and says so.
+		{"dev-hetzner", 400, 1, 0},
 	} {
-		if err := b.declareClusterCapacity(c.name, c.overcommit, c.minHosts); err != nil {
+		if err := b.declareClusterCapacity(c.name, c.overcommit, c.minHosts, c.splitCPU); err != nil {
 			b.fail(err)
 			return
 		}
@@ -233,7 +239,7 @@ func sameInt(a, b *int) bool {
 
 // declareClusterCapacity records the overcommit ratio and, when given, how many
 // hosts must survive.
-func (b *builder) declareClusterCapacity(name string, overcommit, minHosts int) error {
+func (b *builder) declareClusterCapacity(name string, overcommit, minHosts, splitCPU int) error {
 	// Looked up by name rather than from Refs, which carries no cluster map:
 	// the phase runs after the clusters exist and this is a handful of rows.
 	all, err := b.store.ListClusters(b.ctx)
@@ -254,10 +260,19 @@ func (b *builder) declareClusterCapacity(name string, overcommit, minHosts int) 
 	if err != nil {
 		return fmt.Errorf("reading cluster %s: %w", name, err)
 	}
-	if c.CPUOvercommit != nil && (minHosts == 0 || c.MinHosts != nil) {
+	if c.CPUOvercommit != nil && (minHosts == 0 || c.MinHosts != nil) &&
+		(splitCPU == 0 || c.CostSplitCPU != nil) {
 		return nil // already declared
 	}
 	c.CPUOvercommit = num(overcommit)
+	// What proportion of the cluster's cost is CPU. Declared on one cluster and
+	// LEFT UNDECLARED ON THE OTHER, because both states are worth seeing: a
+	// reader needs to know what the report looks like before anybody has made
+	// the judgement, and an estate where every number is already filled in
+	// cannot show that.
+	if splitCPU > 0 && c.CostSplitCPU == nil {
+		c.CostSplitCPU = num(splitCPU)
+	}
 	if minHosts > 0 && c.MinHosts == nil {
 		c.MinHosts = num(minHosts)
 	}
@@ -498,5 +513,81 @@ func (b *builder) storagePools() {
 	}
 	for _, c := range claims {
 		b.storageClaim(c.asset, c.pool, c.gb, c.note)
+	}
+}
+
+// conditionalLicence puts a per-core licence on one host and names the guests
+// it covers (§5.6).
+//
+// WITHOUT THIS THE FIXTURE COULD NOT SHOW THE RULE THAT BROKE THE DRAFT. Every
+// seeded cost is universal, so the estate divided everything evenly and the
+// whole of §5.6 was arithmetic nobody could see run. A per-core database
+// licence benefits exactly the machines running that database; spread it across
+// the cluster and every other workload subsidises them, while the total stays
+// right and nothing prompts a reader to look.
+//
+// The two database VMs are the consumers. They are the obvious case and also
+// the honest one: this is what such a licence actually covers.
+func (b *builder) conditionalLicence() {
+	if !b.ok() {
+		return
+	}
+	host, ok := b.refs.Assets["hv-01"]
+	if !ok {
+		return
+	}
+	existing, err := b.store.ListAssetCosts(b.ctx, host)
+	if err != nil {
+		b.fail(fmt.Errorf("reading the costs on hv-01: %w", err))
+		return
+	}
+	for _, line := range existing {
+		if line.AppliesTo != domain.CostUniversal {
+			return // already scoped, so a top-up neither rewrites nor duplicates
+		}
+	}
+
+	b.assetCosts([]costLine{
+		{"hv-01", "licence", domain.CostYearly, 7800, -700,
+			"per-core database licence, covers the database guests only"},
+	})
+	if !b.ok() {
+		return
+	}
+
+	// Find the line just written and scope it.
+	lines, err := b.store.ListAssetCosts(b.ctx, host)
+	if err != nil {
+		b.fail(fmt.Errorf("re-reading the costs on hv-01: %w", err))
+		return
+	}
+	var licence *domain.Cost
+	for i := range lines {
+		if lines[i].Kind == "licence" {
+			c := lines[i].Cost
+			licence = &c
+			break
+		}
+	}
+	if licence == nil {
+		return
+	}
+	licence.AppliesTo = domain.CostConditional
+	if err := b.store.UpdateAssetCost(b.ctx, Actor, licence); err != nil {
+		b.fail(fmt.Errorf("scoping the licence: %w", err))
+		return
+	}
+
+	consumers := []string{}
+	for _, name := range []string{"vm-db-1", "vm-db-2"} {
+		if id, ok := b.refs.Assets[name]; ok {
+			consumers = append(consumers, id)
+		}
+	}
+	if len(consumers) == 0 {
+		return
+	}
+	if err := b.store.SetCostConsumers(b.ctx, Actor, licence.ID, consumers); err != nil {
+		b.fail(fmt.Errorf("naming the licence consumers: %w", err))
 	}
 }

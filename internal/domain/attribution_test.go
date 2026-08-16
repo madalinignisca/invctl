@@ -239,3 +239,53 @@ func TestEverySliceCarriesItsBasis(t *testing.T) {
 		t.Errorf("the division is stamped %q, want %q", d.Basis, domain.BasisAllocated)
 	}
 }
+
+// TestAPerConsumerCostDividesPerHeadNotByCapacity.
+//
+// §5.6's third shape. A backup licence per virtual machine costs the same for a
+// 64 GB machine as for a 2 GB one, so a project owning three of five covered
+// machines pays three fifths -- regardless of how large those machines are.
+// Dividing this by capacity share reconciles perfectly and is wrong, which is
+// the failure mode the whole section exists for.
+func TestAPerConsumerCostDividesPerHeadNotByCapacity(t *testing.T) {
+	d := domain.DivideEqually("Backup licence", []domain.Claim{
+		{SubjectID: "p1", Subject: "orders", Amount: 3},   // three covered machines
+		{SubjectID: "p2", Subject: "platform", Amount: 2}, // two, but much larger
+	})
+	if d.Shares[0].BasisPoints != 6000 || d.Shares[1].BasisPoints != 4000 {
+		t.Errorf("three of five machines and two of five split %d/%d, want 6000/4000",
+			d.Shares[0].BasisPoints, d.Shares[1].BasisPoints)
+	}
+	// A licence has no unclaimed portion: every one of them was bought for
+	// somebody, so there is no headroom slice to render.
+	if d.Idle.Amount != 0 {
+		t.Errorf("a per-consumer cost produced %d units of idle capacity, "+
+			"which is not a thing a licence has", d.Idle.Amount)
+	}
+	// And the money still lands exactly.
+	var total int64
+	for _, part := range d.ApportionMinor(1_000) {
+		total += part
+	}
+	if total != 1_000 {
+		t.Errorf("the licence apportions to %d, want exactly 1000", total)
+	}
+}
+
+// TestAScopeThatNamesNobodyIsAGapNotUniversal.
+//
+// The fallback would be laundering: a default wearing the clothes of a
+// declaration. A conditional line naming nobody is one whose scope somebody
+// started declaring and did not finish, and the two states must not render the
+// same way.
+func TestAScopeThatNamesNobodyIsAGapNotUniversal(t *testing.T) {
+	for _, scope := range []string{domain.CostConditional, domain.CostPerConsumer} {
+		if !domain.NeedsConsumers(scope) {
+			t.Errorf("%s does not require a named set, so a line with none "+
+				"would silently divide across everything", scope)
+		}
+	}
+	if domain.NeedsConsumers(domain.CostUniversal) {
+		t.Error("a universal cost demands a consumer list, which it cannot have")
+	}
+}

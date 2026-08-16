@@ -81,10 +81,10 @@ func (s *SQLStore) CreateCluster(ctx context.Context, actor domain.Actor, c *dom
 	return s.write(ctx, actor, func(t *tx) error {
 		_, err := t.exec(ctx, `
 			INSERT INTO cluster (id, name, kind, ha_policy, min_hosts, cpu_overcommit,
-			                     description, lifecycle, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			                     cost_split_cpu, description, lifecycle, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			c.ID, c.Name, c.Kind, c.HAPolicy, c.MinHosts, c.CPUOvercommit,
-			c.Description, c.Lifecycle, c.CreatedAt, c.UpdatedAt)
+			c.CostSplitCPU, c.Description, c.Lifecycle, c.CreatedAt, c.UpdatedAt)
 		if err != nil {
 			return translateWriteErr(err, "creating cluster")
 		}
@@ -112,11 +112,12 @@ func (s *SQLStore) UpdateCluster(ctx context.Context, actor domain.Actor, c *dom
 	return s.write(ctx, actor, func(t *tx) error {
 		res, err := t.exec(ctx, `
 			UPDATE cluster SET name = ?, kind = ?, ha_policy = ?, min_hosts = ?,
-			                   cpu_overcommit = ?, description = ?, updated_at = ?,
+			                   cpu_overcommit = ?, cost_split_cpu = ?,
+			                   description = ?, updated_at = ?,
 			                   row_version = row_version + 1
 			WHERE id = ? AND row_version = ?`,
-			c.Name, c.Kind, c.HAPolicy, c.MinHosts, c.CPUOvercommit, c.Description,
-			at, c.ID, c.RowVersion)
+			c.Name, c.Kind, c.HAPolicy, c.MinHosts, c.CPUOvercommit, c.CostSplitCPU,
+			c.Description, at, c.ID, c.RowVersion)
 		if err != nil {
 			return translateWriteErr(err, "updating cluster")
 		}

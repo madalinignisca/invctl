@@ -14,6 +14,7 @@ import (
 
 	"github.com/madalinignisca/invctl/internal/domain"
 	"github.com/madalinignisca/invctl/internal/store"
+	"github.com/madalinignisca/invctl/internal/web/middleware"
 	"github.com/madalinignisca/invctl/internal/web/render"
 )
 
@@ -82,6 +83,18 @@ func (a *App) ClusterDetail(w http.ResponseWriter, r *http.Request) {
 		slog.Error("dividing the cluster", "error", err, "cluster", id)
 	}
 
+	// And what that share costs. Money is behind the same permission the cost
+	// panels already use, so a reader who cannot see a rack's price cannot see
+	// it divided either.
+	var costs *store.CostAttribution
+	canSeeCosts := a.Authz.CanSeeCosts(middleware.UserFrom(r.Context()))
+	if canSeeCosts {
+		costs, err = a.Store.CostAttributionFor(r.Context(), id, "")
+		if err != nil {
+			slog.Error("dividing the cluster's cost", "error", err, "cluster", id)
+		}
+	}
+
 	a.Render.Page(w, http.StatusOK, "cluster_detail", struct {
 		Base
 		Cluster     *domain.Cluster
@@ -91,6 +104,8 @@ func (a *App) ClusterDetail(w http.ResponseWriter, r *http.Request) {
 		PolicyNote  string
 		Capacity    *domain.ClusterCapacity
 		Attribution *store.Attribution
+		Cost        *store.CostAttribution
+		CanSeeCosts bool
 	}{
 		Base:        a.base(r, cluster.Name, "clusters"),
 		Cluster:     cluster,
@@ -100,6 +115,8 @@ func (a *App) ClusterDetail(w http.ResponseWriter, r *http.Request) {
 		PolicyNote:  domain.HAPolicyDescription(cluster.HAPolicy),
 		Capacity:    capacity,
 		Attribution: attribution,
+		Cost:        costs,
+		CanSeeCosts: canSeeCosts,
 	})
 }
 
@@ -167,6 +184,11 @@ func (a *App) ClusterUpdate(w http.ResponseWriter, r *http.Request) {
 	// quietly re-read the cluster at a conservative 1:1.
 	if r.PostForm.Has("cpu_overcommit") {
 		updated.CPUOvercommit = nums.ratio("cpu_overcommit")
+	}
+	// The cost split, same treatment: a form variant without the field must
+	// not silently undeclare it and stop dividing the cluster's money.
+	if r.PostForm.Has("cost_split_cpu") {
+		updated.CostSplitCPU = nums.opt("cost_split_cpu")
 	}
 	updated.Description = optionalString(r, "description")
 	// 422 with a message rather than a re-rendered form: this page has no

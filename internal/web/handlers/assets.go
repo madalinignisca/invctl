@@ -330,6 +330,12 @@ type assetDetailPage struct {
 	Replacement *store.ReplacementComparison
 	// Movement is how each of its cost kinds has moved. WP-J2.
 	Movement []store.PriceSeries
+	// Guests are what runs inside this asset, offered as the consumers a
+	// scoped cost line may name (§5.6).
+	Guests []store.AssetRow
+	// CostConsumers maps a cost line to the assets it applies to, so a saved
+	// line can render which guests it covers.
+	CostConsumers map[string][]string
 	// What this workload holds, and where it could hold it (WP-J4).
 	Storage []domain.StorageClaim
 	Pools   []domain.StoragePool
@@ -520,6 +526,25 @@ func (a *App) renderAssetDetail(w http.ResponseWriter, r *http.Request, status i
 		slog.Error("resolving price movement", "error", err, "asset", id)
 	}
 
+	// The guests, and which of them each scoped cost line covers (§5.6).
+	// Logged and absent rather than fatal, like every other panel here.
+	guests, err := a.Store.ListAssets(r.Context(), store.AssetFilter{ParentID: id})
+	if err != nil {
+		slog.Error("listing guests for cost scoping", "error", err, "asset", id)
+	}
+	consumers := map[string][]string{}
+	for i := range costs {
+		if costs[i].AppliesTo == domain.CostUniversal {
+			continue
+		}
+		named, err := a.Store.CostConsumers(r.Context(), costs[i].ID)
+		if err != nil {
+			slog.Error("reading cost consumers", "error", err, "cost", costs[i].ID)
+			continue
+		}
+		consumers[costs[i].ID] = named
+	}
+
 	// What it holds, and what it could hold (WP-J4). Same treatment: an asset
 	// page is opened during an incident and a panel is not worth taking it
 	// down for.
@@ -561,6 +586,8 @@ func (a *App) renderAssetDetail(w http.ResponseWriter, r *http.Request, status i
 		Fit:             fit,
 		Replacement:     replacement,
 		Movement:        movement,
+		Guests:          guests,
+		CostConsumers:   consumers,
 		Storage:         storage,
 		Pools:           pools,
 		Occupancy:       occupancy,

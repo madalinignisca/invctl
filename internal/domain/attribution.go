@@ -168,6 +168,35 @@ func Divide(dimension, unit string, sellable int, claims []Claim) Division {
 	return d
 }
 
+// DivideEqually splits one dimension per HEAD rather than by capacity.
+//
+// FOR A PER-CONSUMER COST, AND THE DIFFERENCE IS NOT PEDANTRY. A backup product
+// licensed per virtual machine costs the same for a 64 GB machine as for a 2 GB
+// one; dividing it by capacity share would charge the large one thirty times
+// over for a single licence and the small one almost nothing. The total would
+// still reconcile, which is exactly the sort of wrong number nobody catches.
+//
+// Each consumer counts one. A project owning three of five covered machines
+// pays three fifths, and the apportionment is the same largest-remainder rule
+// everything else here uses rather than a second rounding invented for this
+// case -- two rounding rules in one report is how two figures that should
+// agree stop agreeing.
+func DivideEqually(dimension string, consumers []Claim) Division {
+	heads := make([]Claim, 0, len(consumers))
+	total := 0
+	for _, c := range consumers {
+		if c.Amount <= 0 {
+			continue
+		}
+		heads = append(heads, c)
+		total += c.Amount
+	}
+	// Sellable IS the head count, so there is no idle slice: a licence has no
+	// unclaimed portion. Every one of them was bought for somebody.
+	d := Divide(dimension, "covered", total, heads)
+	return d
+}
+
 // ApportionMinor divides an amount of money across this division's slices,
 // idle included, summing to EXACTLY the amount given.
 //
@@ -188,6 +217,19 @@ func (d Division) ApportionMinor(minor int64) []int64 {
 	}
 	parts := apportionMinor(minor, amounts, d.Denominator)
 	return parts
+}
+
+// Apportion is apportion, exported for callers that build their own weights --
+// the cost blend weights each project by CPU and memory together and must land
+// on the same 10000 the capacity shares do. One rounding rule, used everywhere:
+// two in one report is how two figures that should agree stop agreeing.
+func Apportion(total int, amounts []int, denominator int) []int {
+	return apportion(total, amounts, denominator)
+}
+
+// ApportionMinorAcross is apportionMinor, exported for the same reason.
+func ApportionMinorAcross(total int64, amounts []int, denominator int) []int64 {
+	return apportionMinor(total, amounts, denominator)
 }
 
 // apportion splits total across amounts summing to denominator, by largest
