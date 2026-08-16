@@ -362,3 +362,70 @@ func TestWithoutASplitThePageSaysSoRatherThanGuessing(t *testing.T) {
 		t.Error("the page reports the gap and offers no way to close it")
 	}
 }
+
+// TestAnOperatorCanDeclareWhoSharesAMachine.
+//
+// J5's whole input surface. The shares are set together in one form because
+// they only mean anything together: editing one without seeing the others is
+// how a total stops being 100 without anybody deciding it should.
+func TestAnOperatorCanDeclareWhoSharesAMachine(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+	vm := h.refs.Assets["vm-app-1"]
+	platform, orders := h.refs.Projects["platform"], h.refs.Projects["orders"]
+
+	page := body(t, h.get("/assets/"+vm, false))
+	if !strings.Contains(page, "Shared with") {
+		t.Fatal("the asset page cannot record who shares a machine")
+	}
+
+	resp := h.post("/assets/"+vm+"/occupants", url.Values{
+		"csrf_token":          {h.csrfToken("/assets/" + vm)},
+		"project_id":          {platform, orders},
+		"percent_" + platform: {"60"},
+		"percent_" + orders:   {"40"},
+		"note_" + platform:    {"agreed at the March review"},
+	}, false)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("declaring occupancy returned %d, want a redirect", resp.StatusCode)
+	}
+
+	after := body(t, h.get("/assets/"+vm, false))
+	for _, want := range []string{"60%", "40%", "agreed at the March review"} {
+		if !strings.Contains(after, want) {
+			t.Errorf("the declared occupancy does not show %q", want)
+		}
+	}
+	// Declared state moves money, so it owes an audit entry.
+	if !strings.Contains(body(t, h.get("/changes", false)), "60%") {
+		t.Error("declaring who shares a machine wrote no change_log entry")
+	}
+}
+
+// TestAnUnbalancedOccupancySaysSoOnThePage. §5.4: a finding, not a silent
+// rounding — and the page is where somebody sees it.
+func TestAnUnbalancedOccupancySaysSoOnThePage(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+	vm := h.refs.Assets["vm-app-1"]
+	platform := h.refs.Projects["platform"]
+
+	resp := h.post("/assets/"+vm+"/occupants", url.Values{
+		"csrf_token":          {h.csrfToken("/assets/" + vm)},
+		"project_id":          {platform},
+		"percent_" + platform: {"70"},
+	}, false)
+	resp.Body.Close()
+
+	page := body(t, h.get("/assets/"+vm, false))
+	if !strings.Contains(page, "attributed to nobody") {
+		t.Error("a 70% occupancy does not say the rest reaches nobody")
+	}
+	// And the dashboard carries it, so it is not only visible to whoever
+	// happens to open this one asset.
+	if !strings.Contains(body(t, h.get("/", false)),
+		"occupants do not total 100%") {
+		t.Error("the estate findings do not mention the unbalanced occupancy")
+	}
+}

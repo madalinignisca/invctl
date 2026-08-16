@@ -49,6 +49,7 @@ func (b *builder) companyMoney() {
 	b.pricedFor()
 	b.storagePools()
 	b.conditionalLicence()
+	b.sharedTenancy()
 }
 
 // pricedFor records what two engagements were quoted on (WP-J7).
@@ -589,5 +590,65 @@ func (b *builder) conditionalLicence() {
 	}
 	if err := b.store.SetCostConsumers(b.ctx, Actor, licence.ID, consumers); err != nil {
 		b.fail(fmt.Errorf("naming the licence consumers: %w", err))
+	}
+}
+
+// sharedTenancy declares one machine as shared between engagements (WP-J5).
+//
+// THE CASE THE WHOLE WORK PACKAGE EXISTS FOR, and the fixture could not show it
+// otherwise: every asset here belongs wholly to one project, so attribution had
+// no example where ownership gives the wrong answer. An estate that packs
+// tenants together to save on licensing is common enough that the CEO named it,
+// and a shared box is exactly where a per-project cost figure quietly stops
+// being true.
+//
+// DELIBERATELY DECLARED AT 90%, not 100. §5.4 says a total that is not a
+// hundred is a finding rather than a silent rounding, and a fixture where every
+// declaration is complete can demonstrate the arithmetic but never the
+// discipline problem it exists to surface. The missing tenth is a real slice of
+// a real machine that somebody is paying for and nobody has claimed -- which is
+// the conversation the finding is meant to start.
+func (b *builder) sharedTenancy() {
+	if !b.ok() {
+		return
+	}
+	assetID, ok := b.refs.Assets["vm-proxy-1"]
+	if !ok {
+		return
+	}
+	existing, err := b.store.OccupancyFor(b.ctx, assetID)
+	if err != nil {
+		b.fail(fmt.Errorf("reading occupancy: %w", err))
+		return
+	}
+	if existing.Shared() {
+		return // already declared, so a top-up neither rewrites nor duplicates
+	}
+
+	shares := []struct {
+		project string
+		percent int
+		note    string
+	}{
+		{"platform", 50, "the shared ingress everything behind it depends on"},
+		{"orders", 40, "agreed at the platform review; revisit when the second region lands"},
+		// 90%: the remaining tenth is unclaimed on purpose. See above.
+	}
+	occupants := make([]domain.Occupant, 0, len(shares))
+	for _, sh := range shares {
+		id, ok := b.refs.Projects[sh.project]
+		if !ok {
+			continue
+		}
+		note := sh.note
+		occupants = append(occupants, domain.Occupant{
+			ProjectID: id, Percent: sh.percent, Note: &note,
+		})
+	}
+	if len(occupants) == 0 {
+		return
+	}
+	if err := b.store.SetOccupants(b.ctx, Actor, assetID, occupants); err != nil {
+		b.fail(fmt.Errorf("declaring shared tenancy: %w", err))
 	}
 }

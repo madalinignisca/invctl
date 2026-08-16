@@ -100,7 +100,7 @@ func TestCapacityHeldByNoProjectIsItsOwnSubject(t *testing.T) {
 	projectOf := map[string]string{"vm-a": "p1", "vm-b": "p1"} // orphan has none
 	nameOf := map[string]string{"p1": "orders"}
 
-	got := domain.StorageClaims(claims, projectOf, nameOf)
+	got := domain.StorageClaims(claims, projectOf, nameOf, nil)
 	if len(got) != 2 {
 		t.Fatalf("got %d subjects, want the project and the unattributed", len(got))
 	}
@@ -121,5 +121,36 @@ func TestCapacityHeldByNoProjectIsItsOwnSubject(t *testing.T) {
 	}
 	if total != 1000 {
 		t.Errorf("the slices account for %d GB of a 1000 GB pool", total)
+	}
+}
+
+// TestASharedMachineDividesItsDiskToo. Cores and disk follow the same
+// declaration: a box four tenants share does not hold its storage for one of
+// them. The undeclared remainder is carried to nobody so the slices still
+// account for the whole pool.
+func TestASharedMachineDividesItsDiskToo(t *testing.T) {
+	claims := []domain.StorageClaim{
+		{AssetID: "vm-shared", PoolID: "block", AllocatedGB: 100},
+	}
+	shared := map[string]*domain.Occupancy{
+		"vm-shared": {AssetID: "vm-shared", Occupants: []domain.Occupant{
+			{ProjectID: "p1", Percent: 60},
+			{ProjectID: "p2", Percent: 30},
+			// 90% declared: a tenth belongs to nobody and must stay visible.
+		}},
+	}
+	names := map[string]string{"p1": "orders", "p2": "platform"}
+
+	got := domain.StorageClaims(claims, map[string]string{}, names, shared)
+	byName := map[string]int{}
+	for _, c := range got {
+		byName[c.Subject] = c.Amount
+	}
+	if byName["orders"] != 60 || byName["platform"] != 30 {
+		t.Errorf("the tenants hold %v, want 60 and 30", byName)
+	}
+	if byName[domain.UnattributedSubject] != 10 {
+		t.Errorf("the undeclared tenth is %d, want 10 held by nobody",
+			byName[domain.UnattributedSubject])
 	}
 }

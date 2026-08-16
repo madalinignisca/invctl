@@ -99,7 +99,11 @@ func (s *SQLStore) PoolAttribution(ctx context.Context, poolID string) (*domain.
 	if err != nil {
 		return nil, err
 	}
-	claims := domain.StorageClaims(o.Claims, owners, names)
+	shared, err := s.AllOccupancy(ctx)
+	if err != nil {
+		return nil, err
+	}
+	claims := domain.StorageClaims(o.Claims, owners, names, shared)
 	d := domain.Divide(o.Pool.Name, "GB", o.Pool.UsableGB(), claims)
 	return &d, nil
 }
@@ -138,10 +142,17 @@ func (s *SQLStore) clusterWorkloadClaims(ctx context.Context, clusterID string) 
 	if err != nil {
 		return nil, err
 	}
+	// Who SHARES each machine, which overrides who owns it for the purpose of
+	// dividing -- and only for that. A shared box still has an owner who is
+	// answerable for it. See WP-J5.
+	shared, err := s.AllOccupancy(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	byProject := map[string]*workloadClaim{}
 	order := []string{}
-	for _, r := range rows {
-		id := owners[r.AssetID]
+	add := func(id string, vcpu, memory int) {
 		claim, seen := byProject[id]
 		if !seen {
 			subject := names[id]
@@ -151,11 +162,41 @@ func (s *SQLStore) clusterWorkloadClaims(ctx context.Context, clusterID string) 
 			claim = &workloadClaim{ProjectID: id, Subject: subject}
 			byProject[id], order = claim, append(order, id)
 		}
+		claim.VCPU += vcpu
+		claim.MemoryMB += memory
+	}
+	for _, r := range rows {
+		vcpu, memory := 0, 0
 		if r.VCPU != nil {
-			claim.VCPU += *r.VCPU
+			vcpu = *r.VCPU
 		}
 		if r.MemoryMB != nil {
-			claim.MemoryMB += *r.MemoryMB
+			memory = *r.MemoryMB
+		}
+		occ, isShared := shared[r.AssetID]
+		if !isShared || !occ.Shared() {
+			add(owners[r.AssetID], vcpu, memory)
+			continue
+		}
+		// Split it. Each dimension apportions separately, because 40% of nine
+		// vCPU and 40% of nine gigabytes round differently and forcing them to
+		// agree would lose a unit from one of them.
+		cpuParts, memParts := occ.Split(vcpu), occ.Split(memory)
+		attributedCPU, attributedMemory := 0, 0
+		for _, x := range occ.Occupants {
+			add(x.ProjectID, cpuParts[x.ProjectID], memParts[x.ProjectID])
+			attributedCPU += cpuParts[x.ProjectID]
+			attributedMemory += memParts[x.ProjectID]
+		}
+		// The undeclared remainder belongs to nobody, and it is CARRIED rather
+		// than dropped: an occupancy declared at 90% leaves a tenth of a real
+		// machine that somebody is paying for, and dropping it would make the
+		// shares add up to a whole that was never the cluster.
+		if rest := vcpu - attributedCPU; rest > 0 {
+			add("", rest, 0)
+		}
+		if rest := memory - attributedMemory; rest > 0 {
+			add("", 0, rest)
 		}
 	}
 	out := make([]workloadClaim, 0, len(order))

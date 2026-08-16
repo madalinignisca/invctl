@@ -287,6 +287,100 @@
 
 {{template "timeline_panel" .Timeline}}
 
+{{/* Who shares this machine (WP-J5). Only for things that can carry a
+     workload: a rack is not shared between tenants, it holds boxes that are. */}}
+{{if .Asset.CanHostInstances}}
+<div class="panel">
+  <div class="panel-head">
+    <h2>Shared with</h2>
+    <p class="panel-note">
+      Declared by a person, never measured — nothing separates several tenants
+      inside one operating system, and a computed figure here would be a guess
+      wearing an authoritative number's clothes.
+    </p>
+  </div>
+  <div class="panel-body">
+    {{with .SharedWith}}
+    {{if .Shared}}
+    <div class="stat-row">
+      <div class="stat">
+        <div class="k">Declared</div>
+        <div class="v">{{.DeclaredPercent}}%</div>
+      </div>
+      <div class="stat">
+        <div class="k">Occupants</div>
+        <div class="v">{{len .Occupants}}</div>
+      </div>
+    </div>
+    {{if not .Balanced}}
+    <p class="diag-note">
+      {{if gt .DeclaredPercent 100}}
+      The occupants claim {{.DeclaredPercent}}% between them, which is more
+      machine than exists — two people have each been told they have most of it.
+      {{else}}
+      {{.DeclaredPercent}}% is spoken for, so the remaining
+      {{sub 100 .DeclaredPercent}}% is attributed to nobody. That is deliberate:
+      normalising it away would inflate every share above and leave nothing to notice.
+      {{end}}
+    </p>
+    {{end}}
+    <table class="grid">
+      <thead><tr><th>Project</th><th class="num">Share</th><th>Why</th></tr></thead>
+      <tbody>
+        {{range .Occupants}}
+        <tr>
+          <td><a href="/projects/{{.ProjectID}}">{{.ProjectCode}}</a></td>
+          <td class="num">{{.Percent}}%</td>
+          <td>{{deref .Note}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+    {{else}}
+    <div class="empty">
+      <strong>Not shared</strong>
+      Its whole cost and capacity land on whichever project owns it.
+    </div>
+    {{end}}
+    {{end}}
+
+    {{if .CanWrite}}
+    <form method="post" action="/assets/{{.Asset.ID}}/occupants" style="margin-top:12px">
+      <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+      <p class="field-hint">
+        Set every occupant at once — the shares only mean anything together.
+        Leave a share blank or zero to remove that occupant.
+      </p>
+      <table class="grid">
+        <thead><tr><th>Project</th><th>Share (%)</th><th>Why this number</th></tr></thead>
+        <tbody>
+          {{$occ := .SharedWith}}
+          {{range .Projects}}
+          <tr>
+            <td>
+              <input type="hidden" name="project_id" value="{{.ID}}">
+              {{.Code}}
+            </td>
+            <td>
+              <input type="number" name="percent_{{.ID}}" min="0" max="100"
+                     style="width:6em" value="{{percentOf $occ .ID}}">
+            </td>
+            <td>
+              <input type="text" name="note_{{.ID}}" style="width:100%"
+                     value="{{occupantNote $occ .ID}}"
+                     placeholder="how the figure was agreed">
+            </td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+      <button class="btn btn-primary" type="submit">Record who shares it</button>
+    </form>
+    {{end}}
+  </div>
+</div>
+{{end}}
+
 {{/* Storage (WP-J4). Two panels, because a pool and a workload ask opposite
      questions: what do I hold, and who holds me. */}}
 {{if .Occupancy}}

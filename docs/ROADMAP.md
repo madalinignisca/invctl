@@ -643,10 +643,24 @@ conservative direction — half and half is not cautious, it is arbitrary.
 Run rate and amortised capital stay apart the whole way through, per
 `cost.go`'s rule that folding a one-off into a monthly figure is a lie.
 
-**WP-J5 · Shared occupancy** — M — depends: J4
+**WP-J5 · Shared occupancy** — M — **DONE**
 For estates that pack several tenants into one VM to save on licensing: occupants
 with a declared percentage each, never inferred. Percentages that do not total
 100 are a finding.
+
+**The case ownership cannot describe.** At most one project owns an asset, so
+without this the whole of a shared box's capacity and cost lands on its owner —
+not an approximation but a wrong answer given confidently, for exactly the
+estates that pack tenants together to save on licensing. Occupancy changes only
+how a machine DIVIDES; it does not replace ownership, because a shared box still
+has somebody answerable for it.
+
+Percentages are whole numbers, because nobody defends a tenant's share to two
+decimal places and offering the precision would invite an argument the figure
+cannot support. A total that is not 100 is reported and the remainder attributed
+to nobody: normalising 90 up to 100 would inflate every declared share by a ninth
+and leave nothing on any page to notice. The demo estate declares one machine at
+90% on purpose, so the discipline problem is visible and not only the arithmetic.
 
 **WP-J6 · Supplier as a dimension** — M — depends: J2
 Promotes `vendor` from free text on an asset to a real reference, so "which

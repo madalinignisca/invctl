@@ -133,16 +133,32 @@ func NewStoragePool(assetID, name, kind, kindLabel string, rawGB, rawPerUsable *
 // reports rather than hides, and dropping it would make the remaining shares
 // add up to a whole that was never the pool.
 func StorageClaims(claims []StorageClaim, projectOf map[string]string,
-	nameOf map[string]string) []Claim {
+	nameOf map[string]string, shared map[string]*Occupancy) []Claim {
 
 	byProject := map[string]int{}
 	order := []string{}
-	for _, c := range claims {
-		id := projectOf[c.AssetID]
+	add := func(id string, gb int) {
 		if _, seen := byProject[id]; !seen {
 			order = append(order, id)
 		}
-		byProject[id] += c.AllocatedGB
+		byProject[id] += gb
+	}
+	for _, c := range claims {
+		// A machine several tenants share divides its disk the same way it
+		// divides its cores (WP-J5). The undeclared remainder is carried to
+		// nobody rather than dropped, so the slices still account for the pool.
+		if occ, ok := shared[c.AssetID]; ok && occ.Shared() {
+			attributed := 0
+			for id, part := range occ.Split(c.AllocatedGB) {
+				add(id, part)
+				attributed += part
+			}
+			if rest := c.AllocatedGB - attributed; rest > 0 {
+				add("", rest)
+			}
+			continue
+		}
+		add(projectOf[c.AssetID], c.AllocatedGB)
 	}
 	out := make([]Claim, 0, len(order))
 	for _, id := range order {

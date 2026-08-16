@@ -156,6 +156,7 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	write("POST /assets/{id}/retire", app.AssetRetire)
 	write("POST /assets/{id}/parent", app.AssetReparent)
 	write("POST /assets/{id}/storage", app.AssetStorageClaim)
+	write("POST /assets/{id}/occupants", app.AssetOccupants)
 
 	write("POST /services", app.ServiceCreate)
 	// One route per surface, as with costs: an entity type arriving in a URL

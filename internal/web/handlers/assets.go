@@ -330,6 +330,11 @@ type assetDetailPage struct {
 	Replacement *store.ReplacementComparison
 	// Movement is how each of its cost kinds has moved. WP-J2.
 	Movement []store.PriceSeries
+	// Who shares this machine, and the projects that could (WP-J5). Named
+	// SharedWith rather than Occupancy because a storage pool's occupancy is a
+	// different thing on this same page.
+	SharedWith *domain.Occupancy
+	Projects   []store.ProjectRow
 	// Guests are what runs inside this asset, offered as the consumers a
 	// scoped cost line may name (§5.6).
 	Guests []store.AssetRow
@@ -526,6 +531,16 @@ func (a *App) renderAssetDetail(w http.ResponseWriter, r *http.Request, status i
 		slog.Error("resolving price movement", "error", err, "asset", id)
 	}
 
+	// Who shares it (WP-J5). Logged and absent rather than fatal.
+	sharedWith, err := a.Store.OccupancyFor(r.Context(), id)
+	if err != nil {
+		slog.Error("reading occupancy", "error", err, "asset", id)
+	}
+	projects, err := a.Store.ListProjects(r.Context(), store.ProjectFilter{})
+	if err != nil {
+		slog.Error("listing projects for occupancy", "error", err, "asset", id)
+	}
+
 	// The guests, and which of them each scoped cost line covers (§5.6).
 	// Logged and absent rather than fatal, like every other panel here.
 	guests, err := a.Store.ListAssets(r.Context(), store.AssetFilter{ParentID: id})
@@ -586,6 +601,8 @@ func (a *App) renderAssetDetail(w http.ResponseWriter, r *http.Request, status i
 		Fit:             fit,
 		Replacement:     replacement,
 		Movement:        movement,
+		SharedWith:      sharedWith,
+		Projects:        projects,
 		Guests:          guests,
 		CostConsumers:   consumers,
 		Storage:         storage,
@@ -680,6 +697,48 @@ func (a *App) AssetCreate(w http.ResponseWriter, r *http.Request) {
 
 	a.setFlash(r, "success", "Asset "+asset.Name+" created.")
 	render.Redirect(w, r, "/assets/"+asset.ID)
+}
+
+// AssetOccupants records who shares a machine (WP-J5).
+//
+// One form for the whole set, because the shares are meaningful only together:
+// editing one occupant's percentage without seeing the others is how a total
+// stops being 100 without anybody deciding it should.
+func (a *App) AssetOccupants(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Could not read that form.", http.StatusBadRequest)
+		return
+	}
+	id := r.PathValue("id")
+	nums := optionalNumbers(r)
+	occupants := []domain.Occupant{}
+	for _, projectID := range r.PostForm["project_id"] {
+		percent := nums.opt("percent_" + projectID)
+		if percent == nil || *percent == 0 {
+			continue // an untouched row is not an occupant
+		}
+		occupants = append(occupants, domain.Occupant{
+			ProjectID: projectID, Percent: *percent,
+			Note: optionalString(r, "note_"+projectID),
+		})
+	}
+	if nums.messages() != nil {
+		a.setFlash(r, "error", "A share is a whole number of percent.")
+		render.Redirect(w, r, "/assets/"+id)
+		return
+	}
+	if err := a.Store.SetOccupants(r.Context(), actor(r), id, occupants); err != nil {
+		if _, ok := validationErrors(err); ok {
+			a.setFlash(r, "error", firstMessage(err,
+				"That set of shares was refused."))
+			render.Redirect(w, r, "/assets/"+id)
+			return
+		}
+		a.handleStoreError(w, r, err)
+		return
+	}
+	a.setFlash(r, "success", "Recorded who shares this machine.")
+	render.Redirect(w, r, "/assets/"+id)
 }
 
 // AssetStorageClaim records what a workload holds in a pool.

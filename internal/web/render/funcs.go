@@ -57,6 +57,32 @@ func funcs() template.FuncMap {
 		"has": func(haystack []string, needle string) bool {
 			return slices.Contains(haystack, needle)
 		},
+		"sub": func(a, b int) int { return a - b },
+		// The occupancy form renders one row per project, so it needs to find
+		// what THIS project already holds. A map built in the handler would do
+		// it too, and this keeps the shape the store returns.
+		"percentOf": func(o *domain.Occupancy, projectID string) string {
+			if o == nil {
+				return ""
+			}
+			for _, x := range o.Occupants {
+				if x.ProjectID == projectID {
+					return strconv.Itoa(x.Percent)
+				}
+			}
+			return ""
+		},
+		"occupantNote": func(o *domain.Occupancy, projectID string) string {
+			if o == nil {
+				return ""
+			}
+			for _, x := range o.Occupants {
+				if x.ProjectID == projectID {
+					return deref(x.Note)
+				}
+			}
+			return ""
+		},
 		"title":       titleCase,
 		"pluralise":   pluralise,
 		"queryString": queryString,

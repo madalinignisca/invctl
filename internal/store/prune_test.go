@@ -714,6 +714,12 @@ func TestTheOnlyFactDeletingStatementIsThePrune(t *testing.T) {
 		// who benefits from this licence -- replaced inside the line's own
 		// transaction and folded into its audited value by costScopeAudit.
 		"internal/store/costs.go": "asset_cost_consumer: which consumers a cost line applies to, replaced wholesale",
+		// asset_occupant: who shares a machine and in what proportion. Same
+		// rule, ninth time. Replaced inside the asset's transaction and folded
+		// into its audited value by occupancyAudit -- somebody deciding a
+		// machine is no longer shared moves money, and a change with no diff
+		// on the parent could not be found afterwards.
+		"internal/store/occupancy.go": "asset_occupant: who shares a machine, replaced wholesale",
 	}
 
 	root := repoRoot(t)

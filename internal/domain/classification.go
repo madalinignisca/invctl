@@ -204,7 +204,14 @@ var DeclaredColumns = map[string][]string{
 	},
 	"asset_closure":       {"ancestor_id", "descendant_id", "depth"},
 	"asset_cost_consumer": {"cost_id", "asset_id", "created_at"},
-	"asset_environment":   {"asset_id", "environment_id", "note"},
+	// Who shares a machine, and in what proportion (migration 00049).
+	// DECLARED, and it could not be anything else: nothing measures how four
+	// tenants inside one operating system divide it, so a reported figure here
+	// would be a guess wearing an authoritative number's clothes. The note is
+	// what makes the judgement defensible once whoever agreed it has moved on.
+	"asset_occupant": {"asset_id", "project_id", "percent", "note",
+		"created_at", "updated_at"},
+	"asset_environment": {"asset_id", "environment_id", "note"},
 	// What a workload holds in a pool (migration 00046). DECLARED, and the
 	// distinction is the usual one: this is what somebody agreed the workload
 	// gets, never what df(1) reports. A filesystem filling up is telemetry and

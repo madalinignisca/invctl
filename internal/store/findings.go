@@ -199,6 +199,7 @@ func (s *SQLStore) EstateFindings(ctx context.Context) ([]Finding, error) {
 		{CapacityOverPriced, "project grown past what it was priced for"},
 		{CapacityUnmeasured, "cluster with unmeasured hosts"},
 		{CapacityUnallocated, "workload with no allocation recorded"},
+		{CapacityUnbalancedOccupancy, "shared machine whose occupants do not total 100%"},
 	} {
 		// The severity travels with the finding rather than being decided here:
 		// memory oversubscription is a fault and CPU is a risk, and a label

@@ -58,6 +58,8 @@ const (
 	// The gaps, which are findings about the inventory rather than the estate.
 	CapacityUnmeasured  = "unmeasured_hosts"
 	CapacityUnallocated = "unallocated_workloads"
+	// CapacityUnbalancedOccupancy: shares of a machine that do not total 100.
+	CapacityUnbalancedOccupancy = "unbalanced_occupancy"
 )
 
 // CapacityFindings gathers all of them.
@@ -154,6 +156,40 @@ func (s *SQLStore) CapacityFindings(ctx context.Context) ([]CapacityFinding, err
 					p.AllocatedMemoryMB, *p.PricedForMemoryMB),
 			})
 		}
+	}
+
+	// Shares of a shared machine that do not total 100 (WP-J5, §5.4). A
+	// FINDING RATHER THAN A SILENT ROUNDING: normalising 90 up to 100 would
+	// inflate every declared share by a ninth, and there would be nothing on
+	// any page to notice.
+	shared, err := s.AllOccupancy(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("gathering occupancy findings: %w", err)
+	}
+	for assetID, occ := range shared {
+		if occ.Balanced() {
+			continue
+		}
+		declared := occ.DeclaredPercent()
+		detail := fmt.Sprintf("%d%% of it is spoken for, so the remaining %d%% is "+
+			"attributed to nobody", declared, 100-declared)
+		severity := domain.FindingGapSeverity
+		if declared > 100 {
+			// Over-declaring is a different mistake from not finishing: two
+			// people have each been told they have most of the machine.
+			detail = fmt.Sprintf("its occupants claim %d%% between them, which is "+
+				"more machine than exists", declared)
+			severity = domain.FindingRiskSeverity
+		}
+		name := assetID
+		if a, err := s.GetAsset(ctx, assetID); err == nil {
+			name = a.Name
+		}
+		out = append(out, CapacityFinding{
+			Kind: CapacityUnbalancedOccupancy, Severity: severity,
+			Subject: name, SubjectID: assetID, Href: "/assets/" + assetID,
+			Detail: detail,
+		})
 	}
 
 	// The planning one, and the reason this package exists.
