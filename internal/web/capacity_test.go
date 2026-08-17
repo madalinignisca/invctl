@@ -449,3 +449,50 @@ func TestAnUnbalancedOccupancySaysSoOnThePage(t *testing.T) {
 		t.Error("the estate findings do not mention the unbalanced occupancy")
 	}
 }
+
+// TestAConsumerPickerOffersOnlyThingsThatRunSoftware.
+//
+// A bridge is a child of its hypervisor and cannot run the software a licence
+// covers. Offering it as a consumer is an invitation to a wrong answer, and the
+// kind lookup already answers this question everywhere capacity is counted.
+//
+// The scoped line is CREATED HERE rather than assumed: the base fixture carries
+// none, so the first version of this test found no picker, returned early and
+// passed against the very bug it was written for.
+func TestAConsumerPickerOffersOnlyThingsThatRunSoftware(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+	hv := h.refs.Assets["hv-01"]
+
+	page := body(t, h.get("/assets/"+hv, false))
+	if !strings.Contains(page, "hv-01-br0") {
+		t.Fatal("the fixture has no bridge under hv-01, so this proves nothing")
+	}
+
+	resp := h.post("/assets/"+hv+"/costs", url.Values{
+		"csrf_token": {h.csrfToken("/assets/" + hv)},
+		"kind":       {"licence"}, "period": {"yearly"}, "amount": {"7800"},
+		"applies_to": {"conditional"},
+	}, false)
+	resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		t.Fatalf("adding a scoped cost returned %d", resp.StatusCode)
+	}
+
+	page = body(t, h.get("/assets/"+hv, false))
+	i := strings.Index(page, "Set who it covers")
+	if i < 0 {
+		t.Fatal("a conditional cost line offers no way to say who it covers")
+	}
+	form := page[:i]
+	if j := strings.LastIndex(form, "<form"); j >= 0 {
+		form = form[j:]
+	}
+	if !strings.Contains(form, "vm-") {
+		t.Error("the consumer picker offers no workloads at all")
+	}
+	if strings.Contains(form, "hv-01-br0") {
+		t.Error("the consumer picker offers a bridge, which runs no software " +
+			"and can hold no licence")
+	}
+}

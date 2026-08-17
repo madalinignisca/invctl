@@ -547,6 +547,17 @@ func (a *App) renderAssetDetail(w http.ResponseWriter, r *http.Request, status i
 	if err != nil {
 		slog.Error("listing guests for cost scoping", "error", err, "asset", id)
 	}
+	// Only things that can carry a workload. A bridge is a child of its
+	// hypervisor and cannot run the software a licence covers, so offering it
+	// as a consumer is an invitation to a wrong answer -- and the kind lookup
+	// already answers this question everywhere else capacity is counted.
+	workloads := guests[:0]
+	for _, g := range guests {
+		if g.CanHostInstances() {
+			workloads = append(workloads, g)
+		}
+	}
+	guests = workloads
 	consumers := map[string][]string{}
 	for i := range costs {
 		if costs[i].AppliesTo == domain.CostUniversal {
