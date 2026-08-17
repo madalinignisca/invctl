@@ -38,7 +38,7 @@ fragments:
     preconditions:
       - "the overview shows at least one finding of each severity (fault, risk, gap)"
       - "no invctl.nav.* keys in localStorage before capturing: a persistent browser profile carries the previous run's expanded groups into the next, and a fresh reader sees everything collapsed"
-    generated_at: 7f71c0c81fc2
+    generated_at: 2906bfae290f
 
   - id: installation
     title: Installing and running invctl
@@ -109,7 +109,7 @@ fragments:
       - "one cluster whose min_hosts equals its host count, so the 'not survivable' row is visible"
       - "one asset whose EOL date is inherited from its device type, so the source is shown"
       - "at least one journal entry exists — the seeded estate has NONE, so the notes capture is made by writing one on the local copy first (see REGENERATING.md)"
-    generated_at: 7f71c0c81fc2
+    generated_at: 2906bfae290f
 
   - id: racks
     title: Racks — will it fit, will it hold, will it stay cool
@@ -137,7 +137,7 @@ fragments:
       - "two vertically adjacent boxes with opposing airflow"
       - "one box carrying 24 or more leads, and one declared cable length too short for its span"
       - "rack-a2 and colo-rack-07 in the seeded estate hold all of the above between them"
-    generated_at: 7ba77afbb08a
+    generated_at: 2906bfae290f
 
   - id: addressing
     title: Addressing — prefixes, VLANs, allocations
@@ -209,7 +209,7 @@ fragments:
       - "one circuit with a contract end inside the expiry horizon"
       - "one overlay with fewer than two terminations"
       - "one circuit that IS a connectivity edge (both ends on ports, in two different forwarder groups) and one that is not — the manual documents both verdicts"
-    generated_at: 7ba77afbb08a
+    generated_at: 2906bfae290f
 
   - id: reports
     title: Reports — what expires, power, impact
@@ -282,5 +282,5 @@ fragments:
       - "one workload with a declared occupancy that does NOT total 100, so the remainder is shown reaching nobody"
       - "a project allocated above what it was priced for, so the commercial finding appears"
       - "one cost line repriced at least twice, with an inflation series covering those years, so nominal and real movement differ visibly"
-    generated_at: cff491ab0b0c
+    generated_at: 2906bfae290f
 

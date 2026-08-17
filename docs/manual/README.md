@@ -15,6 +15,7 @@ for the people using it.
 | [Addressing](parts/30-addressing.md) | prefixes, reservations, VLANs, allocations |
 | [Network](parts/40-network.md) | topology, circuits, overlays, redundancy groups |
 | [Reports](parts/50-reports.md) | outage simulation, what expires, power findings, the change log |
+| [Money](parts/60-money.md) | what things cost, how big they are, who holds what share, and what that share costs |
 
 Screenshots are of the public demo at `https://invctl.madalin.me`: a small
 company that owns its production hardware in Oslo, rents a rack in a colo for
