@@ -78,9 +78,28 @@ domains ship first, how far to take each one. Argue about all of it.
 Each carries: size (S/M/L/XL), what it depends on, and what it unlocks. Sizes are
 relative effort, not time.
 
+**On the DONE markers.** Seventeen of them were added on 2026-08-17 in one pass,
+because they had been applied inconsistently since the beginning and this file
+had stopped being usable as a status document — asked "what is next", it named
+bulk import, VLANs, clusters and the whole of group D, all of which had shipped
+months earlier. Nothing was wrong with the code; the markers had simply never
+been kept.
+
+Each one was verified against the running estate rather than from memory: the
+tables the package would have created, the routes it would have registered, and
+the navigation entry it would have added. Where those disagreed with a guess,
+the estate won — `A2` looked built because `routes.go` mentions `/api/inventory`
+in a comment reserving it, and is not built at all.
+
+**`I1` and `I2` are marked "recurring" and will never be DONE.** They are
+standing audits — every new edge type must reach the impact engine, every new
+cost-bearing entity must reach the reports — so an absent marker there means the
+obligation stands, not that work is pending. `I2` carries the date it was last
+audited and the two gaps that audit found.
+
 ### Group A — Prerequisites
 
-**WP-A1 · Bulk import** — M — depends: none — unlocks: everything
+**WP-A1 · Bulk import** — M — **DONE**
 CSV per object type. Dry-run reporting what it would create and what it cannot
 resolve. References by natural key, not UUID. Whole-file refusal on partial
 failure. Audited as declared-state writes, one row per object. An import that
@@ -91,7 +110,7 @@ point at it — that is a reconciliation moment, not an error.
 Read-only, scoped tokens, keyset pagination matching the change log. Shapes for
 Ansible inventory and observability joins. No write routes.
 
-**WP-A3 · Type-and-template mechanism** — S — depends: none — unlocks: C1, E1, F1
+**WP-A3 · Type-and-template mechanism** — S — **DONE**
 Generic "a type carries component templates; instantiating creates them". Later
 type edits do **not** rewrite existing instances — report drift as a finding
 instead, since nobody declared that change.
@@ -107,7 +126,7 @@ searchable, exportable, audited like any other field.
 
 ### Group B — Physical: power and cabling
 
-**WP-B1 · Power chain** — L — depends: A3 (light) — unlocks: new impact source
+**WP-B1 · Power chain** — L — **DONE**
 Power panel → feed → outlet → asset input. Supply, phase, voltage, amperage, max
 utilisation. Assets with redundant inputs from different feeds.
 
@@ -119,10 +138,10 @@ finding, not an error.
 *See the appendix: the propagation half is smaller than L; the false-redundancy
 analysis is the part worth sizing around.*
 
-**WP-B2 · Front and rear ports, pass-through** — M — depends: none — unlocks: B3
+**WP-B2 · Front and rear ports, pass-through** — M — **DONE**
 Port position mapping on patch panels and similar passive gear.
 
-**WP-B3 · Cables and path tracing** — L — depends: B2
+**WP-B3 · Cables and path tracing** — L — **DONE**
 Cable with two terminations; a tracer that walks pass-through hops end to end.
 Explicit hop limit, cycle guard, and a test asserting termination on a
 deliberately malformed patch field — this is where these systems get slow and
@@ -136,7 +155,7 @@ Breakout and multi-strand lane mapping (4×10 GE ↔ 40 GE), and bundles represe
 runs managed as a unit. This is parity with NetBox 4.5/4.6 and it is genuinely
 hard — the profile changes what "connected" means in the tracer.
 
-**WP-B5 · Rack elevations** — M — depends: none
+**WP-B5 · Rack elevations** — M — **DONE**
 Units, position, orientation, depth, blade and slot occupancy. Utilisation derived,
 never stored. Reuses existing containment for failure semantics — this adds
 position and capacity, not new impact behaviour.
@@ -145,7 +164,7 @@ position and capacity, not new impact behaviour.
 
 ### Group C — Physical: hardware catalogue
 
-**WP-C1 · Manufacturers, device types, module types** — M — depends: A3
+**WP-C1 · Manufacturers, device types, module types** — M — **DONE**
 Model, height, full-depth, part number, EOL and end-of-support dates. Component
 templates for interfaces, ports, outlets, inputs. Modules, module bays, inventory
 items, serial tracking.
@@ -154,7 +173,7 @@ Engine: expiry resolves an asset's support date from its type when the asset has
 none — **and says which source it used.** Provenance, not silent inference. Search
 resolves part numbers and serials.
 
-**WP-C2 · Physical fit — will it actually go in that rack** — S — depends: C1
+**WP-C2 · Physical fit — will it actually go in that rack** — S — **DONE**
 *Decided 2026-08-10: warn, never refuse. Depth and weight in the first pass.*
 
 The vertical half already works. `CheckPlacement` refuses a box whose top passes
@@ -228,7 +247,7 @@ universally racked from the front with its ports at the back. The real cost is a
 lead between two boxes whose ports face OPPOSITE ways, which is what the
 declared faces can actually prove. Found by reading the output, not by a test.
 
-**WP-C4 · Airflow and thermal adjacency** — S — depends: C1
+**WP-C4 · Airflow and thermal adjacency** — S — **DONE**
 *Raised 2026-08-10 from a real case: a side-intake, rear-exhaust, short-depth
 firewall in a densely cabled cabinet.*
 
@@ -270,32 +289,32 @@ missing term, not whether the arithmetic looks similar.*
 
 ### Group D — Addressing
 
-**WP-D1 · VRFs and route targets** — M — depends: none
+**WP-D1 · VRFs and route targets** — M — **DONE**
 Grouping, lookup scoping and prefix-level uniqueness for overlapping tenant space.
 
 *See the appendix: the "address uniqueness is global" premise does not hold in
 this codebase. Worth having on its merits, but it is not a correctness fix and
 carries no do-it-early urgency.*
 
-**WP-D2 · Prefix hierarchy, containment, utilisation** — M — depends: D1 ideally
+**WP-D2 · Prefix hierarchy, containment, utilisation** — M — **DONE**
 Parent/child resolution, depth, utilisation derived from contained prefixes, ranges
 and addresses. Search already resolves a CIDR; this makes the result a tree.
 
-**WP-D3 · IP ranges and next-free allocation** — M — depends: D2
+**WP-D3 · IP ranges and next-free allocation** — M — **DONE**
 Ranges within prefixes, "next available address" query.
 
-**WP-D4 · VLANs and VLAN groups** — M — depends: none
+**WP-D4 · VLANs and VLAN groups** — M — **DONE**
 VLANs, groups scoped to site/rack group/cluster, assignment to prefixes and
 interfaces. A VLAN is a reachability domain — give it an edge, not just a record.
 
-**WP-D5 · FHRP groups** — S — depends: D4 light
+**WP-D5 · FHRP groups** — S — **DONE**
 Shared virtual IP across devices. Small model, direct payoff: this *is* redundancy,
 and the reachability model already reports redundancy lost.
 
-**WP-D6 · ASNs, RIRs, aggregates** — S — depends: D2
+**WP-D6 · ASNs, RIRs, aggregates** — S — **DONE**
 Completes the IPAM hierarchy above prefixes. Parity item.
 
-**WP-D7 · L2VPN overlays** — M — depends: D4
+**WP-D7 · L2VPN overlays** — M — **DONE**
 Overlay modelling and terminations. Parity item; matters for service providers.
 
 **WP-D8 · L2 domains as reachability edges** — **CLOSED, will not build**
@@ -357,7 +376,7 @@ a real hole: dr-bergen had a switch, a firewall and no group at all, so the
 reach model did not cover the one site whose entire purpose is to still be
 reachable.*
 
-**WP-E2 · Clusters and cluster groups** — M — depends: A3
+**WP-E2 · Clusters and cluster groups** — M — **DONE**
 Cluster type, group, cluster, VM placement, VM type, virtual disks.
 
 Engine: HA semantics. Losing one host in a three-node cluster consults cluster

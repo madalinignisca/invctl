@@ -178,7 +178,16 @@ func (a *App) ClusterUpdate(w http.ResponseWriter, r *http.Request) {
 	updated.Kind = formValue(r, "kind")
 	updated.HAPolicy = formValue(r, "ha_policy")
 	nums := optionalNumbers(r)
-	updated.MinHosts = nums.opt("min_hosts")
+	// sub, not opt, and for the same reason as the two below it -- which is
+	// exactly why it was wrong for as long as it was: a form variant that does
+	// not carry the floor must not read as an operator withdrawing it.
+	//
+	// THIS ONE IS LOAD-BEARING TWICE OVER. min_hosts decides whether losing a
+	// host is survivable, which the impact engine branches on, AND it is the
+	// divisor the redundancy premium falls out of -- so silently clearing it
+	// makes a cluster look survivable and its capacity cheaper per unit in the
+	// same edit. Neither shows up as an error anywhere.
+	updated.MinHosts = nums.sub("min_hosts", updated.MinHosts)
 	// sub-shaped for the same reason as the asset's capacity, through ratio:
 	// a form variant without the field must not silently drop the ratio and
 	// quietly re-read the cluster at a conservative 1:1.

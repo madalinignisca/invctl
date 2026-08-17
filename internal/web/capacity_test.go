@@ -521,3 +521,69 @@ func TestARackIsNotOfferedAPlaceToPutFilesystems(t *testing.T) {
 		t.Error("a workload is no longer offered a storage claim either")
 	}
 }
+
+// TestTheSurvivorFloorSurvivesAFormThatDoesNotMentionIt.
+//
+// min_hosts is load-bearing twice over: it decides whether losing a host is
+// survivable, which the IMPACT ENGINE branches on, and it is the divisor the
+// redundancy premium falls out of. Clearing it silently makes a cluster look
+// survivable and its capacity cheaper per unit in the same edit, and neither
+// shows up as an error anywhere.
+//
+// Its two neighbours on the same form — the overcommit ratio and the cost split
+// — were given this protection when they were added. This one predates them and
+// did not get it.
+func TestTheSurvivorFloorSurvivesAFormThatDoesNotMentionIt(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+	id := firstClusterID(t, body(t, h.get("/clusters", false)))
+
+	base := func(extra url.Values) url.Values {
+		v := url.Values{
+			"csrf_token": {h.csrfToken("/clusters/" + id)},
+			"name":       {"prod-virt"}, "kind": {"proxmox"}, "ha_policy": {"restart"},
+		}
+		for k, vals := range extra {
+			v[k] = vals
+		}
+		return v
+	}
+
+	resp := h.post("/clusters/"+id, base(url.Values{"min_hosts": {"2"}}), false)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("declaring a floor returned %d", resp.StatusCode)
+	}
+	if page := body(t, h.get("/clusters/"+id, false)); !strings.Contains(page, `value="2"`) {
+		t.Fatal("the declared floor does not come back on the form")
+	}
+
+	// A correction that never mentions the floor.
+	resp = h.post("/clusters/"+id, base(nil), false)
+	resp.Body.Close()
+	if page := body(t, h.get("/clusters/"+id, false)); !strings.Contains(page, `value="2"`) {
+		t.Error("an edit that never mentioned the survivor floor withdrew it, " +
+			"which makes the cluster look survivable and its capacity cheaper " +
+			"per unit at the same time")
+	}
+}
+
+// TestAFloorThatIsNotANumberIsRefused. The other half, and it is already
+// handled — the messages check added with the overcommit ratio covers every
+// number on this form. Asserted so it stays covered.
+func TestAFloorThatIsNotANumberIsRefused(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+	id := firstClusterID(t, body(t, h.get("/clusters", false)))
+
+	resp := h.post("/clusters/"+id, url.Values{
+		"csrf_token": {h.csrfToken("/clusters/" + id)},
+		"name":       {"prod-virt"}, "kind": {"proxmox"}, "ha_policy": {"restart"},
+		"min_hosts": {"two"},
+	}, false)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Errorf("a floor of \"two\" returned %d, want 422 -- a number that "+
+			"quietly became nothing takes survivability with it", resp.StatusCode)
+	}
+}
