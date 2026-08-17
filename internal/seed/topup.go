@@ -129,6 +129,22 @@ func (b *builder) hydrate() error {
 		b.refs.Assets[a.Name] = a.ID
 	}
 
+	// PROJECTS, AND THIS WAS MISSING FOR TWO RELEASES' WORTH OF PHASES.
+	// b.refs.Projects starts empty on a top-up, so every phase that resolves a
+	// project id -- what an engagement was priced for, who shares a machine --
+	// looked up nothing, found nothing, and returned without writing or
+	// failing. Both were written to skip an estate that does not contain the
+	// thing they name, which is right for a partial deployment and indis-
+	// tinguishable from this. Found by deploying: the columns were still NULL
+	// on a live estate that had been topped up.
+	projects, err := b.store.ListProjects(b.ctx, store.ProjectFilter{})
+	if err != nil {
+		return fmt.Errorf("projects: %w", err)
+	}
+	for _, p := range projects {
+		b.refs.Projects[p.Code] = p.ID
+	}
+
 	teams, err := b.store.TeamOptions(b.ctx)
 	if err != nil {
 		return fmt.Errorf("teams: %w", err)

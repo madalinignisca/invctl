@@ -354,3 +354,87 @@ func TestATopUpDoesNotResurrectWhatItRetired(t *testing.T) {
 		}
 	})
 }
+
+// TestATopUpCanResolveEveryRefItsPhasesRead.
+//
+// WRITTEN AFTER A DEPLOY FOUND IT. b.refs.Projects starts empty on a top-up and
+// hydrate did not fill it, so every phase resolving a project id -- what an
+// engagement was priced for (WP-J7), who shares a machine (WP-J5) -- looked up
+// nothing and returned without writing or failing. Both are deliberately
+// written to skip an estate that does not contain what they name, which is
+// right for a partial deployment and indistinguishable from this.
+//
+// So the assertion is on the OUTCOME rather than on the map: a top-up must
+// leave the estate saying the same things a full seed does. Checking that
+// hydrate populates one more map would pass the day somebody adds a phase
+// reading a different one.
+func TestATopUpCanResolveEveryRefItsPhasesRead(t *testing.T) {
+	seed.CompanyEstate = true
+	t.Cleanup(func() { seed.CompanyEstate = false })
+
+	eachEngine(t, func(t *testing.T, f *fixture) {
+		// AN ESTATE THAT PREDATES THE PHASES, which is the only state that
+		// reproduces this. Topping up an already-complete fixture proves
+		// nothing: the declarations are already there, so a top-up that
+		// resolved no project at all still passes. Clearing them first is what
+		// makes the top-up do the work a real upgrade asks of it.
+		projectsBefore, err := f.store.ListProjects(f.ctx, store.ProjectFilter{})
+		if err != nil {
+			t.Fatalf("listing projects: %v", err)
+		}
+		for _, row := range projectsBefore {
+			p := row.Project
+			p.PricedForVCPU, p.PricedForMemoryMB = nil, nil
+			if err := f.store.UpdateProject(f.ctx, seed.Actor, &p); err != nil {
+				t.Fatalf("clearing priced-for: %v", err)
+			}
+		}
+		assetsBefore, err := f.store.ListAssets(f.ctx, store.AssetFilter{})
+		if err != nil {
+			t.Fatalf("listing assets: %v", err)
+		}
+		for _, a := range assetsBefore {
+			if err := f.store.SetOccupants(f.ctx, seed.Actor, a.ID, nil); err != nil {
+				t.Fatalf("clearing occupancy: %v", err)
+			}
+		}
+
+		if _, err := seed.TopUp(f.ctx, f.store); err != nil {
+			t.Fatalf("topping up: %v", err)
+		}
+
+		projects, err := f.store.ListProjects(f.ctx, store.ProjectFilter{})
+		if err != nil {
+			t.Fatalf("listing projects: %v", err)
+		}
+		priced := 0
+		for _, p := range projects {
+			if p.PricedForVCPU != nil {
+				priced++
+			}
+		}
+		if priced == 0 {
+			t.Error("after a top-up no project records what it was priced for, " +
+				"so a phase that resolves a project id silently did nothing")
+		}
+
+		shared := 0
+		assets, err := f.store.ListAssets(f.ctx, store.AssetFilter{})
+		if err != nil {
+			t.Fatalf("listing assets: %v", err)
+		}
+		for _, a := range assets {
+			occ, err := f.store.OccupancyFor(f.ctx, a.ID)
+			if err != nil {
+				t.Fatalf("reading occupancy: %v", err)
+			}
+			if occ.Shared() {
+				shared++
+			}
+		}
+		if shared == 0 {
+			t.Error("after a top-up no machine is declared as shared, so the " +
+				"occupancy phase silently did nothing")
+		}
+	})
+}
