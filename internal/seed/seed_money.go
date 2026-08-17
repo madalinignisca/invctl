@@ -178,18 +178,22 @@ func (b *builder) computeCapacity() {
 	// premium something to demonstrate.
 	for _, c := range []struct {
 		name       string
+		anchorHost string
 		overcommit int
 		minHosts   int
 		splitCPU   int
 	}{
 		// 60/40 towards CPU: an ordinary judgement for a general-purpose
 		// virtualisation cluster, and the point is that somebody made it.
-		{"prod-virt", 300, 0, 60},
+		// hv-01 anchors it: see declareClusterCapacity for why a name is not
+		// enough.
+		{"prod-virt", "hv-01", 300, 0, 60},
 		// dev-hetzner declares NO split, so the estate demonstrates a cluster
 		// whose cost cannot be divided and says so.
-		{"dev-hetzner", 400, 1, 0},
+		{"dev-hetzner", "srv-hz-1", 400, 1, 0},
 	} {
-		if err := b.declareClusterCapacity(c.name, c.overcommit, c.minHosts, c.splitCPU); err != nil {
+		if err := b.declareClusterCapacity(c.name, c.anchorHost, c.overcommit,
+			c.minHosts, c.splitCPU); err != nil {
 			b.fail(err)
 			return
 		}
@@ -241,7 +245,7 @@ func sameInt(a, b *int) bool {
 
 // declareClusterCapacity records the overcommit ratio and, when given, how many
 // hosts must survive.
-func (b *builder) declareClusterCapacity(name string, overcommit, minHosts, splitCPU int) error {
+func (b *builder) declareClusterCapacity(name, anchorHost string, overcommit, minHosts, splitCPU int) error {
 	// Looked up by name rather than from Refs, which carries no cluster map:
 	// the phase runs after the clusters exist and this is a handful of rows.
 	all, err := b.store.ListClusters(b.ctx)
@@ -255,8 +259,42 @@ func (b *builder) declareClusterCapacity(name string, overcommit, minHosts, spli
 			break
 		}
 	}
+
+	// FALLING BACK TO THE HOST IT WAS MEANT TO DESCRIBE, because a name is the
+	// least stable thing about a cluster and this fixture has already renamed
+	// one. A demo seeded years ago carries `prod-pve`; today's fixture builds
+	// `prod-virt`; the top-up never creates clusters, so the old name is
+	// permanent. Matching on the anchor host asks the question that actually
+	// matters -- "the cluster the production hypervisors are in" -- and that is
+	// true whatever the local name is.
+	//
+	// It cannot be repaired by creating the missing cluster instead: a host
+	// belongs to at most one, so `prod-virt` could only be added by taking
+	// hv-01 away from whatever already holds it.
+	if id == "" && anchorHost != "" {
+		hostID, ok := b.refs.Assets[anchorHost]
+		if ok {
+			for _, row := range all {
+				hosts, err := b.store.ListClusterHosts(b.ctx, row.ID)
+				if err != nil {
+					return fmt.Errorf("reading hosts of %s: %w", row.Name, err)
+				}
+				for _, h := range hosts {
+					if h.AssetID == hostID {
+						id = row.ID
+						break
+					}
+				}
+				if id != "" {
+					break
+				}
+			}
+		}
+	}
 	if id == "" {
-		return nil // a deployment without this cluster
+		b.skip("no cluster named %s and none holding %s, so its capacity is undeclared",
+			name, anchorHost)
+		return nil
 	}
 	c, err := b.store.GetCluster(b.ctx, id)
 	if err != nil {

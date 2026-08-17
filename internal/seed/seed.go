@@ -19,6 +19,7 @@ package seed
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/madalinignisca/invctl/internal/domain"
@@ -61,6 +62,8 @@ type builder struct {
 	now   time.Time
 	refs  *Refs
 	err   error
+	// skipped are phases that found nothing of theirs in the estate. See skip.
+	skipped []string
 
 	// topUp makes the creators skip what a hydrated database already holds, so
 	// a phase can be re-run against a live estate instead of only an empty one.
@@ -174,6 +177,12 @@ func Load(ctx context.Context, s *store.SQLStore) (*Refs, error) {
 	if b.err != nil {
 		return nil, b.err
 	}
+	// Phases that found nothing of theirs. Logged rather than returned: they are
+	// not failures, and a caller that had to handle them would mostly ignore
+	// them. What matters is that they stop being invisible.
+	for _, note := range b.skipped {
+		slog.Warn("seed phase skipped", "reason", note)
+	}
 	return b.refs, nil
 }
 
@@ -185,6 +194,22 @@ func (b *builder) fail(err error) {
 }
 
 func (b *builder) ok() bool { return b.err == nil }
+
+// skip records a phase that found nothing to do, so a deployment can tell
+// "there was nothing to add" from "this fixture no longer fits your estate".
+//
+// WRITTEN BECAUSE A PHASE THAT SILENTLY DID NOTHING WAS INDISTINGUISHABLE FROM
+// ONE THAT SUCCEEDED. Every phase here is deliberately written to skip an estate
+// that does not contain what it names -- right for a partial deployment, and
+// the exact behaviour that let the capacity phase quietly declare nothing on a
+// long-lived demo whose clusters had been renamed years earlier. Nothing failed,
+// nothing was logged, and the estate simply stayed undeclared.
+//
+// Not an error: skipping is usually correct. It is a line in the log, which is
+// all it takes to turn "no output" into a fact somebody can act on.
+func (b *builder) skip(format string, args ...any) {
+	b.skipped = append(b.skipped, fmt.Sprintf(format, args...))
+}
 
 // ---------- environments ----------
 

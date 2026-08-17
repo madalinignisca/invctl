@@ -438,3 +438,66 @@ func TestATopUpCanResolveEveryRefItsPhasesRead(t *testing.T) {
 		}
 	})
 }
+
+// TestTheCapacityPhaseFindsItsClusterAfterARename.
+//
+// A DEPLOYMENT OUTLIVES THE FIXTURE'S NAMES. The public demo was seeded when
+// this fixture's production cluster was called `prod-pve`; it is called
+// `prod-virt` today, and the top-up never creates clusters — a host belongs to
+// at most one, so `prod-virt` could only be added by taking hv-01 away from
+// whatever already holds it. The old name is therefore permanent on that estate.
+//
+// Matching on the anchor host asks the question that actually matters: not "is
+// there a cluster called prod-virt" but "which cluster are the production
+// hypervisors in". The symptom this fixes is a silent one — the demo ran a
+// successful top-up and declared no capacity at all, and nothing said so.
+func TestTheCapacityPhaseFindsItsClusterAfterARename(t *testing.T) {
+	seed.CompanyEstate = true
+	t.Cleanup(func() { seed.CompanyEstate = false })
+
+	eachEngine(t, func(t *testing.T, f *fixture) {
+		clusters, err := f.store.ListClusters(f.ctx)
+		if err != nil {
+			t.Fatalf("listing clusters: %v", err)
+		}
+		targetID := ""
+		for _, row := range clusters {
+			if row.Name == "prod-virt" {
+				targetID = row.ID
+			}
+		}
+		if targetID == "" {
+			t.Fatal("the fixture no longer builds prod-virt; update this test")
+		}
+		target, err := f.store.GetCluster(f.ctx, targetID)
+		if err != nil {
+			t.Fatalf("reading the cluster: %v", err)
+		}
+
+		// Rename it the way a long-lived deployment has it, and undeclare the
+		// capacity so the top-up has work to do.
+		renamed := *target
+		renamed.Name = "prod-pve"
+		renamed.CPUOvercommit, renamed.CostSplitCPU = nil, nil
+		if err := f.store.UpdateCluster(f.ctx, seed.Actor, &renamed); err != nil {
+			t.Fatalf("renaming: %v", err)
+		}
+
+		if _, err := seed.TopUp(f.ctx, f.store); err != nil {
+			t.Fatalf("topping up: %v", err)
+		}
+
+		after, err := f.store.GetCluster(f.ctx, targetID)
+		if err != nil {
+			t.Fatalf("re-reading: %v", err)
+		}
+		if after.CPUOvercommit == nil {
+			t.Error("the capacity phase found no cluster to declare on after a " +
+				"rename, so a long-lived estate stays undeclared and says nothing")
+		}
+		if after.CostSplitCPU == nil {
+			t.Error("the cost split was not declared, so that cluster's money " +
+				"is not divided at all")
+		}
+	})
+}

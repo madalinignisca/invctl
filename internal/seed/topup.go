@@ -11,6 +11,7 @@ package seed
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/madalinignisca/invctl/internal/domain"
 	"github.com/madalinignisca/invctl/internal/store"
@@ -96,6 +97,12 @@ func TopUp(ctx context.Context, s *store.SQLStore) (*Refs, error) {
 
 	if b.err != nil {
 		return nil, b.err
+	}
+	// Phases that found nothing of theirs. Logged rather than returned: they are
+	// not failures, and a caller that had to handle them would mostly ignore
+	// them. What matters is that they stop being invisible.
+	for _, note := range b.skipped {
+		slog.Warn("seed phase skipped", "reason", note)
 	}
 	return b.refs, nil
 }
