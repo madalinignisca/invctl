@@ -34,6 +34,114 @@ footnote.
 
 ---
 
+## [0.5.0] — 2026-08-17
+
+**What the estate costs, and whose cost it is.** invctl could say what a rack
+was bought for and what a circuit is billed at. It could not say what a project
+costs, because nothing recorded how big a machine was or who was standing on it.
+This release models capacity, divides it between the projects that claim it, and
+divides the money the same way — with the judgements it rests on declared,
+audited and visible rather than assumed.
+
+**Nine migrations run on first start.** They add columns and tables; none drops
+or rewrites anything. On a real estate of 75 assets and 677 audit rows the
+upgrade preserved every count with `integrity_check ok` and no foreign-key
+violations — but **back up the database before starting the new binary anyway**,
+because that is the advice that costs nothing and the exception is the one you
+did not test.
+
+### Action required
+
+- **Two judgements have to be made, or two figures stay deliberately blank.**
+  Neither has a safe default, and inventing one is how a number nobody agreed
+  ends up in a board pack.
+
+  | | |
+  |---|---|
+  | `cluster.cost_split_cpu` | what proportion of a cluster's cost is attributable to CPU; memory takes the rest. **Until it is set, that cluster's money is not divided at all** and the page says why. One invoice buys cores and memory together and no arithmetic separates them — half and half is not cautious, it is arbitrary. |
+  | asset occupancy | who shares a machine, in whole percent. Until it is declared, a shared box's whole capacity lands on whichever project owns it — which is what happened before this release, so nothing changes until you say otherwise. |
+
+- **Every existing cost line was defaulted to `applies_to = universal`**, which
+  is what the arithmetic implicitly assumed before the column existed and is
+  genuinely right for hardware, power and rack space. It is **not** right for a
+  licence only some guests benefit from, and nothing here can detect which lines
+  those are. **Scope is unreviewed on every pre-existing line until a person
+  looks at it.** A licence spread across guests that derive nothing from it
+  makes every other workload subsidise them — and the total stays correct, so
+  nothing prompts anybody to check.
+
+- **The capacity figures start empty and say so.** A cluster with no recorded
+  host sizes reports that its totals are a floor, not a total. Nothing is
+  guessed from observed load: a quiet cluster would raise its own apparent safe
+  ratio and licence exactly the overcommitment the findings exist to catch.
+
+### Added
+
+- **Capacity.** Hosts carry cores and memory; workloads carry what they were
+  **provisioned** (the hard limit) and what they were **allocated** (the figure
+  money is computed on). The two routinely differ, and the gap between them is a
+  decision somebody made without pricing it. Clusters carry a declared CPU
+  overcommit ratio, written the way it is spoken — `3`, or `1.5`.
+
+- **Storage as a dimension.** A pool is an asset with a raw capacity and a
+  redundancy kind; usable capacity is derived, never typed. Ceph at three-times
+  replication turns 30 TB raw into 10 TB usable, and the pool page says what the
+  other two thirds bought. A workload's claim is recorded per pool, because a
+  machine holds its system disk on fast media and its backups on bulk, and those
+  are different products at different prices.
+
+- **Who holds a cluster, per dimension.** One project is routinely a different
+  percentage of CPU than of memory than of each storage pool — on the demo
+  estate, 12.50% / 15.63% / 8.79% / 5.63%. There is no single "project share"
+  and the report does not offer one: a blended figure would hide which dimension
+  binds, which is the only thing a capacity conversation is about. Idle capacity
+  is its own slice, because somebody is paying for the headroom.
+
+- **What that share costs.** Cluster cost divided by usable capacity, with the
+  availability premium falling out of `min_hosts` rather than a hand-kept
+  multiplier. Run rate and amortised capital stay apart the whole way through.
+  Slices sum to the invoice exactly — including the idle one.
+
+- **Cost scoping.** A cost line declares who benefits: **universal** across the
+  whole capacity, **conditional** across named guests in proportion to what they
+  hold, or **per-consumer** across them equally per head — because a per-VM
+  backup licence costs the same for a 64 GB machine as for a 2 GB one. A scoped
+  line naming nobody is reported and attributed to nobody, never quietly spread.
+
+- **Shared occupancy.** Several tenants in one machine, each with a declared
+  percentage. A total that is not 100 is a finding and the remainder is
+  attributed to nobody — normalising 90 up to 100 would inflate every declared
+  share by a ninth with nothing on any page to notice.
+
+- **Five capacity findings**, needing no money at all: a project grown past what
+  it was priced for (the margin is eroding, nobody is in breach), a cluster
+  promising more than it can serve, **more capacity priced across engagements
+  than the estate can host** — which no utilisation dashboard can produce,
+  because utilisation measures what is taken and this measures what could be
+  claimed — plus unmeasured hosts and unattributed workloads.
+
+- **Replacement lineage and price movement.** What a box took over from, so a
+  refresh can be priced against what it succeeded; and how each cost kind has
+  moved over time, against a recorded inflation series, so "up 23%" becomes a
+  real rise or a nominal one.
+
+- **Circuits belong to projects.** A circuit carries a monthly rate and an
+  install fee, and nothing said which project it served — so every project
+  depending on connectivity reported less than it cost.
+
+### Changed
+
+- **A project's cost rollup now reaches its circuits.** Totals that were
+  previously too low by the price of connectivity will rise.
+
+- **The cost report moved** to its own file and gained what it could not see:
+  the count of things in a footprint carrying no cost line at all. A total over
+  three priced assets in a footprint of forty is a sample, not a budget.
+
+[0.5.0]: https://github.com/madalinignisca/invctl/releases/tag/v0.5.0
+
+---
+
 ## [0.4.1] — 2026-08-14
 
 **A security release, and the only one so far.** No feature changes, no
