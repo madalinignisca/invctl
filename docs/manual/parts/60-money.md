@@ -18,7 +18,7 @@ A cost line is attached to whatever the invoice names — an asset, a service, a
 project, or a circuit. It is not attached to what you wish the invoice had
 named, and that is why the totals reconcile.
 
-![The cost panel on a hypervisor. Three figures across the top — CAPITAL, ONCE €8,400.00; PER MONTH €770.00; PER YEAR €9,240.00 — followed by a sentence saying that spreading the capital adds €240.00 a month, so the real monthly cost of ownership is €1,010.00. Below, a table of lines: a yearly licence of €7,800.00 tagged BY SIZE with checkboxes for vm-app-1, vm-db-1 and vm-vault-1; an acquisition of €8,400.00 once; a €500.00 yearly subscription; a €940.00 yearly support contract.](../img/money-1-asset-cost.png)
+![The cost panel on a hypervisor. Three figures across the top — CAPITAL, ONCE €8,400.00; PER MONTH €770.00; PER YEAR €9,240.00 — followed by a sentence saying that spreading the capital adds €240.00 a month, so the real monthly cost of ownership is €1,010.00. Below, a table of lines: a yearly licence of €7,800.00 tagged BY SIZE with checkboxes for vm-app-1, vm-db-1 and vm-vault-1; an acquisition of €8,400.00 once; a €500.00 yearly subscription; a €940.00 yearly support contract. Each line names who invoices it, and the add form carries a "Who invoices it" picker alongside "Who benefits".](../img/money-1-asset-cost.png)
 
 **A one-off is never folded into a run rate.** €8,400 spent once is not €700 a
 month, and a page that quietly averaged it would make a five-year-old server
@@ -80,6 +80,40 @@ figures for your currency and invents none.
 Editing a line instead of repricing it is still there and still right — for
 correcting a number that was wrong when it was typed. The distinction is whether
 the old figure was *true then*: if it was, reprice; if it never was, correct it.
+
+### Which suppliers raise prices beyond inflation
+
+The price-movement panel answers that for one thing. **Reports → Suppliers**
+answers it for the estate, by asking who invoiced each line.
+
+![The supplier report. A warning panel reads "What this ranking does not cover — 85 cost line(s) name no supplier, worth €11,197.67 a month." Below, a table headed "Worst first": Nordic IT Partner at €3,020.00 a month across 10 lines, 1 moved, 23% nominal and 21% real, tagged BEYOND INFLATION; then GlobalConnect, Nordvind Fiber, Telenor, Altibox, Hetzner Online and Scaleway, each reading "steady" with a dash for real.](../img/money-7-suppliers.png)
+
+Set the supplier on a cost line — the *"who invoices it"* picker, on any asset,
+service, project or circuit — and it appears here.
+
+**The supplier is on the line, not on the box.** One server routinely carries
+hardware bought from a reseller, support from the manufacturer and a licence
+from a third party: three suppliers, three price histories, one asset. `vendor`
+on an asset says who made or sold it, which is a different question and is not
+what this report reads.
+
+Three things about the figures:
+
+- **Movement is weighted by what each line costs.** A €40 line that doubled
+  beside a €4,000 line up 2% is a 2% rise, not 26%. An unweighted average hands
+  you a grievance built out of a rounding error on a small invoice, which is
+  the opposite of what a decision to leave a supplier needs.
+- **"Steady" is not 0%.** A supplier whose lines have never been repriced has no
+  movement to judge, which is a different fact from one whose prices held. The
+  dash in the real column says the same thing.
+- **A price history that changed hands is excluded**, and counted separately. If
+  you moved a contract to a new reseller and the figure jumped, that is a switch
+  — not the new supplier raising its price. Crediting it to them would
+  manufacture the very accusation this report exists to test.
+
+And the line at the top is the one that keeps the rest honest: **what it could
+not rank.** A ranking over part of the book reads exactly like a ranking over
+all of it.
 
 ## How big things are
 

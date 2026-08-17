@@ -62,6 +62,11 @@ renewal, so the page carries the same reprice action and price-movement panel an
 asset has: the old figure is closed rather than overwritten, and the rise is
 shown against inflation as well as in cash. See **Money** for how that reads.
 
+Each cost line also names **who invoices it**, which for a circuit is normally
+the provider already at the top of the page — but not always, since transit is
+sometimes billed through a reseller. Naming it is what puts the circuit into the
+supplier ranking; see **Money**.
+
 **A circuit can belong to a project, and the link is made from the project's
 page rather than this one** — the circuit page says nothing about it. Until the
 link exists, the connectivity a project depends on costs it nothing on paper,
