@@ -241,3 +241,46 @@ fragments:
       - "an asset whose loss empties a VLAN or reduces a redundancy group"
       - "an asset whose loss changes NO service status but does change reachability (sw-core-1 in the seeded estate)"
     generated_at: 8cc0d28bcf9d
+
+  - id: money
+    title: Money — what it costs, and whose cost it is
+    file: parts/60-money.md
+    pages:
+      - /assets/{id}
+      - /clusters/{id}
+    screenshots:
+      - img/money-1-asset-cost.png
+      - img/money-2-shares.png
+      - img/money-3-cost.png
+      - img/money-4-pool.png
+      - img/money-5-shared.png
+      - img/money-6-movement.png
+    depends_on:
+      - internal/domain/cost.go
+      - internal/domain/capacity.go
+      - internal/domain/storage.go
+      - internal/domain/attribution.go
+      - internal/domain/occupancy.go
+      - internal/domain/inflation.go
+      - internal/store/reprice.go
+      - internal/store/price_movement.go
+      - internal/store/costs.go
+      - internal/store/capacity.go
+      - internal/store/storage.go
+      - internal/store/attribution.go
+      - internal/store/cost_attribution.go
+      - internal/store/occupancy.go
+      - internal/store/capacity_findings.go
+      - internal/web/handlers/costs.go
+      - web/templates/partials/costs.html
+      - web/templates/pages/cluster_detail.html
+      - web/templates/pages/asset_detail.html
+    preconditions:
+      - "one cluster with a DECLARED cost split, and one without — the manual turns on the difference between a divided cost and an honestly undivided one"
+      - "one cost line scoped conditional with its consumers named, on the host whose guests it covers: a licence on hv-01 may name only guests of hv-01, because the picker offers that host's workloads and saving it would drop anything else"
+      - "one storage pool with a replication kind, so usable and raw differ visibly"
+      - "one workload with a declared occupancy that does NOT total 100, so the remainder is shown reaching nobody"
+      - "a project allocated above what it was priced for, so the commercial finding appears"
+      - "one cost line repriced at least twice, with an inflation series covering those years, so nominal and real movement differ visibly"
+    generated_at: cff491ab0b0c
+

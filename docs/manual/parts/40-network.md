@@ -57,6 +57,18 @@ windows. A one-off install fee is spread to the **contract end**, because a
 circuit has no end-of-support — it has a contract, and a fee spread over
 anything else is a made-up number.
 
+A circuit's monthly rate is also the thing most likely to be **repriced** at
+renewal, so the page carries the same reprice action and price-movement panel an
+asset has: the old figure is closed rather than overwritten, and the rise is
+shown against inflation as well as in cash. See **Money** for how that reads.
+
+**A circuit can belong to a project, and the link is made from the project's
+page rather than this one** — the circuit page says nothing about it. Until the
+link exists, the connectivity a project depends on costs it nothing on paper,
+and every project leaning on a transit circuit reports less than it costs.
+`owns` puts the rate in one project's total; `uses` is the ordinary relation
+here, because one circuit commonly serves everything in a rack.
+
 ## If the fibre is cut
 
 A circuit's page has **Simulate cutting this**. It is a different question from

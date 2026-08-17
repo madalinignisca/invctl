@@ -496,3 +496,28 @@ func TestAConsumerPickerOffersOnlyThingsThatRunSoftware(t *testing.T) {
 			"and can hold no licence")
 	}
 }
+
+// TestARackIsNotOfferedAPlaceToPutFilesystems.
+//
+// The "storage held" panel rendered on every asset the moment any pool existed
+// in the estate, so a rack was invited to claim gigabytes in a Ceph pool. Found
+// by opening a rack page while writing the manual, which is what capturing a
+// manual is for.
+func TestARackIsNotOfferedAPlaceToPutFilesystems(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	rack := h.refs.Assets["rack-a1"]
+	if rack == "" {
+		t.Fatal("the fixture has no rack, so this proves nothing")
+	}
+	if page := body(t, h.get("/assets/"+rack, false)); strings.Contains(page, "Storage held") {
+		t.Error("a rack is offered a storage claim; it holds boxes, not filesystems")
+	}
+	// And the panel is still there for something that can carry a workload,
+	// or this assertion would pass by hiding it everywhere.
+	vm := h.refs.Assets["vm-app-1"]
+	if page := body(t, h.get("/assets/"+vm, false)); !strings.Contains(page, "Storage held") {
+		t.Error("a workload is no longer offered a storage claim either")
+	}
+}

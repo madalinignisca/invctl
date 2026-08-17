@@ -527,8 +527,12 @@ func (b *builder) storagePools() {
 // the cluster and every other workload subsidises them, while the total stays
 // right and nothing prompts a reader to look.
 //
-// The two database VMs are the consumers. They are the obvious case and also
-// the honest one: this is what such a licence actually covers.
+// ONLY THE GUESTS OF THE HOST IT IS ATTACHED TO. A per-core licence is bought
+// for a machine and grants unlimited guests ON THAT MACHINE, so naming a guest
+// of a different hypervisor would be wrong twice over: wrong about what the
+// licence covers, and unreachable from the form, which offers this host's
+// workloads. Saving that form would then silently drop the off-host consumer.
+// The first version named both database guests and one of them lives on hv-02.
 func (b *builder) conditionalLicence() {
 	if !b.ok() {
 		return
@@ -580,7 +584,7 @@ func (b *builder) conditionalLicence() {
 	}
 
 	consumers := []string{}
-	for _, name := range []string{"vm-db-1", "vm-db-2"} {
+	for _, name := range []string{"vm-db-1"} {
 		if id, ok := b.refs.Assets[name]; ok {
 			consumers = append(consumers, id)
 		}

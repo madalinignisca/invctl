@@ -2,7 +2,8 @@
 
 > Covers: `/assets`, `/assets/{id}`, `/catalogue`, `/power`, `/clusters`, `/clusters/{id}`
 > Regenerated when: the asset model, the hardware catalogue, the power chain or
-> the cluster model changes.
+> the cluster model changes. Capacity, cost and shared tenancy are covered in
+> **Money**, which owns those panels.
 
 Everything physical, and the things that decide what losing it costs.
 
@@ -157,6 +158,24 @@ with no members, as `dev-pve` does in the screenshot. That is deliberate rather
 than an oversight: the cluster is something a person declared, and only a person
 withdraws it. An empty one is worth seeing — it is either a migration nobody
 finished tidying up or a name about to be reused.
+
+### How big it is, and who is standing on it
+
+The same form carries two more declarations, and both are judgements rather than
+readings: a **CPU overcommit ratio** — written as it is spoken, `3` or `1.5` —
+and a **cost split**, the proportion of the cluster's cost attributable to CPU
+rather than memory.
+
+Below the membership, the page then answers three questions the estate could not
+answer before: what this cluster can carry, who holds what share of it, and what
+that share costs. Those panels have their own section — see **Money** — because
+the arithmetic behind them is worth reading once rather than explaining twice.
+
+One thing belongs here rather than there. **The capacity figures say what they
+could not see.** A cluster with three hosts of which one has no recorded size
+does not report the capacity of two; it reports a floor, and says so. An estate
+that has measured nothing must be able to say it knows nothing, or every figure
+built on it is a guess with a decimal point.
 
 ## Power
 

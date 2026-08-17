@@ -442,7 +442,11 @@
 </div>
 {{end}}
 
-{{if .Pools}}
+{{/* Only things that can carry a workload. A rack holds boxes, not
+     filesystems, and offering it a claim on a pool is an invitation to a row
+     that means nothing -- the same rule the capacity fields and the consumer
+     picker already follow. */}}
+{{if and .Pools .Asset.CanHostInstances}}
 <div class="panel">
   <div class="panel-head">
     <h2>Storage held</h2>
