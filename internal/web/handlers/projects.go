@@ -58,8 +58,10 @@ type projectListPage struct {
 
 type projectPage struct {
 	Base
-	Errors  map[string]string
-	Project *store.ProjectRow
+	// Suppliers, for the "who invoices it" picker on each cost line (WP-J6).
+	Providers []store.ProviderRow
+	Errors    map[string]string
+	Project   *store.ProjectRow
 	// Edit is the whole-project form, present only when the operator asked for
 	// it with ?edit=<the project's own id>.
 	Edit       *projectEditForm
@@ -259,7 +261,15 @@ func (a *App) renderProjectWith(w http.ResponseWriter, r *http.Request, status i
 		}
 	}
 
+	// Suppliers for the cost picker (WP-J6).
+	providers, err := a.Store.ListProviders(r.Context())
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
+
 	a.Render.Respond(w, r, status, "project_detail", "project_panel", projectPage{
+		Providers:   providers,
 		Base:        base,
 		Edit:        edit,
 		Teams:       teams,

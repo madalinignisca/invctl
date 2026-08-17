@@ -50,6 +50,7 @@ func (b *builder) companyMoney() {
 	b.storagePools()
 	b.conditionalLicence()
 	b.sharedTenancy()
+	b.attributeSuppliers()
 }
 
 // pricedFor records what two engagements were quoted on (WP-J7).
@@ -654,5 +655,142 @@ func (b *builder) sharedTenancy() {
 	}
 	if err := b.store.SetOccupants(b.ctx, Actor, assetID, occupants); err != nil {
 		b.fail(fmt.Errorf("declaring shared tenancy: %w", err))
+	}
+}
+
+// attributeSuppliers records who invoices the estate's cost lines (WP-J6).
+//
+// WITHOUT THIS THE SUPPLIER REPORT RANKS NOTHING. The fixture priced everything
+// and named nobody, so the CEO's third question -- which suppliers raise prices
+// beyond inflation -- had a whole engine behind it and an empty table in front.
+// Fifth time this fixture has needed that sentence.
+//
+// DELIBERATELY NOT EXHAUSTIVE. Several lines are left unattributed on purpose,
+// because the report's honesty depends on saying what it could not rank, and an
+// estate where every line names a supplier cannot demonstrate that. A reader who
+// only ever sees a complete ranking will read every ranking as complete.
+func (b *builder) attributeSuppliers() {
+	if !b.ok() {
+		return
+	}
+
+	// The suppliers the estate buys from, beyond the telcos the circuits
+	// already named. A reseller and two hosting companies -- and the reseller is
+	// the one whose renewals the report is meant to catch.
+	suppliers := []struct{ name, account string }{
+		{"Nordic IT Partner", "NIP-77120"},
+		{"Hetzner Online", "HZ-4410932"},
+		{"Scaleway", "SCW-88213"},
+	}
+	ids := map[string]string{}
+	existing, err := b.store.ListProviders(b.ctx)
+	if err != nil {
+		b.fail(fmt.Errorf("listing suppliers: %w", err))
+		return
+	}
+	for _, row := range existing {
+		ids[row.Name] = row.ID
+	}
+	for _, sup := range suppliers {
+		if _, ok := ids[sup.name]; ok {
+			continue // already seeded, so a top-up neither rewrites nor duplicates
+		}
+		p, err := domain.NewProvider(store.NewID(), sup.name)
+		if err != nil {
+			b.fail(fmt.Errorf("building supplier %s: %w", sup.name, err))
+			return
+		}
+		p.AccountRef = str(sup.account)
+		if err := b.store.CreateProvider(b.ctx, Actor, p); err != nil {
+			b.fail(fmt.Errorf("seeding supplier %s: %w", sup.name, err))
+			return
+		}
+		ids[sup.name] = p.ID
+	}
+
+	// Who invoices what. The colo rack is the interesting one: its rent has been
+	// repriced twice (see coloRentRenewals), so the reseller carries a real
+	// movement to judge against inflation rather than a single figure.
+	attribution := []struct{ asset, supplier string }{
+		{"colo-rack-07", "Nordic IT Partner"},
+		{"hv-01", "Nordic IT Partner"},
+		{"hv-02", "Nordic IT Partner"},
+		{"srv-hz-1", "Hetzner Online"},
+		{"srv-hz-2", "Hetzner Online"},
+		{"vps-stg-1", "Scaleway"},
+		{"vps-ci-1", "Scaleway"},
+		// hv-03, the switches and the firewalls are LEFT UNATTRIBUTED on
+		// purpose. See the doc comment.
+	}
+	b.attributeCircuitCosts(ids)
+	for _, a := range attribution {
+		assetID, ok := b.refs.Assets[a.asset]
+		if !ok {
+			continue // a deployment without this layer
+		}
+		supplierID, ok := ids[a.supplier]
+		if !ok {
+			continue
+		}
+		lines, err := b.store.ListAssetCosts(b.ctx, assetID)
+		if err != nil {
+			b.fail(fmt.Errorf("reading costs of %s: %w", a.asset, err))
+			return
+		}
+		for i := range lines {
+			if lines[i].Lifecycle == domain.LifecycleRetired {
+				continue
+			}
+			if lines[i].ProviderID != nil {
+				continue // already attributed
+			}
+			c := lines[i].Cost
+			c.ProviderID = &supplierID
+			if err := b.store.UpdateAssetCost(b.ctx, Actor, &c); err != nil {
+				b.fail(fmt.Errorf("attributing %s: %w", a.asset, err))
+				return
+			}
+		}
+	}
+}
+
+// attributeCircuitCosts hands each circuit's cost lines to the telco that
+// provides it.
+//
+// THE ONE ATTRIBUTION THAT NEEDS NO JUDGEMENT. A circuit already names its
+// provider, and the invoice for that circuit comes from them -- so leaving those
+// lines unattributed would be withholding a fact the estate already holds. It is
+// also the case that makes the report's meaning clear: the telcos appear beside
+// the resellers, because a supplier is a supplier however different the product.
+func (b *builder) attributeCircuitCosts(ids map[string]string) {
+	if !b.ok() {
+		return
+	}
+	circuits, err := b.store.ListCircuits(b.ctx)
+	if err != nil {
+		b.fail(fmt.Errorf("listing circuits: %w", err))
+		return
+	}
+	for _, ci := range circuits {
+		if ci.Lifecycle == domain.LifecycleRetired || ci.ProviderID == "" {
+			continue
+		}
+		lines, err := b.store.ListCircuitCosts(b.ctx, ci.ID)
+		if err != nil {
+			b.fail(fmt.Errorf("reading costs of circuit %s: %w", ci.CID, err))
+			return
+		}
+		for i := range lines {
+			if lines[i].Lifecycle == domain.LifecycleRetired || lines[i].ProviderID != nil {
+				continue
+			}
+			c := lines[i].Cost
+			provider := ci.ProviderID
+			c.ProviderID = &provider
+			if err := b.store.UpdateCircuitCost(b.ctx, Actor, &c); err != nil {
+				b.fail(fmt.Errorf("attributing circuit %s: %w", ci.CID, err))
+				return
+			}
+		}
 	}
 }

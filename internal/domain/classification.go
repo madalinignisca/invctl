@@ -362,6 +362,8 @@ var DeclaredColumns = map[string][]string{
 	// The fourth cost surface. Same obligation as the other three: somebody
 	// read an invoice and typed it, and the rollups are derived at read time.
 	"circuit_cost": {
+		// Who invoiced it (migration 00050). Declared: somebody read an invoice.
+		"provider_id",
 		"id", "circuit_id", "kind", "period", "amount_minor", "note",
 		"valid_from", "valid_until", "lifecycle", "created_at", "updated_at",
 		"row_version",
@@ -451,6 +453,8 @@ var DeclaredColumns = map[string][]string{
 	// nothing derives one -- the ROLLUPS are derived, and they are computed at
 	// read time and stored nowhere for exactly that reason.
 	"asset_cost": {
+		// Who invoiced it (migration 00050). Declared: somebody read an invoice.
+		"provider_id",
 		"id", "asset_id", "kind", "period", "amount_minor", "note",
 		"valid_from", "valid_until", "lifecycle", "created_at", "updated_at",
 		"row_version",
@@ -462,11 +466,15 @@ var DeclaredColumns = map[string][]string{
 		"applies_to",
 	},
 	"service_cost": {
+		// Who invoiced it (migration 00050). Declared: somebody read an invoice.
+		"provider_id",
 		"id", "service_id", "kind", "period", "amount_minor", "note",
 		"valid_from", "valid_until", "lifecycle", "created_at", "updated_at",
 		"row_version",
 	},
 	"project_cost": {
+		// Who invoiced it (migration 00050). Declared: somebody read an invoice.
+		"provider_id",
 		"id", "project_id", "kind", "period", "amount_minor", "note",
 		"valid_from", "valid_until", "lifecycle", "created_at", "updated_at",
 		"row_version",

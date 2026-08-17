@@ -120,6 +120,10 @@
                    re-rendering, so there is no editState to carry a stale token back.
                    The operator retypes from scratch either way. */}}
               <input type="hidden" name="row_version" value="{{.RowVersion}}">
+              <select form="cost-{{.ID}}" name="provider_id" aria-label="Who invoices it">
+                <option value="">— supplier not recorded —</option>
+                {{range $.Providers}}<option value="{{.ID}}" {{if eq .ID (deref $row.ProviderID)}}selected{{end}}>{{.Name}}</option>{{end}}
+              </select>
               {{if $.Scoped}}
               <select form="cost-{{.ID}}" name="applies_to" aria-label="Who benefits">
                 <option value="universal" {{if eq $row.AppliesTo "universal"}}selected{{end}}>everything here</option>
@@ -289,6 +293,19 @@
       </div>
     </div>
     {{end}}
+    {{/* Who invoices it (WP-J6). Offered on every cost table, because the
+         question "which suppliers raise prices" is asked across all four. */}}
+    <div class="field">
+      <label for="cost-supplier-{{.Slug}}">Who invoices it</label>
+      <select id="cost-supplier-{{.Slug}}" name="provider_id">
+        <option value="">— not recorded —</option>
+        {{range .Providers}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
+      </select>
+      <div class="field-hint">
+        Optional, and the <a href="/reports/suppliers">supplier report</a> counts
+        what it could not attribute rather than ranking over half the book.
+      </div>
+    </div>
     <div class="field">
       <label for="cost-note-{{.Slug}}">Note</label>
       <input id="cost-note-{{.Slug}}" type="text" name="note" placeholder="contract reference, what it covers">

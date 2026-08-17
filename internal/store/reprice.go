@@ -129,6 +129,17 @@ func (s *SQLStore) reprice(ctx context.Context, actor domain.Actor, t costTable,
 		AmountMinor: spec.NewAmountMinor, Note: spec.Note,
 		ValidFrom: spec.EffectiveFrom, Lifecycle: domain.LifecycleActive,
 		CreatedAt: now, UpdatedAt: now, RowVersion: 1,
+		// THE SUPPLIER CARRIES FORWARD, because a renewal is from the same
+		// supplier unless somebody says otherwise -- and if it does not, the
+		// series looks to WP-J6 like a line that changed hands, which is
+		// deliberately excluded from "did this supplier raise its prices".
+		// Every renewal would have been discounted from the report that exists
+		// to judge renewals.
+		ProviderID: before.ProviderID,
+		// So does the scope. A licence that covered three guests still covers
+		// them at the new price; losing it would silently return the line to
+		// universal and spread it over workloads that derive nothing from it.
+		AppliesTo: before.AppliesTo,
 	}
 	if err := opened.Validate(); err != nil {
 		return nil, err
@@ -151,10 +162,14 @@ func (s *SQLStore) reprice(ctx context.Context, actor domain.Actor, t costTable,
 		}
 		_, err = tx.exec(ctx, `
 			INSERT INTO `+t.name+` (id, `+t.column+`, kind, period, amount_minor, note,
-			                        valid_from, valid_until, lifecycle, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			opened.ID, ownerID, opened.Kind, opened.Period, opened.AmountMinor, opened.Note,
-			opened.ValidFrom, opened.ValidUntil, opened.Lifecycle, opened.CreatedAt, opened.UpdatedAt)
+			                        valid_from, valid_until, lifecycle, created_at, updated_at,
+			                        provider_id`+scopeColumn(t)+`)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?`+scopeValue(t)+`)`,
+			append([]any{
+				opened.ID, ownerID, opened.Kind, opened.Period, opened.AmountMinor, opened.Note,
+				opened.ValidFrom, opened.ValidUntil, opened.Lifecycle, opened.CreatedAt,
+				opened.UpdatedAt, opened.ProviderID,
+			}, scopeArg(t, opened.AppliesTo)...)...)
 		if err != nil {
 			return translateWriteErr(err, "opening the new cost line")
 		}
@@ -164,4 +179,29 @@ func (s *SQLStore) reprice(ctx context.Context, actor domain.Actor, t costTable,
 		return nil, err
 	}
 	return &opened, nil
+}
+
+// scopeColumn, scopeValue and scopeArg add applies_to to a statement only for
+// the one cost table that has it. Three tiny helpers rather than a second
+// INSERT: two statements that must stay in step is how one of them stops
+// carrying a column somebody added to the other.
+func scopeColumn(t costTable) string {
+	if t.scoped {
+		return ", applies_to"
+	}
+	return ""
+}
+
+func scopeValue(t costTable) string {
+	if t.scoped {
+		return ", ?"
+	}
+	return ""
+}
+
+func scopeArg(t costTable, appliesTo string) []any {
+	if t.scoped {
+		return []any{appliesTo}
+	}
+	return nil
 }

@@ -662,11 +662,32 @@ to nobody: normalising 90 up to 100 would inflate every declared share by a nint
 and leave nothing on any page to notice. The demo estate declares one machine at
 90% on purpose, so the discipline problem is visible and not only the arithmetic.
 
-**WP-J6 · Supplier as a dimension** — M — depends: J2
-Promotes `vendor` from free text on an asset to a real reference, so "which
-suppliers raise prices beyond inflation" can be asked across the estate rather
-than one item at a time. A migration over data typed by hand, which is why it is
-separate and later.
+**WP-J6 · Supplier as a dimension** — M — **DONE**
+Answers "which suppliers raise prices beyond inflation" across the estate rather
+than one item at a time.
+
+**The wording above was wrong and the code does not follow it.** It said to
+promote `asset.vendor` to a real reference, which attributes a support contract
+to whoever MADE the box. One server routinely carries hardware from a reseller,
+support from the manufacturer and a licence from a third party — three suppliers,
+three price histories, one asset. So the reference went on the **cost line**
+(migration `00050`), where the invoice actually is.
+
+`provider` was reused rather than a third organisation table added. It already
+carried `account_ref` and `portal_url` — precisely what you need to ring a
+supplier about a rise — and its meaning is widened from "telco" to "anybody who
+invoices us". A telco IS a supplier, and modelling it twice would mean "which
+supplier" had to union two tables to be answered honestly.
+
+Movement is **weighted by what each line costs**: a €40 line up 50% beside a
+€4,000 line up 2% is a 2% rise, not 26%. And a series whose supplier changed
+mid-history is counted separately and excluded, because a price that moved when
+the reseller changed is a switch rather than a supplier raising its price.
+
+**`asset.vendor` is untouched and still free text.** It answers a different
+question — who made or sold this box — and it still holds a mix of
+manufacturers, hosting companies and noise. Tidying it is its own job and is not
+pretended to here.
 
 ---
 

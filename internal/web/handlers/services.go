@@ -81,6 +81,8 @@ func (a *App) ServiceList(w http.ResponseWriter, r *http.Request) {
 
 type serviceDetailPage struct {
 	Base
+	// Suppliers, for the "who invoices it" picker on each cost line (WP-J6).
+	Providers    []store.ProviderRow
 	Service      *store.ServiceRow
 	Certificates []store.DeployedCertificate
 	Costs        []store.CostRow
@@ -273,7 +275,15 @@ func (a *App) renderServiceDetail(w http.ResponseWriter, r *http.Request, status
 		f := a.newServiceEditForm(r, service, errs, envs, kinds, spec)
 		serviceEdit = &f
 	}
+	// Suppliers for the cost picker. Logged and absent rather than fatal.
+	providers, err := a.Store.ListProviders(r.Context())
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
+
 	a.Render.Page(w, status, "service_detail", serviceDetailPage{
+		Providers:      providers,
 		Base:           b,
 		Service:        service,
 		Certificates:   certificates,

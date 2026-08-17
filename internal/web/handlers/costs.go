@@ -288,6 +288,9 @@ func costFromForm(r *http.Request, now time.Time) (*domain.Cost, error) {
 		// existed. Only the asset form offers the field; the store ignores it
 		// on the other three, where there is nothing to subdivide.
 		AppliesTo: formValue(r, "applies_to"),
+		// Who invoices it (WP-J6). Blank is "not recorded", which the supplier
+		// report counts rather than hides.
+		ProviderID: optional(formValue(r, "provider_id")),
 	}
 	c, err := domain.NewCost(store.NewID(), spec, now)
 	if err != nil {

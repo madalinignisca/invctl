@@ -117,7 +117,7 @@ func (t costTable) selectSQL() string {
 	return `
 		SELECT c.id, c.` + t.column + ` AS owner_id, c.kind, c.period, c.amount_minor,
 		       c.note, c.valid_from, c.valid_until, c.lifecycle, c.created_at, c.updated_at,
-		       c.row_version, ` + appliesTo + `,
+		       c.row_version, c.provider_id, ` + appliesTo + `,
 		       COALESCE(k.label, c.kind) AS kind_label,
 		       ` + eol + `
 		FROM ` + t.name + ` c
@@ -208,15 +208,17 @@ func (s *SQLStore) addCost(ctx context.Context, actor domain.Actor, t costTable,
 		}
 		columns, values := "", ""
 		args := []any{c.ID, ownerID, c.Kind, c.Period, c.AmountMinor, c.Note,
-			c.ValidFrom, c.ValidUntil, c.Lifecycle, c.CreatedAt, c.UpdatedAt}
+			c.ValidFrom, c.ValidUntil, c.Lifecycle, c.CreatedAt, c.UpdatedAt,
+			c.ProviderID}
 		if t.scoped {
 			columns, values = ", applies_to", ", ?"
 			args = append(args, c.AppliesTo)
 		}
 		_, err := tx.exec(ctx, `
 			INSERT INTO `+t.name+` (id, `+t.column+`, kind, period, amount_minor, note,
-			                        valid_from, valid_until, lifecycle, created_at, updated_at`+columns+`)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?`+values+`)`, args...)
+			                        valid_from, valid_until, lifecycle, created_at, updated_at,
+			                        provider_id`+columns+`)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?`+values+`)`, args...)
 		if err != nil {
 			return translateWriteErr(err, "adding a cost line")
 		}
@@ -269,7 +271,7 @@ func (s *SQLStore) updateCost(ctx context.Context, actor domain.Actor, t costTab
 		}
 		scope := ""
 		args := []any{c.Kind, c.Period, c.AmountMinor, c.Note,
-			c.ValidFrom, c.ValidUntil, c.Lifecycle, c.UpdatedAt}
+			c.ValidFrom, c.ValidUntil, c.Lifecycle, c.UpdatedAt, c.ProviderID}
 		if t.scoped {
 			scope = "applies_to = ?, "
 			args = append(args, c.AppliesTo)
@@ -278,6 +280,7 @@ func (s *SQLStore) updateCost(ctx context.Context, actor domain.Actor, t costTab
 		res, err := tx.exec(ctx, `
 			UPDATE `+t.name+` SET kind = ?, period = ?, amount_minor = ?, note = ?,
 			                      valid_from = ?, valid_until = ?, lifecycle = ?, updated_at = ?,
+			                      provider_id = ?,
 			                      `+scope+`row_version = row_version + 1
 			WHERE id = ? AND row_version = ?`, args...)
 		if err != nil {

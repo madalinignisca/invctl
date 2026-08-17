@@ -39,3 +39,26 @@ type costReportPage struct {
 	Base
 	Report *store.EstateCostReport
 }
+
+// SupplierReport answers the third of the CEO's questions: which suppliers raise
+// prices beyond inflation (WP-J6).
+//
+// Behind the cost permission like every other money page. A reader who cannot
+// see a rack's price cannot see it ranked by supplier either.
+func (a *App) SupplierReport(w http.ResponseWriter, r *http.Request) {
+	report, err := a.Store.SupplierMovements(r.Context(), "")
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
+	a.Render.Respond(w, r, http.StatusOK, "supplier_report", "supplier_report",
+		supplierReportPage{
+			Base:   a.base(r, "Suppliers", "supplier-report"),
+			Report: report,
+		})
+}
+
+type supplierReportPage struct {
+	Base
+	Report *store.SupplierReport
+}

@@ -1,0 +1,174 @@
+{{/*
+invctl — infrastructure inventory
+Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+
+Licensed under the GNU Affero General Public License, version 3 only —
+no later version applies. See LICENSE for the full text.
+
+SPDX-License-Identifier: AGPL-3.0-only
+*/}}
+{{define "content"}}
+<div class="crumbs">
+  <span>reports</span><span class="sep">/</span><span>suppliers</span>
+</div>
+
+<div class="page-head">
+  <div class="eyebrow">analysis</div>
+  <h1>Suppliers</h1>
+  <p class="lede">
+    Which suppliers raise prices beyond inflation. Every figure here is
+    aggregated from the cost lines owed to each supplier — none of it is typed,
+    and none of it can drift from the lines it summarises.
+  </p>
+</div>
+
+{{template "supplier_report" .}}
+{{end}}
+
+{{define "supplier_report"}}
+<div id="supplier-report">
+
+{{if not .CanSeeCosts}}
+<div class="panel">
+  <div class="empty">
+    <strong>Not for you</strong>
+    This report shows money, and your account does not see money.
+  </div>
+</div>
+{{else}}
+{{with .Report}}
+
+{{if .UnattributedLines}}
+<div class="callout callout-warn">
+  <h2>What this ranking does not cover</h2>
+  <p>
+    <strong>{{.UnattributedLines}} cost line(s) name no supplier</strong>, worth
+    {{money .UnattributedMinor}} a month. They are not in the table below. A
+    ranking over part of the book reads exactly like a ranking over all of it,
+    so the part it misses is stated rather than left for somebody to discover.
+  </p>
+</div>
+{{end}}
+
+<div class="panel">
+  <div class="panel-head">
+    <h2>Worst first</h2>
+    <p class="panel-note">
+      As at {{.On}}. Movement is weighted by what each line costs — a small
+      invoice that doubled does not outvote a large one that barely moved.
+    </p>
+  </div>
+  <div class="panel-body">
+    {{if .Attributed}}
+    <div class="scroll-x">
+      <table class="grid">
+        <thead>
+          <tr>
+            <th>Supplier</th>
+            <th class="num">Per month</th>
+            <th class="num">Lines</th>
+            <th class="num">Moved</th>
+            <th class="num">Nominal</th>
+            <th class="num">Real</th>
+            <th>Account</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .Suppliers}}
+          <tr>
+            <td>
+              <strong>{{.Provider}}</strong>
+              {{if .BeyondInflation}}
+              <span class="pill pill-degraded">beyond inflation</span>
+              {{end}}
+              {{if .Switched}}
+              <div class="reason">
+                {{.Switched}} price history changed hands and is not counted as a
+                rise — the figure moved because the supplier did.
+              </div>
+              {{end}}
+            </td>
+            <td class="num">{{money .MonthlyMinor}}</td>
+            <td class="num">{{.Lines}}</td>
+            <td class="num">{{.Moved}}</td>
+            <td class="num">
+              {{if .Moved}}{{.NominalPercent}}%{{else}}<span class="muted">steady</span>{{end}}
+            </td>
+            <td class="num">
+              {{if .Real}}{{.RealPercent}}%
+              {{else if .Moved}}<span class="muted">not known</span>
+              {{else}}—{{end}}
+            </td>
+            <td>{{deref .AccountRef}}</td>
+          </tr>
+          {{if .MissingYear}}
+          <tr>
+            <td colspan="7" class="reason">
+              {{.Provider}}: no inflation rate is recorded for {{.MissingYear}},
+              so no real-terms figure is offered. Computing one over a year
+              treated as zero would understate what money did and flatter the
+              supplier — <a href="/inflation">record the year</a> and it appears.
+            </td>
+          </tr>
+          {{end}}
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+    <p class="field-hint" style="margin-top:12px">
+      <strong>Nominal</strong> is what the invoice did. <strong>Real</strong> is
+      what it did once money is accounted for, and it is the one to argue from:
+      a rise that merely tracks inflation is not a supplier behaving badly.
+      A supplier whose lines have never been repriced reads as
+      <em>steady</em> rather than as zero, because those are different facts.
+    </p>
+    {{else}}
+    <div class="empty">
+      <strong>No supplier is named on any cost line</strong>
+      This report is built from who invoices what. Set the supplier on a cost
+      line — on any asset, service, project or circuit — and it appears here.
+    </div>
+    {{end}}
+  </div>
+</div>
+
+{{range .Suppliers}}
+{{if .Series}}
+<div class="panel">
+  <div class="panel-head">
+    <h2>{{.Provider}}</h2>
+    <p class="panel-note">
+      {{.Lines}} line(s), {{money .MonthlyMinor}} a month.
+      {{if .AccountRef}}Account {{.AccountRef}}.{{end}}
+    </p>
+  </div>
+  <div class="panel-body">
+    <table class="grid">
+      <thead>
+        <tr><th>What</th><th class="num">First</th><th class="num">Now</th><th class="num">Nominal</th><th class="num">Real</th></tr>
+      </thead>
+      <tbody>
+        {{range .Series}}
+        <tr>
+          <td>{{.Label}} · {{.Period}}</td>
+          <td class="num">{{if .Moved}}{{money .FirstMinor}}{{else}}—{{end}}</td>
+          <td class="num">{{money .CurrentMinor}}</td>
+          <td class="num">{{if .Moved}}{{.TotalPercentChange}}%{{else}}<span class="muted">steady</span>{{end}}</td>
+          <td class="num">
+            {{if .RealKnown}}{{.Real.PercentChange}}%
+            {{else if .Moved}}<span class="muted">not known</span>
+            {{else}}—{{end}}
+          </td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+</div>
+{{end}}
+{{end}}
+
+{{end}}
+{{end}}
+</div>
+{{end}}

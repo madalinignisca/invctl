@@ -131,9 +131,17 @@ type Cost struct {
 	// asset cost carries a meaningful value; the other three attach to
 	// something that is already the unit of attribution.
 	AppliesTo string `db:"applies_to"`
-	Lifecycle string `db:"lifecycle"`
-	CreatedAt string `db:"created_at"`
-	UpdatedAt string `db:"updated_at"`
+	// ProviderID is who invoiced it (WP-J6). Nil is ordinary: most estates fill
+	// this in slowly, and the supplier report counts what it could not
+	// attribute rather than totalling over the half that was labelled.
+	//
+	// ON THE LINE RATHER THAN THE ASSET, because one server carries hardware
+	// from a reseller, support from the manufacturer and a licence from a third
+	// party -- three suppliers and three price histories against one box.
+	ProviderID *string `db:"provider_id"`
+	Lifecycle  string  `db:"lifecycle"`
+	CreatedAt  string  `db:"created_at"`
+	UpdatedAt  string  `db:"updated_at"`
 	// RowVersion is the optimistic-concurrency token; see version.go.
 	RowVersion int `db:"row_version"`
 }
@@ -149,6 +157,8 @@ type CostSpec struct {
 	// AppliesTo defaults to universal when blank, which is what every cost in
 	// this system meant before the column existed.
 	AppliesTo string
+	// ProviderID is who invoiced it, or nil.
+	ProviderID *string
 }
 
 // NewCost validates and constructs a cost line.
@@ -161,6 +171,7 @@ func NewCost(id string, spec CostSpec, now time.Time) (*Cost, error) {
 		AmountMinor: spec.AmountMinor,
 		Note:        spec.Note,
 		AppliesTo:   strings.ToLower(strings.TrimSpace(spec.AppliesTo)),
+		ProviderID:  blankToNil(spec.ProviderID),
 		Lifecycle:   LifecycleActive,
 		CreatedAt:   FormatTime(now),
 		UpdatedAt:   FormatTime(now),

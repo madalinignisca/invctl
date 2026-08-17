@@ -335,6 +335,8 @@ type assetDetailPage struct {
 	// different thing on this same page.
 	SharedWith *domain.Occupancy
 	Projects   []store.ProjectRow
+	// Suppliers, for the "who invoices it" picker on each cost line (WP-J6).
+	Providers []store.ProviderRow
 	// Guests are what runs inside this asset, offered as the consumers a
 	// scoped cost line may name (§5.6).
 	Guests []store.AssetRow
@@ -531,6 +533,13 @@ func (a *App) renderAssetDetail(w http.ResponseWriter, r *http.Request, status i
 		slog.Error("resolving price movement", "error", err, "asset", id)
 	}
 
+	// Suppliers for the cost picker. Logged and absent rather than fatal: an
+	// empty picker still leaves the page usable, and the cost panel works.
+	providers, err := a.Store.ListProviders(r.Context())
+	if err != nil {
+		slog.Error("listing suppliers for the cost picker", "error", err, "asset", id)
+	}
+
 	// Who shares it (WP-J5). Logged and absent rather than fatal.
 	sharedWith, err := a.Store.OccupancyFor(r.Context(), id)
 	if err != nil {
@@ -612,6 +621,7 @@ func (a *App) renderAssetDetail(w http.ResponseWriter, r *http.Request, status i
 		Fit:             fit,
 		Replacement:     replacement,
 		Movement:        movement,
+		Providers:       providers,
 		SharedWith:      sharedWith,
 		Projects:        projects,
 		Guests:          guests,
