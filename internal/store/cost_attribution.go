@@ -57,14 +57,14 @@ type CostShare struct {
 	DirectMinor int64
 }
 
-// CPUPercent, MemoryPercent and BlendedPercent render the shares the way the
-// capacity table above them already does.
+// CPUPercent is the CPU share as a percentage, rendered the way the capacity
+// table above it already does.
 //
 // BASIS POINTS ARE THE STORAGE UNIT, NOT THE READING UNIT. The first version of
 // the cost panel printed them raw -- 1940 beside a column headed "blended", on
 // the same page as a table saying 19.4% -- and a reader would take the number at
 // face value and be wrong by a hundred times. The integer is what makes the
-// slices sum exactly; it is not what anybody is asking.
+// slices sum exactly; it is not what anybody is asking. Same for the two below.
 func (s CostShare) CPUPercent() string { return domain.RatioText(s.CPUPoints) }
 
 // MemoryPercent is the memory share as a percentage.
