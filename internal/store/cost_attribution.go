@@ -57,6 +57,22 @@ type CostShare struct {
 	DirectMinor int64
 }
 
+// CPUPercent, MemoryPercent and BlendedPercent render the shares the way the
+// capacity table above them already does.
+//
+// BASIS POINTS ARE THE STORAGE UNIT, NOT THE READING UNIT. The first version of
+// the cost panel printed them raw -- 1940 beside a column headed "blended", on
+// the same page as a table saying 19.4% -- and a reader would take the number at
+// face value and be wrong by a hundred times. The integer is what makes the
+// slices sum exactly; it is not what anybody is asking.
+func (s CostShare) CPUPercent() string { return domain.RatioText(s.CPUPoints) }
+
+// MemoryPercent is the memory share as a percentage.
+func (s CostShare) MemoryPercent() string { return domain.RatioText(s.MemoryPoints) }
+
+// BlendedPercent is the weighted share the money was actually divided by.
+func (s CostShare) BlendedPercent() string { return domain.RatioText(s.BasisPoints) }
+
 // TotalMinor is the run rate plus the capital spread plus what was attributed
 // directly. Named rather than implied: a reader who wants the run rate alone
 // has it, and one who wants everything gets a figure that says it includes

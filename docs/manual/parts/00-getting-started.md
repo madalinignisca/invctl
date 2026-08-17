@@ -26,7 +26,7 @@ pages. The rail's footer shows which you have.
 The first page is not a dashboard of counts. It is a list of **what needs a
 decision**.
 
-![The overview page. A table headed "17 findings" lists rows tagged FAULT, RISK or GAP, each with a count, a finding and an example — "past its date, 6, sw-core-1 lapsed on 2025-06-03" and "too deep for the rack, 3, hv-esx-01 in rack-a2: 772mm chassis plus 75mm for cabling needs 847mm, and the cabinet has 600mm".](../img/getting-started-2-overview.png)
+![The overview page. A table headed "21 findings" lists rows tagged FAULT, RISK or GAP, each with a count, a finding and an example — "past its date, 6, sw-core-1 lapsed on 2025-06-03", "too deep for the rack, 3, hv-esx-01 in rack-a2: 772mm chassis plus 75mm for cabling needs 847mm, and the cabinet has 600mm", and "project grown past what it was priced for, 2, platform: using 28 vCPU against the 24 it was priced for — nobody is in breach, the margin is eroding".](../img/getting-started-2-overview.png)
 
 Every row here was already computed by some other page. What this adds is the
 one place that says them together, because a finding on a page nobody opened
@@ -42,13 +42,20 @@ The three severities are not decoration:
 | | |
 |---|---|
 | **fault** | something is wrong now — a certificate has expired, two supposedly redundant power feeds trace to one UPS |
-| **risk** | nothing is wrong, and one failure away something is — a VRRP group with one router, a contract renewing next month |
-| **gap** | the inventory does not know — a site with no power recorded, a circuit with one end |
+| **risk** | nothing is wrong, and one failure away something is — a VRRP group with one router, a contract renewing next month, an engagement that has grown past what it was priced for |
+| **gap** | the inventory does not know — a site with no power recorded, a circuit with one end, a cluster whose hosts nobody has measured |
 
 The third is the one most tools leave out, and it is what makes the other two
 worth trusting. Three faults across four modelled assets is not a healthy
 estate; it is an unmodelled one, and a report that cannot say *"I do not know"*
 is a report that guesses.
+
+**Not all of them are about hardware.** *"Project grown past what it was priced
+for"* is a commercial finding: nobody is in breach, the engagement has simply
+outgrown the assumption its price was built on, and the margin is eroding
+quietly. It sits in the same list as a lapsed certificate because it needs the
+same thing — somebody to decide — and because the person who would notice it is
+not the person watching the racks.
 
 Every finding links to the page that explains it. Nothing here is stored — it is
 recomputed on each visit, so it cannot go stale against the pages it summarises.

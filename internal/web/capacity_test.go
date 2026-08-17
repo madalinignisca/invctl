@@ -343,6 +343,26 @@ func TestTheClusterPageSaysWhatTheShareCosts(t *testing.T) {
 	if !strings.Contains(page, `value="60"`) {
 		t.Error("the declared split does not come back on the form")
 	}
+	// THE SHARES ARE RENDERED AS PERCENTAGES, not as the basis points they are
+	// stored in. The first version printed 1940 under a column headed "blended"
+	// on a page saying 19.4% a few inches above -- a reader takes that at face
+	// value and is wrong by a hundred times.
+	//
+	// Asserted on the CELL rather than on the absence of a particular number: a
+	// negative assertion passes whenever the fixture's figures happen to differ,
+	// which is exactly what it did when it was first written.
+	panel := page[strings.Index(page, "What that share costs"):]
+	if end := strings.Index(panel, "</table>"); end > 0 {
+		panel = panel[:end]
+	}
+	// All THREE share columns -- CPU, memory and the blend they produce. Testing
+	// that "a percentage appears somewhere" passes while two of the three have
+	// regressed, which is what the previous version of this assertion did.
+	if n := strings.Count(panel, `class="num">0%<`); n != 3 {
+		t.Errorf("%d of the 3 share columns render as percentages; a basis-point "+
+			"integer under a column headed Blended reads as a percentage and is "+
+			"wrong by a hundred times:\n%s", n, panel)
+	}
 }
 
 // TestWithoutASplitThePageSaysSoRatherThanGuessing. Half and half is not
