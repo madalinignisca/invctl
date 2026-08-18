@@ -606,15 +606,22 @@ func (s *SQLStore) decorateAPIServices(ctx context.Context, scope domain.Environ
 	var placements []placement
 	for _, chunk := range chunkIDs(ids) {
 		args := append(anySlice(chunk), scopeArgs...)
-		args = append(args, domain.LifecycleRetired)
+		args = append(args, domain.LifecycleRetired, domain.LifecycleRetired)
 		var part []placement
+		// BOTH LIFECYCLES, the placement's and the host's. Filtering only the
+		// placement left a service naming a decommissioned machine, which is
+		// the same failure as publishing a retired host's address and carries
+		// the same argument: the box may since have been rebuilt as something
+		// else, so naming it points a consumer at the wrong machine rather than
+		// at a missing one.
 		err := s.read(ctx, &part, `
 			SELECT si.service_id, a.name
 			FROM service_instance si
 			JOIN asset a ON a.id = si.host_asset_id
 			WHERE si.service_id IN (`+placeholders(len(chunk))+`)
 			  AND `+assetScope+`
-			  AND si.lifecycle <> ?`, args...)
+			  AND si.lifecycle <> ?
+			  AND a.lifecycle <> ?`, args...)
 		if err != nil {
 			return fmt.Errorf("resolving api service placements: %w", err)
 		}

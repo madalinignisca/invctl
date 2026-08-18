@@ -121,6 +121,13 @@ func newAPIFixture(t *testing.T, e Engine) *apiFixture {
 	// row to a {dr} token that owns nothing in the estate. An empty environment
 	// is not safe, it is merely not yet exploited -- the disclosure arrives with
 	// the first asset somebody puts in it, silently.
+	// A THREE-ENVIRONMENT ASSET. Without one, every membership in the estate is
+	// a set of size 1 or 2, so a scope of size 3, 4 or 5 can never be the
+	// difference between visible and hidden and the subset rule is only ever
+	// exercised at its two smallest widths. The reviewer could construct no
+	// weakening that lives only there, which is precisely the argument that has
+	// cost three rounds already: not safe, merely not yet exploited.
+	f.asset(t, domain.KindSwitch, "sw-span-1", &rack, "prod", "dev", "staging")
 	f.asset(t, domain.KindFirewall, "fw-transit", &rack, "transit")
 	f.asset(t, domain.KindServer, "dr-box", &rack, "dr")
 
@@ -228,6 +235,20 @@ func (f *apiFixture) bareService(t *testing.T, code, envCode string) string {
 	}
 	f.services[code] = svc.ID
 	return svc.ID
+}
+
+// placementID resolves a service's one placement, so a test can retire the
+// placement rather than either entity it joins.
+func (f *apiFixture) placementID(t *testing.T, serviceID string) string {
+	t.Helper()
+	rows, err := f.s.ListInstancesByService(f.ctx, serviceID)
+	if err != nil {
+		t.Fatalf("loading placements: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("service has %d placements, want exactly 1", len(rows))
+	}
+	return rows[0].ID
 }
 
 // address attaches an interface and an address to an asset.
@@ -419,6 +440,22 @@ func scopeCases(codes []string) [][]string {
 			out = append(out, []string{sorted[i], sorted[j]})
 		}
 	}
+	// The complement of each singleton: every environment but one. These are
+	// the widths between a pair and the whole estate, and they are where an
+	// asset in three environments is the difference between visible and hidden.
+	// Without them the subset rule is only ever exercised at |S| <= 2 and at
+	// |S| = everything, and a weakening living in between would pass.
+	for _, omit := range sorted {
+		var rest []string
+		for _, c := range sorted {
+			if c != omit {
+				rest = append(rest, c)
+			}
+		}
+		if len(rest) > 2 && len(rest) < len(sorted) {
+			out = append(out, rest)
+		}
+	}
 	return append(out, sorted)
 }
 
@@ -608,14 +645,12 @@ func TestTheFixtureCannotBeFlattenedIntoUniformEnvironments(t *testing.T) {
 	var outOfScope int
 	criticalities := map[int]bool{}
 	roles := map[string]bool{}
-	inScopeByID := make(map[string]bool, len(envs))
 	for _, env := range envs {
 		if !env.InScope {
 			outOfScope++
 		}
 		criticalities[env.Criticality] = true
 		roles[env.Role] = true
-		inScopeByID[env.ID] = env.InScope
 	}
 
 	const why = "\n\nA uniform fixture cannot tell a predicate filtering on `code` apart from one " +
@@ -631,19 +666,31 @@ func TestTheFixtureCannotBeFlattenedIntoUniformEnvironments(t *testing.T) {
 		t.Errorf("every fixture environment has criticality %v, so a predicate qualified on "+
 			"criticality is indistinguishable from the correct one.%s", criticalities, why)
 	}
-	// EVERY ROLE THE DOMAIN DEFINES IS REPRESENTED, derived from
-	// domain.EnvRoles rather than from a list repeated here.
+	// EVERY ROLE THE VOCABULARY DEFINES IS REPRESENTED, read from
+	// environment_role rather than from a Go list.
 	//
 	// Two reasons it is written this way. A bare "more than one role" check
 	// could not fire through the regression its neighbours name -- mustEnvironment
 	// takes the role as a parameter, so flattening leaves roles varied -- and it
 	// would have read as load-bearing while proving nothing. And a hand-kept
 	// classification of roles into "utility" and "workload" lived in two places
-	// here, so a new domain.EnvRole* constant would have landed in neither and
-	// been silently treated as a workload. Deriving from the domain's own list
-	// means a new role fails this test until somebody decides where it belongs
-	// in the fixture.
-	for _, role := range domain.EnvRoles {
+	// here, so a new role constant would have landed in neither and been
+	// silently treated as a workload.
+	//
+	// AND THE VOCABULARY IS THE TABLE, NOT domain.EnvRoles. That slice
+	// documents itself as "NOT the vocabulary" (internal/domain/asset.go) --
+	// environment_role is, and a role added by migration without a matching Go
+	// constant would fail nothing here while being a role no fixture
+	// environment carries. They agree today, six of six; reading the table is
+	// what keeps that true without anybody checking.
+	var vocabulary []string
+	if err := f.s.read(f.ctx, &vocabulary, `SELECT code FROM environment_role ORDER BY code`); err != nil {
+		t.Fatalf("reading the environment role vocabulary: %v", err)
+	}
+	if len(vocabulary) == 0 {
+		t.Fatal("the environment_role vocabulary is empty; this check would pass vacuously")
+	}
+	for _, role := range vocabulary {
 		if !roles[role] {
 			t.Errorf("no fixture environment has the %q role, so no test can show the scope "+
 				"predicate treats it correctly -- a predicate weakened with "+
@@ -1403,6 +1450,132 @@ func TestASingleFetchStillReturnsARetiredEntity(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestDecoratedListsExcludeWhatWasRetired.
+//
+// THE GAP THIS CLOSES. The visibility property asserts row MEMBERSHIP -- which
+// entities a scope may see -- and never looks inside Environments, Addresses,
+// Services or Assets. Everything the three decoration queries do beyond the
+// scope predicate therefore rested on two named tests, both about scope, so
+// dropping any of their lifecycle filters changed real behaviour and failed
+// nothing: an asset would name a RETIRED service, or name a service through a
+// RETIRED placement, and a service would name a host it no longer runs on.
+//
+// Not a disclosure -- every row involved is already inside the scope -- but the
+// same wrong-answer failure that justifies excluding a retired host's addresses:
+// a consumer targets something that no longer exists, or worse, the wrong
+// machine, because the box may since have been rebuilt as something else.
+func TestDecoratedListsExcludeWhatWasRetired(t *testing.T) {
+	const (
+		host = "probe-host"
+		svc  = "probe-svc"
+		addr = "10.8.0.1"
+	)
+	cases := []struct {
+		name string
+		// what gets retired, and what should survive it
+		retire func(t *testing.T, f *apiFixture, hostID, svcID string)
+		// after the retirement, does the host still name the service, and does
+		// the service still name the host?
+		hostNamesService bool
+		serviceNamesHost bool
+		why              string
+	}{
+		{
+			name: "a retired service",
+			retire: func(t *testing.T, f *apiFixture, hostID, svcID string) {
+				if err := f.s.RetireService(f.ctx, f.actor, svcID); err != nil {
+					t.Fatalf("retiring the service: %v", err)
+				}
+			},
+			hostNamesService: false,
+			// The placement and the host are both live; a fetch of the retired
+			// service by id still answers where it used to run, which is the
+			// same rule as returning the retired entity at all.
+			serviceNamesHost: true,
+			why:              "a consumer would target a service that no longer exists",
+		},
+		{
+			name: "a retired placement",
+			retire: func(t *testing.T, f *apiFixture, hostID, svcID string) {
+				if err := f.s.RetireInstance(f.ctx, f.actor, f.placementID(t, svcID)); err != nil {
+					t.Fatalf("retiring the placement: %v", err)
+				}
+			},
+			hostNamesService: false,
+			serviceNamesHost: false,
+			why:              "both sides of a withdrawn placement would point a consumer at the WRONG HOST",
+		},
+		{
+			name: "a retired host",
+			retire: func(t *testing.T, f *apiFixture, hostID, svcID string) {
+				if err := f.s.RetireAsset(f.ctx, f.actor, hostID); err != nil {
+					t.Fatalf("retiring the host: %v", err)
+				}
+			},
+			// The host is retired, so a fetch of it by id still reports what it
+			// carries -- but the SERVICE must stop naming a decommissioned
+			// machine, for the reason its addresses are already excluded.
+			hostNamesService: true,
+			serviceNamesHost: false,
+			why:              "a service would name a decommissioned machine that may since have been rebuilt",
+		},
+	}
+
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			for _, tc := range cases {
+				t.Run(tc.name, func(t *testing.T) {
+					f := newAPIFixture(t, e)
+					scope := mustScope(t, "prod")
+					hostID := f.asset(t, domain.KindServer, host, nil, "prod")
+					f.address(t, host, "eth0", addr)
+					svcID := f.service(t, svc, domain.SvcAPI, "prod", host)
+
+					tc.retire(t, f, hostID, svcID)
+
+					gotAsset, err := f.s.APIGetAsset(f.ctx, scope, hostID)
+					if err != nil {
+						t.Fatalf("fetching the host: %v", err)
+					}
+					gotSvc, err := f.s.APIGetService(f.ctx, scope, svcID)
+					if err != nil {
+						t.Fatalf("fetching the service: %v", err)
+					}
+
+					if has := containsString(gotAsset.Services, svc); has != tc.hostNamesService {
+						t.Errorf("after %s the host's services = %v (contains %s: %v, want %v): %s",
+							tc.name, gotAsset.Services, svc, has, tc.hostNamesService, tc.why)
+					}
+					if has := containsString(gotSvc.Assets, host); has != tc.serviceNamesHost {
+						t.Errorf("after %s the service's assets = %v (contains %s: %v, want %v): %s",
+							tc.name, gotSvc.Assets, host, has, tc.serviceNamesHost, tc.why)
+					}
+
+					// The other two decorated lists are membership, not
+					// lifecycle, and must be undisturbed by any of it.
+					if !containsString(gotAsset.Addresses, addr) {
+						t.Errorf("after %s the host's addresses = %v, want %s -- an address is a "+
+							"fact about the box, not about what runs on it", tc.name, gotAsset.Addresses, addr)
+					}
+					if len(gotAsset.Environments) != 1 || gotAsset.Environments[0] != "prod" {
+						t.Errorf("after %s the host's environments = %v, want [prod] -- membership "+
+							"is declared and retirement does not revoke it", tc.name, gotAsset.Environments)
+					}
+				})
+			}
+		})
+	}
+}
+
+func containsString(v []string, want string) bool {
+	for _, s := range v {
+		if s == want {
+			return true
+		}
+	}
+	return false
 }
 
 func containsAddr(rows []APIAddressRow, addr string) bool {
