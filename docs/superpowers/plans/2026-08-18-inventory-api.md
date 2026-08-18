@@ -1,5 +1,15 @@
 # Read-only Inventory API (WP-A2) Implementation Plan
 
+> **SUPERSEDED — this is a process artefact, not a description of current
+> behaviour.** The authoritative documents for WP-A2 are
+> [`docs/api-design.md`](../../api-design.md) (design and rulings) and
+> [`docs/API.md`](../../API.md) (the consumer-facing contract). Where this
+> plan and those documents disagree, they are right and this is stale: it
+> already contradicts the amended design in at least the Asset DTO, which no
+> longer publishes a `role` field. It is kept because how the work was
+> sequenced is worth being able to reconstruct — do not read it as a statement
+> of what the API does today, and do not update it to match.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Publish declared inventory state to machine consumers over a read-only,

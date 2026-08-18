@@ -87,13 +87,31 @@ func (s EnvironmentScope) IsEmpty() bool { return len(s) == 0 }
 
 // Allows reports whether one environment code is inside the scope.
 func (s EnvironmentScope) Allows(code string) bool {
+	_, ok := s.Canonical(code)
+	return ok
+}
+
+// Canonical returns the SCOPE'S OWN SPELLING of code, and whether the scope
+// covers it at all.
+//
+// It exists because Allows is deliberately forgiving -- it lower-cases and
+// trims, so `?env=PROD ` is admitted -- while everything downstream compares
+// an environment code as TEXT against the lower-case codes NewEnvironment
+// stores. A caller that checked Allows and then kept the caller's own
+// spelling would pass the authorization check and then match no row at all,
+// returning a 200 with an empty collection: a value that arrived, could not
+// be used as the caller meant it, and was silently replaced by something
+// indistinguishable from a legitimate answer. Taking the code back out of the
+// scope means the accepting comparison and the querying comparison can never
+// be two different strings.
+func (s EnvironmentScope) Canonical(code string) (string, bool) {
 	code = strings.ToLower(strings.TrimSpace(code))
 	for _, c := range s {
 		if c == code {
-			return true
+			return c, true
 		}
 	}
-	return false
+	return "", false
 }
 
 // AllowsAny reports whether the scope covers at least one of an entity's

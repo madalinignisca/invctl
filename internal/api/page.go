@@ -95,10 +95,20 @@ func ParsePageRequest(q url.Values) (PageRequest, error) {
 	p := PageRequest{Limit: DefaultLimit}
 
 	if raw := q.Get("after"); raw != "" {
-		if _, err := uuid.Parse(raw); err != nil {
+		parsed, err := uuid.Parse(raw)
+		if err != nil {
 			return PageRequest{}, badRequest("after must be the id of the last row of the previous page")
 		}
-		p.After = raw
+		// THE PARSED FORM, NOT THE RAW ONE. uuid.Parse accepts four
+		// spellings of the same id -- hyphenated, unhyphenated, braced and
+		// `urn:uuid:`-prefixed -- in any case. The cursor is compared as TEXT
+		// against ids stored hyphenated and lower-case, so keeping whatever
+		// arrived meant a validated, accepted cursor that silently selected
+		// the wrong rows: `01924E5A-...` sorts before every lower-case id, so
+		// `a.id > ?` repeats the whole page, and a braced form sorts after
+		// them all, so it skips to the end. Either way a 200. String()
+		// renders the one spelling the estate uses.
+		p.After = parsed.String()
 	}
 
 	if raw := q.Get("limit"); raw != "" {

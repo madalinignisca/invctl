@@ -74,3 +74,36 @@ func TestAnUnparseableLimitIsRefused(t *testing.T) {
 		}
 	}
 }
+
+// TestACursorIsCanonicalisedNotJustValidated pins the final review's C2. The
+// cursor was VALIDATED with uuid.Parse and then stored raw, and uuid.Parse
+// accepts four spellings of the same id in any case. The cursor is compared
+// as TEXT against ids stored hyphenated and lower-case, so an upper-case one
+// sorts before every id in the estate (`a.id > ?` repeats the whole page) and
+// a braced one sorts after them all (the page is skipped) -- both with a 200.
+func TestACursorIsCanonicalisedNotJustValidated(t *testing.T) {
+	const canonical = "01924e5a-1c2b-7f3a-9d4e-5f6a7b8c9d0e"
+	cases := []struct {
+		name string
+		raw  string
+	}{
+		{"already canonical", canonical},
+		{"upper case", "01924E5A-1C2B-7F3A-9D4E-5F6A7B8C9D0E"},
+		{"mixed case", "01924e5a-1C2B-7f3a-9D4E-5f6a7b8c9d0e"},
+		{"braced", "{01924e5a-1c2b-7f3a-9d4e-5f6a7b8c9d0e}"},
+		{"urn prefixed", "urn:uuid:01924e5a-1c2b-7f3a-9d4e-5f6a7b8c9d0e"},
+		{"unhyphenated", "01924e5a1c2b7f3a9d4e5f6a7b8c9d0e"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			p, err := ParsePageRequest(url.Values{"after": {c.raw}})
+			if err != nil {
+				t.Fatalf("uuid.Parse accepts %q, so the API must too: %v", c.raw, err)
+			}
+			if p.After != canonical {
+				t.Fatalf("got after %q, want %q -- a validated cursor must be stored in the one "+
+					"spelling the estate's ids use, or it silently selects the wrong rows", p.After, canonical)
+			}
+		})
+	}
+}

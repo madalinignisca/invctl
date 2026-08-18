@@ -221,10 +221,49 @@ func (c *Config) validate() error {
 	if err := c.validateAgents(); err != nil {
 		return err
 	}
+	if err := c.validateCredentialSeparation(); err != nil {
+		return err
+	}
 	if len(c.AdminUsers) == 0 {
 		// Not fatal: a read-only deployment is legitimate. But an operator
 		// who expected to be able to write should find out immediately.
 		return nil
+	}
+	return nil
+}
+
+// validateCredentialSeparation refuses one secret that carries two
+// capabilities.
+//
+// INV_AGENT_TOKENS and INV_API_TOKENS are two registries because they are two
+// principal types: an agent writes observed state, a reader reads the whole
+// scoped inventory, and neither is meant to be able to do the other's job.
+// Each list already refuses a token used twice WITHIN it, for the narrower
+// version of this reason -- but a token pasted into both started cleanly and
+// authenticated on both surfaces, which is exactly what the second registry
+// exists to prevent. This is the only place both lists are in scope at once,
+// so it is the only place the check can live.
+//
+// Neither token is named, only the two credential ids. The error is a startup
+// failure for the same reason every other one in this file is: a deployment
+// whose authorization posture differs from the one somebody wrote down.
+func (c *Config) validateCredentialSeparation() error {
+	if len(c.AgentCredentials) == 0 || len(c.Readers) == 0 {
+		return nil
+	}
+	byToken := make(map[string]string, len(c.AgentCredentials))
+	for _, a := range c.AgentCredentials {
+		byToken[a.Token] = a.ID
+	}
+	// Readers is sorted by id (loadReaderCredentials), so two clashes report
+	// the same one on every run.
+	for _, r := range c.Readers {
+		if agentID, clash := byToken[r.Token]; clash {
+			return fmt.Errorf(
+				"validating config: monitoring credential %q (INV_AGENT_TOKENS) and read credential %q "+
+					"(INV_API_TOKENS) share a token; they are separate principal types and one secret "+
+					"must not carry both capabilities", agentID, r.ID)
+		}
 	}
 	return nil
 }

@@ -171,3 +171,24 @@ func TestAShortReaderTokenRefusesToStart(t *testing.T) {
 		t.Fatalf("the error must name the length; got %v", err)
 	}
 }
+
+// TestAnUnmatchedScopeErrorIsDeterministic pins a small but real operator
+// problem: the check iterated a map, so with two unmatched scope ids the
+// startup error named a different one on every run. An operator who fixed the
+// one it named would be told about the other and could reasonably conclude
+// the fix had not taken. Sorted, the same run reports the same id, and the
+// lowest one first.
+func TestAnUnmatchedScopeErrorIsDeterministic(t *testing.T) {
+	t.Setenv("INV_API_TOKENS", "ansible:"+longToken("a"))
+	t.Setenv("INV_API_SCOPES", "ansible:prod,zulu:prod,alpha:prod")
+
+	for i := 0; i < 20; i++ {
+		_, err := loadReaderCredentials()
+		if err == nil {
+			t.Fatal("a scope naming a credential that is not in INV_API_TOKENS must refuse to start")
+		}
+		if !strings.Contains(err.Error(), `"alpha"`) {
+			t.Fatalf("run %d named a different unmatched id; the error must be deterministic: %v", i, err)
+		}
+	}
+}

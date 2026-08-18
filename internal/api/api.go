@@ -26,8 +26,10 @@ import (
 	"sort"
 	"unicode"
 
+	"github.com/madalinignisca/invctl/internal/auth"
 	"github.com/madalinignisca/invctl/internal/domain"
 	"github.com/madalinignisca/invctl/internal/store"
+	"github.com/madalinignisca/invctl/internal/web/middleware"
 	"github.com/madalinignisca/invctl/internal/web/render"
 )
 
@@ -93,6 +95,69 @@ func writeError(w http.ResponseWriter, err error) {
 		slog.Error("api", "error", err)
 		render.JSONError(w, http.StatusInternalServerError, "internal error")
 	}
+}
+
+// parseQuery is the ONLY place in this package a request's query string
+// becomes url.Values, and the reason it exists is r.URL.Query().
+//
+// r.URL.Query() calls url.ParseQuery and DISCARDS ITS ERROR. That is
+// documented behaviour, not a bug in net/http, but it is precisely the shape
+// docs/api-design.md §6 refuses: `?after=%zz` is dropped on the floor, so
+// ParsePageRequest sees no cursor at all, and the caller gets PAGE ONE with a
+// 200 -- the "paginating client restarts forever" failure the whole cursor
+// rule exists to forbid. `?%zz=1` is dropped the same way and never reaches
+// checkKnownParams, so an unknown parameter goes unrefused too. The AST guard
+// in silent_fallback_test.go cannot see any of it, because the discarded
+// error is inside net/http rather than in this package.
+//
+// The raw query is never echoed back. It is as caller-controlled as a
+// parameter value, and safeParamName's argument applies to the whole string.
+func parseQuery(r *http.Request, allowed ...string) (url.Values, error) {
+	q, err := url.ParseQuery(r.URL.RawQuery)
+	if err != nil {
+		return nil, badRequest("the query string is malformed")
+	}
+	if err := checkKnownParams(q, allowed...); err != nil {
+		return nil, err
+	}
+	return q, nil
+}
+
+// readerAndQuery is the preamble every handler in this package shares: the
+// authenticated principal, then a parsed and validated query string, in that
+// order because a request with no reader must fail closed before anything
+// else is considered.
+//
+// One helper rather than the same eight lines in seven handlers, which had
+// already drifted: ListAssets cached r.URL.Query() with a comment about not
+// re-parsing it while ListServices and ListAddresses called it twice each.
+// Sharing it is also what gives parseQuery exactly one call site to fix.
+func readerAndQuery(r *http.Request, allowed ...string) (*auth.Reader, url.Values, error) {
+	reader, ok := middleware.ReaderFrom(r.Context())
+	if !ok {
+		return nil, nil, errNoReaderInContext
+	}
+	q, err := parseQuery(r, allowed...)
+	if err != nil {
+		return nil, nil, err
+	}
+	return reader, q, nil
+}
+
+// beginList is readerAndQuery plus the ?after=/?limit= every collection
+// takes. The caller still names its own full parameter set, "after" and
+// "limit" included, because that list is the endpoint's published surface
+// (docs/api-design.md §4) and it is checked before this ever parses a page.
+func beginList(r *http.Request, allowed ...string) (*auth.Reader, url.Values, PageRequest, error) {
+	reader, q, err := readerAndQuery(r, allowed...)
+	if err != nil {
+		return nil, nil, PageRequest{}, err
+	}
+	page, err := ParsePageRequest(q)
+	if err != nil {
+		return nil, nil, PageRequest{}, err
+	}
+	return reader, q, page, nil
 }
 
 // checkKnownParams refuses a request naming a query parameter the endpoint

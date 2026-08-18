@@ -210,11 +210,19 @@ treatment.
   "environments": ["prod"],
   "site": "dc-1",
   "rack": "r14",
-  "role": "database",
   "addresses": ["10.2.0.14"],
   "services": ["billing-api"]
 }
 ```
+
+There is no `role`. An earlier revision of this document showed one, sourced
+from `asset.manager_role` and described as a capacity like `"database"`.
+`manager_role` is an FK into `responsibility_role` — `owner`, `operator`,
+`approver`, `oncall`, `custodian`, `vendor` — so it can never hold that value,
+and migration 00014 is explicit that a role without the team it qualifies is
+not expressible. `kind` already carries `server`/`vm`/`switch`, and
+`services` carries the functional grouping the Ansible view needs. Publishing a
+real functional-role column later is additive and non-breaking.
 
 Retired assets are excluded unless `?lifecycle=retired` asks for them. Soft
 delete means the rows are still there, and an inventory that silently targets
@@ -231,8 +239,9 @@ a deliberate edit.
 
 ```json
 // service
-{"id": "...", "name": "billing-api", "lifecycle": "active",
- "environments": ["prod"], "criticality": 1, "assets": ["vm-db-2"]}
+{"id": "...", "code": "billing-api", "name": "Billing API", "kind": "api",
+ "lifecycle": "active", "environments": ["prod"], "criticality": 1,
+ "assets": ["vm-db-2"]}
 
 // address
 {"id": "...", "address": "10.2.0.14", "family": 4,
@@ -281,6 +290,18 @@ cannot collide with the `prod` environment. A collision after sanitisation is a
 into one — a merged group silently widens the target set of every playbook that
 uses it.
 
+A host name claimed by two assets is refused the same way: a **500 with both
+asset ids in the log**. `asset.name` is unique only among live siblings, so
+`vm-app-1` under two different hypervisors is legal, and Ansible keys
+`hostvars` by name — merging them would resolve one environment's host to the
+other's address and connect successfully, which is the group collision with a
+worse blast radius.
+
+`ansible_host` is `addresses[0]` after a plain string sort, so `10.20.10.11`
+precedes `10.20.10.9`. Documented rather than made clever: a numeric or
+role-aware choice is a policy this work package does not have, and an
+undocumented arbitrary one is worse than a stated arbitrary one.
+
 Only `lifecycle = 'active'` assets appear.
 
 ---
@@ -319,10 +340,23 @@ Through `render.JSONError`, which already exists for the machine surface.
 
 | Status | When |
 |---|---|
-| 400 | malformed cursor, unparseable `limit`, unknown filter value |
+| 400 | a query string that is not valid URL encoding, malformed cursor, unparseable `limit`, unknown filter value |
 | 401 | no bearer token, unknown token, or a browser session present |
 | 404 | unknown id, **and** an id outside the token's scope |
 | 429 | rate limited |
+| 500 | the estate cannot be rendered into the contract: an Ansible group-name collision, or a host name claimed by two assets. Both sources named in the log, neither in the body |
+
+`r.URL.Query()` is not used anywhere in `internal/api`. It calls
+`url.ParseQuery` and discards the error, so `?after=%zz` drops the pair on the
+floor and the caller gets page one with a 200 — the same silent substitution
+in a place the package's own AST guard cannot see, because the discarded error
+is inside `net/http`. One helper parses the query string, refuses a parse
+error with a 400, and never echoes the raw query back.
+
+A well-formed cursor is also **canonicalised**, not merely validated:
+`uuid.Parse` accepts braced, `urn:uuid:`-prefixed, unhyphenated and upper-case
+forms, and the cursor is compared as TEXT against hyphenated lower-case ids, so
+keeping whichever spelling arrived skipped or repeated a page with a 200.
 
 **A malformed cursor is a 400 and never a silent restart.** `ParseChangeCursor`
 treats a bad cursor as "no cursor, therefore the first page", which is right for

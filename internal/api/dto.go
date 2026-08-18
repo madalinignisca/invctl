@@ -21,6 +21,15 @@ package api
 // internal/domain.Asset that is not part of the contract — purchase-adjacent
 // fields, capacity numbers, team ownership, EOL dates, and the opaque attrs
 // blob never appear here.
+//
+// THERE IS NO `role`. One briefly existed, sourced from asset.manager_role,
+// and it was wrong in a way no test could catch because the field was nil in
+// every fixture: manager_role is an FK into responsibility_role
+// (owner/operator/approver/oncall/custodian/vendor), never a functional
+// capacity like "database", and it is meaningless without the team it
+// qualifies — migration 00014 says a role without a team is not expressible.
+// Kind already carries server/vm/switch and Services carries the functional
+// grouping. Publishing a real functional role later is additive.
 type Asset struct {
 	ID           string   `json:"id"`
 	Name         string   `json:"name"`
@@ -29,7 +38,6 @@ type Asset struct {
 	Environments []string `json:"environments"`
 	Site         *string  `json:"site"`
 	Rack         *string  `json:"rack"`
-	Role         *string  `json:"role"`
 	Addresses    []string `json:"addresses"`
 	Services     []string `json:"services"`
 }

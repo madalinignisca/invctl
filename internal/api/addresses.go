@@ -13,7 +13,6 @@ import (
 	"net/http"
 
 	"github.com/madalinignisca/invctl/internal/store"
-	"github.com/madalinignisca/invctl/internal/web/middleware"
 	"github.com/madalinignisca/invctl/internal/web/render"
 )
 
@@ -26,16 +25,7 @@ var addressQueryParams = []string{"after", "limit"}
 // visible to the caller's token, scoped by the environments of the asset each
 // one belongs to.
 func (a *API) ListAddresses(w http.ResponseWriter, r *http.Request) {
-	reader, ok := middleware.ReaderFrom(r.Context())
-	if !ok {
-		writeError(w, errNoReaderInContext)
-		return
-	}
-	if err := checkKnownParams(r.URL.Query(), addressQueryParams...); err != nil {
-		writeError(w, err)
-		return
-	}
-	page, err := ParsePageRequest(r.URL.Query())
+	reader, _, page, err := beginList(r, addressQueryParams...)
 	if err != nil {
 		writeError(w, err)
 		return

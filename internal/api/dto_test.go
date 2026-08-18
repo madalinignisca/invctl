@@ -87,7 +87,9 @@ func TestNoDTOEmbedsAStoreOrDomainStruct(t *testing.T) {
 // literal is how you declare that you meant it -- not a chore to silence.
 func TestTheContractIsExactlyTheseFields(t *testing.T) {
 	want := map[string][]string{
-		"Asset":       {"id", "name", "kind", "lifecycle", "environments", "site", "rack", "role", "addresses", "services"},
+		// Nine fields, and no "role": see Asset's doc comment in dto.go. The
+		// Environment DTO's "role" below is environment_role and is unrelated.
+		"Asset":       {"id", "name", "kind", "lifecycle", "environments", "site", "rack", "addresses", "services"},
 		"Service":     {"id", "code", "name", "kind", "lifecycle", "environments", "criticality", "assets"},
 		"Address":     {"id", "address", "family", "asset", "asset_id", "environments"},
 		"Environment": {"id", "code", "name", "role", "in_scope", "criticality"},

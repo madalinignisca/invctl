@@ -35,7 +35,6 @@ import (
 
 	"github.com/madalinignisca/invctl/internal/domain"
 	"github.com/madalinignisca/invctl/internal/store"
-	"github.com/madalinignisca/invctl/internal/web/middleware"
 	"github.com/madalinignisca/invctl/internal/web/render"
 )
 
@@ -129,6 +128,17 @@ func ansibleGroupName(dimension, raw string) string {
 // refused with an error naming both sources, never merged into one group --
 // a merged group would silently widen the target set of every playbook that
 // uses it.
+//
+// TWO ASSETS SHARING A HOST NAME ARE REFUSED THE SAME WAY, one level down and
+// on the dimension that decides which machine gets connected to. asset.name is
+// unique only among LIVE SIBLINGS (migration 00021), so `vm-app-1` under
+// hv-prod-1 and `vm-app-1` under hv-dev-1 is legal and common. Ansible keys
+// hostvars by name, so merging them means last writer wins: a playbook
+// targeting env_dev resolves `vm-app-1` to the PRODUCTION box's ansible_host
+// and connects to it successfully, with nothing reporting an error. That is
+// the group-name failure with a worse blast radius, so it gets the same
+// answer -- an error naming BOTH asset ids, a 500 to the client with the
+// generic body, and both ids in the server log.
 func buildAnsibleInventory(rows []store.APIAssetRow) (Inventory, error) {
 	inv := Inventory{
 		Meta:   InventoryMeta{HostVars: map[string]map[string]string{}},
@@ -157,11 +167,27 @@ func buildAnsibleInventory(rows []store.APIAssetRow) (Inventory, error) {
 		return nil
 	}
 
+	// hostSource maps a published host name to the id of the asset that
+	// claimed it, so a second asset claiming the same name is detectable
+	// before anything is overwritten. Checked AFTER the host filter above: two
+	// assets sharing a name matter here only if both would actually appear in
+	// this document, and a switch sharing a VM's name is not a conflict
+	// Ansible can ever see.
+	hostSource := map[string]string{}
+
 	for _, row := range rows {
 		if !hostKinds[row.Kind] || len(row.Addresses) == 0 {
 			continue
 		}
 		host := row.Name
+		if existing, ok := hostSource[host]; ok && existing != row.ID {
+			return Inventory{}, fmt.Errorf(
+				"ansible host name %q is claimed by two assets, %s and %s: "+
+					"a name is unique only among live siblings, and merging them would "+
+					"connect a playbook to whichever asset was written last",
+				host, existing, row.ID)
+		}
+		hostSource[host] = row.ID
 
 		hv := map[string]string{
 			"invctl_id":    row.ID,
@@ -198,6 +224,15 @@ func buildAnsibleInventory(rows []store.APIAssetRow) (Inventory, error) {
 	return inv, nil
 }
 
+// pageSize is the clamped round-trip size fetchAllAssets actually uses. See
+// its call site for what each end of the clamp otherwise truncates.
+func (a *API) pageSize() int {
+	if a.PageSize <= 0 || a.PageSize > MaxLimit {
+		return MaxLimit
+	}
+	return a.PageSize
+}
+
 // fetchAllAssets pages through every asset visible to scope, following the
 // keyset cursor exactly as an external client would, until a short page says
 // there is nothing left. See the file doc comment for why "one call with a
@@ -215,6 +250,21 @@ func buildAnsibleInventory(rows []store.APIAssetRow) (Inventory, error) {
 // nothing about what gets fetched or returned.
 func (a *API) fetchAllAssets(ctx context.Context, scope domain.EnvironmentScope) ([]store.APIAssetRow, error) {
 	var all []store.APIAssetRow
+	// CLAMPED HERE, not trusted from the field. API.PageSize is exported and
+	// has no floor or ceiling, and both ends of its range truncate this view
+	// silently -- the exact failure this file's banner comment forbids:
+	//
+	//   - The ZERO value. `&api.API{Store: st}` built without New() asks the
+	//     store for 0, the store's own apiLimit turns that into 100 rows, and
+	//     nextCursor(rows, 0) returns nil on the first call, so the loop ends
+	//     after one page with a 200 and a truncated inventory.
+	//   - Anything ABOVE MaxLimit. The store clamps to 500 and returns 500,
+	//     nextCursor compares 500 against the larger asked-for size, calls it
+	//     a short page, and stops. Same silent truncation.
+	//
+	// The same number must reach the store and nextCursor for the short-page
+	// test to mean anything, which is why it is computed once here.
+	size := a.pageSize()
 	after := ""
 	for trips := 1; ; trips++ {
 		if trips > fetchAllAssetsWarnAfter {
@@ -224,14 +274,14 @@ func (a *API) fetchAllAssets(ctx context.Context, scope domain.EnvironmentScope)
 		rows, err := a.Store.APIListAssets(ctx, store.APIAssetFilter{
 			Scope:     scope,
 			After:     after,
-			Limit:     a.PageSize,
+			Limit:     size,
 			Lifecycle: domain.LifecycleActive,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("paging assets for the ansible view: %w", err)
 		}
 		all = append(all, rows...)
-		cursor := nextCursor(rows, a.PageSize, func(r store.APIAssetRow) string { return r.ID })
+		cursor := nextCursor(rows, size, func(r store.APIAssetRow) string { return r.ID })
 		if cursor == nil {
 			return all, nil
 		}
@@ -245,12 +295,8 @@ func (a *API) fetchAllAssets(ctx context.Context, scope domain.EnvironmentScope)
 // expects one document, not a feed to page through; the pagination happens
 // internally against the store instead, in fetchAllAssets.
 func (a *API) Ansible(w http.ResponseWriter, r *http.Request) {
-	reader, ok := middleware.ReaderFrom(r.Context())
-	if !ok {
-		writeError(w, errNoReaderInContext)
-		return
-	}
-	if err := checkKnownParams(r.URL.Query()); err != nil {
+	reader, _, err := readerAndQuery(r)
+	if err != nil {
 		writeError(w, err)
 		return
 	}

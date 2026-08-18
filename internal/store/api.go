@@ -161,7 +161,16 @@ type APIAssetRow struct {
 	// invctl_site for a VM.
 	Site *string `db:"site"`
 	Rack *string `db:"rack"`
-	Role *string `db:"role"`
+	// NO ROLE COLUMN. An earlier revision selected `a.manager_role AS role`
+	// and published it as the asset's functional role. manager_role is an FK
+	// into responsibility_role, whose entire vocabulary is
+	// owner/operator/approver/oncall/custodian/vendor -- it can never hold
+	// "database", which is what both documents described. It is also only half
+	// a fact: migration 00014 is explicit that a role without a team is not
+	// expressible, and publishing half of a two-part fact is worse than
+	// omitting it. `kind` already carries server/vm/switch and services give
+	// functional grouping. A real functional-role column, if one is ever
+	// added, is an additive and non-breaking change to this contract.
 
 	Environments []string `db:"-"`
 	Addresses    []string `db:"-"`
@@ -267,8 +276,7 @@ const apiAssetSelect = `
 	       (SELECT ra.name FROM asset_closure ac
 	          JOIN asset ra ON ra.id = ac.ancestor_id
 	         WHERE ac.descendant_id = a.id AND ra.kind = 'rack'
-	         ORDER BY ac.depth LIMIT 1) AS rack,
-	       a.manager_role AS role
+	         ORDER BY ac.depth LIMIT 1) AS rack
 	FROM asset a
 	WHERE `
 

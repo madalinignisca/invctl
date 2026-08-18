@@ -38,6 +38,7 @@ func pristineEnv(t *testing.T) {
 		"INV_LDAP_URL", "INV_LISTEN", "INV_LOG_LEVEL", "INV_SECURE_COOKIES",
 		"INV_SEED", "INV_SESSION_KEY", "INV_SESSION_TIMEOUT",
 		"INV_AGENT_TOKENS", "INV_AGENT_SCOPES", "INV_AGENT_VOCAB",
+		"INV_API_TOKENS", "INV_API_SCOPES",
 	} {
 		t.Setenv(key, "")
 	}
@@ -460,5 +461,61 @@ func TestLDAPRefusesAnUntrustworthyChannel(t *testing.T) {
 				t.Fatalf("an encrypted bind was refused: %v", err)
 			}
 		})
+	}
+}
+
+// TestATokenSharedBetweenTheAgentAndReaderRegistriesRefusesToStart pins the
+// final review's C4. INV_AGENT_TOKENS and INV_API_TOKENS are two registries
+// because they are two principal types, and sharing a token WITHIN either
+// list is already refused -- but one pasted into both started cleanly and
+// handed a single secret both capabilities, which is precisely what the
+// second registry exists to prevent. This is the only place both lists are in
+// scope at once, so it is the only place the check can live.
+func TestATokenSharedBetweenTheAgentAndReaderRegistriesRefusesToStart(t *testing.T) {
+	pristineEnv(t)
+	shared := longToken("shared")
+	t.Setenv("INV_ADMIN_USERS", "gabriel")
+	t.Setenv("INV_AGENT_TOKENS", "prom-prod:"+shared)
+	t.Setenv("INV_AGENT_SCOPES", "prom-prod:prod")
+	t.Setenv("INV_AGENT_VOCAB", "prom-prod:prometheus")
+	t.Setenv("INV_API_TOKENS", "ansible:"+shared)
+	t.Setenv("INV_API_SCOPES", "ansible:prod")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("one token carrying both an agent's and a reader's capabilities must refuse to start")
+	}
+	if !strings.Contains(err.Error(), "prom-prod") || !strings.Contains(err.Error(), "ansible") {
+		t.Fatalf("the error must name both credentials; got %v", err)
+	}
+	if !strings.Contains(err.Error(), "INV_AGENT_TOKENS") || !strings.Contains(err.Error(), "INV_API_TOKENS") {
+		t.Fatalf("the error must name both variables, so an operator knows where to edit; got %v", err)
+	}
+	if strings.Contains(err.Error(), shared) {
+		t.Fatalf("the error must not contain the shared token; got %v", err)
+	}
+}
+
+// TestDistinctAgentAndReaderTokensStartFine is the negative half: the check
+// must refuse a shared secret and nothing else. Two credentials of different
+// principal types with their own tokens are the ordinary configuration.
+func TestDistinctAgentAndReaderTokensStartFine(t *testing.T) {
+	pristineEnv(t)
+	t.Setenv("INV_ADMIN_USERS", "gabriel")
+	t.Setenv("INV_AGENT_TOKENS", "prom-prod:"+longToken("a"))
+	t.Setenv("INV_AGENT_SCOPES", "prom-prod:prod")
+	t.Setenv("INV_AGENT_VOCAB", "prom-prod:prometheus")
+	t.Setenv("INV_API_TOKENS", "ansible:"+longToken("b"))
+	t.Setenv("INV_API_SCOPES", "ansible:prod")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(cfg.AgentCredentials) != 1 || cfg.AgentCredentials[0].ID != "prom-prod" {
+		t.Fatalf("got agent credentials %+v, want exactly [prom-prod]", cfg.AgentCredentials)
+	}
+	if len(cfg.Readers) != 1 || cfg.Readers[0].ID != "ansible" {
+		t.Fatalf("got readers %+v, want exactly [ansible]", cfg.Readers)
 	}
 }

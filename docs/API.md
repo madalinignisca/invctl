@@ -99,6 +99,12 @@ All `GET`, all under `/api/v1`.
 | `GET /environments` | collection, unpaginated |
 | `GET /ansible` | the composed Ansible dynamic-inventory view, unpaginated |
 
+**A query string that is not valid URL encoding is a 400.** `?after=%zz` is
+not a bad cursor — it is a query string `net/http` cannot parse, and its
+default behaviour is to drop the offending pair entirely, which would hand the
+caller page one with a 200. It is refused instead, and the raw query is never
+echoed back.
+
 **A query parameter the route does not define is a 400**, not a silently
 ignored value — `?limt=5` is refused rather than quietly falling back to the
 default limit with a 200. A parameter repeated twice (`?limit=5&limit=9`) is
@@ -131,7 +137,10 @@ below).
 **A malformed `?after=` cursor is a 400, never silently restarted at page
 one.** A cursor is the id of the last row of the previous page; if it is not a
 well-formed id, the request is refused rather than quietly treated as "no
-cursor". A client that kept going on a corrupted cursor would restart at page
+cursor". A well-formed one is normalised to the hyphenated lower-case
+spelling before it is used, so the braced, `urn:uuid:`-prefixed, unhyphenated
+and upper-case forms an id parser accepts all select the same rows rather than
+quietly skipping or repeating a page. A client that kept going on a corrupted cursor would restart at page
 one forever — re-fetching the first hundred rows on every call and never
 reaching the rest of the estate, with a 200 every time and nothing anywhere
 saying so.
@@ -308,16 +317,22 @@ edit. Every example below is drawn from the repository's golden test fixtures
   "environments": ["prod"],
   "site": "dc-oslo",
   "rack": null,
-  "role": null,
   "addresses": [],
   "services": []
 }
 ```
 
 `site` and `rack` are the nearest containing asset of that kind, unscoped —
-see §5 above. `role` is the asset's `manager_role`, a capacity ("database"),
-never a person. `addresses` and `services` are sorted and de-duplicated: a
+see §5 above. `addresses` and `services` are sorted and de-duplicated: a
 service with three replicas on one host appears once.
+
+**There is no `role` field.** An earlier revision published one, sourced from
+`asset.manager_role` and documented here as a capacity like `"database"`.
+`manager_role` is a foreign key into `responsibility_role`, whose whole
+vocabulary is `owner`, `operator`, `approver`, `oncall`, `custodian`,
+`vendor` — it could never carry that value — and it means nothing without the
+team it qualifies, which this surface deliberately does not publish. Use
+`kind` for what a machine is and `services` for what it runs.
 
 ### Service
 
@@ -410,6 +425,20 @@ space:
 }
 ```
 
+`ansible_host` is the asset's **first address after a plain string sort** of
+its `addresses` list — the same list, sorted the same way, that `GET /assets`
+publishes. That is a lexicographic sort, not a numeric one: an asset holding
+`10.20.10.9` and `10.20.10.11` gets `10.20.10.11`, because `1` sorts before
+`9`. It is stable and it is not necessarily the management NIC. If a host must
+be reached on a particular interface, set that in your playbook or inventory
+plugin rather than assuming this route picked it.
+
+**A host name claimed by two assets is a 500, naming both asset ids in the
+server log** — never a merge. `asset.name` is unique only among live siblings,
+so `vm-app-1` under one hypervisor and `vm-app-1` under another is legal;
+Ansible keys `hostvars` by name, so merging them would silently point a
+playbook at whichever asset happened to be written last.
+
 Groups are formed along three dimensions — every environment an asset is in,
 its kind, and each service it runs — and prefixed by dimension (`env_`,
 `kind_`, `svc_`) so a service literally named `prod` cannot collide with the
@@ -436,10 +465,11 @@ no adapter or transformation step sits between this route and `ansible-playbook
 
 | Status | When |
 |---|---|
-| 400 | a malformed `?after=` cursor; an unparseable or non-positive `?limit=`; an unrecognised `?kind=`/`?lifecycle=` value; an unknown query parameter name, or one repeated; `?env=` naming an environment outside the credential's scope |
+| 400 | a query string that is not valid URL encoding at all (`?after=%zz`); a malformed `?after=` cursor; an unparseable or non-positive `?limit=`; an unrecognised `?kind=`/`?lifecycle=` value; an unknown query parameter name, or one repeated; `?env=` naming an environment outside the credential's scope |
 | 401 | no bearer token; an unrecognised token; a browser session present on the route |
 | 404 | an id that does not exist, **or** an id that exists but is outside the credential's scope — byte-identical either way, see §2 |
 | 429 | the credential, or repeated failed authentication attempts, over the rate limit |
+| 500 | the estate cannot be rendered into this contract: an Ansible group-name collision after sanitisation, or a host name claimed by two assets. Both name the conflicting sources in the server log and neither says anything about them to the client |
 
 Every error body is `render.JSONError`'s shape and never echoes a raw database
 error — a 500 is logged in full server-side and answered to the client with a

@@ -19,7 +19,6 @@ import (
 	"github.com/madalinignisca/invctl/internal/auth"
 	"github.com/madalinignisca/invctl/internal/domain"
 	"github.com/madalinignisca/invctl/internal/store"
-	"github.com/madalinignisca/invctl/internal/web/middleware"
 	"github.com/madalinignisca/invctl/internal/web/render"
 )
 
@@ -30,21 +29,7 @@ var assetQueryParams = []string{"after", "limit", "env", "kind", "lifecycle"}
 // ListAssets serves GET /api/v1/assets: one page of the assets visible to the
 // caller's token, narrowed by the optional env/kind/lifecycle filters.
 func (a *API) ListAssets(w http.ResponseWriter, r *http.Request) {
-	reader, ok := middleware.ReaderFrom(r.Context())
-	if !ok {
-		writeError(w, errNoReaderInContext)
-		return
-	}
-	// Parsed once and reused by checkKnownParams, ParsePageRequest and
-	// applyAssetFilters -- url.Values.Query() re-parses the raw query string
-	// every time it is called, and there is no reason to pay for that three
-	// times over one request.
-	q := r.URL.Query()
-	if err := checkKnownParams(q, assetQueryParams...); err != nil {
-		writeError(w, err)
-		return
-	}
-	page, err := ParsePageRequest(q)
+	reader, q, page, err := beginList(r, assetQueryParams...)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -79,12 +64,8 @@ func (a *API) ListAssets(w http.ResponseWriter, r *http.Request) {
 // existence oracle over the estate, so the two cases must render the same
 // response and differ only in a server-side security event.
 func (a *API) GetAsset(w http.ResponseWriter, r *http.Request) {
-	reader, ok := middleware.ReaderFrom(r.Context())
-	if !ok {
-		writeError(w, errNoReaderInContext)
-		return
-	}
-	if err := checkKnownParams(r.URL.Query()); err != nil {
+	reader, _, err := readerAndQuery(r)
+	if err != nil {
 		writeError(w, err)
 		return
 	}
@@ -111,7 +92,6 @@ func assetDTO(r store.APIAssetRow) Asset {
 		Environments: r.Environments,
 		Site:         r.Site,
 		Rack:         r.Rack,
-		Role:         r.Role,
 		Addresses:    r.Addresses,
 		Services:     r.Services,
 	}
@@ -152,11 +132,20 @@ func applyAssetFilters(f *store.APIAssetFilter, q url.Values) error {
 		}
 		f.Lifecycle = v
 	}
+	// THE CANONICAL CODE COMES BACK OUT OF THE SCOPE, never the caller's own
+	// spelling. Scope.Allows lower-cases and trims before comparing, so
+	// `?env=PROD` is admitted -- but the store compares environment_code as
+	// TEXT against the lower-case codes NewEnvironment stores, so assigning
+	// the raw value gave a 200 with an empty collection while `?kind=VM`
+	// correctly 400s. Same §6 shape, one step later: a value arrives, cannot
+	// be used as the caller meant it, and is silently replaced by something
+	// indistinguishable from a legitimate empty answer.
 	if v := q.Get("env"); v != "" {
-		if !f.Scope.Allows(v) {
+		code, ok := f.Scope.Canonical(v)
+		if !ok {
 			return badRequest("env is not in this credential's scope")
 		}
-		f.EnvironmentCode = v
+		f.EnvironmentCode = code
 	}
 	return nil
 }

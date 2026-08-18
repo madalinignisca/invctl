@@ -11,6 +11,7 @@ package middleware
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/madalinignisca/invctl/internal/auth"
@@ -143,5 +144,38 @@ func TestACredentialOverItsOwnRateLimitIsThrottled(t *testing.T) {
 	}
 	if last != http.StatusTooManyRequests {
 		t.Fatalf("got %d, want 429 once the credential's own bucket is exhausted", last)
+	}
+}
+
+// TestTheReaderGuardNamesItsOwnVariableInThe401 pins a message that had leaked
+// across the seam: /api/v1 answered agent.go's "a valid monitoring credential
+// is required", which sends an Ansible integrator debugging a 401 to
+// INV_AGENT_TOKENS -- the wrong variable, on the wrong surface, for a
+// credential that would not have worked here anyway. Both refusal paths are
+// asserted, because they are two call sites and either can drift back.
+func TestTheReaderGuardNamesItsOwnVariableInThe401(t *testing.T) {
+	const want = `{"error":"a valid read credential is required; see INV_API_TOKENS"}`
+	cases := map[string]string{
+		"no bearer token":    "",
+		"unrecognised token": "wrong",
+	}
+	for name, bearer := range cases {
+		t.Run(name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/assets", nil)
+			if bearer != "" {
+				req.Header.Set("Authorization", "Bearer "+bearer)
+			}
+			RequireReader(testReaderGuard(t))(okHandler()).ServeHTTP(rec, req)
+			if rec.Code != http.StatusUnauthorized {
+				t.Fatalf("got %d, want 401", rec.Code)
+			}
+			if got := strings.TrimSpace(rec.Body.String()); got != want {
+				t.Fatalf("got body %q, want %q", got, want)
+			}
+			if strings.Contains(rec.Body.String(), "monitoring") {
+				t.Fatalf("the reader route sent the monitoring surface's message: %s", rec.Body.String())
+			}
+		})
 	}
 }

@@ -16,7 +16,6 @@ import (
 
 	"github.com/madalinignisca/invctl/internal/auth"
 	"github.com/madalinignisca/invctl/internal/store"
-	"github.com/madalinignisca/invctl/internal/web/middleware"
 	"github.com/madalinignisca/invctl/internal/web/render"
 )
 
@@ -27,16 +26,7 @@ var serviceQueryParams = []string{"after", "limit"}
 // ListServices serves GET /api/v1/services: one page of the services visible
 // to the caller's token.
 func (a *API) ListServices(w http.ResponseWriter, r *http.Request) {
-	reader, ok := middleware.ReaderFrom(r.Context())
-	if !ok {
-		writeError(w, errNoReaderInContext)
-		return
-	}
-	if err := checkKnownParams(r.URL.Query(), serviceQueryParams...); err != nil {
-		writeError(w, err)
-		return
-	}
-	page, err := ParsePageRequest(r.URL.Query())
+	reader, _, page, err := beginList(r, serviceQueryParams...)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -59,12 +49,8 @@ func (a *API) ListServices(w http.ResponseWriter, r *http.Request) {
 // GetService serves GET /api/v1/services/{id}, with the same byte-identical
 // 404 behaviour as GetAsset for an out-of-scope id.
 func (a *API) GetService(w http.ResponseWriter, r *http.Request) {
-	reader, ok := middleware.ReaderFrom(r.Context())
-	if !ok {
-		writeError(w, errNoReaderInContext)
-		return
-	}
-	if err := checkKnownParams(r.URL.Query()); err != nil {
+	reader, _, err := readerAndQuery(r)
+	if err != nil {
 		writeError(w, err)
 		return
 	}

@@ -129,11 +129,21 @@ func loadReaderCredentials() ([]ReaderCredential, error) {
 		creds = append(creds, ReaderCredential{ID: p.key, Token: p.value, Environments: envs})
 	}
 
+	// SORTED, so two unmatched scope ids name the same one on every run. Map
+	// iteration order is randomised, so the previous form reported a different
+	// credential each start -- an operator fixing the one it named would be
+	// told about the other, and could reasonably conclude the fix had not
+	// taken.
+	unmatched := make([]string, 0, len(byID))
 	for id := range byID {
 		if !seen[id] {
-			return nil, fmt.Errorf(
-				"validating config: INV_API_SCOPES names credential %q, which is not in INV_API_TOKENS", id)
+			unmatched = append(unmatched, id)
 		}
+	}
+	if len(unmatched) > 0 {
+		sort.Strings(unmatched)
+		return nil, fmt.Errorf(
+			"validating config: INV_API_SCOPES names credential %q, which is not in INV_API_TOKENS", unmatched[0])
 	}
 
 	sort.Slice(creds, func(i, j int) bool { return creds[i].ID < creds[j].ID })

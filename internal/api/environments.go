@@ -13,7 +13,6 @@ import (
 	"net/http"
 
 	"github.com/madalinignisca/invctl/internal/domain"
-	"github.com/madalinignisca/invctl/internal/web/middleware"
 	"github.com/madalinignisca/invctl/internal/web/render"
 )
 
@@ -22,12 +21,8 @@ import (
 // it is the vocabulary a consumer needs before it can use ?env= at all. There
 // are no query parameters.
 func (a *API) ListEnvironments(w http.ResponseWriter, r *http.Request) {
-	reader, ok := middleware.ReaderFrom(r.Context())
-	if !ok {
-		writeError(w, errNoReaderInContext)
-		return
-	}
-	if err := checkKnownParams(r.URL.Query()); err != nil {
+	reader, _, err := readerAndQuery(r)
+	if err != nil {
 		writeError(w, err)
 		return
 	}

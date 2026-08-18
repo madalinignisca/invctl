@@ -13,8 +13,10 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/madalinignisca/invctl/internal/auth"
@@ -210,6 +212,28 @@ func (f *apiHandlerFixture) serveByID(handler http.HandlerFunc, id, bearer strin
 	}
 	middleware.RequireReader(f.guard)(handler).ServeHTTP(rec, req)
 	return rec
+}
+
+// readerScope returns the environment scope the real guard puts in the
+// context for a bearer token, so a test that exercises something BELOW the
+// handler still uses the credential's own scope rather than one written out
+// by hand -- a hand-written scope is the "uniform fixture silently disarmed a
+// security predicate" failure this suite has already had once.
+func (f *apiHandlerFixture) readerScope(t *testing.T, bearer string) domain.EnvironmentScope {
+	t.Helper()
+	var scope domain.EnvironmentScope
+	rec := f.serve(func(w http.ResponseWriter, r *http.Request) {
+		reader, ok := middleware.ReaderFrom(r.Context())
+		if !ok {
+			t.Fatal("the guard admitted a request with no reader in context")
+			return
+		}
+		scope = reader.Environments
+	}, http.MethodGet, "/api/v1/x", bearer)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("authenticating the fixture token: got %d", rec.Code)
+	}
+	return scope
 }
 
 // ---------------------------------------------------------------------------
@@ -436,5 +460,168 @@ func TestListEnvironmentsReturnsOnlyWhatTheTokenMaySee(t *testing.T) {
 	}
 	if len(page.Data) != 1 || page.Data[0].Code != "prod" {
 		t.Fatalf("got %+v, want exactly [prod]", page.Data)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// A malformed query string (final review, B3). r.URL.Query() calls
+// url.ParseQuery and DISCARDS its error, which is documented behaviour and
+// exactly the shape docs/api-design.md §6 refuses: `?after=%zz` used to drop
+// the pair entirely, so ParsePageRequest saw no cursor at all and the caller
+// got PAGE ONE with a 200 -- the "paginating client restarts forever" failure.
+// The AST guard in silent_fallback_test.go cannot see it, because the
+// discarded error is inside net/http.
+// ---------------------------------------------------------------------------
+
+func TestAMalformedQueryStringIsRefused(t *testing.T) {
+	f := newAPIHandlerFixture(t)
+
+	const wantBody = `{"error":"the query string is malformed"}`
+	cases := []struct {
+		name   string
+		target string
+		why    string
+	}{
+		{"a malformed cursor value", "/api/v1/assets?after=%zz",
+			"the pair is dropped, so the request would silently be page one with a 200"},
+		{"a malformed parameter name", "/api/v1/assets?%zz=1",
+			"the pair is dropped, so checkKnownParams never sees the unknown name"},
+		{"a bare stray percent", "/api/v1/assets?limit=%",
+			"an incomplete escape is not a limit this endpoint can honour"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			rec := f.serve(f.api.ListAssets, http.MethodGet, c.target, tokProd)
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("got %d, want 400: %s", rec.Code, c.why)
+			}
+			if rec.Body.String() != wantBody {
+				t.Fatalf("got body %q, want %q", rec.Body.String(), wantBody)
+			}
+		})
+	}
+}
+
+// TestAMalformedQueryStringIsRefusedOnEveryRoute pins the fix as SHARED. The
+// point of routing all seven handlers through one preamble is that no handler
+// can be left on r.URL.Query(); a per-handler fix would drift the way the
+// boilerplate already had.
+func TestAMalformedQueryStringIsRefusedOnEveryRoute(t *testing.T) {
+	f := newAPIHandlerFixture(t)
+	handlers := map[string]http.HandlerFunc{
+		"assets":       f.api.ListAssets,
+		"services":     f.api.ListServices,
+		"addresses":    f.api.ListAddresses,
+		"environments": f.api.ListEnvironments,
+		"ansible":      f.api.Ansible,
+	}
+	const wantBody = `{"error":"the query string is malformed"}`
+	for name, h := range handlers {
+		t.Run(name, func(t *testing.T) {
+			rec := f.serve(h, http.MethodGet, "/api/v1/"+name+"?%zz=1", tokProd)
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("got %d, want 400", rec.Code)
+			}
+			if rec.Body.String() != wantBody {
+				t.Fatalf("got body %q, want %q", rec.Body.String(), wantBody)
+			}
+		})
+	}
+	// The single-resource routes take no query parameters at all, and are on
+	// the same preamble.
+	for name, h := range map[string]http.HandlerFunc{"asset": f.api.GetAsset, "service": f.api.GetService} {
+		t.Run(name+" by id", func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/x/an-id?%zz=1", nil)
+			req.SetPathValue("id", "an-id")
+			req.Header.Set("Authorization", "Bearer "+tokProd)
+			middleware.RequireReader(f.guard)(h).ServeHTTP(rec, req)
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("got %d, want 400", rec.Code)
+			}
+			if rec.Body.String() != wantBody {
+				t.Fatalf("got body %q, want %q", rec.Body.String(), wantBody)
+			}
+		})
+	}
+}
+
+// TestAMalformedQueryStringIsNeverEchoed is the second half, matching the
+// rule already applied to a parameter name and a parameter value: the raw
+// query is as caller-controlled as either, so none of it comes back.
+func TestAMalformedQueryStringIsNeverEchoed(t *testing.T) {
+	f := newAPIHandlerFixture(t)
+	rec := f.serve(f.api.ListAssets, http.MethodGet,
+		"/api/v1/assets?after=%zz&secret-value=1", tokProd)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("got %d, want 400", rec.Code)
+	}
+	if strings.Contains(rec.Body.String(), "secret-value") || strings.Contains(rec.Body.String(), "%zz") {
+		t.Fatalf("the raw query leaked into the response: %s", rec.Body.String())
+	}
+}
+
+// TestAWellFormedQueryStillWorks is the negative half: the new refusal must
+// bite on a malformed query and on nothing else.
+func TestAWellFormedQueryStillWorks(t *testing.T) {
+	f := newAPIHandlerFixture(t)
+	rec := f.serve(f.api.ListAssets, http.MethodGet, "/api/v1/assets?kind=vm&limit=10", tokProd)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("got %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	var page Page[Asset]
+	if err := json.Unmarshal(rec.Body.Bytes(), &page); err != nil {
+		t.Fatalf("decoding response: %v", err)
+	}
+	names := make([]string, 0, len(page.Data))
+	for _, a := range page.Data {
+		names = append(names, a.Name)
+	}
+	if !reflect.DeepEqual(names, []string{"vm-db-1"}) {
+		t.Fatalf("got %v, want exactly [vm-db-1]", names)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// ?env= is case-insensitive on the way in and canonical on the way through
+// (final review, C1). Scope.Allows lower-cases and trims before comparing, so
+// `?env=PROD` was ADMITTED and then stored raw and compared case-sensitively
+// against the lower-case codes the estate stores -- a 200 with an empty
+// collection, while `?kind=VM` correctly 400s. Same §6 shape, one step later.
+// ---------------------------------------------------------------------------
+
+func TestAnEnvironmentFilterIsCanonicalisedNotJustAccepted(t *testing.T) {
+	f := newAPIHandlerFixture(t)
+
+	canonical := f.serve(f.api.ListAssets, http.MethodGet, "/api/v1/assets?env=prod", tokProd)
+	if canonical.Code != http.StatusOK {
+		t.Fatalf("?env=prod: got %d, want 200: %s", canonical.Code, canonical.Body.String())
+	}
+	// Sanity: the fixture answer this compares against is not itself empty,
+	// or the comparison below would pass for the very bug it is written for.
+	var page Page[Asset]
+	if err := json.Unmarshal(canonical.Body.Bytes(), &page); err != nil {
+		t.Fatalf("decoding response: %v", err)
+	}
+	names := make([]string, 0, len(page.Data))
+	for _, a := range page.Data {
+		names = append(names, a.Name)
+	}
+	if !reflect.DeepEqual(names, []string{"vm-db-1"}) {
+		t.Fatalf("got %v, want exactly [vm-db-1]", names)
+	}
+
+	for _, spelling := range []string{"PROD", "Prod", " prod", "prod "} {
+		t.Run(spelling, func(t *testing.T) {
+			rec := f.serve(f.api.ListAssets, http.MethodGet,
+				"/api/v1/assets?env="+url.QueryEscape(spelling), tokProd)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("?env=%q: got %d, want 200 -- Scope.Allows admits this spelling", spelling, rec.Code)
+			}
+			if rec.Body.String() != canonical.Body.String() {
+				t.Fatalf("?env=%q returned %s, want byte-identical to ?env=prod's %s",
+					spelling, rec.Body.String(), canonical.Body.String())
+			}
+		})
 	}
 }

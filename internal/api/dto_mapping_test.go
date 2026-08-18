@@ -124,15 +124,15 @@ func TestAssetDTOExactMapping(t *testing.T) {
 	site := "dc-1"
 	row := store.APIAssetRow{
 		ID: "a1", Kind: domain.KindVM, Name: "vm-db-2", Lifecycle: domain.LifecycleActive,
-		Site: &site, Rack: nil, Role: nil,
+		Site: &site, Rack: nil,
 		Environments: []string{"prod"}, Addresses: []string{"10.2.0.14"}, Services: []string{"billing-api"},
 	}
 	got := assetDTO(row)
 	if got.ID != "a1" || got.Kind != domain.KindVM || got.Name != "vm-db-2" || got.Lifecycle != domain.LifecycleActive {
 		t.Fatalf("got %+v, want identity/kind/name/lifecycle to match the row", got)
 	}
-	if got.Site == nil || *got.Site != "dc-1" || got.Rack != nil || got.Role != nil {
-		t.Fatalf("got Site=%v Rack=%v Role=%v, want Site=dc-1 Rack=nil Role=nil", got.Site, got.Rack, got.Role)
+	if got.Site == nil || *got.Site != "dc-1" || got.Rack != nil {
+		t.Fatalf("got Site=%v Rack=%v, want Site=dc-1 Rack=nil", got.Site, got.Rack)
 	}
 	if !equalStrings(got.Environments, []string{"prod"}) || !equalStrings(got.Addresses, []string{"10.2.0.14"}) ||
 		!equalStrings(got.Services, []string{"billing-api"}) {

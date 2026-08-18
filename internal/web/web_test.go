@@ -95,7 +95,9 @@ const (
 	readerAllID    = "ansible"
 	readerAllToken = "reader-all-token-000000000000000000"
 	readerDevID    = "dev-only"
-	readerDevToken = "reader-dev-token-111111111111111111" // #nosec G101 -- test fixture credential, padded on purpose to exercise config.MinAgentTokenLength, not a real secret
+	// Padded on purpose to exercise config.MinAgentTokenLength.
+	//nolint:gosec // G101: test fixture credential, not a real secret
+	readerDevToken = "reader-dev-token-111111111111111111"
 )
 
 // testReaderCredentials can read the whole fixture estate. There is no
@@ -412,9 +414,10 @@ func (h *harness) request(method, path string, reqBody io.Reader) *http.Request 
 // do sends a request built by request.
 func (h *harness) do(req *http.Request) *http.Response {
 	h.t.Helper()
-	// #nosec G704 -- req is always built by h.request via h.url, which
-	// prepends h.server.URL: the harness's own httptest server. Nothing
-	// upstream of this call ever supplies a caller- or request-influenced URL.
+	// req is always built by h.request via h.url, which prepends
+	// h.server.URL: the harness's own httptest server. Nothing upstream of
+	// this call ever supplies a caller- or request-influenced URL.
+	//nolint:gosec // G704: fixed base URL; the harness's own httptest server
 	resp, err := h.client.Do(req)
 	if err != nil {
 		h.t.Fatalf("sending request: %v", err)

@@ -110,7 +110,7 @@ func RequireReader(g ReaderGuard) func(http.Handler) http.Handler {
 			if !ok {
 				auth.LogSecurityEvent(ctx, slog.LevelWarn, auth.EventReaderRejected,
 					"path", r.URL.Path, "remote", r.RemoteAddr, "reason", "no bearer token")
-				unauthorised(w)
+				readerUnauthorised(w)
 				return
 			}
 
@@ -126,7 +126,7 @@ func RequireReader(g ReaderGuard) func(http.Handler) http.Handler {
 				}
 				auth.LogSecurityEvent(ctx, slog.LevelWarn, auth.EventReaderRejected,
 					"path", r.URL.Path, "remote", r.RemoteAddr, "reason", "unrecognised token")
-				unauthorised(w)
+				readerUnauthorised(w)
 				return
 			}
 
@@ -140,4 +140,19 @@ func RequireReader(g ReaderGuard) func(http.Handler) http.Handler {
 			next.ServeHTTP(w, r.WithContext(withReader(ctx, reader)))
 		})
 	}
+}
+
+// readerUnauthorised is agent.go's unauthorised with this route's own noun.
+//
+// It exists because the shared helper leaked across the seam: /api/v1
+// answered "a valid monitoring credential is required", which sends an
+// Ansible integrator debugging a 401 to INV_AGENT_TOKENS -- the wrong
+// variable, on the wrong surface, for a credential that would not have worked
+// here anyway. Same status, same header, same single message for "no token",
+// "malformed token" and "wrong token", because that difference is only useful
+// to somebody guessing.
+func readerUnauthorised(w http.ResponseWriter) {
+	w.Header().Set("WWW-Authenticate", `Bearer realm="invctl"`)
+	render.JSONError(w, http.StatusUnauthorized,
+		"a valid read credential is required; see INV_API_TOKENS")
 }
