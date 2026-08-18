@@ -12,6 +12,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -108,12 +109,38 @@ func newAPIFixture(t *testing.T, e Engine) *apiFixture {
 	// token: id, name, kind, lifecycle and placement, not merely a leaked name.
 	f.asset(t, domain.KindServer, "mgmt-jump", &rack, "shared", "prod")
 
+	// EVERY ENVIRONMENT HAS AN ASSET THAT IS IN IT AND NOTHING ELSE, and the
+	// guard below enforces that rather than trusting this comment.
+	//
+	// An environment with no exclusive member is invisible to the visibility
+	// property: nothing changes when a predicate stops counting it, so a
+	// mutation keyed on that environment's code, role or criticality survives
+	// every test. `transit` and `dr` used to be empty and `staging` had only a
+	// straddle-free single member, which is precisely how `AND e2.code <>
+	// 'staging'` passed the whole suite while disclosing staging-box as a full
+	// row to a {dr} token that owns nothing in the estate. An empty environment
+	// is not safe, it is merely not yet exploited -- the disclosure arrives with
+	// the first asset somebody puts in it, silently.
+	f.asset(t, domain.KindFirewall, "fw-transit", &rack, "transit")
+	f.asset(t, domain.KindServer, "dr-box", &rack, "dr")
+
 	f.service(t, "billing-api", domain.SvcAPI, "prod", "vm-db-2")
 	f.service(t, "dev-api", domain.SvcAPI, "dev", "dev-box")
+	// The same coverage rule for the service path, which has its own predicate:
+	// one service per remaining environment, so no environment is invisible to
+	// the service half of the property either.
+	f.bareService(t, "staging-svc", "staging")
+	f.bareService(t, "shared-svc", "shared")
+	f.bareService(t, "transit-svc", "transit")
+	f.bareService(t, "dr-svc", "dr")
 
 	f.address(t, "sw-core-1", "eth0", "10.9.0.1")
 	f.address(t, "vm-db-2", "eth0", "10.2.0.14")
 	f.address(t, "dev-box", "eth0", "10.3.0.5")
+	f.address(t, "staging-box", "eth0", "10.4.0.5")
+	f.address(t, "mgmt-jump", "eth0", "10.5.0.5")
+	f.address(t, "fw-transit", "eth0", "10.6.0.1")
+	f.address(t, "dr-box", "eth0", "10.7.0.5")
 
 	// An FHRP-style virtual address: no interface, therefore no asset,
 	// therefore no environment.
@@ -249,6 +276,293 @@ func containsName(rows []APIAssetRow, name string) bool {
 }
 
 // ---------------------------------------------------------------------------
+// The visibility property
+// ---------------------------------------------------------------------------
+
+// The rule every test below derives its expectation from, rather than restating
+// it by hand:
+//
+//	a token scoped to S sees entity A if and only if A's environment set is
+//	non-empty AND A's environment set is a subset of S.
+//
+// WHY A DERIVED PROPERTY AND NOT MORE NAMED CASES. Three separate weakenings of
+// the scope predicate survived a suite full of named tests -- `in_scope`,
+// `role <> 'shared'`, `code <> 'staging'` -- and each fix hardened against the
+// one just found. A named test can only encode the mutation somebody already
+// thought of; this loop encodes the RULE, so it fails for a weakening nobody has
+// imagined yet, including one keyed on an environment added years from now.
+//
+// The named tests stay. They explain WHY a boundary device is hidden in a way a
+// loop cannot, and a reader meeting this file needs that. The property is the
+// net; the named tests are the documentation.
+//
+// Expectations are computed from the estate as it actually is, read back out of
+// the database. Writing the expected names out by hand would reintroduce the
+// exact failure this replaces: a hand-written list does not notice a newly
+// added environment, and neither did we, three times.
+
+// estateFacts is the fixture's estate as the database holds it.
+type estateFacts struct {
+	envCodes []string
+
+	assetEnvs   map[string][]string // asset id -> environment codes
+	assetName   map[string]string
+	assetLife   map[string]string
+	serviceEnv  map[string]string // service id -> its one environment code
+	serviceName map[string]string
+	serviceLife map[string]string
+	addrEnvs    map[string][]string // address id -> its host's environment codes
+	addrText    map[string]string
+	addrHost    map[string]string // address id -> host asset id, "" when none
+	addrLife    map[string]string // address id -> host lifecycle, "" when none
+}
+
+// snapshot reads the estate back out of the database.
+func (f *apiFixture) snapshot(t *testing.T) *estateFacts {
+	t.Helper()
+	e := &estateFacts{
+		assetEnvs: map[string][]string{}, assetName: map[string]string{},
+		assetLife: map[string]string{}, serviceEnv: map[string]string{},
+		serviceName: map[string]string{}, serviceLife: map[string]string{},
+		addrEnvs: map[string][]string{}, addrText: map[string]string{},
+		addrHost: map[string]string{}, addrLife: map[string]string{},
+	}
+
+	if err := f.s.read(f.ctx, &e.envCodes, `SELECT code FROM environment ORDER BY code`); err != nil {
+		t.Fatalf("reading environments: %v", err)
+	}
+
+	var assets []struct {
+		ID        string `db:"id"`
+		Name      string `db:"name"`
+		Lifecycle string `db:"lifecycle"`
+	}
+	if err := f.s.read(f.ctx, &assets, `SELECT id, name, lifecycle FROM asset`); err != nil {
+		t.Fatalf("reading assets: %v", err)
+	}
+	for _, a := range assets {
+		e.assetName[a.ID] = a.Name
+		e.assetLife[a.ID] = a.Lifecycle
+	}
+
+	var members []struct {
+		AssetID string `db:"asset_id"`
+		Code    string `db:"code"`
+	}
+	if err := f.s.read(f.ctx, &members, `
+		SELECT ae.asset_id, en.code
+		FROM asset_environment ae
+		JOIN environment en ON en.id = ae.environment_id`); err != nil {
+		t.Fatalf("reading memberships: %v", err)
+	}
+	for _, m := range members {
+		e.assetEnvs[m.AssetID] = append(e.assetEnvs[m.AssetID], m.Code)
+	}
+
+	var services []struct {
+		ID        string `db:"id"`
+		Code      string `db:"code"`
+		Lifecycle string `db:"lifecycle"`
+		Env       string `db:"env"`
+	}
+	if err := f.s.read(f.ctx, &services, `
+		SELECT sv.id, sv.code, sv.lifecycle, en.code AS env
+		FROM service sv
+		JOIN environment en ON en.id = sv.environment_id`); err != nil {
+		t.Fatalf("reading services: %v", err)
+	}
+	for _, sv := range services {
+		e.serviceName[sv.ID] = sv.Code
+		e.serviceLife[sv.ID] = sv.Lifecycle
+		e.serviceEnv[sv.ID] = sv.Env
+	}
+
+	var addrs []struct {
+		ID       string  `db:"id"`
+		AddrText string  `db:"addr_text"`
+		AssetID  *string `db:"asset_id"`
+	}
+	if err := f.s.read(f.ctx, &addrs, `
+		SELECT ip.id, ip.addr_text, i.asset_id
+		FROM ip_address ip
+		LEFT JOIN interface i ON i.id = ip.interface_id`); err != nil {
+		t.Fatalf("reading addresses: %v", err)
+	}
+	for _, a := range addrs {
+		e.addrText[a.ID] = a.AddrText
+		if a.AssetID == nil {
+			continue // no interface: no asset, no environments, no reader
+		}
+		e.addrHost[a.ID] = *a.AssetID
+		e.addrLife[a.ID] = e.assetLife[*a.AssetID]
+		e.addrEnvs[a.ID] = e.assetEnvs[*a.AssetID]
+	}
+	return e
+}
+
+// scopeCases returns the scopes the property is checked against: every
+// singleton, every pair, and the full set.
+//
+// Singletons alone would satisfy the rule as stated, but they only ever
+// exercise EQUALITY -- an asset in exactly the one environment. Pairs are what
+// exercise the SUBSET half, which is where AllowsAll and AllowsAny differ and
+// therefore where the interesting weakenings live.
+func scopeCases(codes []string) [][]string {
+	sorted := append([]string(nil), codes...)
+	sort.Strings(sorted)
+	var out [][]string
+	for _, c := range sorted {
+		out = append(out, []string{c})
+	}
+	for i := 0; i < len(sorted); i++ {
+		for j := i + 1; j < len(sorted); j++ {
+			out = append(out, []string{sorted[i], sorted[j]})
+		}
+	}
+	return append(out, sorted)
+}
+
+// visibleUnder is the rule itself: non-empty, and a subset.
+func visibleUnder(envs, scope []string) bool {
+	if len(envs) == 0 {
+		return false
+	}
+	in := make(map[string]bool, len(scope))
+	for _, c := range scope {
+		in[c] = true
+	}
+	for _, c := range envs {
+		if !in[c] {
+			return false
+		}
+	}
+	return true
+}
+
+func joined(v []string) string {
+	if len(v) == 0 {
+		return "none"
+	}
+	s := append([]string(nil), v...)
+	sort.Strings(s)
+	return strings.Join(s, ",")
+}
+
+// TestAssetVisibilityIsExactlyTheSubsetRule.
+func TestAssetVisibilityIsExactlyTheSubsetRule(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newAPIFixture(t, e)
+			facts := f.snapshot(t)
+
+			for _, codes := range scopeCases(facts.envCodes) {
+				rows, err := f.s.APIListAssets(f.ctx, APIAssetFilter{
+					Scope: mustScope(t, codes...), Limit: 500,
+				})
+				if err != nil {
+					t.Fatalf("listing for scope {%s}: %v", joined(codes), err)
+				}
+				got := make(map[string]bool, len(rows))
+				for _, r := range rows {
+					got[r.ID] = true
+				}
+				for id, name := range facts.assetName {
+					envs := facts.assetEnvs[id]
+					want := visibleUnder(envs, codes) && facts.assetLife[id] != domain.LifecycleRetired
+					switch {
+					case got[id] && !want:
+						t.Errorf("asset %s was visible to scope {%s} but its environments are {%s}: "+
+							"a token sees an asset only when EVERY environment it is in is inside the scope",
+							name, joined(codes), joined(envs))
+					case !got[id] && want:
+						t.Errorf("asset %s was NOT visible to scope {%s} although its environments {%s} "+
+							"are a subset of it: a strict predicate is not an empty one",
+							name, joined(codes), joined(envs))
+					}
+				}
+			}
+		})
+	}
+}
+
+// TestServiceVisibilityIsExactlyTheSubsetRule. A service reaches its
+// environment through environment_id rather than a join table, so the rule is
+// derived the way that entity actually gets its set.
+func TestServiceVisibilityIsExactlyTheSubsetRule(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newAPIFixture(t, e)
+			facts := f.snapshot(t)
+
+			for _, codes := range scopeCases(facts.envCodes) {
+				rows, err := f.s.APIListServices(f.ctx, mustScope(t, codes...), "", 500)
+				if err != nil {
+					t.Fatalf("listing for scope {%s}: %v", joined(codes), err)
+				}
+				got := make(map[string]bool, len(rows))
+				for _, r := range rows {
+					got[r.ID] = true
+				}
+				for id, name := range facts.serviceName {
+					envs := []string{facts.serviceEnv[id]}
+					want := visibleUnder(envs, codes) && facts.serviceLife[id] != domain.LifecycleRetired
+					switch {
+					case got[id] && !want:
+						t.Errorf("service %s was visible to scope {%s} but it is in {%s}",
+							name, joined(codes), joined(envs))
+					case !got[id] && want:
+						t.Errorf("service %s was NOT visible to scope {%s} although it is in {%s}",
+							name, joined(codes), joined(envs))
+					}
+				}
+			}
+		})
+	}
+}
+
+// TestAddressVisibilityIsExactlyTheSubsetRule. An address inherits the
+// environment set of the asset holding its interface; one with no interface
+// reaches no asset and is therefore visible to nobody, which the rule already
+// says because its set is empty.
+func TestAddressVisibilityIsExactlyTheSubsetRule(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newAPIFixture(t, e)
+			facts := f.snapshot(t)
+
+			for _, codes := range scopeCases(facts.envCodes) {
+				rows, err := f.s.APIListAddresses(f.ctx, mustScope(t, codes...), "", 500)
+				if err != nil {
+					t.Fatalf("listing for scope {%s}: %v", joined(codes), err)
+				}
+				got := make(map[string]bool, len(rows))
+				for _, r := range rows {
+					got[r.ID] = true
+				}
+				for id, text := range facts.addrText {
+					envs := facts.addrEnvs[id]
+					want := visibleUnder(envs, codes) && facts.addrLife[id] != domain.LifecycleRetired
+					host := facts.addrHost[id]
+					hostName := "no asset"
+					if host != "" {
+						hostName = facts.assetName[host]
+					}
+					switch {
+					case got[id] && !want:
+						t.Errorf("address %s (on %s) was visible to scope {%s} but its host's "+
+							"environments are {%s}", text, hostName, joined(codes), joined(envs))
+					case !got[id] && want:
+						t.Errorf("address %s (on %s) was NOT visible to scope {%s} although its "+
+							"host's environments {%s} are a subset of it",
+							text, hostName, joined(codes), joined(envs))
+					}
+				}
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
 // The fixture's own invariant
 // ---------------------------------------------------------------------------
 
@@ -317,83 +631,69 @@ func TestTheFixtureCannotBeFlattenedIntoUniformEnvironments(t *testing.T) {
 		t.Errorf("every fixture environment has criticality %v, so a predicate qualified on "+
 			"criticality is indistinguishable from the correct one.%s", criticalities, why)
 	}
-	// ROLE IS CHECKED FOR A SPECIFIC PAIR, not merely for variety.
+	// EVERY ROLE THE DOMAIN DEFINES IS REPRESENTED, derived from
+	// domain.EnvRoles rather than from a list repeated here.
 	//
-	// A bare "more than one role" assertion would read as load-bearing while
-	// being unable to fire through the regression its neighbours name:
-	// mustEnvironment takes the role as a parameter, so flattening the fixture
-	// through it leaves the roles varied. What actually matters is that a
-	// UTILITY role and a WORKLOAD role are both present, because that is the
-	// pair `AND e2.role <> 'shared'` exploits.
-	if !roles[domain.EnvRoleShared] {
-		t.Error("no fixture environment has the `shared` role, so a predicate weakened with " +
-			"`AND e2.role <> 'shared'` is indistinguishable from the correct one." + why)
-	}
-	var workload bool
-	for _, r := range []string{domain.EnvRoleProduction, domain.EnvRoleStaging, domain.EnvRoleDev, domain.EnvRoleDR} {
-		if roles[r] {
-			workload = true
+	// Two reasons it is written this way. A bare "more than one role" check
+	// could not fire through the regression its neighbours name -- mustEnvironment
+	// takes the role as a parameter, so flattening leaves roles varied -- and it
+	// would have read as load-bearing while proving nothing. And a hand-kept
+	// classification of roles into "utility" and "workload" lived in two places
+	// here, so a new domain.EnvRole* constant would have landed in neither and
+	// been silently treated as a workload. Deriving from the domain's own list
+	// means a new role fails this test until somebody decides where it belongs
+	// in the fixture.
+	for _, role := range domain.EnvRoles {
+		if !roles[role] {
+			t.Errorf("no fixture environment has the %q role, so no test can show the scope "+
+				"predicate treats it correctly -- a predicate weakened with "+
+				"`AND e2.role <> %q` would pass the whole suite.%s", role, role, why)
 		}
-	}
-	if !workload {
-		t.Errorf("the fixture has only utility roles (%v); a scope predicate cannot be shown to "+
-			"treat a workload environment correctly against them.%s", roles, why)
 	}
 
-	// And the asset that makes the difference observable: the predicate is only
-	// weakened for something that STRADDLES a monitored and an unmonitored
-	// environment. Without such an asset the checks above prove nothing.
+	// EVERY ENVIRONMENT HAS AN ASSET THAT IS IN IT AND NOTHING ELSE.
+	//
+	// This replaces the two by-name straddle checks that used to sit here (one
+	// for the in_scope boundary, one for utility/workload). The visibility
+	// property above subsumes both -- it derives what each scope should see
+	// from the estate itself -- but it can only observe an environment that
+	// something actually lives in. An environment with no exclusive member
+	// changes nothing when a predicate stops counting it, so a mutation keyed
+	// on its code, role or criticality survives every test in the file. That is
+	// exactly how `AND e2.code <> 'staging'` passed, and why an EMPTY
+	// environment is not safe but merely not yet exploited: the disclosure
+	// arrives with the first asset somebody puts in it, silently.
+	//
+	// So this is the fixture-shaped precondition the property needs, and it is
+	// stated as a rule over the fixture's own environments rather than as a
+	// list of the mutations found so far.
 	type membership struct {
+		AssetID string `db:"asset_id"`
 		Code    string `db:"code"`
-		Role    string `db:"role"`
-		InScope bool   `db:"in_scope"`
 	}
-	var straddling, utilityStraddling []string
-	for name, id := range f.assets {
-		var rows []membership
-		err := f.s.read(f.ctx, &rows, `
-			SELECT e.code, e.role, e.in_scope
-			FROM asset_environment ae
-			JOIN environment e ON e.id = ae.environment_id
-			WHERE ae.asset_id = ?`, id)
-		if err != nil {
-			t.Fatalf("loading the environments of %s: %v", name, err)
-		}
-		var monitored, unmonitored, utility, workloadEnv bool
-		for _, r := range rows {
-			if r.InScope {
-				monitored = true
-			} else {
-				unmonitored = true
-			}
-			if r.Role == domain.EnvRoleShared || r.Role == domain.EnvRoleTransit {
-				utility = true
-			} else {
-				workloadEnv = true
-			}
-		}
-		if monitored && unmonitored {
-			straddling = append(straddling, name)
-		}
-		if utility && workloadEnv {
-			utilityStraddling = append(utilityStraddling, name)
+	var rows []membership
+	if err := f.s.read(f.ctx, &rows, `
+		SELECT ae.asset_id, e.code
+		FROM asset_environment ae
+		JOIN environment e ON e.id = ae.environment_id`); err != nil {
+		t.Fatalf("loading memberships: %v", err)
+	}
+	byAsset := map[string][]string{}
+	for _, r := range rows {
+		byAsset[r.AssetID] = append(byAsset[r.AssetID], r.Code)
+	}
+	exclusive := map[string]bool{}
+	for _, codes := range byAsset {
+		if len(codes) == 1 {
+			exclusive[codes[0]] = true
 		}
 	}
-	if len(straddling) == 0 {
-		t.Error("no fixture asset is in both an in_scope and a not-in_scope environment, so a " +
-			"predicate that ignores unmonitored environments has nothing to get wrong here. " +
-			"sw-core-1 and sw-core-2 are meant to be that asset." + why)
-	}
-	// The second straddle, and the one a real estate exercises hardest: an
-	// asset in a utility environment AND a workload one. Without it, `shared`
-	// only ever appears on assets that are in nothing else, and a predicate
-	// weakened with `AND e2.role <> 'shared'` cannot be caught -- it merely
-	// hands out the utility-only assets, which no assertion is watching.
-	// mgmt-jump is meant to be that asset.
-	if len(utilityStraddling) == 0 {
-		t.Error("no fixture asset is in both a utility environment (shared/transit) and a " +
-			"workload one. That is the commonest straddle in a real estate and the one that " +
-			"catches `AND e2.role <> 'shared'`; mgmt-jump is meant to be that asset." + why)
+	for _, env := range envs {
+		if !exclusive[env.Code] {
+			t.Errorf("no fixture asset is in %q and nothing else, so nothing changes when a "+
+				"predicate stops counting that environment and a mutation keyed on it survives "+
+				"every test.%s", env.Code, why)
+		}
 	}
 }
 

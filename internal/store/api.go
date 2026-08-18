@@ -123,6 +123,17 @@ func assetScopeSQL(alias string, scope domain.EnvironmentScope) (string, []any) 
 // anyway -- "exists an environment, and none of them is outside the scope" --
 // so that a future many-to-many service/environment change cannot quietly widen
 // disclosure by leaving a predicate that only ever considered the first row.
+//
+// THE SHAPE IS THE ONLY GUARD, AND NO TEST CAN CHANGE THAT TODAY. While a
+// service has exactly one environment, AllowsAll and AllowsAny agree on every
+// possible input, so the two obvious weakenings of this predicate are
+// EQUIVALENT MUTANTS: rewriting it as `se.code IN (...)` passes every test in
+// the suite and always will, because the estate cannot express a service that
+// distinguishes them. Do not read the paragraph above as a claim that something
+// asserts it -- it is a claim about how the SQL is written, kept honest only by
+// review. The day service/environment becomes many-to-many, the test that tells
+// AllowsAll from AllowsAny becomes both possible and mandatory, and it belongs
+// in the same change.
 func serviceScopeSQL(alias string, scope domain.EnvironmentScope) (string, []any) {
 	codes := scope.Codes()
 	sql := `EXISTS (SELECT 1 FROM environment se WHERE se.id = ` + alias + `.environment_id)
@@ -350,6 +361,17 @@ func (s *SQLStore) APIGetAsset(ctx context.Context, scope domain.EnvironmentScop
 //
 // The second query runs ONLY on a miss, and its result never reaches the
 // client: same status, same body either way.
+//
+// IT ATTRIBUTES ANY PREDICATE MISS TO SCOPE, which is correct only because the
+// scope predicate is the ONLY predicate in APIGetAsset and APIGetService. Both
+// deliberately carry no lifecycle filter (Ruling T), so today "the row exists
+// but the scoped query did not return it" and "the row is out of scope" are the
+// same statement. That equivalence is load-bearing rather than incidental: this
+// error string feeds the operator-side security event docs/api-design.md §3
+// promises, so the moment a non-scope predicate is added to either fetch, a
+// perfectly legitimate miss starts being logged as a scope violation -- and a
+// security log that cries wolf is worse than one nobody wrote. Adding such a
+// predicate means teaching this function to tell the two apart FIRST.
 func (s *SQLStore) explainAPIMiss(ctx context.Context, table, id string, cause error) error {
 	if !errors.Is(cause, domain.ErrNotFound) {
 		return fmt.Errorf("getting %s %s for the api: %w", table, id, cause)
