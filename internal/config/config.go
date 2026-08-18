@@ -53,6 +53,10 @@ type Config struct {
 	// machine-facing route is mounted at all.
 	AgentCredentials []AgentCredential
 
+	// Readers are the read-only API credentials for WP-A2's inventory API.
+	// Empty means no machine-facing read route is mounted at all.
+	Readers []ReaderCredential
+
 	AuthLocal bool
 	AuthLDAP  bool
 
@@ -148,6 +152,12 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 	cfg.AgentCredentials = agents
+
+	readers, err := loadReaderCredentials()
+	if err != nil {
+		return nil, err
+	}
+	cfg.Readers = readers
 
 	if err := cfg.validate(); err != nil {
 		return nil, err
