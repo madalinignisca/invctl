@@ -26,6 +26,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"sort"
 	"strings"
@@ -36,12 +37,12 @@ import (
 	"github.com/madalinignisca/invctl/internal/web/render"
 )
 
-// ansiblePageSize is how many rows fetchAllAssets asks for per round trip.
-// It is store.APIMaxLimit() rather than DefaultLimit to minimise the number
-// of trips against a large estate; a test that needs to exercise more than
-// one page overrides this package variable for its own duration rather than
-// building thousands of fixture rows.
-var ansiblePageSize = MaxLimit
+// fetchAllAssetsWarnAfter is the number of round trips fetchAllAssets will
+// make before it starts logging a warning on every subsequent one. This adds
+// operational visibility into a runaway estate; it does not cap or truncate
+// anything -- a cap here would recreate exactly the silent-truncation bug
+// this file's paging exists to forbid.
+const fetchAllAssetsWarnAfter = 50
 
 // hostKinds are the kinds Ansible can actually connect to. A rack, a PDU or a
 // patch panel is a real asset and not a thing with an SSH daemon; listing one
@@ -199,21 +200,36 @@ func buildAnsibleInventory(rows []store.APIAssetRow) (Inventory, error) {
 // keyset cursor exactly as an external client would, until a short page says
 // there is nothing left. See the file doc comment for why "one call with a
 // large limit" is refused.
+//
+// NO CAP ON THE NUMBER OF ROUND TRIPS, DELIBERATELY. The loop bound is the
+// operator's own row count, not anything a client controls, and termination
+// is structural: APIListAssets filters on a strict `a.id > ?` against a
+// primary key, so every iteration either advances past the last id it saw or
+// returns a short page and ends the loop -- it cannot repeat a page or spin
+// forever. A cap here would recreate exactly the silent truncation this
+// file's paging exists to forbid. Past fetchAllAssetsWarnAfter round trips
+// this logs a warning on every further one, purely for operational
+// visibility into an unusually large or runaway estate; the warning changes
+// nothing about what gets fetched or returned.
 func (a *API) fetchAllAssets(ctx context.Context, scope domain.EnvironmentScope) ([]store.APIAssetRow, error) {
 	var all []store.APIAssetRow
 	after := ""
-	for {
+	for trips := 1; ; trips++ {
+		if trips > fetchAllAssetsWarnAfter {
+			slog.Warn("api: paging the ansible view is taking an unusually large number of round trips",
+				"round_trip", trips, "rows_so_far", len(all))
+		}
 		rows, err := a.Store.APIListAssets(ctx, store.APIAssetFilter{
 			Scope:     scope,
 			After:     after,
-			Limit:     ansiblePageSize,
+			Limit:     a.PageSize,
 			Lifecycle: domain.LifecycleActive,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("paging assets for the ansible view: %w", err)
 		}
 		all = append(all, rows...)
-		cursor := nextCursor(rows, ansiblePageSize, func(r store.APIAssetRow) string { return r.ID })
+		cursor := nextCursor(rows, a.PageSize, func(r store.APIAssetRow) string { return r.ID })
 		if cursor == nil {
 			return all, nil
 		}

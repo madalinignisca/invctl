@@ -34,11 +34,21 @@ import (
 // API holds the store every handler in this package reads through.
 type API struct {
 	Store *store.SQLStore
+	// PageSize is how many rows fetchAllAssets (ansible.go) asks for per
+	// round trip while assembling the Ansible view. It lives on the struct,
+	// not a package-level var: a package var mutated by one test and read by
+	// fetchAllAssets in another goroutine is a data race waiting for the day
+	// this package's tests start using t.Parallel(), and a field on a
+	// per-test *API (built fresh by New() in every fixture) removes that
+	// hazard structurally instead of by convention.
+	PageSize int
 }
 
-// New builds an API over a store.
+// New builds an API over a store. PageSize defaults to MaxLimit, which
+// minimises round trips against a large estate; a test that wants to force
+// several pages through a small fixture sets the field on its own instance.
 func New(s *store.SQLStore) *API {
-	return &API{Store: s}
+	return &API{Store: s, PageSize: MaxLimit}
 }
 
 // noReaderInContext is what every handler reports when middleware.ReaderFrom

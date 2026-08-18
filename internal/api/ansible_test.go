@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/madalinignisca/invctl/internal/domain"
@@ -24,16 +25,16 @@ import (
 // ruling in the task brief demands: buildAnsibleInventory alone cannot prove
 // the handler doesn't just fetch "with a large limit" and silently truncate
 // an estate bigger than one page, because that bug lives in fetchAllAssets,
-// not in the pure function. ansiblePageSize is shrunk to 2 for the duration
-// of this test so a small, fast fixture (5 hosts) still forces three round
-// trips (2 + 2 + 1) through the real keyset cursor, exactly as an external
-// client paginating /api/v1/assets would have to.
+// not in the pure function. f.api.PageSize is set to 2 for this fixture's own
+// *API instance (New() built it fresh, so no other test is affected) so a
+// small, fast fixture (5 hosts plus the fixture's own vm-db-1 = 6 rows) still
+// forces FOUR round trips through the real keyset cursor: three full pages
+// of 2 (2 + 2 + 2 = 6, and a full page cannot tell it is the last one) plus
+// one final fetch that comes back empty and is what actually ends the loop --
+// exactly what an external client paginating /api/v1/assets would have to do.
 func TestAnsibleViewPagesInternallyPastASinglePage(t *testing.T) {
-	old := ansiblePageSize
-	ansiblePageSize = 2
-	t.Cleanup(func() { ansiblePageSize = old })
-
 	f := newAPIHandlerFixture(t)
+	f.api.PageSize = 2
 
 	const hostCount = 5
 	want := make([]string, 0, hostCount+1) // +1 for vm-db-1 already in the fixture
@@ -189,5 +190,62 @@ func TestAnsibleViewOmitsANonActiveAsset(t *testing.T) {
 	}
 	if _, ok := body.Meta.HostVars["vm-db-1"]; !ok {
 		t.Fatalf("the fixture's active asset must still appear: got %+v", body.Meta.HostVars)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Ruling AG: TestAGroupNameCollisionIsRefused (api_test.go) calls
+// buildAnsibleInventory directly and inspects the Go error value. Nothing
+// there drives a real collision through the actual handler, so neither half
+// of docs/api-design.md §4's promise -- "the client learns nothing, the
+// operator learns everything" -- was proven at the boundary that matters.
+// This is the third time on this branch a control justified in prose turned
+// out to have no test guarding it (the scope-miss security event went
+// unguarded for a whole review round; a uniform fixture silently disarmed a
+// security predicate for three more). The two halves are separate claims and
+// each can break without the other, so both are asserted here, separately.
+// ---------------------------------------------------------------------------
+
+// TestAGroupNameCollisionThroughTheRealHandlerIs500WithNothingLeakedAndBothNamesLogged
+// mirrors the pure-function fixture in api_test.go's TestAGroupNameCollisionIsRefused
+// (billing-api vs billing_api), but drives it through (*API).Ansible over a
+// real store and a real reader, and checks both the client-facing response
+// and the operator-facing log line.
+func TestAGroupNameCollisionThroughTheRealHandlerIs500WithNothingLeakedAndBothNamesLogged(t *testing.T) {
+	f := newAPIHandlerFixture(t)
+	buf := captureSecurityLog(t)
+
+	// f.serviceID is already "billing-api" in prod, placed on f.assetProdVM
+	// (vm-db-1), which has an address -- so it is a real host in this view.
+	// A second, in-scope, addressable host carries a service whose CODE
+	// sanitises to the same group name: "billing_api" -> "svc_billing_api",
+	// exactly as "billing-api" does.
+	collidingHost := f.mustAsset(domain.KindVM, "vm-collide", nil, "prod")
+	f.mustInterfaceAndAddress(collidingHost, "eth0", "10.9.5.5")
+	f.mustService("billing_api", "prod", collidingHost)
+
+	rec := f.serve(f.api.Ansible, "GET", "/api/v1/ansible", tokProd)
+
+	// --- Client-facing half: a generic 500, and neither source name anywhere
+	// in the body a caller can read. ---
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("got %d, want 500: a group-name collision must be refused, not silently merged", rec.Code)
+	}
+	const wantBody = `{"error":"internal error"}`
+	if rec.Body.String() != wantBody {
+		t.Fatalf("got body %q, want the generic %q: a collision must not leak which two names collided", rec.Body.String(), wantBody)
+	}
+	if strings.Contains(rec.Body.String(), "billing-api") || strings.Contains(rec.Body.String(), "billing_api") {
+		t.Fatalf("a colliding source name leaked into the client-facing response: %s", rec.Body.String())
+	}
+
+	// --- Operator-facing half: both source names appear in the server log,
+	// which is the entire compensation for the client learning nothing. ---
+	logged := buf.String()
+	if !strings.Contains(logged, "billing-api") {
+		t.Fatalf("the server log does not name the first colliding source (billing-api): %s", logged)
+	}
+	if !strings.Contains(logged, "billing_api") {
+		t.Fatalf("the server log does not name the second colliding source (billing_api): %s", logged)
 	}
 }
