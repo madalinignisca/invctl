@@ -145,9 +145,14 @@ small.
 
 ## Filters
 
-`env`, `kind` and `lifecycle` (assets only) narrow **within** a token's scope
-and can never widen it — the scope check runs first, and a filter selects a
-subset of what survived it.
+`?env=`, `?kind=` and `?lifecycle=` all belong to **`/assets` alone** — see the
+route table above. None of the three exists on `/services` or `/addresses`:
+`serviceQueryParams` and `addressQueryParams` accept only `after` and `limit`,
+so `?env=prod` against `/services` is not a filter that quietly matches
+nothing — it is the same 400 "unknown query parameter" any other misspelled or
+unsupported parameter gets. Within `/assets`, all three narrow **within** a
+token's scope and can never widen it — the scope check runs first, and a
+filter selects a subset of what survived it.
 
 **An unrecognised filter *value* is a 400, not an empty collection.**
 `?kind=toaster` and `?lifecycle=purged` are both refused, for the same reason
@@ -204,9 +209,11 @@ readings get told apart.
 
 ### 3. Why is `?env=` a 400 instead of an empty list, when the environment doesn't even exist?
 
-`?env=X` is a 400 — "env is not in this credential's scope" — whenever `X` is
-outside the credential's scope, **whether or not `X` names a real
-environment**. It is never an empty 200.
+This is about `/assets?env=X` specifically — the only route `?env=` exists on;
+`/services` and `/addresses` refuse it outright as an unknown parameter (§
+Filters, above). On `/assets`, `?env=X` is a 400 — "env is not in this
+credential's scope" — whenever `X` is outside the credential's scope,
+**whether or not `X` names a real environment**. It is never an empty 200.
 
 This used to work the other way: an out-of-scope `env` returned an empty
 collection, on the reasoning that a token's own scope is not the client's
@@ -264,13 +271,21 @@ design cannot keep inside a scope.
 
 ---
 
-## `GET /ansible` and disappearing history
+## `GET /services/{id}` and disappearing history
 
 `GET /services/{id}` for a service whose every host has been retired answers
 `"assets": []` — identical to a service that was never placed anywhere.
 **This route does not answer "where did this used to run"; only "where does
 it run now."** If you need placement history, it lives in the change log, not
 here.
+
+`GET /ansible` has the same blind spot in a stronger form: a retired asset
+never appears in the Ansible view at all, under any host or group, because the
+view only ever considers `lifecycle = 'active'` assets — see "The Ansible
+view" below. This is not the `/assets/{id}`-vs-`/services/{id}` asymmetry from
+§4: there is no id-fetch route for the Ansible view to make an exception on, so
+a retired host is simply absent, with nothing anywhere in the response saying
+so.
 
 ---
 
@@ -359,9 +374,8 @@ interface, is likewise visible to nobody.
 ```
 
 `GET /environments` returns only the environments inside the credential's own
-scope. This is the vocabulary a consumer needs before it can use `?env=` at
-all — every code you can legally pass to `?env=` on another route appears
-here.
+scope. This is the vocabulary a consumer needs before it can use `/assets`'s
+`?env=` filter at all — every code you can legally pass to it appears here.
 
 ### The Ansible view
 
