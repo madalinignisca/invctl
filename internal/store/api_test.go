@@ -236,6 +236,118 @@ func containsName(rows []APIAssetRow, name string) bool {
 }
 
 // ---------------------------------------------------------------------------
+// The fixture's own invariant
+// ---------------------------------------------------------------------------
+
+// TestTheFixtureCannotBeFlattenedIntoUniformEnvironments guards the property
+// every scope test in this file silently depends on.
+//
+// WHY THIS EXISTS, because it will look like a test of a test. A uniform
+// fixture cannot distinguish a predicate that filters on `code` from one that
+// filters on `code AND anything else that happens to be uniform across the
+// fixture`. Before commit 32a61a3 the six environments here were built through
+// mustEnvironment, which hardcodes in_scope = true and criticality = 2 -- so
+// they differed only by code, and a scope predicate weakened with
+// `AND e2.in_scope = TRUE` (or any qualifier on criticality or role) passed
+// EVERY test in this file, on both engines. In production that same mutation
+// means an environment flagged in_scope = false stops counting against a token,
+// and AllowsAll degrades toward AllowsAny for precisely the assets that
+// straddle a monitored and an unmonitored environment.
+//
+// So the heterogeneity below is load-bearing, which makes it an invariant, and
+// docs/ROADMAP.md §0 is the rule for those: "an invariant with no guard is a
+// promise, and this project has already been bitten by the difference."
+//
+// IF YOU ARE READING THIS BECAUSE YOU SIMPLIFIED THE FIXTURE -- routed it back
+// through mustEnvironment, dropped the odd criticality values, made every
+// environment in_scope -- the simplification is the bug. It reopens the hole
+// this test was written to keep shut, and it does it while looking like a
+// tidy-up in review.
+//
+// One engine is enough: this asserts over the fixture, not over the estate, and
+// nothing here is dialect-specific.
+func TestTheFixtureCannotBeFlattenedIntoUniformEnvironments(t *testing.T) {
+	e := Engines(t)[0]
+	f := newAPIFixture(t, e)
+
+	envs, err := f.s.ListEnvironments(f.ctx)
+	if err != nil {
+		t.Fatalf("loading the fixture environments: %v", err)
+	}
+	if len(envs) < 2 {
+		t.Fatalf("the fixture has %d environments; the scope tests need several", len(envs))
+	}
+
+	var outOfScope int
+	criticalities := map[int]bool{}
+	roles := map[string]bool{}
+	inScopeByID := make(map[string]bool, len(envs))
+	for _, env := range envs {
+		if !env.InScope {
+			outOfScope++
+		}
+		criticalities[env.Criticality] = true
+		roles[env.Role] = true
+		inScopeByID[env.ID] = env.InScope
+	}
+
+	const why = "\n\nA uniform fixture cannot tell a predicate filtering on `code` apart from one " +
+		"filtering on `code AND <anything uniform across the fixture>`. That is exactly how a " +
+		"weakened scope predicate passed every test in this file before commit 32a61a3. If you " +
+		"simplified the fixture, the simplification is the bug."
+
+	if outOfScope == 0 {
+		t.Error("every fixture environment is in_scope = true, so a predicate qualified with " +
+			"`AND e2.in_scope = TRUE` is indistinguishable from the correct one." + why)
+	}
+	if len(criticalities) < 2 {
+		t.Errorf("every fixture environment has criticality %v, so a predicate qualified on "+
+			"criticality is indistinguishable from the correct one.%s", criticalities, why)
+	}
+	if len(roles) < 2 {
+		t.Errorf("every fixture environment has role %v, so a predicate qualified on role is "+
+			"indistinguishable from the correct one.%s", roles, why)
+	}
+
+	// And the asset that makes the difference observable: the predicate is only
+	// weakened for something that STRADDLES a monitored and an unmonitored
+	// environment. Without such an asset the checks above prove nothing.
+	type membership struct {
+		Code    string `db:"code"`
+		EnvID   string `db:"id"`
+		InScope bool   `db:"in_scope"`
+	}
+	var straddling []string
+	for name, id := range f.assets {
+		var rows []membership
+		err := f.s.read(f.ctx, &rows, `
+			SELECT e.id, e.code, e.in_scope
+			FROM asset_environment ae
+			JOIN environment e ON e.id = ae.environment_id
+			WHERE ae.asset_id = ?`, id)
+		if err != nil {
+			t.Fatalf("loading the environments of %s: %v", name, err)
+		}
+		var monitored, unmonitored bool
+		for _, r := range rows {
+			if r.InScope {
+				monitored = true
+			} else {
+				unmonitored = true
+			}
+		}
+		if monitored && unmonitored {
+			straddling = append(straddling, name)
+		}
+	}
+	if len(straddling) == 0 {
+		t.Error("no fixture asset is in both an in_scope and a not-in_scope environment, so a " +
+			"predicate that ignores unmonitored environments has nothing to get wrong here. " +
+			"sw-core-1 and sw-core-2 are meant to be that asset." + why)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // The scope predicate
 // ---------------------------------------------------------------------------
 
