@@ -1,0 +1,29 @@
+{
+  "data": [
+    {
+      "id": "00000000-0000-0000-0000-000000000001",
+      "code": "dev",
+      "name": "Development",
+      "role": "dev",
+      "in_scope": false,
+      "criticality": 4
+    },
+    {
+      "id": "00000000-0000-0000-0000-000000000002",
+      "code": "prod",
+      "name": "Production",
+      "role": "production",
+      "in_scope": true,
+      "criticality": 1
+    },
+    {
+      "id": "00000000-0000-0000-0000-000000000003",
+      "code": "transit",
+      "name": "Transit / DMZ",
+      "role": "transit",
+      "in_scope": true,
+      "criticality": 2
+    }
+  ],
+  "next": null
+}

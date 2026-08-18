@@ -1,0 +1,193 @@
+{
+  "_meta": {
+    "hostvars": {
+      "hv-01": {
+        "ansible_host": "10.20.10.11",
+        "invctl_id": "00000000-0000-0000-0000-000000000001",
+        "invctl_kind": "hypervisor",
+        "invctl_site": "dc-oslo"
+      },
+      "hv-02": {
+        "ansible_host": "10.20.10.12",
+        "invctl_id": "00000000-0000-0000-0000-000000000002",
+        "invctl_kind": "hypervisor",
+        "invctl_site": "dc-oslo"
+      },
+      "hv-03": {
+        "ansible_host": "10.20.10.13",
+        "invctl_id": "00000000-0000-0000-0000-000000000003",
+        "invctl_kind": "hypervisor",
+        "invctl_site": "dc-oslo"
+      },
+      "srv-backup-proxy-1": {
+        "ansible_host": "10.20.10.30",
+        "invctl_id": "00000000-0000-0000-0000-000000000004",
+        "invctl_kind": "server",
+        "invctl_site": "dc-oslo"
+      },
+      "vm-app-1": {
+        "ansible_host": "10.20.30.31",
+        "invctl_id": "00000000-0000-0000-0000-000000000005",
+        "invctl_kind": "vm",
+        "invctl_site": "dc-oslo"
+      },
+      "vm-db-1": {
+        "ansible_host": "10.20.30.21",
+        "invctl_id": "00000000-0000-0000-0000-000000000006",
+        "invctl_kind": "vm",
+        "invctl_site": "dc-oslo"
+      },
+      "vm-db-2": {
+        "ansible_host": "10.20.30.22",
+        "invctl_id": "00000000-0000-0000-0000-000000000007",
+        "invctl_kind": "vm",
+        "invctl_site": "dc-oslo"
+      },
+      "vm-dev-1": {
+        "ansible_host": "10.20.40.11",
+        "invctl_id": "00000000-0000-0000-0000-000000000008",
+        "invctl_kind": "vm",
+        "invctl_site": "dc-oslo"
+      },
+      "vm-proxy-1": {
+        "ansible_host": "10.20.30.41",
+        "invctl_id": "00000000-0000-0000-0000-000000000009",
+        "invctl_kind": "vm",
+        "invctl_site": "dc-oslo"
+      },
+      "vm-queue-1": {
+        "ansible_host": "10.20.30.51",
+        "invctl_id": "00000000-0000-0000-0000-000000000010",
+        "invctl_kind": "vm",
+        "invctl_site": "dc-oslo"
+      },
+      "vm-sso-1": {
+        "ansible_host": "10.20.30.61",
+        "invctl_id": "00000000-0000-0000-0000-000000000011",
+        "invctl_kind": "vm",
+        "invctl_site": "dc-oslo"
+      },
+      "vm-vault-1": {
+        "ansible_host": "10.20.30.11",
+        "invctl_id": "00000000-0000-0000-0000-000000000012",
+        "invctl_kind": "vm",
+        "invctl_site": "dc-oslo"
+      },
+      "vm-vault-2": {
+        "ansible_host": "10.20.30.12",
+        "invctl_id": "00000000-0000-0000-0000-000000000013",
+        "invctl_kind": "vm",
+        "invctl_site": "dc-oslo"
+      },
+      "vm-vault-3": {
+        "ansible_host": "10.20.30.13",
+        "invctl_id": "00000000-0000-0000-0000-000000000014",
+        "invctl_kind": "vm",
+        "invctl_site": "dc-oslo"
+      }
+    }
+  },
+  "env_dev": {
+    "hosts": [
+      "vm-dev-1"
+    ]
+  },
+  "env_prod": {
+    "hosts": [
+      "hv-01",
+      "hv-02",
+      "hv-03",
+      "srv-backup-proxy-1",
+      "vm-app-1",
+      "vm-db-1",
+      "vm-db-2",
+      "vm-proxy-1",
+      "vm-queue-1",
+      "vm-sso-1",
+      "vm-vault-1",
+      "vm-vault-2",
+      "vm-vault-3"
+    ]
+  },
+  "kind_hypervisor": {
+    "hosts": [
+      "hv-01",
+      "hv-02",
+      "hv-03"
+    ]
+  },
+  "kind_server": {
+    "hosts": [
+      "srv-backup-proxy-1"
+    ]
+  },
+  "kind_vm": {
+    "hosts": [
+      "vm-app-1",
+      "vm-db-1",
+      "vm-db-2",
+      "vm-dev-1",
+      "vm-proxy-1",
+      "vm-queue-1",
+      "vm-sso-1",
+      "vm-vault-1",
+      "vm-vault-2",
+      "vm-vault-3"
+    ]
+  },
+  "svc_backup_agent": {
+    "hosts": [
+      "hv-01",
+      "vm-app-1"
+    ]
+  },
+  "svc_haproxy_edge": {
+    "hosts": [
+      "vm-proxy-1"
+    ]
+  },
+  "svc_log_shipper": {
+    "hosts": [
+      "srv-backup-proxy-1",
+      "vm-queue-1"
+    ]
+  },
+  "svc_orders_api": {
+    "hosts": [
+      "vm-app-1"
+    ]
+  },
+  "svc_orders_api_dev": {
+    "hosts": [
+      "vm-dev-1"
+    ]
+  },
+  "svc_orders_web": {
+    "hosts": [
+      "vm-app-1"
+    ]
+  },
+  "svc_pgsql_core": {
+    "hosts": [
+      "vm-db-1",
+      "vm-db-2"
+    ]
+  },
+  "svc_rabbitmq": {
+    "hosts": [
+      "vm-queue-1"
+    ]
+  },
+  "svc_sso": {
+    "hosts": [
+      "vm-sso-1"
+    ]
+  },
+  "svc_vault": {
+    "hosts": [
+      "vm-vault-1",
+      "vm-vault-2",
+      "vm-vault-3"
+    ]
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "data": [
+    {
+      "id": "00000000-0000-0000-0000-000000000001",
+      "code": "vault",
+      "name": "HashiCorp Vault",
+      "kind": "secrets",
+      "lifecycle": "active",
+      "environments": [
+        "prod"
+      ],
+      "criticality": 1,
+      "assets": [
+        "vm-vault-1",
+        "vm-vault-2",
+        "vm-vault-3"
+      ]
+    }
+  ],
+  "next": "00000000-0000-0000-0000-000000000001"
+}

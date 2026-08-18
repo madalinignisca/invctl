@@ -1,0 +1,19 @@
+{
+  "data": [
+    {
+      "id": "00000000-0000-0000-0000-000000000001",
+      "name": "dc-oslo",
+      "kind": "site",
+      "lifecycle": "active",
+      "environments": [
+        "prod"
+      ],
+      "site": "dc-oslo",
+      "rack": null,
+      "role": null,
+      "addresses": [],
+      "services": []
+    }
+  ],
+  "next": "00000000-0000-0000-0000-000000000001"
+}
