@@ -14,7 +14,7 @@ import (
 )
 
 func TestReaderCredentialsLoadFromTheTwoVariables(t *testing.T) {
-	t.Setenv("INV_API_TOKENS", "ansible:tok-a,grafana:tok-g")
+	t.Setenv("INV_API_TOKENS", "ansible:"+longToken("a")+",grafana:"+longToken("g"))
 	t.Setenv("INV_API_SCOPES", "ansible:prod|staging,grafana:prod")
 
 	creds, err := loadReaderCredentials()
@@ -35,7 +35,7 @@ func TestReaderCredentialsLoadFromTheTwoVariables(t *testing.T) {
 }
 
 func TestAReaderCredentialWithoutAScopeRefusesToStart(t *testing.T) {
-	t.Setenv("INV_API_TOKENS", "ansible:tok-a")
+	t.Setenv("INV_API_TOKENS", "ansible:"+longToken("a"))
 	t.Setenv("INV_API_SCOPES", "")
 
 	_, err := loadReaderCredentials()
@@ -48,7 +48,7 @@ func TestAReaderCredentialWithoutAScopeRefusesToStart(t *testing.T) {
 }
 
 func TestAScopeForAnUnknownReaderRefusesToStart(t *testing.T) {
-	t.Setenv("INV_API_TOKENS", "ansible:tok-a")
+	t.Setenv("INV_API_TOKENS", "ansible:"+longToken("a"))
 	t.Setenv("INV_API_SCOPES", "ansible:prod,typo:prod")
 
 	_, err := loadReaderCredentials()
@@ -61,7 +61,7 @@ func TestAScopeForAnUnknownReaderRefusesToStart(t *testing.T) {
 }
 
 func TestADuplicateReaderIDRefusesToStart(t *testing.T) {
-	t.Setenv("INV_API_TOKENS", "ansible:tok-a,ansible:tok-b")
+	t.Setenv("INV_API_TOKENS", "ansible:"+longToken("a")+",ansible:"+longToken("b"))
 	t.Setenv("INV_API_SCOPES", "ansible:prod")
 
 	if _, err := loadReaderCredentials(); err == nil {
@@ -105,5 +105,69 @@ func TestScopesWithoutTokensRefusesToStart(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "INV_API_SCOPES") || !strings.Contains(err.Error(), "INV_API_TOKENS") {
 		t.Fatalf("the error must name both variables; got %v", err)
+	}
+}
+
+// TestAMalformedReaderTokenEntryDoesNotLeakTheTokenIntoTheError is the
+// regression test for the review's Critical finding: a bare INV_API_TOKENS
+// entry with no id: prefix is exactly the mistake a redacted message exists
+// to protect against, the same as it already does for INV_AGENT_TOKENS.
+func TestAMalformedReaderTokenEntryDoesNotLeakTheTokenIntoTheError(t *testing.T) {
+	const bareToken = "sup3rsecrettoken-that-is-definitely-long-enough"
+	t.Setenv("INV_API_TOKENS", bareToken)
+	t.Setenv("INV_API_SCOPES", "")
+
+	_, err := loadReaderCredentials()
+	if err == nil {
+		t.Fatal("an entry with no colon must refuse to start")
+	}
+	if strings.Contains(err.Error(), bareToken) {
+		t.Fatalf("the error must not contain the raw token; got %v", err)
+	}
+	if !strings.Contains(err.Error(), "no colon") {
+		t.Fatalf("the error must say the entry has no colon; got %v", err)
+	}
+}
+
+// TestTwoReaderCredentialsSharingATokenRefusesToStart is the regression test
+// for the review's first Important finding: an ambiguous token must not
+// silently resolve to whichever credential a lookup happens to find.
+func TestTwoReaderCredentialsSharingATokenRefusesToStart(t *testing.T) {
+	shared := longToken("shared")
+	t.Setenv("INV_API_TOKENS", "ansible:"+shared+",grafana:"+shared)
+	t.Setenv("INV_API_SCOPES", "ansible:prod,grafana:dev")
+
+	_, err := loadReaderCredentials()
+	if err == nil {
+		t.Fatal("two reader credentials sharing a token must refuse to start")
+	}
+	if !strings.Contains(err.Error(), "share a token") {
+		t.Fatalf("the error must say the credentials share a token; got %v", err)
+	}
+	if !strings.Contains(err.Error(), "ansible") || !strings.Contains(err.Error(), "grafana") {
+		t.Fatalf("the error must name both credentials; got %v", err)
+	}
+	if strings.Contains(err.Error(), shared) {
+		t.Fatalf("the error must not contain the shared token; got %v", err)
+	}
+}
+
+// TestAShortReaderTokenRefusesToStart is the regression test for the
+// review's second Important finding: a reader token below MinAgentTokenLength
+// is the entire authentication for an API exposing topology, hostnames and
+// IPs, and must not pass validation.
+func TestAShortReaderTokenRefusesToStart(t *testing.T) {
+	t.Setenv("INV_API_TOKENS", "ansible:short")
+	t.Setenv("INV_API_SCOPES", "ansible:prod")
+
+	_, err := loadReaderCredentials()
+	if err == nil {
+		t.Fatal("a short reader token must refuse to start")
+	}
+	if !strings.Contains(err.Error(), "ansible") {
+		t.Fatalf("the error must name the credential; got %v", err)
+	}
+	if !strings.Contains(err.Error(), "characters") {
+		t.Fatalf("the error must name the length; got %v", err)
 	}
 }

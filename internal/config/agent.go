@@ -223,11 +223,18 @@ func splitPairs(envName, raw string) ([]pair, error) {
 	return out, nil
 }
 
-// entryLabel keeps a malformed INV_AGENT_TOKENS entry out of the error message,
-// because an entry with no colon may well be a bare token somebody pasted
-// without its id -- and an error message is the most-copied text there is.
+// entryLabel keeps a malformed entry of a token-bearing variable out of the
+// error message, because an entry with no colon may well be a bare token
+// somebody pasted without its id -- and an error message is the most-copied
+// text there is.
+//
+// Every variable following this repo's naming convention for a raw-secret
+// list ends in _TOKENS (INV_AGENT_TOKENS, INV_API_TOKENS, and whatever the
+// next credential family calls its own). Matching the suffix rather than one
+// hard-coded name means a future *_TOKENS variable is redacted by
+// construction instead of needing this function edited again.
 func entryLabel(envName, entry string) string {
-	if envName == "INV_AGENT_TOKENS" {
+	if strings.HasSuffix(envName, "_TOKENS") {
 		return "an entry"
 	}
 	return entry

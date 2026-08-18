@@ -85,12 +85,28 @@ func loadReaderCredentials() ([]ReaderCredential, error) {
 	}
 
 	seen := make(map[string]bool, len(tokens))
+	seenToken := make(map[string]string, len(tokens))
 	creds := make([]ReaderCredential, 0, len(tokens))
 	for _, p := range tokens {
 		if seen[p.key] {
 			return nil, fmt.Errorf("validating config: INV_API_TOKENS names credential %q twice", p.key)
 		}
 		seen[p.key] = true
+
+		if len(p.value) < MinAgentTokenLength {
+			// The length is named, the token is not.
+			return nil, fmt.Errorf("validating config: the token for credential %q is %d characters; at least %d are required",
+				p.key, len(p.value), MinAgentTokenLength)
+		}
+		if other, clash := seenToken[p.value]; clash {
+			// Two credentials sharing a token means a client holding what it
+			// believes is its own token would authenticate as whichever
+			// credential a lookup happens to resolve to -- silently taking on
+			// that credential's environment scope instead of its own.
+			return nil, fmt.Errorf("validating config: credentials %q and %q share a token; each credential needs its own",
+				other, p.key)
+		}
+		seenToken[p.value] = p.key
 
 		scope, ok := byID[p.key]
 		if !ok {
