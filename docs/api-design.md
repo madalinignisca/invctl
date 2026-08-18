@@ -146,12 +146,40 @@ Collections return:
 
 `env` and `kind` narrow **within** the token's scope and can never widen it: the
 scope predicate is applied first and `env` selects a subset of what survived.
-`?env=prod` on a `{dev}` token returns an empty collection, not an error, because
-the token's scope is not the client's business.
 
-A filter *value* that is not a real environment code or asset kind is a **400**,
-not an empty collection. An empty collection would be indistinguishable from a
-legitimate empty answer, which is the silent-fallback shape §6 refuses.
+**`env` is validated against the token's own scope, not against the estate.**
+`?env=X` where X is in the credential's scope filters and returns 200; `?env=X`
+where X is not — *whether or not X exists* — is a **400** reading "env is not in
+this credential's scope".
+
+This replaces an earlier rule that returned an empty collection for an
+out-of-scope `env` "because the token's scope is not the client's business". That
+rationale does not survive `/api/v1/environments` existing on the same surface:
+the scope **is** published to the client, in full, by another route, so refusing
+by scope tells it only what it can already compute offline. Three things follow,
+and all of them are improvements:
+
+- It closes an existence oracle. Validating against the estate meant an unknown
+  code returned 400 while a real out-of-scope one returned 200-empty, so any
+  token could enumerate the environment vocabulary by dictionary. The
+  namespace is a dozen short human-chosen words, so that leak is total rather
+  than targeted — and it becomes a genuine disclosure the day an environment is
+  named after a client (`acme-prod`, `dmz-payments`).
+- It says nothing false. The message is equally true whether X exists or not,
+  where a 400 claiming "unknown environment" for a real one would be a lie.
+- **It fixes a §6 violation in the previous rule.** A consumer whose
+  `INV_API_SCOPES` was edited out from under it received a plausible,
+  well-formed, empty inventory with a 200 and no signal — a value arrives,
+  cannot be used as the caller meant it, and is replaced by something
+  indistinguishable from a legitimate answer. That is the exact shape §6 exists
+  to refuse, and the earlier rule mandated it.
+
+It is also cheaper: validating `env` against the estate required a database
+lookup and threaded a store handle into filter parsing; validating against the
+scope is an in-memory check against a slice the request already holds.
+
+A filter *value* that is not a real asset kind or lifecycle is a **400**, not an
+empty collection, for the same reason.
 
 ### Pagination
 
