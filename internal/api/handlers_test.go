@@ -203,7 +203,7 @@ func (f *apiHandlerFixture) serve(handler http.HandlerFunc, method, target, bear
 func (f *apiHandlerFixture) serveByID(handler http.HandlerFunc, id, bearer string) *httptest.ResponseRecorder {
 	f.t.Helper()
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest("GET", "/api/v1/x/"+id, nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/x/"+id, nil)
 	req.SetPathValue("id", id)
 	if bearer != "" {
 		req.Header.Set("Authorization", "Bearer "+bearer)
@@ -366,7 +366,7 @@ func TestAnEmptyCollectionMarshalsAsAnEmptyArray(t *testing.T) {
 func TestAHandlerWithNoReaderInContextIsA500NotAnEmptyScope(t *testing.T) {
 	f := newAPIHandlerFixture(t)
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest("GET", "/api/v1/assets", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/assets", nil)
 	// No middleware in front: this simulates a route mounted without the
 	// guard, which must fail closed rather than publish the estate.
 	f.api.ListAssets(rec, req)

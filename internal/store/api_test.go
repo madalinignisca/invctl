@@ -1252,7 +1252,7 @@ func TestPageOrderDependsOnUUIDv7(t *testing.T) {
 	a := uuid.Must(uuid.NewV7()).String()
 	time.Sleep(2 * time.Millisecond)
 	b := uuid.Must(uuid.NewV7()).String()
-	if !(a < b) {
+	if a >= b {
 		t.Fatal("ids are no longer time-sortable as text; the API's single-column cursor " +
 			"in internal/store/api.go must become a (created_at, id) pair")
 	}

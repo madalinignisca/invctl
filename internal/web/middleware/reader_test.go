@@ -46,7 +46,7 @@ func okHandler() http.Handler {
 func TestABrowserSessionIsRefusedOnTheAPI(t *testing.T) {
 	g := testReaderGuard(t)
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest("GET", "/api/v1/assets", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/assets", nil)
 	req.Header.Set("Authorization", "Bearer tok-a")
 	req.AddCookie(&http.Cookie{Name: g.SessionCookie, Value: "anything"})
 
@@ -59,7 +59,7 @@ func TestABrowserSessionIsRefusedOnTheAPI(t *testing.T) {
 
 func TestNoBearerTokenIsUnauthorised(t *testing.T) {
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest("GET", "/api/v1/assets", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/assets", nil)
 	RequireReader(testReaderGuard(t))(okHandler()).ServeHTTP(rec, req)
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("got %d, want 401", rec.Code)
@@ -68,7 +68,7 @@ func TestNoBearerTokenIsUnauthorised(t *testing.T) {
 
 func TestAnUnrecognisedTokenIsUnauthorised(t *testing.T) {
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest("GET", "/api/v1/assets", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/assets", nil)
 	req.Header.Set("Authorization", "Bearer wrong")
 	RequireReader(testReaderGuard(t))(okHandler()).ServeHTTP(rec, req)
 	if rec.Code != http.StatusUnauthorized {
@@ -87,7 +87,7 @@ func TestAValidReaderReachesTheHandlerAndIsInContext(t *testing.T) {
 		seen = reader.ID
 	})
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest("GET", "/api/v1/assets", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/assets", nil)
 	req.Header.Set("Authorization", "Bearer tok-a")
 
 	RequireReader(testReaderGuard(t))(h).ServeHTTP(rec, req)
@@ -106,7 +106,7 @@ func TestRepeatedFailureThrottlesTheUnauthenticatedBucket(t *testing.T) {
 	var last int
 	for i := 0; i < 3; i++ {
 		rec := httptest.NewRecorder()
-		req := httptest.NewRequest("GET", "/api/v1/assets", nil)
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/assets", nil)
 		req.Header.Set("Authorization", "Bearer wrong")
 		RequireReader(g)(okHandler()).ServeHTTP(rec, req)
 		last = rec.Code
@@ -121,7 +121,7 @@ func TestAWorkingReaderNeverTouchesTheUnauthenticatedBucket(t *testing.T) {
 	g.Unauthenticated = NewRateLimiter(0, 1)
 	for i := 0; i < 5; i++ {
 		rec := httptest.NewRecorder()
-		req := httptest.NewRequest("GET", "/api/v1/assets", nil)
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/assets", nil)
 		req.Header.Set("Authorization", "Bearer tok-a")
 		RequireReader(g)(okHandler()).ServeHTTP(rec, req)
 		if rec.Code != http.StatusOK {
@@ -136,7 +136,7 @@ func TestACredentialOverItsOwnRateLimitIsThrottled(t *testing.T) {
 	var last int
 	for i := 0; i < 2; i++ {
 		rec := httptest.NewRecorder()
-		req := httptest.NewRequest("GET", "/api/v1/assets", nil)
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/assets", nil)
 		req.Header.Set("Authorization", "Bearer tok-a")
 		RequireReader(g)(okHandler()).ServeHTTP(rec, req)
 		last = rec.Code

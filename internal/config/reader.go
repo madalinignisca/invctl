@@ -18,6 +18,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -68,7 +69,7 @@ func loadReaderCredentials() ([]ReaderCredential, error) {
 			return nil, err
 		}
 		if len(scopes) > 0 {
-			return nil, fmt.Errorf(
+			return nil, errors.New(
 				"validating config: INV_API_SCOPES is set but INV_API_TOKENS is empty; " +
 					"every scope must belong to a credential, so either set INV_API_TOKENS or clear INV_API_SCOPES")
 		}

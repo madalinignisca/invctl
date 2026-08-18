@@ -6,9 +6,12 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-only
 
-// The Ansible dynamic inventory view (WP-A2, docs/api-design.md §4): the one
-// composed view this work package publishes, assembled from the scoped asset
-// list rather than served from its own store query.
+package api
+
+// This file implements the Ansible dynamic inventory view (WP-A2,
+// docs/api-design.md §4): the one composed view this work package publishes,
+// assembled from the scoped asset list rather than served from its own store
+// query.
 //
 // THIS HANDLER PAGES INTERNALLY UNTIL THE ESTATE IS EXHAUSTED. It does not
 // fetch "with a large limit" -- apiMaxLimit (internal/store/api.go) clamps
@@ -20,7 +23,6 @@
 // error. fetchAllAssets instead follows the keyset cursor exactly as an
 // external client would, page after page, until a short page says there is
 // nothing left.
-package api
 
 import (
 	"context"

@@ -116,7 +116,7 @@ func TestAnsibleViewIsScopedLikeEveryOtherRoute(t *testing.T) {
 func TestAnsibleHandlerWithNoReaderInContextIsA500NotAnEmptyScope(t *testing.T) {
 	f := newAPIHandlerFixture(t)
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest("GET", "/api/v1/ansible", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/ansible", nil)
 	f.api.Ansible(rec, req)
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("got %d, want 500: a missing reader must never fall back to an empty (or any) scope", rec.Code)
