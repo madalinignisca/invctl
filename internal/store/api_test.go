@@ -12,6 +12,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -45,15 +46,35 @@ func newAPIFixture(t *testing.T, e Engine) *apiFixture {
 		services: map[string]string{},
 	}
 
-	for code, role := range map[string]string{
-		"prod":    domain.EnvRoleProduction,
-		"dev":     domain.EnvRoleDev,
-		"staging": domain.EnvRoleStaging,
-		"shared":  domain.EnvRoleShared,
-		"transit": domain.EnvRoleTransit,
-		"dr":      domain.EnvRoleDR,
+	// EVERY ENVIRONMENT DIFFERS ON EVERY ATTRIBUTE, and that is load-bearing
+	// rather than decorative.
+	//
+	// The shared mustEnvironment helper hardcodes in_scope = true and
+	// criticality = 2, so an estate built with it has six environments that are
+	// identical except for their codes. Against that fixture, a scope predicate
+	// weakened with an extra qualifier -- `AND e2.in_scope = TRUE`, or anything
+	// on criticality or role -- passes every test on both engines, because the
+	// qualifier is true of every row. In production the same mutation means an
+	// environment flagged in_scope = false stops counting against a token, and
+	// AllowsAll degrades toward AllowsAny for precisely the assets that straddle
+	// a monitored and an unmonitored environment: the boundary case the whole
+	// predicate exists for.
+	//
+	// So `dev` is deliberately in_scope = false while `prod` is true, and
+	// sw-core-1 below straddles the two.
+	for _, env := range []struct {
+		code, role  string
+		inScope     bool
+		criticality int
+	}{
+		{"prod", domain.EnvRoleProduction, true, 1},
+		{"dev", domain.EnvRoleDev, false, 4},
+		{"staging", domain.EnvRoleStaging, false, 3},
+		{"shared", domain.EnvRoleShared, true, 5},
+		{"transit", domain.EnvRoleTransit, false, 2},
+		{"dr", domain.EnvRoleDR, true, 5},
 	} {
-		f.envs[code] = mustEnvironment(t, s, ctx, code, role)
+		f.environment(t, env.code, env.role, env.inScope, env.criticality)
 	}
 
 	// Placement: a site holding a rack holding the boxes. Both are in `shared`
@@ -91,6 +112,22 @@ func newAPIFixture(t *testing.T, e Engine) *apiFixture {
 		t.Fatalf("creating the virtual address: %v", err)
 	}
 	return f
+}
+
+// environment creates an environment with the attributes it is given, rather
+// than the uniform ones mustEnvironment hardcodes. See the comment in
+// newAPIFixture for why the variation matters.
+func (f *apiFixture) environment(t *testing.T, code, role string, inScope bool, criticality int) string {
+	t.Helper()
+	env, err := domain.NewEnvironment(NewID(), code, code, role, inScope, criticality, f.s.Now())
+	if err != nil {
+		t.Fatalf("building environment %s: %v", code, err)
+	}
+	if err := f.s.CreateEnvironment(f.ctx, testActor, env); err != nil {
+		t.Fatalf("creating environment %s: %v", code, err)
+	}
+	f.envs[code] = env.ID
+	return env.ID
 }
 
 // asset creates an asset in the named environments and remembers its id.
@@ -131,6 +168,25 @@ func (f *apiFixture) service(t *testing.T, code, kind, envCode, host string) str
 	if err := f.s.CreateInstance(f.ctx, testActor, si); err != nil {
 		t.Fatalf("placing %s: %v", code, err)
 	}
+	return svc.ID
+}
+
+// bareService creates a service with no placement. Enough for the paging
+// tests, which care about how many rows survive the predicate and not about
+// where they run.
+func (f *apiFixture) bareService(t *testing.T, code, envCode string) string {
+	t.Helper()
+	svc, err := domain.NewService(NewID(), domain.ServiceSpec{
+		Code: code, Name: code, Kind: domain.SvcAPI,
+		EnvironmentID: f.envs[envCode], Availability: domain.AvailStandalone, Tier: 3,
+	}, f.s.Now())
+	if err != nil {
+		t.Fatalf("building service %s: %v", code, err)
+	}
+	if err := f.s.CreateService(f.ctx, testActor, svc); err != nil {
+		t.Fatalf("creating service %s: %v", code, err)
+	}
+	f.services[code] = svc.ID
 	return svc.ID
 }
 
@@ -202,6 +258,29 @@ func TestABoundaryAssetIsHiddenFromAPartialScope(t *testing.T) {
 				t.Fatal("a {dev} token must still see what is only in dev; a strict predicate is not an empty one")
 			}
 
+			// THE REVERSE, and it does not follow from the case above.
+			//
+			// A predicate that is asymmetric by sensitivity -- "surely prod may
+			// see the dev half of a boundary device" -- passes every {dev}-side
+			// assertion in this file. So does any predicate qualified on
+			// in_scope, because dev is the out-of-scope environment here and is
+			// flagged in_scope = false. AllowsAll is a statement about the SET,
+			// not about which side of it is the more sensitive.
+			rows, err = f.s.APIListAssets(f.ctx, APIAssetFilter{Scope: mustScope(t, "prod"), Limit: 500})
+			if err != nil {
+				t.Fatalf("listing: %v", err)
+			}
+			if containsName(rows, "sw-core-1") {
+				t.Fatal("sw-core-1 is in {prod, dev}; a {prod} token must not see it either. " +
+					"The rule is every environment, not every SENSITIVE environment")
+			}
+			if !containsName(rows, "vm-db-2") {
+				t.Fatal("a {prod} token must still see what is only in prod; a strict predicate is not an empty one")
+			}
+			if _, err := f.s.APIGetAsset(f.ctx, mustScope(t, "prod"), f.assets["sw-core-1"]); !errors.Is(err, ErrOutOfScope) {
+				t.Fatalf("fetching the boundary device by id as {prod}: got %v, want ErrOutOfScope", err)
+			}
+
 			rows, err = f.s.APIListAssets(f.ctx, APIAssetFilter{Scope: mustScope(t, "dev", "prod"), Limit: 500})
 			if err != nil {
 				t.Fatalf("listing: %v", err)
@@ -233,6 +312,12 @@ func TestAnAssetInNoEnvironmentIsVisibleToNobody(t *testing.T) {
 				}
 				if containsName(rows, "orphan-box") {
 					t.Fatalf("scope %v saw an asset that is in no environment", codes)
+				}
+				// A POSITIVE CONTROL. Every assertion in this test is a
+				// negative, so a query that returned nothing at all would pass
+				// it clean.
+				if len(rows) == 0 {
+					t.Fatalf("scope %v returned no assets whatsoever; this test would pass vacuously", codes)
 				}
 			}
 			// Even the scope that names every environment there is.
@@ -300,8 +385,118 @@ func TestTheScopeIsAppliedInsideThePageNotAfterIt(t *testing.T) {
 				t.Fatalf("paged through %d assets, want at least %d", len(seen), visible)
 			}
 			for _, name := range seen {
-				if len(name) > 8 && name[:8] == "boundary" {
+				if strings.HasPrefix(name, "boundary") {
 					t.Fatalf("a {dev} token paged into %s, which is in {dev, prod}", name)
+				}
+			}
+		})
+	}
+}
+
+// TestTheScopeIsAppliedInsideTheServicePage is the same property for
+// APIListServices. Tested rather than reasoned about: the two collections share
+// the shape of the bug, not the code that avoids it.
+func TestTheScopeIsAppliedInsideTheServicePage(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newAPIFixture(t, e)
+
+			const visible = 12
+			for i := 0; i < visible; i++ {
+				f.bareService(t, fmt.Sprintf("dev-svc-%02d", i), "dev")
+				f.bareService(t, fmt.Sprintf("prod-svc-%02d", i), "prod")
+			}
+
+			seen := f.pageServices(t, mustScope(t, "dev"), 3, visible)
+			for _, code := range seen {
+				if strings.HasPrefix(code, "prod-") {
+					t.Fatalf("a {dev} token paged into %s", code)
+				}
+			}
+		})
+	}
+}
+
+// pageServices walks every page and returns the codes, failing on a short page
+// while rows remain -- which is what filtering after the LIMIT looks like.
+func (f *apiFixture) pageServices(t *testing.T, scope domain.EnvironmentScope, size, want int) []string {
+	t.Helper()
+	var seen []string
+	after := ""
+	for page := 0; page < 50; page++ {
+		rows, err := f.s.APIListServices(f.ctx, scope, after, size)
+		if err != nil {
+			t.Fatalf("page %d: %v", page, err)
+		}
+		if len(rows) == 0 {
+			break
+		}
+		for _, r := range rows {
+			seen = append(seen, r.Code)
+		}
+		if len(rows) < size && len(seen) < want {
+			t.Fatalf("page %d returned %d rows of %d while %d services remain unseen; "+
+				"the scope predicate is being applied to the fetched page, not inside the query",
+				page, len(rows), size, want-len(seen))
+		}
+		after = rows[len(rows)-1].ID
+	}
+	if len(seen) < want {
+		t.Fatalf("paged through %d services, want at least %d", len(seen), want)
+	}
+	return seen
+}
+
+// TestTheScopeIsAppliedInsideTheAddressPage. The likeliest of the three to
+// regress: decorating addresses in Go, after the page has been fetched, is the
+// tempting refactor and is exactly the bug.
+func TestTheScopeIsAppliedInsideTheAddressPage(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newAPIFixture(t, e)
+
+			const visible = 12
+			for i := 0; i < visible; i++ {
+				host := fmt.Sprintf("dev-host-%02d", i)
+				f.asset(t, domain.KindServer, host, nil, "dev")
+				f.address(t, host, "eth0", fmt.Sprintf("10.10.%d.1", i))
+
+				edge := fmt.Sprintf("edge-host-%02d", i)
+				f.asset(t, domain.KindSwitch, edge, nil, "dev", "prod")
+				f.address(t, edge, "eth0", fmt.Sprintf("10.11.%d.1", i))
+			}
+
+			scope := mustScope(t, "dev")
+			const size = 3
+			var seen []APIAddressRow
+			after := ""
+			for page := 0; page < 50; page++ {
+				rows, err := f.s.APIListAddresses(f.ctx, scope, after, size)
+				if err != nil {
+					t.Fatalf("page %d: %v", page, err)
+				}
+				if len(rows) == 0 {
+					break
+				}
+				seen = append(seen, rows...)
+				if len(rows) < size && len(seen) < visible {
+					t.Fatalf("page %d returned %d rows of %d while %d addresses remain unseen; "+
+						"the scope predicate is being applied to the fetched page, not inside the query",
+						page, len(rows), size, visible-len(seen))
+				}
+				for i := 1; i < len(rows); i++ {
+					if rows[i-1].ID >= rows[i].ID {
+						t.Fatalf("address page is not ascending by id: %s >= %s", rows[i-1].ID, rows[i].ID)
+					}
+				}
+				after = rows[len(rows)-1].ID
+			}
+			if len(seen) < visible {
+				t.Fatalf("paged through %d addresses, want at least %d", len(seen), visible)
+			}
+			for _, a := range seen {
+				if strings.HasPrefix(a.AddrText, "10.11.") {
+					t.Fatalf("a {dev} token paged into %s, which is on a {dev, prod} device", a.AddrText)
 				}
 			}
 		})
@@ -487,7 +682,14 @@ func TestAPageIsBoundedEvenWhenTheCallerAsksForMore(t *testing.T) {
 // Lifecycle
 // ---------------------------------------------------------------------------
 
-func TestRetiredAssetsAreExcludedUnlessAskedFor(t *testing.T) {
+// TestALifecycleFilterNamesAValueAndTheDefaultExcludesRetired.
+//
+// One control, not a filter plus a boolean. `?lifecycle=retired` returns ONLY
+// retired assets, exactly as `?kind=vm` returns only VMs -- a filter names a
+// value. Absent means the default exclusion. There is deliberately no way to
+// ask for "retired and also everything else", because two callers would read
+// that combination two ways.
+func TestALifecycleFilterNamesAValueAndTheDefaultExcludesRetired(t *testing.T) {
 	for _, e := range Engines(t) {
 		t.Run(e.Name, func(t *testing.T) {
 			f := newAPIFixture(t, e)
@@ -497,6 +699,7 @@ func TestRetiredAssetsAreExcludedUnlessAskedFor(t *testing.T) {
 				t.Fatalf("retiring: %v", err)
 			}
 
+			// Default: retired is excluded, everything else is not.
 			rows, err := f.s.APIListAssets(f.ctx, APIAssetFilter{Scope: scope, Limit: 500})
 			if err != nil {
 				t.Fatalf("listing: %v", err)
@@ -504,16 +707,91 @@ func TestRetiredAssetsAreExcludedUnlessAskedFor(t *testing.T) {
 			if containsName(rows, "old-box") {
 				t.Fatal("a retired asset is kept forever and is not a target; it must be excluded by default")
 			}
+			if !containsName(rows, "vm-db-2") {
+				t.Fatal("the default excludes retired, not everything")
+			}
 
-			rows, err = f.s.APIListAssets(f.ctx, APIAssetFilter{Scope: scope, Limit: 500, IncludeRetired: true})
+			// lifecycle=retired: ONLY retired.
+			rows, err = f.s.APIListAssets(f.ctx, APIAssetFilter{
+				Scope: scope, Limit: 500, Lifecycle: domain.LifecycleRetired,
+			})
 			if err != nil {
-				t.Fatalf("listing with retired: %v", err)
+				t.Fatalf("listing the retired: %v", err)
 			}
 			if !containsName(rows, "old-box") {
-				t.Fatal("IncludeRetired must return it; soft delete means the row is still there")
+				t.Fatal("lifecycle=retired must return it; soft delete means the row is still there")
+			}
+			if containsName(rows, "vm-db-2") {
+				t.Fatal("lifecycle=retired returned an active asset; a filter names a value, " +
+					"it does not add a set to the default one")
+			}
+
+			// lifecycle=active: the complement, and not by accident.
+			rows, err = f.s.APIListAssets(f.ctx, APIAssetFilter{
+				Scope: scope, Limit: 500, Lifecycle: domain.LifecycleActive,
+			})
+			if err != nil {
+				t.Fatalf("listing the active: %v", err)
+			}
+			if containsName(rows, "old-box") {
+				t.Fatal("lifecycle=active returned a retired asset")
+			}
+			for _, r := range rows {
+				if r.Lifecycle != domain.LifecycleActive {
+					t.Errorf("lifecycle=active returned a %s asset", r.Lifecycle)
+				}
+			}
+			if len(rows) == 0 {
+				t.Fatal("lifecycle=active returned nothing; a zero result means the filter is wrong, not strict")
 			}
 		})
 	}
+}
+
+// TestARetiredHostsAddressesAreExcluded.
+//
+// Matching /services and the default of /assets. The address of a
+// decommissioned host is worse than absent in an Ansible or observability
+// join: it may since have been reassigned, so publishing it points a consumer
+// at the wrong machine.
+func TestARetiredHostsAddressesAreExcluded(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newAPIFixture(t, e)
+			scope := everyEnvironment(t)
+
+			before, err := f.s.APIListAddresses(f.ctx, scope, "", 500)
+			if err != nil {
+				t.Fatalf("listing: %v", err)
+			}
+			if !containsAddr(before, "10.3.0.5") {
+				t.Fatal("dev-box's address is missing before it was retired; the test proves nothing")
+			}
+
+			if err := f.s.RetireAsset(f.ctx, f.actor, f.assets["dev-box"]); err != nil {
+				t.Fatalf("retiring dev-box: %v", err)
+			}
+			after, err := f.s.APIListAddresses(f.ctx, scope, "", 500)
+			if err != nil {
+				t.Fatalf("listing: %v", err)
+			}
+			if containsAddr(after, "10.3.0.5") {
+				t.Fatal("a retired host's address is still published; it may since have been reassigned")
+			}
+			if !containsAddr(after, "10.2.0.14") {
+				t.Fatal("retiring one host removed another host's address")
+			}
+		})
+	}
+}
+
+func containsAddr(rows []APIAddressRow, addr string) bool {
+	for _, r := range rows {
+		if r.AddrText == addr {
+			return true
+		}
+	}
+	return false
 }
 
 // ---------------------------------------------------------------------------
@@ -623,11 +901,41 @@ func TestAnAddressInheritsItsAssetsEnvironments(t *testing.T) {
 			if err != nil {
 				t.Fatalf("listing: %v", err)
 			}
+			var sawDevOnly bool
 			for _, a := range dev {
 				if a.AssetName != nil && *a.AssetName == "sw-core-1" {
 					t.Fatal("an address is scoped by the environments of the asset holding it; " +
 						"a {dev} token reading a {prod, dev} switch's address is the same leak by another route")
 				}
+				if a.AddrText == "10.3.0.5" {
+					sawDevOnly = true
+				}
+			}
+			// The positive control: dev-box is in {dev} alone and its address
+			// must come back, or the assertion above passes on an empty list.
+			if !sawDevOnly {
+				t.Fatal("a {dev} token did not see dev-box's 10.3.0.5; a strict predicate is not an empty one")
+			}
+
+			// And the reverse, for the same reason as the asset case: prod is
+			// not privileged over dev just because it is the more sensitive
+			// half of the pair.
+			prod, err := f.s.APIListAddresses(f.ctx, mustScope(t, "prod"), "", 500)
+			if err != nil {
+				t.Fatalf("listing: %v", err)
+			}
+			var sawProdOnly bool
+			for _, a := range prod {
+				if a.AddrText == "10.9.0.1" {
+					t.Fatal("a {prod} token read the boundary switch's address; " +
+						"AllowsAll is a statement about the set, not about which half is sensitive")
+				}
+				if a.AddrText == "10.2.0.14" {
+					sawProdOnly = true
+				}
+			}
+			if !sawProdOnly {
+				t.Fatal("a {prod} token did not see vm-db-2's 10.2.0.14; the predicate is empty, not strict")
 			}
 
 			both, err := f.s.APIListAddresses(f.ctx, mustScope(t, "dev", "prod"), "", 500)

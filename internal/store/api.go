@@ -202,7 +202,15 @@ type APIAssetFilter struct {
 	// survived it.
 	Kind            string
 	EnvironmentCode string
-	IncludeRetired  bool
+	// Lifecycle names the one lifecycle to return. Empty is not "all": it is
+	// the default exclusion of retired assets.
+	//
+	// ONE CONTROL, not a filter plus a boolean. `?lifecycle=retired` returns
+	// only retired assets, exactly as `?kind=vm` returns only VMs -- a filter
+	// names a value. A separate IncludeRetired flag could express "retired and
+	// also everything else", a combination the contract does not have and which
+	// two callers would read two ways.
+	Lifecycle string
 }
 
 // ---------------------------------------------------------------------------
@@ -216,6 +224,29 @@ type APIAssetFilter struct {
 // question in this codebase is answered. The ORDER BY depth picks the nearest
 // ancestor of that kind; there is only ever one, and asking for the nearest
 // costs nothing and removes the question.
+//
+// PLACEMENT LABELS ARE PUBLISHED UNSCOPED, AND THAT IS THE CONTRACT RATHER
+// THAN AN OVERSIGHT. Neither subquery carries the scope predicate, so a {prod}
+// token reads Site == "dc-1" for an asset whose site row it could not fetch by
+// id -- APIGetAsset would answer that same id with ErrOutOfScope. Deliberate,
+// and decided rather than inherited:
+//
+//   - docs/api-design.md §4 publishes `site` and `rack` in the asset DTO and
+//     `invctl_site` in the Ansible view. They are part of the surface.
+//   - Only a NAME crosses. No id, no addresses, no lifecycle, nothing that can
+//     be used to enumerate or reach the building.
+//   - Scoping them would gut the field rather than protect it. A site or a rack
+//     is typically in `shared` or in no environment at all, and under the rule
+//     that an entity in no environment is visible to nobody, placement would
+//     come back null for essentially every reader -- destroying the feature to
+//     hide the name of a building.
+//
+// This is NOT the cross-entity rule applied loosely. That rule (see
+// decorateAPIAssets and decorateAPIServices) exists because a service or a host
+// is a first-class entity whose disclosure the token was never granted; a
+// placement label is an attribute of an asset the token IS allowed to read.
+// The next reader will see the scope predicate carefully applied a few lines
+// below and should not conclude that its absence here was forgotten.
 const apiAssetSelect = `
 	SELECT a.id, a.kind, a.name, a.lifecycle,
 	       (SELECT sa.name FROM asset_closure ac
@@ -261,7 +292,10 @@ func (s *SQLStore) APIListAssets(ctx context.Context, f APIAssetFilter) ([]APIAs
 			WHERE ae3.asset_id = a.id AND e3.code = ?)`)
 		args = append(args, f.EnvironmentCode)
 	}
-	if !f.IncludeRetired {
+	if f.Lifecycle != "" {
+		where = append(where, `a.lifecycle = ?`)
+		args = append(args, f.Lifecycle)
+	} else {
 		// Soft delete means the row is still there. An inventory that silently
 		// targets decommissioned hosts is worse than one that omits them.
 		where = append(where, `a.lifecycle <> ?`)
@@ -437,8 +471,11 @@ func (s *SQLStore) decorateAPIAssets(ctx context.Context, scope domain.Environme
 	}
 
 	for i := range rows {
-		sort.Strings(rows[i].Environments)
-		sort.Strings(rows[i].Addresses)
+		// All three go through sortedUnique. An asset can carry the same
+		// addr_text on two interfaces, and a repeat in a published list reads
+		// as two facts where there is one.
+		rows[i].Environments = sortedUnique(rows[i].Environments)
+		rows[i].Addresses = sortedUnique(rows[i].Addresses)
 		rows[i].Services = sortedUnique(rows[i].Services)
 	}
 	return nil
@@ -585,10 +622,11 @@ func (s *SQLStore) decorateAPIServices(ctx context.Context, scope domain.Environ
 // asset, therefore no environment, and is visible to nobody -- the same denial
 // an asset in no environment gets, for the same reason.
 //
-// No lifecycle filter on the host. Unlike /assets there is no parameter here
-// that could ask for the excluded set, so filtering would make those rows
-// unreachable rather than merely non-default. The scope predicate is the
-// security boundary; lifecycle is a convenience.
+// An address on a RETIRED asset is excluded, matching /services and the default
+// of /assets. Consistency across the collections is itself a contract property,
+// and the address of a decommissioned host is worse than absent in an Ansible
+// or observability join: it may since have been reassigned to something else,
+// so publishing it points a consumer at the wrong machine.
 func (s *SQLStore) APIListAddresses(ctx context.Context, scope domain.EnvironmentScope,
 	after string, limit int) ([]APIAddressRow, error) {
 
@@ -601,6 +639,8 @@ func (s *SQLStore) APIListAddresses(ctx context.Context, scope domain.Environmen
 		where = append(where, `ip.id > ?`)
 		args = append(args, after)
 	}
+	where = append(where, `a.lifecycle <> ?`)
+	args = append(args, domain.LifecycleRetired)
 	query := `
 		SELECT ip.id, ip.addr_text, ip.addr_family,
 		       a.id AS asset_id, a.name AS asset_name
@@ -662,12 +702,17 @@ func (s *SQLStore) decorateAPIAddresses(ctx context.Context, rows []APIAddressRo
 		}
 	}
 	for k := range byAsset {
-		sort.Strings(byAsset[k])
+		byAsset[k] = sortedUnique(byAsset[k])
 	}
 	for i := range rows {
-		if rows[i].AssetID != nil {
-			rows[i].Environments = byAsset[*rows[i].AssetID]
+		if rows[i].AssetID == nil {
+			continue
 		}
+		// A COPY PER ROW. Several addresses commonly sit on one asset, and
+		// handing them all the same backing slice means one append by a future
+		// DTO mapper silently rewrites its siblings.
+		shared := byAsset[*rows[i].AssetID]
+		rows[i].Environments = append(make([]string, 0, len(shared)), shared...)
 	}
 	return nil
 }
