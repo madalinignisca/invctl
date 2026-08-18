@@ -34,6 +34,7 @@ import (
 	"github.com/alexedwards/scs/sqlite3store"
 	"github.com/alexedwards/scs/v2"
 
+	"github.com/madalinignisca/invctl/internal/api"
 	"github.com/madalinignisca/invctl/internal/auth"
 	"github.com/madalinignisca/invctl/internal/config"
 	"github.com/madalinignisca/invctl/internal/domain"
@@ -224,9 +225,14 @@ func run() error {
 		app.Agents = agents.Registry
 	}
 
+	readers, err := buildReaderSurface(st, cfg, sessions.Cookie.Name)
+	if err != nil {
+		return err
+	}
+
 	server := &http.Server{
 		Addr:              cfg.Listen,
-		Handler:           web.Routes(app, staticFS, app.Authz, agents),
+		Handler:           web.Routes(app, staticFS, app.Authz, agents, readers),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      60 * time.Second,
@@ -448,6 +454,31 @@ func warnUnknownScopes(ctx context.Context, st *store.SQLStore, cfg *config.Conf
 			}
 		}
 	}
+}
+
+// buildReaderSurface assembles the read-only, token-scoped inventory API's
+// route surface (WP-A2), or nothing at all.
+//
+// Mirrors buildAgentSurface's shape: a nil or unconfigured registry mounts
+// no route, and every failure here refuses to start rather than logging a
+// warning and carrying on with a credential dropped.
+func buildReaderSurface(st *store.SQLStore, cfg *config.Config, sessionCookie string) (*web.ReaderSurface, error) {
+	registry, err := auth.NewReaderRegistry(cfg.Readers)
+	if err != nil {
+		return nil, err
+	}
+	if !registry.Enabled() {
+		slog.Info("no read-only API credentials configured; the /api/v1 surface is not mounted")
+		return nil, nil
+	}
+	for _, cred := range cfg.Readers {
+		slog.Info("read-only API credential configured", "credential", cred)
+	}
+	return &web.ReaderSurface{
+		Registry:      registry,
+		API:           api.New(st),
+		SessionCookie: sessionCookie,
+	}, nil
 }
 
 // serve runs the HTTP server and shuts it down cleanly on a signal, so an

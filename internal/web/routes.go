@@ -13,10 +13,72 @@ import (
 	"io/fs"
 	"net/http"
 
+	"github.com/madalinignisca/invctl/internal/api"
 	"github.com/madalinignisca/invctl/internal/auth"
 	"github.com/madalinignisca/invctl/internal/web/handlers"
 	"github.com/madalinignisca/invctl/internal/web/middleware"
 )
+
+// APIPrefix is the one prefix the read surface (WP-A2) occupies.
+const APIPrefix = "/api/v1"
+
+// apiRoute is one entry in the read surface's route table.
+//
+// handler is a function of *api.API rather than a bound method value so the
+// table can be a package-level literal built once, at init, before any
+// ReaderSurface exists to bind against.
+type apiRoute struct {
+	pattern string
+	handler func(*api.API) http.HandlerFunc
+}
+
+// apiRoutes is the whole read surface, and the only place it is listed.
+//
+// A package-level, immutable slice -- not a var appended to from inside
+// Routes(). Appending per call would mutate shared state on every request to
+// build the router (races across parallel tests) and would be empty on a
+// call with no reader credential configured, which is exactly backwards from
+// what a test walking it wants to see.
+//
+// The mounting loop below builds each full pattern as "GET " + APIPrefix +
+// pattern, and that "GET " is hard-coded in exactly one place: apiPattern.
+// That is what makes "no route in this table is a write route" true by
+// construction, not by review -- there is no second path that could register
+// one of these under a different method.
+var apiRoutes = []apiRoute{
+	{"/assets", func(a *api.API) http.HandlerFunc { return a.ListAssets }},
+	{"/assets/{id}", func(a *api.API) http.HandlerFunc { return a.GetAsset }},
+	{"/services", func(a *api.API) http.HandlerFunc { return a.ListServices }},
+	{"/services/{id}", func(a *api.API) http.HandlerFunc { return a.GetService }},
+	{"/addresses", func(a *api.API) http.HandlerFunc { return a.ListAddresses }},
+	{"/environments", func(a *api.API) http.HandlerFunc { return a.ListEnvironments }},
+	{"/ansible", func(a *api.API) http.HandlerFunc { return a.Ansible }},
+}
+
+// apiPattern builds the full net/http.ServeMux pattern for one entry. The
+// only place "GET " is written for this surface.
+func apiPattern(r apiRoute) string {
+	return "GET " + APIPrefix + r.pattern
+}
+
+// ReaderSurface is the read-only, token-scoped API's half of the router: the
+// registry that guards it and the handlers it guards.
+//
+// It mirrors AgentSurface for the same reason AgentSurface exists: a nil
+// surface, or one with no configured credentials, mounts no route and adds
+// no CSRF exemption. An estate with no integrations should not be carrying
+// the attack surface of one that is.
+type ReaderSurface struct {
+	Registry *auth.ReaderRegistry
+	API      *api.API
+	// SessionCookie is the browser session cookie's name, so the guard can
+	// refuse a request carrying one by name -- see RequireReader.
+	SessionCookie string
+}
+
+func (s *ReaderSurface) enabled() bool {
+	return s != nil && s.API != nil && s.Registry.Enabled()
+}
 
 // ObservationsPath is the one route a monitoring credential can reach.
 //
@@ -56,7 +118,7 @@ func (a *AgentSurface) enabled() bool {
 // they carry: public, authenticated read, and authenticated write. A fourth
 // group, the machine-facing route, carries none of them and is described where
 // it is registered.
-func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *AgentSurface) http.Handler {
+func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *AgentSurface, readers *ReaderSurface) http.Handler {
 	mux := http.NewServeMux()
 
 	// Static assets are served without session or CSRF machinery; they are
@@ -323,7 +385,6 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	// exemption's parameter type is middleware.ExactPath, whose implementation
 	// calls nosurf's ExemptPath -- never ExemptGlob or ExemptRegexp. That is
 	// what stops the planned /api/inventory from inheriting it for free.
-	var csrfExempt []middleware.ExactPath
 	if agents.enabled() {
 		guard := middleware.AgentGuard{
 			Registry:        agents.Registry,
@@ -333,8 +394,30 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 		}
 		mux.Handle("POST "+ObservationsPath,
 			middleware.RequireAgent(guard)(http.HandlerFunc(agents.Handler.Record)))
-		csrfExempt = append(csrfExempt, middleware.ExactPath(ObservationsPath))
 	}
+
+	// The read surface (WP-A2). Mounted only when a credential is configured,
+	// exactly as the observations route above: an estate with no integrations
+	// should not be carrying it.
+	//
+	// Note what is NOT here: no entry is added to the CSRF exemption list.
+	// Every route registered from apiRoutes is a GET (apiPattern hard-codes
+	// it), and nosurf ignores safe methods on its own -- so the exemption
+	// list stays a list of one no matter how large this table grows.
+	if readers.enabled() {
+		guard := middleware.ReaderGuard{
+			Registry:        readers.Registry,
+			Credentials:     middleware.NewRateLimiter(middleware.ReaderRequestsPerSecond, middleware.ReaderBurst),
+			Unauthenticated: middleware.NewRateLimiter(middleware.UnauthenticatedPerSecond, middleware.UnauthenticatedBurst),
+			SessionCookie:   readers.SessionCookie,
+		}
+		guarded := middleware.RequireReader(guard)
+		for _, route := range apiRoutes {
+			mux.Handle(apiPattern(route), guarded(route.handler(readers.API)))
+		}
+	}
+
+	csrfExempt := csrfExemptions(agents)
 
 	// Outermost first. Recovery wraps everything so a panic anywhere still
 	// produces a response; the session manager has to wrap CSRF because
@@ -358,6 +441,22 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 		middleware.Authenticate(app.Sessions, app.Store),
 		middleware.Log,
 	)
+}
+
+// csrfExemptions builds the CSRF exemption list for Routes.
+//
+// It is the one and only place that list is assembled, and it is built from
+// ObservationsPath rather than a literal string, so the exemption cannot
+// drift from the route it was written for (docs/AUDIT.md rule 6). It is
+// exercised directly by a test (see routes_export_test.go) so the claim "the
+// exemption list has exactly one entry" is checked against this function's
+// return value rather than trusted from reading the diff.
+func csrfExemptions(agents *AgentSurface) []middleware.ExactPath {
+	var exempt []middleware.ExactPath
+	if agents.enabled() {
+		exempt = append(exempt, middleware.ExactPath(ObservationsPath))
+	}
+	return exempt
 }
 
 // cacheStatic lets the browser hold on to vendored assets. They only change

@@ -31,6 +31,7 @@ import (
 	"github.com/alexedwards/scs/sqlite3store"
 	"github.com/alexedwards/scs/v2"
 
+	"github.com/madalinignisca/invctl/internal/api"
 	"github.com/madalinignisca/invctl/internal/auth"
 	"github.com/madalinignisca/invctl/internal/config"
 	"github.com/madalinignisca/invctl/internal/domain"
@@ -86,9 +87,39 @@ func testAgentCredentials() []config.AgentCredential {
 	}
 }
 
+// Read-only API credentials the harness can configure (WP-A2). Tokens are
+// padded to satisfy config.MinAgentTokenLength, which Task 1 enforces for
+// read credentials too -- a shorter fixture token would refuse to start
+// rather than exercise the guard.
+const (
+	readerAllID    = "ansible"
+	readerAllToken = "reader-all-token-000000000000000000"
+	readerDevID    = "dev-only"
+	readerDevToken = "reader-dev-token-111111111111111111"
+)
+
+// testReaderCredentials can read the whole fixture estate. There is no
+// wildcard, so "everything" is spelled out -- which is the point.
+func testReaderCredentials() []config.ReaderCredential {
+	return []config.ReaderCredential{
+		{ID: readerAllID, Token: readerAllToken,
+			Environments: []string{"prod", "dev", "staging", "shared", "transit", "dr"}},
+	}
+}
+
+// devOnlyReaderCredentials is the partial scope the boundary-device tests need.
+func devOnlyReaderCredentials() []config.ReaderCredential {
+	return []config.ReaderCredential{
+		{ID: readerDevID, Token: readerDevToken, Environments: []string{"dev"}},
+	}
+}
+
 // newHarness builds the fixture deployment, with the machine-facing route
-// mounted. Every test in this package runs against it, so "an agent token
-// reaches nothing else" is proved against a server where the route exists.
+// mounted and no reader credentials configured. Every test in this package
+// runs against it, so "an agent token reaches nothing else" is proved
+// against a server where the route exists, and newHarness(t) keeps meaning
+// "no readers" so every pre-existing test in this package is unaffected by
+// this task.
 func newHarness(t *testing.T) *harness {
 	t.Helper()
 	return newHarnessWith(t, testAgentCredentials())
@@ -98,7 +129,7 @@ func newHarness(t *testing.T) *harness {
 // which is the only thing that turns HSTS on.
 func newSecureHarness(t *testing.T) *harness {
 	t.Helper()
-	return newHarnessSecure(t, testAgentCredentials(), true)
+	return newHarnessSecure(t, testAgentCredentials(), nil, true)
 }
 
 // newHarnessWithoutAgents builds the same deployment with no monitoring
@@ -110,7 +141,15 @@ func newHarnessWithoutAgents(t *testing.T) *harness {
 }
 
 func newHarnessWith(t *testing.T, creds []config.AgentCredential) *harness {
-	return newHarnessSecure(t, creds, false)
+	t.Helper()
+	return newHarnessSecure(t, creds, nil, false)
+}
+
+// newHarnessWithReaders builds the fixture deployment with both the
+// machine-facing route and the read-only API mounted.
+func newHarnessWithReaders(t *testing.T, agentCreds []config.AgentCredential, readerCreds []config.ReaderCredential) *harness {
+	t.Helper()
+	return newHarnessSecure(t, agentCreds, readerCreds, false)
 }
 
 var (
@@ -218,7 +257,7 @@ func webTemplate(t *testing.T) (string, *seed.Refs) {
 	return webTemplatePath, webTemplateRefs
 }
 
-func newHarnessSecure(t *testing.T, creds []config.AgentCredential, secure bool) *harness {
+func newHarnessSecure(t *testing.T, creds []config.AgentCredential, readerCreds []config.ReaderCredential, secure bool) *harness {
 	t.Helper()
 
 	template, refs := webTemplate(t)
@@ -297,7 +336,20 @@ func newHarnessSecure(t *testing.T, creds []config.AgentCredential, secure bool)
 		app.Agents = registry
 	}
 
-	server := httptest.NewServer(web.Routes(app, staticFS(t), authz, agents))
+	var readers *web.ReaderSurface
+	if len(readerCreds) > 0 {
+		registry, err := auth.NewReaderRegistry(readerCreds)
+		if err != nil {
+			t.Fatalf("building reader registry: %v", err)
+		}
+		readers = &web.ReaderSurface{
+			Registry:      registry,
+			API:           api.New(st),
+			SessionCookie: sessions.Cookie.Name,
+		}
+	}
+
+	server := httptest.NewServer(web.Routes(app, staticFS(t), authz, agents, readers))
 	t.Cleanup(server.Close)
 
 	jar, err := cookiejar.New(nil)
@@ -343,6 +395,51 @@ func (h *harness) get(path string, htmx bool) *http.Response {
 		h.t.Fatalf("GET %s: %v", path, err)
 	}
 	return resp
+}
+
+// request builds a request against the harness server without sending it, so
+// a test can set an Authorization header. get and post cannot: neither
+// exposes the *http.Request before it is sent.
+func (h *harness) request(method, path string, reqBody io.Reader) *http.Request {
+	h.t.Helper()
+	req, err := http.NewRequest(method, h.url(path), reqBody)
+	if err != nil {
+		h.t.Fatalf("building request: %v", err)
+	}
+	return req
+}
+
+// do sends a request built by request.
+func (h *harness) do(req *http.Request) *http.Response {
+	h.t.Helper()
+	resp, err := h.client.Do(req)
+	if err != nil {
+		h.t.Fatalf("sending request: %v", err)
+	}
+	h.t.Cleanup(func() { resp.Body.Close() })
+	return resp
+}
+
+// apiResponse is a read response with its body already drained, so two of
+// them can be compared byte for byte without either test racing the other's
+// Close.
+type apiResponse struct {
+	StatusCode int
+	Header     http.Header
+	Body       string
+}
+
+// apiGet performs an authenticated read as the named credential.
+func (h *harness) apiGet(t *testing.T, path, token string) apiResponse {
+	t.Helper()
+	req := h.request(http.MethodGet, path, nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp := h.do(req)
+	b, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("reading body: %v", err)
+	}
+	return apiResponse{StatusCode: resp.StatusCode, Header: resp.Header, Body: string(b)}
 }
 
 var csrfPattern = regexp.MustCompile(`name="csrf_token" value="([^"]+)"`)
