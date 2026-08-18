@@ -95,6 +95,19 @@ func newAPIFixture(t *testing.T, e Engine) *apiFixture {
 	f.asset(t, domain.KindServer, "dev-box", &rack, "dev")
 	f.asset(t, domain.KindServer, "staging-box", &rack, "staging")
 
+	// THE OTHER STRADDLE, and in a real estate it is the commonest one there
+	// is: a management or utility environment PLUS a workload environment. A
+	// jump host lives in `shared` because operations reaches it from there, and
+	// in `prod` because that is what it reaches.
+	//
+	// Without it, `shared` appears only on dc-1 and r14 -- assets that are in
+	// nothing else -- and no test can tell the correct predicate apart from one
+	// weakened with `AND e2.role <> 'shared'` ("surely a shared environment
+	// should not count against a token"). That mutation survived the entire
+	// suite once, and it made dc-1 and r14 fully readable rows for a {dev}
+	// token: id, name, kind, lifecycle and placement, not merely a leaked name.
+	f.asset(t, domain.KindServer, "mgmt-jump", &rack, "shared", "prod")
+
 	f.service(t, "billing-api", domain.SvcAPI, "prod", "vm-db-2")
 	f.service(t, "dev-api", domain.SvcAPI, "dev", "dev-box")
 
@@ -304,9 +317,27 @@ func TestTheFixtureCannotBeFlattenedIntoUniformEnvironments(t *testing.T) {
 		t.Errorf("every fixture environment has criticality %v, so a predicate qualified on "+
 			"criticality is indistinguishable from the correct one.%s", criticalities, why)
 	}
-	if len(roles) < 2 {
-		t.Errorf("every fixture environment has role %v, so a predicate qualified on role is "+
-			"indistinguishable from the correct one.%s", roles, why)
+	// ROLE IS CHECKED FOR A SPECIFIC PAIR, not merely for variety.
+	//
+	// A bare "more than one role" assertion would read as load-bearing while
+	// being unable to fire through the regression its neighbours name:
+	// mustEnvironment takes the role as a parameter, so flattening the fixture
+	// through it leaves the roles varied. What actually matters is that a
+	// UTILITY role and a WORKLOAD role are both present, because that is the
+	// pair `AND e2.role <> 'shared'` exploits.
+	if !roles[domain.EnvRoleShared] {
+		t.Error("no fixture environment has the `shared` role, so a predicate weakened with " +
+			"`AND e2.role <> 'shared'` is indistinguishable from the correct one." + why)
+	}
+	var workload bool
+	for _, r := range []string{domain.EnvRoleProduction, domain.EnvRoleStaging, domain.EnvRoleDev, domain.EnvRoleDR} {
+		if roles[r] {
+			workload = true
+		}
+	}
+	if !workload {
+		t.Errorf("the fixture has only utility roles (%v); a scope predicate cannot be shown to "+
+			"treat a workload environment correctly against them.%s", roles, why)
 	}
 
 	// And the asset that makes the difference observable: the predicate is only
@@ -314,36 +345,55 @@ func TestTheFixtureCannotBeFlattenedIntoUniformEnvironments(t *testing.T) {
 	// environment. Without such an asset the checks above prove nothing.
 	type membership struct {
 		Code    string `db:"code"`
-		EnvID   string `db:"id"`
+		Role    string `db:"role"`
 		InScope bool   `db:"in_scope"`
 	}
-	var straddling []string
+	var straddling, utilityStraddling []string
 	for name, id := range f.assets {
 		var rows []membership
 		err := f.s.read(f.ctx, &rows, `
-			SELECT e.id, e.code, e.in_scope
+			SELECT e.code, e.role, e.in_scope
 			FROM asset_environment ae
 			JOIN environment e ON e.id = ae.environment_id
 			WHERE ae.asset_id = ?`, id)
 		if err != nil {
 			t.Fatalf("loading the environments of %s: %v", name, err)
 		}
-		var monitored, unmonitored bool
+		var monitored, unmonitored, utility, workloadEnv bool
 		for _, r := range rows {
 			if r.InScope {
 				monitored = true
 			} else {
 				unmonitored = true
 			}
+			if r.Role == domain.EnvRoleShared || r.Role == domain.EnvRoleTransit {
+				utility = true
+			} else {
+				workloadEnv = true
+			}
 		}
 		if monitored && unmonitored {
 			straddling = append(straddling, name)
+		}
+		if utility && workloadEnv {
+			utilityStraddling = append(utilityStraddling, name)
 		}
 	}
 	if len(straddling) == 0 {
 		t.Error("no fixture asset is in both an in_scope and a not-in_scope environment, so a " +
 			"predicate that ignores unmonitored environments has nothing to get wrong here. " +
 			"sw-core-1 and sw-core-2 are meant to be that asset." + why)
+	}
+	// The second straddle, and the one a real estate exercises hardest: an
+	// asset in a utility environment AND a workload one. Without it, `shared`
+	// only ever appears on assets that are in nothing else, and a predicate
+	// weakened with `AND e2.role <> 'shared'` cannot be caught -- it merely
+	// hands out the utility-only assets, which no assertion is watching.
+	// mgmt-jump is meant to be that asset.
+	if len(utilityStraddling) == 0 {
+		t.Error("no fixture asset is in both a utility environment (shared/transit) and a " +
+			"workload one. That is the commonest straddle in a real estate and the one that " +
+			"catches `AND e2.role <> 'shared'`; mgmt-jump is meant to be that asset." + why)
 	}
 }
 
@@ -399,6 +449,69 @@ func TestABoundaryAssetIsHiddenFromAPartialScope(t *testing.T) {
 			}
 			if !containsName(rows, "sw-core-1") {
 				t.Fatal("a {dev, prod} token must see the boundary device it declared")
+			}
+		})
+	}
+}
+
+// TestASharedEnvironmentCountsAgainstAScopeLikeAnyOther.
+//
+// The mutation this kills is `AND e2.role <> 'shared'` on the inner NOT EXISTS,
+// and it is not contrived: "a shared or utility environment should not count
+// against a token" is a change somebody makes in good faith. It survived the
+// whole suite once, and what it actually did was hand a {dev} token the site
+// and the rack -- whole rows, id and name and kind and lifecycle and placement,
+// for assets in `shared` and nothing else.
+//
+// A utility environment is an environment. AllowsAll counts it.
+func TestASharedEnvironmentCountsAgainstAScopeLikeAnyOther(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newAPIFixture(t, e)
+
+			// A workload token sees neither the utility-only assets nor the
+			// asset that straddles a utility and a workload environment.
+			dev, err := f.s.APIListAssets(f.ctx, APIAssetFilter{Scope: mustScope(t, "dev"), Limit: 500})
+			if err != nil {
+				t.Fatalf("listing: %v", err)
+			}
+			for _, name := range []string{"dc-1", "r14", "mgmt-jump"} {
+				if containsName(dev, name) {
+					t.Fatalf("a {dev} token read %s, which is in `shared`. A utility environment "+
+						"is an environment: it counts against a scope like any other, or a site "+
+						"and a rack become readable rows for every token in the estate", name)
+				}
+			}
+			if !containsName(dev, "dev-box") {
+				t.Fatal("a {dev} token must still see dev-box; a strict predicate is not an empty one")
+			}
+
+			// Nor does the workload half of mgmt-jump's membership admit it.
+			prod, err := f.s.APIListAssets(f.ctx, APIAssetFilter{Scope: mustScope(t, "prod"), Limit: 500})
+			if err != nil {
+				t.Fatalf("listing: %v", err)
+			}
+			if containsName(prod, "mgmt-jump") {
+				t.Fatal("mgmt-jump is in {shared, prod}; a {prod} token must not see it")
+			}
+			if _, err := f.s.APIGetAsset(f.ctx, mustScope(t, "prod"), f.assets["mgmt-jump"]); !errors.Is(err, ErrOutOfScope) {
+				t.Fatalf("fetching mgmt-jump as {prod}: got %v, want ErrOutOfScope", err)
+			}
+
+			// And the positive control, which matters as much: a token that
+			// declares both environments gets it.
+			both, err := f.s.APIListAssets(f.ctx, APIAssetFilter{Scope: mustScope(t, "prod", "shared"), Limit: 500})
+			if err != nil {
+				t.Fatalf("listing: %v", err)
+			}
+			if !containsName(both, "mgmt-jump") {
+				t.Fatal("a {prod, shared} token must see the jump host it declared both halves of")
+			}
+			if !containsName(both, "dc-1") || !containsName(both, "r14") {
+				t.Fatal("a {prod, shared} token must see the utility-only assets too")
+			}
+			if _, err := f.s.APIGetAsset(f.ctx, mustScope(t, "prod", "shared"), f.assets["mgmt-jump"]); err != nil {
+				t.Fatalf("fetching mgmt-jump as {prod, shared}: %v", err)
 			}
 		})
 	}
@@ -534,6 +647,7 @@ func TestTheScopeIsAppliedInsideTheServicePage(t *testing.T) {
 func (f *apiFixture) pageServices(t *testing.T, scope domain.EnvironmentScope, size, want int) []string {
 	t.Helper()
 	var seen []string
+	byID := map[string]bool{}
 	after := ""
 	for page := 0; page < 50; page++ {
 		rows, err := f.s.APIListServices(f.ctx, scope, after, size)
@@ -544,7 +658,19 @@ func (f *apiFixture) pageServices(t *testing.T, scope domain.EnvironmentScope, s
 			break
 		}
 		for _, r := range rows {
+			// A cursor of `>=` rather than `>` repeats every page's last row on
+			// the next page. Short pages and within-page ordering both stay
+			// correct under that mutation, so only this assertion catches it.
+			if byID[r.ID] {
+				t.Fatalf("service %s appeared on two pages; the keyset cursor is not strict", r.Code)
+			}
+			byID[r.ID] = true
 			seen = append(seen, r.Code)
+		}
+		for i := 1; i < len(rows); i++ {
+			if rows[i-1].ID >= rows[i].ID {
+				t.Fatalf("service page is not ascending by id: %s >= %s", rows[i-1].ID, rows[i].ID)
+			}
 		}
 		if len(rows) < size && len(seen) < want {
 			t.Fatalf("page %d returned %d rows of %d while %d services remain unseen; "+
@@ -581,6 +707,7 @@ func TestTheScopeIsAppliedInsideTheAddressPage(t *testing.T) {
 			scope := mustScope(t, "dev")
 			const size = 3
 			var seen []APIAddressRow
+			seenID := map[string]bool{}
 			after := ""
 			for page := 0; page < 50; page++ {
 				rows, err := f.s.APIListAddresses(f.ctx, scope, after, size)
@@ -589,6 +716,14 @@ func TestTheScopeIsAppliedInsideTheAddressPage(t *testing.T) {
 				}
 				if len(rows) == 0 {
 					break
+				}
+				for _, a := range rows {
+					// Same reason as the service pager: `>=` on ip.id repeats
+					// the last row of every page and nothing else notices.
+					if seenID[a.ID] {
+						t.Fatalf("address %s appeared on two pages; the keyset cursor is not strict", a.AddrText)
+					}
+					seenID[a.ID] = true
 				}
 				seen = append(seen, rows...)
 				if len(rows) < size && len(seen) < visible {
@@ -892,6 +1027,79 @@ func TestARetiredHostsAddressesAreExcluded(t *testing.T) {
 			}
 			if !containsAddr(after, "10.2.0.14") {
 				t.Fatal("retiring one host removed another host's address")
+			}
+		})
+	}
+}
+
+// TestASingleFetchStillReturnsARetiredEntity pins the other half of Ruling T.
+//
+// The collections exclude retired by default; the single-resource routes do
+// NOT. The caller named that id -- it came off an old metric label or an
+// Ansible run -- and the DTO carries `lifecycle`, so the honest answer is the
+// row plus the word "retired". A 404 there answers a real question with
+// silence, and the operator concludes the id was wrong rather than the host
+// decommissioned.
+//
+// Unpinned until now: round 1 changed lifecycle handling across this file and
+// every APIGetAsset/APIGetService assertion in it is about scope, so this
+// behaviour would have stopped being true without a single test noticing.
+func TestASingleFetchStillReturnsARetiredEntity(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newAPIFixture(t, e)
+			scope := mustScope(t, "prod")
+
+			assetID := f.asset(t, domain.KindServer, "doomed-box", nil, "prod")
+			svcID := f.bareService(t, "doomed-svc", "prod")
+			if err := f.s.RetireAsset(f.ctx, f.actor, assetID); err != nil {
+				t.Fatalf("retiring the asset: %v", err)
+			}
+			if err := f.s.RetireService(f.ctx, f.actor, svcID); err != nil {
+				t.Fatalf("retiring the service: %v", err)
+			}
+
+			got, err := f.s.APIGetAsset(f.ctx, scope, assetID)
+			if err != nil {
+				t.Fatalf("fetching a retired asset by id: got %v, want the row; the caller named "+
+					"this id and the DTO carries lifecycle", err)
+			}
+			if got.Lifecycle != domain.LifecycleRetired {
+				t.Errorf("lifecycle = %q, want %q -- the caller learns it was decommissioned "+
+					"from the field, not from a 404", got.Lifecycle, domain.LifecycleRetired)
+			}
+
+			svc, err := f.s.APIGetService(f.ctx, scope, svcID)
+			if err != nil {
+				t.Fatalf("fetching a retired service by id: got %v, want the row", err)
+			}
+			if svc.Lifecycle != domain.LifecycleRetired {
+				t.Errorf("service lifecycle = %q, want %q", svc.Lifecycle, domain.LifecycleRetired)
+			}
+
+			// The collections still exclude both, which is what makes the
+			// asymmetry deliberate rather than an accident of one code path.
+			rows, err := f.s.APIListAssets(f.ctx, APIAssetFilter{Scope: scope, Limit: 500})
+			if err != nil {
+				t.Fatalf("listing assets: %v", err)
+			}
+			if containsName(rows, "doomed-box") {
+				t.Error("the collection returned the retired asset")
+			}
+			svcs, err := f.s.APIListServices(f.ctx, scope, "", 500)
+			if err != nil {
+				t.Fatalf("listing services: %v", err)
+			}
+			for _, s := range svcs {
+				if s.Code == "doomed-svc" {
+					t.Error("the collection returned the retired service")
+				}
+			}
+
+			// And scope still outranks lifecycle: a retired entity outside the
+			// scope is still ErrOutOfScope, not a row.
+			if _, err := f.s.APIGetAsset(f.ctx, mustScope(t, "dev"), assetID); !errors.Is(err, ErrOutOfScope) {
+				t.Errorf("fetching a retired asset out of scope: got %v, want ErrOutOfScope", err)
 			}
 		})
 	}
