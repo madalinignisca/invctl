@@ -72,6 +72,19 @@ const (
 	EventAgentUnknownEntity = "agent_unknown_entity"
 	// EventAgentOversized: a request exceeded the body or batch cap.
 	EventAgentOversized = "agent_request_too_large"
+
+	// EventReaderRejected is a read credential that did not authenticate.
+	EventReaderRejected = "reader_token_rejected"
+	// EventReaderSessionConfusion is a browser session arriving on the API.
+	EventReaderSessionConfusion = "reader_session_confusion"
+	// EventReaderThrottled is a read credential over its rate limit.
+	EventReaderThrottled = "reader_rate_limited"
+	// EventReaderScopeDenied is a read credential asking for an entity outside
+	// its environment scope. The response is a 404 indistinguishable from an
+	// absent entity, so this log line is the ONLY place the difference is
+	// visible -- an operator debugging "the API returns nothing" finds the
+	// answer here and nowhere else.
+	EventReaderScopeDenied = "reader_scope_denied"
 )
 
 // LogSecurityEvent emits one security event.
