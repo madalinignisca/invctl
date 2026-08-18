@@ -15,6 +15,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
@@ -220,6 +221,196 @@ func TestNextCursorIsNilOnAnEmptyPage(t *testing.T) {
 	got := nextCursor(rows, 5, func(s string) string { return s })
 	if got != nil {
 		t.Fatalf("got %v, want nil for an empty page", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// The Ansible view (Task 8): group naming, sanitisation and the refusal of a
+// name collision. buildAnsibleInventory is exercised as the pure function it
+// is -- no store, no request -- so these tests assert exact values rather
+// than shapes.
+// ---------------------------------------------------------------------------
+
+func TestGroupNamesAreSanitisedAndPrefixed(t *testing.T) {
+	cases := []struct{ dimension, raw, want string }{
+		{"env", "prod", "env_prod"},
+		{"kind", "vm", "kind_vm"},
+		{"svc", "billing-api", "svc_billing_api"},
+		{"svc", "Billing API", "svc_billing_api"},
+		{"site", "dc-1", "site_dc_1"},
+	}
+	for _, c := range cases {
+		if got := ansibleGroupName(c.dimension, c.raw); got != c.want {
+			t.Errorf("ansibleGroupName(%q, %q) = %q, want %q", c.dimension, c.raw, got, c.want)
+		}
+	}
+}
+
+// TestAServiceCannotCollideWithAnEnvironment pins the reason for the
+// dimension prefix: a service literally named "prod" sanitises to
+// "svc_prod", not "prod", and cannot silently widen the "env_prod" group.
+func TestAServiceCannotCollideWithAnEnvironment(t *testing.T) {
+	if ansibleGroupName("svc", "prod") == ansibleGroupName("env", "prod") {
+		t.Fatal("a service and an environment of the same name must not produce one group")
+	}
+}
+
+// TestAGroupNameCollisionIsRefused pins docs/api-design.md §4: two services
+// sanitising to the same name -- billing-api and billing_api -- must be
+// refused with an error naming both sources, never silently merged into one
+// group. A merged group would silently widen the target set of every
+// playbook that uses it.
+func TestAGroupNameCollisionIsRefused(t *testing.T) {
+	_, err := buildAnsibleInventory([]store.APIAssetRow{
+		{ID: "a", Name: "h1", Kind: "vm", Addresses: []string{"10.0.0.1"},
+			Environments: []string{"prod"}, Services: []string{"billing-api"}},
+		{ID: "b", Name: "h2", Kind: "vm", Addresses: []string{"10.0.0.2"},
+			Environments: []string{"prod"}, Services: []string{"billing_api"}},
+	})
+	if err == nil {
+		t.Fatal("two services sanitising to one group name must be refused, not merged")
+	}
+	if !strings.Contains(err.Error(), "billing-api") || !strings.Contains(err.Error(), "billing_api") {
+		t.Fatalf("error %q does not name both colliding sources", err.Error())
+	}
+}
+
+// TestOnlyAddressableKindsAreHosts asserts the exact host set, not merely
+// that the excluded names are absent: a rack is not connectable, a switch
+// is out of scope for this view, and an addressless VM has nothing to
+// connect to.
+func TestOnlyAddressableKindsAreHosts(t *testing.T) {
+	inv, err := buildAnsibleInventory([]store.APIAssetRow{
+		{ID: "a", Name: "vm-1", Kind: "vm", Addresses: []string{"10.0.0.1"}, Environments: []string{"prod"}},
+		{ID: "b", Name: "rack-14", Kind: "rack", Environments: []string{"prod"}},
+		{ID: "c", Name: "sw-1", Kind: "switch", Addresses: []string{"10.0.0.9"}, Environments: []string{"prod"}},
+		{ID: "d", Name: "vm-2", Kind: "vm", Environments: []string{"prod"}}, // no address
+	})
+	if err != nil {
+		t.Fatalf("building: %v", err)
+	}
+	gotHosts := make([]string, 0, len(inv.Meta.HostVars))
+	for h := range inv.Meta.HostVars {
+		gotHosts = append(gotHosts, h)
+	}
+	sort.Strings(gotHosts)
+	wantHosts := []string{"vm-1"}
+	if !reflect.DeepEqual(gotHosts, wantHosts) {
+		t.Fatalf("got hosts %v, want %v", gotHosts, wantHosts)
+	}
+}
+
+// TestAnAssetInTwoEnvironmentsIsInTwoGroups asserts the exact host list of
+// every group involved, not merely its length.
+func TestAnAssetInTwoEnvironmentsIsInTwoGroups(t *testing.T) {
+	inv, err := buildAnsibleInventory([]store.APIAssetRow{
+		{ID: "a", Name: "vm-1", Kind: "vm", Addresses: []string{"10.0.0.1"},
+			Environments: []string{"prod", "shared"}},
+	})
+	if err != nil {
+		t.Fatalf("building: %v", err)
+	}
+	want := []string{"vm-1"}
+	for _, g := range []string{"env_prod", "env_shared", "kind_vm"} {
+		if !reflect.DeepEqual(inv.Groups[g].Hosts, want) {
+			t.Errorf("group %s: got %v, want %v", g, inv.Groups[g].Hosts, want)
+		}
+	}
+	if len(inv.Groups) != 3 {
+		t.Fatalf("got %d groups, want exactly 3 (env_prod, env_shared, kind_vm): %+v", len(inv.Groups), inv.Groups)
+	}
+}
+
+// TestAnAssetInMultipleGroupsProducesTheFullHostVarsRecord pins the exact
+// hostvars shape published for a host, including the invctl_site field
+// sourced from the asset's closure-derived Site.
+func TestAnAssetInMultipleGroupsProducesTheFullHostVarsRecord(t *testing.T) {
+	site := "dc-1"
+	inv, err := buildAnsibleInventory([]store.APIAssetRow{
+		{ID: "01924e5a-0000-7000-8000-000000000001", Name: "vm-db-2", Kind: "vm",
+			Site: &site, Addresses: []string{"10.2.0.14", "10.2.0.15"},
+			Environments: []string{"prod"}, Services: []string{"billing-api"}},
+	})
+	if err != nil {
+		t.Fatalf("building: %v", err)
+	}
+	want := map[string]string{
+		"invctl_id":    "01924e5a-0000-7000-8000-000000000001",
+		"invctl_kind":  "vm",
+		"invctl_site":  "dc-1",
+		"ansible_host": "10.2.0.14",
+	}
+	got, ok := inv.Meta.HostVars["vm-db-2"]
+	if !ok {
+		t.Fatalf("host vm-db-2 is missing from hostvars: %+v", inv.Meta.HostVars)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got hostvars %+v, want %+v", got, want)
+	}
+}
+
+// TestAHostWithNoResolvedSiteOmitsInvctlSite pins that a nil Site does not
+// publish an "invctl_site": null field into a plain map[string]string.
+func TestAHostWithNoResolvedSiteOmitsInvctlSite(t *testing.T) {
+	inv, err := buildAnsibleInventory([]store.APIAssetRow{
+		{ID: "a", Name: "vm-1", Kind: "vm", Addresses: []string{"10.0.0.1"}, Environments: []string{"prod"}},
+	})
+	if err != nil {
+		t.Fatalf("building: %v", err)
+	}
+	if _, ok := inv.Meta.HostVars["vm-1"]["invctl_site"]; ok {
+		t.Fatalf("invctl_site must be absent when the asset has no resolved site: got %+v", inv.Meta.HostVars["vm-1"])
+	}
+}
+
+// TestGroupHostsMarshalAsEmptyArrayNotNull pins the binding constraint: a
+// group with no hosts (which buildAnsibleInventory never produces on its
+// own, but a caller assembling Inventory by hand might) must still marshal
+// "hosts" as [] rather than null.
+func TestGroupHostsMarshalAsEmptyArrayNotNull(t *testing.T) {
+	g := InventoryGroup{Hosts: []string{}}
+	body, err := json.Marshal(g)
+	if err != nil {
+		t.Fatalf("marshalling: %v", err)
+	}
+	if string(body) != `{"hosts":[]}` {
+		t.Fatalf("got %s, want {\"hosts\":[]}", body)
+	}
+}
+
+// TestInventoryMarshalsMetaBesideArbitraryGroupNames pins the exact wire
+// shape from docs/api-design.md §4: "_meta" and every group key sit at the
+// same top level.
+func TestInventoryMarshalsMetaBesideArbitraryGroupNames(t *testing.T) {
+	inv := Inventory{
+		Meta: InventoryMeta{HostVars: map[string]map[string]string{
+			"vm-1": {"invctl_id": "a", "invctl_kind": "vm", "ansible_host": "10.0.0.1"},
+		}},
+		Groups: map[string]InventoryGroup{
+			"env_prod": {Hosts: []string{"vm-1"}},
+		},
+	}
+	body, err := json.Marshal(inv)
+	if err != nil {
+		t.Fatalf("marshalling: %v", err)
+	}
+	const want = `{"_meta":{"hostvars":{"vm-1":{"ansible_host":"10.0.0.1","invctl_id":"a","invctl_kind":"vm"}}},"env_prod":{"hosts":["vm-1"]}}`
+	if string(body) != want {
+		t.Fatalf("got %s, want %s", body, want)
+	}
+}
+
+// TestAGroupNamedMetaIsRefused pins the last line of defence Inventory's own
+// MarshalJSON adds beyond buildAnsibleInventory's own collision check: a
+// group whose sanitised name happens to be "_meta" must never silently
+// overwrite the real one.
+func TestAGroupNamedMetaIsRefused(t *testing.T) {
+	inv := Inventory{
+		Meta:   InventoryMeta{HostVars: map[string]map[string]string{}},
+		Groups: map[string]InventoryGroup{"_meta": {Hosts: []string{"vm-1"}}},
+	}
+	if _, err := json.Marshal(inv); err == nil {
+		t.Fatal("a group named _meta must be refused, not silently merged into the reserved key")
 	}
 }
 
