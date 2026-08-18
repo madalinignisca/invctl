@@ -106,7 +106,7 @@ failure. Audited as declared-state writes, one row per object. An import that
 collides with an entity a reporter already flagged as unrecognised should stop and
 point at it — that is a reconciliation moment, not an error.
 
-**WP-A2 · Read-only inventory API** — M — depends: none — unlocks: integrations
+**WP-A2 · Read-only inventory API** — M — **DONE**
 Read-only, scoped tokens, keyset pagination matching the change log. Shapes for
 Ansible inventory and observability joins. No write routes.
 
@@ -792,7 +792,7 @@ Track it. It answers "what's left" in one glance.
 | Object-level permissions | G1 |
 | Webhooks and event rules | G2 |
 | Journal entries | G3 |
-| REST API | A2 (read-only by design — deliberate divergence) |
+| REST API | A2 — **DONE** (read-only by design — deliberate divergence) |
 | Bulk import | A1 |
 | **Impact simulation with startup semantics** | **invctl only** |
 | **Reachability findings** | **invctl only** |

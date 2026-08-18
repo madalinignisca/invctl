@@ -34,6 +34,28 @@ footnote.
 
 ---
 
+## [Unreleased]
+
+### Action required
+
+- **The read-only inventory API is absent until you set `INV_API_TOKENS`.**
+  Upgrading alone does not turn it on — every route under `/api/v1` answers
+  404, indistinguishable from a path that was never defined, until a token is
+  configured. That is the answer to "I upgraded and `/api/v1` 404s."
+
+### Added
+
+- **A read-only, token-scoped inventory API at `/api/v1`.** Assets, services,
+  addresses and environments, keyset-paginated like the change log, plus a
+  composed Ansible dynamic-inventory view. Built for an Ansible integration and
+  an observability join, not for a browser — every route is `GET`, no route
+  reaches observed state, cost, or anything personal. Configuration is two
+  variables, `INV_API_TOKENS` and `INV_API_SCOPES`; there is no wildcard, so a
+  credential must name every environment it is allowed to read. See
+  `docs/API.md`.
+
+---
+
 ## [0.5.0] — 2026-08-17
 
 **What the estate costs, and whose cost it is.** invctl could say what a rack
