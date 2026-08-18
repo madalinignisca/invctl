@@ -143,6 +143,11 @@ func newAPIFixture(t *testing.T, e Engine) *apiFixture {
 
 	f.address(t, "sw-core-1", "eth0", "10.9.0.1")
 	f.address(t, "vm-db-2", "eth0", "10.2.0.14")
+	// A SECOND ADDRESS ON ONE HOST. With one address each, "publish the
+	// address" and "publish every address" are the same answer, so a
+	// decoration that collapsed the list -- MIN(addr_text) with a GROUP BY, say
+	// -- would be indistinguishable from the correct one.
+	f.address(t, "vm-db-2", "eth1", "10.2.0.15")
 	f.address(t, "dev-box", "eth0", "10.3.0.5")
 	f.address(t, "staging-box", "eth0", "10.4.0.5")
 	f.address(t, "mgmt-jump", "eth0", "10.5.0.5")
@@ -422,7 +427,8 @@ func (f *apiFixture) snapshot(t *testing.T) *estateFacts {
 }
 
 // scopeCases returns the scopes the property is checked against: every
-// singleton, every pair, and the full set.
+// singleton, every pair, every complement of a singleton (that is, every
+// environment but one), and the full set.
 //
 // Singletons alone would satisfy the rule as stated, but they only ever
 // exercise EQUALITY -- an asset in exactly the one environment. Pairs are what
@@ -1483,6 +1489,16 @@ func TestDecoratedListsExcludeWhatWasRetired(t *testing.T) {
 		why              string
 	}{
 		{
+			// THE BASELINE. Without it each case below could pass because the
+			// decoration never named anything in the first place; with it, the
+			// three retirements are self-evidently the thing that changed.
+			name:             "nothing retired",
+			retire:           func(t *testing.T, f *apiFixture, hostID, svcID string) {},
+			hostNamesService: true,
+			serviceNamesHost: true,
+			why:              "with nothing retired both sides must name each other, or the cases below prove nothing",
+		},
+		{
 			name: "a retired service",
 			retire: func(t *testing.T, f *apiFixture, hostID, svcID string) {
 				if err := f.s.RetireService(f.ctx, f.actor, svcID); err != nil {
@@ -1566,6 +1582,146 @@ func TestDecoratedListsExcludeWhatWasRetired(t *testing.T) {
 				})
 			}
 		})
+	}
+}
+
+// TestAListResponseCarriesTheRightDecorationForEachRow.
+//
+// THE GAP THIS CLOSES, and it is the one the previous round predicted. Every
+// content assertion in this file was on a SINGLE FETCH, where the page holds
+// exactly one row -- and with one row, a decoration that mis-keys its batched
+// result is a no-op. Four separate defects therefore passed the whole suite on
+// both engines:
+//
+//   - a decoration that returns early unless the page holds one row, so every
+//     COLLECTION comes back with empty environments, addresses and services;
+//   - a services query keyed so that every asset on the page gets every service
+//     found for the page. That one lands on the Ansible view, where groups are
+//     formed per service: every host would join every svc_* group, which is "a
+//     merged group silently widens the target set of every playbook that uses
+//     it" -- the failure docs/api-design.md §4 refuses for name collisions;
+//   - an address decoration keyed to the FIRST asset of the page, so every
+//     address inherits that asset's environments;
+//   - a decoration that publishes one of an asset's addresses rather than all.
+//
+// None of them is a disclosure: every value here already passed the scope
+// predicate. They are wrong answers, which for a machine-facing inventory means
+// a consumer acting on them.
+//
+// So this test asserts EXACT sets, in both directions, for several rows of one
+// LIST response. Exact rather than by length, because a length check is what let
+// the first-id keying survive -- under the scope it was tested with, the asset it
+// checked happened to BE the first id, so it killed by coincidence of ordering
+// rather than by design. And the expectations are ordered slices, which is what
+// pins the sort: an unsorted list is not guaranteed to agree between the engines,
+// and this is a published contract.
+func TestAListResponseCarriesTheRightDecorationForEachRow(t *testing.T) {
+	// {prod, shared} returns five assets -- rich ones, bare ones, one in two
+	// environments -- which is what makes a mis-keyed batch observable.
+	want := map[string]struct{ envs, addrs, svcs []string }{
+		"vm-db-2":   {envs: []string{"prod"}, addrs: []string{"10.2.0.14", "10.2.0.15"}, svcs: []string{"billing-api"}},
+		"hv-01":     {envs: []string{"prod"}},
+		"mgmt-jump": {envs: []string{"prod", "shared"}, addrs: []string{"10.5.0.5"}},
+		"dc-1":      {envs: []string{"shared"}},
+		"r14":       {envs: []string{"shared"}},
+	}
+
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newAPIFixture(t, e)
+			scope := mustScope(t, "prod", "shared")
+
+			rows, err := f.s.APIListAssets(f.ctx, APIAssetFilter{Scope: scope, Limit: 500})
+			if err != nil {
+				t.Fatalf("listing: %v", err)
+			}
+			if len(rows) < 2 {
+				t.Fatalf("the list returned %d rows; with fewer than two, a mis-keyed batch "+
+					"decoration is a no-op and this test proves nothing", len(rows))
+			}
+			got := map[string]APIAssetRow{}
+			for _, r := range rows {
+				got[r.Name] = r
+			}
+			for name := range got {
+				if _, expected := want[name]; !expected {
+					t.Errorf("the list returned %s, which {prod,shared} should not see", name)
+				}
+			}
+			for name, w := range want {
+				row, ok := got[name]
+				if !ok {
+					t.Errorf("%s is missing from a {prod,shared} list", name)
+					continue
+				}
+				assertList(t, name, "environments", row.Environments, w.envs)
+				assertList(t, name, "addresses", row.Addresses, w.addrs)
+				assertList(t, name, "services", row.Services, w.svcs)
+			}
+
+			// The address collection, whose rows inherit their host's
+			// environments -- keyed per row, not per page.
+			addrs, err := f.s.APIListAddresses(f.ctx, scope, "", 500)
+			if err != nil {
+				t.Fatalf("listing addresses: %v", err)
+			}
+			wantAddr := map[string][]string{
+				"10.2.0.14": {"prod"},
+				"10.2.0.15": {"prod"},
+				"10.5.0.5":  {"prod", "shared"},
+			}
+			if len(addrs) != len(wantAddr) {
+				t.Errorf("the address list returned %d rows, want %d", len(addrs), len(wantAddr))
+			}
+			for _, a := range addrs {
+				w, ok := wantAddr[a.AddrText]
+				if !ok {
+					t.Errorf("the address list returned %s, which {prod,shared} should not see", a.AddrText)
+					continue
+				}
+				assertList(t, a.AddrText, "environments", a.Environments, w)
+			}
+
+			// And the service collection's hosts, for the same reason.
+			svcs, err := f.s.APIListServices(f.ctx, scope, "", 500)
+			if err != nil {
+				t.Fatalf("listing services: %v", err)
+			}
+			wantSvc := map[string][]string{
+				"billing-api": {"vm-db-2"},
+				"shared-svc":  nil,
+			}
+			if len(svcs) != len(wantSvc) {
+				t.Errorf("the service list returned %d rows, want %d", len(svcs), len(wantSvc))
+			}
+			for _, sv := range svcs {
+				w, ok := wantSvc[sv.Code]
+				if !ok {
+					t.Errorf("the service list returned %s, which {prod,shared} should not see", sv.Code)
+					continue
+				}
+				assertList(t, sv.Code, "assets", sv.Assets, w)
+			}
+		})
+	}
+}
+
+// assertList compares a decorated list against the exact expected one, ORDER
+// INCLUDED. Order is part of the contract: an unsorted list is not guaranteed
+// to come back the same way from both engines, and a consumer diffing two
+// responses would see a change that is not one.
+func assertList(t *testing.T, subject, list string, got, want []string) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Errorf("%s: %s = %v, want %v", subject, list, got, want)
+		return
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("%s: %s = %v, want %v (differs at position %d; the lists are sorted, "+
+				"so this is either the wrong content or the wrong order)", subject, list, got, want, i)
+			return
+		}
 	}
 }
 
@@ -1862,9 +2018,9 @@ func TestAFetchedAssetCarriesItsPlacementAndItsSets(t *testing.T) {
 			if len(got.Environments) != 1 || got.Environments[0] != "prod" {
 				t.Errorf("environments = %v, want [prod]", got.Environments)
 			}
-			if len(got.Addresses) != 1 || got.Addresses[0] != "10.2.0.14" {
-				t.Errorf("addresses = %v, want [10.2.0.14]", got.Addresses)
-			}
+			// BOTH of them, and sorted: vm-db-2 carries two addresses so that
+			// "publish one" and "publish all" are different answers.
+			assertList(t, "vm-db-2", "addresses", got.Addresses, []string{"10.2.0.14", "10.2.0.15"})
 			if len(got.Services) != 1 || got.Services[0] != "billing-api" {
 				t.Errorf("services = %v, want [billing-api]", got.Services)
 			}
