@@ -9,7 +9,6 @@
 package api
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -36,11 +35,16 @@ func (a *API) ListAssets(w http.ResponseWriter, r *http.Request) {
 		writeError(w, errNoReaderInContext)
 		return
 	}
-	if err := checkKnownParams(r.URL.Query(), assetQueryParams...); err != nil {
+	// Parsed once and reused by checkKnownParams, ParsePageRequest and
+	// applyAssetFilters -- url.Values.Query() re-parses the raw query string
+	// every time it is called, and there is no reason to pay for that three
+	// times over one request.
+	q := r.URL.Query()
+	if err := checkKnownParams(q, assetQueryParams...); err != nil {
 		writeError(w, err)
 		return
 	}
-	page, err := ParsePageRequest(r.URL.Query())
+	page, err := ParsePageRequest(q)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -50,7 +54,7 @@ func (a *API) ListAssets(w http.ResponseWriter, r *http.Request) {
 		After: page.After,
 		Limit: page.Limit,
 	}
-	if err := applyAssetFilters(r.Context(), a.Store, &f, r.URL.Query()); err != nil {
+	if err := applyAssetFilters(&f, q); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -113,42 +117,44 @@ func assetDTO(r store.APIAssetRow) Asset {
 	}
 }
 
-// applyAssetFilters validates ?env=, ?kind= and ?lifecycle= against their
-// vocabularies and, if they pass, narrows f to them.
-//
-// An unknown filter VALUE is ErrBadRequest -- an empty collection there would
-// be indistinguishable from a legitimate empty answer, the silent-fallback
-// shape docs/api-design.md §6 refuses. A KNOWN value that the caller's scope
-// simply does not cover is not an error at all: ?env=prod on a {dev} token
-// narrows to an empty collection, because the scope predicate runs first and
-// a filter can only select a subset of what survived it (store.APIAssetFilter
-// doc comment). Filters narrow within scope; they can never widen it.
+// applyAssetFilters validates ?env=, ?kind= and ?lifecycle= and, if they
+// pass, narrows f to them.
 //
 // kind and lifecycle are validated against the Go-side enums that back their
-// CHECK constraints (domain.AssetKinds, domain.AssetLifecycles). env has no
-// such fixed vocabulary -- environment codes are estate-defined -- so it is
-// validated against the environment table itself via GetEnvironmentByCode,
-// which is why this function needs a context and the store even though the
-// filters it sets belong to the store's own, context-free APIAssetFilter.
-func applyAssetFilters(ctx context.Context, s *store.SQLStore, f *store.APIAssetFilter, q url.Values) error {
+// CHECK constraints (domain.AssetKinds, domain.AssetLifecycles): an unknown
+// value is ErrBadRequest, because an empty collection there would be
+// indistinguishable from a legitimate empty answer, the silent-fallback
+// shape docs/api-design.md §6 refuses.
+//
+// env is validated against the CALLER'S OWN SCOPE (f.Scope), not against the
+// estate -- docs/api-design.md §4's "Controller ruling AD". `?env=X` is a 400
+// unless X is one of the credential's own environments, whether or not X
+// exists at all: validating against the estate would let any token enumerate
+// the environment vocabulary by dictionary (a 400 for an unknown code, a 200
+// for a real one merely out of scope), and returning 200-with-empty for a
+// real but out-of-scope code was itself a §6 violation -- a value the caller
+// cannot use is silently replaced by something indistinguishable from a
+// legitimate empty answer. Validating against the token's own scope leaks
+// nothing new: /api/v1/environments already publishes that scope in full.
+// f.Scope is already the reader's scope by the time this runs (ListAssets
+// sets it before calling applyAssetFilters), so no additional parameter or
+// store access is needed here.
+func applyAssetFilters(f *store.APIAssetFilter, q url.Values) error {
 	if v := q.Get("kind"); v != "" {
 		if !slices.Contains(domain.AssetKinds, v) {
-			return fmt.Errorf("%w: kind is not a recognised asset kind", ErrBadRequest)
+			return badRequest("kind is not a recognised asset kind")
 		}
 		f.Kind = v
 	}
 	if v := q.Get("lifecycle"); v != "" {
 		if !slices.Contains(domain.AssetLifecycles, v) {
-			return fmt.Errorf("%w: lifecycle is not a recognised asset lifecycle", ErrBadRequest)
+			return badRequest("lifecycle is not a recognised asset lifecycle")
 		}
 		f.Lifecycle = v
 	}
 	if v := q.Get("env"); v != "" {
-		if _, err := s.GetEnvironmentByCode(ctx, v); err != nil {
-			if errors.Is(err, domain.ErrNotFound) {
-				return fmt.Errorf("%w: env is not a recognised environment code", ErrBadRequest)
-			}
-			return fmt.Errorf("validating env filter: %w", err)
+		if !f.Scope.Allows(v) {
+			return badRequest("env is not in this credential's scope")
 		}
 		f.EnvironmentCode = v
 	}

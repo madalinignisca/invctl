@@ -20,12 +20,11 @@ package api
 
 import (
 	"errors"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"net/url"
 	"sort"
-	"strings"
+	"unicode"
 
 	"github.com/madalinignisca/invctl/internal/domain"
 	"github.com/madalinignisca/invctl/internal/store"
@@ -59,10 +58,25 @@ var errNoReaderInContext = errors.New("no reader in context")
 // (which wraps it): the two must render byte-identically, and mapping both
 // through the same errors.Is branch is what guarantees that -- there is no
 // separate case above this one that could diverge.
+//
+// A 400's body comes from errors.As, not from trimming err.Error(): every
+// list handler wraps the error it gets back (fmt.Errorf("listing assets:
+// %w", err)), so a positional trim over the wrapped text would either fail to
+// strip the sentinel or publish the wrapping text itself. badRequestError
+// carries the client-facing message separately from Error()'s server-log
+// form for exactly this reason -- see page.go.
 func writeError(w http.ResponseWriter, err error) {
+	var bad *badRequestError
 	switch {
+	case errors.As(err, &bad):
+		render.JSONError(w, http.StatusBadRequest, bad.ClientMessage())
 	case errors.Is(err, ErrBadRequest):
-		render.JSONError(w, http.StatusBadRequest, strings.TrimPrefix(err.Error(), "bad request: "))
+		// Reachable only if something in this package ever constructs
+		// ErrBadRequest directly instead of through badRequest() -- the status
+		// is still right, but with no client-safe message to send, "bad
+		// request" is the honest generic body rather than risking whatever
+		// err.Error() happens to contain.
+		render.JSONError(w, http.StatusBadRequest, "bad request")
 	case errors.Is(err, domain.ErrNotFound):
 		render.JSONError(w, http.StatusNotFound, "not found")
 	default:
@@ -72,7 +86,7 @@ func writeError(w http.ResponseWriter, err error) {
 }
 
 // checkKnownParams refuses a request naming a query parameter the endpoint
-// does not define.
+// does not define, or naming a defined one more than once.
 //
 // `?limt=5` silently yielding the default with a 200 is the same silent
 // fallback shape a malformed cursor would be: a value arrives, cannot be used
@@ -81,16 +95,25 @@ func writeError(w http.ResponseWriter, err error) {
 // and entirely machine-consumed, so the usual HTTP convention of ignoring
 // unknown parameters buys nothing.
 //
-// The error names the offending parameter and never its value, so a
-// malformed query string cannot be used to reflect attacker-controlled
-// content into a client's log.
+// A repeated parameter is refused for the same reason: url.Values.Get takes
+// the first of several values for a key, so `?limit=5&limit=9` would
+// silently use 5 and drop 9 on the floor -- a value the caller supplied that
+// this handler never even looks at, which is the same shape as an unknown
+// name, just spelled differently.
+//
+// The error names the offending parameter and never its value. The name
+// itself is caller-supplied too, so it is bounded and checked for printable
+// ASCII before being echoed -- json.Marshal already escapes it correctly and
+// this is not an injection risk, but an oversized or unprintable name has no
+// business appearing in a log line or a client's error message verbatim.
 func checkKnownParams(q url.Values, allowed ...string) error {
 	allowedSet := make(map[string]bool, len(allowed))
 	for _, p := range allowed {
 		allowedSet[p] = true
 	}
-	// Sorted so that a request naming several unknown parameters reports the
-	// same one every time, rather than whichever the map happened to yield.
+	// Sorted so that a request naming several unknown or repeated parameters
+	// reports the same one every time, rather than whichever the map happened
+	// to yield.
 	keys := make([]string, 0, len(q))
 	for k := range q {
 		keys = append(keys, k)
@@ -98,10 +121,32 @@ func checkKnownParams(q url.Values, allowed ...string) error {
 	sort.Strings(keys)
 	for _, k := range keys {
 		if !allowedSet[k] {
-			return fmt.Errorf("%w: unknown query parameter %q", ErrBadRequest, k)
+			return badRequest("unknown query parameter %q", safeParamName(k))
+		}
+		if len(q[k]) > 1 {
+			return badRequest("query parameter %q is repeated", safeParamName(k))
 		}
 	}
 	return nil
+}
+
+// maxEchoedParamName bounds how much of a query parameter's name is ever
+// echoed back to the caller.
+const maxEchoedParamName = 64
+
+// safeParamName returns k unchanged if it is short, printable ASCII, and a
+// generic placeholder otherwise -- so an oversized or unprintable parameter
+// name never reaches a log line or an error body verbatim.
+func safeParamName(k string) string {
+	if len(k) > maxEchoedParamName {
+		return "(a long parameter name)"
+	}
+	for _, r := range k {
+		if r > unicode.MaxASCII || !unicode.IsPrint(r) {
+			return "(an unprintable parameter name)"
+		}
+	}
+	return k
 }
 
 // nextCursor is nil on a short page -- fewer rows than were asked for, which

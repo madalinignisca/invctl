@@ -25,8 +25,41 @@ const DefaultLimit = 100
 // length of the response the client just received.
 const MaxLimit = 500
 
-// ErrBadRequest wraps a client mistake; api.go maps it to 400.
+// ErrBadRequest wraps a client mistake; api.go maps it to 400. Callers that
+// need the 400 body to say something specific should use badRequest below
+// rather than fmt.Errorf("%w: ...", ErrBadRequest) directly: errors.Is(err,
+// ErrBadRequest) still works either way, but only badRequest keeps the
+// client-facing message independent of how the error gets wrapped on its way
+// back up.
 var ErrBadRequest = errors.New("bad request")
+
+// badRequestError carries a message meant for the client, separately from
+// Error()'s value, which is what a server-side log line uses. Without this
+// separation, writeError had to reconstruct the client-safe message by
+// trimming a known prefix off err.Error() -- correct only as long as nothing
+// wraps the error further, which every list handler does
+// (fmt.Errorf("listing assets: %w", err)). A positional trim over that
+// wrapped text would either fail to strip the sentinel or, worse, publish the
+// wrapping text ("listing assets: bad request: ...") to the client.
+type badRequestError struct {
+	msg string
+}
+
+// badRequest builds a client-facing 400. The message is exactly what
+// render.JSONError sends back, however the error is subsequently wrapped.
+func badRequest(format string, args ...any) error {
+	return &badRequestError{msg: fmt.Sprintf(format, args...)}
+}
+
+// Error is the server-log form: this is not what the client sees.
+func (e *badRequestError) Error() string { return "bad request: " + e.msg }
+
+// Unwrap lets errors.Is(err, ErrBadRequest) keep working regardless of how
+// the error was constructed.
+func (e *badRequestError) Unwrap() error { return ErrBadRequest }
+
+// ClientMessage is what writeError sends back, verbatim.
+func (e *badRequestError) ClientMessage() string { return e.msg }
 
 // Page is the collection envelope returned by every list endpoint. Next is
 // the cursor to pass as ?after= to fetch the following page, or nil when
@@ -63,8 +96,7 @@ func ParsePageRequest(q url.Values) (PageRequest, error) {
 
 	if raw := q.Get("after"); raw != "" {
 		if _, err := uuid.Parse(raw); err != nil {
-			return PageRequest{}, fmt.Errorf(
-				"%w: after must be the id of the last row of the previous page", ErrBadRequest)
+			return PageRequest{}, badRequest("after must be the id of the last row of the previous page")
 		}
 		p.After = raw
 	}
@@ -72,7 +104,7 @@ func ParsePageRequest(q url.Values) (PageRequest, error) {
 	if raw := q.Get("limit"); raw != "" {
 		n, err := strconv.Atoi(raw)
 		if err != nil || n < 1 {
-			return PageRequest{}, fmt.Errorf("%w: limit must be a positive whole number", ErrBadRequest)
+			return PageRequest{}, badRequest("limit must be a positive whole number")
 		}
 		if n > MaxLimit {
 			n = MaxLimit

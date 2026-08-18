@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/madalinignisca/invctl/internal/auth"
@@ -28,6 +29,15 @@ import (
 // handler tests exercise the real path a request takes -- auth, scope and
 // store -- rather than a context built by reaching into middleware's
 // unexported readerContextKey.
+//
+// SQLITE ONLY, deliberately. This suite exists to exercise the handler
+// wiring (auth, scope propagation, the DTO mapping, the byte-identical 404),
+// not to re-verify the SQL the scope predicate compiles to -- that SQL lives
+// in internal/store/api.go and is run through the store package's own test
+// suite on BOTH engines via `make test` (CLAUDE.md: "a change that only
+// passes on SQLite is not done"). Nothing here is dialect-specific, so this
+// package opting into SQLite alone does not weaken that guarantee; it just
+// means this file is not where it's enforced.
 // ---------------------------------------------------------------------------
 
 type apiHandlerFixture struct {
@@ -206,6 +216,25 @@ func (f *apiHandlerFixture) serveByID(handler http.HandlerFunc, id, bearer strin
 // Item 1: an out-of-scope id and a fabricated id are indistinguishable.
 // ---------------------------------------------------------------------------
 
+// assertIdenticalResponses compares two recorded responses in full: status,
+// body and every header. Comparing only status plus body plus one named
+// header (as an earlier version of this test did) is still a shape
+// assertion a wrong answer could satisfy -- item 1 is the property this task
+// most had to protect, so the whole header map is compared with
+// reflect.DeepEqual rather than picking the headers that seem relevant today.
+func assertIdenticalResponses(t *testing.T, a, b *httptest.ResponseRecorder, label string) {
+	t.Helper()
+	if a.Code != b.Code {
+		t.Fatalf("%s: status differs: %d vs %d", label, a.Code, b.Code)
+	}
+	if a.Body.String() != b.Body.String() {
+		t.Fatalf("%s: body differs: %q vs %q", label, a.Body.String(), b.Body.String())
+	}
+	if !reflect.DeepEqual(a.Header(), b.Header()) {
+		t.Fatalf("%s: headers differ: %v vs %v", label, a.Header(), b.Header())
+	}
+}
+
 func TestAnOutOfScopeAssetIsIndistinguishableFromAnAbsentOne(t *testing.T) {
 	f := newAPIHandlerFixture(t)
 
@@ -214,15 +243,10 @@ func TestAnOutOfScopeAssetIsIndistinguishableFromAnAbsentOne(t *testing.T) {
 	outOfScope := f.serveByID(f.api.GetAsset, f.assetDevOnly, tokProd)
 	fabricated := f.serveByID(f.api.GetAsset, store.NewID(), tokProd)
 
-	if outOfScope.Code != fabricated.Code {
-		t.Fatalf("status differs: out-of-scope %d, fabricated %d", outOfScope.Code, fabricated.Code)
-	}
 	if outOfScope.Code != http.StatusNotFound {
 		t.Fatalf("got %d, want 404", outOfScope.Code)
 	}
-	if outOfScope.Body.String() != fabricated.Body.String() {
-		t.Fatalf("body differs: out-of-scope %q, fabricated %q", outOfScope.Body.String(), fabricated.Body.String())
-	}
+	assertIdenticalResponses(t, outOfScope, fabricated, "out-of-scope asset vs fabricated id")
 }
 
 func TestAnOutOfScopeServiceIsIndistinguishableFromAnAbsentOne(t *testing.T) {
@@ -232,10 +256,7 @@ func TestAnOutOfScopeServiceIsIndistinguishableFromAnAbsentOne(t *testing.T) {
 	outOfScope := f.serveByID(f.api.GetService, f.serviceID, tokDev)
 	fabricated := f.serveByID(f.api.GetService, store.NewID(), tokDev)
 
-	if outOfScope.Code != fabricated.Code || outOfScope.Body.String() != fabricated.Body.String() {
-		t.Fatalf("out-of-scope and fabricated ids diverge: %d %q vs %d %q",
-			outOfScope.Code, outOfScope.Body.String(), fabricated.Code, fabricated.Body.String())
-	}
+	assertIdenticalResponses(t, outOfScope, fabricated, "out-of-scope service vs fabricated id")
 }
 
 // TestABoundaryAssetIsHiddenFromAPartialScope pins the AllowsAll rule at the
@@ -272,6 +293,11 @@ func TestAnUnrecognisedLifecycleFilterValueIsRefused(t *testing.T) {
 	}
 }
 
+// TestAnUnrecognisedEnvironmentFilterValueIsRefused covers a code that does
+// not exist anywhere in the estate. Under Controller ruling AD
+// (docs/api-design.md §4), env is validated against the CALLER'S OWN SCOPE,
+// not against the estate, so this is refused for the same reason a real code
+// outside the token's scope is: neither is in {prod}.
 func TestAnUnrecognisedEnvironmentFilterValueIsRefused(t *testing.T) {
 	f := newAPIHandlerFixture(t)
 	rec := f.serve(f.api.ListAssets, "GET", "/api/v1/assets?env=nonexistent", tokProd)
@@ -281,35 +307,49 @@ func TestAnUnrecognisedEnvironmentFilterValueIsRefused(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Item 8: filters narrow within scope; a valid value outside scope is an
-// empty collection, not an error.
+// Item 8 / Controller ruling AD: env is validated against the credential's
+// own scope. A real code outside that scope is refused exactly like a code
+// that does not exist at all -- anything else would let a token learn, by
+// the shape of the response, whether an environment it cannot see is real.
 // ---------------------------------------------------------------------------
 
-func TestAnEnvironmentFilterOutsideScopeReturnsAnEmptyCollectionNotAnError(t *testing.T) {
+// TestAnEnvironmentFilterOutsideScopeIsRefused pins the ruling directly: a
+// {dev} token asking ?env=prod -- a real environment, just not one it may
+// see -- gets the same 400 an unrecognised code gets, never a 200-empty.
+// The old rule ("empty collection, not an error") was itself a §6 violation:
+// a consumer whose scope was edited out from under it would have received a
+// plausible, well-formed, empty inventory with no signal at all.
+func TestAnEnvironmentFilterOutsideScopeIsRefused(t *testing.T) {
 	f := newAPIHandlerFixture(t)
-	// "prod" is a real environment, just not one the dev-only token may see.
 	rec := f.serve(f.api.ListAssets, "GET", "/api/v1/assets?env=prod", tokDev)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("got %d, want 200: a valid but out-of-scope filter value is an empty answer, not an error", rec.Code)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("got %d, want 400: a real environment outside the token's scope must be refused, not silently narrowed to empty", rec.Code)
 	}
-	var page Page[Asset]
-	if err := json.Unmarshal(rec.Body.Bytes(), &page); err != nil {
-		t.Fatalf("decoding response: %v", err)
-	}
-	if len(page.Data) != 0 {
-		t.Fatalf("got %d assets, want 0: the token's scope is not the client's business, but it still bounds the answer", len(page.Data))
-	}
-	if page.Data == nil {
-		t.Fatal("Data must marshal as [], never null, even for a scope-narrowed empty answer")
-	}
+}
+
+// TestAnOutOfScopeEnvironmentAndANonexistentOneProduceTheSameResponse is the
+// existence-oracle guard Controller ruling AD exists to close: validating
+// against the estate would let a token tell a real-but-out-of-scope code
+// apart from a fabricated one (400 either way today, but a real one used to
+// be a 200-empty), and the environment namespace is a dozen short
+// human-chosen words -- enumerable by dictionary in seconds. Both responses
+// must be identical in every respect, the same property item 1 protects for
+// asset and service ids.
+func TestAnOutOfScopeEnvironmentAndANonexistentOneProduceTheSameResponse(t *testing.T) {
+	f := newAPIHandlerFixture(t)
+	realButOutOfScope := f.serve(f.api.ListAssets, "GET", "/api/v1/assets?env=prod", tokDev)
+	nonexistent := f.serve(f.api.ListAssets, "GET", "/api/v1/assets?env=totally-made-up", tokDev)
+	assertIdenticalResponses(t, realButOutOfScope, nonexistent, "real-but-out-of-scope env vs nonexistent env")
 }
 
 // TestAnEmptyCollectionMarshalsAsAnEmptyArray is the handler-level companion
 // to TestPageDataMarshalsAsEmptyArrayNotNull in api_test.go: it exercises the
-// real ListAssets path end to end rather than constructing a Page by hand.
+// real ListAssets path end to end rather than constructing a Page by hand,
+// for a filter that is legitimately empty -- ?lifecycle=retired, valid and
+// within scope, matching nothing because the fixture has no retired assets.
 func TestAnEmptyCollectionMarshalsAsAnEmptyArray(t *testing.T) {
 	f := newAPIHandlerFixture(t)
-	rec := f.serve(f.api.ListAssets, "GET", "/api/v1/assets?env=prod", tokDev)
+	rec := f.serve(f.api.ListAssets, "GET", "/api/v1/assets?lifecycle=retired", tokProd)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("got %d, want 200", rec.Code)
 	}

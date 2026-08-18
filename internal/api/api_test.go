@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -51,6 +52,26 @@ func TestAnInternalErrorIsNotEchoedToTheClient(t *testing.T) {
 	}
 }
 
+// TestAWrappedBadRequestKeepsItsClientSafeMessage pins finding (c): every
+// list handler wraps whatever error it gets back (fmt.Errorf("listing
+// assets: %w", err)), so the 400 body must come from the badRequestError's
+// own message, not from trimming a known prefix off the wrapped text -- a
+// positional trim over "listing assets: bad request: kind is not a
+// recognised asset kind" would either fail to strip anything or leak the
+// wrapping text itself.
+func TestAWrappedBadRequestKeepsItsClientSafeMessage(t *testing.T) {
+	err := fmt.Errorf("listing assets: %w", badRequest("kind is not a recognised asset kind"))
+	rec := httptest.NewRecorder()
+	writeError(rec, err)
+	if rec.Code != 400 {
+		t.Fatalf("got %d, want 400", rec.Code)
+	}
+	const want = `{"error":"kind is not a recognised asset kind"}`
+	if rec.Body.String() != want {
+		t.Fatalf("got %s, want %s", rec.Body.String(), want)
+	}
+}
+
 // TestAnOutOfScopeErrorAndAFabricatedIDProduceTheSameResponse pins the
 // property store.ErrOutOfScope exists to protect at the one place it can be
 // undone silently: writeError. Both are domain.ErrNotFound by wrapping, and
@@ -72,8 +93,11 @@ func TestAnOutOfScopeErrorAndAFabricatedIDProduceTheSameResponse(t *testing.T) {
 	if recOutOfScope.Body.String() != recAbsent.Body.String() {
 		t.Fatalf("body differs: out-of-scope %q, absent %q", recOutOfScope.Body.String(), recAbsent.Body.String())
 	}
-	if recOutOfScope.Header().Get("Content-Type") != recAbsent.Header().Get("Content-Type") {
-		t.Fatal("Content-Type differs between an out-of-scope id and an absent one")
+	// The FULL header map, not one named header picked because it seemed
+	// relevant: a length or "contains" check is satisfied by many wrong
+	// answers, and item 1 is the property this task most had to protect.
+	if !reflect.DeepEqual(recOutOfScope.Header(), recAbsent.Header()) {
+		t.Fatalf("headers differ: out-of-scope %v, absent %v", recOutOfScope.Header(), recAbsent.Header())
 	}
 }
 
@@ -117,6 +141,47 @@ func TestAnUnknownQueryParameterValueIsNeverEchoed(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "secret-value") {
 		t.Fatalf("the offending value leaked into the error: %q", err.Error())
+	}
+}
+
+// TestARepeatedQueryParameterIsRefused pins finding (d): url.Values.Get takes
+// the first of several values for a key, so ?limit=5&limit=9 would otherwise
+// silently use 5 and drop 9 -- a value the caller supplied that the handler
+// never even looks at, the same shape as an unknown parameter name.
+func TestARepeatedQueryParameterIsRefused(t *testing.T) {
+	err := checkKnownParams(url.Values{"limit": {"5", "9"}}, "after", "limit")
+	if !errors.Is(err, ErrBadRequest) {
+		t.Fatalf("got %v, want ErrBadRequest", err)
+	}
+	if !strings.Contains(err.Error(), `"limit"`) {
+		t.Fatalf("error %q does not name the repeated parameter", err.Error())
+	}
+}
+
+// TestAnOversizedParameterNameIsNotEchoed pins finding (e): the parameter
+// NAME is as caller-controlled as its value, so an oversized one is replaced
+// by a generic placeholder rather than echoed verbatim.
+func TestAnOversizedParameterNameIsNotEchoed(t *testing.T) {
+	long := strings.Repeat("x", maxEchoedParamName+1)
+	err := checkKnownParams(url.Values{long: {"1"}}, "after", "limit")
+	if err == nil {
+		t.Fatal("an unknown parameter must be refused")
+	}
+	if strings.Contains(err.Error(), long) {
+		t.Fatalf("an oversized parameter name was echoed verbatim: %q", err.Error())
+	}
+}
+
+// TestAnUnprintableParameterNameIsNotEchoed is the same guard for a name
+// carrying a control character rather than merely being long.
+func TestAnUnprintableParameterNameIsNotEchoed(t *testing.T) {
+	bad := "a\x00b"
+	err := checkKnownParams(url.Values{bad: {"1"}}, "after", "limit")
+	if err == nil {
+		t.Fatal("an unknown parameter must be refused")
+	}
+	if strings.Contains(err.Error(), bad) {
+		t.Fatalf("an unprintable parameter name was echoed verbatim: %q", err.Error())
 	}
 }
 

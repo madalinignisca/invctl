@@ -80,9 +80,15 @@ func equalStrings(a, b []string) bool {
 // TestEnvironmentDTONeverPublishesRowVersion pins item 6 at the mapping
 // function itself, not merely at the struct shape TestTheContractIsExactly
 // TheseFields already covers: even a domain.Environment carrying a non-zero
-// RowVersion produces a payload with no trace of it, because
+// RowVersion produces a payload with no `row_version` key, because
 // APIListEnvironments does SELECT * into the domain struct and environmentDTO
 // is the only thing standing between that and the client.
+//
+// This checks only for the KEY, not for the row version's VALUE anywhere in
+// the body -- a value-shaped substring check (e.g. looking for "7") is
+// satisfied by coincidence the moment any other field legitimately contains
+// that digit, which TestEnvironmentDTOExactMapping right below already
+// covers properly by comparing the whole struct.
 func TestEnvironmentDTONeverPublishesRowVersion(t *testing.T) {
 	e := domain.Environment{
 		ID: "e1", Code: "prod", Name: "Production", Role: domain.EnvRoleProduction,
@@ -95,8 +101,8 @@ func TestEnvironmentDTONeverPublishesRowVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshalling: %v", err)
 	}
-	if strings.Contains(string(body), "row_version") || strings.Contains(string(body), "7") {
-		t.Fatalf("environmentDTO leaked row_version-shaped content: %s", body)
+	if strings.Contains(string(body), "row_version") {
+		t.Fatalf("environmentDTO leaked row_version: %s", body)
 	}
 }
 
