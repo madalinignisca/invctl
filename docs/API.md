@@ -169,6 +169,18 @@ a bad cursor is refused rather than silently downgraded: a value the caller
 cannot use must never be replaced by something that looks like a legitimate,
 if surprising, answer.
 
+**`?env=` is case-insensitive; `?kind=` and `?lifecycle=` are not.**
+`?env=PROD`, `?env=Prod` and `?env=%20prod` all filter exactly as `?env=prod`
+does, and return byte-identical responses. `?kind=VM` and `?lifecycle=Active`
+are both a 400.
+
+That asymmetry is deliberate, and it follows from where each vocabulary lives.
+An environment code is lower-cased when it is stored, so `PROD` and `prod` are
+not two values — they are the same environment written two ways, and refusing
+one of them would refuse a correct answer. Asset kinds and lifecycles are a
+fixed set of constants, and `VM` is simply not one of them: that is a typo, and
+a typo must be refused rather than answered with an empty collection.
+
 **`?env=` is validated against the credential's own scope, not against the
 estate — see "Why is `?env=` a 400 instead of an empty list?" below.**
 
