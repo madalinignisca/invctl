@@ -15,6 +15,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/madalinignisca/invctl/internal/csvsafe"
 )
 
 // CSV downloads.
@@ -65,12 +67,12 @@ func CSV(w http.ResponseWriter, r *http.Request, t Table, now time.Time) {
 	// encoding/csv quotes anything containing a comma, a quote or a newline, so
 	// a note or a description cannot break the shape of the file. It does NOT
 	// defend a spreadsheet against a cell beginning with = or +, which is the
-	// formula-injection problem -- see sanitise below.
+	// formula-injection problem -- see csvsafe.Cell.
 	rows := append([][]string{t.CSVHeader()}, t.CSVRows()...)
 	for _, row := range rows {
 		safe := make([]string, len(row))
 		for i, cell := range row {
-			safe[i] = sanitise(cell)
+			safe[i] = csvsafe.Cell(cell)
 		}
 		if err := cw.Write(safe); err != nil {
 			// The response is already begun, so this cannot become an error
@@ -84,28 +86,4 @@ func CSV(w http.ResponseWriter, r *http.Request, t Table, now time.Time) {
 	if err := cw.Error(); err != nil {
 		slog.Error("flushing csv", "error", err, "path", r.URL.Path)
 	}
-}
-
-// sanitise defuses a cell a spreadsheet would treat as a formula.
-//
-// THE ONE SECURITY PROBLEM A CSV EXPORT ACTUALLY HAS. Excel and LibreOffice
-// evaluate a cell beginning with = + - or @, so an asset somebody named
-// `=cmd|'/c calc'!A1` becomes code the moment a colleague opens the file. The
-// database is right to store it -- it is a name, and refusing punctuation in
-// names would be its own bug -- so the defusing belongs here, at the boundary
-// where the text stops being data and starts being a spreadsheet.
-//
-// A leading apostrophe is the conventional fix: spreadsheets read it as "treat
-// the rest as text" and drop it on display, so the cell still reads correctly
-// to a human. Nothing is removed, which matters -- an export that silently
-// altered a name would be worse than the problem.
-func sanitise(cell string) string {
-	if cell == "" {
-		return cell
-	}
-	switch cell[0] {
-	case '=', '+', '-', '@', '\t', '\r':
-		return "'" + cell
-	}
-	return cell
 }

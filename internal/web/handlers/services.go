@@ -61,7 +61,12 @@ func (a *App) ServiceList(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if render.WantsCSV(r) {
-		render.CSV(w, r, store.ExportServices(services), a.Store.Now())
+		table, err := a.Store.ExportServices(r.Context(), services)
+		if err != nil {
+			a.serverError(w, r, err)
+			return
+		}
+		render.CSV(w, r, table, a.Store.Now())
 		return
 	}
 
