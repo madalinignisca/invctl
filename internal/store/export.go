@@ -141,20 +141,48 @@ type customExportColumn struct {
 //
 // EVERY HEADER CARRIES ITS CODE, UNCONDITIONALLY -- design.md's Ruling AN,
 // and there is no disambiguation pass left to call: a header built from
-// "Label (code)" (or "Label (retired) (code)") is a pure function of the one
-// field it names. Ruling AM tried appending the code only on a detected
-// collision and that failed twice over: the appended form could itself
-// collide with an untouched field that already happened to look like
-// "Label (code)", and worse, a NEW field arriving with a colliding label
-// silently renamed an EXISTING field's header from "Label" to "Label (code)"
-// with nothing about that field having changed -- exactly what a diff or a
-// header-keyed tool reads as a column removed and another added, denting
-// §7's own promise that the export is where an operator goes to see what
-// they still hold. Appending unconditionally removes both failure modes: a
-// field's header depends only on its own code and retirement state, never on
-// what else happens to be defined. It also outlives a rename -- Ruling M made
+// "Label (code)" (or "Label (retired YYYY-MM-DD) (code)") depends on nothing
+// but the one field it names and, for a retired one, when it was retired.
+// Ruling AM tried appending the code only on a detected collision and that
+// failed twice over: the appended form could itself collide with an
+// untouched field that already happened to look like "Label (code)", and
+// worse, a NEW field arriving with a colliding label silently renamed an
+// EXISTING field's header from "Label" to "Label (code)" with nothing about
+// that field having changed -- exactly what a diff or a header-keyed tool
+// reads as a column removed and another added, denting §7's own promise
+// that the export is where an operator goes to see what they still hold.
+// Appending unconditionally removes both failure modes for a header's
+// dependence on OTHER fields: it never changes because something else was
+// created, retired or restored. It also outlives a rename -- Ruling M made
 // label editable forever, so a header built from label alone moves whenever
 // an administrator renames a field, and code is the thing that does not.
+//
+// THE CLAIM IS PRECISELY THIS MUCH AND NO MORE: a LIVE field's header cannot
+// collide with any other field's, because code is unique among LIVE rows
+// (custom_field_live_code_key, migration 00051, a PARTIAL index). It says
+// nothing stronger, because nothing stronger is true. An earlier version of
+// this comment claimed collision was impossible outright, and a real engine
+// proved it wrong on two counts: §6 explicitly touts reusing a code after
+// retirement as intended behaviour, so two RETIRED fields sharing a code AND
+// a label are ordinary use, not abuse, and their headers were identical
+// before Ruling AO added the retirement date below. And a LIVE field
+// labelled literally "Support (retired)" with code "support" rendered
+// identically to a RETIRED field labelled "Support" with the same code,
+// because the marker was plain text with nothing tying it to an actual
+// retirement.
+//
+// THE RETIREMENT DATE (Ruling AO) closes the second case completely: a live
+// label a human chose to imitate the marker can happen to equal
+// "Support (retired)" but cannot also equal a specific calendar date this
+// field was never retired on, because that string names an event, not a
+// phrase anyone types by hand. It closes the first case down to exactly one
+// residual line, accepted rather than engineered away: two fields sharing a
+// code, a label, AND a retirement date truncated to the same UTC day still
+// collide. The field id would close it too but is unreadable in a header,
+// and forbidding the substring "(retired)" in a label is a domain change
+// into a task this one does not own -- the date closes the case that
+// actually matters (b) for free and narrows the other (a) to a coincidence
+// nobody has to design against.
 func (s *SQLStore) customFieldColumns(ctx context.Context, entityType string, ids []string) ([]customExportColumn, map[string]map[string]string, error) {
 	var cols []customExportColumn
 	seen := make(map[string]bool)
@@ -187,7 +215,7 @@ func (s *SQLStore) customFieldColumns(ctx context.Context, entityType string, id
 				seen[r.FieldID] = true
 				header := r.Label + " (" + r.Code + ")"
 				if r.RetiredAt != nil {
-					header = r.Label + " (retired) (" + r.Code + ")"
+					header = r.Label + " (retired " + retiredDate(*r.RetiredAt) + ") (" + r.Code + ")"
 				}
 				cols = append(cols, customExportColumn{FieldID: r.FieldID, Code: r.Code, Header: header})
 			}
@@ -203,6 +231,20 @@ func (s *SQLStore) customFieldColumns(ctx context.Context, entityType string, id
 		}
 	}
 	return cols, values, nil
+}
+
+// retiredDate extracts the calendar day (YYYY-MM-DD) from a retired_at
+// timestamp for a retired column's header -- design.md's Ruling AO. Stored
+// timestamps are RFC3339 UTC written by domain.FormatTime (never by the
+// database, per this repo's timestamp rule), so the date is always the first
+// ten bytes; the length guard is defensive rather than expected to fire, and
+// falls back to the raw value rather than panicking on a slice bound if it
+// ever does.
+func retiredDate(retiredAt string) string {
+	if len(retiredAt) < 10 {
+		return retiredAt
+	}
+	return retiredAt[:10]
 }
 
 // customFieldCells renders one entity's custom-field cells in cols' order,

@@ -11,6 +11,7 @@ package store
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/madalinignisca/invctl/internal/domain"
 )
@@ -131,6 +132,14 @@ func TestARetiredFieldStillExportsUnderARetiredHeader(t *testing.T) {
 			if err := f.s.RetireCustomField(f.ctx, f.actor, id); err != nil {
 				t.Fatalf("retiring: %v", err)
 			}
+			retired, err := f.s.GetCustomField(f.ctx, id)
+			if err != nil {
+				t.Fatalf("re-reading after retiring: %v", err)
+			}
+			if retired.RetiredAt == nil {
+				t.Fatal("retired_at is nil after retiring")
+			}
+			wantRetiredHeader := "Cost Centre (retired " + retiredDate(*retired.RetiredAt) + ") (cost_centre)"
 
 			rows, err := f.s.ListAssets(f.ctx, AssetFilter{Limit: 500})
 			if err != nil {
@@ -145,12 +154,12 @@ func TestARetiredFieldStillExportsUnderARetiredHeader(t *testing.T) {
 				t.Fatalf("the live header %q is still present after retirement; header is %v",
 					"Cost Centre (cost_centre)", table.Header)
 			}
-			col := indexOf(table.Header, "Cost Centre (retired) (cost_centre)")
+			col := indexOf(table.Header, wantRetiredHeader)
 			if col < 0 {
-				t.Fatalf(`no exact "Cost Centre (retired) (cost_centre)" column; header is %v`, table.Header)
+				t.Fatalf("no exact %q column; header is %v", wantRetiredHeader, table.Header)
 			}
 			for i, h := range table.Header {
-				if h != "Cost Centre (retired) (cost_centre)" && strings.Contains(h, "Cost Centre") {
+				if h != wantRetiredHeader && strings.Contains(h, "Cost Centre") {
 					t.Fatalf("column %d is %q -- a header that partially matches but is not "+
 						"the exact retired marker", i, h)
 				}
@@ -440,10 +449,14 @@ func TestTwoFieldsSharingALabelGetDifferentHeadersByCode(t *testing.T) {
 	}
 }
 
-// TestTwoRetiredFieldsSharingALabelReadAsLabelRetiredCode documents the exact
+// TestTwoRetiredFieldsSharingALabelReadAsLabelRetiredCode documents the
 // answer to "what does a collided RETIRED column read as": the retired
-// marker and the code suffix both apply, in that order --
-// "Label (retired) (code)" -- for each field, unconditionally.
+// marker, the retirement date, and the code suffix all apply, in that order
+// -- "Label (retired YYYY-MM-DD) (code)" -- for each field, unconditionally.
+// These two fields differ by code as well as by date, so Ruling AN's code
+// suffix alone would already distinguish them; TestTwoRetiredFieldsSharing
+// CodeAndLabelOnDifferentDaysGetDistinctHeaders below is the sharper case,
+// where the code is identical too and only the date is left to do the work.
 func TestTwoRetiredFieldsSharingALabelReadAsLabelRetiredCode(t *testing.T) {
 	for _, e := range Engines(t) {
 		t.Run(e.Name, func(t *testing.T) {
@@ -469,6 +482,17 @@ func TestTwoRetiredFieldsSharingALabelReadAsLabelRetiredCode(t *testing.T) {
 			if err := f.s.RetireCustomField(f.ctx, f.actor, second); err != nil {
 				t.Fatalf("retiring %s: %v", second, err)
 			}
+			firstRow, err := f.s.GetCustomField(f.ctx, first)
+			if err != nil {
+				t.Fatalf("re-reading %s: %v", first, err)
+			}
+			secondRow, err := f.s.GetCustomField(f.ctx, second)
+			if err != nil {
+				t.Fatalf("re-reading %s: %v", second, err)
+			}
+			if firstRow.RetiredAt == nil || secondRow.RetiredAt == nil {
+				t.Fatal("retired_at is nil after retiring")
+			}
 
 			cols, _, err := f.s.customFieldColumns(f.ctx, domain.CustomFieldEntityAsset, []string{f.assetID})
 			if err != nil {
@@ -478,10 +502,10 @@ func TestTwoRetiredFieldsSharingALabelReadAsLabelRetiredCode(t *testing.T) {
 			for _, c := range cols {
 				byField[c.FieldID] = c.Header
 			}
-			if want := "Cost Centre (retired) (cost_centre)"; byField[first] != want {
+			if want := "Cost Centre (retired " + retiredDate(*firstRow.RetiredAt) + ") (cost_centre)"; byField[first] != want {
 				t.Fatalf("got header %q for %s, want %q", byField[first], first, want)
 			}
-			if want := "Cost Centre (retired) (cc)"; byField[second] != want {
+			if want := "Cost Centre (retired " + retiredDate(*secondRow.RetiredAt) + ") (cc)"; byField[second] != want {
 				t.Fatalf("got header %q for %s, want %q", byField[second], second, want)
 			}
 		})
@@ -489,9 +513,8 @@ func TestTwoRetiredFieldsSharingALabelReadAsLabelRetiredCode(t *testing.T) {
 }
 
 // TestALiveAndARetiredFieldSharingALabelGetDifferentHeaders: a live field and
-// a same-labelled retired field are already distinguishable before any code
-// is considered -- "Cost Centre (code-a)" and "Cost Centre (retired) (code-b)"
-// -- and each still carries its own code regardless.
+// a same-labelled retired field are already distinguishable, each still
+// carrying its own code and, for the retired one, its retirement date.
 func TestALiveAndARetiredFieldSharingALabelGetDifferentHeaders(t *testing.T) {
 	for _, e := range Engines(t) {
 		t.Run(e.Name, func(t *testing.T) {
@@ -514,6 +537,13 @@ func TestALiveAndARetiredFieldSharingALabelGetDifferentHeaders(t *testing.T) {
 			if err := f.s.RetireCustomField(f.ctx, f.actor, retired); err != nil {
 				t.Fatalf("retiring %s: %v", retired, err)
 			}
+			retiredRow, err := f.s.GetCustomField(f.ctx, retired)
+			if err != nil {
+				t.Fatalf("re-reading %s: %v", retired, err)
+			}
+			if retiredRow.RetiredAt == nil {
+				t.Fatal("retired_at is nil after retiring")
+			}
 
 			cols, _, err := f.s.customFieldColumns(f.ctx, domain.CustomFieldEntityAsset, []string{f.assetID})
 			if err != nil {
@@ -526,8 +556,148 @@ func TestALiveAndARetiredFieldSharingALabelGetDifferentHeaders(t *testing.T) {
 			if want := "Cost Centre (cost_centre)"; byField[live] != want {
 				t.Fatalf("got header %q for the live field, want %q", byField[live], want)
 			}
-			if want := "Cost Centre (retired) (cc)"; byField[retired] != want {
+			if want := "Cost Centre (retired " + retiredDate(*retiredRow.RetiredAt) + ") (cc)"; byField[retired] != want {
 				t.Fatalf("got header %q for the retired field, want %q", byField[retired], want)
+			}
+		})
+	}
+}
+
+// ---------- Ruling AO: the retirement date, closing what AN's code suffix
+// alone could not ----------
+
+// TestTwoRetiredFieldsSharingCodeAndLabelOnDifferentDaysGetDistinctHeaders is
+// the reviewer's case (a): design.md §6 explicitly touts reusing a code after
+// retirement as intended behaviour, so retiring a field, then creating and
+// retiring ANOTHER field with the identical code and label, is ordinary use.
+// Before Ruling AO the two retired headers were byte-identical ("Label
+// (retired) (code)" for both). The retirement date is controlled via
+// SQLStore.WithClock so the two retirements land on different UTC days,
+// which is what the ruling's fix actually closes -- the residual case it
+// accepts (same code, same label, AND the same day) is deliberately not what
+// this test exercises.
+func TestTwoRetiredFieldsSharingCodeAndLabelOnDifferentDaysGetDistinctHeaders(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newCustomFieldFixture(t, e)
+			relabel := func(fieldID, label string) {
+				t.Helper()
+				row, err := f.s.GetCustomField(f.ctx, fieldID)
+				if err != nil {
+					t.Fatalf("reading %s: %v", fieldID, err)
+				}
+				row.Label = label
+				if err := f.s.UpdateCustomField(f.ctx, f.actor, &row.CustomField); err != nil {
+					t.Fatalf("relabelling %s: %v", fieldID, err)
+				}
+			}
+
+			first := mustField(t, f, "asset", "cc", domain.CustomFieldText)
+			relabel(first, "Cost Centre")
+			day1 := time.Date(2026, 1, 10, 9, 0, 0, 0, time.UTC)
+			onDay1 := f.s.WithClock(func() time.Time { return day1 })
+			if err := onDay1.RetireCustomField(f.ctx, f.actor, first); err != nil {
+				t.Fatalf("retiring first: %v", err)
+			}
+
+			// The code is free again the moment the first field is retired
+			// (the partial unique index enforces uniqueness among LIVE rows
+			// only), and design.md §6 calls that reuse intended, not abuse.
+			second := mustField(t, f, "asset", "cc", domain.CustomFieldText)
+			relabel(second, "Cost Centre")
+			day2 := time.Date(2026, 3, 4, 9, 0, 0, 0, time.UTC)
+			onDay2 := f.s.WithClock(func() time.Time { return day2 })
+			if err := onDay2.RetireCustomField(f.ctx, f.actor, second); err != nil {
+				t.Fatalf("retiring second: %v", err)
+			}
+
+			cols, _, err := f.s.customFieldColumns(f.ctx, domain.CustomFieldEntityAsset, []string{f.assetID})
+			if err != nil {
+				t.Fatalf("reading columns: %v", err)
+			}
+			if len(cols) != 2 {
+				t.Fatalf("got %d columns, want 2", len(cols))
+			}
+			byField := make(map[string]string, 2)
+			for _, c := range cols {
+				byField[c.FieldID] = c.Header
+			}
+			if byField[first] == byField[second] {
+				t.Fatalf("two retired fields sharing a code and a label produced identical "+
+					"headers (%q) once retired on different days -- Ruling AO's retirement date "+
+					"must distinguish them", byField[first])
+			}
+			if want := "Cost Centre (retired 2026-01-10) (cc)"; byField[first] != want {
+				t.Fatalf("got header %q for the first field, want %q", byField[first], want)
+			}
+			if want := "Cost Centre (retired 2026-03-04) (cc)"; byField[second] != want {
+				t.Fatalf("got header %q for the second field, want %q", byField[second], want)
+			}
+		})
+	}
+}
+
+// TestALiveLabelImitatingTheRetiredMarkerDoesNotCollideWithARetiredField is
+// the reviewer's case (b): before Ruling AO, a LIVE field labelled literally
+// "Support (retired)" with a reused code rendered byte-identically to the
+// RETIRED field labelled "Support" that had held that code before it --
+// because the marker was plain text with nothing tying it to an actual
+// retirement. The retirement date closes this completely: no live label a
+// human can type also names the exact calendar day this OTHER field was
+// retired on.
+func TestALiveLabelImitatingTheRetiredMarkerDoesNotCollideWithARetiredField(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newCustomFieldFixture(t, e)
+			relabel := func(fieldID, label string) {
+				t.Helper()
+				row, err := f.s.GetCustomField(f.ctx, fieldID)
+				if err != nil {
+					t.Fatalf("reading %s: %v", fieldID, err)
+				}
+				row.Label = label
+				if err := f.s.UpdateCustomField(f.ctx, f.actor, &row.CustomField); err != nil {
+					t.Fatalf("relabelling %s: %v", fieldID, err)
+				}
+			}
+
+			retiredField := mustField(t, f, "asset", "support", domain.CustomFieldText)
+			relabel(retiredField, "Support")
+			if err := f.s.RetireCustomField(f.ctx, f.actor, retiredField); err != nil {
+				t.Fatalf("retiring: %v", err)
+			}
+			retiredRow, err := f.s.GetCustomField(f.ctx, retiredField)
+			if err != nil {
+				t.Fatalf("re-reading: %v", err)
+			}
+			if retiredRow.RetiredAt == nil {
+				t.Fatal("retired_at is nil after retiring")
+			}
+			wantRetiredHeader := "Support (retired " + retiredDate(*retiredRow.RetiredAt) + ") (support)"
+
+			// §6: the code is free for reuse once retired. This live field
+			// deliberately imitates the bare marker in its own label.
+			liveField := mustField(t, f, "asset", "support", domain.CustomFieldText)
+			relabel(liveField, "Support (retired)")
+
+			cols, _, err := f.s.customFieldColumns(f.ctx, domain.CustomFieldEntityAsset, []string{f.assetID})
+			if err != nil {
+				t.Fatalf("reading columns: %v", err)
+			}
+			byField := make(map[string]string, 2)
+			for _, c := range cols {
+				byField[c.FieldID] = c.Header
+			}
+			if byField[retiredField] != wantRetiredHeader {
+				t.Fatalf("got header %q for the retired field, want %q", byField[retiredField], wantRetiredHeader)
+			}
+			wantLiveHeader := "Support (retired) (support)"
+			if byField[liveField] != wantLiveHeader {
+				t.Fatalf("got header %q for the live field, want %q", byField[liveField], wantLiveHeader)
+			}
+			if byField[retiredField] == byField[liveField] {
+				t.Fatalf("a live label imitating the retired marker collided with an actually "+
+					"retired field's header: %q", byField[retiredField])
 			}
 		})
 	}

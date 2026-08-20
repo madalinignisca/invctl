@@ -283,12 +283,12 @@ CSV export gains one column per field, live or retired.
 
 **Every header is `Label (code)`, unconditionally — never plain `Label`, and
 never conditional on whether another field happens to collide.** A retired
-column reads `Label (retired) (code)`, the marker and the code both applied
-every time. `custom_field.label` carries no uniqueness constraint (§2/§3,
-deliberately — a cross-task constraint might forbid a legitimate rename), so
-two live fields, or two retired ones, can share one label. An earlier version
-of this rule appended the code only when a collision was actually detected,
-and that failed twice over:
+column reads `Label (retired YYYY-MM-DD) (code)`, the marker, the day it was
+retired, and the code all applied every time. `custom_field.label` carries no
+uniqueness constraint (§2/§3, deliberately — a cross-task constraint might
+forbid a legitimate rename), so two live fields, or two retired ones, can
+share one label. An earlier version of this rule appended the code only when
+a collision was actually detected, and that failed twice over:
 
 - the appended form (`Label (code)`) could itself collide with an untouched
   field whose OWN label already happened to read `Label (code)` — a
@@ -301,16 +301,42 @@ and that failed twice over:
   removed and another added — denting this section's own promise that the
   export is where an operator goes to see what they still hold.
 
-Appending the code unconditionally removes both failure modes at once, because
-it makes a header **a pure function of its own field and nothing else**:
-self-collision is impossible (`code` is unique among live fields per entity
-type via the partial index, and a retired field's `(retired)` marker keeps it
-distinct from a live one sharing the same code space), and no field's header
-can ever change as a side effect of another field being created, retired, or
-restored. It also survives a rename: §3's rule that `label` stays editable
-forever means a header built from label alone would move every time an
-administrator corrects it, and `code` is the one thing on a definition that
-does not move underneath an export somebody is diffing.
+Appending the code unconditionally removes both failure modes for a header's
+dependence on OTHER fields: it never changes because something else was
+created, retired or restored, and a field's header depends only on that
+field's own code and retirement state. It also survives a rename: §3's rule
+that `label` stays editable forever means a header built from label alone
+would move every time an administrator corrects it, and `code` is the one
+thing on a definition that does not move underneath an export somebody is
+diffing.
+
+**The claim is precisely this much and no more: a LIVE field's header cannot
+collide with any other field's**, because `code` is unique among LIVE rows
+only — `custom_field_live_code_key` (§2) is a *partial* index. An earlier
+version of this document claimed collision was impossible outright, and a
+real engine proved that wrong on two counts:
+
+- **two RETIRED fields can share a code and a label.** §6 explicitly touts
+  reusing a code after retirement as intended behaviour, not abuse, so
+  retiring `cc`, creating `cc` again with the same label, and retiring that
+  one too is ordinary use — and without more, the two retired headers were
+  byte-identical;
+- **a LIVE field's label can imitate the retired marker.** A live field
+  labelled literally `"Support (retired)"` with a reused code `support`
+  rendered identically to a *retired* field labelled `"Support"` that had
+  held `support` before it, because the marker was plain text with nothing
+  tying it to an actual retirement.
+
+**The retirement date closes the second case completely, and narrows the
+first to one accepted residual.** A live label a human chose can happen to
+equal `"Support (retired)"`, but it cannot also name the exact calendar day
+some OTHER field was retired on — that string identifies an event, not a
+phrase anyone types by hand. Two retired fields sharing a code and a label
+now collide only if they were **also** retired within the same UTC day; that
+residual is accepted rather than engineered away. The field's id would close
+it too but is unreadable in a header, and forbidding the substring
+`"(retired)"` inside a label is a domain change reaching into a task this one
+does not own, where the date closes the case that matters for free.
 
 The cost is a redundant-looking suffix on a header whose code is just the
 snake_case of its label — noise for a human, and exactly the price worth
