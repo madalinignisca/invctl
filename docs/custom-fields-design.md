@@ -304,8 +304,18 @@ web/templates/partials/custom_field_form.html     define / edit a field
 ```
 
 The show and form partials are included by the asset and service pages and must
-be renderable standalone, as every partial here must. Widgets follow the kind:
-a text input, a number input, a date input, a checkbox, a select. No new
+be renderable standalone, as every partial here must. Widgets follow the kind: a text input, a number input, a date input, a select —
+and **a three-state select for `boolean`**, offering blank, yes and no.
+
+Not a checkbox. A checkbox cannot represent "no assertion": unchecked and
+unrecorded are the same state on the wire, so a shared multi-field form posts a
+value for every boolean on every save. An operator opening the panel to correct
+an unrelated text field would thereby record `false` against every boolean the
+entity had never held — the UI fabricating a negative declaration as a side
+effect of an unrelated edit. The three-state select submits an empty string for
+"not recorded", which is exactly the clear signal the other four kinds already
+use, so it reuses a path that is already correct instead of needing one of its
+own. No new
 JavaScript — Alpine only for local state if a form needs it, and nothing that
 fetches.
 
