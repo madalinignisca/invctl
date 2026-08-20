@@ -310,33 +310,41 @@ would move every time an administrator corrects it, and `code` is the one
 thing on a definition that does not move underneath an export somebody is
 diffing.
 
-**The claim is precisely this much and no more: a LIVE field's header cannot
-collide with any other field's**, because `code` is unique among LIVE rows
-only — `custom_field_live_code_key` (§2) is a *partial* index. An earlier
-version of this document claimed collision was impossible outright, and a
-real engine proved that wrong on two counts:
+**The claim is exactly this much, and Ruling AQ exists because two earlier
+versions of this section claimed more than is true:**
 
-- **two RETIRED fields can share a code and a label.** §6 explicitly touts
-  reusing a code after retirement as intended behaviour, not abuse, so
-  retiring `cc`, creating `cc` again with the same label, and retiring that
-  one too is ordinary use — and without more, the two retired headers were
-  byte-identical;
-- **a LIVE field's label can imitate the retired marker.** A live field
-  labelled literally `"Support (retired)"` with a reused code `support`
-  rendered identically to a *retired* field labelled `"Support"` that had
-  held `support` before it, because the marker was plain text with nothing
-  tying it to an actual retirement.
+1. **Live vs live is collision-free.** Two live fields' headers can never
+   match, because `code` is unique among LIVE rows only —
+   `custom_field_live_code_key` (§2) is a *partial* index. This is the
+   guarantee that actually matters day to day, and it is genuinely true.
 
-**The retirement date closes the second case completely, and narrows the
-first to one accepted residual.** A live label a human chose can happen to
-equal `"Support (retired)"`, but it cannot also name the exact calendar day
-some OTHER field was retired on — that string identifies an event, not a
-phrase anyone types by hand. Two retired fields sharing a code and a label
-now collide only if they were **also** retired within the same UTC day; that
-residual is accepted rather than engineered away. The field's id would close
-it too but is unreadable in a header, and forbidding the substring
-`"(retired)"` inside a label is a domain change reaching into a task this one
-does not own, where the date closes the case that matters for free.
+2. **Any other pair CAN collide, and that is accepted, not closed.** A label
+   is free text, so a label can be written to imitate whatever marker this
+   header format composes — there is no marker a human cannot copy. Two
+   RETIRED fields sharing a code, a label, and the same UTC-day retirement
+   date collide (§6 explicitly touts code reuse after retirement as
+   intended, not abuse, so this is ordinary use, not a contrived attack). And
+   a LIVE field can imitate a RETIRED field's entire dated header, not just
+   the bare word: a field labelled literally `"Support (retired 2026-01-10)"`
+   with code `support` renders byte-identically to a *retired* field
+   labelled `"Support"` with code `support` that was retired on that exact
+   day — a date is precisely the kind of string somebody copies out of a
+   changelog, a ticket, or a report like this one. No header component
+   composed from user-editable text closes this; only the field id would,
+   and it is unreadable, which defeats the point of a header. Two earlier
+   drafts of this section claimed the marker, then the retirement date,
+   closed collision "completely" — both claims were tested against a real
+   engine and both were false.
+
+3. **A collision is a display ambiguity only, never a data one — the
+   sentence that makes accepting (2) reasonable rather than reckless.**
+   Every value stays keyed by `field_id` internally, so two columns sharing
+   an identical header still each carry their own field's values correctly;
+   nothing is ever written under, read from, or attributed to the wrong
+   field. An operator who sees two identically headed columns consults the
+   registry (§4) to tell them apart; what they cannot do is trust the header
+   alone as an identifier, which was never a promise this export made for
+   any column, custom or built-in.
 
 The cost is a redundant-looking suffix on a header whose code is just the
 snake_case of its label — noise for a human, and exactly the price worth

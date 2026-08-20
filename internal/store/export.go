@@ -157,32 +157,43 @@ type customExportColumn struct {
 // label editable forever, so a header built from label alone moves whenever
 // an administrator renames a field, and code is the thing that does not.
 //
-// THE CLAIM IS PRECISELY THIS MUCH AND NO MORE: a LIVE field's header cannot
-// collide with any other field's, because code is unique among LIVE rows
-// (custom_field_live_code_key, migration 00051, a PARTIAL index). It says
-// nothing stronger, because nothing stronger is true. An earlier version of
-// this comment claimed collision was impossible outright, and a real engine
-// proved it wrong on two counts: §6 explicitly touts reusing a code after
-// retirement as intended behaviour, so two RETIRED fields sharing a code AND
-// a label are ordinary use, not abuse, and their headers were identical
-// before Ruling AO added the retirement date below. And a LIVE field
-// labelled literally "Support (retired)" with code "support" rendered
-// identically to a RETIRED field labelled "Support" with the same code,
-// because the marker was plain text with nothing tying it to an actual
-// retirement.
+// THE CLAIM IS EXACTLY THIS MUCH, AND RULING AQ EXISTS BECAUSE TWO EARLIER
+// DRAFTS OF THIS COMMENT CLAIMED MORE THAN IS TRUE:
 //
-// THE RETIREMENT DATE (Ruling AO) closes the second case completely: a live
-// label a human chose to imitate the marker can happen to equal
-// "Support (retired)" but cannot also equal a specific calendar date this
-// field was never retired on, because that string names an event, not a
-// phrase anyone types by hand. It closes the first case down to exactly one
-// residual line, accepted rather than engineered away: two fields sharing a
-// code, a label, AND a retirement date truncated to the same UTC day still
-// collide. The field id would close it too but is unreadable in a header,
-// and forbidding the substring "(retired)" in a label is a domain change
-// into a task this one does not own -- the date closes the case that
-// actually matters (b) for free and narrows the other (a) to a coincidence
-// nobody has to design against.
+//  1. LIVE VS LIVE IS COLLISION-FREE. Two live fields' headers can never
+//     match, because code is unique among LIVE rows
+//     (custom_field_live_code_key, migration 00051, a PARTIAL index). This is
+//     the guarantee that actually matters day to day, and it is genuinely
+//     true.
+//
+//  2. ANY OTHER PAIR CAN COLLIDE, and that is accepted, not closed. A label
+//     is free text, so a label can be written to imitate whatever marker
+//     this function composes -- there is no marker a human cannot copy.
+//     Two RETIRED fields sharing a code, a label, and the same UTC-day
+//     retirement date collide (§6 explicitly touts code reuse after
+//     retirement as intended, not abuse, so this is ordinary use). And a
+//     LIVE field can imitate a RETIRED field's entire dated header, not just
+//     the bare word: a field labelled literally "Support (retired 2026-01-10)"
+//     with code "support" renders byte-identically to a retired field
+//     labelled "Support" with code "support" that was retired on
+//     2026-01-10 -- a date is exactly the kind of string somebody copies out
+//     of a changelog, a ticket, or a report like this one. No header
+//     component composed from user-editable text closes this; only the
+//     field id would, and it is unreadable, which defeats the point of a
+//     header. Two earlier versions of this comment claimed the marker, then
+//     the retirement date, closed collision "completely" -- both claims were
+//     tested against a real engine and both were false.
+//
+//  3. A COLLISION IS A DISPLAY AMBIGUITY ONLY, NEVER A DATA ONE, and this is
+//     the sentence that makes accepting (2) reasonable rather than reckless.
+//     Every value stays keyed by field_id (see the returned values map), so
+//     two columns sharing an identical header still each carry their own
+//     field's values correctly -- nothing is ever written under, read from,
+//     or attributed to the wrong field. An operator who sees two identically
+//     headed columns consults the registry (design.md §4) to tell them
+//     apart; what they cannot do is trust the header alone as an identifier,
+//     which was never a promise this export made for any column, custom or
+//     built-in.
 func (s *SQLStore) customFieldColumns(ctx context.Context, entityType string, ids []string) ([]customExportColumn, map[string]map[string]string, error) {
 	var cols []customExportColumn
 	seen := make(map[string]bool)
