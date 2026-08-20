@@ -236,12 +236,23 @@ pages and from forms. **Retiring a field deletes no value, ever** — soft delet
 for entities is the rule, and a bulk delete of 214 declared values is exactly
 what this codebase does not do.
 
+**A submission says what it means, and says nothing about what it omits.** A
+field absent from a submission is UNTOUCHED; an explicit empty value clears it.
+Absence is never read as a clear, because a form's field set and the writer's
+field set diverge the moment anything retires or restores a field between render
+and submit — and a writer inferring intent from absence inherits every one of
+those discrepancies.
+
+It follows that **a submission may only name what the operator was shown.** A
+clear-all posts an explicit blank for each field THE FORM DREW — not for every
+value the entity holds (`CustomValuesFor` returns retired rows deliberately), and
+not for every field live at submit time (another administrator may have added one
+since). Both of those are payloads assembled from a query rather than from a
+rendering, and both destroy data the operator never saw.
+
 **An operator clearing one value is a different act, and it does remove the
 row — including on a retired field, which is precisely why no surface may
-enumerate a retired field's value into a submission.** A clear-all action builds
-its payload from the LIVE FIELD LIST, never from the values an entity holds:
-`CustomValuesFor` returns retired rows deliberately, so using it as the source
-would post explicit blanks for rows the operator was never shown. Restore
+enumerate a retired field's value into a submission.** Restore
 therefore brings back the field and every value STILL RETAINED. That is correct rather than an exception: `custom_field_value` holds the
 current value of something its parent owns, which is the same shape as
 `asset_environment` and `dependency_data_class` — "set and index tables are
