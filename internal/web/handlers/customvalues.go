@@ -214,8 +214,16 @@ func (a *App) postCustomFields(w http.ResponseWriter, r *http.Request, entityTyp
 		if !ok {
 			// Not a field this entity type has live -- either a stale form
 			// naming a field retired since it was opened, or a hand-built
-			// request. Left for the store to 404 or refuse; a client-side
-			// message here would have to guess which.
+			// request. RULING AJ: dropped from the payload rather than
+			// forwarded, which is the first half of the submission contract
+			// applied to the race -- a submission may only name what the
+			// operator was shown, and this operator was not shown a field
+			// that retired out from under them. Forwarding it left
+			// SetCustomValues to refuse it correctly but via a wrapped
+			// ErrInvalid that handleStoreError renders as a generic error
+			// page instead of the styled per-field form every sibling
+			// refusal in this handler produces.
+			delete(vals, id)
 			continue
 		}
 		raw := strings.TrimSpace(vals[id])

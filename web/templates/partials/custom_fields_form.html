@@ -9,10 +9,11 @@
 */}}
 {{/*
   custom_fields_form is the editable half of docs/custom-fields-design.md
-  §4 and §6: one widget per live field, by kind (text, number, date,
-  checkbox, select), all submitted together against the parent entity's own
-  row_version -- never a per-value token (design.md §3: they are editing
-  this asset or service, not one field on it).
+  §4, §6 and §8: one widget per live field, by kind -- text, number, date, a
+  three-state select for boolean, and select -- all submitted together
+  against the parent entity's own row_version -- never a per-value token
+  (design.md §3: they are editing this asset or service, not one field on
+  it).
 
   EVERY INPUT CARRIES THE STORED VALUE VERBATIM. A form that drew a blank
   over an existing value would commit that blank faithfully on save -- the
@@ -61,19 +62,24 @@
         <input id="cf-{{$row.Field.ID}}" class="{{if $.Edit.Err $name}}invalid{{end}}" type="date"
                name="{{$name}}" value="{{$.Edit.Value $name $row.Value}}">
         {{else if eq $row.Field.Kind "boolean"}}
-        {{/* Checked-then-hidden, in that order: a browser submits form
-             controls in document order, so a ticked box sends "true" first
-             and PostFormValue (first value wins) reads it; unticked, only
-             the hidden control fires and reads "false". The field is
-             therefore always present when this form is submitted, never
-             genuinely absent -- correct here because this form always
-             shows every live field, and resubmitting an unchanged value is
-             a no-op (see setCustomValues' unchanged-value rule). */}}
-        <label style="display:inline-flex;align-items:center;gap:6px">
-          <input id="cf-{{$row.Field.ID}}" type="checkbox" name="{{$name}}" value="true"
-                 {{if $.Edit.Checked $name (eq $row.Value "true")}}checked{{end}}>
-          <input type="hidden" name="{{$name}}" value="false">
-        </label>
+        {{/* THREE-STATE, NOT A CHECKBOX -- design.md §8, amended after a
+             Critical. A checkbox cannot represent "no assertion": unticked
+             and never-recorded are the same state on the wire, so a shared
+             multi-field form would post a value for EVERY boolean on EVERY
+             save, fabricating "false" against every one this entity had
+             never held as a side effect of correcting an unrelated field.
+             The blank option submits an empty string, which is exactly the
+             clear signal the other four kinds already use -- clearing a
+             field that was never stored is a correct no-op in
+             setCustomValues, so this reuses a path that is already right
+             rather than needing one of its own. Do not reintroduce a
+             checkbox here. */}}
+        {{$current := $.Edit.Value $name $row.Value}}
+        <select id="cf-{{$row.Field.ID}}" name="{{$name}}">
+          <option value="" {{if eq $current ""}}selected{{end}}>— not recorded —</option>
+          <option value="true" {{if eq $current "true"}}selected{{end}}>yes</option>
+          <option value="false" {{if eq $current "false"}}selected{{end}}>no</option>
+        </select>
         {{else if eq $row.Field.Kind "select"}}
         {{$current := $.Edit.Value $name $row.Value}}
         <select id="cf-{{$row.Field.ID}}" name="{{$name}}">

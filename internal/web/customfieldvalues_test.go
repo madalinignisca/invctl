@@ -11,6 +11,7 @@ package web_test
 import (
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -178,6 +179,142 @@ func TestTheValueEditorDrawsTheStoredValueNotABlank(t *testing.T) {
 	if !strings.Contains(page, want) {
 		t.Errorf("the value editor's input did not carry the stored value verbatim:\n%s", page)
 	}
+}
+
+// TestABooleanFieldStaysUnsetWhenAnUnrelatedFieldIsSaved is the Critical a
+// reviewer found: the widget must never fabricate a declaration as a side
+// effect of an unrelated edit. This is a SHARED multi-field form -- every
+// live field is posted on every save -- so a checkbox (which cannot
+// represent "no assertion": unticked and never-recorded are the same state
+// on the wire) would record "false" against every boolean the entity had
+// never held, the moment an operator saved a fix to something else
+// entirely. The three-state select must not do that: its blank state posts
+// an empty string, which clears a field that already holds nothing, a
+// correct no-op.
+func TestABooleanFieldStaysUnsetWhenAnUnrelatedFieldIsSaved(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+	boolID := mustCreateFieldViaHTTP(t, h, "asset", "in_scope", "In Scope", "boolean")
+	noteID := mustCreateFieldViaHTTP(t, h, "asset", "note", "Note", "text")
+	assetID := h.refs.Assets["hv-01"]
+
+	page := body(t, h.get("/assets/"+assetID, false))
+	if got := selectedCustomFieldOption(t, page, boolID); got != "" {
+		t.Fatalf("the boolean must start unset, or this test proves nothing: got %q", got)
+	}
+
+	// Exactly what a real submission of this shared form sends: the field
+	// the operator actually edited, and the boolean carrying whatever its
+	// own widget drew -- here, blank, because it was never set.
+	resp := h.post("/assets/"+assetID+"/custom-fields", url.Values{
+		"csrf_token":   {h.csrfToken("/assets/" + assetID)},
+		"row_version":  {versionInForm(t, page)},
+		"cf_" + noteID: {"a note about this box"},
+		"cf_" + boolID: {""},
+	}, false)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("saving: got %d", resp.StatusCode)
+	}
+
+	after := body(t, h.get("/assets/"+assetID, false))
+	if got := selectedCustomFieldOption(t, after, boolID); got != "" {
+		t.Errorf("saving an unrelated field recorded the boolean as %q -- "+
+			"it must stay unset until somebody actually asserts it", got)
+	}
+}
+
+// TestABooleanCanBeSetToYesToNoAndClearedBackToUnset exercises every state
+// transition the three-state widget offers, and that the widget always
+// redraws the state that is actually stored.
+func TestABooleanCanBeSetToYesToNoAndClearedBackToUnset(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+	id := mustCreateFieldViaHTTP(t, h, "asset", "in_scope", "In Scope", "boolean")
+	assetID := h.refs.Assets["hv-01"]
+
+	setBoolean := func(value string) string {
+		t.Helper()
+		page := body(t, h.get("/assets/"+assetID, false))
+		resp := h.post("/assets/"+assetID+"/custom-fields", url.Values{
+			"csrf_token":  {h.csrfToken("/assets/" + assetID)},
+			"row_version": {versionInForm(t, page)},
+			"cf_" + id:    {value},
+		}, false)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusSeeOther {
+			t.Fatalf("setting the boolean to %q: got %d", value, resp.StatusCode)
+		}
+		return selectedCustomFieldOption(t, body(t, h.get("/assets/"+assetID, false)), id)
+	}
+
+	if got := setBoolean("true"); got != "true" {
+		t.Errorf("setting to yes: the widget redrew %q, not the stored state", got)
+	}
+	if got := setBoolean("false"); got != "false" {
+		t.Errorf("setting to no: the widget redrew %q, not the stored state", got)
+	}
+	if got := setBoolean(""); got != "" {
+		t.Errorf("clearing back to unset: the widget redrew %q, not blank", got)
+	}
+}
+
+// TestAFieldRetiredBetweenRenderAndSubmitIsSilentlyDropped is Ruling AJ: a
+// field retired between the form being rendered and the submission arriving
+// is a field the operator was not shown at the moment they clicked Save, so
+// the submission must not name it at all -- the first half of the
+// submission contract applied to the race. Before the fix this value
+// reached the store, which correctly refused it but as a generic error page
+// rather than the styled per-field 422 every sibling refusal in this
+// handler produces; the observable difference from here is that the SAME
+// submission, with every other field unchanged, now succeeds.
+func TestAFieldRetiredBetweenRenderAndSubmitIsSilentlyDropped(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+	id := mustCreateFieldViaHTTP(t, h, "asset", "cost_centre", "Cost Centre", "text")
+	assetID := h.refs.Assets["hv-01"]
+
+	page := body(t, h.get("/assets/"+assetID, false))
+	token := versionInForm(t, page)
+
+	retire := h.post("/custom-fields/"+id+"/retire",
+		url.Values{"csrf_token": {h.csrfToken("/custom-fields")}}, false)
+	retire.Body.Close()
+	if retire.StatusCode != http.StatusSeeOther {
+		t.Fatalf("retiring: got %d", retire.StatusCode)
+	}
+
+	resp := h.post("/assets/"+assetID+"/custom-fields", url.Values{
+		"csrf_token":  {h.csrfToken("/assets/" + assetID)},
+		"row_version": {token},
+		"cf_" + id:    {"a value for a field that just retired"},
+	}, false)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Errorf("a value for a field retired mid-flight must be dropped, not refused: got %d", resp.StatusCode)
+	}
+}
+
+// selectedCustomFieldOption reads which <option> the value editor's select
+// for one field currently carries selected, scoped to that field's own
+// <select id="cf-<field id>">...</select> block so two boolean fields on
+// the same page cannot be confused with each other.
+func selectedCustomFieldOption(t *testing.T, page, fieldID string) string {
+	t.Helper()
+	i := strings.Index(page, `id="cf-`+fieldID+`"`)
+	if i < 0 {
+		t.Fatalf("no widget rendered for field %s", fieldID)
+	}
+	end := strings.Index(page[i:], "</select>")
+	if end < 0 {
+		t.Fatalf("no closing </select> for field %s", fieldID)
+	}
+	block := page[i : i+end]
+	m := regexp.MustCompile(`value="([^"]*)" selected`).FindStringSubmatch(block)
+	if m == nil {
+		t.Fatalf("no selected option drawn for field %s in:\n%s", fieldID, block)
+	}
+	return m[1]
 }
 
 // mustCreateFieldViaHTTP defines a field through the real handler and
