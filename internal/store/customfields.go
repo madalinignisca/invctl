@@ -212,16 +212,26 @@ func (s *SQLStore) UpdateCustomField(ctx context.Context, actor domain.Actor, f 
 	// SSI detects a serialization failure only when it finds a CYCLE of two
 	// rw-antidependency edges between concurrent serializable transactions.
 	// This transaction reading custom_field_value against a concurrent value
-	// insert supplies ONE edge. A value writer that blindly INSERTs without
-	// reading kind first reads nothing back, supplies no second edge, and
-	// therefore closes no cycle -- Postgres will commit both transactions,
-	// 10/10, with no abort, because "the kind change commits, then the
-	// insert runs" is a perfectly valid serial order it cannot rule out.
-	// Verified directly against the live container: a blind-insert racer
-	// never aborts; a racer that SELECTs kind before it INSERTs aborts every
-	// time (SQLSTATE 40001). Task 4's value writer MUST read custom_field.kind
-	// inside its own writeSerializable transaction before validating a value
-	// against it, or this guard is decorative.
+	// insert supplies ONE edge. A writer that reads nothing back supplies no
+	// second edge and therefore closes no cycle, and "the kind change commits,
+	// then the insert runs" is a perfectly valid serial order Postgres cannot
+	// rule out.
+	//
+	// CORRECTED BY A LATER PROBE, and the earlier wording here said the
+	// opposite as settled fact: on THIS schema even a blind INSERT into
+	// custom_field_value aborts with SQLSTATE 40001. The second edge comes
+	// from custom_field_value.field_id REFERENCES custom_field(id) -- the
+	// referential-integrity check reads the parent row inside the inserting
+	// transaction. Drop that constraint in a scratch schema and repeat the
+	// probe and the blind insert commits cleanly, no abort, which is the
+	// behaviour originally described. So the foreign key is load-bearing for
+	// this guard, and removing it would quietly make this decorative.
+	//
+	// Task 4's value writer reads custom_field inside its own
+	// writeSerializable transaction anyway (see customFieldDefs in
+	// customvalues.go): belt as well as braces, at no extra cost, because it
+	// needs the kind, the retirement state and the codes regardless.
+	// TestAKindChangeAbortsAgainstAConcurrentValueWrite asserts the outcome.
 	return s.writeSerializable(ctx, actor, func(t *tx) error {
 		if f.Kind != before.Kind {
 			n, err := t.countOne(ctx,

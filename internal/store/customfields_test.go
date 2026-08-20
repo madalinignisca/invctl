@@ -133,7 +133,8 @@ func mustValue(t *testing.T, f *customFieldFixture, fieldID, entityID, raw strin
 		vals[v.FieldID] = v.ValueText
 	}
 	vals[fieldID] = raw
-	if err := f.s.SetCustomValues(f.ctx, f.actor, entityType, entityID, vals); err != nil {
+	if err := f.s.SetCustomValues(f.ctx, f.actor, entityType, entityID,
+		entityVersion(t, f, entityType, entityID), vals); err != nil {
 		t.Fatalf("setting custom value %q on field %s: %v", raw, fieldID, err)
 	}
 }
@@ -143,7 +144,8 @@ func mustValue(t *testing.T, f *customFieldFixture, fieldID, entityID, raw strin
 func mustSetValues(t *testing.T, f *customFieldFixture, entityID string, vals map[string]string) {
 	t.Helper()
 	entityType := entityTypeOf(t, f, entityID)
-	if err := f.s.SetCustomValues(f.ctx, f.actor, entityType, entityID, vals); err != nil {
+	if err := f.s.SetCustomValues(f.ctx, f.actor, entityType, entityID,
+		entityVersion(t, f, entityType, entityID), vals); err != nil {
 		t.Fatalf("setting custom values on %s %s: %v", entityType, entityID, err)
 	}
 }
@@ -153,6 +155,30 @@ func mustSetValues(t *testing.T, f *customFieldFixture, entityID string, vals ma
 func mustClearValues(t *testing.T, f *customFieldFixture, entityID string) {
 	t.Helper()
 	mustSetValues(t, f, entityID, nil)
+}
+
+// entityVersion reads the parent entity's current concurrency token, which
+// SetCustomValues takes and bumps (design.md §3, as amended: the value editor's
+// token is the parent's, not each value's). A real handler renders it into the
+// form; a fixture helper that is not testing the guard reads the live one.
+func entityVersion(t *testing.T, f *customFieldFixture, entityType, entityID string) int {
+	t.Helper()
+	var version int
+	// Two literal statements rather than one with the table name pasted in:
+	// the same rule the store side follows, for the same reason.
+	var err error
+	switch entityType {
+	case domain.CustomFieldEntityAsset:
+		err = f.s.readOne(f.ctx, &version, `SELECT row_version FROM asset WHERE id = ?`, entityID)
+	case domain.CustomFieldEntityService:
+		err = f.s.readOne(f.ctx, &version, `SELECT row_version FROM service WHERE id = ?`, entityID)
+	default:
+		t.Fatalf("no such entity type %q", entityType)
+	}
+	if err != nil {
+		t.Fatalf("reading the row_version of %s %s: %v", entityType, entityID, err)
+	}
+	return version
 }
 
 // entityTypeOf answers "is this id an asset or a service" so the helpers above

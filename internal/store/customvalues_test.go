@@ -194,7 +194,7 @@ func TestAValueForAnUnknownFieldIsRefused(t *testing.T) {
 		t.Run(e.Name, func(t *testing.T) {
 			f := newCustomFieldFixture(t, e)
 			err := f.s.SetCustomValues(f.ctx, f.actor, "asset", f.assetID,
-				map[string]string{NewID(): "IT-42"})
+				entityVersion(t, f, "asset", f.assetID), map[string]string{NewID(): "IT-42"})
 			if err == nil {
 				t.Fatal("a value for a field that does not exist must be refused")
 			}
@@ -215,7 +215,7 @@ func TestAValueForTheWrongEntityTypeIsRefused(t *testing.T) {
 			assetField := mustField(t, f, "asset", "cost_centre", domain.CustomFieldText)
 
 			err := f.s.SetCustomValues(f.ctx, f.actor, "service", f.serviceID,
-				map[string]string{assetField: "IT-42"})
+				entityVersion(t, f, "service", f.serviceID), map[string]string{assetField: "IT-42"})
 			if err == nil {
 				t.Fatal("an asset field must not accept a value against a service")
 			}
@@ -240,7 +240,7 @@ func TestARetiredFieldTakesNoNewValue(t *testing.T) {
 			}
 
 			err := f.s.SetCustomValues(f.ctx, f.actor, "asset", f.secondAssetID,
-				map[string]string{id: "IT-99"})
+				entityVersion(t, f, "asset", f.secondAssetID), map[string]string{id: "IT-99"})
 			if err == nil {
 				t.Fatal("a retired field must take no new value")
 			}
@@ -286,7 +286,7 @@ func TestASelectValueMustBeALiveOption(t *testing.T) {
 			}
 
 			if err := f.s.SetCustomValues(f.ctx, f.actor, "asset", f.secondAssetID,
-				map[string]string{id: "bronze"}); err == nil {
+				entityVersion(t, f, "asset", f.secondAssetID), map[string]string{id: "bronze"}); err == nil {
 				t.Fatal("a value that is not an option at all must be refused")
 			}
 
@@ -296,7 +296,7 @@ func TestASelectValueMustBeALiveOption(t *testing.T) {
 				t.Fatalf("retiring silver: %v", err)
 			}
 			if err := f.s.SetCustomValues(f.ctx, f.actor, "asset", f.secondAssetID,
-				map[string]string{id: "silver"}); err == nil {
+				entityVersion(t, f, "asset", f.secondAssetID), map[string]string{id: "silver"}); err == nil {
 				t.Fatal("a retired option must take no new value")
 			}
 		})
@@ -332,7 +332,7 @@ func TestCustomValuesAreCanonicalised(t *testing.T) {
 					id := mustField(t, f, "asset", "probe", c.kind)
 
 					err := f.s.SetCustomValues(f.ctx, f.actor, "asset", f.assetID,
-						map[string]string{id: c.raw})
+						entityVersion(t, f, "asset", f.assetID), map[string]string{id: c.raw})
 					if c.refused {
 						if err == nil {
 							t.Fatalf("%q must be refused for a %s field", c.raw, c.kind)
@@ -456,7 +456,7 @@ func TestAValueForAnUnknownEntityIsRefused(t *testing.T) {
 			id := mustField(t, f, "asset", "cost_centre", domain.CustomFieldText)
 			ghost := NewID()
 
-			err := f.s.SetCustomValues(f.ctx, f.actor, "asset", ghost,
+			err := f.s.SetCustomValues(f.ctx, f.actor, "asset", ghost, 1,
 				map[string]string{id: "IT-42"})
 			if err == nil {
 				t.Fatal("a value for an asset that does not exist must be refused")
@@ -483,7 +483,7 @@ func TestSetCustomValuesRefusesAnUnknownEntityType(t *testing.T) {
 	for _, e := range Engines(t) {
 		t.Run(e.Name, func(t *testing.T) {
 			f := newCustomFieldFixture(t, e)
-			err := f.s.SetCustomValues(f.ctx, f.actor, "project", f.assetID, nil)
+			err := f.s.SetCustomValues(f.ctx, f.actor, "project", f.assetID, 1, nil)
 			if err == nil {
 				t.Fatal("only assets and services hold custom fields")
 			}
@@ -583,6 +583,280 @@ func TestAKindChangeAbortsAgainstAConcurrentValueWrite(t *testing.T) {
 			}
 			if len(values) != 1 || values[0].ValueText != "IT-42" {
 				t.Fatalf("got %v, want the concurrently written value to survive", values)
+			}
+		})
+	}
+}
+
+// ---------- retention: what a wholesale replacement must NOT destroy ----------
+
+// TestARetiredFieldsValueSurvivesALaterEdit is the Critical this task shipped
+// and a review caught.
+//
+// The delete list was built from customFieldDefs, which deliberately includes
+// RETIRED fields so the fold can resolve their codes. So the next unrelated edit
+// wiped every retained value of every retired field, and the insert loop could
+// never put them back because a retired field takes no new value. Measured
+// before the fix: the retired field's value rows went to 0 and the audit entry
+// read as an operator clearing a value, which nobody did.
+//
+// docs/custom-fields-design.md §6 is unambiguous -- "Retiring a field deletes no
+// value, ever" -- and Restore is supposed to bring the field AND every value
+// back, not an empty field.
+func TestARetiredFieldsValueSurvivesALaterEdit(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newCustomFieldFixture(t, e)
+			tagID := mustField(t, f, "asset", "asset_tag", domain.CustomFieldText)
+			ccID := mustField(t, f, "asset", "cost_centre", domain.CustomFieldText)
+			mustSetValues(t, f, f.assetID, map[string]string{tagID: "ABC-1", ccID: "IT-42"})
+
+			if err := f.s.RetireCustomField(f.ctx, f.actor, ccID); err != nil {
+				t.Fatalf("retiring cost_centre: %v", err)
+			}
+
+			// The operator edits asset_tag only. The retired field is not on
+			// the form at all, so it is not in the map.
+			mustSetValues(t, f, f.assetID, map[string]string{tagID: "ABC-2"})
+
+			values, err := f.s.CustomValuesFor(f.ctx, "asset", f.assetID)
+			if err != nil {
+				t.Fatalf("reading values: %v", err)
+			}
+			if len(values) != 2 {
+				t.Fatalf("got %d values, want 2: the retired field's value was destroyed "+
+					"by an edit to a different field", len(values))
+			}
+			if values[0].Code != "asset_tag" || values[0].ValueText != "ABC-2" {
+				t.Fatalf("got %s=%s, want asset_tag=ABC-2", values[0].Code, values[0].ValueText)
+			}
+			if values[1].Code != "cost_centre" || values[1].ValueText != "IT-42" {
+				t.Fatalf("got %s=%s, want cost_centre=IT-42 retained", values[1].Code, values[1].ValueText)
+			}
+			if !values[1].Retired {
+				t.Fatal("the retained value's field must report as retired")
+			}
+
+			// And the audit entry says the retired value did not move.
+			want := `{"custom_fields":{"old":"asset_tag=ABC-1,cost_centre=IT-42","new":"asset_tag=ABC-2,cost_centre=IT-42"}}`
+			if got := lastChangeDiff(t, f, "asset", f.assetID); got != want {
+				t.Fatalf("the entry must show only what moved\n got %s\nwant %s", got, want)
+			}
+
+			// Restore brings back a field that still holds its value.
+			if err := f.s.RestoreCustomField(f.ctx, f.actor, ccID); err != nil {
+				t.Fatalf("restoring: %v", err)
+			}
+			restored, err := f.s.GetCustomField(f.ctx, ccID)
+			if err != nil {
+				t.Fatalf("reading the restored field: %v", err)
+			}
+			if restored.UsageCount != 1 {
+				t.Fatalf("the restored field holds %d values, want 1", restored.UsageCount)
+			}
+		})
+	}
+}
+
+// TestAValueOnARetiredOptionSurvivesALaterEdit is the same root cause wearing a
+// different face: the field is LIVE, so scoping the replacement to live fields
+// does nothing for it.
+//
+// §3 says a retired select option "keeps displaying" on the values that already
+// chose it while no NEW value may select it. A form therefore renders that value
+// and posts it back, and before the fix that had two outcomes and both were
+// wrong: re-sent, CanonicalCustomValue rejected the entire edit over a field the
+// operator never touched; omitted, it was silently cleared. An unchanged value
+// is not a new value, so it is now left exactly where it is.
+func TestAValueOnARetiredOptionSurvivesALaterEdit(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newCustomFieldFixture(t, e)
+			tierID := mustField(t, f, "asset", "tier", domain.CustomFieldSelect)
+			mustOption(t, f, tierID, "gold")
+			mustOption(t, f, tierID, "silver")
+			tagID := mustField(t, f, "asset", "asset_tag", domain.CustomFieldText)
+			mustSetValues(t, f, f.assetID, map[string]string{tierID: "silver", tagID: "ABC-1"})
+
+			// Retire "silver" by offering only "gold".
+			if err := f.s.SetCustomFieldOptions(f.ctx, f.actor, tierID,
+				[]domain.CustomFieldOption{{Value: "gold", Label: "Gold"}}); err != nil {
+				t.Fatalf("retiring the silver option: %v", err)
+			}
+
+			// The form renders the retained value and posts it back unchanged
+			// alongside the field the operator actually edited.
+			mustSetValues(t, f, f.assetID, map[string]string{tierID: "silver", tagID: "ABC-2"})
+
+			values, err := f.s.CustomValuesFor(f.ctx, "asset", f.assetID)
+			if err != nil {
+				t.Fatalf("reading values: %v", err)
+			}
+			if len(values) != 2 {
+				t.Fatalf("got %d values, want 2", len(values))
+			}
+			if values[1].Code != "tier" || values[1].ValueText != "silver" {
+				t.Fatalf("got %s=%s, want tier=silver retained", values[1].Code, values[1].ValueText)
+			}
+
+			// A genuinely NEW value on the retired option is still refused.
+			if err := f.s.SetCustomValues(f.ctx, f.actor, "asset", f.secondAssetID,
+				entityVersion(t, f, "asset", f.secondAssetID),
+				map[string]string{tierID: "silver"}); err == nil {
+				t.Fatal("a NEW value selecting a retired option must still be refused")
+			}
+		})
+	}
+}
+
+// TestAnUnchangedValueKeepsItsRowIdentity: the row is not churned. Same id, same
+// created_at, same row_version -- "when was this first set" is a fact about the
+// value and a replacement is a mechanism, not a new beginning.
+func TestAnUnchangedValueKeepsItsRowIdentity(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newCustomFieldFixture(t, e)
+			id := mustField(t, f, "asset", "cost_centre", domain.CustomFieldText)
+			mustValue(t, f, id, f.assetID, "IT-42")
+			first, err := f.s.CustomValuesFor(f.ctx, "asset", f.assetID)
+			if err != nil {
+				t.Fatalf("reading values: %v", err)
+			}
+
+			mustValue(t, f, id, f.assetID, "IT-42")
+			again, err := f.s.CustomValuesFor(f.ctx, "asset", f.assetID)
+			if err != nil {
+				t.Fatalf("re-reading values: %v", err)
+			}
+			if again[0].ID != first[0].ID {
+				t.Fatalf("the id changed on a no-op save: %s then %s", first[0].ID, again[0].ID)
+			}
+			if again[0].CreatedAt != first[0].CreatedAt {
+				t.Fatalf("created_at changed on a no-op save: %s then %s",
+					first[0].CreatedAt, again[0].CreatedAt)
+			}
+			if again[0].RowVersion != first[0].RowVersion {
+				t.Fatalf("row_version moved on a no-op save: %d then %d",
+					first[0].RowVersion, again[0].RowVersion)
+			}
+
+			// A real change carries the id and created_at across the
+			// replacement and advances the version.
+			mustValue(t, f, id, f.assetID, "IT-99")
+			changed, err := f.s.CustomValuesFor(f.ctx, "asset", f.assetID)
+			if err != nil {
+				t.Fatalf("re-reading values: %v", err)
+			}
+			if changed[0].ID != first[0].ID {
+				t.Fatalf("a changed value got a new id: %s then %s", first[0].ID, changed[0].ID)
+			}
+			if changed[0].CreatedAt != first[0].CreatedAt {
+				t.Fatalf("a changed value lost its created_at: %s then %s",
+					first[0].CreatedAt, changed[0].CreatedAt)
+			}
+			if changed[0].RowVersion != first[0].RowVersion+1 {
+				t.Fatalf("got row_version %d, want %d", changed[0].RowVersion, first[0].RowVersion+1)
+			}
+		})
+	}
+}
+
+// ---------- RULING R: the token is the parent entity's ----------
+
+// TestASecondSaveFromOneTokenIsRefused is invariant 4 for this editor.
+//
+// design.md §3 as amended: the value editor's token is the parent asset or
+// service's row_version, not each value's. Two operators with the same asset
+// page open must not silently overwrite each other's whole set, and
+// TestEveryEditorRefusesASecondSaveFromOneToken submits every editor's form
+// twice from one token and requires the second to be refused -- so the bump is
+// unconditional, including on a save that changes nothing.
+func TestASecondSaveFromOneTokenIsRefused(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newCustomFieldFixture(t, e)
+			id := mustField(t, f, "asset", "cost_centre", domain.CustomFieldText)
+			token := entityVersion(t, f, "asset", f.assetID)
+
+			if err := f.s.SetCustomValues(f.ctx, f.actor, "asset", f.assetID, token,
+				map[string]string{id: "IT-42"}); err != nil {
+				t.Fatalf("the first save from a fresh token must succeed: %v", err)
+			}
+			if got := entityVersion(t, f, "asset", f.assetID); got != token+1 {
+				t.Fatalf("got version %d after one save, want %d", got, token+1)
+			}
+
+			err := f.s.SetCustomValues(f.ctx, f.actor, "asset", f.assetID, token,
+				map[string]string{id: "IT-99"})
+			if err == nil {
+				t.Fatal("a second save from one token must be refused")
+			}
+			if !errors.Is(err, domain.ErrStale) {
+				t.Fatalf("want ErrStale, got %v", err)
+			}
+			values, err := f.s.CustomValuesFor(f.ctx, "asset", f.assetID)
+			if err != nil {
+				t.Fatalf("reading values: %v", err)
+			}
+			if len(values) != 1 || values[0].ValueText != "IT-42" {
+				t.Fatalf("got %v, want the stale write to have changed nothing", values)
+			}
+		})
+	}
+}
+
+// TestASaveThatChangesNothingStillMovesTheToken: the bump is unconditional.
+// Conditional on a diff, the second identical submission of one form would be
+// accepted and the guard would read as present while being inert -- which is
+// precisely the defect TestEveryEditorRefusesASecondSaveFromOneToken exists to
+// catch, and it submits the same form twice.
+func TestASaveThatChangesNothingStillMovesTheToken(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newCustomFieldFixture(t, e)
+			id := mustField(t, f, "asset", "cost_centre", domain.CustomFieldText)
+			mustValue(t, f, id, f.assetID, "IT-42")
+
+			token := entityVersion(t, f, "asset", f.assetID)
+			changes := changeCount(t, f, "asset", f.assetID)
+
+			if err := f.s.SetCustomValues(f.ctx, f.actor, "asset", f.assetID, token,
+				map[string]string{id: "IT-42"}); err != nil {
+				t.Fatalf("re-saving the same value: %v", err)
+			}
+
+			if got := entityVersion(t, f, "asset", f.assetID); got != token+1 {
+				t.Fatalf("got version %d, want %d: a no-op save must still move the token", got, token+1)
+			}
+			if got := changeCount(t, f, "asset", f.assetID); got != changes {
+				t.Fatalf("a no-op save wrote %d change_log rows, want 0", got-changes)
+			}
+			if err := f.s.SetCustomValues(f.ctx, f.actor, "asset", f.assetID, token,
+				map[string]string{id: "IT-42"}); !errors.Is(err, domain.ErrStale) {
+				t.Fatalf("the same token twice must be refused, got %v", err)
+			}
+		})
+	}
+}
+
+// TestAServiceValueEditCarriesTheSameToken: both entity types, one rule.
+func TestAServiceValueEditCarriesTheSameToken(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newCustomFieldFixture(t, e)
+			id := mustField(t, f, "service", "sla_ref", domain.CustomFieldText)
+			token := entityVersion(t, f, "service", f.serviceID)
+
+			if err := f.s.SetCustomValues(f.ctx, f.actor, "service", f.serviceID, token,
+				map[string]string{id: "SLA-7"}); err != nil {
+				t.Fatalf("first save: %v", err)
+			}
+			if got := entityVersion(t, f, "service", f.serviceID); got != token+1 {
+				t.Fatalf("got version %d, want %d", got, token+1)
+			}
+			if err := f.s.SetCustomValues(f.ctx, f.actor, "service", f.serviceID, token,
+				map[string]string{id: "SLA-8"}); !errors.Is(err, domain.ErrStale) {
+				t.Fatalf("want ErrStale from a stale token, got %v", err)
 			}
 		})
 	}

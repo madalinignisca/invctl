@@ -157,6 +157,28 @@ func entityCustomValues(ctx context.Context, t *tx, entityID string) ([]domain.C
 // A value containing a comma or an equals sign renders literally, exactly as an
 // environment code would. The fold is a human-readable audit rendering, not a
 // wire format -- nothing parses it back.
+//
+// KNOWN EXPOSURE, NAMED RATHER THAN SOLVED HERE: WHAT THIS PUTS IN change_log
+// CANNOT BE REDACTED. domain.IsRedacted keys on an entity name plus a FIELD
+// name, and everything folded below arrives under one opaque key,
+// "custom_fields". So there is no name to key a redaction rule on, and the
+// value_text of every custom field lands in the audit trail permanently and in
+// full -- change_log is append-only, no UPDATE and no DELETE, ever.
+//
+// That matters because CLAUDE.md's position is that the audit trail "carries no
+// personal data and can be kept forever with no retention argument", which is
+// why change_log.actor holds an opaque app_user.id rather than a username. That
+// property now rests on no administrator ever defining a field like "Owner
+// email" or "Contact phone" -- and letting an estate define exactly such a field
+// is what this feature is FOR. Scrubbing an app_user row still answers an
+// erasure request for the actor; it does nothing about PII an administrator put
+// in a value.
+//
+// Closing it needs either per-code diff keys (which means changing auditFields,
+// the function every entity's audit flows through and whose last defect was
+// invisible for a week) or a redaction flag on custom_field and a rule that
+// reads it. Both are schema and spec changes and are the coordinator's, not
+// this function's. Do not treat the silence here as a judgement that it is fine.
 func foldCustomValues(defs map[string]domain.CustomField, values []domain.CustomFieldValue) string {
 	pairs := make([]string, 0, len(values))
 	for _, v := range values {
@@ -188,23 +210,59 @@ func customFieldsAudit(ctx context.Context, t *tx, entityType, entityID string) 
 	return foldCustomValues(defs, values), nil
 }
 
-// setCustomValues replaces one entity's custom values wholesale INSIDE t.
+// setCustomValues replaces one entity's LIVE custom values wholesale INSIDE t.
 //
 // It never opens its own transaction: the parent's change_log entry has to
 // cover this write, so the caller owns both. SetCustomValues below is the only
 // caller today and does exactly that.
 //
 // vals maps custom_field.id to the RAW value an operator submitted. A blank or
-// whitespace-only entry, and any field absent from the map, CLEARS that field --
-// a form posts every field it renders, and "" is how a person says "nothing
-// here". Every remaining value is canonicalised through
+// whitespace-only entry, and any LIVE field absent from the map, CLEARS that
+// field -- a form posts every field it renders, and "" is how a person says
+// "nothing here". Every changed value is canonicalised through
 // domain.CanonicalCustomValue against its field's kind and, for select, its LIVE
-// options. A value for an unknown field, a field belonging to another entity
-// type, or a retired field is refused.
+// options. A value for an unknown field, or for a field belonging to another
+// entity type, is refused.
+//
+// TWO RULES KEEP A WHOLESALE REPLACEMENT FROM DESTROYING WHAT IT WAS PROMISED
+// TO RETAIN, and both were bugs before they were rules.
+//
+// RETIRED FIELDS ARE OUT OF SCOPE ENTIRELY. The replacement touches only rows
+// belonging to LIVE fields. customFieldDefs deliberately includes retired ones
+// -- the fold has to resolve their codes -- and a delete list built from the
+// whole map wiped every retained value of every retired field on the next
+// unrelated edit, which the insert loop could never restore because a retired
+// field takes no new value. That is a hard delete of a fact
+// docs/custom-fields-design.md §6 promises to keep forever ("retiring a field
+// deletes no value, ever"), it made Restore bring a field back empty, and the
+// audit entry described it as an operator clearing a value, which nobody did.
+// Retired values therefore appear unchanged on both sides of the fold and
+// cancel. The corollary is that this path cannot clear a retired field's value
+// at all, which is the rule, not a gap.
+//
+// AN UNCHANGED VALUE IS NOT A NEW VALUE, so it is left exactly where it is --
+// same row, same id, same created_at, same row_version -- and never
+// re-validated. §3 says a retired select option "keeps displaying" on the values
+// that already chose it while no NEW value may select it; without this rule a
+// form that renders such a value and posts it back had two outcomes and both
+// were wrong. Re-send it and CanonicalCustomValue rejected the whole edit over a
+// field the operator never touched; omit it and it was silently cleared. The
+// comparison is made twice, before validation on the trimmed text and again
+// after it, because canonicalisation can collapse "TRUE" onto a stored "true".
 func setCustomValues(ctx context.Context, t *tx, entityType, entityID string, vals map[string]string) error {
 	defs, err := customFieldDefs(ctx, t, entityType)
 	if err != nil {
 		return err
+	}
+	existing, err := entityCustomValues(ctx, t, entityID)
+	if err != nil {
+		return err
+	}
+	stored := make(map[string]domain.CustomFieldValue, len(existing))
+	for _, v := range existing {
+		if _, ok := defs[v.FieldID]; ok {
+			stored[v.FieldID] = v
+		}
 	}
 
 	// Sorted so that a map with two bad entries always names the same one
@@ -215,12 +273,10 @@ func setCustomValues(ctx context.Context, t *tx, entityType, entityID string, va
 	}
 	sort.Strings(fieldIDs)
 
-	canonical := make(map[string]string, len(fieldIDs))
+	// unchanged: leave the row alone. changed: delete and write it again.
+	unchanged := make(map[string]bool, len(fieldIDs))
+	changed := make(map[string]string, len(fieldIDs))
 	for _, fieldID := range fieldIDs {
-		raw := vals[fieldID]
-		if strings.TrimSpace(raw) == "" {
-			continue // cleared
-		}
 		def, ok := defs[fieldID]
 		if !ok {
 			// Deliberately not distinguishable from "belongs to a service":
@@ -229,6 +285,15 @@ func setCustomValues(ctx context.Context, t *tx, entityType, entityID string, va
 			// into an inventory-creation vector.
 			return fmt.Errorf("setting custom values of %s %s: no such field %s for a %s: %w",
 				entityType, entityID, fieldID, entityType, domain.ErrNotFound)
+		}
+		raw := strings.TrimSpace(vals[fieldID])
+		prev, held := stored[fieldID]
+		if raw != "" && held && prev.ValueText == raw {
+			unchanged[fieldID] = true
+			continue
+		}
+		if raw == "" {
+			continue // cleared, if the field is live
 		}
 		if def.IsRetired() {
 			return fmt.Errorf("setting custom values of %s %s: field %q is retired and takes no new value: %w",
@@ -245,61 +310,60 @@ func setCustomValues(ctx context.Context, t *tx, entityType, entityID string, va
 		if err != nil {
 			return fmt.Errorf("custom field %q: %w", def.Code, err)
 		}
-		canonical[fieldID] = value
+		if held && prev.ValueText == value {
+			unchanged[fieldID] = true
+			continue
+		}
+		changed[fieldID] = value
 	}
 
-	// created_at and row_version are carried across the replacement rather than
-	// reset: "when was this first set" is a fact about the value, and the
-	// replacement is a mechanism, not a new beginning.
-	existing, err := entityCustomValues(ctx, t, entityID)
-	if err != nil {
-		return err
-	}
-	previous := make(map[string]domain.CustomFieldValue, len(existing))
-	for _, v := range existing {
-		if _, ok := defs[v.FieldID]; ok {
-			previous[v.FieldID] = v
+	// What goes: every stored row of a LIVE field that is not being kept as it
+	// stands. That is the cleared ones and the ones about to be written again.
+	// Scoped by explicit id rather than by a
+	// `field_id IN (SELECT id FROM custom_field WHERE ...)` subquery, and that
+	// is deliberate twice over. It cannot reach another entity type's fields,
+	// and the subquery would read custom_field too -- ALSO supplying the
+	// rw-antidependency edge customFieldDefs exists to supply, which is fine
+	// until somebody rewrites this DELETE and silently takes Task 3's kind
+	// guard with it. One read, in one named place, with a test pointed at it,
+	// beats an invariant that happens to hold twice.
+	doomed := make([]string, 0, len(stored))
+	for fieldID := range stored {
+		def := defs[fieldID]
+		if def.IsRetired() || unchanged[fieldID] {
+			continue
 		}
+		doomed = append(doomed, fieldID)
 	}
-
-	// Scoped to THIS entity type's fields, so setting a service's values could
-	// never clear an asset's even if the two ids somehow coincided.
-	//
-	// The id list comes from the defs map rather than from a
-	// `field_id IN (SELECT id FROM custom_field WHERE entity_type = ?)`
-	// subquery, and that is deliberate. The subquery reads custom_field too, so
-	// it ALSO supplies the rw-antidependency edge customFieldDefs exists to
-	// supply -- which is fine until somebody rewrites this DELETE and silently
-	// takes Task 3's kind guard with it. One read, in one named place, with a
-	// test pointed at it, beats an invariant that happens to hold twice.
-	if len(defs) > 0 {
-		ids := make([]string, 0, len(defs))
-		for id := range defs {
-			ids = append(ids, id)
-		}
-		sort.Strings(ids)
-		args := append([]any{entityID}, anySlice(ids)...)
+	sort.Strings(doomed)
+	if len(doomed) > 0 {
+		args := append([]any{entityID}, anySlice(doomed)...)
 		if _, err := t.exec(ctx,
 			`DELETE FROM custom_field_value WHERE entity_id = ? AND field_id IN (`+
-				placeholders(len(ids))+`)`, args...); err != nil {
+				placeholders(len(doomed))+`)`, args...); err != nil {
 			return translateWriteErr(err, "clearing custom values")
 		}
 	}
 
 	for _, fieldID := range fieldIDs {
-		value, ok := canonical[fieldID]
+		value, ok := changed[fieldID]
 		if !ok {
 			continue
 		}
-		createdAt, version := t.at, 1
-		if prev, ok := previous[fieldID]; ok {
-			createdAt, version = prev.CreatedAt, prev.RowVersion+1
+		// The id, created_at and row_version are carried across the
+		// replacement rather than reset. "When was this first set" is a fact
+		// about the value, the primary key is a handle somebody may already
+		// hold, and the replacement is a mechanism rather than a new
+		// beginning.
+		id, createdAt, version := NewID(), t.at, 1
+		if prev, held := stored[fieldID]; held {
+			id, createdAt, version = prev.ID, prev.CreatedAt, prev.RowVersion+1
 		}
 		if _, err := t.exec(ctx, `
 			INSERT INTO custom_field_value (id, field_id, entity_id, value_text,
 			                                created_at, updated_at, row_version)
 			VALUES (?, ?, ?, ?, ?, ?, ?)`,
-			NewID(), fieldID, entityID, value, createdAt, t.at, version); err != nil {
+			id, fieldID, entityID, value, createdAt, t.at, version); err != nil {
 			return translateWriteErr(err, "setting custom value")
 		}
 	}
@@ -326,7 +390,27 @@ func liveOptionValues(ctx context.Context, t *tx, fieldID string) ([]string, err
 // than anything this method asserts for itself: see customFieldDefs. The retry
 // writeSerializable already carries turns the resulting abort into "you raced,
 // try again" instead of an error an operator has to interpret.
-func (s *SQLStore) SetCustomValues(ctx context.Context, actor domain.Actor, entityType, entityID string, vals map[string]string) error {
+//
+// THE CONCURRENCY TOKEN IS THE PARENT ENTITY'S row_version, NOT EACH VALUE'S,
+// and expected is the one the form was rendered with. design.md §3, as amended:
+// values are replaced wholesale per entity, so a per-value token would need one
+// hidden token per rendered field and would still not describe what the operator
+// is editing -- they are editing vm-db-2, not vm-db-2's cost centre. The audit
+// entry is written against the entity for the same reason and every other editor
+// in this repo is per-entity.
+//
+// The bump is UNCONDITIONAL, including on a save that changes nothing. That is
+// what invariant 4 means by "refuses a second save from one token", and it is
+// exactly what TestEveryEditorRefusesASecondSaveFromOneToken submits: the same
+// form twice. A bump conditional on a diff would let the second save through and
+// the guard would read as present while being inert. It writes no change_log row
+// on its own -- auditFields skips row_version and updated_at, and the audited
+// shape is built from the row as it was read, so a no-op save moves the token
+// and records nothing, which is correct on both counts.
+//
+// The caller's token is not advanced in place; a handler re-reads the entity to
+// re-render it and gets the new one from there.
+func (s *SQLStore) SetCustomValues(ctx context.Context, actor domain.Actor, entityType, entityID string, expected int, vals map[string]string) error {
 	switch entityType {
 	case domain.CustomFieldEntityAsset, domain.CustomFieldEntityService:
 	default:
@@ -347,10 +431,31 @@ func (s *SQLStore) SetCustomValues(ctx context.Context, actor domain.Actor, enti
 			return err
 		}
 		if entityType == domain.CustomFieldEntityAsset {
-			return logAssetCustomValues(ctx, t, entityID, before, after)
+			return logAssetCustomValues(ctx, t, entityID, expected, before, after)
 		}
-		return logServiceCustomValues(ctx, t, entityID, before, after)
+		return logServiceCustomValues(ctx, t, entityID, expected, before, after)
 	})
+}
+
+// bumpedParentVersion turns the parent bump's result into a stale-token
+// refusal: domain.ErrStale, which handlers map to 409.
+//
+// It takes the RESULT rather than building the statement, so that each caller
+// writes its own UPDATE with a LITERAL table name. Assembling the target at run
+// time is refused by TestNoAssembledWriteReachesChangeLog, and rightly: a
+// statement that names its own table can eventually be pointed at change_log,
+// which is append-only. Two five-line statements beat one clever one.
+//
+// Zero rows affected does NOT mean the entity is gone -- the caller has just
+// read it inside this same transaction -- so the clause that failed is
+// `row_version = ?`: somebody else wrote the entity between the form being
+// rendered and this submission arriving. requireVersion says the rest.
+func bumpedParentVersion(res sql.Result, err error, entity, entityID string, expected int) error {
+	if err != nil {
+		return translateWriteErr(err, "bumping the "+entity+" version")
+	}
+	version := expected
+	return requireVersion(res, entity, entityID, &version)
 }
 
 // logAssetCustomValues writes the asset's audit entry for a value replacement.
@@ -360,7 +465,7 @@ func (s *SQLStore) SetCustomValues(ctx context.Context, actor domain.Actor, enti
 // that actually moved. Without the surrounding audited shape there would be no
 // entry at all -- the asset row itself is untouched by this write, which is the
 // exact failure the fold exists to prevent.
-func logAssetCustomValues(ctx context.Context, t *tx, assetID, before, after string) error {
+func logAssetCustomValues(ctx context.Context, t *tx, assetID string, expected int, before, after string) error {
 	var a domain.Asset
 	if err := t.get(ctx, &a, `SELECT * FROM asset WHERE id = ?`, assetID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -375,18 +480,30 @@ func logAssetCustomValues(ctx context.Context, t *tx, assetID, before, after str
 		WHERE ae.asset_id = ?`, assetID); err != nil {
 		return fmt.Errorf("reading environments of asset %s for its audit entry: %w", assetID, err)
 	}
+	res, err := t.exec(ctx,
+		`UPDATE asset SET row_version = row_version + 1, updated_at = ?
+		 WHERE id = ? AND row_version = ?`, t.at, assetID, expected)
+	if err := bumpedParentVersion(res, err, "asset", assetID, expected); err != nil {
+		return err
+	}
 	return t.logUpdate(ctx, "asset", assetID,
 		auditedAsset(&a, codes, before), auditedAsset(&a, codes, after))
 }
 
 // logServiceCustomValues is the service half of the same thing.
-func logServiceCustomValues(ctx context.Context, t *tx, serviceID, before, after string) error {
+func logServiceCustomValues(ctx context.Context, t *tx, serviceID string, expected int, before, after string) error {
 	var svc domain.Service
 	if err := t.get(ctx, &svc, `SELECT * FROM service WHERE id = ?`, serviceID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return fmt.Errorf("setting custom values: service %s: %w", serviceID, domain.ErrNotFound)
 		}
 		return fmt.Errorf("reading service %s for its audit entry: %w", serviceID, err)
+	}
+	res, err := t.exec(ctx,
+		`UPDATE service SET row_version = row_version + 1, updated_at = ?
+		 WHERE id = ? AND row_version = ?`, t.at, serviceID, expected)
+	if err := bumpedParentVersion(res, err, "service", serviceID, expected); err != nil {
+		return err
 	}
 	return t.logUpdate(ctx, "service", serviceID,
 		auditedService(&svc, before), auditedService(&svc, after))
