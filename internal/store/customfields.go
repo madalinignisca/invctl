@@ -185,8 +185,8 @@ func (s *SQLStore) UpdateCustomField(ctx context.Context, actor domain.Actor, f 
 	// Kind guard below, which depends on a table this method does not own.
 	if f.EntityType != before.EntityType {
 		return fmt.Errorf(
-			"custom field %s belongs to %s: a field for %s is a new field, not an edit",
-			before.Code, before.EntityType, f.EntityType)
+			"custom field %s belongs to %s: a field for %s is a new field, not an edit: %w",
+			before.Code, before.EntityType, f.EntityType, domain.ErrInvalid)
 	}
 
 	// Attribution and retirement are not this method's business -- Retire and
@@ -241,8 +241,8 @@ func (s *SQLStore) UpdateCustomField(ctx context.Context, actor domain.Actor, f 
 			}
 			if n > 0 {
 				return fmt.Errorf(
-					"custom field %s holds %d value(s): kind cannot change while values exist, create a new field instead",
-					before.Code, n)
+					"custom field %s holds %d value(s): kind cannot change while values exist, create a new field instead: %w",
+					before.Code, n, domain.ErrInvalid)
 			}
 		}
 
@@ -315,7 +315,8 @@ func (s *SQLStore) RestoreCustomField(ctx context.Context, actor domain.Actor, i
 		return fmt.Errorf("checking for a live field holding code %s: %w", before.Code, err)
 	}
 	if n > 0 {
-		return fmt.Errorf("restoring custom field: a live field already holds the code %q", before.Code)
+		return fmt.Errorf("restoring custom field: a live field already holds the code %q: %w",
+			before.Code, domain.ErrConflict)
 	}
 
 	return s.write(ctx, actor, func(t *tx) error {
@@ -365,7 +366,17 @@ func actorOrEmpty(id *string) string {
 // inserted. The field's change_log entry folds the resulting live option set
 // in as a second field (customFieldAudit), so a set replacement that leaves
 // the CustomField struct itself untouched still writes an audit row.
-func (s *SQLStore) SetCustomFieldOptions(ctx context.Context, actor domain.Actor, fieldID string, opts []domain.CustomFieldOption) error {
+//
+// expected IS THE FIELD'S OWN row_version, THE ONE THE FORM WAS RENDERED
+// WITH -- Ruling W. Without it two administrators editing one field's options
+// never learn they collided, and the outcome is worse than an ordinary lost
+// update in both directions: an option present in a stale list is un-retired,
+// silently reversing a retirement another administrator just made; an option
+// absent from a stale list is retired, silently undoing an addition the
+// submitting administrator never saw. A stale token is refused outright with
+// domain.ErrStale (409), which closes both directions at once rather than
+// reasoning about either.
+func (s *SQLStore) SetCustomFieldOptions(ctx context.Context, actor domain.Actor, fieldID string, expected int, opts []domain.CustomFieldOption) error {
 	before, err := s.GetCustomField(ctx, fieldID)
 	if err != nil {
 		return err
@@ -395,6 +406,20 @@ func (s *SQLStore) SetCustomFieldOptions(ctx context.Context, actor domain.Actor
 
 	at := domain.FormatTime(s.now())
 	return s.write(ctx, actor, func(t *tx) error {
+		// The stale-token guard, first and alone: refused outright, before a
+		// single option row is touched, so a collision never leaves a partial
+		// write behind for the transaction to roll back around.
+		res, err := t.exec(ctx,
+			`UPDATE custom_field SET row_version = row_version + 1 WHERE id = ? AND row_version = ?`,
+			fieldID, expected)
+		if err != nil {
+			return translateWriteErr(err, "bumping the custom field version")
+		}
+		version := expected
+		if err := requireVersion(res, "custom field", fieldID, &version); err != nil {
+			return err
+		}
+
 		for i, o := range opts {
 			if cur, ok := existingByValue[o.Value]; ok {
 				if _, err := t.exec(ctx, `

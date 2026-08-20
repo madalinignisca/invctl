@@ -10,6 +10,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -109,7 +110,8 @@ func mustOptions(t *testing.T, f *customFieldFixture, fieldID string, values ...
 	for _, v := range values {
 		opts = append(opts, domain.CustomFieldOption{Value: v, Label: v})
 	}
-	if err := f.s.SetCustomFieldOptions(f.ctx, f.actor, fieldID, opts); err != nil {
+	if err := f.s.SetCustomFieldOptions(f.ctx, f.actor, fieldID,
+		fieldVersion(t, f, fieldID), opts); err != nil {
 		t.Fatalf("setting the options of field %s to %v: %v", fieldID, values, err)
 	}
 }
@@ -226,6 +228,25 @@ func entityVersion(t *testing.T, f *customFieldFixture, entityType, entityID str
 	}
 	if err != nil {
 		t.Fatalf("reading the row_version of %s %s: %v", entityType, entityID, err)
+	}
+	return version
+}
+
+// fieldVersion reads a custom_field's own current concurrency token, which
+// SetCustomFieldOptions takes and bumps -- Ruling W: the options editor's
+// token is the field's own, not each option's.
+//
+// IT READS AT SUBMIT TIME, WHICH NO FORM CAN DO, for the same reason
+// entityVersion does: the token is not part of the instruction about which
+// options to keep, so a helpfully-fresh token cannot mask a defect in what
+// the caller named. A test exercising staleness captures its own token first
+// instead of calling this.
+func fieldVersion(t *testing.T, f *customFieldFixture, fieldID string) int {
+	t.Helper()
+	var version int
+	if err := f.s.readOne(f.ctx, &version,
+		`SELECT row_version FROM custom_field WHERE id = ?`, fieldID); err != nil {
+		t.Fatalf("reading the row_version of custom field %s: %v", fieldID, err)
 	}
 	return version
 }
@@ -587,7 +608,7 @@ func TestReorderingCustomFieldOptionsIsNotAChange(t *testing.T) {
 		t.Run(e.Name, func(t *testing.T) {
 			f := newCustomFieldFixture(t, e)
 			id := mustField(t, f, "asset", "tier", domain.CustomFieldSelect)
-			if err := f.s.SetCustomFieldOptions(f.ctx, f.actor, id, []domain.CustomFieldOption{
+			if err := f.s.SetCustomFieldOptions(f.ctx, f.actor, id, fieldVersion(t, f, id), []domain.CustomFieldOption{
 				{Value: "gold", Label: "Gold"},
 				{Value: "silver", Label: "Silver"},
 			}); err != nil {
@@ -595,7 +616,7 @@ func TestReorderingCustomFieldOptionsIsNotAChange(t *testing.T) {
 			}
 			before := changeCount(t, f, "custom_field", id)
 
-			if err := f.s.SetCustomFieldOptions(f.ctx, f.actor, id, []domain.CustomFieldOption{
+			if err := f.s.SetCustomFieldOptions(f.ctx, f.actor, id, fieldVersion(t, f, id), []domain.CustomFieldOption{
 				{Value: "silver", Label: "Silver"},
 				{Value: "gold", Label: "Gold"},
 			}); err != nil {
@@ -620,7 +641,7 @@ func TestRetiringAnOptionKeepsItSelectableOnExistingValues(t *testing.T) {
 			mustOptions(t, f, id, "gold", "silver")
 
 			// Drop "silver" by submitting only "gold".
-			if err := f.s.SetCustomFieldOptions(f.ctx, f.actor, id, []domain.CustomFieldOption{
+			if err := f.s.SetCustomFieldOptions(f.ctx, f.actor, id, fieldVersion(t, f, id), []domain.CustomFieldOption{
 				{Value: "gold", Label: "Gold"},
 			}); err != nil {
 				t.Fatalf("dropping silver: %v", err)
@@ -655,7 +676,7 @@ func TestSetCustomFieldOptionsRefusesADuplicateValue(t *testing.T) {
 			f := newCustomFieldFixture(t, e)
 			id := mustField(t, f, "asset", "tier", domain.CustomFieldSelect)
 
-			err := f.s.SetCustomFieldOptions(f.ctx, f.actor, id, []domain.CustomFieldOption{
+			err := f.s.SetCustomFieldOptions(f.ctx, f.actor, id, fieldVersion(t, f, id), []domain.CustomFieldOption{
 				{Value: "gold", Label: "Gold"},
 				{Value: "gold", Label: "Gold (again)"},
 			})
@@ -678,12 +699,12 @@ func TestSetCustomFieldOptionsRefusesAnEmptyValueOrLabel(t *testing.T) {
 			f := newCustomFieldFixture(t, e)
 			id := mustField(t, f, "asset", "tier", domain.CustomFieldSelect)
 
-			if err := f.s.SetCustomFieldOptions(f.ctx, f.actor, id, []domain.CustomFieldOption{
+			if err := f.s.SetCustomFieldOptions(f.ctx, f.actor, id, fieldVersion(t, f, id), []domain.CustomFieldOption{
 				{Value: "  ", Label: "Gold"},
 			}); err == nil {
 				t.Fatal("an empty option value must be refused")
 			}
-			if err := f.s.SetCustomFieldOptions(f.ctx, f.actor, id, []domain.CustomFieldOption{
+			if err := f.s.SetCustomFieldOptions(f.ctx, f.actor, id, fieldVersion(t, f, id), []domain.CustomFieldOption{
 				{Value: "gold", Label: "  "},
 			}); err == nil {
 				t.Fatal("an empty option label must be refused")
@@ -740,6 +761,97 @@ func TestEntityTypeCannotChangeEvenAtZeroValues(t *testing.T) {
 			}
 			if !strings.Contains(err.Error(), "asset") {
 				t.Errorf("the refusal should name the field's real entity_type; got %v", err)
+			}
+		})
+	}
+}
+
+// ---------- Ruling W: the options editor needs a token, in both directions ----------
+
+// TestAStaleOptionsSubmissionDoesNotUnretireAnOption is the first of the two
+// directions Ruling W closes: a stale option list still names an option
+// another administrator just retired, and applying it anyway would silently
+// UN-RETIRE that option, reversing the exact decision retirement exists to
+// protect.
+func TestAStaleOptionsSubmissionDoesNotUnretireAnOption(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newCustomFieldFixture(t, e)
+			id := mustField(t, f, "asset", "tier", domain.CustomFieldSelect)
+			mustOptions(t, f, id, "gold", "silver")
+
+			// The stale administrator's form was rendered before either edit
+			// below and still names both options live.
+			stale := fieldVersion(t, f, id)
+
+			// A second administrator retires "silver".
+			if err := f.s.SetCustomFieldOptions(f.ctx, f.actor, id, fieldVersion(t, f, id),
+				[]domain.CustomFieldOption{{Value: "gold", Label: "Gold"}}); err != nil {
+				t.Fatalf("retiring silver: %v", err)
+			}
+
+			// The stale submission, naming both options as though nothing had
+			// happened, must be refused rather than un-retiring silver.
+			err := f.s.SetCustomFieldOptions(f.ctx, f.actor, id, stale, []domain.CustomFieldOption{
+				{Value: "gold", Label: "Gold"},
+				{Value: "silver", Label: "Silver"},
+			})
+			if !errors.Is(err, domain.ErrStale) {
+				t.Fatalf("a stale options submission returned %v, want domain.ErrStale", err)
+			}
+
+			row, err := f.s.GetCustomField(f.ctx, id)
+			if err != nil {
+				t.Fatalf("reading: %v", err)
+			}
+			for _, o := range row.Options {
+				if o.Value == "silver" && o.RetiredAt == nil {
+					t.Fatal("the stale submission un-retired silver")
+				}
+			}
+		})
+	}
+}
+
+// TestAStaleOptionsSubmissionDoesNotRetireAnOptionJustAdded is the second
+// direction: an option present in the live set but absent from a stale list
+// would be retired, silently undoing an addition the submitting administrator
+// never saw.
+func TestAStaleOptionsSubmissionDoesNotRetireAnOptionJustAdded(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newCustomFieldFixture(t, e)
+			id := mustField(t, f, "asset", "tier", domain.CustomFieldSelect)
+			mustOptions(t, f, id, "gold")
+
+			// The stale administrator's form was rendered with only "gold" live.
+			stale := fieldVersion(t, f, id)
+
+			// A second administrator adds "silver".
+			if err := f.s.SetCustomFieldOptions(f.ctx, f.actor, id, fieldVersion(t, f, id),
+				[]domain.CustomFieldOption{
+					{Value: "gold", Label: "Gold"},
+					{Value: "silver", Label: "Silver"},
+				}); err != nil {
+				t.Fatalf("adding silver: %v", err)
+			}
+
+			// The stale submission, naming only "gold" as though "silver" did
+			// not exist, must be refused rather than retiring it.
+			err := f.s.SetCustomFieldOptions(f.ctx, f.actor, id, stale,
+				[]domain.CustomFieldOption{{Value: "gold", Label: "Gold"}})
+			if !errors.Is(err, domain.ErrStale) {
+				t.Fatalf("a stale options submission returned %v, want domain.ErrStale", err)
+			}
+
+			row, err := f.s.GetCustomField(f.ctx, id)
+			if err != nil {
+				t.Fatalf("reading: %v", err)
+			}
+			for _, o := range row.Options {
+				if o.Value == "silver" && o.RetiredAt != nil {
+					t.Fatal("the stale submission retired silver, which the operator never saw added")
+				}
 			}
 		})
 	}

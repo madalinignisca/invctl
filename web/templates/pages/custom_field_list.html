@@ -1,0 +1,27 @@
+{{/*
+  invctl — infrastructure inventory
+  Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+
+  Licensed under the GNU Affero General Public License, version 3 only —
+  no later version applies. See LICENSE for the full text.
+
+  SPDX-License-Identifier: AGPL-3.0-only
+*/}}
+{{define "content"}}
+<div class="page-head">
+  <div class="eyebrow">Settings</div>
+  <h1>Custom fields</h1>
+  <p class="lede">
+    Estate-specific attributes an administrator defined, without a migration.
+    This page is the answer to "did invctl ship this field, or did someone here
+    add it?" — every field below names who defined it, when, and why, so nobody
+    has to phone the vendor to find out.
+  </p>
+</div>
+
+{{template "custom_field_list_panel" .}}
+
+{{if .CanWrite}}
+{{template "custom_field_form" .}}
+{{end}}
+{{end}}

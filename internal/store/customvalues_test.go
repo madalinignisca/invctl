@@ -290,7 +290,7 @@ func TestASelectValueMustBeALiveOption(t *testing.T) {
 			}
 
 			// Retire "silver" by submitting only "gold".
-			if err := f.s.SetCustomFieldOptions(f.ctx, f.actor, id,
+			if err := f.s.SetCustomFieldOptions(f.ctx, f.actor, id, fieldVersion(t, f, id),
 				[]domain.CustomFieldOption{{Value: "gold", Label: "Gold"}}); err != nil {
 				t.Fatalf("retiring silver: %v", err)
 			}
@@ -679,7 +679,7 @@ func TestAValueOnARetiredOptionSurvivesALaterEdit(t *testing.T) {
 			mustSetValues(t, f, f.assetID, map[string]string{tierID: "silver", tagID: "ABC-1"})
 
 			// Retire "silver" by offering only "gold".
-			if err := f.s.SetCustomFieldOptions(f.ctx, f.actor, tierID,
+			if err := f.s.SetCustomFieldOptions(f.ctx, f.actor, tierID, fieldVersion(t, f, tierID),
 				[]domain.CustomFieldOption{{Value: "gold", Label: "Gold"}}); err != nil {
 				t.Fatalf("retiring the silver option: %v", err)
 			}

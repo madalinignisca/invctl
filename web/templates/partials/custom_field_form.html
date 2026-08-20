@@ -1,0 +1,258 @@
+{{/*
+  invctl — infrastructure inventory
+  Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+
+  Licensed under the GNU Affero General Public License, version 3 only —
+  no later version applies. See LICENSE for the full text.
+
+  SPDX-License-Identifier: AGPL-3.0-only
+*/}}
+
+{{/*
+  custom_field_row renders one definition: a plain row, or its edit form in
+  place of it when $.Page.EditRow (or a rejected edit) names this field, or
+  its options editor open beneath it when $.Page.EditOptions names it.
+
+  Takes dict{Row, Page} rather than the row alone, because OptionRows and
+  every $.CanWrite / $.CSRF / $.EditRow check need the whole page.
+*/}}
+{{define "custom_field_row"}}
+{{$row := .Row}}
+{{$p := .Page}}
+{{if and $p.CanWrite (eq $row.ID $p.Base.EditRow)}}
+<tr class="row-editing">
+  <td>
+    <input form="cf-{{$row.ID}}" class="mono {{if $p.Edit.Err "code"}}invalid{{end}}" type="text" name="code"
+           value="{{$p.Edit.Value "code" $row.Code}}" aria-label="Code" required style="width:10em">
+    {{with $p.Edit.Err "code"}}<div class="field-error">{{.}}</div>{{end}}
+  </td>
+  <td>
+    <input form="cf-{{$row.ID}}" class="{{if $p.Edit.Err "label"}}invalid{{end}}" type="text" name="label"
+           value="{{$p.Edit.Value "label" $row.Label}}" aria-label="Label" required>
+    {{with $p.Edit.Err "label"}}<div class="field-error">{{.}}</div>{{end}}
+  </td>
+  <td>
+    <select form="cf-{{$row.ID}}" name="kind" aria-label="Kind">
+      {{$k := $p.Edit.Value "kind" $row.Kind}}
+      {{range $p.Kinds}}<option value="{{.}}" {{if eq . $k}}selected{{end}}>{{.}}</option>{{end}}
+    </select>
+    {{with $p.Edit.Err "kind"}}<div class="field-error">{{.}}</div>{{end}}
+  </td>
+  <td colspan="3">
+    <input form="cf-{{$row.ID}}" class="{{if $p.Edit.Err "description"}}invalid{{end}}" type="text" name="description"
+           value="{{$p.Edit.Value "description" $row.Description}}" aria-label="Description" required style="width:100%">
+    {{with $p.Edit.Err "description"}}<div class="field-error">{{.}}</div>{{end}}
+  </td>
+  <td style="white-space:nowrap">
+    <form id="cf-{{$row.ID}}" method="post" action="/custom-fields/{{$row.ID}}" style="display:inline">
+      <input type="hidden" name="csrf_token" value="{{$p.CSRF}}">
+      <input type="hidden" name="row_version" value="{{$p.Edit.Value "row_version" (itoa $row.RowVersion)}}">
+      <button class="btn btn-sm btn-primary" type="submit">Save</button>
+    </form>
+    <a class="btn btn-sm" href="/custom-fields">Cancel</a>
+  </td>
+</tr>
+{{else}}
+<tr>
+  <td class="mono">{{$row.Code}}</td>
+  <td>{{$row.Label}}</td>
+  <td><span class="pill pill-muted">{{$row.Kind}}</span></td>
+  <td>{{$row.Description}}</td>
+  <td style="font-size:12px">
+    {{$row.CreatedByName}}<br>
+    <span style="color:var(--muted)">{{shortTime $row.CreatedAt}}</span>
+  </td>
+  <td class="num">{{$row.UsageCount}}</td>
+  <td style="white-space:nowrap">
+    {{if $p.CanWrite}}
+    <a class="btn btn-sm" href="/custom-fields?edit={{$row.ID}}">Edit</a>
+    {{if eq $row.Kind "select"}}
+    <a class="btn btn-sm" href="/custom-fields?options={{$row.ID}}">Options</a>
+    {{end}}
+    <form method="post" action="/custom-fields/{{$row.ID}}/retire" style="display:inline">
+      <input type="hidden" name="csrf_token" value="{{$p.CSRF}}">
+      <button class="btn btn-sm btn-danger" type="submit"
+              onclick="return confirm('Retire this field? Every value it already holds is kept.')">Retire</button>
+    </form>
+    {{end}}
+  </td>
+</tr>
+{{end}}
+{{if and (eq $row.Kind "select") (eq $row.ID $p.EditOptions)}}
+<tr>
+  <td colspan="7">
+    <form method="post" action="/custom-fields/{{$row.ID}}/options" class="panel-body" style="padding:8px 0">
+      <input type="hidden" name="csrf_token" value="{{$p.CSRF}}">
+      <input type="hidden" name="row_version" value="{{$p.OptionsRowVersion $row}}">
+      <p class="field-hint">
+        Live options this field offers. A retired option keeps displaying on the
+        values that already chose it; it is not offered to a new one. Leave a row
+        blank to drop it.
+      </p>
+      {{with $p.OptionsError $row}}
+      <div class="field-error">{{.}}</div>
+      {{end}}
+      {{range $p.OptionRows $row}}
+      <div class="field-row">
+        <div class="field">
+          <label>Value</label>
+          <input class="mono" type="text" name="option_value" value="{{.Value}}">
+        </div>
+        <div class="field">
+          <label>Label</label>
+          <input type="text" name="option_label" value="{{.Label}}">
+        </div>
+      </div>
+      {{end}}
+      <button class="btn btn-sm btn-primary" type="submit">Save options</button>
+      <a class="btn btn-sm" href="/custom-fields">Cancel</a>
+    </form>
+  </td>
+</tr>
+{{end}}
+{{end}}
+
+{{define "custom_field_list_panel"}}
+<div id="custom-field-registry">
+
+  <div class="panel">
+    <div class="panel-head">
+      <h2>Asset fields</h2>
+      <span class="panel-note">{{pluralise (len .AssetFields) "field" "fields"}}</span>
+    </div>
+    {{if .AssetFields}}
+    <div class="scroll-x">
+      <table>
+        <thead>
+          <tr><th>Code</th><th>Label</th><th>Kind</th><th>Description</th>
+              <th>Defined by</th><th class="num">In use</th><th></th></tr>
+        </thead>
+        <tbody>
+          {{range .AssetFields}}{{template "custom_field_row" dict "Row" . "Page" $}}{{end}}
+        </tbody>
+      </table>
+    </div>
+    {{else}}
+    <div class="empty"><strong>No custom fields defined for assets.</strong></div>
+    {{end}}
+  </div>
+
+  <div class="panel">
+    <div class="panel-head">
+      <h2>Service fields</h2>
+      <span class="panel-note">{{pluralise (len .ServiceFields) "field" "fields"}}</span>
+    </div>
+    {{if .ServiceFields}}
+    <div class="scroll-x">
+      <table>
+        <thead>
+          <tr><th>Code</th><th>Label</th><th>Kind</th><th>Description</th>
+              <th>Defined by</th><th class="num">In use</th><th></th></tr>
+        </thead>
+        <tbody>
+          {{range .ServiceFields}}{{template "custom_field_row" dict "Row" . "Page" $}}{{end}}
+        </tbody>
+      </table>
+    </div>
+    {{else}}
+    <div class="empty"><strong>No custom fields defined for services.</strong></div>
+    {{end}}
+  </div>
+
+  {{if .RetiredFields}}
+  <div class="panel">
+    <div class="panel-head">
+      <h2>Retired fields</h2>
+      <span class="panel-note">Every value a retired field already held is kept, never deleted.</span>
+    </div>
+    <div class="scroll-x">
+      <table>
+        <thead>
+          <tr><th>Entity</th><th>Code</th><th>Label</th><th>Kind</th>
+              <th>Retired by</th><th>Retired</th><th class="num">Values retained</th><th></th></tr>
+        </thead>
+        <tbody>
+          {{range .RetiredFields}}
+          <tr>
+            <td><span class="pill pill-muted">{{.EntityType}}</span></td>
+            <td class="mono">{{.Code}}</td>
+            <td>{{.Label}}</td>
+            <td><span class="pill pill-muted">{{.Kind}}</span></td>
+            <td>{{deref .RetiredByName}}</td>
+            <td>{{if .RetiredAt}}{{shortTime (deref .RetiredAt)}}{{end}}</td>
+            <td class="num">{{.UsageCount}}</td>
+            <td>
+              {{if $.CanWrite}}
+              <form method="post" action="/custom-fields/{{.ID}}/restore" style="display:inline">
+                <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+                <button class="btn btn-sm" type="submit">Restore</button>
+              </form>
+              {{end}}
+            </td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {{end}}
+
+</div>
+{{end}}
+
+{{define "custom_field_form"}}
+<div class="panel">
+  <div class="panel-head"><h2>Define a custom field</h2></div>
+  <form class="panel-body" method="post" action="/custom-fields" hx-post="/custom-fields">
+    <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+
+    <div class="callout callout-warn">
+      <strong>This cannot be undone selectively.</strong>
+      <p style="margin-top:6px">
+        A custom field's values are recorded permanently in the audit trail,
+        cannot be removed, and must not hold personal data. Redaction of a
+        custom value is all-or-nothing across every custom field on every
+        entity, so there is no way to hide one field's values later without
+        hiding every field's. Never create a field such as "Owner email",
+        "Contact" or "Requested by".
+      </p>
+    </div>
+
+    <div class="field-row">
+      <div class="field">
+        <label for="cf-entity">Entity type</label>
+        <select id="cf-entity" name="entity_type">
+          {{range .EntityTypes}}<option value="{{.}}" {{if eq . $.Spec.EntityType}}selected{{end}}>{{.}}</option>{{end}}
+        </select>
+        {{with index .Errors "entity_type"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="cf-code">Code</label>
+        <input id="cf-code" class="mono" type="text" name="code" value="{{.Spec.Code}}" required
+               placeholder="cost_centre">
+        {{with index .Errors "code"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="cf-label">Label</label>
+        <input id="cf-label" type="text" name="label" value="{{.Spec.Label}}" required
+               placeholder="Cost Centre">
+        {{with index .Errors "label"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="cf-kind">Kind</label>
+        <select id="cf-kind" name="kind">
+          {{range .Kinds}}<option value="{{.}}" {{if eq . $.Spec.Kind}}selected{{end}}>{{.}}</option>{{end}}
+        </select>
+        {{with index .Errors "kind"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+    </div>
+    <div class="field">
+      <label for="cf-desc">Description — why this field exists</label>
+      <input id="cf-desc" type="text" name="description" value="{{.Spec.Description}}" required
+             placeholder="SAP cost centre finance rebills against">
+      {{with index .Errors "description"}}<div class="field-error">{{.}}</div>{{end}}
+    </div>
+    <button class="btn btn-primary" type="submit">Define field</button>
+  </form>
+</div>
+{{end}}

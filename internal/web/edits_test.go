@@ -604,6 +604,12 @@ func TestEveryEditorRefusesASecondSaveFromOneToken(t *testing.T) {
 	servicePage := body(t, h.get("/services/"+serviceID, false))
 	addressID, _ := firstAddressEditID(t, assetPage)
 
+	// WP-A4: the definition editor and the options editor are two separate
+	// editors on two separate entities (a custom_field's own row_version,
+	// docs/custom-fields-design.md §3), so each gets its own entry here.
+	customFieldID := mustCreateCustomField(t, h, "asset", "edit-token", "text")
+	customFieldSelectID := mustCreateCustomField(t, h, "asset", "options-token", "select")
+
 	editors := []struct {
 		name   string
 		open   string // where the form is rendered
@@ -641,6 +647,12 @@ func TestEveryEditorRefusesASecondSaveFromOneToken(t *testing.T) {
 			"/endpoints/" + firstEndpointEditID(t, servicePage),
 			url.Values{"name": {"ep-token"}, "l4_proto": {"tcp"}, "port": {"7001"},
 				"bind_scope": {"host"}, "tls_mode": {"none"}, "exposure": {"internal"}}},
+		{"custom field", "/custom-fields?edit=" + customFieldID, "/custom-fields/" + customFieldID,
+			url.Values{"code": {"edit-token"}, "label": {"Edit Token"}, "kind": {"text"},
+				"description": {"redrawn by the token test"}}},
+		{"custom field options", "/custom-fields?options=" + customFieldSelectID,
+			"/custom-fields/" + customFieldSelectID + "/options",
+			url.Values{"option_value": {"gold"}, "option_label": {"Gold"}}},
 	}
 
 	for _, e := range editors {
