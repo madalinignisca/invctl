@@ -129,9 +129,10 @@ existing values keep displaying, no new value may select it.
 
 **Both editors carry `row_version` and refuse a second save from one token**,
 returning 409 — the definition editor on `custom_field`, and the value editor on
-**the parent asset or service**, not on `custom_field_value`. Values are replaced
-wholesale per entity, so a per-value token would need one hidden token per
-rendered field and would still not describe what the operator is editing: they
+**the parent asset or service**, not on `custom_field_value`. A submission is
+applied per entity in one statement, so a per-value token would need one hidden
+token per rendered field and would still not describe what the operator is
+editing: they
 are editing `vm-db-2`, not `vm-db-2`'s cost centre. The audit entry is written
 against the entity for the same reason, and every other editor in this repo is
 per-entity. Setting values bumps the parent's `row_version`. Invariant 4 admits no exception, and
