@@ -158,12 +158,15 @@ func entityCustomValues(ctx context.Context, t *tx, entityID string) ([]domain.C
 // environment code would. The fold is a human-readable audit rendering, not a
 // wire format -- nothing parses it back.
 //
-// KNOWN EXPOSURE, NAMED RATHER THAN SOLVED HERE: WHAT THIS PUTS IN change_log
-// CANNOT BE REDACTED. domain.IsRedacted keys on an entity name plus a FIELD
-// name, and everything folded below arrives under one opaque key,
-// "custom_fields". So there is no name to key a redaction rule on, and the
-// value_text of every custom field lands in the audit trail permanently and in
-// full -- change_log is append-only, no UPDATE and no DELETE, ever.
+// KNOWN EXPOSURE, NAMED RATHER THAN SOLVED HERE: NOTHING INSIDE THIS STRING CAN
+// BE REDACTED SELECTIVELY. domain.IsRedacted takes an entity name and a COLUMN
+// name, and everything folded below arrives under one opaque column,
+// "custom_fields". Adding "custom_fields" to RedactedFields would redact the
+// WHOLE fold wholesale -- a real lever, and worth knowing it exists -- but there
+// is no name INSIDE it to key a rule on, so one field's value cannot be redacted
+// while the rest stay readable. Absent that, the value_text of every custom
+// field lands in the audit trail permanently and in full: change_log is
+// append-only, no UPDATE and no DELETE, ever.
 //
 // That matters because CLAUDE.md's position is that the audit trail "carries no
 // personal data and can be kept forever with no retention argument", which is
@@ -174,10 +177,12 @@ func entityCustomValues(ctx context.Context, t *tx, entityID string) ([]domain.C
 // erasure request for the actor; it does nothing about PII an administrator put
 // in a value.
 //
-// Closing it needs either per-code diff keys (which means changing auditFields,
-// the function every entity's audit flows through and whose last defect was
-// invisible for a week) or a redaction flag on custom_field and a rule that
-// reads it. Both are schema and spec changes and are the coordinator's, not
+// Closing it properly needs either per-code diff keys (which means changing
+// auditFields, the function every entity's audit flows through and whose last
+// defect was invisible for a week) or a redaction flag on custom_field and a
+// rule that reads it. Redacting the whole fold is the blunt instrument
+// available today at the cost of every custom value disappearing from every
+// entry. Both are schema and spec changes and are the coordinator's, not
 // this function's. Do not treat the silence here as a judgement that it is fine.
 func foldCustomValues(defs map[string]domain.CustomField, values []domain.CustomFieldValue) string {
 	pairs := make([]string, 0, len(values))
@@ -210,45 +215,59 @@ func customFieldsAudit(ctx context.Context, t *tx, entityType, entityID string) 
 	return foldCustomValues(defs, values), nil
 }
 
-// setCustomValues replaces one entity's LIVE custom values wholesale INSIDE t.
+// setCustomValues applies one entity's submitted custom values INSIDE t.
 //
 // It never opens its own transaction: the parent's change_log entry has to
 // cover this write, so the caller owns both. SetCustomValues below is the only
 // caller today and does exactly that.
 //
-// vals maps custom_field.id to the RAW value an operator submitted. A blank or
-// whitespace-only entry, and any LIVE field absent from the map, CLEARS that
-// field -- a form posts every field it renders, and "" is how a person says
-// "nothing here". Every changed value is canonicalised through
-// domain.CanonicalCustomValue against its field's kind and, for select, its LIVE
-// options. A value for an unknown field, or for a field belonging to another
-// entity type, is refused.
+// THE CONTRACT, AND TASKS 5 AND 6 BUILD AGAINST EXACTLY THIS:
 //
-// TWO RULES KEEP A WHOLESALE REPLACEMENT FROM DESTROYING WHAT IT WAS PROMISED
-// TO RETAIN, and both were bugs before they were rules.
+//	ABSENT from vals        -> UNTOUCHED. Whatever is stored stays stored.
+//	present, blank or space -> CLEARED. The row is removed.
+//	present with a value    -> set, once canonicalised and validated.
 //
-// RETIRED FIELDS ARE OUT OF SCOPE ENTIRELY. The replacement touches only rows
-// belonging to LIVE fields. customFieldDefs deliberately includes retired ones
-// -- the fold has to resolve their codes -- and a delete list built from the
-// whole map wiped every retained value of every retired field on the next
-// unrelated edit, which the insert loop could never restore because a retired
-// field takes no new value. That is a hard delete of a fact
-// docs/custom-fields-design.md §6 promises to keep forever ("retiring a field
-// deletes no value, ever"), it made Restore bring a field back empty, and the
-// audit entry described it as an operator clearing a value, which nobody did.
-// Retired values therefore appear unchanged on both sides of the fold and
-// cancel. The corollary is that this path cannot clear a retired field's value
-// at all, which is the rule, not a gap.
+// vals maps custom_field.id to the RAW text an operator submitted. A form that
+// wants to clear a field must post an empty string for it; leaving it out says
+// "I am not editing this", not "delete it".
+//
+// ABSENCE USED TO MEAN "CLEAR" AND THAT WAS A DATA-DESTROYING BUG, TWICE. The
+// old rule rested on "a form posts every field it renders", which holds only if
+// the form's field set equals this writer's field set. It does not, because the
+// two are computed at different moments:
+//
+//   - A field retired between render and submit is absent from the form, so its
+//     retained value was deleted on the next unrelated edit -- against §6's
+//     "retiring a field deletes no value, ever", leaving Restore to bring the
+//     field back empty.
+//   - A field RESTORED in that same window is live at write time and still
+//     absent from the operator's map, so it was doomed for the same reason. The
+//     parent's row_version cannot close this: RestoreCustomField bumps
+//     custom_field.row_version, not the asset's, so the operator's token is
+//     still current and the write is accepted.
+//
+// Requiring an explicit blank closes both, and it closes them structurally
+// rather than by scoping the delete to whatever the field's state happens to be
+// at write time. The retired-field protection then falls out for free: a retired
+// field is absent from forms (§6), so it is absent from vals, so it is
+// untouched. An explicit blank still clears one -- that is an operator's own
+// deliberate act, which §6 says does remove the row, and no form can reach it by
+// accident because no form renders a retired field.
 //
 // AN UNCHANGED VALUE IS NOT A NEW VALUE, so it is left exactly where it is --
-// same row, same id, same created_at, same row_version -- and never
-// re-validated. §3 says a retired select option "keeps displaying" on the values
-// that already chose it while no NEW value may select it; without this rule a
-// form that renders such a value and posts it back had two outcomes and both
-// were wrong. Re-send it and CanonicalCustomValue rejected the whole edit over a
-// field the operator never touched; omit it and it was silently cleared. The
-// comparison is made twice, before validation on the trimmed text and again
-// after it, because canonicalisation can collapse "TRUE" onto a stored "true".
+// same row, same id, same created_at, same row_version -- and never rewritten.
+// §3 says a retired select option "keeps displaying" on the values that already
+// chose it while no NEW value may select it; without this rule a form that
+// renders such a value and posts it back was rejected outright over a field the
+// operator never touched. The comparison is made twice, on the trimmed text
+// before validation and on the canonical form after it, because canonicalisation
+// can collapse "TRUE" onto a stored "true".
+//
+// THE RETIRED REFUSAL COMES LAST, after canonicalising and after both equality
+// checks. Above them it made that second comparison unreachable on the retired
+// path, so a retired boolean holding "true", re-posted as "TRUE", refused the
+// whole submission over a field the operator never touched and could not clear.
+// Only a value that is genuinely NEW is refused for a retired field.
 func setCustomValues(ctx context.Context, t *tx, entityType, entityID string, vals map[string]string) error {
 	defs, err := customFieldDefs(ctx, t, entityType)
 	if err != nil {
@@ -273,8 +292,9 @@ func setCustomValues(ctx context.Context, t *tx, entityType, entityID string, va
 	}
 	sort.Strings(fieldIDs)
 
-	// unchanged: leave the row alone. changed: delete and write it again.
-	unchanged := make(map[string]bool, len(fieldIDs))
+	// cleared: the row goes. changed: the row is written again. Anything not in
+	// either -- including every field absent from vals -- is left alone.
+	cleared := make(map[string]bool, len(fieldIDs))
 	changed := make(map[string]string, len(fieldIDs))
 	for _, fieldID := range fieldIDs {
 		def, ok := defs[fieldID]
@@ -287,17 +307,13 @@ func setCustomValues(ctx context.Context, t *tx, entityType, entityID string, va
 				entityType, entityID, fieldID, entityType, domain.ErrNotFound)
 		}
 		raw := strings.TrimSpace(vals[fieldID])
-		prev, held := stored[fieldID]
-		if raw != "" && held && prev.ValueText == raw {
-			unchanged[fieldID] = true
+		if raw == "" {
+			cleared[fieldID] = true
 			continue
 		}
-		if raw == "" {
-			continue // cleared, if the field is live
-		}
-		if def.IsRetired() {
-			return fmt.Errorf("setting custom values of %s %s: field %q is retired and takes no new value: %w",
-				entityType, entityID, def.Code, domain.ErrInvalid)
+		prev, held := stored[fieldID]
+		if held && prev.ValueText == raw {
+			continue // unchanged, verbatim
 		}
 		var options []string
 		if def.Kind == domain.CustomFieldSelect {
@@ -311,14 +327,18 @@ func setCustomValues(ctx context.Context, t *tx, entityType, entityID string, va
 			return fmt.Errorf("custom field %q: %w", def.Code, err)
 		}
 		if held && prev.ValueText == value {
-			unchanged[fieldID] = true
-			continue
+			continue // unchanged once canonicalised
+		}
+		if def.IsRetired() {
+			return fmt.Errorf("setting custom values of %s %s: field %q is retired and takes no new value: %w",
+				entityType, entityID, def.Code, domain.ErrInvalid)
 		}
 		changed[fieldID] = value
 	}
 
-	// What goes: every stored row of a LIVE field that is not being kept as it
-	// stands. That is the cleared ones and the ones about to be written again.
+	// What goes: only rows this submission explicitly cleared or is about to
+	// write again. Nothing is deleted on the strength of being absent.
+	//
 	// Scoped by explicit id rather than by a
 	// `field_id IN (SELECT id FROM custom_field WHERE ...)` subquery, and that
 	// is deliberate twice over. It cannot reach another entity type's fields,
@@ -327,11 +347,12 @@ func setCustomValues(ctx context.Context, t *tx, entityType, entityID string, va
 	// until somebody rewrites this DELETE and silently takes Task 3's kind
 	// guard with it. One read, in one named place, with a test pointed at it,
 	// beats an invariant that happens to hold twice.
-	doomed := make([]string, 0, len(stored))
+	doomed := make([]string, 0, len(cleared)+len(changed))
 	for fieldID := range stored {
-		def := defs[fieldID]
-		if def.IsRetired() || unchanged[fieldID] {
-			continue
+		if !cleared[fieldID] {
+			if _, rewriting := changed[fieldID]; !rewriting {
+				continue
+			}
 		}
 		doomed = append(doomed, fieldID)
 	}

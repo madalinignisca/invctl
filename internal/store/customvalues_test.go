@@ -529,10 +529,12 @@ func TestSetCustomValuesRefusesAnUnknownEntityType(t *testing.T) {
 // deadlock against the writer pool.
 func TestAKindChangeAbortsAgainstAConcurrentValueWrite(t *testing.T) {
 	for _, e := range Engines(t) {
-		if e.Name != DriverPostgres {
-			continue
-		}
 		t.Run(e.Name, func(t *testing.T) {
+			if e.Name != DriverPostgres {
+				t.Skip("SQLite serialises writes on a single connection by construction " +
+					"and has no SSI to exercise; holding T1 open here would deadlock " +
+					"against the writer pool rather than test anything")
+			}
 			f := newCustomFieldFixture(t, e)
 			fieldID := mustField(t, f, "asset", "cost_centre", domain.CustomFieldText)
 			raw := f.s.DB().Writer
@@ -857,6 +859,165 @@ func TestAServiceValueEditCarriesTheSameToken(t *testing.T) {
 			if err := f.s.SetCustomValues(f.ctx, f.actor, "service", f.serviceID, token,
 				map[string]string{id: "SLA-8"}); !errors.Is(err, domain.ErrStale) {
 				t.Fatalf("want ErrStale from a stale token, got %v", err)
+			}
+		})
+	}
+}
+
+// TestARestoreBetweenRenderAndSubmitDestroysNothing is RULING U, and it is the
+// second instance of the shape the Critical was about.
+//
+// The old contract inferred a clear from ABSENCE, which rests on "a form posts
+// every field it renders". That holds only if the form's field set equals the
+// writer's field set, and the two are computed at different moments. §6 says a
+// retired field is absent from forms, so it cannot be in the operator's map --
+// and if an administrator RESTORES it between render and submit, the field is
+// live at write time, absent from the map, and was therefore deleted.
+//
+// The parent's token cannot close this, which is what makes it structural:
+// RestoreCustomField bumps custom_field.row_version, not the asset's, so the
+// operator's token is still current and the write is accepted. Measured before
+// the fix: submit succeeded, cost_centre=IT-42 was hard-deleted, and the audit
+// entry attributed the clearing to an operator who never saw the field.
+func TestARestoreBetweenRenderAndSubmitDestroysNothing(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newCustomFieldFixture(t, e)
+			tagID := mustField(t, f, "asset", "asset_tag", domain.CustomFieldText)
+			ccID := mustField(t, f, "asset", "cost_centre", domain.CustomFieldText)
+			mustSetValues(t, f, f.assetID, map[string]string{tagID: "ABC-1", ccID: "IT-42"})
+
+			if err := f.s.RetireCustomField(f.ctx, f.actor, ccID); err != nil {
+				t.Fatalf("retiring cost_centre: %v", err)
+			}
+
+			// RENDER: the form is built now. cost_centre is retired, so §6 says
+			// it is not on it, so it is not in what the operator will post.
+			submitted := map[string]string{tagID: "ABC-2"}
+			token := entityVersion(t, f, "asset", f.assetID)
+
+			// An administrator restores the field in the window.
+			if err := f.s.RestoreCustomField(f.ctx, f.actor, ccID); err != nil {
+				t.Fatalf("restoring cost_centre: %v", err)
+			}
+			// The operator's token is STILL CURRENT -- the restore moved
+			// custom_field.row_version, not the asset's. This is the assertion
+			// that says the token cannot be the thing protecting the value.
+			if got := entityVersion(t, f, "asset", f.assetID); got != token {
+				t.Fatalf("the asset's version moved to %d during the restore; this test "+
+					"is no longer exercising the window it was written for", got)
+			}
+
+			// SUBMIT.
+			if err := f.s.SetCustomValues(f.ctx, f.actor, "asset", f.assetID, token, submitted); err != nil {
+				t.Fatalf("submitting: %v", err)
+			}
+
+			values, err := f.s.CustomValuesFor(f.ctx, "asset", f.assetID)
+			if err != nil {
+				t.Fatalf("reading values: %v", err)
+			}
+			if len(values) != 2 {
+				t.Fatalf("got %d values, want 2: a field restored between render and "+
+					"submit had its value destroyed by an edit to a different field", len(values))
+			}
+			if values[0].Code != "asset_tag" || values[0].ValueText != "ABC-2" {
+				t.Fatalf("got %s=%s, want asset_tag=ABC-2", values[0].Code, values[0].ValueText)
+			}
+			if values[1].Code != "cost_centre" || values[1].ValueText != "IT-42" {
+				t.Fatalf("got %s=%s, want cost_centre=IT-42 intact", values[1].Code, values[1].ValueText)
+			}
+			want := `{"custom_fields":{"old":"asset_tag=ABC-1,cost_centre=IT-42","new":"asset_tag=ABC-2,cost_centre=IT-42"}}`
+			if got := lastChangeDiff(t, f, "asset", f.assetID); got != want {
+				t.Fatalf("the entry must show only what the operator moved\n got %s\nwant %s", got, want)
+			}
+		})
+	}
+}
+
+// TestAnAbsentFieldIsUntouchedAndABlankOneIsCleared states the contract Tasks 5
+// and 6 build against, as a test rather than only as a doc comment: absent means
+// untouched, an explicit blank means clear. Both live fields here, so neither
+// retirement nor restoration is doing the work.
+func TestAnAbsentFieldIsUntouchedAndABlankOneIsCleared(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newCustomFieldFixture(t, e)
+			tagID := mustField(t, f, "asset", "asset_tag", domain.CustomFieldText)
+			ccID := mustField(t, f, "asset", "cost_centre", domain.CustomFieldText)
+			mustSetValues(t, f, f.assetID, map[string]string{tagID: "ABC-1", ccID: "IT-42"})
+
+			// Absent: untouched.
+			mustSetValues(t, f, f.assetID, map[string]string{tagID: "ABC-2"})
+			values, err := f.s.CustomValuesFor(f.ctx, "asset", f.assetID)
+			if err != nil {
+				t.Fatalf("reading values: %v", err)
+			}
+			if len(values) != 2 {
+				t.Fatalf("got %d values, want 2: an absent field must be untouched", len(values))
+			}
+			if values[1].ValueText != "IT-42" {
+				t.Fatalf("got cost_centre=%q, want IT-42", values[1].ValueText)
+			}
+
+			// Explicitly blank: cleared.
+			mustSetValues(t, f, f.assetID, map[string]string{ccID: ""})
+			values, err = f.s.CustomValuesFor(f.ctx, "asset", f.assetID)
+			if err != nil {
+				t.Fatalf("re-reading values: %v", err)
+			}
+			if len(values) != 1 {
+				t.Fatalf("got %d values, want 1: an explicit blank must clear", len(values))
+			}
+			if values[0].Code != "asset_tag" || values[0].ValueText != "ABC-2" {
+				t.Fatalf("got %s=%s, want asset_tag=ABC-2 left alone", values[0].Code, values[0].ValueText)
+			}
+		})
+	}
+}
+
+// TestARetiredValueRePostedUnchangedInADifferentCaseIsAccepted is RULING V.
+//
+// The retired refusal sat above the post-canonicalisation equality check, so
+// that comparison was unreachable on the retired path: a retired boolean holding
+// "true", re-posted as "TRUE", refused the WHOLE submission over a field the
+// operator never touched and could not clear. It contradicted the rule the same
+// function states -- an unchanged value is not a new value.
+func TestARetiredValueRePostedUnchangedInADifferentCaseIsAccepted(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newCustomFieldFixture(t, e)
+			flagID := mustField(t, f, "asset", "pci_scope", domain.CustomFieldBoolean)
+			tagID := mustField(t, f, "asset", "asset_tag", domain.CustomFieldText)
+			mustSetValues(t, f, f.assetID, map[string]string{flagID: "true", tagID: "ABC-1"})
+			if err := f.s.RetireCustomField(f.ctx, f.actor, flagID); err != nil {
+				t.Fatalf("retiring pci_scope: %v", err)
+			}
+
+			// Canonicalisation collapses "TRUE" onto the stored "true", so this
+			// is not a new value and must not be refused.
+			if err := f.s.SetCustomValues(f.ctx, f.actor, "asset", f.assetID,
+				entityVersion(t, f, "asset", f.assetID),
+				map[string]string{flagID: "TRUE", tagID: "ABC-2"}); err != nil {
+				t.Fatalf("re-posting an unchanged retired value in a different case: %v", err)
+			}
+
+			values, err := f.s.CustomValuesFor(f.ctx, "asset", f.assetID)
+			if err != nil {
+				t.Fatalf("reading values: %v", err)
+			}
+			if len(values) != 2 {
+				t.Fatalf("got %d values, want 2", len(values))
+			}
+			if values[1].Code != "pci_scope" || values[1].ValueText != "true" {
+				t.Fatalf("got %s=%s, want pci_scope=true retained", values[1].Code, values[1].ValueText)
+			}
+
+			// A genuinely different value on the retired field is still refused.
+			if err := f.s.SetCustomValues(f.ctx, f.actor, "asset", f.assetID,
+				entityVersion(t, f, "asset", f.assetID),
+				map[string]string{flagID: "false"}); err == nil {
+				t.Fatal("a NEW value for a retired field must still be refused")
 			}
 		})
 	}

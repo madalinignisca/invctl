@@ -152,9 +152,22 @@ func mustSetValues(t *testing.T, f *customFieldFixture, entityID string, vals ma
 
 // mustClearValues clears every custom value an entity holds. The rows go, and
 // the parent's change_log entry has to record it.
+//
+// It posts an EXPLICIT blank for every value held, because absence means
+// untouched: a nil map now clears nothing at all, which is the whole point of
+// Ruling U. This is the shape a real "clear everything" form takes.
 func mustClearValues(t *testing.T, f *customFieldFixture, entityID string) {
 	t.Helper()
-	mustSetValues(t, f, entityID, nil)
+	entityType := entityTypeOf(t, f, entityID)
+	held, err := f.s.CustomValuesFor(f.ctx, entityType, entityID)
+	if err != nil {
+		t.Fatalf("reading the values of %s %s before clearing: %v", entityType, entityID, err)
+	}
+	vals := make(map[string]string, len(held))
+	for _, v := range held {
+		vals[v.FieldID] = ""
+	}
+	mustSetValues(t, f, entityID, vals)
 }
 
 // entityVersion reads the parent entity's current concurrency token, which
