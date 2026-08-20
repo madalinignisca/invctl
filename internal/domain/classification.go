@@ -647,6 +647,33 @@ var DeclaredColumns = map[string][]string{
 		"ordinal", "desired_state", "lifecycle", "created_at", "updated_at",
 		"row_version",
 	},
+	// Estate-specific attributes, migration 00051 (WP-A4). Declared without
+	// exception: an administrator defines a field once, and everything about
+	// it -- what it is, what it means, what an entity holds -- is somebody
+	// asserting a fact, never the estate reporting one. Nothing here is
+	// telemetry.
+	//
+	// created_by/retired_by look like provenance and are not: provenance in
+	// this codebase is `source` and `confidence`, a claim about where a fact
+	// came from, and custom fields carry neither. These are a PERSON's
+	// attestation -- who defined this, who retired it -- the same reasoning
+	// that classifies dependency.verified_by/.verified_at as declared above.
+	"custom_field": {
+		"id", "entity_type", "code", "label", "kind", "description",
+		"created_by", "created_at", "retired_at", "retired_by", "row_version",
+	},
+	// The vocabulary a `select` field offers. Declared: somebody typed the
+	// options; nothing observes or derives them.
+	"custom_field_option": {
+		"id", "field_id", "value", "label", "position", "retired_at",
+	},
+	// The current value of one field on one entity -- a set the field owns,
+	// replaced wholesale and folded into the entity's own audited value
+	// (design.md §6), the same shape as asset_environment.
+	"custom_field_value": {
+		"id", "field_id", "entity_id", "value_text",
+		"created_at", "updated_at", "row_version",
+	},
 }
 
 // ClassifyColumn returns the class of a column. ok is false when the column is
