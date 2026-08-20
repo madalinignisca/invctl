@@ -109,8 +109,7 @@ func mustOption(t *testing.T, f *customFieldFixture, fieldID, value string) {
 	}
 }
 
-// mustValue sets ONE field's value on an entity, leaving whatever other values
-// that entity already holds in place.
+// mustValue sets ONE field's value on an entity and touches nothing else.
 //
 // Task 3 carried a stub here that INSERTed straight into custom_field_value,
 // bypassing validation, canonicalisation and the audit fold entirely. Task 4
@@ -118,36 +117,20 @@ func mustOption(t *testing.T, f *customFieldFixture, fieldID, value string) {
 // alongside: every test in this package now exercises SetCustomValues, so a
 // defect in it cannot hide behind a fixture that did the write differently.
 //
-// THE MERGE BELOW IS NOW REDUNDANT, AND THE COMMENT THAT USED TO JUSTIFY IT
-// STATED A CONTRACT THAT NO LONGER EXISTS. It said "the map it receives IS the
-// entity's complete set, and a helper that forgot to merge would silently clear
-// every other value". Under Ruling U absence means UNTOUCHED, so posting the one
-// field on its own would do exactly the same thing, and nothing is cleared by
-// omission any more.
-//
-// It is left in place only because it is harmless: every value it re-posts is
-// byte-identical to what is stored, so each one hits the unchanged-value rule
-// and no row is rewritten. But it is the Ruling Y enumeration shape -- a caller
-// building a payload from CustomValuesFor, which includes retired fields'
-// retained values the operator never saw -- and it is defused by rule 2 rather
-// than by being right. Raised for a decision rather than changed here; the fix
-// is to drop the merge and post `map[string]string{fieldID: raw}`.
+// IT POSTS THE ONE FIELD AND NOTHING ELSE, which is the whole helper. Absence
+// means UNTOUCHED (Ruling U), so naming one field is exactly "set this, leave
+// the rest". It used to merge the entity's existing values in from
+// CustomValuesFor and re-post them all, which was inert -- every re-posted value
+// was byte-identical to what was stored, so each hit the unchanged-value rule
+// before validation and no row was rewritten -- but inert is not the same as
+// right. That merge was the Ruling Y enumeration shape: a payload built from
+// CustomValuesFor, which deliberately includes retired fields' retained values
+// the operator never saw. A helper that is safe only because a downstream rule
+// catches it is the fragility this feature spent four review rounds on, so it is
+// gone rather than annotated (Ruling Z).
 func mustValue(t *testing.T, f *customFieldFixture, fieldID, entityID, raw string) {
 	t.Helper()
-	entityType := entityTypeOf(t, f, entityID)
-	current, err := f.s.CustomValuesFor(f.ctx, entityType, entityID)
-	if err != nil {
-		t.Fatalf("reading the current values of %s %s: %v", entityType, entityID, err)
-	}
-	vals := make(map[string]string, len(current)+1)
-	for _, v := range current {
-		vals[v.FieldID] = v.ValueText
-	}
-	vals[fieldID] = raw
-	if err := f.s.SetCustomValues(f.ctx, f.actor, entityType, entityID,
-		entityVersion(t, f, entityType, entityID), vals); err != nil {
-		t.Fatalf("setting custom value %q on field %s: %v", raw, fieldID, err)
-	}
+	mustSetValues(t, f, entityID, map[string]string{fieldID: raw})
 }
 
 // mustSetValues replaces an entity's whole set in one call, which is what a
