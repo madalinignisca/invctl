@@ -653,6 +653,13 @@ func TestEveryEditorRefusesASecondSaveFromOneToken(t *testing.T) {
 		{"custom field options", "/custom-fields?options=" + customFieldSelectID,
 			"/custom-fields/" + customFieldSelectID + "/options",
 			url.Values{"option_value": {"gold"}, "option_label": {"Gold"}}},
+		// WP-A4 Task 6: the value editor is its own third editor, on the
+		// PARENT ASSET's own row_version -- not the custom_field's and not
+		// the value's -- design.md §3. It carries no ?edit=, because it is
+		// always rendered when a live field is defined, not gated by the
+		// shared row editor.
+		{"custom field value", "/assets/" + assetID, "/assets/" + assetID + "/custom-fields",
+			url.Values{"cf_" + customFieldID: {"value-token"}}},
 	}
 
 	for _, e := range editors {

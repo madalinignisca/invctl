@@ -356,6 +356,11 @@ type assetDetailPage struct {
 	Journal         []store.JournalRow
 	JournalResource string
 	JournalID       string
+	// CustomFields is this asset's estate-defined fields, grouped in their
+	// own section under a heading naming the organisation (WP-A4,
+	// docs/custom-fields-design.md §4). Absent from the page entirely when
+	// its Rows is empty -- see custom_fields_show.html.
+	CustomFields customFieldsPanel
 }
 
 // AssetDetail renders one asset with its containment, ports and workloads.
@@ -477,6 +482,20 @@ func (a *App) renderAssetDetail(w http.ResponseWriter, r *http.Request, status i
 		// A refused save of the asset itself, rather than of a row on it.
 		f := a.newAssetEditForm(r, asset, edit.Errors, envs, kinds, edit)
 		assetEdit = &f
+	}
+	// Custom fields (WP-A4): this entity's own values, plus a refusal if the
+	// one that just landed here belongs to that submission rather than to a
+	// port, address or the asset form above -- customFieldsEditID's sentinel
+	// never collides with a real row id.
+	var cfEdit *editState
+	if edit != nil && edit.ID == customFieldsEditID(asset.ID) {
+		cfEdit = edit
+	}
+	customFields, err := a.loadCustomFieldsPanel(r, domain.CustomFieldEntityAsset, asset.ID,
+		asset.RowVersion, "/assets/"+asset.ID+"/custom-fields", assetBase.CSRF, assetBase.CanWrite, cfEdit)
+	if err != nil {
+		a.serverError(w, r, err)
+		return
 	}
 	// Power, and the feeds this asset could be plugged into. A failure to read
 	// either leaves the section empty rather than failing the page: an asset
@@ -635,6 +654,7 @@ func (a *App) renderAssetDetail(w http.ResponseWriter, r *http.Request, status i
 		PowerFeeds:      powerFeeds,
 		Edit:            edit,
 		AssetEdit:       assetEdit,
+		CustomFields:    customFields,
 		Asset:           asset,
 		Certificates:    certificates,
 		Costs:           costs,

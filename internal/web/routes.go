@@ -221,8 +221,10 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	write("POST /assets/{id}/parent", app.AssetReparent)
 	write("POST /assets/{id}/storage", app.AssetStorageClaim)
 	write("POST /assets/{id}/occupants", app.AssetOccupants)
+	write("POST /assets/{id}/custom-fields", app.AssetCustomFields)
 
 	write("POST /services", app.ServiceCreate)
+	write("POST /services/{id}/custom-fields", app.ServiceCustomFields)
 	// One route per surface, as with costs: an entity type arriving in a URL
 	// is an entity type arriving from a request, and it would select a table.
 	write("POST /certificates", app.CertificateCreate)

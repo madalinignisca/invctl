@@ -314,4 +314,12 @@
     "Note" "Attached to this service: a licence, a support contract, a hosted plan."}}
 
 {{template "timeline_panel" .Timeline}}
+
+{{/* Estate-defined fields, WP-A4 (docs/custom-fields-design.md §4). Last on
+     the page, deliberately: every other panel here is something invctl
+     itself defines, and this is the one section whose row_version belongs
+     to no other editor -- keeping it below every ?edit= row on this page
+     keeps each editor's token the first one a reader (or a test) finds. */}}
+{{template "custom_fields_show" .CustomFields}}
+{{if .CustomFields.CanWrite}}{{template "custom_fields_form" .CustomFields}}{{end}}
 {{end}}

@@ -1,0 +1,94 @@
+{{/*
+  invctl — infrastructure inventory
+  Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+
+  Licensed under the GNU Affero General Public License, version 3 only —
+  no later version applies. See LICENSE for the full text.
+
+  SPDX-License-Identifier: AGPL-3.0-only
+*/}}
+{{/*
+  custom_fields_form is the editable half of docs/custom-fields-design.md
+  §4 and §6: one widget per live field, by kind (text, number, date,
+  checkbox, select), all submitted together against the parent entity's own
+  row_version -- never a per-value token (design.md §3: they are editing
+  this asset or service, not one field on it).
+
+  EVERY INPUT CARRIES THE STORED VALUE VERBATIM. A form that drew a blank
+  over an existing value would commit that blank faithfully on save -- the
+  converse half of the submission contract, and exactly Task 5's Critical
+  repeated here would silently clear every value on the next save.
+
+  A RETIRED FIELD RENDERS NO INPUT AT ALL: .Rows already comes from a
+  live-only field list (loadCustomFieldsPanel), so there is nothing here to
+  accidentally post one back. Design.md §6 says a retired field disappears
+  from forms; this is how that is literally true.
+
+  THE SUBMISSION MAY ONLY NAME WHAT THIS FORM DRAWS: every input's name is
+  cf_<field id>, and the handler builds its write payload from exactly the
+  cf_ keys present in the POST -- never a fresh field list, never
+  CustomValuesFor. A field this form does not render is a field this
+  submission cannot touch.
+
+  Standalone: absent when .Rows is empty, same as custom_fields_show.
+
+  Expects: .Rows, .Action, .CSRF, .RowVersion, .Edit (nil-safe editState).
+*/}}
+{{define "custom_fields_form"}}
+{{if .Rows}}
+<div class="panel">
+  <div class="panel-head">
+    <h2>Edit custom fields</h2>
+    <span class="panel-note">Saved together, against this entity's own version.</span>
+  </div>
+  <form class="panel-body" method="post" action="{{.Action}}">
+    <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+    <input type="hidden" name="row_version" value="{{.Edit.Value "row_version" (itoa .RowVersion)}}">
+    {{with .Edit.Err "_form"}}<div class="field-error">{{.}}</div>{{end}}
+    <div class="field-row">
+      {{range .Rows}}
+      {{$row := .}}
+      {{$name := $row.InputName}}
+      <div class="field">
+        <label for="cf-{{$row.Field.ID}}">{{$row.Field.Label}}</label>
+        {{if eq $row.Field.Kind "text"}}
+        <input id="cf-{{$row.Field.ID}}" class="{{if $.Edit.Err $name}}invalid{{end}}" type="text"
+               name="{{$name}}" value="{{$.Edit.Value $name $row.Value}}">
+        {{else if eq $row.Field.Kind "number"}}
+        <input id="cf-{{$row.Field.ID}}" class="{{if $.Edit.Err $name}}invalid{{end}}" type="number" step="any"
+               name="{{$name}}" value="{{$.Edit.Value $name $row.Value}}">
+        {{else if eq $row.Field.Kind "date"}}
+        <input id="cf-{{$row.Field.ID}}" class="{{if $.Edit.Err $name}}invalid{{end}}" type="date"
+               name="{{$name}}" value="{{$.Edit.Value $name $row.Value}}">
+        {{else if eq $row.Field.Kind "boolean"}}
+        {{/* Checked-then-hidden, in that order: a browser submits form
+             controls in document order, so a ticked box sends "true" first
+             and PostFormValue (first value wins) reads it; unticked, only
+             the hidden control fires and reads "false". The field is
+             therefore always present when this form is submitted, never
+             genuinely absent -- correct here because this form always
+             shows every live field, and resubmitting an unchanged value is
+             a no-op (see setCustomValues' unchanged-value rule). */}}
+        <label style="display:inline-flex;align-items:center;gap:6px">
+          <input id="cf-{{$row.Field.ID}}" type="checkbox" name="{{$name}}" value="true"
+                 {{if $.Edit.Checked $name (eq $row.Value "true")}}checked{{end}}>
+          <input type="hidden" name="{{$name}}" value="false">
+        </label>
+        {{else if eq $row.Field.Kind "select"}}
+        {{$current := $.Edit.Value $name $row.Value}}
+        <select id="cf-{{$row.Field.ID}}" name="{{$name}}">
+          <option value="">— not set —</option>
+          {{range $row.Options}}
+          <option value="{{.Value}}" {{if eq .Value $current}}selected{{end}}>{{.Label}}</option>
+          {{end}}
+        </select>
+        {{end}}
+        {{with $.Edit.Err $name}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      {{end}}
+    </div>
+    <button class="btn btn-primary" type="submit">Save custom fields</button>
+  </form>
+</div>
+{{end}}
+{{end}}

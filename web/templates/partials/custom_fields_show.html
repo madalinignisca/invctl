@@ -1,0 +1,46 @@
+{{/*
+  invctl — infrastructure inventory
+  Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+
+  Licensed under the GNU Affero General Public License, version 3 only —
+  no later version applies. See LICENSE for the full text.
+
+  SPDX-License-Identifier: AGPL-3.0-only
+*/}}
+{{/*
+  custom_fields_show is the read-only half of docs/custom-fields-design.md
+  §4's grouped section: what this estate has recorded on this asset or
+  service, under a heading naming the ORGANISATION rather than the product,
+  so a new hire can tell at a glance which fields invctl shipped and which
+  somebody here added.
+
+  Standalone, like every partial here: absent entirely -- no heading, no
+  panel, nothing -- when no live field is defined for this entity type, so
+  an estate that never uses the feature never sees it (design.md §4). NEVER
+  interleaved with built-in fields: this is its own panel, never folded
+  into "Details".
+
+  Expects: .Rows ([]customFieldFormRow).
+*/}}
+{{define "custom_fields_show"}}
+{{if .Rows}}
+<div class="panel">
+  <div class="panel-head">
+    <h2>Defined by your organisation</h2>
+    <span class="panel-note">
+      Estate-specific fields nobody at invctl wrote — invctl only draws the
+      slot. If one of these misbehaves, the answer is on the registry, not a
+      call to the vendor.
+    </span>
+  </div>
+  <div class="panel-body">
+    <dl class="kv">
+      {{range .Rows}}
+      <dt>{{.Field.Label}}</dt>
+      <dd class="mono">{{if .Value}}{{.Value}}{{else}}<span style="color:var(--faint)">not recorded</span>{{end}}</dd>
+      {{end}}
+    </dl>
+  </div>
+</div>
+{{end}}
+{{end}}

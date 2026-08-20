@@ -82,7 +82,11 @@ func (a *App) ServiceList(w http.ResponseWriter, r *http.Request) {
 type serviceDetailPage struct {
 	Base
 	// Suppliers, for the "who invoices it" picker on each cost line (WP-J6).
-	Providers    []store.ProviderRow
+	Providers []store.ProviderRow
+	// CustomFields is this service's estate-defined fields, grouped in
+	// their own section (WP-A4, docs/custom-fields-design.md §4). Absent
+	// from the page entirely when its Rows is empty.
+	CustomFields customFieldsPanel
 	Service      *store.ServiceRow
 	Certificates []store.DeployedCertificate
 	Costs        []store.CostRow
@@ -282,8 +286,24 @@ func (a *App) renderServiceDetail(w http.ResponseWriter, r *http.Request, status
 		return
 	}
 
+	// Custom fields (WP-A4): this entity's own values, plus a refusal if the
+	// one that just landed here belongs to that submission rather than to a
+	// placement or an endpoint -- customFieldsEditID's sentinel never
+	// collides with a real row id.
+	var cfEdit *editState
+	if edit != nil && edit.ID == customFieldsEditID(service.ID) {
+		cfEdit = edit
+	}
+	customFields, err := a.loadCustomFieldsPanel(r, domain.CustomFieldEntityService, service.ID,
+		service.RowVersion, "/services/"+service.ID+"/custom-fields", b.CSRF, b.CanWrite, cfEdit)
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
+
 	a.Render.Page(w, status, "service_detail", serviceDetailPage{
 		Providers:      providers,
+		CustomFields:   customFields,
 		Base:           b,
 		Service:        service,
 		Certificates:   certificates,
