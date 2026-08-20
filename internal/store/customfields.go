@@ -167,14 +167,7 @@ func (s *SQLStore) UpdateCustomField(ctx context.Context, actor domain.Actor, f 
 		return err
 	}
 
-	ve := &domain.ValidationError{}
-	if strings.TrimSpace(f.Label) == "" {
-		ve.Add("label", "is required")
-	}
-	if strings.TrimSpace(f.Description) == "" {
-		ve.Add("description", "is required")
-	}
-	if err := ve.OrNil(); err != nil {
+	if err := f.Validate(); err != nil {
 		return err
 	}
 
@@ -185,23 +178,15 @@ func (s *SQLStore) UpdateCustomField(ctx context.Context, actor domain.Actor, f 
 	// custom_field_value carries no entity_type of its own to catch the
 	// mismatch. An operator who meant a service field created an asset field,
 	// which is one form, not an edit of this one.
+	//
+	// No race to guard here: entity_type can only ever change through this
+	// same check, on this same row, so `before.EntityType` read a moment ago
+	// cannot have gone stale in a way that flips the outcome -- unlike the
+	// Kind guard below, which depends on a table this method does not own.
 	if f.EntityType != before.EntityType {
 		return fmt.Errorf(
 			"custom field %s belongs to %s: a field for %s is a new field, not an edit",
 			before.Code, before.EntityType, f.EntityType)
-	}
-
-	if f.Kind != before.Kind {
-		n, err := s.countOne(ctx,
-			`SELECT COUNT(*) FROM custom_field_value WHERE field_id = ?`, f.ID)
-		if err != nil {
-			return fmt.Errorf("counting values of custom field %s: %w", f.ID, err)
-		}
-		if n > 0 {
-			return fmt.Errorf(
-				"custom field %s holds %d value(s): kind cannot change while values exist, create a new field instead",
-				before.Code, n)
-		}
 	}
 
 	// Attribution and retirement are not this method's business -- Retire and
@@ -211,7 +196,30 @@ func (s *SQLStore) UpdateCustomField(ctx context.Context, actor domain.Actor, f 
 	f.RetiredAt = before.RetiredAt
 	f.RetiredBy = before.RetiredBy
 
-	return s.write(ctx, actor, func(t *tx) error {
+	// writeSerializable, not write: the Kind guard below is check-then-act --
+	// "does this field hold no values" -- against a table this method does
+	// not own, with no unique index or FK backing the invariant the way
+	// RestoreCustomField's code collision is backed by the partial unique
+	// index. Read-committed lets a concurrent value write commit between the
+	// count and this transaction's own commit; only serializable isolation
+	// (with the retry writeSerializable already provides) actually closes it.
+	// It is unreachable today, before Task 4 adds the value writer that could
+	// race it -- and "unreachable today" is exactly the reasoning this repo
+	// has already paid for once.
+	return s.writeSerializable(ctx, actor, func(t *tx) error {
+		if f.Kind != before.Kind {
+			n, err := t.countOne(ctx,
+				`SELECT COUNT(*) FROM custom_field_value WHERE field_id = ?`, f.ID)
+			if err != nil {
+				return fmt.Errorf("counting values of custom field %s: %w", f.ID, err)
+			}
+			if n > 0 {
+				return fmt.Errorf(
+					"custom field %s holds %d value(s): kind cannot change while values exist, create a new field instead",
+					before.Code, n)
+			}
+		}
+
 		res, err := t.exec(ctx, `
 			UPDATE custom_field SET entity_type = ?, code = ?, label = ?, kind = ?,
 			                         description = ?, row_version = row_version + 1
@@ -338,8 +346,20 @@ func (s *SQLStore) SetCustomFieldOptions(ctx context.Context, actor domain.Actor
 	}
 	beforeValues := optionValues(before.Options)
 
+	// A duplicate value would silently double-write the same row -- last one
+	// wins, and nothing above notices -- so both it and an empty value or
+	// label are refused up front, naming the offending value.
 	desired := make(map[string]bool, len(opts))
 	for _, o := range opts {
+		if strings.TrimSpace(o.Value) == "" {
+			return fmt.Errorf("setting options of custom field %s: an option's value must not be empty", fieldID)
+		}
+		if strings.TrimSpace(o.Label) == "" {
+			return fmt.Errorf("setting options of custom field %s: option %q must have a label", fieldID, o.Value)
+		}
+		if desired[o.Value] {
+			return fmt.Errorf("setting options of custom field %s: value %q is listed more than once", fieldID, o.Value)
+		}
 		desired[o.Value] = true
 	}
 	existingByValue := make(map[string]domain.CustomFieldOption, len(before.Options))

@@ -94,21 +94,37 @@ type CustomFieldValue struct {
 	RowVersion int    `db:"row_version"`
 }
 
+// validateShape checks a CustomField's shape and enum membership: the rules
+// that hold at every point in its life, construction or a later edit alike.
+// It normalises Code, Label and Description in place. NewCustomField and
+// Validate share it rather than keeping two copies of the same rules --
+// immutability (entity_type frozen after creation, kind frozen once a value
+// exists) is deliberately NOT here, because it needs the before row and a
+// value count that only the store has; see internal/store/customfields.go.
+func (f *CustomField) validateShape(ve *ValidationError) {
+	f.Code = strings.ToLower(checkVocabulary(ve, "code", f.Code))
+	f.Label = checkRequired(ve, "label", f.Label)
+	checkEnum(ve, "entity_type", f.EntityType, CustomFieldEntityTypes)
+	checkEnum(ve, "kind", f.Kind, CustomFieldKinds)
+	f.Description = checkRequired(ve, "description", f.Description)
+}
+
+// Validate re-checks a CustomField after field updates, mirroring
+// domain.Team.Validate(): a handler that mutated the struct directly --
+// exactly what UpdateCustomField's own test suite does -- gets the same
+// first line of defence a fresh NewCustomField call would, rather than
+// leaving the database CHECK as the only backstop.
+func (f *CustomField) Validate() error {
+	ve := &ValidationError{}
+	f.validateShape(ve)
+	return ve.OrNil()
+}
+
 // NewCustomField validates and constructs a field definition. now is the
 // clock, last parameter, formatted here — the shape every constructor in this
 // package follows, so the store never generates a timestamp.
 func NewCustomField(id, entityType, code, label, kind, description, createdBy string, now time.Time) (*CustomField, error) {
-	ve := &ValidationError{}
-	checkEnum(ve, "entity_type", entityType, CustomFieldEntityTypes)
-	code = strings.ToLower(checkVocabulary(ve, "code", code))
-	label = checkRequired(ve, "label", label)
-	checkEnum(ve, "kind", kind, CustomFieldKinds)
-	description = checkRequired(ve, "description", description)
-	createdBy = checkRequired(ve, "created_by", createdBy)
-	if err := ve.OrNil(); err != nil {
-		return nil, err
-	}
-	return &CustomField{
+	f := &CustomField{
 		ID:          id,
 		EntityType:  entityType,
 		Code:        code,
@@ -118,7 +134,14 @@ func NewCustomField(id, entityType, code, label, kind, description, createdBy st
 		CreatedBy:   createdBy,
 		CreatedAt:   FormatTime(now),
 		RowVersion:  1,
-	}, nil
+	}
+	ve := &ValidationError{}
+	f.validateShape(ve)
+	f.CreatedBy = checkRequired(ve, "created_by", f.CreatedBy)
+	if err := ve.OrNil(); err != nil {
+		return nil, err
+	}
+	return f, nil
 }
 
 // IsRetired reports whether the field has been retired. A retired field keeps

@@ -263,6 +263,45 @@ func TestTheLabelAndDescriptionStayEditableWithValues(t *testing.T) {
 	}
 }
 
+// TestCodeStaysEditableWithValues is Ruling M's other half: code, like
+// label and description, is a rename -- values are keyed by field_id, not by
+// code, so nothing is stranded and the audit fold is simply recomputed on the
+// next write rather than rewritten retroactively. Only entity_type is frozen
+// even with no values at stake; code is not, and this is the test that says so.
+func TestCodeStaysEditableWithValues(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newCustomFieldFixture(t, e)
+			id := mustField(t, f, "asset", "cost_centre", domain.CustomFieldText)
+			mustValue(t, f, id, f.assetID, "IT-42")
+
+			row, err := f.s.GetCustomField(f.ctx, id)
+			if err != nil {
+				t.Fatalf("reading: %v", err)
+			}
+			row.Code = "cost_center_us"
+			if err := f.s.UpdateCustomField(f.ctx, f.actor, &row.CustomField); err != nil {
+				t.Fatalf("renaming the code of a field that holds values must be allowed: %v", err)
+			}
+			after, err := f.s.GetCustomField(f.ctx, id)
+			if err != nil {
+				t.Fatalf("re-reading: %v", err)
+			}
+			if after.Code != "cost_center_us" {
+				t.Fatalf("got code %q, want cost_center_us", after.Code)
+			}
+			n, err := f.s.countOne(f.ctx,
+				`SELECT COUNT(*) FROM custom_field_value WHERE field_id = ?`, id)
+			if err != nil {
+				t.Fatalf("counting: %v", err)
+			}
+			if n != 1 {
+				t.Fatalf("renaming the code stranded the value: got %d, want 1", n)
+			}
+		})
+	}
+}
+
 func TestRetiringAFieldKeepsEveryValue(t *testing.T) {
 	for _, e := range Engines(t) {
 		t.Run(e.Name, func(t *testing.T) {
@@ -490,6 +529,52 @@ func TestRetiringAnOptionKeepsItSelectableOnExistingValues(t *testing.T) {
 			}
 			if silver.RetiredAt == nil {
 				t.Fatal("the silver option must be retired once it is no longer offered")
+			}
+		})
+	}
+}
+
+// TestSetCustomFieldOptionsRefusesADuplicateValue: a duplicate value would
+// silently double-write the same row inside the loop -- last one wins, and
+// nothing before this guard would have noticed.
+func TestSetCustomFieldOptionsRefusesADuplicateValue(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newCustomFieldFixture(t, e)
+			id := mustField(t, f, "asset", "tier", domain.CustomFieldSelect)
+
+			err := f.s.SetCustomFieldOptions(f.ctx, f.actor, id, []domain.CustomFieldOption{
+				{Value: "gold", Label: "Gold"},
+				{Value: "gold", Label: "Gold (again)"},
+			})
+			if err == nil {
+				t.Fatal("a duplicate option value must be refused")
+			}
+			if !strings.Contains(err.Error(), "gold") {
+				t.Errorf("the refusal must name the offending value; got %v", err)
+			}
+		})
+	}
+}
+
+// TestSetCustomFieldOptionsRefusesAnEmptyValueOrLabel covers the other half
+// of the same guard: an option with nothing in its value or its label is not
+// a value an entity could ever be asked to pick.
+func TestSetCustomFieldOptionsRefusesAnEmptyValueOrLabel(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newCustomFieldFixture(t, e)
+			id := mustField(t, f, "asset", "tier", domain.CustomFieldSelect)
+
+			if err := f.s.SetCustomFieldOptions(f.ctx, f.actor, id, []domain.CustomFieldOption{
+				{Value: "  ", Label: "Gold"},
+			}); err == nil {
+				t.Fatal("an empty option value must be refused")
+			}
+			if err := f.s.SetCustomFieldOptions(f.ctx, f.actor, id, []domain.CustomFieldOption{
+				{Value: "gold", Label: "  "},
+			}); err == nil {
+				t.Fatal("an empty option label must be refused")
 			}
 		})
 	}
