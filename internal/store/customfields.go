@@ -178,6 +178,19 @@ func (s *SQLStore) UpdateCustomField(ctx context.Context, actor domain.Actor, f 
 		return err
 	}
 
+	// entity_type is immutable, always, even at zero values -- stricter than
+	// the rule for Kind below. It is half the field's identity and half the
+	// partial unique index (entity_type, code); flipping it strands every
+	// existing value against the wrong entity kind, because
+	// custom_field_value carries no entity_type of its own to catch the
+	// mismatch. An operator who meant a service field created an asset field,
+	// which is one form, not an edit of this one.
+	if f.EntityType != before.EntityType {
+		return fmt.Errorf(
+			"custom field %s belongs to %s: a field for %s is a new field, not an edit",
+			before.Code, before.EntityType, f.EntityType)
+	}
+
 	if f.Kind != before.Kind {
 		n, err := s.countOne(ctx,
 			`SELECT COUNT(*) FROM custom_field_value WHERE field_id = ?`, f.ID)

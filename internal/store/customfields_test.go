@@ -109,14 +109,19 @@ func mustOption(t *testing.T, f *customFieldFixture, fieldID, value string) {
 	}
 }
 
-// mustValue is a STUB, not the real write path. Task 4 owns
-// SetCustomFieldValue (validation against the field's kind, canonicalisation,
-// the fold into assetAudit/serviceAudit, the row_version conflict check) and
-// will replace this with a call through the store. custom_field_value.entity_id
-// carries no foreign key -- the same (entity_type, entity_id) shape as
-// change_log -- so a raw insert here cannot corrupt anything Task 3 owns; it
-// exists only so this task's own tests (which must exercise "a field that
-// holds a value") do not block on work that has not landed yet.
+// mustValue BYPASSES THE STORE LAYER ENTIRELY. It is a raw INSERT straight
+// into custom_field_value, not a call through any store method -- there is no
+// SetCustomFieldValue yet. It does none of the things the real write path
+// must do: no validation against the field's kind, no canonicalisation, no
+// fold into assetAudit/serviceAudit, no row_version conflict check.
+//
+// TASK 4 MUST REPLACE THIS FUNCTION'S BODY with a call through its real store
+// method once that method exists -- not add a second value-writing path
+// alongside it. This stub exists only so Task 3's own tests (which need "a
+// field that holds a value" to exist) do not block on work that has not
+// landed yet. custom_field_value.entity_id carries no foreign key -- the same
+// (entity_type, entity_id) shape as change_log -- so this raw insert cannot
+// corrupt anything Task 3 owns, but it is not a second implementation to keep.
 func mustValue(t *testing.T, f *customFieldFixture, fieldID, entityID, raw string) {
 	t.Helper()
 	now := domain.FormatTime(f.s.Now())
@@ -506,6 +511,38 @@ func TestUpdateRefusesADescriptionClearedToBlank(t *testing.T) {
 			row.Description = "   "
 			if err := f.s.UpdateCustomField(f.ctx, f.actor, &row.CustomField); err == nil {
 				t.Fatal("clearing the description to blank must be refused")
+			}
+		})
+	}
+}
+
+// TestEntityTypeCannotChangeEvenAtZeroValues is CONTROLLER RULING M:
+// entity_type is stricter than Kind. Kind is refused only once values exist,
+// because a retype is harmless with none. entity_type is refused even with
+// NO values, because it is half the field's identity and half the partial
+// unique index -- flipping it would strand every future value against the
+// wrong entity kind, and custom_field_value has nothing that would catch the
+// mismatch.
+func TestEntityTypeCannotChangeEvenAtZeroValues(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newCustomFieldFixture(t, e)
+			id := mustField(t, f, "asset", "cost_centre", domain.CustomFieldText)
+
+			row, err := f.s.GetCustomField(f.ctx, id)
+			if err != nil {
+				t.Fatalf("reading: %v", err)
+			}
+			// No mustValue call here on purpose: this field holds ZERO
+			// values. Refusing anyway is the entire point of this test --
+			// it is what tells entity_type apart from Kind.
+			row.EntityType = "service"
+			err = f.s.UpdateCustomField(f.ctx, f.actor, &row.CustomField)
+			if err == nil {
+				t.Fatal("changing entity_type must be refused, even when the field holds no values")
+			}
+			if !strings.Contains(err.Error(), "asset") {
+				t.Errorf("the refusal should name the field's real entity_type; got %v", err)
 			}
 		})
 	}
