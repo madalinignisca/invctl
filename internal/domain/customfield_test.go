@@ -9,18 +9,19 @@
 package domain
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
 
-var testClock = time.Date(2026, 8, 20, 9, 0, 0, 0, time.UTC)
+var customFieldNow = time.Date(2026, 8, 20, 9, 0, 0, 0, time.UTC)
 
 func TestACustomFieldRefusesAnEmptyDescription(t *testing.T) {
 	// The description is what a new hire reads instead of telephoning the
 	// vendor. An administrator who cannot say why a field exists is the
 	// origin of that call, and creation is the cheapest moment to ask.
 	_, err := NewCustomField("id", CustomFieldEntityAsset, "cost_centre",
-		"Cost Centre", CustomFieldText, "   ", "user-1", testClock)
+		"Cost Centre", CustomFieldText, "   ", "user-1", customFieldNow)
 	if err == nil {
 		t.Fatal("a field with no description must be refused")
 	}
@@ -28,7 +29,7 @@ func TestACustomFieldRefusesAnEmptyDescription(t *testing.T) {
 
 func TestACustomFieldCodeIsLowerCased(t *testing.T) {
 	f, err := NewCustomField("id", CustomFieldEntityAsset, "Cost_Centre",
-		"Cost Centre", CustomFieldText, "SAP cost centre", "user-1", testClock)
+		"Cost Centre", CustomFieldText, "SAP cost centre", "user-1", customFieldNow)
 	if err != nil {
 		t.Fatalf("building: %v", err)
 	}
@@ -37,9 +38,19 @@ func TestACustomFieldCodeIsLowerCased(t *testing.T) {
 	}
 }
 
+func TestACustomFieldRefusesACodeWithASpace(t *testing.T) {
+	// code participates in a unique index and surfaces in HTML form field
+	// names and CSV headers, where a space is a mess.
+	_, err := NewCustomField("id", CustomFieldEntityAsset, "cost centre",
+		"Cost Centre", CustomFieldText, "SAP cost centre", "user-1", customFieldNow)
+	if err == nil {
+		t.Fatal("a code containing a space must be refused")
+	}
+}
+
 func TestACustomFieldRefusesAnUnknownEntityType(t *testing.T) {
 	_, err := NewCustomField("id", "network", "cost_centre",
-		"Cost Centre", CustomFieldText, "SAP cost centre", "user-1", testClock)
+		"Cost Centre", CustomFieldText, "SAP cost centre", "user-1", customFieldNow)
 	if err == nil {
 		t.Fatal("an unknown entity type must be refused")
 	}
@@ -47,7 +58,7 @@ func TestACustomFieldRefusesAnUnknownEntityType(t *testing.T) {
 
 func TestACustomFieldRefusesAnUnknownKind(t *testing.T) {
 	_, err := NewCustomField("id", CustomFieldEntityAsset, "cost_centre",
-		"Cost Centre", "colour", "SAP cost centre", "user-1", testClock)
+		"Cost Centre", "colour", "SAP cost centre", "user-1", customFieldNow)
 	if err == nil {
 		t.Fatal("an unknown kind must be refused")
 	}
@@ -55,18 +66,18 @@ func TestACustomFieldRefusesAnUnknownKind(t *testing.T) {
 
 func TestACustomFieldStampsItsCreatedAtFromTheClockParameter(t *testing.T) {
 	f, err := NewCustomField("id", CustomFieldEntityAsset, "cost_centre",
-		"Cost Centre", CustomFieldText, "SAP cost centre", "user-1", testClock)
+		"Cost Centre", CustomFieldText, "SAP cost centre", "user-1", customFieldNow)
 	if err != nil {
 		t.Fatalf("building: %v", err)
 	}
-	if f.CreatedAt != FormatTime(testClock) {
-		t.Fatalf("got created_at %q, want %q", f.CreatedAt, FormatTime(testClock))
+	if f.CreatedAt != FormatTime(customFieldNow) {
+		t.Fatalf("got created_at %q, want %q", f.CreatedAt, FormatTime(customFieldNow))
 	}
 }
 
 func TestANewCustomFieldIsNotRetired(t *testing.T) {
 	f, err := NewCustomField("id", CustomFieldEntityAsset, "cost_centre",
-		"Cost Centre", CustomFieldText, "SAP cost centre", "user-1", testClock)
+		"Cost Centre", CustomFieldText, "SAP cost centre", "user-1", customFieldNow)
 	if err != nil {
 		t.Fatalf("building: %v", err)
 	}
@@ -77,11 +88,11 @@ func TestANewCustomFieldIsNotRetired(t *testing.T) {
 
 func TestARetiredCustomFieldReportsItself(t *testing.T) {
 	f, err := NewCustomField("id", CustomFieldEntityAsset, "cost_centre",
-		"Cost Centre", CustomFieldText, "SAP cost centre", "user-1", testClock)
+		"Cost Centre", CustomFieldText, "SAP cost centre", "user-1", customFieldNow)
 	if err != nil {
 		t.Fatalf("building: %v", err)
 	}
-	retiredAt := FormatTime(testClock)
+	retiredAt := FormatTime(customFieldNow)
 	f.RetiredAt = &retiredAt
 	if !f.IsRetired() {
 		t.Fatal("a field with retired_at set must report itself retired")
@@ -100,16 +111,27 @@ func TestCanonicalCustomValue(t *testing.T) {
 		{"a whole number", CustomFieldNumber, "42", nil, "42", false},
 		{"a decimal", CustomFieldNumber, "42.50", nil, "42.50", false},
 		{"a negative", CustomFieldNumber, "-7", nil, "-7", false},
+		{"a positive with an explicit sign", CustomFieldNumber, "+42", nil, "+42", false},
 		{"a grouped number is refused", CustomFieldNumber, "1,234", nil, "", true},
 		{"words are not a number", CustomFieldNumber, "many", nil, "", true},
+		{"underscore grouping is refused", CustomFieldNumber, "1_234", nil, "", true},
+		{"Infinity is refused", CustomFieldNumber, "Infinity", nil, "", true},
+		{"inf is refused", CustomFieldNumber, "inf", nil, "", true},
+		{"NaN is refused", CustomFieldNumber, "NaN", nil, "", true},
+		{"a hex float literal is refused", CustomFieldNumber, "0x1p4", nil, "", true},
 		{"an ISO date", CustomFieldDate, "2027-03-01", nil, "2027-03-01", false},
 		{"a non-date is refused", CustomFieldDate, "march next year", nil, "", true},
 		{"an impossible date is refused", CustomFieldDate, "2027-02-30", nil, "", true},
+		{"a non-leap-year 29th of February is refused", CustomFieldDate, "2027-02-29", nil, "", true},
 		{"true normalises", CustomFieldBoolean, "TRUE", nil, "true", false},
 		{"yes is not a boolean", CustomFieldBoolean, "yes", nil, "", true},
 		{"a live option", CustomFieldSelect, "it-42", []string{"it-42", "it-99"}, "it-42", false},
 		{"an unlisted option is refused", CustomFieldSelect, "it-01", []string{"it-42"}, "", true},
 		{"select with no options is refused", CustomFieldSelect, "it-42", nil, "", true},
+		{"text at the length limit is accepted", CustomFieldText, strings.Repeat("a", MaxCustomTextLength), nil, strings.Repeat("a", MaxCustomTextLength), false},
+		{"text over the length limit is refused", CustomFieldText, strings.Repeat("a", MaxCustomTextLength+1), nil, "", true},
+		{"text with an embedded control character is refused", CustomFieldText, "ABC-1234\x00", nil, "", true},
+		{"text with a newline is refused", CustomFieldText, "ABC-1234\nmore", nil, "", true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

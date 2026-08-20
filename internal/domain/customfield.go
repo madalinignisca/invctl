@@ -20,6 +20,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // Custom field kinds. This Go set is the first line of defence; the
@@ -47,6 +48,11 @@ const (
 
 // CustomFieldEntityTypes are the permitted values of custom_field.entity_type.
 var CustomFieldEntityTypes = []string{CustomFieldEntityAsset, CustomFieldEntityService}
+
+// MaxCustomTextLength bounds a `text` kind custom value. Generous for an
+// identifier or a short note, far short of a paste bomb landing in a CSV
+// export next to the injection surface WP-G5 already defuses.
+const MaxCustomTextLength = 500
 
 // CustomField is a definition: what an administrator says a field means, for
 // which entity type, and why it exists. description is required — an
@@ -94,7 +100,7 @@ type CustomFieldValue struct {
 func NewCustomField(id, entityType, code, label, kind, description, createdBy string, now time.Time) (*CustomField, error) {
 	ve := &ValidationError{}
 	checkEnum(ve, "entity_type", entityType, CustomFieldEntityTypes)
-	code = strings.ToLower(checkRequired(ve, "code", code))
+	code = strings.ToLower(checkVocabulary(ve, "code", code))
 	label = checkRequired(ve, "label", label)
 	checkEnum(ve, "kind", kind, CustomFieldKinds)
 	description = checkRequired(ve, "description", description)
@@ -134,11 +140,29 @@ func CanonicalCustomValue(kind, raw string, options []string) (string, error) {
 		if trimmed == "" {
 			return "", NewValidation("value", "is required")
 		}
+		if len(trimmed) > MaxCustomTextLength {
+			return "", NewValidation("value", "must be "+strconv.Itoa(MaxCustomTextLength)+" characters or fewer")
+		}
+		for _, r := range trimmed {
+			if unicode.IsControl(r) {
+				return "", NewValidation("value", "must not contain control characters")
+			}
+		}
 		return trimmed, nil
 	case CustomFieldNumber:
 		trimmed := strings.TrimSpace(raw)
+		// isDecimalNumber decides, not ParseFloat: ParseFloat accepts the
+		// Go float-literal grammar, which is more permissive than "a
+		// decimal number" -- it takes "1_234" (underscore grouping),
+		// "Infinity", "inf", "NaN" and "0x1p4" (hex float), none of which
+		// belong in value_text verbatim, in a CSV column or in an audit
+		// diff. ParseFloat runs afterward only as a second check on a
+		// string the character class has already approved.
+		if !isDecimalNumber(trimmed) {
+			return "", NewValidation("value", "must be a decimal number")
+		}
 		if _, err := strconv.ParseFloat(trimmed, 64); err != nil {
-			return "", NewValidation("value", "must be a number")
+			return "", NewValidation("value", "must be a decimal number")
 		}
 		// The trimmed ORIGINAL text is returned, not the parsed float
 		// reformatted: an operator who typed 42.50 meant two decimal
@@ -169,6 +193,35 @@ func CanonicalCustomValue(kind, raw string, options []string) (string, error) {
 		}
 		return "", NewValidation("value", "must be one of this field's live options")
 	default:
-		return "", NewValidation("kind", "is not a known custom field kind")
+		return "", NewValidation("value", "is not a known custom field kind")
 	}
+}
+
+// isDecimalNumber reports whether s is a decimal number and nothing else: an
+// optional leading sign, digits, at most one '.', and at least one digit.
+// Deliberately narrower than strconv.ParseFloat's grammar, which also
+// accepts underscore-grouped literals, "Infinity", "inf", "NaN" and hex
+// float literals -- none of which are "a decimal number" in the sense a
+// custom field's number kind means.
+func isDecimalNumber(s string) bool {
+	i := 0
+	if i < len(s) && (s[i] == '+' || s[i] == '-') {
+		i++
+	}
+	if i >= len(s) {
+		return false
+	}
+	sawDigit := false
+	sawDot := false
+	for ; i < len(s); i++ {
+		switch c := s[i]; {
+		case c >= '0' && c <= '9':
+			sawDigit = true
+		case c == '.' && !sawDot:
+			sawDot = true
+		default:
+			return false
+		}
+	}
+	return sawDigit
 }
