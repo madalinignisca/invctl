@@ -102,6 +102,7 @@ func (s *SQLStore) AssetPaths(ctx context.Context) (map[string]string, error) {
 // definition it renders and the header it renders under.
 type customExportColumn struct {
 	FieldID string
+	Code    string
 	Header  string
 }
 
@@ -145,6 +146,7 @@ func (s *SQLStore) customFieldColumns(ctx context.Context, entityType string, id
 	for _, chunk := range chunkIDs(ids) {
 		var scanned []struct {
 			FieldID   string  `db:"field_id"`
+			Code      string  `db:"code"`
 			Label     string  `db:"label"`
 			RetiredAt *string `db:"retired_at"`
 			EntityID  *string `db:"entity_id"`
@@ -153,7 +155,7 @@ func (s *SQLStore) customFieldColumns(ctx context.Context, entityType string, id
 		args := anySlice(chunk)
 		args = append(args, entityType)
 		query := `
-			SELECT cf.id AS field_id, cf.label AS label, cf.retired_at AS retired_at,
+			SELECT cf.id AS field_id, cf.code AS code, cf.label AS label, cf.retired_at AS retired_at,
 			       cv.entity_id AS entity_id, cv.value_text AS value_text
 			FROM custom_field cf
 			LEFT JOIN custom_field_value cv
@@ -170,7 +172,7 @@ func (s *SQLStore) customFieldColumns(ctx context.Context, entityType string, id
 				if r.RetiredAt != nil {
 					header = r.Label + " (retired)"
 				}
-				cols = append(cols, customExportColumn{FieldID: r.FieldID, Header: header})
+				cols = append(cols, customExportColumn{FieldID: r.FieldID, Code: r.Code, Header: header})
 			}
 			if r.EntityID == nil || r.ValueText == nil {
 				continue
@@ -183,13 +185,57 @@ func (s *SQLStore) customFieldColumns(ctx context.Context, entityType string, id
 			byField[*r.EntityID] = *r.ValueText
 		}
 	}
+	disambiguateHeaders(cols)
 	return cols, values, nil
 }
 
+// disambiguateHeaders appends a field's code to its header, IN PLACE, but
+// only where two or more columns would otherwise carry the identical header
+// text -- design.md's Ruling AM. custom_field.label is not unique (§2/§3
+// impose no such constraint, deliberately: a cross-task uniqueness constraint
+// might forbid a legitimate rename), so two live fields, or two retired ones,
+// can share a label. The registry already shows the code beside the label, so
+// the ambiguity exists only here, in a file an operator works from once the
+// column names are the only thing left to go by.
+//
+// APPLIED TO THE HEADER AS ALREADY BUILT, RETIRED MARKER INCLUDED, so a
+// collision between two RETIRED fields sharing a label reads as
+// "Label (retired) (code)" for each -- the marker states what the field is,
+// the code says which one. A live field colliding with a same-labelled
+// retired one is never touched by this at all: "Cost Centre" and
+// "Cost Centre (retired)" are already two different strings, so the retired
+// marker disambiguates them on its own and neither gets a code suffix.
+//
+// A field with a UNIQUE header is untouched -- only a real collision earns
+// the code suffix, so the common case (which is every field most estates will
+// ever define) keeps reading exactly as the registry shows it.
+func disambiguateHeaders(cols []customExportColumn) {
+	counts := make(map[string]int, len(cols))
+	for _, c := range cols {
+		counts[c.Header]++
+	}
+	for i, c := range cols {
+		if counts[c.Header] > 1 {
+			cols[i].Header = c.Header + " (" + c.Code + ")"
+		}
+	}
+}
+
 // customFieldCells renders one entity's custom-field cells in cols' order,
-// each defused through csvsafe.Cell -- the same defusing render.CSV applies
-// to every other cell, applied here because an operator types a custom
-// value's text freely, and it is not a wire format anything else parses back.
+// each defused through csvsafe.Cell.
+//
+// NOT DEFENCE IN DEPTH AGAINST A SECOND CONSUMER OF Table -- there isn't one.
+// Every Table this package builds is read exactly once, by render.CSV, which
+// already defuses every cell of every row (including these) at the boundary
+// where the file is written. This call exists because
+// TestACustomValueIsDefusedLikeEveryOtherCell asserts against ExportAssets'
+// and ExportServices' RETURNED Table directly, never going through
+// render.CSV -- so the Table itself has to already carry a defused value for
+// that assertion to mean anything. If that test, or the reason it bypasses
+// render.CSV, ever goes away, this call can go with it; until then, deleting
+// it as a tidy-up breaks a test without leaving any clue why it existed,
+// which is the whole reason this comment is here instead of "belt and
+// braces".
 func customFieldCells(cols []customExportColumn, values map[string]map[string]string, entityID string) []string {
 	cells := make([]string, len(cols))
 	for i, c := range cols {

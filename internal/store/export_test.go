@@ -286,3 +286,251 @@ func TestServiceExportIncludesACustomFieldColumn(t *testing.T) {
 		})
 	}
 }
+
+// ---------- Ruling AL: the chunk-merge logic, exercised directly ----------
+
+// TestCustomFieldColumnsMergeAcrossChunks calls customFieldColumns directly
+// with 501 entity ids -- one more than idChunkSize (store.go) -- so
+// chunkIDs splits it into two chunks. Every shipped ExportAssets test above
+// goes through ListAssets, which is capped at AssetListLimit (500) and can
+// therefore never produce more than one chunk; this is the only place the
+// 500-id boundary, the seen-map dedup, and the cross-chunk value
+// accumulation are exercised at all.
+//
+// The two ids that matter sit at the two positions a broken merge would get
+// wrong: f.assetID at index 0 (first chunk) and f.secondAssetID at the very
+// last index (last chunk). A per-chunk reset of the values accumulator would
+// keep only the second chunk's contribution and lose the first; a per-chunk
+// re-append of the column without the seen-map dedup would duplicate the
+// column instead of merging into one.
+func TestCustomFieldColumnsMergeAcrossChunks(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newCustomFieldFixture(t, e)
+			id := mustField(t, f, "asset", "cost_centre", domain.CustomFieldText)
+			mustValue(t, f, id, f.assetID, "IT-42")
+			mustValue(t, f, id, f.secondAssetID, "IT-99")
+
+			// entity_id carries no foreign key (design.md §2), so a filler id
+			// need not name a real asset -- only f.assetID and f.secondAssetID,
+			// which already hold real values, have to.
+			const total = idChunkSize + 1
+			ids := make([]string, 0, total)
+			ids = append(ids, f.assetID)
+			for len(ids) < total-1 {
+				ids = append(ids, NewID())
+			}
+			ids = append(ids, f.secondAssetID)
+			if len(ids) != total {
+				t.Fatalf("test setup: got %d ids, want %d", len(ids), total)
+			}
+			if len(chunkIDs(ids)) < 2 {
+				t.Fatalf("test setup: %d ids did not split into more than one chunk", len(ids))
+			}
+
+			cols, values, err := f.s.customFieldColumns(f.ctx, domain.CustomFieldEntityAsset, ids)
+			if err != nil {
+				t.Fatalf("reading columns: %v", err)
+			}
+
+			var matches int
+			for _, c := range cols {
+				if c.FieldID == id {
+					matches++
+				}
+			}
+			if matches != 1 {
+				t.Fatalf("the cost_centre column appears %d times across chunks, want exactly 1", matches)
+			}
+
+			byField := values[id]
+			if got := byField[f.assetID]; got != "IT-42" {
+				t.Fatalf("got %q for the first-chunk entity, want IT-42", got)
+			}
+			if got := byField[f.secondAssetID]; got != "IT-99" {
+				t.Fatalf("got %q for the last-chunk entity, want IT-99 -- a per-chunk reset of "+
+					"the values accumulator would have dropped it", got)
+			}
+		})
+	}
+}
+
+// ---------- Ruling AM: two fields sharing a label ----------
+
+// TestAUniqueLabelKeepsAPlainHeader is the common case: nothing about a
+// single field with a unique label should ever grow a code suffix.
+func TestAUniqueLabelKeepsAPlainHeader(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newCustomFieldFixture(t, e)
+			id := mustField(t, f, "asset", "cost_centre", domain.CustomFieldText)
+			row, err := f.s.GetCustomField(f.ctx, id)
+			if err != nil {
+				t.Fatalf("reading: %v", err)
+			}
+			row.Label = "Cost Centre"
+			if err := f.s.UpdateCustomField(f.ctx, f.actor, &row.CustomField); err != nil {
+				t.Fatalf("relabelling: %v", err)
+			}
+
+			cols, _, err := f.s.customFieldColumns(f.ctx, domain.CustomFieldEntityAsset, []string{f.assetID})
+			if err != nil {
+				t.Fatalf("reading columns: %v", err)
+			}
+			if len(cols) != 1 {
+				t.Fatalf("got %d columns, want 1", len(cols))
+			}
+			if cols[0].Header != "Cost Centre" {
+				t.Fatalf("got header %q, want the plain label %q -- a unique label must never "+
+					"grow a code suffix", cols[0].Header, "Cost Centre")
+			}
+		})
+	}
+}
+
+// TestCollidingLabelsAreDisambiguatedByCode: custom_field.label carries no
+// uniqueness constraint (design.md §2/§3, deliberately -- Ruling AM), so two
+// live fields with different codes can share one label. Neither exported
+// header may be left as the bare, ambiguous label -- BOTH are disambiguated,
+// each by its own code.
+func TestCollidingLabelsAreDisambiguatedByCode(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newCustomFieldFixture(t, e)
+			relabel := func(fieldID, label string) {
+				t.Helper()
+				row, err := f.s.GetCustomField(f.ctx, fieldID)
+				if err != nil {
+					t.Fatalf("reading %s: %v", fieldID, err)
+				}
+				row.Label = label
+				if err := f.s.UpdateCustomField(f.ctx, f.actor, &row.CustomField); err != nil {
+					t.Fatalf("relabelling %s: %v", fieldID, err)
+				}
+			}
+			first := mustField(t, f, "asset", "cost_centre", domain.CustomFieldText)
+			relabel(first, "Cost Centre")
+			second := mustField(t, f, "asset", "cc", domain.CustomFieldText)
+			relabel(second, "Cost Centre")
+
+			cols, _, err := f.s.customFieldColumns(f.ctx, domain.CustomFieldEntityAsset, []string{f.assetID})
+			if err != nil {
+				t.Fatalf("reading columns: %v", err)
+			}
+			if len(cols) != 2 {
+				t.Fatalf("got %d columns, want 2", len(cols))
+			}
+			byField := make(map[string]string, 2)
+			for _, c := range cols {
+				byField[c.FieldID] = c.Header
+			}
+			if byField[first] == "Cost Centre" {
+				t.Fatalf("field %s kept the bare, ambiguous header %q", first, byField[first])
+			}
+			if byField[second] == "Cost Centre" {
+				t.Fatalf("field %s kept the bare, ambiguous header %q", second, byField[second])
+			}
+			if want := "Cost Centre (cost_centre)"; byField[first] != want {
+				t.Fatalf("got header %q for %s, want %q", byField[first], first, want)
+			}
+			if want := "Cost Centre (cc)"; byField[second] != want {
+				t.Fatalf("got header %q for %s, want %q", byField[second], second, want)
+			}
+		})
+	}
+}
+
+// TestCollidingRetiredLabelsReadAsLabelRetiredCode documents the exact answer
+// to "what does a collided RETIRED column read as": the retired marker and
+// the code suffix both apply, in that order -- "Label (retired) (code)".
+// Neither retired field may keep the ambiguous "Label (retired)" header once
+// a second one shares it.
+func TestCollidingRetiredLabelsReadAsLabelRetiredCode(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newCustomFieldFixture(t, e)
+			relabel := func(fieldID, label string) {
+				t.Helper()
+				row, err := f.s.GetCustomField(f.ctx, fieldID)
+				if err != nil {
+					t.Fatalf("reading %s: %v", fieldID, err)
+				}
+				row.Label = label
+				if err := f.s.UpdateCustomField(f.ctx, f.actor, &row.CustomField); err != nil {
+					t.Fatalf("relabelling %s: %v", fieldID, err)
+				}
+			}
+			first := mustField(t, f, "asset", "cost_centre", domain.CustomFieldText)
+			relabel(first, "Cost Centre")
+			second := mustField(t, f, "asset", "cc", domain.CustomFieldText)
+			relabel(second, "Cost Centre")
+			if err := f.s.RetireCustomField(f.ctx, f.actor, first); err != nil {
+				t.Fatalf("retiring %s: %v", first, err)
+			}
+			if err := f.s.RetireCustomField(f.ctx, f.actor, second); err != nil {
+				t.Fatalf("retiring %s: %v", second, err)
+			}
+
+			cols, _, err := f.s.customFieldColumns(f.ctx, domain.CustomFieldEntityAsset, []string{f.assetID})
+			if err != nil {
+				t.Fatalf("reading columns: %v", err)
+			}
+			byField := make(map[string]string, 2)
+			for _, c := range cols {
+				byField[c.FieldID] = c.Header
+			}
+			if want := "Cost Centre (retired) (cost_centre)"; byField[first] != want {
+				t.Fatalf("got header %q for %s, want %q", byField[first], first, want)
+			}
+			if want := "Cost Centre (retired) (cc)"; byField[second] != want {
+				t.Fatalf("got header %q for %s, want %q", byField[second], second, want)
+			}
+		})
+	}
+}
+
+// TestALiveAndRetiredFieldSharingALabelAreNotDisambiguated: the retired
+// marker alone already tells the two columns apart -- "Cost Centre" and
+// "Cost Centre (retired)" are two different strings before any code is ever
+// considered -- so this is not a collision and neither header grows a code
+// suffix.
+func TestALiveAndRetiredFieldSharingALabelAreNotDisambiguated(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newCustomFieldFixture(t, e)
+			relabel := func(fieldID, label string) {
+				t.Helper()
+				row, err := f.s.GetCustomField(f.ctx, fieldID)
+				if err != nil {
+					t.Fatalf("reading %s: %v", fieldID, err)
+				}
+				row.Label = label
+				if err := f.s.UpdateCustomField(f.ctx, f.actor, &row.CustomField); err != nil {
+					t.Fatalf("relabelling %s: %v", fieldID, err)
+				}
+			}
+			live := mustField(t, f, "asset", "cost_centre", domain.CustomFieldText)
+			relabel(live, "Cost Centre")
+			retired := mustField(t, f, "asset", "cc", domain.CustomFieldText)
+			relabel(retired, "Cost Centre")
+			if err := f.s.RetireCustomField(f.ctx, f.actor, retired); err != nil {
+				t.Fatalf("retiring %s: %v", retired, err)
+			}
+
+			cols, _, err := f.s.customFieldColumns(f.ctx, domain.CustomFieldEntityAsset, []string{f.assetID})
+			if err != nil {
+				t.Fatalf("reading columns: %v", err)
+			}
+			byField := make(map[string]string, 2)
+			for _, c := range cols {
+				byField[c.FieldID] = c.Header
+			}
+			if byField[live] != "Cost Centre" {
+				t.Fatalf("got header %q for the live field, want the plain label %q", byField[live], "Cost Centre")
+			}
+			if byField[retired] != "Cost Centre (retired)" {
+				t.Fatalf("got header %q for the retired field, want %q", byField[retired], "Cost Centre (retired)")
+			}
+		})
+	}
+}
