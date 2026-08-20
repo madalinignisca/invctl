@@ -52,7 +52,7 @@ func TestClearingAValueIsAuditedOnTheParent(t *testing.T) {
 			mustValue(t, f, id, f.assetID, "IT-42")
 			before := changeCount(t, f, "asset", f.assetID)
 
-			mustClearValues(t, f, f.assetID)
+			mustClearValues(t, f, f.assetID, id)
 
 			if got := changeCount(t, f, "asset", f.assetID); got != before+1 {
 				t.Fatalf("clearing a value wrote %d audit rows, want 1", got-before)
@@ -273,8 +273,7 @@ func TestASelectValueMustBeALiveOption(t *testing.T) {
 		t.Run(e.Name, func(t *testing.T) {
 			f := newCustomFieldFixture(t, e)
 			id := mustField(t, f, "asset", "tier", domain.CustomFieldSelect)
-			mustOption(t, f, id, "gold")
-			mustOption(t, f, id, "silver")
+			mustOptions(t, f, id, "gold", "silver")
 
 			mustValue(t, f, id, f.assetID, "gold")
 			values, err := f.s.CustomValuesFor(f.ctx, "asset", f.assetID)
@@ -398,7 +397,7 @@ func TestOneEntitysValuesAreNotAnothers(t *testing.T) {
 			mustValue(t, f, id, f.assetID, "IT-42")
 			mustValue(t, f, id, f.secondAssetID, "IT-99")
 
-			mustClearValues(t, f, f.assetID)
+			mustClearValues(t, f, f.assetID, id)
 
 			values, err := f.s.CustomValuesFor(f.ctx, "asset", f.secondAssetID)
 			if err != nil {
@@ -675,8 +674,7 @@ func TestAValueOnARetiredOptionSurvivesALaterEdit(t *testing.T) {
 		t.Run(e.Name, func(t *testing.T) {
 			f := newCustomFieldFixture(t, e)
 			tierID := mustField(t, f, "asset", "tier", domain.CustomFieldSelect)
-			mustOption(t, f, tierID, "gold")
-			mustOption(t, f, tierID, "silver")
+			mustOptions(t, f, tierID, "gold", "silver")
 			tagID := mustField(t, f, "asset", "asset_tag", domain.CustomFieldText)
 			mustSetValues(t, f, f.assetID, map[string]string{tierID: "silver", tagID: "ABC-1"})
 
@@ -1054,9 +1052,9 @@ func TestAClearAllLeavesARetiredFieldsRetainedValue(t *testing.T) {
 				t.Fatalf("retiring cost_centre: %v", err)
 			}
 
-			// The operator clears everything they can see. cost_centre is not
-			// on their screen at all.
-			mustClearValues(t, f, f.assetID)
+			// The operator clears everything they can see. cost_centre is
+			// retired, so it was not on their screen and is not in their post.
+			mustClearValues(t, f, f.assetID, tagID)
 
 			values, err := f.s.CustomValuesFor(f.ctx, "asset", f.assetID)
 			if err != nil {
@@ -1075,6 +1073,76 @@ func TestAClearAllLeavesARetiredFieldsRetainedValue(t *testing.T) {
 				t.Fatal("the retained value's field must report as retired")
 			}
 
+			want := `{"custom_fields":{"old":"asset_tag=ABC-1,cost_centre=IT-42","new":"cost_centre=IT-42"}}`
+			if got := lastChangeDiff(t, f, "asset", f.assetID); got != want {
+				t.Fatalf("the entry must show only the value the operator cleared\n got %s\nwant %s", got, want)
+			}
+		})
+	}
+}
+
+// TestAFieldCreatedBetweenRenderAndSubmitIsNotCleared is RULING AA, and it is
+// the sixth instance of the shape -- in the recipe again, one column over from
+// the fifth.
+//
+// Ruling Y moved the clear-all off "every value held" and onto "every live
+// field". That swapped rows the operator never saw for FIELDS the operator never
+// saw: a field another administrator creates between render and submit is live
+// at submit time, so a submit-time enumeration posts an explicit blank for it,
+// and the store correctly obeys an instruction nobody gave. Measured with the
+// payload built that way: 0 values remained, and the diff read
+// `{"custom_fields":{"old":"asset_tag=ABC-1,cost_centre=IT-42","new":""}}` --
+// the Critical verbatim, for the fourth time.
+//
+// The submission here therefore names the field set captured at RENDER, and the
+// token captured at render with it, which is all a real form can post.
+func TestAFieldCreatedBetweenRenderAndSubmitIsNotCleared(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newCustomFieldFixture(t, e)
+			tagID := mustField(t, f, "asset", "asset_tag", domain.CustomFieldText)
+			mustSetValues(t, f, f.assetID, map[string]string{tagID: "ABC-1"})
+
+			// RENDER. The form draws one field and captures the token with it.
+			rendered := []string{tagID}
+			token := entityVersion(t, f, "asset", f.assetID)
+
+			// Another administrator defines a second field, and somebody gives
+			// the asset a value for it, entirely outside this operator's window.
+			ccID := mustField(t, f, "asset", "cost_centre", domain.CustomFieldText)
+			mustValue(t, f, ccID, f.assetID, "IT-42")
+
+			// SUBMIT: a clear-all of what was drawn. The token has moved,
+			// because setting cost_centre bumped the asset -- so this write is
+			// refused, which is the outer guard doing its job.
+			vals := map[string]string{}
+			for _, id := range rendered {
+				vals[id] = ""
+			}
+			err := f.s.SetCustomValues(f.ctx, f.actor, "asset", f.assetID, token, vals)
+			if !errors.Is(err, domain.ErrStale) {
+				t.Fatalf("want ErrStale from a token that predates the concurrent value, got %v", err)
+			}
+
+			// And with a CURRENT token -- the operator reloads and resubmits the
+			// same form, which still draws only what it drew -- the field they
+			// never saw is untouched. This is the assertion that does not depend
+			// on the token guard, and it is the one that matters: the payload
+			// names only what was rendered.
+			mustClearValues(t, f, f.assetID, rendered...)
+
+			values, err := f.s.CustomValuesFor(f.ctx, "asset", f.assetID)
+			if err != nil {
+				t.Fatalf("reading values: %v", err)
+			}
+			if len(values) != 1 {
+				t.Fatalf("got %d values, want 1: a field created between render and submit "+
+					"was cleared by a submission that never named it", len(values))
+			}
+			if values[0].Code != "cost_centre" || values[0].ValueText != "IT-42" {
+				t.Fatalf("got %s=%s, want cost_centre=IT-42 untouched",
+					values[0].Code, values[0].ValueText)
+			}
 			want := `{"custom_fields":{"old":"asset_tag=ABC-1,cost_centre=IT-42","new":"cost_centre=IT-42"}}`
 			if got := lastChangeDiff(t, f, "asset", f.assetID); got != want {
 				t.Fatalf("the entry must show only the value the operator cleared\n got %s\nwant %s", got, want)

@@ -86,26 +86,31 @@ func mustField(t *testing.T, f *customFieldFixture, entityType, code, kind strin
 	return cf.ID
 }
 
-// mustOption adds one live option to a select field, keeping whatever live
-// options already existed. It goes through SetCustomFieldOptions -- there is
-// no other writer of custom_field_option -- so a test adding options one at a
-// time exercises the same "replace wholesale" path a form submitting the
-// whole list at once would.
-func mustOption(t *testing.T, f *customFieldFixture, fieldID, value string) {
+// mustOptions sets a select field's live option vocabulary to exactly the values
+// the caller NAMES. It goes through SetCustomFieldOptions, the only writer of
+// custom_field_option, so it exercises the same path a form submitting the whole
+// list does.
+//
+// IT QUERIES FOR NOTHING. The helper it replaced, mustOption, added one option
+// while "keeping whatever live options already existed" -- which it discovered
+// by reading GetCustomField at submit time. That is the Ruling AA shape: a
+// payload assembled from what the database happens to hold now rather than from
+// what the caller, standing in for a rendered form, actually named. It could not
+// destroy anything, because SetCustomFieldOptions retires only what is ABSENT
+// from the list and that list was always a superset of what was live -- but
+// "cannot destroy because of what the callee does with it" is exactly the
+// standing Rulings Y, Z and AA rejected, so it is gone rather than annotated.
+//
+// The cost is that a caller wanting two options names two. That is also what the
+// form does.
+func mustOptions(t *testing.T, f *customFieldFixture, fieldID string, values ...string) {
 	t.Helper()
-	row, err := f.s.GetCustomField(f.ctx, fieldID)
-	if err != nil {
-		t.Fatalf("reading field %s before adding an option: %v", fieldID, err)
+	opts := make([]domain.CustomFieldOption, 0, len(values))
+	for _, v := range values {
+		opts = append(opts, domain.CustomFieldOption{Value: v, Label: v})
 	}
-	opts := make([]domain.CustomFieldOption, 0, len(row.Options)+1)
-	for _, o := range row.Options {
-		if o.RetiredAt == nil {
-			opts = append(opts, o)
-		}
-	}
-	opts = append(opts, domain.CustomFieldOption{Value: value, Label: value})
 	if err := f.s.SetCustomFieldOptions(f.ctx, f.actor, fieldID, opts); err != nil {
-		t.Fatalf("adding option %s to field %s: %v", value, fieldID, err)
+		t.Fatalf("setting the options of field %s to %v: %v", fieldID, values, err)
 	}
 }
 
@@ -133,8 +138,22 @@ func mustValue(t *testing.T, f *customFieldFixture, fieldID, entityID, raw strin
 	mustSetValues(t, f, entityID, map[string]string{fieldID: raw})
 }
 
-// mustSetValues replaces an entity's whole set in one call, which is what a
-// form submission does.
+// mustSetValues submits one payload of custom values, exactly as it is given.
+//
+// It replaces nothing it is not told about: absent means untouched, an explicit
+// blank means clear. It used to say it "replaces an entity's whole set in one
+// call, which is what a form submission does" -- both halves repealed by Ruling
+// U, and the second half is how instance 4 got written, because a helper that
+// believes it is posting a complete set will happily be handed one built from
+// the wrong query.
+//
+// SETUP AFFORDANCE, DELIBERATE AND NARROW: it reads the parent's token at submit
+// time, which no form can do. That is fine for arranging a fixture and wrong for
+// modelling an operator, so a test exercising a render-then-submit window
+// captures its own token and calls the store directly --
+// TestARestoreBetweenRenderAndSubmitDestroysNothing and
+// TestAFieldCreatedBetweenRenderAndSubmitIsNotCleared both do. The payload
+// itself is never queried for here: it is whatever the caller named.
 func mustSetValues(t *testing.T, f *customFieldFixture, entityID string, vals map[string]string) {
 	t.Helper()
 	entityType := entityTypeOf(t, f, entityID)
@@ -144,42 +163,53 @@ func mustSetValues(t *testing.T, f *customFieldFixture, entityID string, vals ma
 	}
 }
 
-// mustClearValues clears every custom value an entity holds THAT AN OPERATOR
-// CAN SEE. The rows go, and the parent's change_log entry has to record it.
+// mustClearValues clears the fields the caller NAMES, by posting an explicit
+// blank for each. rendered is the field set the operator's form drew.
 //
-// It posts an EXPLICIT blank, because absence means untouched: a nil map clears
-// nothing at all, which is the whole point of Ruling U.
+// IT TAKES THE FIELD SET FROM ITS CALLER AND QUERIES FOR NOTHING, and that is
+// the whole of Ruling AA. Two earlier shapes were both wrong for the same
+// reason, and each looked right until the one before it was fixed:
 //
-// IT ENUMERATES THE LIVE FIELD LIST, NOT THE ENTITY'S EXISTING VALUES, and the
-// difference is the whole of Ruling Y. CustomValuesFor deliberately returns
-// retired fields' retained values alongside live ones -- a detail page has to
-// render them. Building a clear-all from it therefore posts an explicit blank
-// for rows the operator was never shown and cannot decline to clear, which
-// launders "I did not see this" into "I instructed you to delete this" at the
-// enumeration step. It is the Critical again, moved one layer up: the store is
-// correct in isolation and the caller hands it a permitted instruction that the
-// operator never gave.
+//   - Enumerating CustomValuesFor posted a blank for every VALUE held, which
+//     includes retired fields' retained values a detail page renders and a form
+//     never does. Rows the operator was never shown, cleared as though they had
+//     asked (Ruling Y).
+//   - Enumerating the live field list at SUBMIT time posted a blank for every
+//     field live THEN, which includes one another administrator created after
+//     the operator's form was drawn. A field the operator was never shown,
+//     cleared as though they had asked (Ruling AA). Same sentence, one column
+//     over.
 //
-// This is also simply what a real form does. It renders the live fields and
-// posts what it rendered; it cannot post a field it did not draw.
-func mustClearValues(t *testing.T, f *customFieldFixture, entityID string) {
+// A test helper has no POST body, so the caller naming the ids IS how it models
+// one honestly. Anything it looks up for itself is something the form could not
+// have known, and the previous comment here already said so -- "it cannot post a
+// field it did not draw" -- while the code beneath it did the opposite.
+func mustClearValues(t *testing.T, f *customFieldFixture, entityID string, rendered ...string) {
 	t.Helper()
-	entityType := entityTypeOf(t, f, entityID)
-	live, err := f.s.ListCustomFields(f.ctx, entityType, false)
-	if err != nil {
-		t.Fatalf("listing the live fields of a %s: %v", entityType, err)
-	}
-	vals := make(map[string]string, len(live))
-	for _, def := range live {
-		vals[def.ID] = ""
+	vals := make(map[string]string, len(rendered))
+	for _, fieldID := range rendered {
+		vals[fieldID] = ""
 	}
 	mustSetValues(t, f, entityID, vals)
 }
 
 // entityVersion reads the parent entity's current concurrency token, which
 // SetCustomValues takes and bumps (design.md §3, as amended: the value editor's
-// token is the parent's, not each value's). A real handler renders it into the
-// form; a fixture helper that is not testing the guard reads the live one.
+// token is the parent's, not each value's).
+//
+// IT READS AT SUBMIT TIME, WHICH NO FORM CAN DO, and that is deliberate and
+// narrow. The fixture sweep for "does any helper build a payload from a query"
+// reached it and it is kept, for a reason worth writing down rather than
+// assuming: the token is not part of the INSTRUCTION about what to change. What
+// gets cleared is decided entirely by the vals map, so a helpfully-fresh token
+// cannot destroy a value the caller did not name, and cannot mask a defect that
+// would -- it only lets a setup write succeed. Every test that exercises
+// staleness passes its own token, and every test modelling a render-then-submit
+// window captures one before the window opens rather than calling this.
+//
+// Threading a token through the setup helpers instead would put churn on twenty
+// call sites with no defect behind it. If that judgement is wrong, the thing to
+// change is the helpers, not this function.
 func entityVersion(t *testing.T, f *customFieldFixture, entityType, entityID string) int {
 	t.Helper()
 	var version int
@@ -534,7 +564,7 @@ func TestChangingOnlyOptionsWritesAChangeLogEntry(t *testing.T) {
 			id := mustField(t, f, "asset", "tier", domain.CustomFieldSelect)
 			before := changeCount(t, f, "custom_field", id)
 
-			mustOption(t, f, id, "gold")
+			mustOptions(t, f, id, "gold")
 
 			after := changeCount(t, f, "custom_field", id)
 			if after != before+1 {
@@ -587,8 +617,7 @@ func TestRetiringAnOptionKeepsItSelectableOnExistingValues(t *testing.T) {
 		t.Run(e.Name, func(t *testing.T) {
 			f := newCustomFieldFixture(t, e)
 			id := mustField(t, f, "asset", "tier", domain.CustomFieldSelect)
-			mustOption(t, f, id, "gold")
-			mustOption(t, f, id, "silver")
+			mustOptions(t, f, id, "gold", "silver")
 
 			// Drop "silver" by submitting only "gold".
 			if err := f.s.SetCustomFieldOptions(f.ctx, f.actor, id, []domain.CustomFieldOption{

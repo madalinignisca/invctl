@@ -404,8 +404,16 @@ func liveOptionValues(ctx context.Context, t *tx, fieldID string) ([]string, err
 	return values, nil
 }
 
-// SetCustomValues replaces every custom value one asset or service holds and
-// audits the result against that entity.
+// SetCustomValues applies one submission of custom values to an asset or service
+// and audits the result against that entity.
+//
+// IT DOES NOT REPLACE EVERYTHING THE ENTITY HOLDS. It touches only what vals
+// names: absent means untouched, an explicit blank means clear. The full
+// contract, and the two ways of building vals that destroy data, are on
+// setCustomValues below -- read that before writing a caller. This sentence is
+// the one somebody sees in godoc, so it says the contract rather than the
+// pre-Ruling-U one it used to assert ("replaces every custom value one asset or
+// service holds"), which is the shortest path back to the bug.
 //
 // writeSerializable, not write, and the reason is Task 3's kind guard rather
 // than anything this method asserts for itself: see customFieldDefs. The retry
@@ -414,9 +422,9 @@ func liveOptionValues(ctx context.Context, t *tx, fieldID string) ([]string, err
 //
 // THE CONCURRENCY TOKEN IS THE PARENT ENTITY'S row_version, NOT EACH VALUE'S,
 // and expected is the one the form was rendered with. design.md §3, as amended:
-// values are replaced wholesale per entity, so a per-value token would need one
-// hidden token per rendered field and would still not describe what the operator
-// is editing -- they are editing vm-db-2, not vm-db-2's cost centre. The audit
+// values are submitted per entity, so a per-value token would need one hidden
+// token per rendered field and would still not describe what the operator is
+// editing -- they are editing vm-db-2, not vm-db-2's cost centre. The audit
 // entry is written against the entity for the same reason and every other editor
 // in this repo is per-entity.
 //
