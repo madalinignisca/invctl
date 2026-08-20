@@ -138,6 +138,23 @@ type customExportColumn struct {
 // set of field definitions produce byte-identical header order, so a diff
 // between them is a diff of real content -- the same property ExportAssets
 // already gives environments and ExportCircuits gives nothing else to sort.
+//
+// EVERY HEADER CARRIES ITS CODE, UNCONDITIONALLY -- design.md's Ruling AN,
+// and there is no disambiguation pass left to call: a header built from
+// "Label (code)" (or "Label (retired) (code)") is a pure function of the one
+// field it names. Ruling AM tried appending the code only on a detected
+// collision and that failed twice over: the appended form could itself
+// collide with an untouched field that already happened to look like
+// "Label (code)", and worse, a NEW field arriving with a colliding label
+// silently renamed an EXISTING field's header from "Label" to "Label (code)"
+// with nothing about that field having changed -- exactly what a diff or a
+// header-keyed tool reads as a column removed and another added, denting
+// §7's own promise that the export is where an operator goes to see what
+// they still hold. Appending unconditionally removes both failure modes: a
+// field's header depends only on its own code and retirement state, never on
+// what else happens to be defined. It also outlives a rename -- Ruling M made
+// label editable forever, so a header built from label alone moves whenever
+// an administrator renames a field, and code is the thing that does not.
 func (s *SQLStore) customFieldColumns(ctx context.Context, entityType string, ids []string) ([]customExportColumn, map[string]map[string]string, error) {
 	var cols []customExportColumn
 	seen := make(map[string]bool)
@@ -168,9 +185,9 @@ func (s *SQLStore) customFieldColumns(ctx context.Context, entityType string, id
 		for _, r := range scanned {
 			if !seen[r.FieldID] {
 				seen[r.FieldID] = true
-				header := r.Label
+				header := r.Label + " (" + r.Code + ")"
 				if r.RetiredAt != nil {
-					header = r.Label + " (retired)"
+					header = r.Label + " (retired) (" + r.Code + ")"
 				}
 				cols = append(cols, customExportColumn{FieldID: r.FieldID, Code: r.Code, Header: header})
 			}
@@ -185,40 +202,7 @@ func (s *SQLStore) customFieldColumns(ctx context.Context, entityType string, id
 			byField[*r.EntityID] = *r.ValueText
 		}
 	}
-	disambiguateHeaders(cols)
 	return cols, values, nil
-}
-
-// disambiguateHeaders appends a field's code to its header, IN PLACE, but
-// only where two or more columns would otherwise carry the identical header
-// text -- design.md's Ruling AM. custom_field.label is not unique (§2/§3
-// impose no such constraint, deliberately: a cross-task uniqueness constraint
-// might forbid a legitimate rename), so two live fields, or two retired ones,
-// can share a label. The registry already shows the code beside the label, so
-// the ambiguity exists only here, in a file an operator works from once the
-// column names are the only thing left to go by.
-//
-// APPLIED TO THE HEADER AS ALREADY BUILT, RETIRED MARKER INCLUDED, so a
-// collision between two RETIRED fields sharing a label reads as
-// "Label (retired) (code)" for each -- the marker states what the field is,
-// the code says which one. A live field colliding with a same-labelled
-// retired one is never touched by this at all: "Cost Centre" and
-// "Cost Centre (retired)" are already two different strings, so the retired
-// marker disambiguates them on its own and neither gets a code suffix.
-//
-// A field with a UNIQUE header is untouched -- only a real collision earns
-// the code suffix, so the common case (which is every field most estates will
-// ever define) keeps reading exactly as the registry shows it.
-func disambiguateHeaders(cols []customExportColumn) {
-	counts := make(map[string]int, len(cols))
-	for _, c := range cols {
-		counts[c.Header]++
-	}
-	for i, c := range cols {
-		if counts[c.Header] > 1 {
-			cols[i].Header = c.Header + " (" + c.Code + ")"
-		}
-	}
 }
 
 // customFieldCells renders one entity's custom-field cells in cols' order,

@@ -95,9 +95,9 @@ func TestExportIncludesACustomFieldColumn(t *testing.T) {
 			if err != nil {
 				t.Fatalf("exporting: %v", err)
 			}
-			col := indexOf(table.Header, "Cost Centre")
+			col := indexOf(table.Header, "Cost Centre (cost_centre)")
 			if col < 0 {
-				t.Fatalf("no Cost Centre column; header is %v", table.Header)
+				t.Fatalf("no Cost Centre (cost_centre) column; header is %v", table.Header)
 			}
 			if got := cellFor(t, assetIDsOf(rows), table, f.assetID, col); got != "IT-42" {
 				t.Fatalf("got %q in the Cost Centre column, want IT-42", got)
@@ -141,16 +141,16 @@ func TestARetiredFieldStillExportsUnderARetiredHeader(t *testing.T) {
 				t.Fatalf("exporting: %v", err)
 			}
 
-			if got := indexOf(table.Header, "Cost Centre"); got >= 0 {
+			if got := indexOf(table.Header, "Cost Centre (cost_centre)"); got >= 0 {
 				t.Fatalf("the live header %q is still present after retirement; header is %v",
-					"Cost Centre", table.Header)
+					"Cost Centre (cost_centre)", table.Header)
 			}
-			col := indexOf(table.Header, "Cost Centre (retired)")
+			col := indexOf(table.Header, "Cost Centre (retired) (cost_centre)")
 			if col < 0 {
-				t.Fatalf(`no exact "Cost Centre (retired)" column; header is %v`, table.Header)
+				t.Fatalf(`no exact "Cost Centre (retired) (cost_centre)" column; header is %v`, table.Header)
 			}
 			for i, h := range table.Header {
-				if h != "Cost Centre (retired)" && strings.Contains(h, "Cost Centre") {
+				if h != "Cost Centre (retired) (cost_centre)" && strings.Contains(h, "Cost Centre") {
 					t.Fatalf("column %d is %q -- a header that partially matches but is not "+
 						"the exact retired marker", i, h)
 				}
@@ -181,9 +181,9 @@ func TestACustomValueIsDefusedLikeEveryOtherCell(t *testing.T) {
 			if err != nil {
 				t.Fatalf("exporting: %v", err)
 			}
-			col := indexOf(table.Header, "note")
+			col := indexOf(table.Header, "note (note)")
 			if col < 0 {
-				t.Fatalf("no note column; header is %v", table.Header)
+				t.Fatalf("no note (note) column; header is %v", table.Header)
 			}
 			got := cellFor(t, assetIDsOf(rows), table, f.assetID, col)
 			if strings.HasPrefix(got, "=") {
@@ -216,9 +216,9 @@ func TestAFieldWithNoValueExportsAnEmptyCell(t *testing.T) {
 			if err != nil {
 				t.Fatalf("exporting: %v", err)
 			}
-			col := indexOf(table.Header, "cost_centre")
+			col := indexOf(table.Header, "cost_centre (cost_centre)")
 			if col < 0 {
-				t.Fatalf("no cost_centre column; header is %v", table.Header)
+				t.Fatalf("no cost_centre (cost_centre) column; header is %v", table.Header)
 			}
 			if got := cellFor(t, assetIDsOf(rows), table, f.secondAssetID, col); got != "" {
 				t.Fatalf("got %q for an asset holding no value, want an empty cell", got)
@@ -246,7 +246,7 @@ func TestOnlyAssetFieldsAppearInTheAssetExport(t *testing.T) {
 			if err != nil {
 				t.Fatalf("exporting: %v", err)
 			}
-			if col := indexOf(table.Header, "owner"); col >= 0 {
+			if col := indexOf(table.Header, "owner (owner)"); col >= 0 {
 				t.Fatalf("a service-only field appeared in the asset export at column %d; header is %v",
 					col, table.Header)
 			}
@@ -272,9 +272,9 @@ func TestServiceExportIncludesACustomFieldColumn(t *testing.T) {
 			if err != nil {
 				t.Fatalf("exporting: %v", err)
 			}
-			col := indexOf(table.Header, "owner")
+			col := indexOf(table.Header, "owner (owner)")
 			if col < 0 {
-				t.Fatalf("no owner column; header is %v", table.Header)
+				t.Fatalf("no owner (owner) column; header is %v", table.Header)
 			}
 			ids := make([]string, len(rows))
 			for i, r := range rows {
@@ -355,11 +355,17 @@ func TestCustomFieldColumnsMergeAcrossChunks(t *testing.T) {
 	}
 }
 
-// ---------- Ruling AM: two fields sharing a label ----------
+// ---------- Ruling AN: every header carries its code, unconditionally ----------
 
-// TestAUniqueLabelKeepsAPlainHeader is the common case: nothing about a
-// single field with a unique label should ever grow a code suffix.
-func TestAUniqueLabelKeepsAPlainHeader(t *testing.T) {
+// TestEveryHeaderCarriesItsCodeUnconditionally: a field with no colliding
+// label still gets the code suffix. Ruling AM tried appending it only on a
+// detected collision; that failed twice over (a self-collision with an
+// already-code-suffixed label, and a new field silently renaming an existing
+// one's header on arrival) and Ruling AN replaced it with an unconditional
+// rule precisely so there is no "common case" left that reads differently
+// from the collision case -- a header is a pure function of its own field,
+// always.
+func TestEveryHeaderCarriesItsCodeUnconditionally(t *testing.T) {
 	for _, e := range Engines(t) {
 		t.Run(e.Name, func(t *testing.T) {
 			f := newCustomFieldFixture(t, e)
@@ -380,20 +386,20 @@ func TestAUniqueLabelKeepsAPlainHeader(t *testing.T) {
 			if len(cols) != 1 {
 				t.Fatalf("got %d columns, want 1", len(cols))
 			}
-			if cols[0].Header != "Cost Centre" {
-				t.Fatalf("got header %q, want the plain label %q -- a unique label must never "+
-					"grow a code suffix", cols[0].Header, "Cost Centre")
+			if want := "Cost Centre (cost_centre)"; cols[0].Header != want {
+				t.Fatalf("got header %q, want %q -- the code is appended unconditionally, "+
+					"not only on a collision", cols[0].Header, want)
 			}
 		})
 	}
 }
 
-// TestCollidingLabelsAreDisambiguatedByCode: custom_field.label carries no
-// uniqueness constraint (design.md §2/§3, deliberately -- Ruling AM), so two
-// live fields with different codes can share one label. Neither exported
-// header may be left as the bare, ambiguous label -- BOTH are disambiguated,
-// each by its own code.
-func TestCollidingLabelsAreDisambiguatedByCode(t *testing.T) {
+// TestTwoFieldsSharingALabelGetDifferentHeadersByCode: custom_field.label
+// carries no uniqueness constraint (design.md §2/§3, deliberately), so two
+// live fields with different codes can share one label. Each header names
+// its own field's code, so the two are distinguishable without either one
+// being computed differently from the other.
+func TestTwoFieldsSharingALabelGetDifferentHeadersByCode(t *testing.T) {
 	for _, e := range Engines(t) {
 		t.Run(e.Name, func(t *testing.T) {
 			f := newCustomFieldFixture(t, e)
@@ -424,12 +430,6 @@ func TestCollidingLabelsAreDisambiguatedByCode(t *testing.T) {
 			for _, c := range cols {
 				byField[c.FieldID] = c.Header
 			}
-			if byField[first] == "Cost Centre" {
-				t.Fatalf("field %s kept the bare, ambiguous header %q", first, byField[first])
-			}
-			if byField[second] == "Cost Centre" {
-				t.Fatalf("field %s kept the bare, ambiguous header %q", second, byField[second])
-			}
 			if want := "Cost Centre (cost_centre)"; byField[first] != want {
 				t.Fatalf("got header %q for %s, want %q", byField[first], first, want)
 			}
@@ -440,12 +440,11 @@ func TestCollidingLabelsAreDisambiguatedByCode(t *testing.T) {
 	}
 }
 
-// TestCollidingRetiredLabelsReadAsLabelRetiredCode documents the exact answer
-// to "what does a collided RETIRED column read as": the retired marker and
-// the code suffix both apply, in that order -- "Label (retired) (code)".
-// Neither retired field may keep the ambiguous "Label (retired)" header once
-// a second one shares it.
-func TestCollidingRetiredLabelsReadAsLabelRetiredCode(t *testing.T) {
+// TestTwoRetiredFieldsSharingALabelReadAsLabelRetiredCode documents the exact
+// answer to "what does a collided RETIRED column read as": the retired
+// marker and the code suffix both apply, in that order --
+// "Label (retired) (code)" -- for each field, unconditionally.
+func TestTwoRetiredFieldsSharingALabelReadAsLabelRetiredCode(t *testing.T) {
 	for _, e := range Engines(t) {
 		t.Run(e.Name, func(t *testing.T) {
 			f := newCustomFieldFixture(t, e)
@@ -489,12 +488,11 @@ func TestCollidingRetiredLabelsReadAsLabelRetiredCode(t *testing.T) {
 	}
 }
 
-// TestALiveAndRetiredFieldSharingALabelAreNotDisambiguated: the retired
-// marker alone already tells the two columns apart -- "Cost Centre" and
-// "Cost Centre (retired)" are two different strings before any code is ever
-// considered -- so this is not a collision and neither header grows a code
-// suffix.
-func TestALiveAndRetiredFieldSharingALabelAreNotDisambiguated(t *testing.T) {
+// TestALiveAndARetiredFieldSharingALabelGetDifferentHeaders: a live field and
+// a same-labelled retired field are already distinguishable before any code
+// is considered -- "Cost Centre (code-a)" and "Cost Centre (retired) (code-b)"
+// -- and each still carries its own code regardless.
+func TestALiveAndARetiredFieldSharingALabelGetDifferentHeaders(t *testing.T) {
 	for _, e := range Engines(t) {
 		t.Run(e.Name, func(t *testing.T) {
 			f := newCustomFieldFixture(t, e)
@@ -525,11 +523,69 @@ func TestALiveAndRetiredFieldSharingALabelAreNotDisambiguated(t *testing.T) {
 			for _, c := range cols {
 				byField[c.FieldID] = c.Header
 			}
-			if byField[live] != "Cost Centre" {
-				t.Fatalf("got header %q for the live field, want the plain label %q", byField[live], "Cost Centre")
+			if want := "Cost Centre (cost_centre)"; byField[live] != want {
+				t.Fatalf("got header %q for the live field, want %q", byField[live], want)
 			}
-			if byField[retired] != "Cost Centre (retired)" {
-				t.Fatalf("got header %q for the retired field, want %q", byField[retired], "Cost Centre (retired)")
+			if want := "Cost Centre (retired) (cc)"; byField[retired] != want {
+				t.Fatalf("got header %q for the retired field, want %q", byField[retired], want)
+			}
+		})
+	}
+}
+
+// TestAddingASecondFieldDoesNotRenameTheFirstsHeader is the property Ruling
+// AN exists for. Ruling AM's conditional disambiguation made a field's header
+// depend on what ELSE was defined: a second field arriving with a colliding
+// label silently renamed the first field's header from "Label" to
+// "Label (code)", with nothing about the first field having changed -- which
+// a diff, or any header-keyed tool, reads as a column removed and another
+// added. A header built unconditionally from a field's own code cannot move
+// when an unrelated field is created.
+func TestAddingASecondFieldDoesNotRenameTheFirstsHeader(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newCustomFieldFixture(t, e)
+			first := mustField(t, f, "asset", "cost_centre", domain.CustomFieldText)
+			row, err := f.s.GetCustomField(f.ctx, first)
+			if err != nil {
+				t.Fatalf("reading %s: %v", first, err)
+			}
+			row.Label = "Cost Centre"
+			if err := f.s.UpdateCustomField(f.ctx, f.actor, &row.CustomField); err != nil {
+				t.Fatalf("relabelling %s: %v", first, err)
+			}
+
+			before, _, err := f.s.customFieldColumns(f.ctx, domain.CustomFieldEntityAsset, []string{f.assetID})
+			if err != nil {
+				t.Fatalf("reading columns before: %v", err)
+			}
+			if len(before) != 1 {
+				t.Fatalf("got %d columns before, want 1", len(before))
+			}
+			headerBefore := before[0].Header
+
+			// A second field arrives, sharing the first field's label.
+			second := mustField(t, f, "asset", "cc", domain.CustomFieldText)
+			row2, err := f.s.GetCustomField(f.ctx, second)
+			if err != nil {
+				t.Fatalf("reading %s: %v", second, err)
+			}
+			row2.Label = "Cost Centre"
+			if err := f.s.UpdateCustomField(f.ctx, f.actor, &row2.CustomField); err != nil {
+				t.Fatalf("relabelling %s: %v", second, err)
+			}
+
+			after, _, err := f.s.customFieldColumns(f.ctx, domain.CustomFieldEntityAsset, []string{f.assetID})
+			if err != nil {
+				t.Fatalf("reading columns after: %v", err)
+			}
+			byField := make(map[string]string, len(after))
+			for _, c := range after {
+				byField[c.FieldID] = c.Header
+			}
+			if got := byField[first]; got != headerBefore {
+				t.Fatalf("adding a second, colliding field renamed the first field's header: "+
+					"was %q, now %q -- a header must be a pure function of its own field", headerBefore, got)
 			}
 		})
 	}

@@ -279,10 +279,47 @@ field already holds the same `(entity_type, code)`.
 
 ## 7. Export
 
-CSV export gains one column per field, live or retired, with retired columns
-headed `Label (retired)`. Every value passes through the same formula-injection
-defusing WP-G5 already applies at the boundary where text becomes a
-spreadsheet.
+CSV export gains one column per field, live or retired.
+
+**Every header is `Label (code)`, unconditionally — never plain `Label`, and
+never conditional on whether another field happens to collide.** A retired
+column reads `Label (retired) (code)`, the marker and the code both applied
+every time. `custom_field.label` carries no uniqueness constraint (§2/§3,
+deliberately — a cross-task constraint might forbid a legitimate rename), so
+two live fields, or two retired ones, can share one label. An earlier version
+of this rule appended the code only when a collision was actually detected,
+and that failed twice over:
+
+- the appended form (`Label (code)`) could itself collide with an untouched
+  field whose OWN label already happened to read `Label (code)` — a
+  disambiguation pass that can disambiguate its way into a fresh collision
+  is not a fix;
+- worse, a brand new field arriving with a label that collides with an
+  existing one silently renamed the EXISTING field's header, from `Label` to
+  `Label (code)`, with nothing about the existing field having changed. A
+  diff, or any spreadsheet tool keyed by header name, reads that as a column
+  removed and another added — denting this section's own promise that the
+  export is where an operator goes to see what they still hold.
+
+Appending the code unconditionally removes both failure modes at once, because
+it makes a header **a pure function of its own field and nothing else**:
+self-collision is impossible (`code` is unique among live fields per entity
+type via the partial index, and a retired field's `(retired)` marker keeps it
+distinct from a live one sharing the same code space), and no field's header
+can ever change as a side effect of another field being created, retired, or
+restored. It also survives a rename: §3's rule that `label` stays editable
+forever means a header built from label alone would move every time an
+administrator corrects it, and `code` is the one thing on a definition that
+does not move underneath an export somebody is diffing.
+
+The cost is a redundant-looking suffix on a header whose code is just the
+snake_case of its label — noise for a human, and exactly the price worth
+paying for a header that is unambiguous for a tool and stable across a diff,
+which is what this section is actually for. **Do not make this conditional
+again for readability** — that is the mistake this rule replaced, twice.
+
+Every value passes through the same formula-injection defusing WP-G5 already
+applies at the boundary where text becomes a spreadsheet.
 
 *A wide file is the accepted cost. An estate with thirty historical fields gets
 thirty extra columns, and the alternative — a separate custom-fields export —
