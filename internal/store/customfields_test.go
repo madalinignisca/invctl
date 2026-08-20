@@ -118,9 +118,20 @@ func mustOption(t *testing.T, f *customFieldFixture, fieldID, value string) {
 // alongside: every test in this package now exercises SetCustomValues, so a
 // defect in it cannot hide behind a fixture that did the write differently.
 //
-// The merge is what makes "set one field" out of a wholesale replacement: the
-// store's contract is that the map it receives IS the entity's complete set,
-// and a helper that forgot to merge would silently clear every other value.
+// THE MERGE BELOW IS NOW REDUNDANT, AND THE COMMENT THAT USED TO JUSTIFY IT
+// STATED A CONTRACT THAT NO LONGER EXISTS. It said "the map it receives IS the
+// entity's complete set, and a helper that forgot to merge would silently clear
+// every other value". Under Ruling U absence means UNTOUCHED, so posting the one
+// field on its own would do exactly the same thing, and nothing is cleared by
+// omission any more.
+//
+// It is left in place only because it is harmless: every value it re-posts is
+// byte-identical to what is stored, so each one hits the unchanged-value rule
+// and no row is rewritten. But it is the Ruling Y enumeration shape -- a caller
+// building a payload from CustomValuesFor, which includes retired fields'
+// retained values the operator never saw -- and it is defused by rule 2 rather
+// than by being right. Raised for a decision rather than changed here; the fix
+// is to drop the merge and post `map[string]string{fieldID: raw}`.
 func mustValue(t *testing.T, f *customFieldFixture, fieldID, entityID, raw string) {
 	t.Helper()
 	entityType := entityTypeOf(t, f, entityID)
@@ -150,22 +161,34 @@ func mustSetValues(t *testing.T, f *customFieldFixture, entityID string, vals ma
 	}
 }
 
-// mustClearValues clears every custom value an entity holds. The rows go, and
-// the parent's change_log entry has to record it.
+// mustClearValues clears every custom value an entity holds THAT AN OPERATOR
+// CAN SEE. The rows go, and the parent's change_log entry has to record it.
 //
-// It posts an EXPLICIT blank for every value held, because absence means
-// untouched: a nil map now clears nothing at all, which is the whole point of
-// Ruling U. This is the shape a real "clear everything" form takes.
+// It posts an EXPLICIT blank, because absence means untouched: a nil map clears
+// nothing at all, which is the whole point of Ruling U.
+//
+// IT ENUMERATES THE LIVE FIELD LIST, NOT THE ENTITY'S EXISTING VALUES, and the
+// difference is the whole of Ruling Y. CustomValuesFor deliberately returns
+// retired fields' retained values alongside live ones -- a detail page has to
+// render them. Building a clear-all from it therefore posts an explicit blank
+// for rows the operator was never shown and cannot decline to clear, which
+// launders "I did not see this" into "I instructed you to delete this" at the
+// enumeration step. It is the Critical again, moved one layer up: the store is
+// correct in isolation and the caller hands it a permitted instruction that the
+// operator never gave.
+//
+// This is also simply what a real form does. It renders the live fields and
+// posts what it rendered; it cannot post a field it did not draw.
 func mustClearValues(t *testing.T, f *customFieldFixture, entityID string) {
 	t.Helper()
 	entityType := entityTypeOf(t, f, entityID)
-	held, err := f.s.CustomValuesFor(f.ctx, entityType, entityID)
+	live, err := f.s.ListCustomFields(f.ctx, entityType, false)
 	if err != nil {
-		t.Fatalf("reading the values of %s %s before clearing: %v", entityType, entityID, err)
+		t.Fatalf("listing the live fields of a %s: %v", entityType, err)
 	}
-	vals := make(map[string]string, len(held))
-	for _, v := range held {
-		vals[v.FieldID] = ""
+	vals := make(map[string]string, len(live))
+	for _, def := range live {
+		vals[def.ID] = ""
 	}
 	mustSetValues(t, f, entityID, vals)
 }

@@ -1022,3 +1022,63 @@ func TestARetiredValueRePostedUnchangedInADifferentCaseIsAccepted(t *testing.T) 
 		})
 	}
 }
+
+// TestAClearAllLeavesARetiredFieldsRetainedValue is RULING Y, and it is the
+// fourth instance of the shape -- this one in the RECIPE the previous fix
+// installed rather than in the store.
+//
+// setCustomValues is correct in isolation: it deletes only what the submission
+// explicitly cleared. So the destruction moved one layer up, into how a caller
+// builds that submission. Enumerating CustomValuesFor -- which deliberately
+// returns retired fields' retained values alongside live ones, because a detail
+// page has to render them -- posts an explicit blank for rows the operator was
+// never shown and cannot decline to clear. The enumeration step launders "I did
+// not see this" into "I instructed you to delete this", and the store then
+// obeys, correctly, an instruction nobody gave.
+//
+// Measured with the payload built that way: 0 values remained, and the diff read
+// `{"custom_fields":{"old":"asset_tag=ABC-1,cost_centre=IT-42","new":""}}` --
+// the Critical verbatim.
+//
+// A clear-all must enumerate the LIVE FIELD LIST, which is also all a real form
+// can do: it renders the live fields and posts what it rendered.
+func TestAClearAllLeavesARetiredFieldsRetainedValue(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newCustomFieldFixture(t, e)
+			tagID := mustField(t, f, "asset", "asset_tag", domain.CustomFieldText)
+			ccID := mustField(t, f, "asset", "cost_centre", domain.CustomFieldText)
+			mustSetValues(t, f, f.assetID, map[string]string{tagID: "ABC-1", ccID: "IT-42"})
+
+			if err := f.s.RetireCustomField(f.ctx, f.actor, ccID); err != nil {
+				t.Fatalf("retiring cost_centre: %v", err)
+			}
+
+			// The operator clears everything they can see. cost_centre is not
+			// on their screen at all.
+			mustClearValues(t, f, f.assetID)
+
+			values, err := f.s.CustomValuesFor(f.ctx, "asset", f.assetID)
+			if err != nil {
+				t.Fatalf("reading values: %v", err)
+			}
+			if len(values) != 1 {
+				t.Fatalf("got %d values, want 1: a clear-all built from the entity's "+
+					"existing values destroyed a retired field's retained value, which "+
+					"the operator was never shown", len(values))
+			}
+			if values[0].Code != "cost_centre" || values[0].ValueText != "IT-42" {
+				t.Fatalf("got %s=%s, want cost_centre=IT-42 retained",
+					values[0].Code, values[0].ValueText)
+			}
+			if !values[0].Retired {
+				t.Fatal("the retained value's field must report as retired")
+			}
+
+			want := `{"custom_fields":{"old":"asset_tag=ABC-1,cost_centre=IT-42","new":"cost_centre=IT-42"}}`
+			if got := lastChangeDiff(t, f, "asset", f.assetID); got != want {
+				t.Fatalf("the entry must show only the value the operator cleared\n got %s\nwant %s", got, want)
+			}
+		})
+	}
+}
