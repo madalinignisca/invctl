@@ -206,6 +206,22 @@ func (s *SQLStore) UpdateCustomField(ctx context.Context, actor domain.Actor, f 
 	// It is unreachable today, before Task 4 adds the value writer that could
 	// race it -- and "unreachable today" is exactly the reasoning this repo
 	// has already paid for once.
+	//
+	// THIS GUARD PROTECTS THE INVARIANT ONLY IF THE VALUE WRITER ALSO READS
+	// custom_field.kind INSIDE ITS OWN SERIALIZABLE TRANSACTION. PostgreSQL's
+	// SSI detects a serialization failure only when it finds a CYCLE of two
+	// rw-antidependency edges between concurrent serializable transactions.
+	// This transaction reading custom_field_value against a concurrent value
+	// insert supplies ONE edge. A value writer that blindly INSERTs without
+	// reading kind first reads nothing back, supplies no second edge, and
+	// therefore closes no cycle -- Postgres will commit both transactions,
+	// 10/10, with no abort, because "the kind change commits, then the
+	// insert runs" is a perfectly valid serial order it cannot rule out.
+	// Verified directly against the live container: a blind-insert racer
+	// never aborts; a racer that SELECTs kind before it INSERTs aborts every
+	// time (SQLSTATE 40001). Task 4's value writer MUST read custom_field.kind
+	// inside its own writeSerializable transaction before validating a value
+	// against it, or this guard is decorative.
 	return s.writeSerializable(ctx, actor, func(t *tx) error {
 		if f.Kind != before.Kind {
 			n, err := t.countOne(ctx,
