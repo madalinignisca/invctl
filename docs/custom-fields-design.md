@@ -208,9 +208,12 @@ writing one, which `auditFields` now panics on rather than tolerates.
 Field definitions are declared state in their own right: create, edit, retire
 and restore each write their own `change_log` row against `custom_field`.
 
-**A custom value's text enters `change_log` permanently, and nothing can redact
-it.** `domain.IsRedacted` keys on an entity plus a FIELD NAME, and the fold is a
-single opaque key — `custom_fields` — so there is no name inside it to key on.
+**A custom value's text enters `change_log` permanently, and redaction is
+all-or-nothing.** `domain.IsRedacted` consults a global list keyed by column, so
+the whole fold CAN be redacted wholesale under `custom_fields` — but the fold is
+a single opaque key, so there is no name INSIDE it to key on, and no way to
+redact one field's values while keeping the rest. The lever exists and it is a
+blunt one: pulling it hides every custom value from every audit entry.
 `docs/AUDIT.md`'s position that the audit trail "carries no personal data and
 can be kept forever with no retention argument" therefore rests, for this
 feature alone, on no administrator creating a field that holds personal data:
@@ -234,7 +237,12 @@ for entities is the rule, and a bulk delete of 214 declared values is exactly
 what this codebase does not do.
 
 **An operator clearing one value is a different act, and it does remove the
-row.** That is correct rather than an exception: `custom_field_value` holds the
+row — including on a retired field, which is precisely why no surface may
+enumerate a retired field's value into a submission.** A clear-all action builds
+its payload from the LIVE FIELD LIST, never from the values an entity holds:
+`CustomValuesFor` returns retired rows deliberately, so using it as the source
+would post explicit blanks for rows the operator was never shown. Restore
+therefore brings back the field and every value STILL RETAINED. That is correct rather than an exception: `custom_field_value` holds the
 current value of something its parent owns, which is the same shape as
 `asset_environment` and `dependency_data_class` — "set and index tables are
 replaced wholesale, and that is not deletion". Delete-then-insert inside the
