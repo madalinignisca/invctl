@@ -244,6 +244,13 @@ field set diverge the moment anything retires or restores a field between render
 and submit — and a writer inferring intent from absence inherits every one of
 those discrepancies.
 
+**And the converse, which is the same rule read backwards: the operator must be
+SHOWN everything the submission will decide.** A form that draws a blank where a
+value already exists produces a submission that is honest about what it names
+and wrong about what it means — the writer commits the empty draw faithfully.
+Both halves are needed. Enforcing only the first makes the render path the place
+the data is lost.
+
 It follows that **a submission may only name what the operator was shown.** A
 clear-all posts an explicit blank for each field THE FORM DREW — not for every
 value the entity holds (`CustomValuesFor` returns retired rows deliberately), and
