@@ -90,11 +90,18 @@ func TestTheCreationFormWarnsThatCustomValuesArePermanentAndMustNotHoldPII(t *te
 	h.login("admin", "admin-password")
 
 	page := body(t, h.get("/custom-fields", false))
-	if !strings.Contains(page, "recorded permanently in the audit trail") {
-		t.Error("the field-creation form does not warn that values are permanent")
-	}
-	if !strings.Contains(page, "must not hold personal data") {
-		t.Error("the field-creation form does not warn against personal data")
+	// All three clauses, asserted separately: Ruling AH found that asserting
+	// only two of the warning's three claims leaves a tripwire that keeps
+	// passing if the third -- "cannot be removed" -- is deleted from the
+	// template while the other two survive.
+	for _, want := range []string{
+		"recorded permanently in the audit trail",
+		"cannot be removed",
+		"must not hold personal data",
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("the field-creation form does not warn %q", want)
+		}
 	}
 }
 
@@ -120,11 +127,19 @@ func TestARetiredFieldOffersRestoreAndKeepsItsValues(t *testing.T) {
 	}
 
 	afterRetire := body(t, h.get("/custom-fields", false))
-	if !strings.Contains(afterRetire, "Retire Me") {
-		t.Error("a retired field disappeared from the registry entirely -- it must appear in its own section")
+	i := strings.Index(afterRetire, "Retire Me")
+	if i < 0 {
+		t.Fatal("a retired field disappeared from the registry entirely -- it must appear in its own section")
 	}
-	if !strings.Contains(afterRetire, "admin") {
-		t.Error("the retired section does not name who retired it")
+	// Scoped to this row's own markup, not the whole page: the logged-in
+	// user is also named "admin" and appears in the page chrome regardless
+	// of whether RetiredByName resolution works at all.
+	row := afterRetire[i:]
+	if j := strings.Index(row, "</tr>"); j >= 0 {
+		row = row[:j]
+	}
+	if !strings.Contains(row, "admin") {
+		t.Errorf("the retired row does not name who retired it: %s", row)
 	}
 
 	restore := h.post("/custom-fields/"+id+"/restore",
@@ -179,6 +194,37 @@ func TestAStaleOptionsSubmissionIsRefusedWith409(t *testing.T) {
 	}
 	if !strings.Contains(page, "somebody else changed this") {
 		t.Errorf("a stale options write was not explained as one: %s", page)
+	}
+}
+
+// TestTheOptionsEditorDrawsExistingOptionsNotBlanks is Ruling AF: the render
+// path must populate a field's live options before the options editor draws
+// them, or an admin who opens the editor on a field that already has options
+// and clicks Save without retyping every one silently retires them all. The
+// submission side was already correct -- the bug was entirely in what the
+// form showed, the converse half of design.md §6's contract.
+func TestTheOptionsEditorDrawsExistingOptionsNotBlanks(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	id := mustCreateCustomField(t, h, "asset", "tier", "select")
+	first := h.post("/custom-fields/"+id+"/options", url.Values{
+		"csrf_token":   {h.csrfToken("/custom-fields")},
+		"row_version":  {versionInForm(t, body(t, h.get("/custom-fields?options="+id, false)))},
+		"option_value": {"gold"}, "option_label": {"Gold"},
+	}, false)
+	first.Body.Close()
+	if first.StatusCode != http.StatusSeeOther {
+		t.Fatalf("seeding the gold option returned %d", first.StatusCode)
+	}
+
+	reopened := body(t, h.get("/custom-fields?options="+id, false))
+	if !strings.Contains(reopened, `name="option_value" value="gold"`) {
+		t.Errorf("reopening the options editor on a field that already has an option "+
+			"drew a blank instead of its stored value:\n%s", reopened)
+	}
+	if !strings.Contains(reopened, `name="option_label" value="Gold"`) {
+		t.Errorf("reopening the options editor did not draw the option's stored label:\n%s", reopened)
 	}
 }
 

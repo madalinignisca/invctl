@@ -29,10 +29,13 @@ type CustomFieldRow struct {
 	CreatedByName string  `db:"created_by_name"`
 	RetiredByName *string `db:"retired_by_name"`
 	UsageCount    int     `db:"usage_count"`
-	// Options is populated by GetCustomField, which a single field's page
-	// needs. ListCustomFields leaves it empty: loading every field's options
-	// on every registry row would be an N+1 query for a column nothing on
-	// that page renders yet.
+	// Options is populated by GetCustomField. ListCustomFields leaves it
+	// empty on every row it returns: loading every field's options on every
+	// registry row would be an N+1 query, and the registry's own list and
+	// retired tables render nothing from it. The registry's options editor
+	// (Ruling AF) needs it for the ONE row currently open, and gets it by a
+	// separate GetCustomField call against just that row -- see
+	// renderCustomFieldList -- rather than by this method ever populating it.
 	Options []domain.CustomFieldOption
 }
 

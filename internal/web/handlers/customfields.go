@@ -135,6 +135,18 @@ func (p customFieldListPage) OptionsRowVersion(row store.CustomFieldRow) string 
 	return strconv.Itoa(row.RowVersion)
 }
 
+// enrichOptions fills in Options on the one row matching id, in place. A
+// no-op if id names no row in rows -- the field being edited lives in the
+// other slice (asset vs service), and this is called against both.
+func enrichOptions(rows []store.CustomFieldRow, id string, opts []domain.CustomFieldOption) {
+	for i := range rows {
+		if rows[i].ID == id {
+			rows[i].Options = opts
+			return
+		}
+	}
+}
+
 // CustomFieldList renders the registry.
 func (a *App) CustomFieldList(w http.ResponseWriter, r *http.Request) {
 	a.renderCustomFieldList(w, r, http.StatusOK, "custom_field_list_panel", nil,
@@ -180,6 +192,31 @@ func (a *App) renderCustomFieldList(w http.ResponseWriter, r *http.Request, stat
 	editOptions := r.URL.Query().Get("options")
 	if optionsEdit != nil {
 		editOptions = optionsEdit.ID
+	}
+
+	// Ruling AF. ListCustomFields leaves Options empty on every row -- fine
+	// for the table, which renders nothing from it, but the options editor
+	// (OptionRows) reads it directly on a fresh open. Left unenriched, that
+	// editor drew a blank row over every option a field already had: honest
+	// about what the submission named and wrong about what it meant, because
+	// the writer commits the empty draw faithfully (design.md §6, the
+	// converse half of the submission contract). Enriched here rather than
+	// left to OptionRows, and only for the one row being edited -- the store
+	// comment's N+1 concern still holds for the list itself.
+	//
+	// Skipped when optionsEdit is set: a rejected submission redraws from
+	// OptionsEdit.Multi, never from row.Options, so the extra read would be
+	// wasted. The definition editor (?edit=) needs no equivalent enrichment
+	// -- it draws Code/Label/Kind/Description straight off the row already
+	// in AssetFields/ServiceFields, never off Options.
+	if editOptions != "" && optionsEdit == nil {
+		if full, err := a.Store.GetCustomField(r.Context(), editOptions); err == nil {
+			enrichOptions(assetFields, editOptions, full.Options)
+			enrichOptions(serviceFields, editOptions, full.Options)
+		}
+		// A lookup failure here (id gone, wrong type) is not fatal: the row
+		// simply will not match EditOptions in the template and the editor
+		// will not open, the same as any other stale link.
 	}
 
 	a.Render.Respond(w, r, status, "custom_field_list", partial, customFieldListPage{
@@ -259,11 +296,19 @@ func (a *App) CustomFieldUpdate(w http.ResponseWriter, r *http.Request) {
 			case isConflict(err):
 				messages = map[string]string{"code": "a live field with that code already exists for this entity type"}
 			case errors.Is(err, domain.ErrInvalid):
-				// The kind-frozen-while-values-exist refusal (and the
-				// entity_type guard, unreachable here because the form
-				// never offers it). The store names the count; the field
-				// where the operator would look for it is kind.
-				messages = map[string]string{"kind": trimSentinel(err, domain.ErrInvalid)}
+				// Two distinct store refusals share this sentinel: the
+				// kind-frozen-while-values-exist guard, which belongs
+				// against "kind", and the entity_type-immutable guard --
+				// unreachable from this handler today because the form
+				// never offers entity_type, but a change elsewhere in the
+				// call chain should not silently mislabel it as a kind
+				// problem if it ever does become reachable. Told apart by
+				// which guard actually wrote the message, not guessed.
+				field := "kind"
+				if strings.Contains(err.Error(), "belongs to") {
+					field = "entity_type"
+				}
+				messages = map[string]string{field: trimSentinel(err, domain.ErrInvalid)}
 			default:
 				a.handleStoreError(w, r, err)
 				return
