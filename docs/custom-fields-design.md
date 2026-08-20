@@ -208,6 +208,22 @@ writing one, which `auditFields` now panics on rather than tolerates.
 Field definitions are declared state in their own right: create, edit, retire
 and restore each write their own `change_log` row against `custom_field`.
 
+**A custom value's text enters `change_log` permanently, and nothing can redact
+it.** `domain.IsRedacted` keys on an entity plus a FIELD NAME, and the fold is a
+single opaque key — `custom_fields` — so there is no name inside it to key on.
+`docs/AUDIT.md`'s position that the audit trail "carries no personal data and
+can be kept forever with no retention argument" therefore rests, for this
+feature alone, on no administrator creating a field that holds personal data:
+an "Owner email", a "Contact", a "Requested by".
+
+This is stated rather than engineered. The principled fix is a per-field
+"holds personal data" flag that redacts that field's value inside the fold, and
+it is a schema change deferred to a later work package. Until then the
+constraint is operational and belongs where the administrator is: the field
+creation form warns that a custom field's values are recorded permanently in
+the audit trail and must not hold personal data, and `docs/API.md` and the
+registry repeat it. An estate that needs such a field needs the flag first.
+
 ---
 
 ## 6. Retirement and restore
