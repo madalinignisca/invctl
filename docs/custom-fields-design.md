@@ -137,8 +137,10 @@ without it fails an existing guard rather than shipping.
 
 ## 4. Attribution — the registry
 
-`/admin/custom-fields`, behind `RequireAdmin` and CSRF like every other
-mutating surface. It lists, for each field: label, code, kind, entity type,
+`/custom-fields`, behind `RequireAdmin` and CSRF like every other mutating
+surface. Flat, not under an `/admin` prefix: this repo has no such prefix, and
+`/teams`, `/vocabularies` and `/inflation` are all administrative surfaces
+sitting at the top level with the `write()` route helper carrying the guard. It lists, for each field: label, code, kind, entity type,
 description, who defined it, when, how many entities hold a value, and whether
 it is retired and by whom.
 
