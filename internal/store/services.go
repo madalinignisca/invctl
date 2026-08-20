@@ -19,6 +19,30 @@ import (
 
 // ---------- services ----------
 
+// serviceAudit is the audited shape of a service: the row plus the custom
+// values it holds, folded the way assetAudit folds environments and
+// dependencyAudit folds data classes.
+//
+// Those values live in custom_field_value, so setting one leaves every column
+// of the service untouched: without this wrapper the change produces no diff
+// and therefore no change_log entry at all, which is the failure this repo has
+// been bitten by three times (docs/custom-fields-design.md §5).
+//
+// EMBEDDED BY VALUE. An anonymous POINTER embed matches neither branch of
+// auditFields, so every column of domain.Service would vanish from the entry
+// while the entry itself was still written -- the certificate bug that was
+// invisible for a week. auditFields panics on that shape now, and
+// TestAServiceAuditEmbedsByValue asserts it here rather than relying on it.
+type serviceAudit struct {
+	domain.Service
+	// Sorted by code before joining, so a reordering is never a change.
+	CustomFields string `db:"custom_fields"`
+}
+
+func auditedService(svc *domain.Service, custom string) *serviceAudit {
+	return &serviceAudit{Service: *svc, CustomFields: custom}
+}
+
 // ServiceFilter narrows a service list query.
 type ServiceFilter struct {
 	EnvironmentID  string
@@ -175,7 +199,10 @@ func (s *SQLStore) CreateService(ctx context.Context, actor domain.Actor, svc *d
 		if err != nil {
 			return translateWriteErr(err, "creating service")
 		}
-		if err := t.logCreate(ctx, "service", svc.ID, svc); err != nil {
+		// No custom value can exist yet -- svc.ID was generated for this
+		// statement -- so the empty fold is the true one, not a forgotten
+		// argument. Same reasoning as insertAsset.
+		if err := t.logCreate(ctx, "service", svc.ID, auditedService(svc, "")); err != nil {
 			return err
 		}
 		return s.indexService(ctx, t, svc)
@@ -218,7 +245,16 @@ func (s *SQLStore) UpdateService(ctx context.Context, actor domain.Actor, svc *d
 		if err := requireVersion(res, "service", svc.ID, &svc.RowVersion); err != nil {
 			return err
 		}
-		if err := t.logUpdate(ctx, "service", svc.ID, &before.Service, svc); err != nil {
+		// This method does not touch custom values, so the same fold goes on
+		// both sides and cancels; it is read rather than assumed empty so the
+		// entry describes the whole service.
+		custom, err := customFieldsAudit(ctx, t, domain.CustomFieldEntityService, svc.ID)
+		if err != nil {
+			return err
+		}
+		if err := t.logUpdate(ctx, "service", svc.ID,
+			auditedService(&before.Service, custom),
+			auditedService(svc, custom)); err != nil {
 			return err
 		}
 		return s.indexService(ctx, t, svc)

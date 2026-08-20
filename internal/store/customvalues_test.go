@@ -1,0 +1,589 @@
+// invctl — infrastructure inventory
+// Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+//
+// Licensed under the GNU Affero General Public License, version 3 only —
+// no later version applies. See LICENSE for the full text.
+//
+// SPDX-License-Identifier: AGPL-3.0-only
+
+package store
+
+import (
+	"database/sql"
+	"errors"
+	"reflect"
+	"testing"
+
+	"github.com/madalinignisca/invctl/internal/domain"
+)
+
+// ---------- the audit fold ----------
+
+// TestSettingAValueIsAuditedAgainstTheEntity: the asset's own columns do not
+// move when a custom value changes, so without the fold there would be no diff
+// and no entry at all. The exact diff is asserted rather than a substring --
+// "contains IT-42" would still pass if the old value had been dropped.
+func TestSettingAValueIsAuditedAgainstTheEntity(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newCustomFieldFixture(t, e)
+			id := mustField(t, f, "asset", "cost_centre", domain.CustomFieldText)
+			mustValue(t, f, id, f.assetID, "IT-41")
+			mustValue(t, f, id, f.assetID, "IT-42")
+
+			want := `{"custom_fields":{"old":"cost_centre=IT-41","new":"cost_centre=IT-42"}}`
+			if got := lastChangeDiff(t, f, "asset", f.assetID); got != want {
+				t.Fatalf("the asset's audit entry must carry both the old and the new\n got %s\nwant %s", got, want)
+			}
+		})
+	}
+}
+
+// TestClearingAValueIsAuditedOnTheParent: clearing removes the row -- correct,
+// because custom_field_value holds the current value of something its parent
+// owns, the same shape as asset_environment. But a set replacement that
+// produces no diff on the parent is exactly the failure this repo has hit three
+// times, so the entry is asserted by count AND by content.
+func TestClearingAValueIsAuditedOnTheParent(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newCustomFieldFixture(t, e)
+			id := mustField(t, f, "asset", "cost_centre", domain.CustomFieldText)
+			mustValue(t, f, id, f.assetID, "IT-42")
+			before := changeCount(t, f, "asset", f.assetID)
+
+			mustClearValues(t, f, f.assetID)
+
+			if got := changeCount(t, f, "asset", f.assetID); got != before+1 {
+				t.Fatalf("clearing a value wrote %d audit rows, want 1", got-before)
+			}
+			want := `{"custom_fields":{"old":"cost_centre=IT-42","new":""}}`
+			if got := lastChangeDiff(t, f, "asset", f.assetID); got != want {
+				t.Fatalf("clearing must record what was removed\n got %s\nwant %s", got, want)
+			}
+			n, err := f.s.countOne(f.ctx,
+				`SELECT COUNT(*) FROM custom_field_value WHERE entity_id = ?`, f.assetID)
+			if err != nil {
+				t.Fatalf("counting: %v", err)
+			}
+			if n != 0 {
+				t.Fatalf("clearing left %d value rows, want 0", n)
+			}
+		})
+	}
+}
+
+// TestReorderingCustomValuesIsNotAChange: the fold sorts by code before
+// joining, the same reason dependencyAudit sorts its classes. A set written in
+// a different order is not a change, and an audit trail that says it is teaches
+// its readers to ignore it.
+func TestReorderingCustomValuesIsNotAChange(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newCustomFieldFixture(t, e)
+			tagID := mustField(t, f, "asset", "asset_tag", domain.CustomFieldText)
+			ccID := mustField(t, f, "asset", "cost_centre", domain.CustomFieldText)
+
+			mustSetValues(t, f, f.assetID, map[string]string{
+				tagID: "ABC-1234", ccID: "IT-42",
+			})
+			before := changeCount(t, f, "asset", f.assetID)
+			wantFold := `{"custom_fields":{"old":"","new":"asset_tag=ABC-1234,cost_centre=IT-42"}}`
+			if got := lastChangeDiff(t, f, "asset", f.assetID); got != wantFold {
+				t.Fatalf("the fold must be sorted by code\n got %s\nwant %s", got, wantFold)
+			}
+
+			// The same pair, written the other way round.
+			mustSetValues(t, f, f.assetID, map[string]string{
+				ccID: "IT-42", tagID: "ABC-1234",
+			})
+
+			if got := changeCount(t, f, "asset", f.assetID); got != before {
+				t.Fatalf("writing the same values in a different order wrote %d audit rows; "+
+					"a reordering is not a change", got-before)
+			}
+		})
+	}
+}
+
+// TestAServiceValueIsAuditedAgainstTheService is the other entity type: it goes
+// through serviceAudit, which did not exist before this task, so a service
+// value change previously had nowhere at all to be recorded.
+func TestAServiceValueIsAuditedAgainstTheService(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newCustomFieldFixture(t, e)
+			id := mustField(t, f, "service", "sla_ref", domain.CustomFieldText)
+			before := changeCount(t, f, "service", f.serviceID)
+
+			mustValue(t, f, id, f.serviceID, "SLA-7")
+
+			if got := changeCount(t, f, "service", f.serviceID); got != before+1 {
+				t.Fatalf("setting a service value wrote %d audit rows, want 1", got-before)
+			}
+			want := `{"custom_fields":{"old":"","new":"sla_ref=SLA-7"}}`
+			if got := lastChangeDiff(t, f, "service", f.serviceID); got != want {
+				t.Fatalf("got %s, want %s", got, want)
+			}
+		})
+	}
+}
+
+// TestAnAuditShapeEmbedsByValue: auditFields PANICS on an anonymous pointer
+// embed, because that shape silently dropped every column from certificate
+// entries for a week while still writing one. Assert the shape rather than
+// trusting it.
+func TestAnAuditShapeEmbedsByValue(t *testing.T) {
+	cases := []struct {
+		name  string
+		shape reflect.Type
+		inner string
+	}{
+		{"serviceAudit", reflect.TypeOf(serviceAudit{}), "Service"},
+		{"assetAudit", reflect.TypeOf(assetAudit{}), "Asset"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			field := c.shape.Field(0)
+			if !field.Anonymous {
+				t.Fatalf("%s must embed domain.%s anonymously", c.name, c.inner)
+			}
+			if field.Type.Kind() == reflect.Ptr {
+				t.Fatalf("%s embeds domain.%s by POINTER; embed by value, or every "+
+					"column is silently absent from every change_log entry", c.name, c.inner)
+			}
+			if field.Type.Name() != c.inner {
+				t.Fatalf("%s embeds %s, want domain.%s", c.name, field.Type.Name(), c.inner)
+			}
+		})
+	}
+}
+
+// TestAnAssetUpdateStillCarriesItsCustomValues: UpdateAsset does not touch
+// values, so the same fold goes on both sides and cancels -- the entry must
+// name the field that actually moved and nothing else.
+func TestAnAssetUpdateStillCarriesItsCustomValues(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newCustomFieldFixture(t, e)
+			id := mustField(t, f, "asset", "cost_centre", domain.CustomFieldText)
+			mustValue(t, f, id, f.assetID, "IT-42")
+
+			row, err := f.s.GetAsset(f.ctx, f.assetID)
+			if err != nil {
+				t.Fatalf("reading the asset: %v", err)
+			}
+			serial := "SN-9"
+			row.Serial = &serial
+			if err := f.s.UpdateAsset(f.ctx, f.actor, &row.Asset, nil); err != nil {
+				t.Fatalf("updating the asset: %v", err)
+			}
+
+			want := `{"serial":{"old":null,"new":"SN-9"}}`
+			if got := lastChangeDiff(t, f, "asset", f.assetID); got != want {
+				t.Fatalf("an unrelated edit must not report the custom values as changed\n got %s\nwant %s", got, want)
+			}
+		})
+	}
+}
+
+// ---------- what a value is allowed to be ----------
+
+func TestAValueForAnUnknownFieldIsRefused(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newCustomFieldFixture(t, e)
+			err := f.s.SetCustomValues(f.ctx, f.actor, "asset", f.assetID,
+				map[string]string{NewID(): "IT-42"})
+			if err == nil {
+				t.Fatal("a value for a field that does not exist must be refused")
+			}
+			if !errors.Is(err, domain.ErrNotFound) {
+				t.Fatalf("want ErrNotFound, got %v", err)
+			}
+		})
+	}
+}
+
+// TestAValueForTheWrongEntityTypeIsRefused: entity_type lives on the definition
+// only, so nothing in the schema would catch an asset field being written
+// against a service. This check is the only thing that does.
+func TestAValueForTheWrongEntityTypeIsRefused(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newCustomFieldFixture(t, e)
+			assetField := mustField(t, f, "asset", "cost_centre", domain.CustomFieldText)
+
+			err := f.s.SetCustomValues(f.ctx, f.actor, "service", f.serviceID,
+				map[string]string{assetField: "IT-42"})
+			if err == nil {
+				t.Fatal("an asset field must not accept a value against a service")
+			}
+			if !errors.Is(err, domain.ErrNotFound) {
+				t.Fatalf("want ErrNotFound, got %v", err)
+			}
+		})
+	}
+}
+
+// TestARetiredFieldTakesNoNewValue: retiring keeps every value already written
+// (design.md §6) and refuses a new one, the same rule a retired select option
+// follows.
+func TestARetiredFieldTakesNoNewValue(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newCustomFieldFixture(t, e)
+			id := mustField(t, f, "asset", "cost_centre", domain.CustomFieldText)
+			mustValue(t, f, id, f.assetID, "IT-42")
+			if err := f.s.RetireCustomField(f.ctx, f.actor, id); err != nil {
+				t.Fatalf("retiring: %v", err)
+			}
+
+			err := f.s.SetCustomValues(f.ctx, f.actor, "asset", f.secondAssetID,
+				map[string]string{id: "IT-99"})
+			if err == nil {
+				t.Fatal("a retired field must take no new value")
+			}
+			if !errors.Is(err, domain.ErrInvalid) {
+				t.Fatalf("want ErrInvalid, got %v", err)
+			}
+
+			// The value written before retirement is untouched.
+			values, err := f.s.CustomValuesFor(f.ctx, "asset", f.assetID)
+			if err != nil {
+				t.Fatalf("reading values: %v", err)
+			}
+			if len(values) != 1 {
+				t.Fatalf("got %d values after retirement, want 1", len(values))
+			}
+			if values[0].ValueText != "IT-42" {
+				t.Fatalf("got %q, want IT-42", values[0].ValueText)
+			}
+			if !values[0].Retired {
+				t.Fatal("the value must report its definition as retired")
+			}
+		})
+	}
+}
+
+// TestASelectValueMustBeALiveOption covers both halves of the option rule: a
+// live option is accepted, a retired one is refused for a NEW value.
+func TestASelectValueMustBeALiveOption(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newCustomFieldFixture(t, e)
+			id := mustField(t, f, "asset", "tier", domain.CustomFieldSelect)
+			mustOption(t, f, id, "gold")
+			mustOption(t, f, id, "silver")
+
+			mustValue(t, f, id, f.assetID, "gold")
+			values, err := f.s.CustomValuesFor(f.ctx, "asset", f.assetID)
+			if err != nil {
+				t.Fatalf("reading values: %v", err)
+			}
+			if len(values) != 1 || values[0].ValueText != "gold" {
+				t.Fatalf("got %v, want a single value of gold", values)
+			}
+
+			if err := f.s.SetCustomValues(f.ctx, f.actor, "asset", f.secondAssetID,
+				map[string]string{id: "bronze"}); err == nil {
+				t.Fatal("a value that is not an option at all must be refused")
+			}
+
+			// Retire "silver" by submitting only "gold".
+			if err := f.s.SetCustomFieldOptions(f.ctx, f.actor, id,
+				[]domain.CustomFieldOption{{Value: "gold", Label: "Gold"}}); err != nil {
+				t.Fatalf("retiring silver: %v", err)
+			}
+			if err := f.s.SetCustomValues(f.ctx, f.actor, "asset", f.secondAssetID,
+				map[string]string{id: "silver"}); err == nil {
+				t.Fatal("a retired option must take no new value")
+			}
+		})
+	}
+}
+
+// TestCustomValuesAreCanonicalised proves the store validates through the
+// domain constructor rather than storing whatever arrived. The refusals matter
+// as much as the acceptances: value_text ends up in a CSV export and in an
+// audit diff, where "1,234" would be two columns.
+func TestCustomValuesAreCanonicalised(t *testing.T) {
+	cases := []struct {
+		name    string
+		kind    string
+		raw     string
+		want    string
+		refused bool
+	}{
+		{"text is trimmed", domain.CustomFieldText, "  IT-42  ", "IT-42", false},
+		{"a control character is refused", domain.CustomFieldText, "IT\x0042", "", true},
+		{"a number keeps the operator's decimals", domain.CustomFieldNumber, "42.50", "42.50", false},
+		{"a grouped number is refused", domain.CustomFieldNumber, "1,234", "", true},
+		{"a date must be real", domain.CustomFieldDate, "2026-02-30", "", true},
+		{"a real date is stored as typed", domain.CustomFieldDate, "2026-02-28", "2026-02-28", false},
+		{"a boolean is normalised", domain.CustomFieldBoolean, "TRUE", "true", false},
+		{"a non-boolean is refused", domain.CustomFieldBoolean, "yes", "", true},
+	}
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			for _, c := range cases {
+				t.Run(c.name, func(t *testing.T) {
+					f := newCustomFieldFixture(t, e)
+					id := mustField(t, f, "asset", "probe", c.kind)
+
+					err := f.s.SetCustomValues(f.ctx, f.actor, "asset", f.assetID,
+						map[string]string{id: c.raw})
+					if c.refused {
+						if err == nil {
+							t.Fatalf("%q must be refused for a %s field", c.raw, c.kind)
+						}
+						return
+					}
+					if err != nil {
+						t.Fatalf("setting %q: %v", c.raw, err)
+					}
+					values, err := f.s.CustomValuesFor(f.ctx, "asset", f.assetID)
+					if err != nil {
+						t.Fatalf("reading values: %v", err)
+					}
+					if len(values) != 1 {
+						t.Fatalf("got %d values, want 1", len(values))
+					}
+					if values[0].ValueText != c.want {
+						t.Fatalf("got %q, want %q", values[0].ValueText, c.want)
+					}
+				})
+			}
+		})
+	}
+}
+
+// TestABlankValueClearsThatFieldOnly: a form posts every field it renders, so
+// "" is how a person says "nothing here" -- and it must not disturb the rest.
+func TestABlankValueClearsThatFieldOnly(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newCustomFieldFixture(t, e)
+			tagID := mustField(t, f, "asset", "asset_tag", domain.CustomFieldText)
+			ccID := mustField(t, f, "asset", "cost_centre", domain.CustomFieldText)
+			mustSetValues(t, f, f.assetID, map[string]string{tagID: "ABC-1234", ccID: "IT-42"})
+
+			mustSetValues(t, f, f.assetID, map[string]string{tagID: "ABC-1234", ccID: "   "})
+
+			values, err := f.s.CustomValuesFor(f.ctx, "asset", f.assetID)
+			if err != nil {
+				t.Fatalf("reading values: %v", err)
+			}
+			if len(values) != 1 {
+				t.Fatalf("got %d values, want 1", len(values))
+			}
+			if values[0].FieldID != tagID || values[0].ValueText != "ABC-1234" {
+				t.Fatalf("got %+v, want the asset_tag value intact", values[0])
+			}
+			want := `{"custom_fields":{"old":"asset_tag=ABC-1234,cost_centre=IT-42","new":"asset_tag=ABC-1234"}}`
+			if got := lastChangeDiff(t, f, "asset", f.assetID); got != want {
+				t.Fatalf("got %s, want %s", got, want)
+			}
+		})
+	}
+}
+
+// TestOneEntitysValuesAreNotAnothers: the replacement is scoped to the entity,
+// which is easy to get wrong in a DELETE and expensive to discover.
+func TestOneEntitysValuesAreNotAnothers(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newCustomFieldFixture(t, e)
+			id := mustField(t, f, "asset", "cost_centre", domain.CustomFieldText)
+			mustValue(t, f, id, f.assetID, "IT-42")
+			mustValue(t, f, id, f.secondAssetID, "IT-99")
+
+			mustClearValues(t, f, f.assetID)
+
+			values, err := f.s.CustomValuesFor(f.ctx, "asset", f.secondAssetID)
+			if err != nil {
+				t.Fatalf("reading values: %v", err)
+			}
+			if len(values) != 1 || values[0].ValueText != "IT-99" {
+				t.Fatalf("got %v, want the second asset's value untouched", values)
+			}
+		})
+	}
+}
+
+// TestCustomValuesForResolvesTheDefinition: a detail page renders label and
+// kind beside the value without a query per row.
+func TestCustomValuesForResolvesTheDefinition(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newCustomFieldFixture(t, e)
+			ccID := mustField(t, f, "asset", "cost_centre", domain.CustomFieldText)
+			tagID := mustField(t, f, "asset", "asset_tag", domain.CustomFieldText)
+			mustSetValues(t, f, f.assetID, map[string]string{ccID: "IT-42", tagID: "ABC-1234"})
+
+			values, err := f.s.CustomValuesFor(f.ctx, "asset", f.assetID)
+			if err != nil {
+				t.Fatalf("reading values: %v", err)
+			}
+			if len(values) != 2 {
+				t.Fatalf("got %d values, want 2", len(values))
+			}
+			// Ordered by code: asset_tag before cost_centre.
+			if values[0].Code != "asset_tag" || values[1].Code != "cost_centre" {
+				t.Fatalf("got %q then %q, want them ordered by code", values[0].Code, values[1].Code)
+			}
+			if values[0].Kind != domain.CustomFieldText {
+				t.Fatalf("got kind %q, want text", values[0].Kind)
+			}
+			if values[0].Label != "asset_tag" {
+				t.Fatalf("got label %q, want asset_tag", values[0].Label)
+			}
+			if values[0].Retired {
+				t.Fatal("a live field's value must not report as retired")
+			}
+		})
+	}
+}
+
+// TestAValueForAnUnknownEntityIsRefused: an entity that does not exist gets a
+// 404, never a created row. custom_field_value carries no foreign key to asset
+// or service -- entity_type lives on the definition -- so nothing but this
+// check stands between a bad id and an orphan.
+func TestAValueForAnUnknownEntityIsRefused(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newCustomFieldFixture(t, e)
+			id := mustField(t, f, "asset", "cost_centre", domain.CustomFieldText)
+			ghost := NewID()
+
+			err := f.s.SetCustomValues(f.ctx, f.actor, "asset", ghost,
+				map[string]string{id: "IT-42"})
+			if err == nil {
+				t.Fatal("a value for an asset that does not exist must be refused")
+			}
+			if !errors.Is(err, domain.ErrNotFound) {
+				t.Fatalf("want ErrNotFound, got %v", err)
+			}
+			n, err := f.s.countOne(f.ctx,
+				`SELECT COUNT(*) FROM custom_field_value WHERE entity_id = ?`, ghost)
+			if err != nil {
+				t.Fatalf("counting: %v", err)
+			}
+			if n != 0 {
+				t.Fatalf("the refused write left %d rows behind, want 0", n)
+			}
+		})
+	}
+}
+
+// TestSetCustomValuesRefusesAnEntityTypeWithNoFields: assets and services only,
+// per design.md §1. Widening it later is a CHECK constraint and a template
+// include, not a silent acceptance here.
+func TestSetCustomValuesRefusesAnUnknownEntityType(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newCustomFieldFixture(t, e)
+			err := f.s.SetCustomValues(f.ctx, f.actor, "project", f.assetID, nil)
+			if err == nil {
+				t.Fatal("only assets and services hold custom fields")
+			}
+			if !errors.Is(err, domain.ErrInvalid) {
+				t.Fatalf("want ErrInvalid, got %v", err)
+			}
+		})
+	}
+}
+
+// ---------- CONTROLLER RULING Q: the guard is only real if the value writer reads back ----------
+
+// TestAKindChangeAbortsAgainstAConcurrentValueWrite is the test that proves
+// Task 3's writeSerializable guard on UpdateCustomField is not decorative.
+//
+// WHY IT IS SHAPED LIKE THIS. PostgreSQL's SSI aborts a transaction only when
+// it finds a CYCLE of two rw-antidependency edges. UpdateCustomField's count of
+// custom_field_value supplies ONE edge against a concurrent insert; a writer
+// that reads nothing supplies no second edge and both transactions commit, at
+// any interleaving. So this is not about timing at all, and a goroutine race
+// would prove nothing (it was tried: 0 failures in 700 trials against genuinely
+// broken code, because there was no dangerous structure to find).
+//
+// ON THIS SCHEMA THE SECOND EDGE HAS TWO SOURCES, which a probe established
+// rather than assumed. customFieldDefs reads custom_field inside the writer's
+// serializable transaction, and so does the foreign key check behind
+// custom_field_value.field_id REFERENCES custom_field(id). Dropping that
+// constraint and repeating the probe with a blind insert commits with no abort;
+// with it, even a blind insert aborts. This test therefore asserts the OUTCOME
+// -- the kind change cannot commit -- rather than pinning which of the two
+// supplies it, because either one disappearing is a regression and either one
+// remaining keeps the invariant true.
+//
+// Two manually sequenced transactions under explicit control flow instead. T1
+// is UpdateCustomField's guard, written out by hand because the real method
+// cannot be paused mid-transaction. T2 is the REAL value writer, which is the
+// whole point: it is SetCustomValues that has to supply the second edge, and it
+// does so only because customFieldDefs reads custom_field inside its own
+// serializable transaction.
+//
+// PostgreSQL only. SQLite serialises writes on a single connection by
+// construction and has no SSI to exercise; holding T1 open there would simply
+// deadlock against the writer pool.
+func TestAKindChangeAbortsAgainstAConcurrentValueWrite(t *testing.T) {
+	for _, e := range Engines(t) {
+		if e.Name != DriverPostgres {
+			continue
+		}
+		t.Run(e.Name, func(t *testing.T) {
+			f := newCustomFieldFixture(t, e)
+			fieldID := mustField(t, f, "asset", "cost_centre", domain.CustomFieldText)
+			raw := f.s.DB().Writer
+			rebind := raw.Rebind
+
+			// T1: UpdateCustomField's guard. Begin, read the value count,
+			// and HOLD.
+			t1, err := raw.BeginTx(f.ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+			if err != nil {
+				t.Fatalf("beginning T1: %v", err)
+			}
+			defer t1.Rollback()
+			var n int
+			if err := t1.QueryRowContext(f.ctx, rebind(
+				`SELECT COUNT(*) FROM custom_field_value WHERE field_id = ?`),
+				fieldID).Scan(&n); err != nil {
+				t.Fatalf("T1 counting values: %v", err)
+			}
+			if n != 0 {
+				t.Fatalf("T1 saw %d values, want 0: the guard would refuse for the wrong reason", n)
+			}
+
+			// T2: the real value writer, start to finish, committed.
+			mustValue(t, f, fieldID, f.assetID, "IT-42")
+
+			// T1 resumes and tries to commit the kind change its stale count
+			// said was safe.
+			_, err = t1.ExecContext(f.ctx, rebind(
+				`UPDATE custom_field SET kind = ?, row_version = row_version + 1 WHERE id = ?`),
+				domain.CustomFieldNumber, fieldID)
+			if err == nil {
+				err = t1.Commit()
+			}
+			if err == nil {
+				t.Fatal("the kind change committed against a value written concurrently: " +
+					"Task 3's serializable guard is INERT, because the value writer supplied " +
+					"no rw-antidependency edge back. SetCustomValues must read custom_field " +
+					"INSIDE its own serializable transaction -- see customFieldDefs.")
+			}
+			if !isSerializationFailure(err) {
+				t.Fatalf("want a serialization failure (SQLSTATE 40001), got %v", err)
+			}
+
+			// And the value survived: T2 is the transaction that committed.
+			values, err := f.s.CustomValuesFor(f.ctx, "asset", f.assetID)
+			if err != nil {
+				t.Fatalf("reading values: %v", err)
+			}
+			if len(values) != 1 || values[0].ValueText != "IT-42" {
+				t.Fatalf("got %v, want the concurrently written value to survive", values)
+			}
+		})
+	}
+}

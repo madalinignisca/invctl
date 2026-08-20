@@ -720,6 +720,15 @@ func TestTheOnlyFactDeletingStatementIsThePrune(t *testing.T) {
 		// machine is no longer shared moves money, and a change with no diff
 		// on the parent could not be found afterwards.
 		"internal/store/occupancy.go": "asset_occupant: who shares a machine, replaced wholesale",
+		// custom_field_value: what one asset or service holds for the fields
+		// this estate defined. Same rule, tenth time, and design.md §6 states
+		// it explicitly -- the row is the CURRENT VALUE of something its
+		// parent owns, so clearing it is a set replacement rather than the
+		// deletion of a fact. Retiring the FIELD deletes no value, ever; only
+		// an operator clearing one entity's value removes a row, inside that
+		// entity's own transaction, folded into assetAudit.CustomFields /
+		// serviceAudit.CustomFields so it cannot produce an empty diff.
+		"internal/store/customvalues.go": "custom_field_value: what one entity holds for each custom field, replaced wholesale",
 	}
 
 	root := repoRoot(t)

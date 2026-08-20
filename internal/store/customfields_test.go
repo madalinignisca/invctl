@@ -109,28 +109,66 @@ func mustOption(t *testing.T, f *customFieldFixture, fieldID, value string) {
 	}
 }
 
-// mustValue BYPASSES THE STORE LAYER ENTIRELY. It is a raw INSERT straight
-// into custom_field_value, not a call through any store method -- there is no
-// SetCustomFieldValue yet. It does none of the things the real write path
-// must do: no validation against the field's kind, no canonicalisation, no
-// fold into assetAudit/serviceAudit, no row_version conflict check.
+// mustValue sets ONE field's value on an entity, leaving whatever other values
+// that entity already holds in place.
 //
-// TASK 4 MUST REPLACE THIS FUNCTION'S BODY with a call through its real store
-// method once that method exists -- not add a second value-writing path
-// alongside it. This stub exists only so Task 3's own tests (which need "a
-// field that holds a value" to exist) do not block on work that has not
-// landed yet. custom_field_value.entity_id carries no foreign key -- the same
-// (entity_type, entity_id) shape as change_log -- so this raw insert cannot
-// corrupt anything Task 3 owns, but it is not a second implementation to keep.
+// Task 3 carried a stub here that INSERTed straight into custom_field_value,
+// bypassing validation, canonicalisation and the audit fold entirely. Task 4
+// REPLACED it with the real write path rather than keeping a second one
+// alongside: every test in this package now exercises SetCustomValues, so a
+// defect in it cannot hide behind a fixture that did the write differently.
+//
+// The merge is what makes "set one field" out of a wholesale replacement: the
+// store's contract is that the map it receives IS the entity's complete set,
+// and a helper that forgot to merge would silently clear every other value.
 func mustValue(t *testing.T, f *customFieldFixture, fieldID, entityID, raw string) {
 	t.Helper()
-	now := domain.FormatTime(f.s.Now())
-	query := f.s.DB().Writer.Rebind(`
-		INSERT INTO custom_field_value (id, field_id, entity_id, value_text, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?)`)
-	if _, err := f.s.DB().Writer.ExecContext(f.ctx, query, NewID(), fieldID, entityID, raw, now, now); err != nil {
-		t.Fatalf("inserting stub custom value (Task 4 owns the real write path): %v", err)
+	entityType := entityTypeOf(t, f, entityID)
+	current, err := f.s.CustomValuesFor(f.ctx, entityType, entityID)
+	if err != nil {
+		t.Fatalf("reading the current values of %s %s: %v", entityType, entityID, err)
 	}
+	vals := make(map[string]string, len(current)+1)
+	for _, v := range current {
+		vals[v.FieldID] = v.ValueText
+	}
+	vals[fieldID] = raw
+	if err := f.s.SetCustomValues(f.ctx, f.actor, entityType, entityID, vals); err != nil {
+		t.Fatalf("setting custom value %q on field %s: %v", raw, fieldID, err)
+	}
+}
+
+// mustSetValues replaces an entity's whole set in one call, which is what a
+// form submission does.
+func mustSetValues(t *testing.T, f *customFieldFixture, entityID string, vals map[string]string) {
+	t.Helper()
+	entityType := entityTypeOf(t, f, entityID)
+	if err := f.s.SetCustomValues(f.ctx, f.actor, entityType, entityID, vals); err != nil {
+		t.Fatalf("setting custom values on %s %s: %v", entityType, entityID, err)
+	}
+}
+
+// mustClearValues clears every custom value an entity holds. The rows go, and
+// the parent's change_log entry has to record it.
+func mustClearValues(t *testing.T, f *customFieldFixture, entityID string) {
+	t.Helper()
+	mustSetValues(t, f, entityID, nil)
+}
+
+// entityTypeOf answers "is this id an asset or a service" so the helpers above
+// take the same argument list the brief's tests use. custom_field_value carries
+// no entity_type of its own -- it lives on the definition -- so a test fixture
+// has to decide it the same way a handler's route does.
+func entityTypeOf(t *testing.T, f *customFieldFixture, entityID string) string {
+	t.Helper()
+	n, err := f.s.countOne(f.ctx, `SELECT COUNT(*) FROM asset WHERE id = ?`, entityID)
+	if err != nil {
+		t.Fatalf("deciding the entity type of %s: %v", entityID, err)
+	}
+	if n == 1 {
+		return domain.CustomFieldEntityAsset
+	}
+	return domain.CustomFieldEntityService
 }
 
 // changeCount and lastChangeDiff are the two change_log helpers every WP-A4

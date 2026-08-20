@@ -125,15 +125,33 @@ func (s *SQLStore) ListEnvironments(ctx context.Context) ([]domain.Environment, 
 // into a second environment, which is precisely what the segmentation-span
 // report keys on, in complete silence. Same failure as dependency data classes;
 // same fix. Codes rather than ids because an audit entry is read by people.
+// Custom values fold in the same way and for the same reason (WP-A4,
+// docs/custom-fields-design.md §5): they live in custom_field_value, so a value
+// change leaves every column of the asset untouched and would otherwise write
+// no audit entry at all. "asset_tag=ABC-1234,cost_centre=IT-42", sorted by code
+// so a reordering is never reported as a change.
+//
+// EMBEDDED BY VALUE, not by pointer. auditFields panics on an anonymous pointer
+// embed because that shape silently dropped every column of the embedded struct
+// from change_log while still writing an entry, and was invisible for a week.
 type assetAudit struct {
 	domain.Asset
 	Environments string `db:"environments"`
+	CustomFields string `db:"custom_fields"`
 }
 
-func auditedAsset(a *domain.Asset, codes []string) *assetAudit {
+// auditedAsset builds the audited shape. custom is the folded custom-value
+// string from customFieldsAudit; every call site passes it, because one that
+// quietly passed nothing would write an entry that looks complete and omits the
+// values -- the failure this fold exists to prevent.
+func auditedAsset(a *domain.Asset, codes []string, custom string) *assetAudit {
 	sorted := append([]string(nil), codes...)
 	sort.Strings(sorted)
-	return &assetAudit{Asset: *a, Environments: strings.Join(sorted, ",")}
+	return &assetAudit{
+		Asset:        *a,
+		Environments: strings.Join(sorted, ","),
+		CustomFields: custom,
+	}
 }
 
 // environmentCodes resolves environment ids to their codes for the audit trail.
@@ -733,7 +751,11 @@ func (s *SQLStore) insertAsset(ctx context.Context, t *tx, a *domain.Asset, envi
 	if err := setAssetEnvironments(ctx, t, a.ID, environmentIDs); err != nil {
 		return err
 	}
-	if err := t.logCreate(ctx, "asset", a.ID, auditedAsset(a, codes)); err != nil {
+	// No custom values can exist yet: a.ID was generated for this statement and
+	// nothing has had the chance to write against it. Empty is the true fold,
+	// not a call site that forgot one -- and querying for it here would put two
+	// extra reads on every row of a bulk import, which shares this function.
+	if err := t.logCreate(ctx, "asset", a.ID, auditedAsset(a, codes, "")); err != nil {
 		return err
 	}
 	return s.indexAsset(ctx, t, a)
@@ -821,9 +843,17 @@ func (s *SQLStore) UpdateAsset(ctx context.Context, actor domain.Actor, a *domai
 		if err := setAssetEnvironments(ctx, t, a.ID, environmentIDs); err != nil {
 			return err
 		}
+		// This method does not touch custom values, so the same fold goes on
+		// both sides and cancels. It is read rather than left empty because an
+		// audit entry that omits half the asset while claiming to describe it
+		// is worse than one query.
+		custom, err := customFieldsAudit(ctx, t, domain.CustomFieldEntityAsset, a.ID)
+		if err != nil {
+			return err
+		}
 		if err := t.logUpdate(ctx, "asset", a.ID,
-			auditedAsset(&before.Asset, beforeCodes),
-			auditedAsset(a, afterCodes)); err != nil {
+			auditedAsset(&before.Asset, beforeCodes, custom),
+			auditedAsset(a, afterCodes, custom)); err != nil {
 			return err
 		}
 		return s.indexAsset(ctx, t, a)
