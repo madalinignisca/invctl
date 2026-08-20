@@ -318,6 +318,12 @@ what this API returns; publishing a new field is always a separate, reviewed
 edit. Every example below is drawn from the repository's golden test fixtures
 (`internal/web/testdata/api/`).
 
+**Custom fields (WP-A4) are deliberately absent from every shape below.** An
+estate's own attributes are administrator-defined and administrator-retirable;
+an integration must not come to depend on one that can disappear at another
+person's discretion. `TestCustomFieldsNeverReachTheAPI` pins this against the
+same golden fixture the Asset shape below is drawn from.
+
 ### Asset
 
 ```json

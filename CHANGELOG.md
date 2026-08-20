@@ -54,6 +54,15 @@ footnote.
   credential must name every environment it is allowed to read. See
   `docs/API.md`.
 
+- **Custom fields.** Define your own typed attributes — text, number, date,
+  boolean or a fixed list of choices — on assets or on services, from
+  `/custom-fields`. Each one is described, attributed to whoever defined it,
+  and audited exactly like a built-in field: every value change writes a
+  `change_log` entry against the asset or service it belongs to. Retiring a
+  field never deletes the values it already holds. Values also leave through
+  the CSV export, one column per field. Deliberately absent from `/api/v1` —
+  see `docs/API.md`. See `docs/custom-fields-design.md`.
+
 ---
 
 ## [0.5.0] — 2026-08-17

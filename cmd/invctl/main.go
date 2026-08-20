@@ -181,6 +181,18 @@ func run() error {
 		}
 	}
 
+	// Custom fields (WP-A4): also after ensureAdmin, and for the same reason
+	// as the override above -- custom_field.created_by is a real foreign key
+	// into app_user, which does not exist until this point. Unlike the
+	// override, staged whenever the demo estate itself was loaded, not only
+	// under the observed-presentation flags: an estate with no custom fields
+	// at all is not a representative demo of this feature.
+	if cfg.SeedOnStart {
+		if err := seed.StageCustomFields(ctx, st, cfg.AdminUsername); err != nil {
+			slog.Warn("demo custom fields not staged", "error", err)
+		}
+	}
+
 	sessions, err := newSessionManager(db, cfg)
 	if err != nil {
 		return err

@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"reflect"
 	"strings"
 	"testing"
@@ -494,4 +495,34 @@ func TestAnEmptyCollectionMarshalsAsAnEmptyArrayOverHTTP(t *testing.T) {
 	if !strings.Contains(got.Body, `"data":[]`) {
 		t.Errorf("an empty collection must marshal as [] and never as null; got %q", got.Body)
 	}
+}
+
+// TestCustomFieldsNeverReachTheAPI is WP-A4's guard on WP-A2's contract: an
+// exact, hand-written list of json tags. A custom field must never appear in
+// /api/v1 -- an integration must not depend on a field one of this estate's
+// administrators can retire at will.
+func TestCustomFieldsNeverReachTheAPI(t *testing.T) {
+	h := newHarnessWithReaders(t, nil, testReaderCredentials())
+	h.login("admin", "admin-password")
+	id := mustCreateFieldViaHTTP(t, h, "asset", "cost_centre", "Cost Centre", "text")
+	mustSetValueViaHTTP(t, h, h.refs.Assets["hv-01"], id, "IT-42")
+
+	// Signed out before the API call: TestTheAPIRefusesABrowserSession pins a
+	// separate, deliberate invariant -- a session cookie refuses the API
+	// outright even carrying a valid bearer token, on top of and before this
+	// guard ever gets a chance to matter. Carrying the admin's session into
+	// apiGet would test that refusal by accident, not this one.
+	token := h.csrfToken("/")
+	logout := h.post("/logout", url.Values{"csrf_token": {token}}, false)
+	logout.Body.Close()
+
+	got := h.apiGet(t, "/api/v1/assets?limit=1", readerAllToken)
+	if strings.Contains(got.Body, "cost_centre") || strings.Contains(got.Body, "IT-42") {
+		t.Fatalf("a custom field reached /api/v1: %s", got.Body)
+	}
+	// The SAME golden the DTO shape test pins, deliberately: after defining a
+	// field and giving it a value, the published shape must come back
+	// byte-unchanged. A second golden here would let this test pass by
+	// asserting against a copy nobody keeps honest.
+	assertGoldenJSON(t, "testdata/api/asset.json", got.Body)
 }

@@ -247,6 +247,13 @@ func webTemplate(t *testing.T) (string, *seed.Refs) {
 			}
 		}
 
+		// WP-A4's own custom fields are DELIBERATELY NOT staged into this
+		// shared template. Every other test in this package assumes an
+		// estate that starts with none defined -- TestTheSectionIsAbsent-
+		// WhenNoFieldIsDefined pins that directly -- and this template is
+		// copied for every one of them. seed.StageCustomFields is exercised
+		// against its own isolated database by
+		// TestTheSeedFixtureCoversEveryCustomFieldKind in internal/seed.
 		if err := db.Close(); err != nil {
 			webTemplateErr = fmt.Errorf("closing the template: %w", err)
 			return

@@ -118,7 +118,7 @@ instead, since nobody declared that change.
 *See the appendix: there is a standing argument for building this concretely
 inside WP-C1 and extracting it when WP-B1 arrives, rather than up front.*
 
-**WP-A4 · Custom fields** — M — depends: none — unlocks: adoption
+**WP-A4 · Custom fields** — M — **DONE**
 Otherwise every estate-specific attribute is a migration. Typed, per object type,
 searchable, exportable, audited like any other field.
 
@@ -788,7 +788,7 @@ Track it. It answers "what's left" in one glance.
 | Clusters, VM types, virtual disks | E2 |
 | Wireless LANs and links | F1 |
 | Config contexts and templates | H1 |
-| Custom fields, tags, export templates | A4, G4, G5 |
+| Custom fields, tags, export templates | A4 — **DONE**, G4, G5 |
 | Object-level permissions | G1 |
 | Webhooks and event rules | G2 |
 | Journal entries | G3 |

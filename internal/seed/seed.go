@@ -157,6 +157,10 @@ func Load(ctx context.Context, s *store.SQLStore) (*Refs, error) {
 	// Certificates last: they deploy to assets and services and are renewed by
 	// teams, so all three must exist.
 	b.certificates()
+	// Custom fields are NOT staged here. custom_field.created_by is a real
+	// foreign key into app_user, and Load runs before cmd/invctl ever creates
+	// the seeded administrator -- see StageCustomFields in
+	// seed_customfields.go for the full reasoning and the separate call site.
 
 	// Last, and only when asked. Observations are telemetry rather than
 	// inventory, so a deployment gets the honest empty state unless somebody is
