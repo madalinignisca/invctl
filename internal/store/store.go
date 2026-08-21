@@ -51,9 +51,11 @@ func (s *SQLStore) WithClock(now func() time.Time) *SQLStore {
 // Resolving the key needs the database -- it may be persisted there, see
 // ResolveAuditFoldKey in foldkey.go -- so it cannot be supplied to New, which
 // runs before migrations. cmd/invctl wires this in after New and after
-// migrating; a store built without it panics the first time it actually has
-// to fold a non-empty set of custom values, which is the correct failure for
-// a wiring bug rather than folding under a silently empty key.
+// migrating; a store built without it returns an error the first time it
+// actually has to fold a non-empty set of custom values (foldDigest refuses
+// an empty key rather than panicking, CLAUDE.md's "never panic outside
+// main"), which is the correct failure for a wiring bug rather than folding
+// under a silently empty key.
 func (s *SQLStore) WithFoldKey(key []byte) *SQLStore {
 	clone := *s
 	clone.foldKey = key

@@ -10,6 +10,7 @@ package store
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/rand"
 	"database/sql"
 	"encoding/base64"
@@ -130,6 +131,36 @@ func (s *SQLStore) insertFoldKey(ctx context.Context, generated []byte) error {
 	_, err := s.db.Writer.ExecContext(ctx, s.db.Rebind(insertAuditFoldKey),
 		auditFoldKeyRowID, encoded, domain.FormatTime(s.Now()))
 	return err
+}
+
+// CheckAuditFoldKeyDivergence compares an operator-supplied
+// INV_AUDIT_FOLD_KEY against the key already persisted in audit_fold_key, if
+// a row exists yet. It exists so cmd/invctl can warn -- loudly, but without
+// refusing to start -- when the two disagree, rather than silently folding
+// every custom value under a key that does not match what earlier writes
+// used. A divergence is not always a mistake: a deliberate rotation is a
+// legitimate operator decision. But it is never SAFE to be silent about,
+// because it changes every digest ever folded and puts a spurious diff on
+// every entity holding a custom value on its next save, permanently, since
+// change_log is append-only and nothing rewrites a stored diff.
+//
+// Neither key is ever returned, logged, or otherwise exposed by this
+// function or its caller -- only whether they match.
+//
+// hasPersisted is false when no row exists yet (the first start of a
+// database that already has INV_AUDIT_FOLD_KEY set): there is nothing to
+// diverge from, since this start's key is exactly what would be persisted if
+// the operator ever unset the variable and fell back to the database. The
+// caller should not warn in that case.
+func (s *SQLStore) CheckAuditFoldKeyDivergence(ctx context.Context, operatorKey []byte) (hasPersisted, differs bool, err error) {
+	persisted, ok, err := s.readFoldKey(ctx)
+	if err != nil {
+		return false, false, err
+	}
+	if !ok {
+		return false, false, nil
+	}
+	return true, !hmac.Equal(persisted, operatorKey), nil
 }
 
 // readFoldKey reads the persisted key, if a row exists yet.

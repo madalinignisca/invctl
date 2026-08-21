@@ -184,6 +184,107 @@ func TestAuditFoldKeyGenerationRacesResolveToTheSameKey(t *testing.T) {
 	}
 }
 
+// TestAuditFoldKeyInsertConflictIsRecognisedAsALostRace reaches the branch
+// neither of the two tests above does: ResolveAuditFoldKey always re-reads
+// before it inserts, so a sequential "call it twice" never drives its own
+// INSERT into the unique-violation arm -- the second call finds the row on
+// its read and returns before touching insertFoldKey at all. The only way
+// that arm is ever exercised in production is a genuine race between two
+// processes' inserts, which is not reproducible deterministically.
+//
+// So this drives the lower-level call directly, the way a security review of
+// this exact function did: insert once (it must succeed, on an empty table),
+// then insert again with a DIFFERENT key for the same fixed id (it must fail,
+// and isUniqueViolation must recognise the failure on both engines -- SQLite's
+// driver text and PostgreSQL's SQLSTATE 23505 are worded differently). Then
+// confirm the table still holds only the FIRST key: a lost race must adopt
+// the winner's key, never overwrite it.
+func TestAuditFoldKeyInsertConflictIsRecognisedAsALostRace(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			s, ctx := newStore(t, e)
+
+			first := bytes.Repeat([]byte{0x11}, 32)
+			if err := s.insertFoldKey(ctx, first); err != nil {
+				t.Fatalf("first insert (empty table): %v", err)
+			}
+
+			second := bytes.Repeat([]byte{0x22}, 32)
+			err := s.insertFoldKey(ctx, second)
+			if err == nil {
+				t.Fatal("second insert for the same id succeeded, want a uniqueness conflict")
+			}
+			if !isUniqueViolation(err) {
+				t.Fatalf("isUniqueViolation(%v) = false, want true", err)
+			}
+
+			winner, ok, err := s.readFoldKey(ctx)
+			if err != nil {
+				t.Fatalf("reading back the persisted key: %v", err)
+			}
+			if !ok {
+				t.Fatal("no key persisted after a winning insert")
+			}
+			if !bytes.Equal(winner, first) {
+				t.Fatal("the losing insert changed the persisted key; " +
+					"the first writer's key must be the one every later reader sees")
+			}
+		})
+	}
+}
+
+// TestCheckAuditFoldKeyDivergence covers the three outcomes cmd/invctl's
+// attachFoldKey branches on when INV_AUDIT_FOLD_KEY is set: nothing persisted
+// yet (first start with the variable already set -- nothing to diverge
+// from), a match (the common, unremarkable case), and a genuine mismatch
+// (the operational trap this function exists to catch).
+func TestCheckAuditFoldKeyDivergence(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			s, ctx := newStore(t, e)
+
+			operatorKey := bytes.Repeat([]byte{0x33}, 32)
+
+			hasPersisted, differs, err := s.CheckAuditFoldKeyDivergence(ctx, operatorKey)
+			if err != nil {
+				t.Fatalf("divergence check against an empty table: %v", err)
+			}
+			if hasPersisted {
+				t.Error("hasPersisted = true against an empty table, want false")
+			}
+			if differs {
+				t.Error("differs = true against an empty table, want false: nothing to diverge from")
+			}
+
+			if err := s.insertFoldKey(ctx, operatorKey); err != nil {
+				t.Fatalf("persisting the operator's own key: %v", err)
+			}
+			hasPersisted, differs, err = s.CheckAuditFoldKeyDivergence(ctx, operatorKey)
+			if err != nil {
+				t.Fatalf("divergence check on a match: %v", err)
+			}
+			if !hasPersisted {
+				t.Error("hasPersisted = false with a row present, want true")
+			}
+			if differs {
+				t.Error("differs = true when the operator key matches the persisted key")
+			}
+
+			otherKey := bytes.Repeat([]byte{0x44}, 32)
+			hasPersisted, differs, err = s.CheckAuditFoldKeyDivergence(ctx, otherKey)
+			if err != nil {
+				t.Fatalf("divergence check on a mismatch: %v", err)
+			}
+			if !hasPersisted {
+				t.Error("hasPersisted = false with a row present, want true")
+			}
+			if !differs {
+				t.Error("differs = false for a key that does not match what is persisted, want true")
+			}
+		})
+	}
+}
+
 // TestAuditFoldKeyInsertFailureThatIsNotARaceIsReported proves the failed
 // INSERT is only ever read as "lost the race" when the failure is actually a
 // uniqueness conflict on the fixed id='default' row. A different failure --

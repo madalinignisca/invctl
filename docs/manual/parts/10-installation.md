@@ -85,6 +85,7 @@ whatever manages your services is the only place settings live.
 | `INV_AUTH_LDAP` | `false` | see [Directory authentication](12-directory.md) |
 | `INV_ADMIN_USERNAME` | `admin` | the seeded first account |
 | `INV_ADMIN_PASSWORD` | — | its password; a random one is generated and logged once if unset |
+| `INV_AUDIT_FOLD_KEY` | — | generated and persisted in the database if unset. See below — setting it is the GDPR-correct deployment, not just hardening |
 
 At least one of `INV_AUTH_LOCAL` and `INV_AUTH_LDAP` must be on. The server
 refuses to start with both off, rather than starting and accepting nobody.
@@ -102,6 +103,41 @@ openssl rand -base64 48
 
 Set it once, keep it with your other secrets, and never rotate it casually:
 rotating it signs everyone out.
+
+### `INV_AUDIT_FOLD_KEY` — set it, but never rotate it by accident
+
+A custom field's value is never written to `change_log` as text. Instead a
+keyed HMAC-SHA256 digest of it is folded into the audited entry, so a change
+still shows up as a diff without the value itself reaching the log. Left
+unset, invctl generates the key once and persists it in the database.
+
+That default is not wrong, but it is worth understanding precisely: a keyed
+digest whose key sits in the **same database** as the digests it protects is
+*pseudonymisation*, not anonymisation (GDPR Art. 4(5), Recital 26) — the
+"additional information" that could re-identify a value is not "kept
+separately". Setting `INV_AUDIT_FOLD_KEY` so the key lives **outside** the
+database — with your other secrets, the same as `INV_SESSION_KEY` — is what
+makes it the GDPR-correct deployment, not merely an extra precaution.
+
+Unlike the session key, **this one must never change under a running
+deployment's data.** A fresh key changes every digest ever folded, and every
+entity that holds a custom value gets a spurious diff on its very next save —
+forever, because `change_log` is append-only and no entry is ever rewritten.
+So do **not** generate a fresh key with `openssl rand -base64 48` and set it
+the way you would for `INV_SESSION_KEY` above. If you want to move the key
+out of the database into `INV_AUDIT_FOLD_KEY`, read the **existing** one out
+first:
+
+```sql
+SELECT key_b64 FROM audit_fold_key;
+```
+
+and set `INV_AUDIT_FOLD_KEY` to that exact value. Setting it to anything else
+is a deliberate key rotation — invctl detects the mismatch against what is
+already persisted and logs a prominent warning at startup (never the key
+itself), but it does not refuse to start, since a genuine rotation is a
+legitimate operator decision. Unsetting the variable again falls back to the
+key already in the database, unchanged.
 
 ## First run
 

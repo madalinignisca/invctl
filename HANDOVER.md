@@ -660,10 +660,21 @@ INV_DB_DRIVER=sqlite            # or postgres
 INV_DB_DSN=file:invctl.db?_txlock=immediate
 INV_LISTEN=:8080
 INV_SESSION_KEY=<32 random bytes, base64>
+INV_AUDIT_FOLD_KEY=<32 random bytes, base64>  # unset: generated & persisted in the DB
 INV_ADMIN_USERS=gabriel,nikolaj # POC RBAC: comma-separated admin usernames
 INV_AUTH_LOCAL=true
 INV_AUTH_LDAP=false
 ```
+
+`INV_AUDIT_FOLD_KEY` keys the digest that replaces a custom field value's
+text before it reaches `change_log` (`internal/store/customvalues.go`,
+`docs/AUDIT.md`). Generated and persisted in the database by default, which
+is a pseudonymisation, not an anonymisation — Art. 4(5) — because the key
+sits beside what it protects. Setting the variable so the key is held
+**outside** the database is the GDPR-correct deployment. Never rotate it
+casually: doing so changes every digest ever folded and puts a spurious diff
+on every entity holding a custom value, permanently, since `change_log` is
+append-only.
 
 ---
 

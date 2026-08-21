@@ -563,6 +563,24 @@ func setupLogging(level string) {
 // worth catching immediately rather than a release cycle later.
 func attachFoldKey(ctx context.Context, st *store.SQLStore, cfg *config.Config) (*store.SQLStore, error) {
 	if cfg.AuditFoldKey != nil {
+		// A divergence from whatever is already persisted is not refused --
+		// a deliberate rotation is a legitimate operator decision -- but it
+		// is never safe to pass in silence: it changes every digest ever
+		// folded, and change_log is append-only, so the consequence is
+		// permanent. hasPersisted is false only on the very first start of a
+		// database that already has the variable set, in which case there
+		// is nothing yet to diverge from.
+		hasPersisted, differs, err := st.CheckAuditFoldKeyDivergence(ctx, cfg.AuditFoldKey)
+		if err != nil {
+			return nil, fmt.Errorf("checking the audit fold key against the database: %w", err)
+		}
+		if hasPersisted && differs {
+			slog.Warn("INV_AUDIT_FOLD_KEY does not match the key persisted in this database; " +
+				"every existing custom-field digest was folded under the OLD key, so every entity " +
+				"holding a custom value will show a spurious diff on its next save -- this cannot be " +
+				"undone, since the audit trail is append-only. If this was not a deliberate key " +
+				"rotation, unset INV_AUDIT_FOLD_KEY to restore the original key.")
+		}
 		slog.Info("audit fold key loaded from INV_AUDIT_FOLD_KEY")
 		return st.WithFoldKey(cfg.AuditFoldKey), nil
 	}
@@ -573,7 +591,9 @@ func attachFoldKey(ctx context.Context, st *store.SQLStore, cfg *config.Config) 
 	switch mode {
 	case store.FoldKeyGenerated:
 		slog.Info("audit fold key generated and persisted for future starts; " +
-			"set INV_AUDIT_FOLD_KEY to manage it outside the database instead")
+			"to manage it outside the database instead (the GDPR-correct deployment), read the " +
+			"EXISTING key out with 'SELECT key_b64 FROM audit_fold_key' and set INV_AUDIT_FOLD_KEY " +
+			"to that value -- do NOT generate a new one, or every digest already folded will change")
 	case store.FoldKeyPersisted:
 		slog.Info("audit fold key loaded from the database (generated on an earlier start)")
 	}

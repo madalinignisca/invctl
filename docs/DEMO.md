@@ -211,6 +211,14 @@ anybody keeps it there, so the product still warns against a field like
 "Owner email" at the point of typing. The digest closes the audit-trail
 exposure, not the row.
 
+**The fix is forward-only, and this instance shows it**: the log is
+append-only, so any change-log entry written before this fix shipped
+still holds the plaintext value, unchanged — do not claim otherwise
+against a live demo. And the digest is a keyed HMAC, not encryption:
+generated inside this database it is pseudonymisation, not erasure —
+setting `INV_AUDIT_FOLD_KEY` to hold that key outside the database is
+what makes it the GDPR-correct deployment.
+
 ---
 
 ## 6. Getting an estate in without typing it (3 min)

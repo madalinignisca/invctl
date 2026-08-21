@@ -108,6 +108,7 @@ INV_DB_DRIVER=sqlite              # or postgres
 INV_DB_DSN=file:invctl.db?_txlock=immediate
 INV_LISTEN=0.0.0.0:8088           # what `make demo` uses; :8080 if unset
 INV_SESSION_KEY=<32 random bytes, base64>   # generated if unset
+INV_AUDIT_FOLD_KEY=<32 random bytes, base64>   # generated and persisted in the DB if unset
 INV_ADMIN_USERS=gabriel,nikolaj   # comma-separated; membership grants write access
 INV_AUTH_LOCAL=true
 INV_AUTH_LDAP=false
@@ -125,6 +126,15 @@ INV_LDAP_STARTTLS=false
 
 `docker compose --profile ldap up -d` starts a directory with two test users
 (`nikolaj` / `ldappass1`, `ingrid` / `ldappass2`) for exercising that path.
+
+`INV_AUDIT_FOLD_KEY` is the key custom field values are folded into the audit
+trail under, as a digest rather than plaintext. Left unset, invctl generates
+one and persists it in the database on first start — but a keyed digest whose
+key sits in the same database is *pseudonymisation*, not anonymisation (GDPR
+Art. 4(5)): setting `INV_AUDIT_FOLD_KEY` to hold the key **outside** the
+database is the GDPR-correct deployment. See `docs/AUDIT.md` and
+`docs/manual/parts/10-installation.md` before rotating it — the key must
+never change under a running deployment's data.
 
 If no account exists on first run, one is created. Without
 `INV_ADMIN_PASSWORD` a random password is generated and logged once — there is

@@ -60,8 +60,8 @@ type harness struct {
 // webTestFoldKey is a fixed 32-byte key attached to every store this package
 // builds, the same way internal/store's own suite uses testFoldKey -- not a
 // secret, never leaves this process. Without it, the first custom field
-// value any handler test sets would panic (foldDigest refuses to fold under
-// an empty key: internal/store/customvalues.go).
+// value any handler test sets would fail with an error (foldDigest refuses
+// to fold under an empty key: internal/store/customvalues.go).
 var webTestFoldKey = bytes.Repeat([]byte{0x5a}, 32)
 
 // Monitoring credentials the harness configures (docs/AUDIT.md rule 6). They

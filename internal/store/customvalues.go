@@ -216,15 +216,21 @@ func foldCustomValues(key []byte, defs map[string]domain.CustomField, values []d
 // 12 hex characters is 48 bits. The birthday bound across the WHOLE
 // change_log table is the wrong model: two folded digests only need to differ
 // from each other when they belong to the SAME field on the SAME entity,
-// because that is the only pair diffJSON ever compares -- a collision between
-// unrelated rows is invisible, there is no diff computed across entities. So
-// the realistic exposure is one field's value history on one entity over a
-// deployment's life: even an estate saving a value a day for 50 years is
-// under 20,000 digests for that one (field, entity) pair, and the birthday
-// bound for a 48-bit space at that count is (20000^2)/2 / 2^48 =~ 7e-7 --
-// roughly one in a million, for a scenario already far more saves than any
-// custom field this system describes will see. 12 hex characters is
-// comfortable for what this digest actually has to distinguish.
+// because that is the only pair diffJSON ever compares. A collision between
+// unrelated rows is not merely invisible -- it is worse if it lands on the
+// SAME (field, entity) pair across two consecutive saves: if custom_fields is
+// the only thing that moved, a colliding digest makes diffJSON report
+// changed=false, and NO change_log row is written at all -- row_version still
+// bumps and the value on the entity's own page still changes, so this is a
+// mutation of declared state with no audit entry, the exact failure rule 7
+// exists to prevent. So the realistic exposure is one field's value history
+// on one entity over a deployment's life: even an estate saving a value a day
+// for 50 years is under 20,000 digests for that one (field, entity) pair, and
+// the birthday bound for a 48-bit space at that count is (20000^2)/2 / 2^48
+// =~ 7e-7 -- roughly one in a million, for a scenario already far more saves
+// than any custom field this system describes will see. 12 hex characters is
+// comfortable for what this digest actually has to distinguish, and the cost
+// of being wrong is stated above rather than only "unlikely".
 //
 // The key must be stable across restarts -- see ResolveAuditFoldKey in
 // foldkey.go -- or every entity holding a custom value shows a spurious diff
