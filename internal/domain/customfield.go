@@ -182,7 +182,21 @@ func CanonicalCustomValue(kind, raw string, options []string) (string, error) {
 		return trimmed, nil
 	case CustomFieldDate:
 		trimmed := strings.TrimSpace(raw)
-		if _, err := time.Parse("2006-01-02", trimmed); err != nil {
+		parsed, err := time.Parse("2006-01-02", trimmed)
+		if err != nil {
+			return "", NewValidation("value", "must be a real calendar date in YYYY-MM-DD form")
+		}
+		// FINAL REVIEW, ROUND 2: time.Parse happily accepts year "0000" --
+		// Go's calendar has no lower bound -- but HTML's own valid-date-
+		// string grammar requires a year GREATER than zero, so
+		// <input type="date" value="0000-01-01"> renders EMPTY. This is
+		// B1's exact shape in the one kind the property test previously
+		// covered with a value that could never fail: the store accepted a
+		// value its own widget cannot draw back, so the next unrelated save
+		// posted the blank the browser drew as an explicit clear. Confirmed
+		// live: POST cf_<date field>=0000-01-01 stored it and the page came
+		// back unable to render it.
+		if parsed.Year() == 0 {
 			return "", NewValidation("value", "must be a real calendar date in YYYY-MM-DD form")
 		}
 		return trimmed, nil
@@ -245,51 +259,78 @@ func ValidateCustomFieldOptionText(field, raw string) (string, error) {
 }
 
 // isDecimalNumber reports whether s is a decimal number and nothing else,
-// under EXACTLY the grammar an HTML <input type="number"> widget can
-// represent (the WHATWG "valid floating-point number" rule this codebase's
-// number widget relies on, minus the exponent form nothing here emits): an
-// optional leading '-' (never '+'), one or more digits, and optionally a '.'
-// followed by one or more digits. Deliberately narrower than
-// strconv.ParseFloat's grammar, which also accepts underscore-grouped
-// literals, "Infinity", "inf", "NaN" and hex float literals -- none of which
-// are "a decimal number" in the sense a custom field's number kind means.
+// under EXACTLY the WHATWG "valid floating-point number" grammar an HTML
+// <input type="number"> widget can represent: an optional leading '-'
+// (never '+'), then ONE OR BOTH of (a series of digits) and ('.' followed
+// by a series of digits), then an optional exponent ('e' or 'E', an
+// optional sign, a series of digits). "One or both" is the clause that
+// matters and is easy to get backwards: the integer part is OPTIONAL when a
+// fraction part is present, so ".5" IS valid (matches "'.' + digits" alone)
+// and so is "1e3" (exponent form) -- only a bare "5." (a '.' with nothing,
+// or nothing valid, after it) and a leading '+' are refused. Deliberately
+// narrower than strconv.ParseFloat's grammar, which also accepts
+// underscore-grouped literals, "Infinity", "inf", "NaN" and hex float
+// literals -- none of which are "a decimal number" in the sense a custom
+// field's number kind means, and none of which this grammar admits either.
 //
-// FINAL REVIEW B1: this used to be looser than the widget that renders it --
-// it accepted "+5", ".5" and "5.", none of which is a valid floating-point
-// number under the browser's own value-sanitisation algorithm, so an
-// <input type="number" value="+5"> (or ".5", or "5.") renders EMPTY. The
-// store then held a value its own form could never draw back, and the next
-// unrelated save on that entity posted the blank the browser drew as an
-// explicit clear -- the same failure shape as a value naming a retired
-// select option, just for a different kind. The general rule this repo now
-// keeps is: for every kind, every value the store accepts must survive a
-// round trip through its own widget unchanged (TestEveryStoredCustomValue-
-// SurvivesARoundTripThroughItsWidget). For `number`, tightening the
-// validator to the widget's own grammar closes it more simply than
-// canonicalising a typed value into a different string the operator did not
-// type -- and every operator-typed value that WAS already valid keeps being
-// stored verbatim, per §3.
+// FINAL REVIEW B1, AND THE CORRECTION THAT FOLLOWED IT: the first version of
+// this function was looser than the widget that renders it -- it accepted
+// "+5" and "5.", neither of which round-trips through an
+// <input type="number">. The FIX for that overcorrected: it also rejected
+// ".5", on the mistaken belief that the widget requires a digit before the
+// decimal point. It does not -- the WHATWG grammar explicitly allows the
+// integer part to be absent when digits follow the point, and a real
+// browser renders and posts ".5" unchanged. That overcorrection is exactly
+// what TestEveryStoredCustomValueSurvivesARoundTripThroughItsWidget's
+// INDEPENDENT oracle exists to catch: had this function and the test's own
+// idea of "what the widget draws back" shared one implementation, the test
+// would have agreed with the bug instead of catching it. See
+// sanitiseHTMLNumberWidgetValue in internal/web/customfield_roundtrip_test.go
+// for that oracle, and the comment there on why it must never be merged
+// with this function into one shared implementation.
 func isDecimalNumber(s string) bool {
 	i := 0
 	if i < len(s) && s[i] == '-' {
 		i++
 	}
-	start := i
+	intStart := i
 	for i < len(s) && s[i] >= '0' && s[i] <= '9' {
 		i++
 	}
-	if i == start {
-		return false // at least one integer digit is required before '.'
-	}
+	hasInt := i > intStart
+
+	hasFrac := false
 	if i < len(s) && s[i] == '.' {
-		i++
-		fracStart := i
-		for i < len(s) && s[i] >= '0' && s[i] <= '9' {
-			i++
+		fracStart := i + 1
+		j := fracStart
+		for j < len(s) && s[j] >= '0' && s[j] <= '9' {
+			j++
 		}
-		if i == fracStart {
-			return false // '.' with no digit after it is not representable either
+		hasFrac = j > fracStart
+		if hasFrac {
+			i = j
 		}
+		// A '.' with no digit after it is consumed by neither alternative
+		// below -- i is deliberately left BEFORE the '.', so the final
+		// i == len(s) check fails on a bare trailing '.' like "5.".
+	}
+	if !hasInt && !hasFrac {
+		return false // need an integer part, a fraction part, or both
+	}
+
+	if i < len(s) && (s[i] == 'e' || s[i] == 'E') {
+		j := i + 1
+		if j < len(s) && (s[j] == '-' || s[j] == '+') {
+			j++
+		}
+		expStart := j
+		for j < len(s) && s[j] >= '0' && s[j] <= '9' {
+			j++
+		}
+		if j == expStart {
+			return false // "e"/"E" with no exponent digits is not valid either
+		}
+		i = j
 	}
 	return i == len(s)
 }

@@ -111,16 +111,22 @@ func TestCanonicalCustomValue(t *testing.T) {
 		{"a whole number", CustomFieldNumber, "42", nil, "42", false},
 		{"a decimal", CustomFieldNumber, "42.50", nil, "42.50", false},
 		{"a negative", CustomFieldNumber, "-7", nil, "-7", false},
-		// FINAL REVIEW B1: an explicit leading '+', a leading '.', and a
-		// trailing '.' are all refused now, tightened to exactly the
-		// grammar an <input type="number"> widget can represent -- see
-		// isDecimalNumber's comment. Before the fix all three were accepted
-		// and stored, but the widget rendering them back drew EMPTY, so the
-		// store held a value its own form could never draw -- the same
-		// failure shape B1 closes for the select kind.
+		// FINAL REVIEW B1, ROUND 2: the WHATWG "valid floating-point number"
+		// grammar this codebase's number widget relies on allows the
+		// integer part to be ABSENT when a fraction part is present -- "one
+		// or both", not "both" -- so ".5" is genuinely valid and a real
+		// browser round-trips it unchanged. The first correction of B1 got
+		// this backwards and refused it too; isDecimalNumber's comment has
+		// the full grammar. A leading '+' and a bare trailing '.' (nothing,
+		// or nothing further valid, after the point) are still refused --
+		// neither round-trips through the widget -- and an exponent form
+		// like "1e3" is accepted, because the grammar allows it too.
+		{"a leading decimal point is accepted (WHATWG allows an absent integer part)",
+			CustomFieldNumber, ".5", nil, ".5", false},
+		{"an exponent form is accepted", CustomFieldNumber, "1e3", nil, "1e3", false},
 		{"a positive with an explicit sign is refused", CustomFieldNumber, "+42", nil, "", true},
-		{"a leading decimal point is refused", CustomFieldNumber, ".5", nil, "", true},
 		{"a trailing decimal point is refused", CustomFieldNumber, "5.", nil, "", true},
+		{"a bare decimal point is refused", CustomFieldNumber, ".", nil, "", true},
 		{"a grouped number is refused", CustomFieldNumber, "1,234", nil, "", true},
 		{"words are not a number", CustomFieldNumber, "many", nil, "", true},
 		{"underscore grouping is refused", CustomFieldNumber, "1_234", nil, "", true},
@@ -132,6 +138,12 @@ func TestCanonicalCustomValue(t *testing.T) {
 		{"a non-date is refused", CustomFieldDate, "march next year", nil, "", true},
 		{"an impossible date is refused", CustomFieldDate, "2027-02-30", nil, "", true},
 		{"a non-leap-year 29th of February is refused", CustomFieldDate, "2027-02-29", nil, "", true},
+		// FINAL REVIEW, ROUND 2: time.Parse accepts year "0000" (Go's
+		// calendar has no lower bound), but HTML's valid-date-string grammar
+		// requires a year greater than zero, so <input type="date"
+		// value="0000-01-01"> renders EMPTY -- B1's exact shape, confirmed
+		// live against the real handler.
+		{"year 0000 is refused", CustomFieldDate, "0000-01-01", nil, "", true},
 		{"true normalises", CustomFieldBoolean, "TRUE", nil, "true", false},
 		{"yes is not a boolean", CustomFieldBoolean, "yes", nil, "", true},
 		{"a live option", CustomFieldSelect, "it-42", []string{"it-42", "it-99"}, "it-42", false},

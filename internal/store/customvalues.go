@@ -181,9 +181,17 @@ func entityCustomValues(ctx context.Context, t *tx, entityID string) ([]domain.C
 // auditFields, the function every entity's audit flows through and whose last
 // defect was invisible for a week) or a redaction flag on custom_field and a
 // rule that reads it. Redacting the whole fold is the blunt instrument
-// available today at the cost of every custom value disappearing from every
-// entry. Both are schema and spec changes and are the coordinator's, not
-// this function's. Do not treat the silence here as a judgement that it is fine.
+// available today, and it is BLUNTER than "hides every custom value from
+// every entry" makes it sound: domain.IsRedacted is consulted only where
+// diffJSON and snapshotJSON build a NEW change_log entry
+// (internal/store/diff.go), never at render time, so pulling the lever
+// redacts every custom value in every entry written FROM THAT POINT
+// FORWARD -- it does nothing to an entry already written, because
+// change_log is append-only. It stops a leak from continuing; it answers no
+// erasure request for anything already recorded. Both a per-code fix and a
+// redaction flag are schema and spec changes and are the coordinator's, not
+// this function's. Do not treat the silence here as a judgement that it is
+// fine -- and do not describe the lever as hiding more than it does.
 func foldCustomValues(defs map[string]domain.CustomField, values []domain.CustomFieldValue) string {
 	pairs := make([]string, 0, len(values))
 	for _, v := range values {

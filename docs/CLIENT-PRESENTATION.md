@@ -142,6 +142,13 @@ Infrastructure inventory and impact analysis
 > erasure work — scrub the user record and the log keeps every entry and its
 > integrity, and simply stops resolving to a person. Saying "the log contains no
 > names" while the screen shows one is the version that loses you the room.
+>
+> **One honest caveat if custom fields come up:** an administrator can define
+> a free-text field ("Cost Centre", say), and its values are folded into the
+> audit trail permanently, the same as everything else. If someone names a
+> field "Owner email" or "Contact", that text is in there for good — the
+> product warns against it at the point of typing, twice over, but it cannot
+> stop it. Say this before a client asks; it lands better offered than found.
 
 ---
 
@@ -308,7 +315,7 @@ Plus: *"12 of 19 things in this footprint carry a price"* — so the total is a 
 
 - **576 automated tests**, every one run against **both** database engines
 - The impact engine is tested against a real fixture estate, not mocks
-- Rules the codebase enforces on itself: audit coverage, no personal data in the log, no hard deletes, portability between engines
+- Rules the codebase enforces on itself: audit coverage, no hard deletes, portability between engines — and, with one named exception, no personal data in the log (see Slide 8's caveat: a custom field's own text is the one place that rule is operational rather than enforced)
 - Reviewed for security and correctness, repeatedly, with findings acted on
 
 > **Speaker note:** Use this if the client is technical or is buying a POC they

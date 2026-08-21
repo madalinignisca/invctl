@@ -202,6 +202,12 @@ Then **Changes** in the nav. Every declared mutation, with `actor` and
 — so the trail carries no personal data, can be kept indefinitely, and scrubbing
 an account answers an erasure request while the log keeps its integrity.
 
+**One caveat if it comes up:** custom fields are the one exception. Their
+values are free text an administrator defines the meaning of, folded into the
+same audited entry, and there is no scrub-the-actor equivalent for a field
+someone named "Owner email" — the product warns against it twice (defining
+the field, and typing a value), but it can't refuse the string.
+
 ---
 
 ## 6. Getting an estate in without typing it (3 min)

@@ -108,8 +108,8 @@ text also matches how this repo already stores every id and every timestamp.
 | kind | stored as | validated as |
 |---|---|---|
 | `text` | the text | non-empty after trim, bounded length, no control characters |
-| `number` | the trimmed original text | a decimal number, and representable by an `<input type="number">` widget; `1,234`, `1 234`, a leading `+`, a bare leading `.` (`.5`) and a bare trailing `.` (`5.`) are all refused |
-| `date` | `YYYY-MM-DD` | a real calendar date |
+| `number` | the trimmed original text | a decimal number representable by an `<input type="number">` widget — the WHATWG "valid floating-point number" grammar exactly: an optional leading `-` (never `+`), one or both of a digit series and a `.`-prefixed digit series (so `.5` is valid — the integer part is optional when a fraction follows — and so is `1e3`, an exponent form), and nothing else. `1,234`, `1 234`, a leading `+`, and a bare trailing `.` (`5.`) are refused |
+| `date` | `YYYY-MM-DD` | a real calendar date with a year **greater than zero** — HTML's valid-date-string grammar excludes year `0000`, which Go's own calendar does not, so the domain layer rejects it explicitly |
 | `boolean` | `true` / `false` | exactly one of those two after normalisation |
 | `select` | the option's `value` | must be a **live** option of that field |
 
@@ -126,9 +126,25 @@ form's own blank posts as an explicit clear (§6), so the next unrelated save
 on that entity silently destroys the value. `number`'s grammar above is
 narrower than "a decimal number" in the abstract for exactly this reason: it
 is the grammar of a decimal number an `<input type="number">` can actually
-render, which is a stricter thing. The same invariant is why `select`
-displays, and marks as retired, a value naming an option retired since it was
-set (below) rather than omitting it from the widget.
+render, which is a stricter thing — and it is also, in one direction, WIDER
+than the naive reading of that grammar: an absent integer part (`.5`) and an
+exponent (`1e3`) both round-trip through the widget, so both are accepted
+rather than refused. `date`'s year-zero exclusion is the same invariant
+applied to a kind whose validator otherwise checks against a real calendar
+rather than a widget grammar — Go's calendar has no lower bound, HTML's does.
+The same invariant is why `select` displays, and marks as retired, a value
+naming an option retired since it was set (below) rather than omitting it
+from the widget.
+
+The round-trip invariant is proved by `TestEveryStoredCustomValueSurvivesA-
+RoundTripThroughItsWidget` (`internal/web/customfield_roundtrip_test.go`)
+against two INDEPENDENTLY written models of each load-bearing kind's widget
+grammar — one in `internal/domain` (the validator, deciding what may be
+stored) and one in the test itself (the oracle, modelling what the widget
+renders back) — never one implementation shared between the two. A shared
+implementation would make the test agree with itself regardless of whether
+either side is right, which is exactly how this invariant was violated twice
+in the same kind before the oracle caught the second violation.
 
 **A field's `kind` cannot change once any value exists.** The label and the
 description stay editable forever — those are the things an administrator
@@ -159,11 +175,6 @@ exception, and `TestEveryEditorRefusesASecondSaveFromOneToken` walks the
 editors, so a new one without it fails an existing guard rather than
 shipping.
 
-*(CORRECTED, FINAL REVIEW F3: this used to say "both editors" — there are
-three: the definition editor, the options editor, and the value editor, and
-all three already carried `row_version` before this correction. Only the
-count in the sentence was wrong.)*
-
 ---
 
 ## 4. Attribution — the registry
@@ -174,18 +185,18 @@ surfaces sitting at the top level. It lists, for each field: label, code,
 kind, entity type, description, who defined it, when, how many entities hold
 a value, and whether it is retired and by whom.
 
-**CORRECTED, FINAL REVIEW F2: this used to say the whole page sits "behind
-`RequireAdmin`". It does not — `GET /custom-fields` ships as `read()`
-(`internal/web/routes.go`), reachable by any authenticated user, and only the
-mutating routes (`POST /custom-fields`, `.../{id}`, `.../{id}/retire`,
-`.../{id}/restore`, `.../{id}/options`) sit behind `RequireAdmin` and CSRF
-like every other mutating surface, carried by the `write()` route helper.**
-That divergence from the original claim is kept rather than "fixed" to match
-it: the support-burden goal this whole feature is built for (see the opening
+**`GET /custom-fields` ships as `read()`** (`internal/web/routes.go`),
+reachable by any authenticated user — only the mutating routes
+(`POST /custom-fields`, `.../{id}`, `.../{id}/retire`, `.../{id}/restore`,
+`.../{id}/options`) sit behind `RequireAdmin` and CSRF like every other
+mutating surface, carried by the `write()` route helper. That is deliberate:
+the support-burden goal this whole feature is built for (see the opening
 paragraph) is served better by a read-only viewer being able to open the
-registry and see who defined a field and why than by locking the page down
-to match a sentence that was wrong. `internal/web/customfields_test.go`
-carries a test that actually exercises this — see its name below.
+registry and see who defined a field and why than by locking the whole page
+down. `TestTheRegistryIsReadableByAnyAuthenticatedUser` and
+`TestDefiningACustomFieldIsAdminOnly` (`internal/web/customfields_test.go`)
+cover the read half and the write half separately, each named for what it
+actually asserts.
 
 **`created_by` and `retired_by` hold an opaque `app_user.id`**, joined for
 display, exactly as `change_log.actor` does. Scrubbing an `app_user` row for an
@@ -247,51 +258,39 @@ Field definitions are declared state in their own right: create, edit, retire
 and restore each write their own `change_log` row against `custom_field`.
 
 **A custom value's text enters `change_log` permanently, and redaction is
-all-or-nothing.** `domain.IsRedacted` consults a global list keyed by column, so
-the whole fold CAN be redacted wholesale under `custom_fields` — but the fold is
-a single opaque key, so there is no name INSIDE it to key on, and no way to
-redact one field's values while keeping the rest. The lever exists and it is a
-blunt one.
-
-**CORRECTED, FINAL REVIEW AX(a): "pulling it hides every custom value from
-every audit entry" overstated what the lever does.** `IsRedacted` is consulted
-only where `diffJSON` and `snapshotJSON` build a NEW `change_log` entry
-(`internal/store/diff.go`); nothing consults it at render time. Adding
+all-or-nothing, and only for future entries.** `domain.IsRedacted` consults a
+global list keyed by column, so the whole fold CAN be redacted wholesale
+under `custom_fields` — but the fold is a single opaque key, so there is no
+name INSIDE it to key on, and no way to redact one field's values while
+keeping the rest. The lever is also blunter than "redact" suggests: it is
+consulted only where `diffJSON` and `snapshotJSON` build a NEW `change_log`
+entry (`internal/store/diff.go`), never at render time. Adding
 `"custom_fields"` to `domain.RedactedFields` therefore redacts every custom
-value in every `change_log` entry written **from that point forward** — it
-does nothing to an entry already written, because `change_log` is append-only
-and nothing rewrites a stored diff. Pulling the lever after the fact hides
-nothing already recorded and answers no erasure request already outstanding;
-it only stops the leak from continuing. That makes the operational
-constraint below load-bearing in a stronger sense than "a lever exists": the
-warning at the point of typing is the only thing standing between an
-administrator and a permanent, currently-irredeemable plaintext record.
-`docs/AUDIT.md`'s position that the audit trail "carries no personal data and
-can be kept forever with no retention argument" therefore rests, for this
-feature alone, on no administrator ever having created a field that holds
-personal data: an "Owner email", a "Contact", a "Requested by".
+value in every entry written **from that point forward** — it does nothing
+to an entry already written, because `change_log` is append-only and nothing
+rewrites a stored diff. Pulling the lever after the fact hides nothing
+already recorded and answers no erasure request already outstanding; it only
+stops the leak from continuing. That makes the warning at the point of
+typing the only thing standing between an administrator and a permanent,
+currently-irredeemable plaintext record. `docs/AUDIT.md`'s position that the
+audit trail "carries no personal data and can be kept forever with no
+retention argument" therefore rests, for this feature alone, on no
+administrator ever having created a field that holds personal data: an
+"Owner email", a "Contact", a "Requested by".
 
 This is stated rather than engineered. The principled fix is a per-field
 "holds personal data" flag that redacts that field's value inside the fold, and
 it is a schema change deferred to a later work package. Until then the
-constraint is operational and belongs where the administrator is: the field
-creation form warns that a custom field's values are recorded permanently in
-the audit trail and must not hold personal data. An estate that needs such a
-field needs the flag first.
-
-**CORRECTED, FINAL REVIEW AX(a): this section previously claimed the warning
-also appeared in `docs/API.md` and on the registry. It did not — the string
-"personal data" shipped in exactly one place, the creation form's own
-callout. Nor did it appear anywhere the person who actually TYPES a value
-would see it: the creation form is opened by whoever defines a field, and the
-person who later fills a value in on an asset or service detail page — very
-possibly someone who never saw the creation form at all — got no warning.
-Both are now fixed rather than the claim being made true by rewording it: the
-value editor (`custom_fields_form.html`) carries the same warning, worded for
-the person filling a value in rather than the person naming the field, and
-that is the full extent of it. `docs/API.md` and the registry still do not
-repeat it — nothing in WP-A4 propagates the warning anywhere beyond these two
-forms, and this document should not claim otherwise until that changes.**
+constraint is operational and belongs where whoever is typing is: the field
+**creation** form warns that a custom field's values are recorded permanently
+in the audit trail and must not hold personal data, and the value **editor**
+(`custom_fields_form.html`) carries the same warning, worded for whoever is
+filling a value in rather than whoever named the field — the creation form is
+opened by whoever DEFINES a field, and the person who later types a value on
+an asset or service detail page has very possibly never seen it. Neither
+`docs/API.md` nor the registry repeats the warning; nothing in WP-A4
+propagates it anywhere beyond these two forms. An estate that needs a field
+holding personal data needs the flag first.
 
 ---
 
@@ -369,26 +368,20 @@ a collision was actually detected, and that failed twice over:
 Appending the code unconditionally removes both failure modes for a header's
 dependence on OTHER fields: it never changes because something else was
 created, retired or restored, and a field's header depends only on that
-field's own code and retirement state.
+field's own code and retirement state — never on anything about a different
+field.
 
-**CORRECTED, FINAL REVIEW F1: this section used to also claim the rule
-"survives a rename" because "`code` is the one thing on a definition that
-does not move underneath an export somebody is diffing".** That is false —
-`UpdateCustomField` edits `code` freely, the same as `label`
-(`TestCodeStaysEditableWithValues`, `internal/store/customfields_test.go`),
-and nothing here freezes it the way
-a `kind` change is refused while values exist. The rule above is still right
-for the reason that actually holds: a header must not depend on ANOTHER
-field's creation, retirement or restoration, and appending the code
-unconditionally achieves that regardless of whether a field's own code ever
-moves. It is not also true that a code rename leaves the export undisturbed
-— renaming a code moves this header exactly as renaming a label does, and it
-moves something else too: `foldCustomValues`
-(`internal/store/customvalues.go`) keys the `change_log` audit fold on
-`code`, so renaming a field's code rewrites that fold for every entity
-already holding a value against it. The next unrelated value edit on any of
-them then logs a `custom_fields` diff for a value that did not itself
-change, because the KEY naming it did.
+**It does NOT also survive a rename of the field's own code**, and this
+section should not claim otherwise: `UpdateCustomField` edits `code` freely,
+the same as `label` (`TestCodeStaysEditableWithValues`,
+`internal/store/customfields_test.go`), and nothing here freezes it the way
+a `kind` change is refused while values exist. Renaming a code moves this
+header exactly as renaming a label does, and it moves something else too:
+`foldCustomValues` (`internal/store/customvalues.go`) keys the `change_log`
+audit fold on `code`, so renaming a field's code rewrites that fold for
+every entity already holding a value against it. The next unrelated value
+edit on any of them then logs a `custom_fields` diff for a value that did
+not itself change, because the KEY naming it did.
 
 **The claim is exactly this much, and Ruling AQ exists because two earlier
 versions of this section claimed more than is true:**

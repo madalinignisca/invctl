@@ -121,6 +121,13 @@ carries no personal data and can be kept indefinitely. The interface resolves it
 to a display name when it can; scrubbing an account answers an erasure request
 while the log keeps its integrity and simply stops resolving that person.
 
+The one exception is a custom field's own value, if your estate has defined
+one: that text is folded into the same change log permanently, and an
+administrator who names a field "Owner email" or similar has put personal
+data in a record with no scrub-and-forget path. The software warns about
+this when a field is defined and again when a value is typed in — it cannot
+refuse the text itself.
+
 Every entry shows **what kind of actor** made the change beside who: a person, a
 system process, or an agent. The log is append-only — a wrong entry is corrected
 by writing a new one, never by editing the old.
