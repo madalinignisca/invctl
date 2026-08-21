@@ -57,18 +57,21 @@
   <form class="panel-body" method="post" action="{{.Action}}">
     <input type="hidden" name="csrf_token" value="{{.CSRF}}">
     <input type="hidden" name="row_version" value="{{.Edit.Value "row_version" (itoa .RowVersion)}}">
-    {{/* FINAL REVIEW AX(a): the creation form warns that a custom value is
-         recorded permanently and must not hold personal data
-         (custom_field_form.html) -- but that form is opened by whoever
-         DEFINES a field, never by whoever later TYPES a value into one on
-         an asset or service page. This is the warning at the point PII
-         actually gets typed. */}}
+    {{/* FINAL REVIEW AX(a): the creation form warns at the point a field is
+         defined (custom_field_form.html) -- but that form is opened by
+         whoever DEFINES a field, never by whoever later TYPES a value into
+         one on an asset or service page. This is the warning at the point
+         PII actually gets typed. Updated for the GDPR digest fold: the audit
+         trail no longer keeps the text, so the warning is now about where
+         this value DOES still live rather than about the audit trail. */}}
     <div class="callout callout-warn">
-      <strong>Recorded permanently.</strong>
+      <strong>Still worth thinking about.</strong>
       <p style="margin-top:6px">
-        A custom field's value is kept in the audit trail forever and cannot
-        be removed selectively later. Do not type personal data here — an
-        email address, a phone number, a person's name.
+        This value is recorded as a digest in the audit trail, not as text —
+        a change shows that it moved, never what it changed to. It still
+        lives on this entity's own page, unencrypted, for as long as anybody
+        keeps it there. Avoid an email address, a phone number or a person's
+        name here unless the field was defined for exactly that.
       </p>
     </div>
     {{with .Edit.Err "_form"}}<div class="field-error">{{.}}</div>{{end}}

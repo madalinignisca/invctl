@@ -85,6 +85,12 @@
             {{if not .Added}}<td class="mono diff-old" style="overflow-wrap:anywhere">{{.Old}}</td>{{end}}
             <td class="mono diff-new" style="overflow-wrap:anywhere">{{.New}}</td>
           </tr>
+          {{if .Note}}
+          <tr>
+            <td></td>
+            <td {{if not .Added}}colspan="2"{{end}} style="font-size:12px;color:var(--muted);font-style:italic">{{.Note}}</td>
+          </tr>
+          {{end}}
           {{end}}
         </tbody>
       </table>

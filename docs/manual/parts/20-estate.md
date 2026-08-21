@@ -108,16 +108,22 @@ teams.
 A withdrawn note keeps its row like everything else here. Something that was
 said was still said, and the record of the withdrawal has to refer to something.
 
-**One warning, and it is not the only place in the software that needs it —
-an estate's own custom fields (defined by an administrator, values recorded
-per asset or service) carry the identical one.** The audit trail deliberately
-holds no personal data — it records an opaque account id, never a name — which
-is what lets it be kept for ever with no retention argument. This field is
-free text and is kept on the same terms. Do not write anything here about a
-person that you would not want kept indefinitely. A custom field's own value
-carries the same obligation, for the same reason, and the software warns
-about it at both places you can type one: defining the field, and filling in
-a value.
+**One warning, and it is not the only place in the software that needs it.**
+The audit trail deliberately holds no personal data — it records an opaque
+account id, never a name — which is what lets it be kept for ever with no
+retention argument. A note is free text and is kept on those terms: written
+down, permanent, and readable by anyone who can see the timeline. Do not
+write anything here about a person that you would not want kept indefinitely.
+
+An estate's own custom fields (defined by an administrator, values recorded
+per asset or service) carry a related warning for a different reason. A
+change to a custom value is audited like everything else, but the audit
+trail records only that the value changed and which field — a keyed digest,
+never the text itself — so a value does not accumulate in the log the way a
+note does. It still lives on the entity's own page, unencrypted, for as long
+as anybody keeps it there, so the same caution applies to what you type: the
+software warns about it at both places you can type one, defining the field
+and filling in a value.
 
 ## Clusters
 

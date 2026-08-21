@@ -9,13 +9,43 @@
 package store
 
 import (
+	"bytes"
 	"database/sql"
 	"errors"
+	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/madalinignisca/invctl/internal/domain"
 )
+
+// digestFold renders one side of a custom_fields diff the way an entity's
+// audit entry now carries it: each pair's plaintext value replaced by
+// foldDigest(testFoldKey, value), joined in the same "code=#digest,..." shape
+// foldCustomValues builds. kv alternates code, value, code, value -- callers
+// list pairs in code order themselves, the same way the fold sorts them, so
+// this stays a straight substitution of the old want strings rather than a
+// second implementation of the sort.
+//
+// Tests assert against THIS, not against a value nobody now expects to see
+// in the log -- a want string still containing "cost_centre=IT-42" would
+// pass against the pre-digest code and silently stop testing what this
+// change is FOR: that the plaintext never reaches change_log.
+func digestFold(kv ...string) string {
+	if len(kv)%2 != 0 {
+		panic("digestFold: odd number of arguments; want code, value pairs")
+	}
+	parts := make([]string, 0, len(kv)/2)
+	// Consumed two at a time by slicing rather than indexed by kv[i+1]: it
+	// reads the same and a static analyser does not have to reconstruct the
+	// even-length invariant the panic above already established.
+	for remaining := kv; len(remaining) >= 2; remaining = remaining[2:] {
+		code, value := remaining[0], remaining[1]
+		parts = append(parts, code+"="+foldDigest(testFoldKey, value))
+	}
+	return strings.Join(parts, ",")
+}
 
 // ---------- the audit fold ----------
 
@@ -31,9 +61,10 @@ func TestSettingAValueIsAuditedAgainstTheEntity(t *testing.T) {
 			mustValue(t, f, id, f.assetID, "IT-41")
 			mustValue(t, f, id, f.assetID, "IT-42")
 
-			want := `{"custom_fields":{"old":"cost_centre=IT-41","new":"cost_centre=IT-42"}}`
+			want := fmt.Sprintf(`{"custom_fields":{"old":%q,"new":%q}}`,
+				digestFold("cost_centre", "IT-41"), digestFold("cost_centre", "IT-42"))
 			if got := lastChangeDiff(t, f, "asset", f.assetID); got != want {
-				t.Fatalf("the asset's audit entry must carry both the old and the new\n got %s\nwant %s", got, want)
+				t.Fatalf("the asset's audit entry must carry both the old and the new digest\n got %s\nwant %s", got, want)
 			}
 		})
 	}
@@ -57,7 +88,7 @@ func TestClearingAValueIsAuditedOnTheParent(t *testing.T) {
 			if got := changeCount(t, f, "asset", f.assetID); got != before+1 {
 				t.Fatalf("clearing a value wrote %d audit rows, want 1", got-before)
 			}
-			want := `{"custom_fields":{"old":"cost_centre=IT-42","new":""}}`
+			want := fmt.Sprintf(`{"custom_fields":{"old":%q,"new":""}}`, digestFold("cost_centre", "IT-42"))
 			if got := lastChangeDiff(t, f, "asset", f.assetID); got != want {
 				t.Fatalf("clearing must record what was removed\n got %s\nwant %s", got, want)
 			}
@@ -88,7 +119,8 @@ func TestReorderingCustomValuesIsNotAChange(t *testing.T) {
 				tagID: "ABC-1234", ccID: "IT-42",
 			})
 			before := changeCount(t, f, "asset", f.assetID)
-			wantFold := `{"custom_fields":{"old":"","new":"asset_tag=ABC-1234,cost_centre=IT-42"}}`
+			wantFold := fmt.Sprintf(`{"custom_fields":{"old":"","new":%q}}`,
+				digestFold("asset_tag", "ABC-1234", "cost_centre", "IT-42"))
 			if got := lastChangeDiff(t, f, "asset", f.assetID); got != wantFold {
 				t.Fatalf("the fold must be sorted by code\n got %s\nwant %s", got, wantFold)
 			}
@@ -121,7 +153,7 @@ func TestAServiceValueIsAuditedAgainstTheService(t *testing.T) {
 			if got := changeCount(t, f, "service", f.serviceID); got != before+1 {
 				t.Fatalf("setting a service value wrote %d audit rows, want 1", got-before)
 			}
-			want := `{"custom_fields":{"old":"","new":"sla_ref=SLA-7"}}`
+			want := fmt.Sprintf(`{"custom_fields":{"old":"","new":%q}}`, digestFold("sla_ref", "SLA-7"))
 			if got := lastChangeDiff(t, f, "service", f.serviceID); got != want {
 				t.Fatalf("got %s, want %s", got, want)
 			}
@@ -379,7 +411,8 @@ func TestABlankValueClearsThatFieldOnly(t *testing.T) {
 			if values[0].FieldID != tagID || values[0].ValueText != "ABC-1234" {
 				t.Fatalf("got %+v, want the asset_tag value intact", values[0])
 			}
-			want := `{"custom_fields":{"old":"asset_tag=ABC-1234,cost_centre=IT-42","new":"asset_tag=ABC-1234"}}`
+			want := fmt.Sprintf(`{"custom_fields":{"old":%q,"new":%q}}`,
+				digestFold("asset_tag", "ABC-1234", "cost_centre", "IT-42"), digestFold("asset_tag", "ABC-1234"))
 			if got := lastChangeDiff(t, f, "asset", f.assetID); got != want {
 				t.Fatalf("got %s, want %s", got, want)
 			}
@@ -639,7 +672,8 @@ func TestARetiredFieldsValueSurvivesALaterEdit(t *testing.T) {
 			}
 
 			// And the audit entry says the retired value did not move.
-			want := `{"custom_fields":{"old":"asset_tag=ABC-1,cost_centre=IT-42","new":"asset_tag=ABC-2,cost_centre=IT-42"}}`
+			want := fmt.Sprintf(`{"custom_fields":{"old":%q,"new":%q}}`,
+				digestFold("asset_tag", "ABC-1", "cost_centre", "IT-42"), digestFold("asset_tag", "ABC-2", "cost_centre", "IT-42"))
 			if got := lastChangeDiff(t, f, "asset", f.assetID); got != want {
 				t.Fatalf("the entry must show only what moved\n got %s\nwant %s", got, want)
 			}
@@ -938,7 +972,8 @@ func TestARestoreBetweenRenderAndSubmitDestroysNothing(t *testing.T) {
 			if values[1].Code != "cost_centre" || values[1].ValueText != "IT-42" {
 				t.Fatalf("got %s=%s, want cost_centre=IT-42 intact", values[1].Code, values[1].ValueText)
 			}
-			want := `{"custom_fields":{"old":"asset_tag=ABC-1,cost_centre=IT-42","new":"asset_tag=ABC-2,cost_centre=IT-42"}}`
+			want := fmt.Sprintf(`{"custom_fields":{"old":%q,"new":%q}}`,
+				digestFold("asset_tag", "ABC-1", "cost_centre", "IT-42"), digestFold("asset_tag", "ABC-2", "cost_centre", "IT-42"))
 			if got := lastChangeDiff(t, f, "asset", f.assetID); got != want {
 				t.Fatalf("the entry must show only what the operator moved\n got %s\nwant %s", got, want)
 			}
@@ -1086,7 +1121,8 @@ func TestAClearAllLeavesARetiredFieldsRetainedValue(t *testing.T) {
 				t.Fatal("the retained value's field must report as retired")
 			}
 
-			want := `{"custom_fields":{"old":"asset_tag=ABC-1,cost_centre=IT-42","new":"cost_centre=IT-42"}}`
+			want := fmt.Sprintf(`{"custom_fields":{"old":%q,"new":%q}}`,
+				digestFold("asset_tag", "ABC-1", "cost_centre", "IT-42"), digestFold("cost_centre", "IT-42"))
 			if got := lastChangeDiff(t, f, "asset", f.assetID); got != want {
 				t.Fatalf("the entry must show only the value the operator cleared\n got %s\nwant %s", got, want)
 			}
@@ -1156,10 +1192,100 @@ func TestAFieldCreatedBetweenRenderAndSubmitIsNotCleared(t *testing.T) {
 				t.Fatalf("got %s=%s, want cost_centre=IT-42 untouched",
 					values[0].Code, values[0].ValueText)
 			}
-			want := `{"custom_fields":{"old":"asset_tag=ABC-1,cost_centre=IT-42","new":"cost_centre=IT-42"}}`
+			want := fmt.Sprintf(`{"custom_fields":{"old":%q,"new":%q}}`,
+				digestFold("asset_tag", "ABC-1", "cost_centre", "IT-42"), digestFold("cost_centre", "IT-42"))
 			if got := lastChangeDiff(t, f, "asset", f.assetID); got != want {
 				t.Fatalf("the entry must show only the value the operator cleared\n got %s\nwant %s", got, want)
 			}
 		})
 	}
+}
+
+// ---------- GDPR mitigation: a value's text never reaches change_log ----------
+
+// TestACustomValuesPlaintextNeverReachesChangeLog is the test that proves the
+// feature does what it claims. A distinctive value is set through the normal
+// write path, and the assertion is not "the fold looks like a digest" -- it
+// is a direct search of the raw stored diff text for the string an operator
+// typed. Nothing about foldDigest's shape (hex, "#", 12 characters) can
+// coincidentally reproduce arbitrary operator text, so this is a real
+// negative, not a tautology.
+func TestACustomValuesPlaintextNeverReachesChangeLog(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newCustomFieldFixture(t, e)
+			id := mustField(t, f, "asset", "owner_email", domain.CustomFieldText)
+
+			const distinctive = "gabriel.the-operator@example-corp.test"
+			mustValue(t, f, id, f.assetID, distinctive)
+
+			got := lastChangeDiff(t, f, "asset", f.assetID)
+			if strings.Contains(got, distinctive) {
+				t.Fatalf("the raw value reached change_log verbatim: %s", got)
+			}
+			// And the digest form is exactly what is there instead -- this
+			// half rules out the fold having silently dropped the field
+			// rather than having folded it safely.
+			want := fmt.Sprintf(`{"custom_fields":{"old":"","new":%q}}`, digestFold("owner_email", distinctive))
+			if got != want {
+				t.Fatalf("got %s, want %s", got, want)
+			}
+
+			// A second, different value must not collide with the first --
+			// otherwise "the digest changed" would be a weaker guarantee
+			// than it looks.
+			mustValue(t, f, id, f.assetID, "someone.else@example-corp.test")
+			second := lastChangeDiff(t, f, "asset", f.assetID)
+			if strings.Contains(second, "someone.else@example-corp.test") {
+				t.Fatalf("the second raw value reached change_log verbatim: %s", second)
+			}
+			if second == got {
+				t.Fatal("two different values folded to the same change_log entry")
+			}
+		})
+	}
+}
+
+// TestFoldDigestIsStableAndDistinguishing is the property foldCustomValues
+// depends on directly: the same value under the same key always digests to
+// the same string, and two different values do not collide in a 5-item
+// sample (48 bits of HMAC output makes an accidental collision here
+// astronomically unlikely; this is a sanity check, not a cryptographic proof).
+func TestFoldDigestIsStableAndDistinguishing(t *testing.T) {
+	if got1, got2 := foldDigest(testFoldKey, "IT-42"), foldDigest(testFoldKey, "IT-42"); got1 != got2 {
+		t.Fatalf("the same value under the same key digested differently: %s then %s", got1, got2)
+	}
+	if !strings.HasPrefix(foldDigest(testFoldKey, "IT-42"), "#") {
+		t.Fatalf("a digest must be prefixed with # so a reader can tell it apart from a value")
+	}
+
+	values := []string{"IT-42", "IT-43", "", "owner@example.test", "TRUE", "2026-01-01"}
+	seen := make(map[string]string, len(values))
+	for _, v := range values {
+		d := foldDigest(testFoldKey, v)
+		if prev, ok := seen[d]; ok {
+			t.Fatalf("%q and %q collided on digest %s", prev, v, d)
+		}
+		seen[d] = v
+	}
+
+	// A different key must not reproduce the same digest for the same value
+	// -- the whole point of a KEYED digest over a plain hash is that the key
+	// controls the mapping, not just the input.
+	otherKey := bytes.Repeat([]byte{0x99}, 32)
+	if foldDigest(testFoldKey, "IT-42") == foldDigest(otherKey, "IT-42") {
+		t.Fatal("the same value digested identically under two different keys; " +
+			"this is not actually keyed")
+	}
+}
+
+// TestFoldDigestPanicsWithoutAKey documents the wiring guard: a store nobody
+// attached SQLStore.WithFoldKey to must not silently fold under an empty key.
+func TestFoldDigestPanicsWithoutAKey(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Fatal("foldDigest under an empty key did not panic")
+		}
+	}()
+	foldDigest(nil, "IT-42")
 }

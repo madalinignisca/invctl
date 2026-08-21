@@ -10,7 +10,10 @@ package store
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"sort"
@@ -148,51 +151,43 @@ func entityCustomValues(ctx context.Context, t *tx, entityID string) ([]domain.C
 	return values, nil
 }
 
-// foldCustomValues renders an entity's values as "code=value,code=value".
+// foldCustomValues renders an entity's values as "code=#digest,code=#digest".
+//
+// GDPR MITIGATION, LANDED. This used to render "code=value" -- the plaintext
+// itself, permanently, in an append-only table that is never pruned. See
+// docs/AUDIT.md's custom_field_value row and docs/custom-fields-design.md §5
+// for the full history: an administrator can define a field like "Owner
+// email" or "Contact phone" at any time, and CLAUDE.md's position that the
+// audit trail "carries no personal data and can be kept forever with no
+// retention argument" rested, for this feature alone, on nobody ever doing
+// so.
+//
+// The fix folds a KEYED DIGEST of the value instead: HMAC-SHA256 over the
+// value, the first 12 hex characters, prefixed with "#" so a reader can tell
+// at a glance this is a digest and not a value (see foldDigest below). That
+// keeps the property the fold exists for -- a set replacement that leaves
+// every column of the parent untouched still produces a diff, because the
+// digest still changes when the value does -- while writing nothing about
+// the value itself into change_log. What is lost, and it is an accepted,
+// permanent cost rather than an oversight: change_log now shows that a
+// custom value changed and which field, never what it changed to. The
+// current value still lives in custom_field_value and on the entity's own
+// page; only the audit trail's copy of it is gone.
+//
+// FORWARD-ONLY. change_log is append-only -- no UPDATE, no DELETE, ever --
+// so every entry written before this change still holds the plaintext it was
+// written with. This fold only changes what NEW entries record.
 //
 // SORTED BY CODE BEFORE JOINING, the same reason dependencyAudit sorts its data
 // classes: a set written in a different order is not a change, and an audit
 // trail that reports one teaches its readers to ignore it.
 //
-// A value containing a comma or an equals sign renders literally, exactly as an
-// environment code would. The fold is a human-readable audit rendering, not a
-// wire format -- nothing parses it back.
-//
-// KNOWN EXPOSURE, NAMED RATHER THAN SOLVED HERE: NOTHING INSIDE THIS STRING CAN
-// BE REDACTED SELECTIVELY. domain.IsRedacted takes an entity name and a COLUMN
-// name, and everything folded below arrives under one opaque column,
-// "custom_fields". Adding "custom_fields" to RedactedFields would redact the
-// WHOLE fold wholesale -- a real lever, and worth knowing it exists -- but there
-// is no name INSIDE it to key a rule on, so one field's value cannot be redacted
-// while the rest stay readable. Absent that, the value_text of every custom
-// field lands in the audit trail permanently and in full: change_log is
-// append-only, no UPDATE and no DELETE, ever.
-//
-// That matters because CLAUDE.md's position is that the audit trail "carries no
-// personal data and can be kept forever with no retention argument", which is
-// why change_log.actor holds an opaque app_user.id rather than a username. That
-// property now rests on no administrator ever defining a field like "Owner
-// email" or "Contact phone" -- and letting an estate define exactly such a field
-// is what this feature is FOR. Scrubbing an app_user row still answers an
-// erasure request for the actor; it does nothing about PII an administrator put
-// in a value.
-//
-// Closing it properly needs either per-code diff keys (which means changing
-// auditFields, the function every entity's audit flows through and whose last
-// defect was invisible for a week) or a redaction flag on custom_field and a
-// rule that reads it. Redacting the whole fold is the blunt instrument
-// available today, and it is BLUNTER than "hides every custom value from
-// every entry" makes it sound: domain.IsRedacted is consulted only where
-// diffJSON and snapshotJSON build a NEW change_log entry
-// (internal/store/diff.go), never at render time, so pulling the lever
-// redacts every custom value in every entry written FROM THAT POINT
-// FORWARD -- it does nothing to an entry already written, because
-// change_log is append-only. It stops a leak from continuing; it answers no
-// erasure request for anything already recorded. Both a per-code fix and a
-// redaction flag are schema and spec changes and are the coordinator's, not
-// this function's. Do not treat the silence here as a judgement that it is
-// fine -- and do not describe the lever as hiding more than it does.
-func foldCustomValues(defs map[string]domain.CustomField, values []domain.CustomFieldValue) string {
+// A key of zero length is a wiring bug -- SetCustomValues is called against a
+// store nobody attached SQLStore.WithFoldKey to -- and foldDigest panics
+// rather than compute a digest under an empty key, which would be silently
+// worthless as a keyed digest and indistinguishable from a correctly folded
+// one to anyone reading it later.
+func foldCustomValues(key []byte, defs map[string]domain.CustomField, values []domain.CustomFieldValue) string {
 	pairs := make([]string, 0, len(values))
 	for _, v := range values {
 		def, ok := defs[v.FieldID]
@@ -202,10 +197,29 @@ func foldCustomValues(defs map[string]domain.CustomField, values []domain.Custom
 			// entity does not have.
 			continue
 		}
-		pairs = append(pairs, def.Code+"="+v.ValueText)
+		pairs = append(pairs, def.Code+"="+foldDigest(key, v.ValueText))
 	}
 	sort.Strings(pairs)
 	return strings.Join(pairs, ",")
+}
+
+// foldDigest renders a keyed digest of one custom value: HMAC-SHA256, first
+// 12 hex characters, prefixed with "#". 12 hex characters is 48 bits, plenty
+// to prove two folds differ or agree without carrying enough of the digest to
+// be useful for anything else.
+//
+// The key must be stable across restarts -- see ResolveAuditFoldKey in
+// foldkey.go -- or every entity holding a custom value shows a spurious diff
+// on its next save after every restart, forever, which would be worse than
+// the plaintext exposure this replaces.
+func foldDigest(key []byte, value string) string {
+	if len(key) == 0 {
+		panic("foldDigest: no audit fold key configured; call SQLStore.WithFoldKey before " +
+			"writing custom values, or every digest would be computed under an empty key")
+	}
+	mac := hmac.New(sha256.New, key)
+	mac.Write([]byte(value))
+	return "#" + hex.EncodeToString(mac.Sum(nil))[:12]
 }
 
 // customFieldsAudit renders an entity's custom values as the string that folds
@@ -220,7 +234,7 @@ func customFieldsAudit(ctx context.Context, t *tx, entityType, entityID string) 
 	if err != nil {
 		return "", err
 	}
-	return foldCustomValues(defs, values), nil
+	return foldCustomValues(t.foldKey, defs, values), nil
 }
 
 // setCustomValues applies one entity's submitted custom values INSIDE t.

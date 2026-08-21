@@ -57,6 +57,13 @@ type harness struct {
 	refs   *seed.Refs
 }
 
+// webTestFoldKey is a fixed 32-byte key attached to every store this package
+// builds, the same way internal/store's own suite uses testFoldKey -- not a
+// secret, never leaves this process. Without it, the first custom field
+// value any handler test sets would panic (foldDigest refuses to fold under
+// an empty key: internal/store/customvalues.go).
+var webTestFoldKey = bytes.Repeat([]byte{0x5a}, 32)
+
 // Monitoring credentials the harness configures (docs/AUDIT.md rule 6). They
 // are here rather than in the agent tests because every test in this package
 // runs against a router that has the machine-facing route mounted -- otherwise
@@ -211,7 +218,7 @@ func webTemplate(t *testing.T) (string, *seed.Refs) {
 			webTemplateErr = fmt.Errorf("migrating: %w", err)
 			return
 		}
-		st := store.New(db)
+		st := store.New(db).WithFoldKey(webTestFoldKey)
 		refs, err := seed.Load(ctx, st)
 		if err != nil {
 			_ = db.Close()
@@ -284,7 +291,7 @@ func newHarnessSecure(t *testing.T, creds []config.AgentCredential, readerCreds 
 		t.Fatalf("opening database: %v", err)
 	}
 	t.Cleanup(func() { db.Close() })
-	st := store.New(db)
+	st := store.New(db).WithFoldKey(webTestFoldKey)
 
 	sessions := scs.New()
 	// A CLEANUP GOROUTINE PER HARNESS, AND THIS PACKAGE BUILDS 243 OF THEM.

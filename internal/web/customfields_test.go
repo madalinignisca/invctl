@@ -101,26 +101,37 @@ func TestAFieldWithNoDescriptionIsRefusedWith422(t *testing.T) {
 	}
 }
 
-// TestTheCreationFormWarnsThatCustomValuesArePermanentAndMustNotHoldPII is
-// Ruling AD's gate. A custom value's text enters change_log permanently and
-// redaction is all-or-nothing across every custom field on every entity
-// (domain.IsRedacted is keyed by column, and the fold is one opaque key,
-// "custom_fields"), so this is the one moment a warning can still change
-// anybody's mind: while an administrator is naming the field, not in a help
-// page and not behind a tooltip they must hover.
-func TestTheCreationFormWarnsThatCustomValuesArePermanentAndMustNotHoldPII(t *testing.T) {
+// TestTheCreationFormWarnsAboutPIIWithoutOverclaimingTheAuditTrail is Ruling
+// AD's gate, updated for the GDPR digest fold. A custom value's text used to
+// enter change_log permanently with redaction all-or-nothing across every
+// field (domain.IsRedacted is keyed by column, and the fold was one opaque
+// key, "custom_fields"), which made this the one moment a warning could
+// still change anybody's mind -- while an administrator is naming the
+// field, not in a help page and not behind a tooltip they must hover.
+//
+// foldCustomValues (internal/store/customvalues.go) now folds a keyed
+// digest instead of the value, so the audit-trail half of that claim is no
+// longer true, and the form must not go on asserting it: this test used to
+// require exactly that string and would have kept passing silently against
+// a form that had become wrong the moment the fold changed underneath it.
+// What still has to be said is that the value lives, unencrypted, on the
+// entity's own page -- the fold closes the audit trail, not the row.
+func TestTheCreationFormWarnsAboutPIIWithoutOverclaimingTheAuditTrail(t *testing.T) {
 	h := newHarness(t)
 	h.login("admin", "admin-password")
 
 	page := body(t, h.get("/custom-fields", false))
-	// All three clauses, asserted separately: Ruling AH found that asserting
-	// only two of the warning's three claims leaves a tripwire that keeps
-	// passing if the third -- "cannot be removed" -- is deleted from the
-	// template while the other two survive.
+	if strings.Contains(page, "recorded permanently in the audit trail") {
+		t.Error("the creation form still claims values are recorded permanently in the audit trail, " +
+			"which is no longer true once the fold digests them")
+	}
+	if strings.Contains(page, "cannot be removed") {
+		t.Error("the creation form still claims a custom value cannot be removed, " +
+			"which described the audit trail and no longer applies to it")
+	}
 	for _, want := range []string{
-		"recorded permanently in the audit trail",
-		"cannot be removed",
-		"must not hold personal data",
+		"digest",
+		"personal data",
 	} {
 		if !strings.Contains(page, want) {
 			t.Errorf("the field-creation form does not warn %q", want)

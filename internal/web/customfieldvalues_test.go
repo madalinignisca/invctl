@@ -80,20 +80,32 @@ func TestACustomFieldRendersOnAServiceDetailPage(t *testing.T) {
 	}
 }
 
-// TestTheValueEditorWarnsThatCustomValuesArePermanentAndMustNotHoldPII is
-// FINAL REVIEW AX(a): the creation form's warning (Ruling AD) is opened by
-// whoever DEFINES a field, never by whoever later TYPES a value into one on
-// an asset or service page -- often somebody who has never seen the
-// creation form at all. This is the warning at the point PII actually gets
-// typed.
-func TestTheValueEditorWarnsThatCustomValuesArePermanentAndMustNotHoldPII(t *testing.T) {
+// TestTheValueEditorWarnsAboutPIIWithoutOverclaimingTheAuditTrail is FINAL
+// REVIEW AX(a), updated for the GDPR digest fold: the creation form's
+// warning (Ruling AD) is opened by whoever DEFINES a field, never by
+// whoever later TYPES a value into one on an asset or service page -- often
+// somebody who has never seen the creation form at all. This is the warning
+// at the point PII actually gets typed.
+//
+// The warning changed shape along with the fold: a value's text no longer
+// reaches change_log (foldCustomValues folds a keyed digest instead, see
+// internal/store/customvalues.go), so the editor must stop claiming the
+// audit trail keeps it forever -- that claim is no longer true, and this
+// test would previously have kept passing against a template that had
+// quietly become wrong. It still has to warn that the value itself lives on
+// the entity's own page.
+func TestTheValueEditorWarnsAboutPIIWithoutOverclaimingTheAuditTrail(t *testing.T) {
 	h := newHarness(t)
 	h.login("admin", "admin-password")
 	mustCreateFieldViaHTTP(t, h, "asset", "cost_centre", "Cost Centre", "text")
 
 	page := body(t, h.get("/assets/"+h.refs.Assets["hv-01"], false))
-	if !strings.Contains(page, "Recorded permanently") {
-		t.Error("the value editor does not warn that a custom value is recorded permanently")
+	if strings.Contains(page, "kept in the audit trail forever") {
+		t.Error("the value editor still claims the audit trail keeps the value forever, " +
+			"which is no longer true once the fold digests it")
+	}
+	if !strings.Contains(page, "digest") {
+		t.Error("the value editor does not explain that the audit trail records a digest, not the value")
 	}
 	if !strings.Contains(page, "personal data") {
 		t.Error("the value editor does not warn against typing personal data")

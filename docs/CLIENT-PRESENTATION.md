@@ -144,11 +144,17 @@ Infrastructure inventory and impact analysis
 > names" while the screen shows one is the version that loses you the room.
 >
 > **One honest caveat if custom fields come up:** an administrator can define
-> a free-text field ("Cost Centre", say), and its values are folded into the
-> audit trail permanently, the same as everything else. If someone names a
-> field "Owner email" or "Contact", that text is in there for good — the
-> product warns against it at the point of typing, twice over, but it cannot
-> stop it. Say this before a client asks; it lands better offered than found.
+> a free-text field ("Cost Centre", say), and a change to its value is
+> audited the same as everything else — but the audit trail records that
+> the value changed and which field, never what it changed to; the text
+> itself is not written to the log. If someone still names a field "Owner
+> email" or "Contact", that value lives on the entity's own page, not in the
+> log, and the product still warns against putting personal data there at
+> the point of typing. Do not oversell this: "the audit trail doesn't keep
+> it" is true and "this makes custom fields GDPR-proof" is not — the value
+> still exists somewhere, on the record it belongs to, for as long as
+> anybody keeps it. Say this before a client asks; it lands better offered
+> than found.
 
 ---
 
@@ -315,7 +321,7 @@ Plus: *"12 of 19 things in this footprint carry a price"* — so the total is a 
 
 - **576 automated tests**, every one run against **both** database engines
 - The impact engine is tested against a real fixture estate, not mocks
-- Rules the codebase enforces on itself: audit coverage, no hard deletes, portability between engines — and, with one named exception, no personal data in the log (see Slide 8's caveat: a custom field's own text is the one place that rule is operational rather than enforced)
+- Rules the codebase enforces on itself: audit coverage, no hard deletes, portability between engines, no personal data in the log — including a custom field's own value, which is folded into the log as a digest rather than its text (see Slide 8's caveat for what that does and does not cover)
 - Reviewed for security and correctness, repeatedly, with findings acted on
 
 > **Speaker note:** Use this if the client is technical or is buying a POC they

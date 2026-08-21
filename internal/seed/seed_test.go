@@ -9,6 +9,7 @@
 package seed_test
 
 import (
+	"bytes"
 	"context"
 	"path/filepath"
 	"strings"
@@ -56,7 +57,12 @@ func newFixture(t *testing.T) *fixture {
 	if err := store.Migrate(ctx, db); err != nil {
 		t.Fatalf("migrating: %v", err)
 	}
-	s := store.New(db)
+	// A fixed test key, not a secret and never used outside this process:
+	// StageCustomFields (customfields_test.go in this package) writes real
+	// custom values through SetCustomValues, which folds a keyed digest into
+	// the audit trail and panics without a key attached
+	// (internal/store/customvalues.go).
+	s := store.New(db).WithFoldKey(bytes.Repeat([]byte{0x5a}, 32))
 	refs, err := seed.Load(ctx, s)
 	if err != nil {
 		t.Fatalf("seeding fixture: %v", err)

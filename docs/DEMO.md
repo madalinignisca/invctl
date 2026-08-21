@@ -202,11 +202,14 @@ Then **Changes** in the nav. Every declared mutation, with `actor` and
 — so the trail carries no personal data, can be kept indefinitely, and scrubbing
 an account answers an erasure request while the log keeps its integrity.
 
-**One caveat if it comes up:** custom fields are the one exception. Their
-values are free text an administrator defines the meaning of, folded into the
-same audited entry, and there is no scrub-the-actor equivalent for a field
-someone named "Owner email" — the product warns against it twice (defining
-the field, and typing a value), but it can't refuse the string.
+**One caveat if it comes up:** custom fields are free text an administrator
+defines the meaning of, folded into the same audited entry as a keyed digest
+rather than the text itself — so a change shows that a value moved and which
+field, never what it changed to. That is not the same as saying the value is
+gone: it still lives on the entity's own page, unencrypted, for as long as
+anybody keeps it there, so the product still warns against a field like
+"Owner email" at the point of typing. The digest closes the audit-trail
+exposure, not the row.
 
 ---
 

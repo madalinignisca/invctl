@@ -215,14 +215,15 @@
     <input type="hidden" name="csrf_token" value="{{.CSRF}}">
 
     <div class="callout callout-warn">
-      <strong>This cannot be undone selectively.</strong>
+      <strong>Think before you name this "Owner email".</strong>
       <p style="margin-top:6px">
-        A custom field's values are recorded permanently in the audit trail,
-        cannot be removed, and must not hold personal data. Redaction of a
-        custom value is all-or-nothing across every custom field on every
-        entity, so there is no way to hide one field's values later without
-        hiding every field's. Never create a field such as "Owner email",
-        "Contact" or "Requested by".
+        A field's values are recorded as a digest in the audit trail, not as
+        text — so a change shows that a value moved and which field, never
+        what it changed to. But the value itself still lives on the entity's
+        own page in <code>custom_field_value</code>, unencrypted, for as long
+        as anybody keeps it there. Casual personal data still does not belong
+        in a custom field; this only closes the audit-trail exposure, not the
+        entity page.
       </p>
     </div>
 

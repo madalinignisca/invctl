@@ -184,7 +184,25 @@ type FieldChange struct {
 	// Added is true for a create, where there is no old value to show and
 	// printing an empty left-hand side would read as "it was blank".
 	Added bool
+	// Note is a short explanation shown beside the row, for a field whose
+	// rendered value would otherwise be mistaken for corruption. Empty for
+	// every ordinary field.
+	//
+	// custom_fields is the one case today: unexplained, "cost_centre=#a3f9c1b2d4e6"
+	// reads as garbage rather than as the deliberate GDPR mitigation it is
+	// (foldCustomValues, internal/store/customvalues.go) -- and "looks like
+	// corruption" is exactly the support call this whole work package exists
+	// to prevent. Set in ParseDiff rather than in the template, because a
+	// template cannot explain a field it does not know the meaning of.
+	Note string
 }
+
+// customFieldsExplanation is the note shown beside a custom_fields row --
+// the one field this codebase folds as a digest rather than a value, so an
+// operator reading it unexplained would otherwise reasonably conclude the
+// log is corrupt. See foldCustomValues's doc comment for the full reasoning.
+const customFieldsExplanation = "Custom field values are recorded as a digest, not their text, " +
+	"so the log carries no personal data. The current value is on the entity's own page."
 
 // ChangeDetail is a stored diff turned into something a human can scan.
 type ChangeDetail struct {
@@ -233,7 +251,7 @@ func ParseDiff(raw string) ChangeDetail {
 		out.Snapshot, out.Parsed = true, true
 		for _, name := range sortedKeys(fields) {
 			out.Fields = append(out.Fields, FieldChange{
-				Field: name, New: renderValue(fields[name]), Added: true,
+				Field: name, New: renderValue(fields[name]), Added: true, Note: fieldNote(name),
 			})
 		}
 		return out
@@ -249,7 +267,7 @@ func ParseDiff(raw string) ChangeDetail {
 			return out
 		}
 		out.Fields = append(out.Fields, FieldChange{
-			Field: name, Old: renderValue(move.Old), New: renderValue(move.New),
+			Field: name, Old: renderValue(move.Old), New: renderValue(move.New), Note: fieldNote(name),
 		})
 	}
 	out.Parsed = len(out.Fields) > 0
@@ -287,6 +305,15 @@ func renderValue(v any) string {
 		}
 		return string(encoded)
 	}
+}
+
+// fieldNote returns the explanation to show beside a field row, or "" for
+// every field that needs none.
+func fieldNote(dbTag string) string {
+	if dbTag == "custom_fields" {
+		return customFieldsExplanation
+	}
+	return ""
 }
 
 func sortedKeys[V any](m map[string]V) []string {

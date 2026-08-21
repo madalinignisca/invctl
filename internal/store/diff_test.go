@@ -96,3 +96,48 @@ func TestAnUnreadableDiffIsKeptVisible(t *testing.T) {
 		}
 	}
 }
+
+// TestACustomFieldsRowCarriesAReaderNote is the legibility half of the GDPR
+// digest fold: an operator reading "cost_centre=#a3f9c1b2d4e6" with no
+// explanation reasonably concludes the log is corrupt, which is exactly the
+// support call this whole work package exists to prevent. ParseDiff must
+// attach an explanation to a custom_fields row, on both an update and a
+// create, and to no other field.
+func TestACustomFieldsRowCarriesAReaderNote(t *testing.T) {
+	t.Run("update", func(t *testing.T) {
+		got := ParseDiff(`{"custom_fields":{"old":"cost_centre=#aaa","new":"cost_centre=#bbb"},"serial":{"old":"a","new":"b"}}`)
+		if !got.Parsed {
+			t.Fatal("the diff must parse")
+		}
+		for _, f := range got.Fields {
+			switch f.Field {
+			case "custom_fields":
+				if f.Note == "" {
+					t.Error("a custom_fields row must carry an explanatory note")
+				}
+			default:
+				if f.Note != "" {
+					t.Errorf("%s: an ordinary field must carry no note, got %q", f.Field, f.Note)
+				}
+			}
+		}
+	})
+	t.Run("create", func(t *testing.T) {
+		got := ParseDiff(`{"new":{"custom_fields":"cost_centre=#aaa","serial":"x"}}`)
+		if !got.Parsed || !got.Snapshot {
+			t.Fatal("the snapshot must parse")
+		}
+		for _, f := range got.Fields {
+			switch f.Field {
+			case "custom_fields":
+				if f.Note == "" {
+					t.Error("a custom_fields row must carry an explanatory note")
+				}
+			default:
+				if f.Note != "" {
+					t.Errorf("%s: an ordinary field must carry no note, got %q", f.Field, f.Note)
+				}
+			}
+		}
+	})
+}

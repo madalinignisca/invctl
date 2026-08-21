@@ -230,9 +230,12 @@ before against after. Custom values fold in the same way, as a second field:
 type assetAudit struct {
     domain.Asset
     Environments string `db:"environments"`
-    CustomFields string `db:"custom_fields"`   // "asset_tag=ABC,cost_centre=IT-42"
+    CustomFields string `db:"custom_fields"`   // "asset_tag=#a1b2c3d4e5f6,cost_centre=#0f1e2d3c4b5a"
 }
 ```
+
+Each value is folded as a **keyed digest**, not the value itself — see the
+GDPR mitigation below.
 
 Sorted by code before joining, so reordering is never reported as a change —
 the same reason `dependencyAudit` sorts its classes.
@@ -257,40 +260,51 @@ writing one, which `auditFields` now panics on rather than tolerates.
 Field definitions are declared state in their own right: create, edit, retire
 and restore each write their own `change_log` row against `custom_field`.
 
-**A custom value's text enters `change_log` permanently, and redaction is
-all-or-nothing, and only for future entries.** `domain.IsRedacted` consults a
-global list keyed by column, so the whole fold CAN be redacted wholesale
-under `custom_fields` — but the fold is a single opaque key, so there is no
-name INSIDE it to key on, and no way to redact one field's values while
-keeping the rest. The lever is also blunter than "redact" suggests: it is
-consulted only where `diffJSON` and `snapshotJSON` build a NEW `change_log`
-entry (`internal/store/diff.go`), never at render time. Adding
-`"custom_fields"` to `domain.RedactedFields` therefore redacts every custom
-value in every entry written **from that point forward** — it does nothing
-to an entry already written, because `change_log` is append-only and nothing
-rewrites a stored diff. Pulling the lever after the fact hides nothing
-already recorded and answers no erasure request already outstanding; it only
-stops the leak from continuing. That makes the warning at the point of
-typing the only thing standing between an administrator and a permanent,
-currently-irredeemable plaintext record. `docs/AUDIT.md`'s position that the
-audit trail "carries no personal data and can be kept forever with no
-retention argument" therefore rests, for this feature alone, on no
-administrator ever having created a field that holds personal data: an
-"Owner email", a "Contact", a "Requested by".
+### GDPR mitigation: a keyed digest, not the value
 
-This is stated rather than engineered. The principled fix is a per-field
-"holds personal data" flag that redacts that field's value inside the fold, and
-it is a schema change deferred to a later work package. Until then the
-constraint is operational and belongs where whoever is typing is: the field
-**creation** form warns that a custom field's values are recorded permanently
-in the audit trail and must not hold personal data, and the value **editor**
-(`custom_fields_form.html`) carries the same warning, worded for whoever is
-filling a value in rather than whoever named the field — the creation form is
-opened by whoever DEFINES a field, and the person who later types a value on
-an asset or service detail page has very possibly never seen it. Neither
-`docs/API.md` nor the registry repeats the warning; nothing in WP-A4
-propagates it anywhere beyond these two forms. An estate that needs a field
-holding personal data needs the flag first.
+**This section used to say a custom value's text entered `change_log`
+permanently with no erasure path, resting `docs/AUDIT.md`'s "carries no
+personal data" claim on no administrator ever defining a field like "Owner
+email". That has been mitigated, and this is the record of how.**
+
+`foldCustomValues` (`internal/store/customvalues.go`) folds a **keyed
+digest** of each value instead of the value itself: HMAC-SHA256 over the
+value, the first 12 hex characters, prefixed with `#` so a reader can tell
+at a glance a fold entry is a digest and not a value —
+`cost_centre=#0f1e2d3c4b5a`. The key is resolved once at startup
+(`store.ResolveAuditFoldKey`, `INV_AUDIT_FOLD_KEY`) and **must never change
+under a running deployment's data**: unlike a session key, which is free to
+regenerate on every start because a generated one only logs people out, a
+regenerated fold key would change every digest ever folded and put a
+spurious diff on every entity holding a custom value on its very next save,
+forever. So a key set via the environment is used as-is, and one left unset
+is generated exactly once and persisted (migration `00052`,
+`audit_fold_key`), read back unchanged on every later start.
+
+This keeps the property the fold exists for — a set replacement that leaves
+every column of the parent untouched still produces a diff, because the
+digest still changes when the value does — while writing nothing about the
+value itself into `change_log`.
+
+**The cost is real and accepted, not hidden.** `change_log` now shows that a
+custom value changed and which field, **never what it changed to**. The
+current value still lives in `custom_field_value` and on the entity's own
+page; only the audit trail's copy of it is gone. Do not present this as
+having made a custom field's value disappear — it has not, and the value
+**editor** (`custom_fields_form.html`) still carries a warning for exactly
+that reason. The **creation** form (`custom_field_form.html`) carries the
+matching one, worded for whoever names the field rather than whoever later
+types a value.
+
+**The fix is forward-only.** `change_log` is append-only — no `UPDATE`, no
+`DELETE`, ever — so every entry written before this shipped still holds the
+plaintext it was written with. This fold only changes what NEW entries
+record; there is no retroactive scrub of what is already there. An estate
+that needs the pre-mitigation entries dealt with needs a separate,
+deliberate decision — this section is not that decision.
+
+Neither `docs/API.md` nor the registry repeats the warning; nothing in
+WP-A4 propagates it anywhere beyond the two forms named above.
 
 ---
 

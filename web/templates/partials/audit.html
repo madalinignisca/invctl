@@ -196,6 +196,9 @@
                       {{range .Fields}}
                       <tr><td class="diff-field">{{.Field}}</td>
                           <td class="diff-new">{{truncate .New 80}}</td></tr>
+                      {{if .Note}}
+                      <tr><td></td><td style="font-size:11px;color:var(--muted);font-style:italic">{{.Note}}</td></tr>
+                      {{end}}
                       {{end}}
                     </table>
                   </details>
@@ -208,6 +211,9 @@
                       <td class="diff-arrow">→</td>
                       <td class="diff-new" title="{{.New}}">{{truncate .New 40}}</td>
                     </tr>
+                    {{if .Note}}
+                    <tr><td></td><td colspan="3" style="font-size:11px;color:var(--muted);font-style:italic">{{.Note}}</td></tr>
+                    {{end}}
                     {{end}}
                   </table>
                 {{end}}
