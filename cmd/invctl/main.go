@@ -196,6 +196,19 @@ func run() error {
 		if err := seed.StageCustomFields(ctx, st, cfg.AdminUsername); err != nil {
 			slog.Warn("demo custom fields not staged", "error", err)
 		}
+
+		// The demo's own spread (Task: demo data refresh): a realistic
+		// proportion of assets and services holding a value, not just the
+		// one-populated/one-empty pair the test suite pins. Gated on
+		// SeedCompany like the estate it populates -- this data is meaningless
+		// against the small base fixture alone, and staging it there would
+		// either fail against missing company-only assets or force this
+		// function to special-case which subset ran.
+		if cfg.SeedCompany {
+			if err := seed.StageCustomFieldSpread(ctx, st, cfg.AdminUsername); err != nil {
+				slog.Warn("demo custom field spread not staged", "error", err)
+			}
+		}
 	}
 
 	sessions, err := newSessionManager(db, cfg)
