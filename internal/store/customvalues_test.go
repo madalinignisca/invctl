@@ -10,6 +10,7 @@ package store
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -42,7 +43,11 @@ func digestFold(kv ...string) string {
 	// even-length invariant the panic above already established.
 	for remaining := kv; len(remaining) >= 2; remaining = remaining[2:] {
 		code, value := remaining[0], remaining[1]
-		parts = append(parts, code+"="+foldDigest(testFoldKey, value))
+		digest, err := foldDigest(testFoldKey, value)
+		if err != nil {
+			panic("digestFold: " + err.Error())
+		}
+		parts = append(parts, code+"="+digest)
 	}
 	return strings.Join(parts, ",")
 }
@@ -1250,19 +1255,32 @@ func TestACustomValuesPlaintextNeverReachesChangeLog(t *testing.T) {
 // depends on directly: the same value under the same key always digests to
 // the same string, and two different values do not collide in a 5-item
 // sample (48 bits of HMAC output makes an accidental collision here
-// astronomically unlikely; this is a sanity check, not a cryptographic proof).
+// astronomically unlikely; this is a sanity check, not a cryptographic proof
+// -- see foldDigest's doc comment for the collision bound that actually
+// matters).
 func TestFoldDigestIsStableAndDistinguishing(t *testing.T) {
-	if got1, got2 := foldDigest(testFoldKey, "IT-42"), foldDigest(testFoldKey, "IT-42"); got1 != got2 {
+	got1, err := foldDigest(testFoldKey, "IT-42")
+	if err != nil {
+		t.Fatalf("folding: %v", err)
+	}
+	got2, err := foldDigest(testFoldKey, "IT-42")
+	if err != nil {
+		t.Fatalf("folding: %v", err)
+	}
+	if got1 != got2 {
 		t.Fatalf("the same value under the same key digested differently: %s then %s", got1, got2)
 	}
-	if !strings.HasPrefix(foldDigest(testFoldKey, "IT-42"), "#") {
+	if !strings.HasPrefix(got1, "#") {
 		t.Fatalf("a digest must be prefixed with # so a reader can tell it apart from a value")
 	}
 
 	values := []string{"IT-42", "IT-43", "", "owner@example.test", "TRUE", "2026-01-01"}
 	seen := make(map[string]string, len(values))
 	for _, v := range values {
-		d := foldDigest(testFoldKey, v)
+		d, err := foldDigest(testFoldKey, v)
+		if err != nil {
+			t.Fatalf("folding %q: %v", v, err)
+		}
 		if prev, ok := seen[d]; ok {
 			t.Fatalf("%q and %q collided on digest %s", prev, v, d)
 		}
@@ -1273,19 +1291,96 @@ func TestFoldDigestIsStableAndDistinguishing(t *testing.T) {
 	// -- the whole point of a KEYED digest over a plain hash is that the key
 	// controls the mapping, not just the input.
 	otherKey := bytes.Repeat([]byte{0x99}, 32)
-	if foldDigest(testFoldKey, "IT-42") == foldDigest(otherKey, "IT-42") {
+	otherDigest, err := foldDigest(otherKey, "IT-42")
+	if err != nil {
+		t.Fatalf("folding with the other key: %v", err)
+	}
+	if got1 == otherDigest {
 		t.Fatal("the same value digested identically under two different keys; " +
 			"this is not actually keyed")
 	}
 }
 
-// TestFoldDigestPanicsWithoutAKey documents the wiring guard: a store nobody
+// TestFoldDigestErrorsWithoutAKey documents the wiring guard: a store nobody
 // attached SQLStore.WithFoldKey to must not silently fold under an empty key.
-func TestFoldDigestPanicsWithoutAKey(t *testing.T) {
-	defer func() {
-		if recover() == nil {
-			t.Fatal("foldDigest under an empty key did not panic")
-		}
-	}()
-	foldDigest(nil, "IT-42")
+// CLAUDE.md forbids panicking outside main, so the guard is an error rather
+// than a crash -- see TestSettingAValueWithNoFoldKeyConfiguredFailsClosed for
+// the guard exercised through the real write path.
+func TestFoldDigestErrorsWithoutAKey(t *testing.T) {
+	_, err := foldDigest(nil, "IT-42")
+	if err == nil {
+		t.Fatal("foldDigest under an empty key must return an error")
+	}
+}
+
+// TestSettingAValueWithNoFoldKeyConfiguredFailsClosed is the write-path half
+// of the guard foldDigest states: a store nobody attached
+// SQLStore.WithFoldKey to must refuse the write with an error rather than
+// panic (CLAUDE.md: never panic outside main) or silently fold under an empty
+// key. Computing every digest under an empty key would be a silent security
+// failure -- it defeats the whole point of a KEYED digest -- so failing
+// closed is correct; the write must be refused, not degraded.
+func TestSettingAValueWithNoFoldKeyConfiguredFailsClosed(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			// New, not newStore: newStore attaches testFoldKey for the rest of
+			// the suite's convenience, and this test specifically needs a
+			// store nobody called WithFoldKey on.
+			s, ctx := New(e.Open(t)), context.Background()
+			const username = "cf-admin-nokey"
+			user, err := domain.NewAppUser(NewID(), username, domain.UserSourceLocal, s.Now())
+			if err != nil {
+				t.Fatalf("building fixture user: %v", err)
+			}
+			if err := s.CreateUser(ctx, testActor, user); err != nil {
+				t.Fatalf("creating fixture user: %v", err)
+			}
+			actor := domain.UserActor(user)
+
+			env := mustEnvironment(t, s, ctx, "prod", domain.EnvRoleProduction)
+			assetID := mustAsset(t, s, ctx, domain.KindVM, "cf-nokey-vm", nil, env)
+
+			cf, err := domain.NewCustomField(NewID(), "asset", "cost_centre", "cost_centre",
+				domain.CustomFieldText, "a fixture field", actor.ID, s.Now())
+			if err != nil {
+				t.Fatalf("building custom field: %v", err)
+			}
+			if err := s.CreateCustomField(ctx, actor, cf); err != nil {
+				t.Fatalf("creating custom field: %v", err)
+			}
+
+			before, err := s.countOne(ctx,
+				`SELECT COUNT(*) FROM change_log WHERE entity_type = 'asset' AND entity_id = ?`, assetID)
+			if err != nil {
+				t.Fatalf("counting change_log rows: %v", err)
+			}
+
+			token, err := s.GetAsset(ctx, assetID)
+			if err != nil {
+				t.Fatalf("reading the asset: %v", err)
+			}
+			err = s.SetCustomValues(ctx, actor, "asset", assetID, token.RowVersion,
+				map[string]string{cf.ID: "IT-42"})
+			if err == nil {
+				t.Fatal("setting a custom value against a store with no fold key configured must fail")
+			}
+
+			after, err := s.countOne(ctx,
+				`SELECT COUNT(*) FROM change_log WHERE entity_type = 'asset' AND entity_id = ?`, assetID)
+			if err != nil {
+				t.Fatalf("counting change_log rows: %v", err)
+			}
+			if after != before {
+				t.Fatalf("a failed fold still wrote %d change_log row(s)", after-before)
+			}
+
+			values, err := s.CustomValuesFor(ctx, "asset", assetID)
+			if err != nil {
+				t.Fatalf("reading values: %v", err)
+			}
+			if len(values) != 0 {
+				t.Fatalf("a failed fold still left %d value row(s) behind, want 0", len(values))
+			}
+		})
+	}
 }

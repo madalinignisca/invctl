@@ -88,7 +88,23 @@
                 </div>
               {{end}}
             {{else}}
-              {{.Detail}}
+              {{/* A declared row, rendered through ParsedDetail rather than
+                   the raw stored text: the "changes" list and the entry page
+                   both explain a custom_fields row as a digest via the same
+                   parse, and this was the one surface that did not (rule 15).
+                   An unexplained "cost_centre=#a3f9c1b2d4e6" reads as
+                   corruption; ParseDiff's Note (diff.go) is what says
+                   otherwise. There is no plaintext exposure either way --
+                   this is legibility, not a redaction concern. */}}
+              {{with .ParsedDetail}}
+                {{if not .Parsed}}
+                  <span style="overflow-wrap:anywhere">{{.Raw}}</span>
+                {{else if .Snapshot}}
+                  created — {{pluralise (len .Fields) "field" "fields"}}
+                {{else if .Fields}}
+                  {{range $i, $f := .Fields}}{{if $i}}; {{end}}<span class="mono">{{$f.Field}}</span>: {{truncate $f.Old 24}} → {{truncate $f.New 24}}{{if $f.Note}} <em style="color:var(--faint)">({{$f.Note}})</em>{{end}}{{end}}
+                {{end}}
+              {{end}}
             {{end}}
           </td>
         </tr>

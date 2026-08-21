@@ -180,6 +180,33 @@ func TestARetiredFieldDisappearsFromTheDetailPage(t *testing.T) {
 	}
 }
 
+// TestTheTimelineExplainsACustomFieldsDigestTheSameWayTheChangesListDoes is
+// the fix for the one surface that rendered a custom_fields diff raw: the
+// asset's own Timeline panel (web/templates/partials/audit.html's
+// timeline_panel) used to print change_log.diff verbatim instead of going
+// through store.ParseDiff the way "/changes" and the entry page already do,
+// so an operator reading the timeline met a bare
+// "custom_fields: #a3f9c1b2d4e6" with none of the explanation the other two
+// surfaces carry (diff.go's customFieldsExplanation). There is no plaintext
+// exposure either way -- this is legibility, not a redaction concern.
+func TestTheTimelineExplainsACustomFieldsDigestTheSameWayTheChangesListDoes(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+	id := mustCreateFieldViaHTTP(t, h, "asset", "cost_centre", "Cost Centre", "text")
+	assetID := h.refs.Assets["hv-01"]
+	mustSetValueViaHTTP(t, h, assetID, id, "IT-42")
+
+	page := body(t, h.get("/assets/"+assetID, false))
+	if !strings.Contains(page, "custom_fields") {
+		t.Fatal("the timeline does not show the custom_fields row at all")
+	}
+	if !strings.Contains(page, "recorded as a digest") {
+		t.Error("the timeline renders a custom_fields change without the reader note " +
+			"the changes list and the entry page both carry -- an unexplained digest " +
+			"reads as corruption, which is the support call this feature exists to prevent")
+	}
+}
+
 func TestAnInvalidValueReturns422AndKeepsTheOthers(t *testing.T) {
 	// One bad value must not discard the good ones the operator also typed.
 	h := newHarness(t)

@@ -243,9 +243,7 @@ func translateWriteErr(err error, what string) error {
 	}
 	msg := strings.ToLower(err.Error())
 	switch {
-	case strings.Contains(msg, "unique constraint"),
-		strings.Contains(msg, "duplicate key"),
-		strings.Contains(msg, "unique_violation"):
+	case isUniqueViolation(err):
 		return fmt.Errorf("%s: %w", what, domain.ErrConflict)
 	case strings.Contains(msg, "foreign key"),
 		strings.Contains(msg, "violates foreign key constraint"):
@@ -254,6 +252,27 @@ func translateWriteErr(err error, what string) error {
 		return fmt.Errorf("%s: violates a database check constraint: %w", what, domain.ErrInvalid)
 	}
 	return fmt.Errorf("%s: %w", what, err)
+}
+
+// isUniqueViolation reports whether err is a uniqueness-constraint failure,
+// on either engine. Both report it with different codes and wording -- SQLite
+// via modernc's driver text, PostgreSQL via pgx's SQLSTATE 23505 message --
+// so this matches on the text rather than a single shared error type, the
+// same approach translateWriteErr uses for every other constraint kind.
+//
+// Split out from translateWriteErr so a caller that needs to distinguish
+// "this specific write lost a race" from "this write failed for some other
+// reason" -- ResolveAuditFoldKey, foldkey.go -- can ask the narrow question
+// without also matching a foreign key or check-constraint failure as if it
+// were the same case.
+func isUniqueViolation(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "unique constraint") ||
+		strings.Contains(msg, "duplicate key") ||
+		strings.Contains(msg, "unique_violation")
 }
 
 // placeholders builds "?, ?, ?" for an IN clause of n values. sqlx.In would do

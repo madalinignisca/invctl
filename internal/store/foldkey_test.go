@@ -13,6 +13,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -115,7 +116,15 @@ func testFoldKeyStableAcrossRestarts(t *testing.T, driver, dsn string) {
 
 	// The whole point, stated as the consequence it actually protects: a
 	// digest for the same value is identical across restarts.
-	if foldDigest(key1, "a distinctive value") != foldDigest(key2, "a distinctive value") {
+	digest1, err := foldDigest(key1, "a distinctive value")
+	if err != nil {
+		t.Fatalf("folding with key1: %v", err)
+	}
+	digest2, err := foldDigest(key2, "a distinctive value")
+	if err != nil {
+		t.Fatalf("folding with key2: %v", err)
+	}
+	if digest1 != digest2 {
 		t.Fatal("the digest for the same value differs across restarts, " +
 			"even though the resolved key compared equal")
 	}
@@ -172,5 +181,46 @@ func TestAuditFoldKeyGenerationRacesResolveToTheSameKey(t *testing.T) {
 				t.Fatal("two resolutions against the same row-holding table returned different keys")
 			}
 		})
+	}
+}
+
+// TestAuditFoldKeyInsertFailureThatIsNotARaceIsReported proves the failed
+// INSERT is only ever read as "lost the race" when the failure is actually a
+// uniqueness conflict on the fixed id='default' row. A different failure --
+// modelled here by breaking the writer pool after the first (empty) read --
+// must be reported, not swallowed as if some other process had already
+// written the key.
+//
+// SQLite only: this needs the writer and reader pools to be genuinely
+// separate connections, which only holds for a file-backed database (see
+// db.go's isMemoryDSN branch and openTestSQLite's comment on using a file for
+// exactly this reason). PostgreSQL's Reader and Writer point at the same pool
+// in this package, so closing one closes both and the read half this test
+// depends on succeeding would fail too, testing nothing.
+func TestAuditFoldKeyInsertFailureThatIsNotARaceIsReported(t *testing.T) {
+	dsn := "file:" + filepath.Join(t.TempDir(), "foldkey-insert-fail.db")
+	db, err := Open(DriverSQLite, dsn)
+	if err != nil {
+		t.Fatalf("opening: %v", err)
+	}
+	defer db.Close()
+	if err := Migrate(context.Background(), db); err != nil {
+		t.Fatalf("migrating: %v", err)
+	}
+
+	// Break the writer pool only. The reader pool stays open, so the first
+	// read inside ResolveAuditFoldKey still finds no row -- the state this
+	// test needs -- and the INSERT that follows fails for a reason that has
+	// nothing to do with a concurrent writer.
+	if err := db.Writer.Close(); err != nil {
+		t.Fatalf("closing the writer pool: %v", err)
+	}
+
+	_, _, err = New(db).ResolveAuditFoldKey(context.Background())
+	if err == nil {
+		t.Fatal("resolving against a broken writer pool must fail, not silently succeed")
+	}
+	if strings.Contains(strings.ToLower(err.Error()), "unique") {
+		t.Fatalf("a broken writer pool was reported as a uniqueness conflict: %v", err)
 	}
 }

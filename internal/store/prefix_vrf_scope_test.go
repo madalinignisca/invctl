@@ -10,7 +10,6 @@ package store
 
 import (
 	"context"
-	"strings"
 	"testing"
 )
 
@@ -99,15 +98,4 @@ func mkPrefix(s *SQLStore, ctx context.Context, id, cidr string, vrfID *string) 
 		VALUES (?, ?, 4, ?, ?, ?)`)
 	_, err := s.db.Writer.ExecContext(ctx, q, id, cidr, start, end, vrfID)
 	return err
-}
-
-// isUniqueViolation keeps the assertion engine-agnostic: SQLite says "UNIQUE
-// constraint failed", PostgreSQL says "duplicate key value violates unique
-// constraint". Matching on either would tie the test to one engine.
-func isUniqueViolation(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "unique") || strings.Contains(msg, "duplicate key")
 }

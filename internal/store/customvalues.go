@@ -183,11 +183,14 @@ func entityCustomValues(ctx context.Context, t *tx, entityID string) ([]domain.C
 // trail that reports one teaches its readers to ignore it.
 //
 // A key of zero length is a wiring bug -- SetCustomValues is called against a
-// store nobody attached SQLStore.WithFoldKey to -- and foldDigest panics
-// rather than compute a digest under an empty key, which would be silently
-// worthless as a keyed digest and indistinguishable from a correctly folded
-// one to anyone reading it later.
-func foldCustomValues(key []byte, defs map[string]domain.CustomField, values []domain.CustomFieldValue) string {
+// store nobody attached SQLStore.WithFoldKey to -- and foldDigest refuses to
+// compute a digest under an empty key, which would be silently worthless as a
+// keyed digest and indistinguishable from a correctly folded one to anyone
+// reading it later. It returns an error rather than panicking: CLAUDE.md's
+// "never panic outside main" admits no exception here, and failing the write
+// closed -- refusing to fold rather than folding wrong -- is the same
+// fail-closed posture, expressed as an error instead of a crash.
+func foldCustomValues(key []byte, defs map[string]domain.CustomField, values []domain.CustomFieldValue) (string, error) {
 	pairs := make([]string, 0, len(values))
 	for _, v := range values {
 		def, ok := defs[v.FieldID]
@@ -197,29 +200,45 @@ func foldCustomValues(key []byte, defs map[string]domain.CustomField, values []d
 			// entity does not have.
 			continue
 		}
-		pairs = append(pairs, def.Code+"="+foldDigest(key, v.ValueText))
+		digest, err := foldDigest(key, v.ValueText)
+		if err != nil {
+			return "", err
+		}
+		pairs = append(pairs, def.Code+"="+digest)
 	}
 	sort.Strings(pairs)
-	return strings.Join(pairs, ",")
+	return strings.Join(pairs, ","), nil
 }
 
 // foldDigest renders a keyed digest of one custom value: HMAC-SHA256, first
-// 12 hex characters, prefixed with "#". 12 hex characters is 48 bits, plenty
-// to prove two folds differ or agree without carrying enough of the digest to
-// be useful for anything else.
+// 12 hex characters, prefixed with "#".
+//
+// 12 hex characters is 48 bits. The birthday bound across the WHOLE
+// change_log table is the wrong model: two folded digests only need to differ
+// from each other when they belong to the SAME field on the SAME entity,
+// because that is the only pair diffJSON ever compares -- a collision between
+// unrelated rows is invisible, there is no diff computed across entities. So
+// the realistic exposure is one field's value history on one entity over a
+// deployment's life: even an estate saving a value a day for 50 years is
+// under 20,000 digests for that one (field, entity) pair, and the birthday
+// bound for a 48-bit space at that count is (20000^2)/2 / 2^48 =~ 7e-7 --
+// roughly one in a million, for a scenario already far more saves than any
+// custom field this system describes will see. 12 hex characters is
+// comfortable for what this digest actually has to distinguish.
 //
 // The key must be stable across restarts -- see ResolveAuditFoldKey in
 // foldkey.go -- or every entity holding a custom value shows a spurious diff
 // on its next save after every restart, forever, which would be worse than
 // the plaintext exposure this replaces.
-func foldDigest(key []byte, value string) string {
+func foldDigest(key []byte, value string) (string, error) {
 	if len(key) == 0 {
-		panic("foldDigest: no audit fold key configured; call SQLStore.WithFoldKey before " +
+		return "", errors.New("folding a custom value into the audit trail: " +
+			"no audit fold key configured; call SQLStore.WithFoldKey before " +
 			"writing custom values, or every digest would be computed under an empty key")
 	}
 	mac := hmac.New(sha256.New, key)
 	mac.Write([]byte(value))
-	return "#" + hex.EncodeToString(mac.Sum(nil))[:12]
+	return "#" + hex.EncodeToString(mac.Sum(nil))[:12], nil
 }
 
 // customFieldsAudit renders an entity's custom values as the string that folds
@@ -234,7 +253,7 @@ func customFieldsAudit(ctx context.Context, t *tx, entityType, entityID string) 
 	if err != nil {
 		return "", err
 	}
-	return foldCustomValues(t.foldKey, defs, values), nil
+	return foldCustomValues(t.foldKey, defs, values)
 }
 
 // setCustomValues applies one entity's submitted custom values INSIDE t.

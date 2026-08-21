@@ -262,11 +262,6 @@ and restore each write their own `change_log` row against `custom_field`.
 
 ### GDPR mitigation: a keyed digest, not the value
 
-**This section used to say a custom value's text entered `change_log`
-permanently with no erasure path, resting `docs/AUDIT.md`'s "carries no
-personal data" claim on no administrator ever defining a field like "Owner
-email". That has been mitigated, and this is the record of how.**
-
 `foldCustomValues` (`internal/store/customvalues.go`) folds a **keyed
 digest** of each value instead of the value itself: HMAC-SHA256 over the
 value, the first 12 hex characters, prefixed with `#` so a reader can tell

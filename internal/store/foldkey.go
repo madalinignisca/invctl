@@ -63,6 +63,17 @@ const insertAuditFoldKey = `INSERT INTO audit_fold_key (id, key_b64, created_at)
 // commits first wins, and the loser adopts the winner's key rather than
 // erroring -- both processes are trying to reach the same outcome, "a key
 // exists", and only one of them needs to be the one that created it.
+//
+// ONLY A UNIQUENESS CONFLICT ON THE FIXED id='default' ROW IS TREATED AS A
+// LOST RACE. A disk error or a permissions problem raised by the same INSERT
+// must not be swallowed the same way -- re-reading after THAT kind of failure
+// would either find nothing (and report the original failure honestly, which
+// this still does) or, worse on a partially-broken connection, appear to
+// succeed and mask a real fault. isUniqueViolation (store.go) is the same
+// text match translateWriteErr already uses for every other constraint kind
+// in this package, so both engines' different wording for a conflict --
+// SQLite's driver text, PostgreSQL's SQLSTATE 23505 -- are recognised the
+// same way here as everywhere else this package inspects a write error.
 func (s *SQLStore) ResolveAuditFoldKey(ctx context.Context) ([]byte, string, error) {
 	if existing, ok, err := s.readFoldKey(ctx); err != nil {
 		return nil, "", err
@@ -76,6 +87,9 @@ func (s *SQLStore) ResolveAuditFoldKey(ctx context.Context) ([]byte, string, err
 	}
 
 	if err := s.insertFoldKey(ctx, generated); err != nil {
+		if !isUniqueViolation(err) {
+			return nil, "", fmt.Errorf("persisting a generated audit fold key: %w", err)
+		}
 		// Lost the race: some other process's INSERT landed first. Read back
 		// what it wrote rather than treating this as a failure -- the goal
 		// was "a key exists", and one now does.
