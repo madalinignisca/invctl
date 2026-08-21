@@ -114,6 +114,8 @@ INV_AUTH_LOCAL=true
 INV_AUTH_LDAP=false
 INV_SEED=false                    # load the demo estate when the database is empty
 INV_SECURE_COOKIES=false          # true behind TLS
+INV_API_TOKENS=ansible:<token>    # id:token pairs; unset means /api/v1 is not mounted at all
+INV_API_SCOPES=ansible:prod|dev   # required once INV_API_TOKENS is set; no wildcard
 ```
 
 LDAP, when enabled:

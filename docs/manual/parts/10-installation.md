@@ -86,9 +86,19 @@ whatever manages your services is the only place settings live.
 | `INV_ADMIN_USERNAME` | `admin` | the seeded first account |
 | `INV_ADMIN_PASSWORD` | — | its password; a random one is generated and logged once if unset |
 | `INV_AUDIT_FOLD_KEY` | — | generated and persisted in the database if unset. See below — setting it is the GDPR-correct deployment, not just hardening |
+| `INV_API_TOKENS` | — | `id:token` pairs, comma separated. Unset means the read-only inventory API (`/api/v1`, `docs/API.md`) is not mounted at all — every route answers 404 |
+| `INV_API_SCOPES` | — | required once `INV_API_TOKENS` is set: maps each id to the pipe-separated environment codes that credential may read. No wildcard — a credential naming no environment sees nothing |
 
 At least one of `INV_AUTH_LOCAL` and `INV_AUTH_LDAP` must be on. The server
 refuses to start with both off, rather than starting and accepting nobody.
+
+`INV_API_TOKENS` and `INV_API_SCOPES` are for machine readers only — Ansible's
+dynamic inventory, or a metrics system resolving a label back to a name. They
+are a separate credential space from `INV_AGENT_TOKENS`, the monitoring
+webhook's own tokens: an inventory reader can never write an observation, and
+an agent credential can never read `/api/v1`. See `docs/API.md` for the full
+contract, including why a misconfigured id refuses to start the process
+rather than silently serving a narrower scope.
 
 ### `INV_SESSION_KEY` is the one people miss
 

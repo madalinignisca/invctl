@@ -304,6 +304,61 @@ not a healthy estate; it is an unmodelled one, and the page says so.
 
 ---
 
+## 8. The read-only API (3 min)
+
+The rest of this walkthrough is a person looking at pages. `/api/v1` is the
+other consumer: Ansible's dynamic inventory, and a metrics system resolving a
+label back to a name and a placement. `docs/API.md` is the full reference;
+this is enough to show it live.
+
+**Not staged by default.** `INV_API_TOKENS` has no default anywhere in
+`config` — same reasoning as `INV_AGENT_TOKENS` — so the public demo, as
+handed over, does not mount `/api/v1` at all. Set it before this section:
+
+```bash
+export INV_API_TOKENS=ansible:demo-api-token-000000000000000000
+export INV_API_SCOPES=ansible:prod|dev|staging|dr|transit
+```
+
+Restart with those set (`make demo` picks up whatever is exported, or add
+them to the systemd unit's `Environment=` lines for the public instance) and
+the routes answer. Every misconfiguration here is a startup failure, not a
+silent gap — an id in one variable with no matching entry in the other
+refuses to start rather than serving half a scope.
+
+**One asset, to show scope is real:**
+
+```bash
+curl -s -H "Authorization: Bearer demo-api-token-000000000000000000" \
+  https://invctl.madalin.me/api/v1/assets?kind=hypervisor | jq
+```
+
+Three hypervisors come back — `hv-01`, `hv-02`, `hv-03` — each with its
+`site`, `rack` and the services placed on it. Nothing about observed health,
+nothing about cost, nothing about a team's contact details: this is declared
+state only, and `docs/API.md` explains why on purpose.
+
+**Then the composed view Ansible actually consumes:**
+
+```bash
+curl -s -H "Authorization: Bearer demo-api-token-000000000000000000" \
+  https://invctl.madalin.me/api/v1/ansible | jq '.env_prod.hosts, .svc_vault'
+```
+
+`env_prod` lists every asset in the production environment; `svc_vault`
+lists `vm-vault-1`, `vm-vault-2`, `vm-vault-3` — the same placement the
+Neighbourhood diagram in section 3 drew as a picture. Point
+`ansible-playbook -i` at the same URL and it needs no adapter: `_meta.hostvars`
+plus one `{"hosts": [...]}` object per group is the native shape.
+
+**Worth saying if it comes up:** custom fields (section 5's caveat, section
+on WP-A4) never reach this surface, on any route, by design —
+`TestCustomFieldsNeverReachTheAPI` pins it. An estate's own attributes are
+administrator-defined and administrator-retirable; an automation pipeline
+must not come to depend on a field somebody else can delete tomorrow.
+
+---
+
 ## If somebody asks
 
 **"Is any of this faked for the demo?"** No. The inventory is a seeded fixture,
