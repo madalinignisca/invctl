@@ -37,16 +37,20 @@ type customFieldSpec struct {
 	options []domain.CustomFieldOption
 }
 
-// selectOptions builds a select field's option list from value/label pairs,
-// positioned in the order given.
-func selectOptions(pairs ...string) []domain.CustomFieldOption {
-	if len(pairs)%2 != 0 {
-		panic("selectOptions: arguments must be value, label pairs")
-	}
-	out := make([]domain.CustomFieldOption, 0, len(pairs)/2)
-	for i := 0; i < len(pairs); i += 2 {
-		//nolint:gosec // G602: the even-length check above panics first, so i+1 is always in range
-		out = append(out, domain.CustomFieldOption{Value: pairs[i], Label: pairs[i+1], Position: i / 2})
+// optionSpec is one value/label pair for selectOptions. A STRUCT RATHER THAN
+// A FLAT PAIRS LIST, DELIBERATELY: CLAUDE.md forbids panic outside main, and
+// this repo has no exception for "an odd-length argument list is a caller
+// bug". A flat list can only fail an even-length check at runtime; a slice of
+// this two-field struct makes an unpaired value unrepresentable at compile
+// time instead, so there is no error to invent and nothing to check.
+type optionSpec struct{ value, label string }
+
+// selectOptions builds a select field's option list, positioned in the order
+// given.
+func selectOptions(specs ...optionSpec) []domain.CustomFieldOption {
+	out := make([]domain.CustomFieldOption, 0, len(specs))
+	for i, s := range specs {
+		out = append(out, domain.CustomFieldOption{Value: s.value, Label: s.label, Position: i})
 	}
 	return out
 }
@@ -70,7 +74,27 @@ func selectOptions(pairs ...string) []domain.CustomFieldOption {
 // Idempotent, the same way loadDemoData is: an estate that already carries a
 // live asset custom field is left alone rather than colliding on the unique
 // (entity_type, code) index, so a repeated dev-mode start does not fail.
+//
+// THAT GUARD IS COARSE, AND KNOWINGLY SO: IT CANNOT TELL "fully staged" FROM
+// "partially staged". A process that dies partway through -- after the asset
+// fields exist but before the service fields or the values are written --
+// leaves the demo permanently half-seeded, because the next start sees a
+// live asset field and skips the whole function, silently, with a one-time
+// slog.Warn at the call site as the only evidence anything went wrong. This
+// is the same risk class already accepted for StageDemoOverride below, for
+// the same reason: it is presentation data for a demo, not declared state an
+// operator depends on, and a human re-running `make seed-topup`-adjacent
+// tooling or dropping the database is an acceptable answer. Not re-engineered
+// here on purpose.
 func StageCustomFields(ctx context.Context, s *store.SQLStore, adminUsername string) error {
+	// includeRetired MUST stay true. This is read-only reconnaissance, not a
+	// write, but the count still has to include a field an OPERATOR retired
+	// deliberately -- if it counted live rows only, a demo where every asset
+	// field this phase defines had since been retired would read as "never
+	// staged" and stage a fresh, colliding set on the next restart, which is
+	// invctl overwriting a person's own decision. See CLAUDE.md: "Observed
+	// state never becomes intent" and its sibling here -- a seed must never
+	// undo one either.
 	existing, err := s.ListCustomFields(ctx, domain.CustomFieldEntityAsset, true)
 	if err != nil {
 		return fmt.Errorf("checking for existing custom fields: %w", err)
@@ -97,7 +121,7 @@ func StageCustomFields(ctx context.Context, s *store.SQLStore, adminUsername str
 			"whether this asset is leased rather than owned outright", nil},
 		{"criticality_tier", "Criticality Tier", domain.CustomFieldSelect,
 			"the estate's own coarse tiering, distinct from the built-in project criticality",
-			selectOptions("low", "Low", "medium", "Medium", "high", "High")},
+			selectOptions(optionSpec{"low", "Low"}, optionSpec{"medium", "Medium"}, optionSpec{"high", "High"})},
 	})
 	if err != nil {
 		return err
@@ -114,7 +138,7 @@ func StageCustomFields(ctx context.Context, s *store.SQLStore, adminUsername str
 			"whether an external customer notices this service being down", nil},
 		{"support_tier", "Support Tier", domain.CustomFieldSelect,
 			"the estate's own support tiering, sold separately from the built-in criticality",
-			selectOptions("bronze", "Bronze", "silver", "Silver", "gold", "Gold")},
+			selectOptions(optionSpec{"bronze", "Bronze"}, optionSpec{"silver", "Silver"}, optionSpec{"gold", "Gold"})},
 	})
 	if err != nil {
 		return err

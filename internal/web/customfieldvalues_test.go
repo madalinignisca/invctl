@@ -41,6 +41,45 @@ func TestCustomFieldsRenderInTheirOwnSection(t *testing.T) {
 	}
 }
 
+// TestANumberCustomFieldRendersOnTheDetailPage closes Ruling AU's first gap:
+// every other web-layer test in this file exercises the text kind only, and
+// docs/custom-fields-design.md §3's numeric canonicalisation (the trimmed
+// original text, not a reparsed float) is a real path CanonicalCustomValue
+// takes that this package had never rendered through HTTP and a template.
+func TestANumberCustomFieldRendersOnTheDetailPage(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+	id := mustCreateFieldViaHTTP(t, h, "asset", "power_rating", "Power Rating (W)", "number")
+	assetID := h.refs.Assets["hv-01"]
+	mustSetValueViaHTTP(t, h, assetID, id, "42.50")
+
+	page := body(t, h.get("/assets/"+assetID, false))
+	if !strings.Contains(page, customFieldValueMarkup("42.50")) {
+		t.Fatal("a number custom field's stored value must render verbatim on the detail page")
+	}
+}
+
+// TestACustomFieldRendersOnAServiceDetailPage closes Ruling AU's second gap:
+// every other web-layer test in this file, including the CSRF/version and
+// retirement paths, exercises an asset. Nothing had exercised the identical
+// ServiceCustomFields handler through HTTP at all.
+func TestACustomFieldRendersOnAServiceDetailPage(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+	id := mustCreateFieldViaHTTP(t, h, "service", "support_channel", "Support Channel", "text")
+	serviceID := h.refs.Services["vault"]
+	mustSetServiceValueViaHTTP(t, h, serviceID, id, "#vault-oncall")
+
+	page := body(t, h.get("/services/"+serviceID, false))
+	heading := strings.Index(page, "Defined by your organisation")
+	if heading < 0 {
+		t.Fatal("the custom section must render on a service detail page too")
+	}
+	if !strings.Contains(page, customFieldValueMarkup("#vault-oncall")) {
+		t.Fatal("a service's custom value must render verbatim on the detail page")
+	}
+}
+
 func TestTheSectionIsAbsentWhenNoFieldIsDefined(t *testing.T) {
 	// An estate that never uses the feature never sees it.
 	h := newHarness(t)
@@ -348,5 +387,22 @@ func mustSetValueViaHTTP(t *testing.T, h *harness, assetID, fieldID, value strin
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusSeeOther {
 		t.Fatalf("setting custom value: got %d", resp.StatusCode)
+	}
+}
+
+// mustSetServiceValueViaHTTP is the service half of mustSetValueViaHTTP,
+// posting to ServiceCustomFields's own route (POST /services/{id}/custom-
+// fields) rather than reusing the asset helper against the wrong path.
+func mustSetServiceValueViaHTTP(t *testing.T, h *harness, serviceID, fieldID, value string) {
+	t.Helper()
+	page := body(t, h.get("/services/"+serviceID, false))
+	resp := h.post("/services/"+serviceID+"/custom-fields", url.Values{
+		"csrf_token":    {h.csrfToken("/services/" + serviceID)},
+		"row_version":   {versionInForm(t, page)},
+		"cf_" + fieldID: {value},
+	}, false)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("setting service custom value: got %d", resp.StatusCode)
 	}
 }

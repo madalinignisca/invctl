@@ -501,17 +501,48 @@ func TestAnEmptyCollectionMarshalsAsAnEmptyArrayOverHTTP(t *testing.T) {
 // exact, hand-written list of json tags. A custom field must never appear in
 // /api/v1 -- an integration must not depend on a field one of this estate's
 // administrators can retire at will.
+//
+// SELF-VERIFYING, PER RULING AT. /api/v1/assets?limit=1 is
+// `ORDER BY a.id LIMIT ?` (internal/store/api.go), so it always returns the
+// lexicographically smallest id -- today that happens to be dc-oslo, the
+// first asset seed.Load creates, and NOT any asset a hardcoded name like
+// "hv-01" would point the value at. Setting the custom value on a
+// hardcoded id would make the "a value reached /api/v1" half of this test
+// pass regardless of whether the API actually leaked one, silently, the
+// moment seeding order ever changed -- exactly the failure mode this test
+// exists to catch, one level down. So the test asks the API which asset it
+// actually returns FIRST, and only then attaches the value to that one.
 func TestCustomFieldsNeverReachTheAPI(t *testing.T) {
 	h := newHarnessWithReaders(t, nil, testReaderCredentials())
+
+	probe := h.apiGet(t, "/api/v1/assets?limit=1", readerAllToken)
+	if probe.StatusCode != http.StatusOK {
+		t.Fatalf("got %d, want 200 discovering the probe subject: %s", probe.StatusCode, probe.Body)
+	}
+	var page struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(probe.Body), &page); err != nil {
+		t.Fatalf("decoding the probe response: %v", err)
+	}
+	if len(page.Data) == 0 || page.Data[0].ID == "" {
+		// A test that found no subject to target would otherwise fall
+		// through with nothing left to check and still report PASS.
+		t.Fatal("the probe returned no asset id, so this test has no subject to attach a value to")
+	}
+	subjectID := page.Data[0].ID
+
 	h.login("admin", "admin-password")
 	id := mustCreateFieldViaHTTP(t, h, "asset", "cost_centre", "Cost Centre", "text")
-	mustSetValueViaHTTP(t, h, h.refs.Assets["hv-01"], id, "IT-42")
+	mustSetValueViaHTTP(t, h, subjectID, id, "IT-42")
 
-	// Signed out before the API call: TestTheAPIRefusesABrowserSession pins a
-	// separate, deliberate invariant -- a session cookie refuses the API
-	// outright even carrying a valid bearer token, on top of and before this
-	// guard ever gets a chance to matter. Carrying the admin's session into
-	// apiGet would test that refusal by accident, not this one.
+	// Signed out before the second API call: TestTheAPIRefusesABrowserSession
+	// pins a separate, deliberate invariant -- a session cookie refuses the
+	// API outright even carrying a valid bearer token, on top of and before
+	// this guard ever gets a chance to matter. Carrying the admin's session
+	// into apiGet would test that refusal by accident, not this one.
 	token := h.csrfToken("/")
 	logout := h.post("/logout", url.Values{"csrf_token": {token}}, false)
 	logout.Body.Close()
@@ -521,8 +552,8 @@ func TestCustomFieldsNeverReachTheAPI(t *testing.T) {
 		t.Fatalf("a custom field reached /api/v1: %s", got.Body)
 	}
 	// The SAME golden the DTO shape test pins, deliberately: after defining a
-	// field and giving it a value, the published shape must come back
-	// byte-unchanged. A second golden here would let this test pass by
-	// asserting against a copy nobody keeps honest.
+	// field and giving the query's own first subject a value, the published
+	// shape must come back byte-unchanged. A second golden here would let
+	// this test pass by asserting against a copy nobody keeps honest.
 	assertGoldenJSON(t, "testdata/api/asset.json", got.Body)
 }
