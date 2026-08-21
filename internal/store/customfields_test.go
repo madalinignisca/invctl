@@ -630,6 +630,49 @@ func TestReorderingCustomFieldOptionsIsNotAChange(t *testing.T) {
 	}
 }
 
+// TestRenamingAnOptionsLabelIsAuditedEvenWithNoOtherChange is FINAL REVIEW B2:
+// SetCustomFieldOptions built the audited fold from option VALUES only, so an
+// option whose value and position were unchanged but whose LABEL changed
+// folded identically before and after and diffJSON saw no change at all --
+// custom_field_option.label is declared (docs/AUDIT.md line 63), and this is
+// the fourth recurrence of the exact failure CLAUDE.md already names three
+// times: a set replacement that leaves the parent struct untouched producing
+// no audit entry. Deliberately the mirror image of
+// TestReorderingCustomFieldOptionsIsNotAChange: that test proves the same set
+// in a different order is not a change; this one proves the same set in the
+// same order, with one member's label edited, IS one.
+func TestRenamingAnOptionsLabelIsAuditedEvenWithNoOtherChange(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newCustomFieldFixture(t, e)
+			id := mustField(t, f, "asset", "tier", domain.CustomFieldSelect)
+			if err := f.s.SetCustomFieldOptions(f.ctx, f.actor, id, fieldVersion(t, f, id), []domain.CustomFieldOption{
+				{Value: "gold", Label: "Gold"},
+				{Value: "silver", Label: "Silver"},
+			}); err != nil {
+				t.Fatalf("setting initial options: %v", err)
+			}
+			before := changeCount(t, f, "custom_field", id)
+
+			// Same value, same position -- only the label moves.
+			if err := f.s.SetCustomFieldOptions(f.ctx, f.actor, id, fieldVersion(t, f, id), []domain.CustomFieldOption{
+				{Value: "gold", Label: "Gold Tier"},
+				{Value: "silver", Label: "Silver"},
+			}); err != nil {
+				t.Fatalf("renaming the gold option's label: %v", err)
+			}
+
+			if got := changeCount(t, f, "custom_field", id); got != before+1 {
+				t.Fatalf("a label-only rename wrote %d change_log rows, want exactly 1", got-before)
+			}
+			diff := lastChangeDiff(t, f, "custom_field", id)
+			if !strings.Contains(diff, "gold=Gold") || !strings.Contains(diff, "gold=Gold Tier") {
+				t.Fatalf("the diff must show the old and the new label, got: %s", diff)
+			}
+		})
+	}
+}
+
 // TestRetiringAnOptionKeepsItSelectableOnExistingValues asserts the migration
 // comment's rule directly: an option is never deleted, and one dropped from a
 // SetCustomFieldOptions call is retired, not removed, so it keeps resolving.
@@ -708,6 +751,53 @@ func TestSetCustomFieldOptionsRefusesAnEmptyValueOrLabel(t *testing.T) {
 				{Value: "gold", Label: "  "},
 			}); err == nil {
 				t.Fatal("an empty option label must be refused")
+			}
+		})
+	}
+}
+
+// TestSetCustomFieldOptionsBoundsValueAndLabel is FINAL REVIEW AY: an
+// option's value and label are text an administrator typed, and
+// CanonicalCustomValue's select branch only ever checks MEMBERSHIP, never
+// bounds -- so an oversized or control-character-laden option value sailed
+// straight through the moment a value selected it. Reproduces exactly what
+// the review accepted: a 5,015-byte value containing an embedded NUL, which
+// SQLite stores and PostgreSQL rejects with "invalid byte sequence for
+// encoding UTF8" -- a portability divergence this bound closes at the Go
+// layer, before either engine sees the byte.
+func TestSetCustomFieldOptionsBoundsValueAndLabel(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newCustomFieldFixture(t, e)
+			id := mustField(t, f, "asset", "tier", domain.CustomFieldSelect)
+
+			oversized := strings.Repeat("a", domain.MaxCustomTextLength+15)
+			if err := f.s.SetCustomFieldOptions(f.ctx, f.actor, id, fieldVersion(t, f, id), []domain.CustomFieldOption{
+				{Value: oversized, Label: "Gold"},
+			}); err == nil {
+				t.Fatal("an option value over the length bound must be refused")
+			}
+
+			withNUL := "gold\x00" + strings.Repeat("a", 5000)
+			if err := f.s.SetCustomFieldOptions(f.ctx, f.actor, id, fieldVersion(t, f, id), []domain.CustomFieldOption{
+				{Value: withNUL, Label: "Gold"},
+			}); err == nil {
+				t.Fatal("an option value with an embedded NUL byte must be refused")
+			}
+
+			if err := f.s.SetCustomFieldOptions(f.ctx, f.actor, id, fieldVersion(t, f, id), []domain.CustomFieldOption{
+				{Value: "gold", Label: "Gold\x00"},
+			}); err == nil {
+				t.Fatal("an option label with an embedded NUL byte must be refused")
+			}
+
+			// Neither refusal left a partial write behind.
+			row, err := f.s.GetCustomField(f.ctx, id)
+			if err != nil {
+				t.Fatalf("reading: %v", err)
+			}
+			if len(row.Options) != 0 {
+				t.Fatalf("a refused options submission wrote %d option row(s), want 0", len(row.Options))
 			}
 		})
 	}

@@ -159,19 +159,7 @@ func (f *CustomField) IsRetired() bool {
 func CanonicalCustomValue(kind, raw string, options []string) (string, error) {
 	switch kind {
 	case CustomFieldText:
-		trimmed := strings.TrimSpace(raw)
-		if trimmed == "" {
-			return "", NewValidation("value", "is required")
-		}
-		if len(trimmed) > MaxCustomTextLength {
-			return "", NewValidation("value", "must be "+strconv.Itoa(MaxCustomTextLength)+" characters or fewer")
-		}
-		for _, r := range trimmed {
-			if unicode.IsControl(r) {
-				return "", NewValidation("value", "must not contain control characters")
-			}
-		}
-		return trimmed, nil
+		return customTextBounds("value", raw)
 	case CustomFieldNumber:
 		trimmed := strings.TrimSpace(raw)
 		// isDecimalNumber decides, not ParseFloat: ParseFloat accepts the
@@ -220,31 +208,88 @@ func CanonicalCustomValue(kind, raw string, options []string) (string, error) {
 	}
 }
 
-// isDecimalNumber reports whether s is a decimal number and nothing else: an
-// optional leading sign, digits, at most one '.', and at least one digit.
-// Deliberately narrower than strconv.ParseFloat's grammar, which also
-// accepts underscore-grouped literals, "Infinity", "inf", "NaN" and hex
-// float literals -- none of which are "a decimal number" in the sense a
-// custom field's number kind means.
-func isDecimalNumber(s string) bool {
-	i := 0
-	if i < len(s) && (s[i] == '+' || s[i] == '-') {
-		i++
+// customTextBounds enforces the bounds every piece of custom-field-adjacent
+// free text obeys -- non-empty after trim, at most MaxCustomTextLength, no
+// control characters -- shared by CanonicalCustomValue's `text` kind and by
+// ValidateCustomFieldOptionText below.
+//
+// FINAL REVIEW AY: a `select` field's own option value and label used to
+// obey neither bound. CanonicalCustomValue's select branch only ever checked
+// membership -- "is trimmed equal to one of the live option values" -- so an
+// unbounded, control-character-laden VALUE, once it existed as an option,
+// sailed through that check the moment a value selected it. The bound
+// belongs on the option itself, at the point an administrator types it, not
+// on every value that later selects it.
+func customTextBounds(field, raw string) (string, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return "", NewValidation(field, "is required")
 	}
-	if i >= len(s) {
-		return false
+	if len(trimmed) > MaxCustomTextLength {
+		return "", NewValidation(field, "must be "+strconv.Itoa(MaxCustomTextLength)+" characters or fewer")
 	}
-	sawDigit := false
-	sawDot := false
-	for ; i < len(s); i++ {
-		switch c := s[i]; {
-		case c >= '0' && c <= '9':
-			sawDigit = true
-		case c == '.' && !sawDot:
-			sawDot = true
-		default:
-			return false
+	for _, r := range trimmed {
+		if unicode.IsControl(r) {
+			return "", NewValidation(field, "must not contain control characters")
 		}
 	}
-	return sawDigit
+	return trimmed, nil
+}
+
+// ValidateCustomFieldOptionText bounds a select field's own option VALUE or
+// LABEL to the same rules as a `text` custom value: MaxCustomTextLength and
+// no control characters (FINAL REVIEW AY). field names which one this call
+// is checking, "value" or "label", for the ValidationError it returns.
+func ValidateCustomFieldOptionText(field, raw string) (string, error) {
+	return customTextBounds(field, raw)
+}
+
+// isDecimalNumber reports whether s is a decimal number and nothing else,
+// under EXACTLY the grammar an HTML <input type="number"> widget can
+// represent (the WHATWG "valid floating-point number" rule this codebase's
+// number widget relies on, minus the exponent form nothing here emits): an
+// optional leading '-' (never '+'), one or more digits, and optionally a '.'
+// followed by one or more digits. Deliberately narrower than
+// strconv.ParseFloat's grammar, which also accepts underscore-grouped
+// literals, "Infinity", "inf", "NaN" and hex float literals -- none of which
+// are "a decimal number" in the sense a custom field's number kind means.
+//
+// FINAL REVIEW B1: this used to be looser than the widget that renders it --
+// it accepted "+5", ".5" and "5.", none of which is a valid floating-point
+// number under the browser's own value-sanitisation algorithm, so an
+// <input type="number" value="+5"> (or ".5", or "5.") renders EMPTY. The
+// store then held a value its own form could never draw back, and the next
+// unrelated save on that entity posted the blank the browser drew as an
+// explicit clear -- the same failure shape as a value naming a retired
+// select option, just for a different kind. The general rule this repo now
+// keeps is: for every kind, every value the store accepts must survive a
+// round trip through its own widget unchanged (TestEveryStoredCustomValue-
+// SurvivesARoundTripThroughItsWidget). For `number`, tightening the
+// validator to the widget's own grammar closes it more simply than
+// canonicalising a typed value into a different string the operator did not
+// type -- and every operator-typed value that WAS already valid keeps being
+// stored verbatim, per §3.
+func isDecimalNumber(s string) bool {
+	i := 0
+	if i < len(s) && s[i] == '-' {
+		i++
+	}
+	start := i
+	for i < len(s) && s[i] >= '0' && s[i] <= '9' {
+		i++
+	}
+	if i == start {
+		return false // at least one integer digit is required before '.'
+	}
+	if i < len(s) && s[i] == '.' {
+		i++
+		fracStart := i
+		for i < len(s) && s[i] >= '0' && s[i] <= '9' {
+			i++
+		}
+		if i == fracStart {
+			return false // '.' with no digit after it is not representable either
+		}
+	}
+	return i == len(s)
 }

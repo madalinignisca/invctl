@@ -153,9 +153,25 @@ type customExportColumn struct {
 // that the export is where an operator goes to see what they still hold.
 // Appending unconditionally removes both failure modes for a header's
 // dependence on OTHER fields: it never changes because something else was
-// created, retired or restored. It also outlives a rename -- Ruling M made
-// label editable forever, so a header built from label alone moves whenever
-// an administrator renames a field, and code is the thing that does not.
+// created, retired or restored.
+//
+// CORRECTED, FINAL REVIEW F1: this comment used to add "and code is the one
+// thing on a definition that does not move underneath an export somebody is
+// diffing" as a second justification. That is false -- UpdateCustomField
+// edits code freely (customfields_test.go asserts it), and nothing here
+// refuses a code change the way it refuses a kind change while values
+// exist. The rule above is still right for its OTHER reason: a header must
+// not depend on another field's creation, retirement or restoration, and
+// appending the code unconditionally achieves exactly that regardless of
+// whether code itself ever moves. It is simply not also true that code is
+// stable against an edit of the field it names. A code rename moves this
+// header the same as a label rename does, AND it moves something this
+// comment did not mention: foldCustomValues
+// (internal/store/customvalues.go) keys the audit fold on `def.Code`, so
+// renaming a field's code rewrites that fold for every entity already
+// holding a value against it -- the next unrelated value edit on any of
+// them logs a custom_fields diff for a value that did not itself change,
+// because the KEY naming it did.
 //
 // THE CLAIM IS EXACTLY THIS MUCH, AND RULING AQ EXISTS BECAUSE TWO EARLIER
 // DRAFTS OF THIS COMMENT CLAIMED MORE THAN IS TRUE:

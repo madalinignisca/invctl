@@ -390,9 +390,30 @@ func (a *App) CustomFieldOptions(w http.ResponseWriter, r *http.Request) {
 
 	expected := submittedVersion(r, existing.RowVersion)
 	if err := a.Store.SetCustomFieldOptions(r.Context(), actor(r), id, expected, opts); err != nil {
-		messages := map[string]string{"options": err.Error()}
-		if isStale(err) {
+		// FINAL REVIEW AY: err.Error() must never reach the browser verbatim
+		// -- CLAUDE.md, "never return a raw driver error to the HTTP layer".
+		// Only a domain-recognised refusal gets its own styled per-field
+		// message here: a stale token, a validation failure on an option's
+		// value or label (domain.ValidateCustomFieldOptionText, bounded and
+		// control-character-checked the same way a text custom value is),
+		// or another domain.ErrInvalid this handler already knows how to
+		// word (a duplicate option value). Anything else -- including
+		// whatever translateWriteErr's own catch-all wrapped a driver said
+		// -- goes through handleStoreError, which maps to a status and a
+		// message it authored, never one it received.
+		var messages map[string]string
+		switch {
+		case isStale(err):
 			messages = staleMessage("options")
+		default:
+			if ve, ok := domain.AsValidation(err); ok && len(ve.Fields) > 0 {
+				messages = map[string]string{"options": ve.Fields[0].Message}
+			} else if errors.Is(err, domain.ErrInvalid) {
+				messages = map[string]string{"options": trimSentinel(err, domain.ErrInvalid)}
+			} else {
+				a.handleStoreError(w, r, err)
+				return
+			}
 		}
 		// The Multi values, not Values -- an option list is a set of pairs,
 		// and editState.Value only ever holds one string per field. The row

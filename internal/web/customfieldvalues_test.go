@@ -80,6 +80,48 @@ func TestACustomFieldRendersOnAServiceDetailPage(t *testing.T) {
 	}
 }
 
+// TestTheValueEditorWarnsThatCustomValuesArePermanentAndMustNotHoldPII is
+// FINAL REVIEW AX(a): the creation form's warning (Ruling AD) is opened by
+// whoever DEFINES a field, never by whoever later TYPES a value into one on
+// an asset or service page -- often somebody who has never seen the
+// creation form at all. This is the warning at the point PII actually gets
+// typed.
+func TestTheValueEditorWarnsThatCustomValuesArePermanentAndMustNotHoldPII(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+	mustCreateFieldViaHTTP(t, h, "asset", "cost_centre", "Cost Centre", "text")
+
+	page := body(t, h.get("/assets/"+h.refs.Assets["hv-01"], false))
+	if !strings.Contains(page, "Recorded permanently") {
+		t.Error("the value editor does not warn that a custom value is recorded permanently")
+	}
+	if !strings.Contains(page, "personal data") {
+		t.Error("the value editor does not warn against typing personal data")
+	}
+}
+
+// TestTheShowPanelLinksToTheRegistryAndRendersTheDescription is FINAL REVIEW
+// ATTRIBUTION: the registry and the value editor both attribute properly,
+// but the read-only show panel -- the one an operator most often actually
+// lands on -- carried no link back to the registry and rendered none of a
+// field's own "why this field exists" description, leaving "who added this
+// and why" a question this panel could not itself answer.
+func TestTheShowPanelLinksToTheRegistryAndRendersTheDescription(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+	id := mustCreateFieldViaHTTP(t, h, "asset", "cost_centre", "Cost Centre", "text")
+	assetID := h.refs.Assets["hv-01"]
+	mustSetValueViaHTTP(t, h, assetID, id, "IT-42")
+
+	page := body(t, h.get("/assets/"+assetID, false))
+	if !strings.Contains(page, `href="/custom-fields"`) {
+		t.Error("the show panel does not link to the custom fields registry")
+	}
+	if !strings.Contains(page, "a fixture field for the web test suite") {
+		t.Error("the show panel does not render the field's own description")
+	}
+}
+
 func TestTheSectionIsAbsentWhenNoFieldIsDefined(t *testing.T) {
 	// An estate that never uses the feature never sees it.
 	h := newHarness(t)

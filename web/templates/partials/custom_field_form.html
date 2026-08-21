@@ -203,7 +203,15 @@
 {{define "custom_field_form"}}
 <div class="panel">
   <div class="panel-head"><h2>Define a custom field</h2></div>
-  <form class="panel-body" method="post" action="/custom-fields" hx-post="/custom-fields">
+  {{/* FINAL REVIEW F5: this carried hx-post with no hx-target/hx-swap, so a
+       422 fragment swapped into the form's own innerHTML, nesting a <form>
+       inside itself -- it only "worked" because the HTML parser drops the
+       inner tag. CLAUDE.md: "swap targets are declared in the template".
+       Every other form on this page is a plain POST with no hx-post at all
+       (custom_field_row's edit form, the options editor, retire/restore) --
+       dropped here to match rather than inventing a target this page has
+       no precedent for. */}}
+  <form class="panel-body" method="post" action="/custom-fields">
     <input type="hidden" name="csrf_token" value="{{.CSRF}}">
 
     <div class="callout callout-warn">

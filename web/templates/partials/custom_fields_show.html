@@ -29,14 +29,15 @@
     <h2>Defined by your organisation</h2>
     <span class="panel-note">
       Estate-specific fields nobody at invctl wrote — invctl only draws the
-      slot. If one of these misbehaves, the answer is on the registry, not a
-      call to the vendor.
+      slot. If one of these misbehaves, the answer is on the
+      <a href="/custom-fields">custom fields registry</a>, not a call to the
+      vendor.
     </span>
   </div>
   <div class="panel-body">
     <dl class="kv">
       {{range .Rows}}
-      <dt>{{.Field.Label}}</dt>
+      <dt>{{.Field.Label}}{{with .Field.Description}}<div class="field-hint">{{.}}</div>{{end}}</dt>
       <dd class="mono">{{if .Value}}{{.Value}}{{else}}<span style="color:var(--faint)">not recorded</span>{{end}}</dd>
       {{end}}
     </dl>

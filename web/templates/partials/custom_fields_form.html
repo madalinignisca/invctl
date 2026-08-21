@@ -40,11 +40,37 @@
 <div class="panel">
   <div class="panel-head">
     <h2>Edit custom fields</h2>
-    <span class="panel-note">Saved together, against this entity's own version.</span>
+    {{/* FINAL REVIEW ATTRIBUTION: the registry and the show panel both
+         attribute properly ("Defined by your organisation"); this editor
+         did not, and this is exactly the "my field isn't working" moment
+         the whole feature exists to defuse (docs/custom-fields-design.md,
+         opening paragraph) -- an operator correcting a value that a
+         validation message just refused, with nothing here saying who
+         defined the field or where to look. */}}
+    <span class="panel-note">
+      Saved together, against this entity's own version. Defined by this
+      estate's own administrators, not by invctl — see the
+      <a href="/custom-fields">custom fields registry</a> if one of these
+      looks wrong.
+    </span>
   </div>
   <form class="panel-body" method="post" action="{{.Action}}">
     <input type="hidden" name="csrf_token" value="{{.CSRF}}">
     <input type="hidden" name="row_version" value="{{.Edit.Value "row_version" (itoa .RowVersion)}}">
+    {{/* FINAL REVIEW AX(a): the creation form warns that a custom value is
+         recorded permanently and must not hold personal data
+         (custom_field_form.html) -- but that form is opened by whoever
+         DEFINES a field, never by whoever later TYPES a value into one on
+         an asset or service page. This is the warning at the point PII
+         actually gets typed. */}}
+    <div class="callout callout-warn">
+      <strong>Recorded permanently.</strong>
+      <p style="margin-top:6px">
+        A custom field's value is kept in the audit trail forever and cannot
+        be removed selectively later. Do not type personal data here — an
+        email address, a phone number, a person's name.
+      </p>
+    </div>
     {{with .Edit.Err "_form"}}<div class="field-error">{{.}}</div>{{end}}
     <div class="field-row">
       {{range .Rows}}
@@ -81,11 +107,19 @@
           <option value="false" {{if eq $current "false"}}selected{{end}}>no</option>
         </select>
         {{else if eq $row.Field.Kind "select"}}
+        {{/* A retired option can appear here exactly once: when it is the
+             value THIS entity currently holds (loadCustomFieldsPanel appends
+             it after the live options). It is marked as retired so the
+             operator sees what an unrelated save on this form will resubmit
+             -- design.md §3's "keeps displaying" made literally true, and
+             the fix for the Critical where a value on a retired option was
+             destroyed by the next unrelated save: with no matching <option>,
+             the browser fell back to its own blank "not set" choice. */}}
         {{$current := $.Edit.Value $name $row.Value}}
         <select id="cf-{{$row.Field.ID}}" name="{{$name}}">
           <option value="">— not set —</option>
           {{range $row.Options}}
-          <option value="{{.Value}}" {{if eq .Value $current}}selected{{end}}>{{.Label}}</option>
+          <option value="{{.Value}}" {{if eq .Value $current}}selected{{end}}>{{.Label}}{{if .RetiredAt}} (retired){{end}}</option>
           {{end}}
         </select>
         {{end}}

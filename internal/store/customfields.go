@@ -81,17 +81,34 @@ func auditedCustomField(f *domain.CustomField, optionValues []string) *customFie
 	return &customFieldAudit{CustomField: *f, Options: strings.Join(sorted, ",")}
 }
 
-// optionValues extracts the LIVE option values, for folding into the audited
-// shape. A retired option keeps displaying on existing values but is no
-// longer part of what the field currently offers.
+// optionValues extracts the LIVE options as "value=label" pairs, for folding
+// into the audited shape. A retired option keeps displaying on existing
+// values but is no longer part of what the field currently offers.
+//
+// FINAL REVIEW B2: the label is folded in alongside the value, not the value
+// alone. Before this fix an option whose value and position were unchanged
+// but whose LABEL changed folded identically before and after -- diffJSON
+// saw no change on CustomField itself (SetCustomFieldOptions never touches
+// it) and none in this fold either, so a rename wrote no change_log row at
+// all. custom_field_option.label is classified declared (docs/AUDIT.md line
+// 63): CLAUDE.md's "every mutation of declared state writes a change_log
+// row, no exceptions" admits none for a rename any more than for a value.
+// This is the fourth recurrence of the exact failure CLAUDE.md already names
+// three times -- a set replacement that leaves the parent struct untouched
+// producing no audit entry -- because the earlier three folds all fixed the
+// SET (which value is live) without also folding what changed ABOUT a
+// member that stays in the set. auditedCustomField still sorts and joins the
+// resulting "value=label" strings exactly as before, so
+// TestReorderingCustomFieldOptionsIsNotAChange keeps holding: the set is
+// still unordered, only what each member carries changed.
 func optionValues(opts []domain.CustomFieldOption) []string {
-	var values []string
+	var pairs []string
 	for _, o := range opts {
 		if o.RetiredAt == nil {
-			values = append(values, o.Value)
+			pairs = append(pairs, o.Value+"="+o.Label)
 		}
 	}
-	return values
+	return pairs
 }
 
 // GetCustomField loads one definition with its full option list, live and
@@ -389,18 +406,33 @@ func (s *SQLStore) SetCustomFieldOptions(ctx context.Context, actor domain.Actor
 	// A duplicate value would silently double-write the same row -- last one
 	// wins, and nothing above notices -- so both it and an empty value or
 	// label are refused up front, naming the offending value.
+	//
+	// FINAL REVIEW AY: value and label are bounded and control-character-
+	// checked here, the same rules a `text` custom value obeys
+	// (domain.ValidateCustomFieldOptionText) -- an option's value is text an
+	// administrator typed, and CanonicalCustomValue's select branch only
+	// ever checks MEMBERSHIP, never bounds, so an oversized or control-
+	// character-laden option value sailed straight through the moment a
+	// value selected it. opts[i] is rewritten in place with the trimmed,
+	// validated text, the same way the text kind stores the trimmed original
+	// rather than the raw submission.
 	desired := make(map[string]bool, len(opts))
-	for _, o := range opts {
-		if strings.TrimSpace(o.Value) == "" {
-			return fmt.Errorf("setting options of custom field %s: an option's value must not be empty", fieldID)
+	for i := range opts {
+		value, err := domain.ValidateCustomFieldOptionText("value", opts[i].Value)
+		if err != nil {
+			return fmt.Errorf("setting options of custom field %s: option value %w", fieldID, err)
 		}
-		if strings.TrimSpace(o.Label) == "" {
-			return fmt.Errorf("setting options of custom field %s: option %q must have a label", fieldID, o.Value)
+		label, err := domain.ValidateCustomFieldOptionText("label", opts[i].Label)
+		if err != nil {
+			return fmt.Errorf("setting options of custom field %s: option %q label %w", fieldID, value, err)
 		}
-		if desired[o.Value] {
-			return fmt.Errorf("setting options of custom field %s: value %q is listed more than once", fieldID, o.Value)
+		opts[i].Value = value
+		opts[i].Label = label
+		if desired[value] {
+			return fmt.Errorf("setting options of custom field %s: value %q is listed more than once: %w",
+				fieldID, value, domain.ErrInvalid)
 		}
-		desired[o.Value] = true
+		desired[value] = true
 	}
 	existingByValue := make(map[string]domain.CustomFieldOption, len(before.Options))
 	for _, o := range before.Options {
@@ -450,9 +482,14 @@ func (s *SQLStore) SetCustomFieldOptions(ctx context.Context, actor domain.Actor
 			}
 		}
 
+		// FINAL REVIEW B2: "value=label", the same shape optionValues folds
+		// beforeValues into, so a label-only rename (value and position
+		// unchanged) still produces a diff -- opts is what the submission
+		// named, not a re-read, but it carries every live option's label
+		// exactly as it will be written above.
 		afterValues := make([]string, 0, len(opts))
 		for _, o := range opts {
-			afterValues = append(afterValues, o.Value)
+			afterValues = append(afterValues, o.Value+"="+o.Label)
 		}
 		beforeAudit := auditedCustomField(&before.CustomField, beforeValues)
 		afterAudit := auditedCustomField(&before.CustomField, afterValues)

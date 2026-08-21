@@ -664,11 +664,24 @@ func TestARetiredFieldsValueSurvivesALaterEdit(t *testing.T) {
 // does nothing for it.
 //
 // §3 says a retired select option "keeps displaying" on the values that already
-// chose it while no NEW value may select it. A form therefore renders that value
-// and posts it back, and before the fix that had two outcomes and both were
-// wrong: re-sent, CanonicalCustomValue rejected the entire edit over a field the
-// operator never touched; omitted, it was silently cleared. An unchanged value
-// is not a new value, so it is now left exactly where it is.
+// chose it while no NEW value may select it. This test proves the STORE half of
+// that: setCustomValues must accept an unchanged resubmission of a value naming
+// a retired option, alongside an edit to a field the operator actually touched,
+// rather than either rejecting the whole submission over a field nobody meant to
+// change, or silently dropping the retained value.
+//
+// PREMISE CORRECTED, FINAL REVIEW B1: this comment used to say "the form renders
+// the retained value and posts it back unchanged" as an established fact. It was
+// not -- no form could reach this path at all, because the value editor built its
+// picker from LIVE options only, so a value naming a retired one matched no
+// <option>, the browser fell back to its own blank "not set" choice, and the very
+// next unrelated save posted that blank back as an explicit clear. This store
+// method was already correct; nothing above it could hand it the case it handles.
+// The form fix (loadCustomFieldsPanel appending the current value's retired
+// option, marked as retired) is what makes the sentence above true today, and
+// TestEveryStoredCustomValueSurvivesARoundTripThroughItsWidget
+// (internal/web/customfield_roundtrip_test.go) is what proves it at the widget.
+// This test stays: it is the store-level guarantee the form fix depends on.
 func TestAValueOnARetiredOptionSurvivesALaterEdit(t *testing.T) {
 	for _, e := range Engines(t) {
 		t.Run(e.Name, func(t *testing.T) {

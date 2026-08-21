@@ -44,7 +44,15 @@ func TestTheRegistryShowsWhoDefinedAFieldAndWhy(t *testing.T) {
 	}
 }
 
-func TestTheRegistryIsAdminOnly(t *testing.T) {
+// TestDefiningACustomFieldIsAdminOnly is FINAL REVIEW F2's rename: this test
+// only ever exercised POST /custom-fields, so its old name --
+// "TestTheRegistryIsAdminOnly" -- asserted something neither the test nor
+// the code does. The registry itself (GET /custom-fields) ships as read()
+// and is reachable by any authenticated user, viewer included -- see
+// TestTheRegistryIsReadableByAnyAuthenticatedUser below for the coverage
+// that actually was missing. Only the mutation this test exercises sits
+// behind RequireAdmin.
+func TestDefiningACustomFieldIsAdminOnly(t *testing.T) {
 	h := newHarness(t)
 	h.login("viewer", "viewer-password")
 	form := url.Values{
@@ -56,6 +64,21 @@ func TestTheRegistryIsAdminOnly(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusSeeOther {
 		t.Fatalf("a viewer must not be able to define a custom field (%d)", resp.StatusCode)
+	}
+}
+
+// TestTheRegistryIsReadableByAnyAuthenticatedUser is the coverage the old
+// name above claimed but never had: docs/custom-fields-design.md §4, as
+// corrected -- the support-burden goal this whole feature exists for is
+// served by a read-only user being able to open the registry and see who
+// defined a field and why, so only the mutating routes sit behind
+// RequireAdmin.
+func TestTheRegistryIsReadableByAnyAuthenticatedUser(t *testing.T) {
+	h := newHarness(t)
+	h.login("viewer", "viewer-password")
+	resp := h.get("/custom-fields", false)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("a viewer could not open the custom fields registry: got %d", resp.StatusCode)
 	}
 }
 
@@ -225,6 +248,43 @@ func TestTheOptionsEditorDrawsExistingOptionsNotBlanks(t *testing.T) {
 	}
 	if !strings.Contains(reopened, `name="option_label" value="Gold"`) {
 		t.Errorf("reopening the options editor did not draw the option's stored label:\n%s", reopened)
+	}
+}
+
+// TestAnOversizedOrControlCharacterOptionIsRefusedWith422 is FINAL REVIEW AY
+// at the HTTP layer: an option's value and label must obey the same bounds a
+// `text` custom value does, and the refusal must come back as the styled
+// per-field 422 every sibling refusal in this handler produces -- never
+// err.Error() echoed verbatim, which is how a raw driver error would have
+// reached the browser for the same input against PostgreSQL.
+func TestAnOversizedOrControlCharacterOptionIsRefusedWith422(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+	id := mustCreateCustomField(t, h, "asset", "tier", "select")
+
+	submit := func(value, label string) *http.Response {
+		return h.post("/custom-fields/"+id+"/options", url.Values{
+			"csrf_token":   {h.csrfToken("/custom-fields")},
+			"row_version":  {versionInForm(t, body(t, h.get("/custom-fields?options="+id, false)))},
+			"option_value": {value}, "option_label": {label},
+		}, false)
+	}
+
+	oversized := strings.Repeat("a", 600)
+	resp := submit(oversized, "Gold")
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("an oversized option value: got %d, want 422", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	withNUL := "gold\x00"
+	resp = submit(withNUL, "Gold")
+	page := body(t, resp)
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("an option value with an embedded NUL byte: got %d, want 422", resp.StatusCode)
+	}
+	if strings.Contains(page, "invalid byte sequence") || strings.Contains(page, "SQLSTATE") {
+		t.Errorf("a raw driver error reached the browser: %s", page)
 	}
 }
 

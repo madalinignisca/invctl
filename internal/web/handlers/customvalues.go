@@ -104,6 +104,32 @@ func (a *App) loadCustomFieldsPanel(r *http.Request, entityType, entityID string
 					row.Options = append(row.Options, o)
 				}
 			}
+			// FINAL REVIEW B1: the operator must be shown everything the
+			// submission will decide (design.md §6, the converse half of the
+			// contract). A value naming an option retired since it was set
+			// keeps displaying (§3) -- which means the widget that draws it
+			// must offer it too, or the browser falls back to its own blank
+			// "not set" choice and the next unrelated save posts that blank
+			// back as an explicit clear. Appended once, only when it is the
+			// value THIS entity holds: a retired option that is not the
+			// current value stays unofferable to a new selection.
+			if row.Value != "" {
+				current := false
+				for _, o := range row.Options {
+					if o.Value == row.Value {
+						current = true
+						break
+					}
+				}
+				if !current {
+					for _, o := range full.Options {
+						if o.Value == row.Value && o.RetiredAt != nil {
+							row.Options = append(row.Options, o)
+							break
+						}
+					}
+				}
+			}
 		}
 		rows = append(rows, row)
 	}
@@ -188,6 +214,28 @@ func (a *App) postCustomFields(w http.ResponseWriter, r *http.Request, entityTyp
 		byID[d.ID] = d.CustomField
 	}
 
+	// FINAL REVIEW B1: what this entity already holds, so an UNCHANGED
+	// resubmission never re-enters kind validation. setCustomValues itself
+	// already treats an unchanged value as untouched regardless of the
+	// field's or (for select) the option's retirement -- see the comment on
+	// "AN UNCHANGED VALUE IS NOT A NEW VALUE" there. Without the same
+	// exception here, this handler's OWN pre-validation -- which exists only
+	// to attribute a bad value to its field before anything is written --
+	// re-checked a value the store would have accepted unchanged, and for a
+	// select field naming a since-retired option that re-check fails: its
+	// membership test only ever sees LIVE options. A form that correctly
+	// draws the retained value (see loadCustomFieldsPanel) would then be
+	// refused with 422 on the very next unrelated save.
+	current, err := a.Store.CustomValuesFor(r.Context(), entityType, entityID)
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
+	storedByID := make(map[string]string, len(current))
+	for _, v := range current {
+		storedByID[v.FieldID] = v.ValueText
+	}
+
 	vals := map[string]string{}
 	fieldNames := make([]string, 0, len(r.PostForm))
 	for key, v := range r.PostForm {
@@ -229,6 +277,9 @@ func (a *App) postCustomFields(w http.ResponseWriter, r *http.Request, entityTyp
 		raw := strings.TrimSpace(vals[id])
 		if raw == "" {
 			continue // a blank clears; clearing needs no validation
+		}
+		if stored, held := storedByID[id]; held && stored == raw {
+			continue // unchanged, verbatim -- the store leaves it exactly where it is
 		}
 		var options []string
 		if def.Kind == domain.CustomFieldSelect {

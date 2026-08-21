@@ -111,7 +111,16 @@ func TestCanonicalCustomValue(t *testing.T) {
 		{"a whole number", CustomFieldNumber, "42", nil, "42", false},
 		{"a decimal", CustomFieldNumber, "42.50", nil, "42.50", false},
 		{"a negative", CustomFieldNumber, "-7", nil, "-7", false},
-		{"a positive with an explicit sign", CustomFieldNumber, "+42", nil, "+42", false},
+		// FINAL REVIEW B1: an explicit leading '+', a leading '.', and a
+		// trailing '.' are all refused now, tightened to exactly the
+		// grammar an <input type="number"> widget can represent -- see
+		// isDecimalNumber's comment. Before the fix all three were accepted
+		// and stored, but the widget rendering them back drew EMPTY, so the
+		// store held a value its own form could never draw -- the same
+		// failure shape B1 closes for the select kind.
+		{"a positive with an explicit sign is refused", CustomFieldNumber, "+42", nil, "", true},
+		{"a leading decimal point is refused", CustomFieldNumber, ".5", nil, "", true},
+		{"a trailing decimal point is refused", CustomFieldNumber, "5.", nil, "", true},
 		{"a grouped number is refused", CustomFieldNumber, "1,234", nil, "", true},
 		{"words are not a number", CustomFieldNumber, "many", nil, "", true},
 		{"underscore grouping is refused", CustomFieldNumber, "1_234", nil, "", true},
