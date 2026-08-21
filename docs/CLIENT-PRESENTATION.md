@@ -327,7 +327,8 @@ Plus: *"12 of 19 things in this footprint carry a price"* — so the total is a 
 
 - **576 automated tests**, every one run against **both** database engines
 - The impact engine is tested against a real fixture estate, not mocks
-- Rules the codebase enforces on itself: audit coverage, no hard deletes, portability between engines — including a custom field's own value, whose text never reaches the log (see Slide 8's caveat for what the digest that replaces it does and does not cover)
+- Rules the codebase enforces on itself: audit coverage, no hard deletes, portability between engines
+- A custom field's text never reaches the audit log — a keyed digest stands in its place (Slide 8 covers what that does and does not cover)
 - Reviewed for security and correctness, repeatedly, with findings acted on
 
 > **Speaker note:** Use this if the client is technical or is buying a POC they
