@@ -182,6 +182,19 @@ cover: compose-up ## Report test coverage
 	INV_TEST_POSTGRES_DSN="$(PG_DSN)" go test ./... -coverprofile=coverage.out -count=1
 	go tool cover -func=coverage.out | tail -20
 
+# NOT PART OF `make test`, AND NOT THE GATE THAT COMMAND IS. Playwright is a
+# test-time-only dependency (tests/e2e/package.json) and never touches the Go
+# build -- `make build` stays CGO_ENABLED=0 with no Node runtime involved.
+# This suite also needs a running instance and INV_E2E_BASE_URL pointed at
+# it, which `make test` has no business requiring of every contributor on
+# every commit. See docs/E2E.md before running: it skips entirely with
+# INV_E2E_BASE_URL unset, and expects the demo estate when it is set.
+.PHONY: e2e
+e2e: ## Run the Playwright E2E suite against INV_E2E_BASE_URL (see docs/E2E.md)
+	@test -n "$(INV_E2E_BASE_URL)" || \
+	  echo "INV_E2E_BASE_URL is not set -- the suite will report itself skipped. See docs/E2E.md."
+	cd tests/e2e && npm install && npx playwright test
+
 .PHONY: compose-up
 compose-up:
 	@docker compose up -d --wait postgres

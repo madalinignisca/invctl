@@ -33,3 +33,8 @@ tests/e2e/**/auth-state.json
 tests/e2e/test-results/
 tests/e2e/playwright-report/
 **/shot-*.png
+
+# Node.js is a test-time dependency of tests/e2e only -- never the build. See
+# docs/E2E.md. package-lock.json IS committed so the pinned Playwright version
+# is reproducible; node_modules is fetched from it, never checked in.
+tests/e2e/node_modules/
