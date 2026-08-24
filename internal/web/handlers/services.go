@@ -10,6 +10,7 @@ package handlers
 
 import (
 	"net/http"
+	"net/url"
 
 	"github.com/madalinignisca/invctl/internal/domain"
 	"github.com/madalinignisca/invctl/internal/store"
@@ -25,19 +26,31 @@ type serviceListPage struct {
 	Availabilities []string
 	Filter         store.ServiceFilter
 	FormData       serviceFormData
+	// CustomFieldsCSVLink is this exact filter as a custom-field-values
+	// download -- see ServiceCustomFieldsCSV and
+	// store.ExportServiceCustomFields.
+	CustomFieldsCSVLink string
+}
+
+// serviceFilterFrom builds the service list filter from a request's query
+// string. Extracted for the same reason assetFilterFrom is: ServiceCustom
+// FieldsCSV, its own route, has to read exactly the same filter ServiceList
+// does rather than parsing the query a second time.
+func serviceFilterFrom(q url.Values, tier int) store.ServiceFilter {
+	return store.ServiceFilter{
+		EnvironmentID: q.Get("environment"),
+		Kind:          q.Get("kind"),
+		Availability:  q.Get("availability"),
+		ProjectID:     q.Get("project"),
+		Tier:          tier,
+		Query:         q.Get("q"),
+	}
 }
 
 // ServiceList renders the service catalogue.
 func (a *App) ServiceList(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	filter := store.ServiceFilter{
-		EnvironmentID: q.Get("environment"),
-		Kind:          q.Get("kind"),
-		Availability:  q.Get("availability"),
-		ProjectID:     q.Get("project"),
-		Tier:          queryInt(r, "tier", 0, 0, 4),
-		Query:         q.Get("q"),
-	}
+	filter := serviceFilterFrom(q, queryInt(r, "tier", 0, 0, 4))
 
 	services, err := a.Store.ListServices(r.Context(), filter)
 	if err != nil {
@@ -61,12 +74,7 @@ func (a *App) ServiceList(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if render.WantsCSV(r) {
-		table, err := a.Store.ExportServices(r.Context(), services)
-		if err != nil {
-			a.serverError(w, r, err)
-			return
-		}
-		render.CSV(w, r, table, a.Store.Now())
+		render.CSV(w, r, store.ExportServices(services), a.Store.Now())
 		return
 	}
 
@@ -77,11 +85,33 @@ func (a *App) ServiceList(w http.ResponseWriter, r *http.Request) {
 		Projects:     projects,
 		Kinds:        kinds,
 		// Availability stays a domain slice: the impact engine switches on it.
-		Availabilities: domain.Availabilities,
-		Filter:         filter,
-		FormData:       a.newServiceForm(r, nil, domain.ServiceSpec{}, envs, kinds),
+		Availabilities:      domain.Availabilities,
+		Filter:              filter,
+		FormData:            a.newServiceForm(r, nil, domain.ServiceSpec{}, envs, kinds),
+		CustomFieldsCSVLink: customFieldsCSVLinkFor("/services/custom-fields.csv", r),
 	}
 	a.Render.Respond(w, r, http.StatusOK, "service_list", "service_table", data)
+}
+
+// ServiceCustomFieldsCSV downloads custom-field values for the current
+// service filter, on its own route rather than the format=csv flag
+// ServiceList answers -- the same split as AssetCustomFieldsCSV, and for the
+// same reason: these columns are not importable, and were never meant to
+// share a query flag with an export that is.
+func (a *App) ServiceCustomFieldsCSV(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	filter := serviceFilterFrom(q, queryInt(r, "tier", 0, 0, 4))
+	services, err := a.Store.ListServices(r.Context(), filter)
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
+	table, err := a.Store.ExportServiceCustomFields(r.Context(), services)
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
+	render.CSV(w, r, table, a.Store.Now())
 }
 
 type serviceDetailPage struct {

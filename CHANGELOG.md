@@ -59,8 +59,11 @@ footnote.
   `/custom-fields`. Each one is described, attributed to whoever defined it,
   and audited exactly like a built-in field: every value change writes a
   `change_log` entry against the asset or service it belongs to. Retiring a
-  field never deletes the values it already holds. Values also leave through
-  the CSV export, one column per field. Deliberately absent from `/api/v1` —
+  field never deletes the values it already holds. Values leave through their
+  own CSV download — "Download custom field values as CSV" on the asset and
+  service lists — one column per field, kept separate from the ordinary asset
+  and service CSV exports so neither of those loses its own guarantee of
+  loading back through the importer. Deliberately absent from `/api/v1` —
   see `docs/API.md`. See `docs/custom-fields-design.md`.
 
 - **A custom field's value is folded into the audit trail as a digest, not as

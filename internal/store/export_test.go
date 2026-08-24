@@ -16,8 +16,13 @@ import (
 	"github.com/madalinignisca/invctl/internal/domain"
 )
 
-// Task 7: custom fields leave the system through the CSV export, alongside
-// everything else. docs/custom-fields-design.md §7 is the design.
+// Task 7: custom fields leave the system through their own CSV export,
+// ExportAssetCustomFields / ExportServiceCustomFields, deliberately separate
+// from ExportAssets / ExportServices -- docs/custom-fields-design.md §7 is
+// the design, and the reason for the split (not the merge an earlier version
+// of this file tested) is that no importer accepts a custom-field column, so
+// merging them into the importable export made every estate with a custom
+// field produce a file its own importer refused.
 
 // indexOf returns the position of want in header, or -1. Used instead of
 // strings.Contains on the header so a test asserts an EXACT column name --
@@ -34,9 +39,9 @@ func indexOf(header []string, want string) int {
 
 // cellFor returns the cell one entity holds in one column of an export
 // Table, matched by position against the AssetRow or ServiceRow slice that
-// produced it -- ExportAssets and ExportServices emit exactly one row per
-// input row, in the same order, so the entity's index in rows is its index
-// in table.Rows.
+// produced it -- ExportAssetCustomFields and ExportServiceCustomFields emit
+// exactly one row per input row, in the same order, so the entity's index in
+// rows is its index in table.Rows.
 func cellFor(t *testing.T, entityIDs []string, table Table, entityID string, col int) string {
 	t.Helper()
 	if col < 0 {
@@ -59,7 +64,8 @@ func cellFor(t *testing.T, entityIDs []string, table Table, entityID string, col
 }
 
 // assetIDsOf and serviceIDsOf extract the id list cellFor needs to locate a
-// row, in the same order ExportAssets/ExportServices consume it.
+// row, in the same order ExportAssetCustomFields/ExportServiceCustomFields
+// consume it.
 func assetIDsOf(rows []AssetRow) []string {
 	ids := make([]string, len(rows))
 	for i, r := range rows {
@@ -68,6 +74,9 @@ func assetIDsOf(rows []AssetRow) []string {
 	return ids
 }
 
+// TestExportIncludesACustomFieldColumn was ExportAssets' test until the
+// columns it asserted moved to ExportAssetCustomFields -- see the package
+// comment above and docs/custom-fields-design.md §7.
 func TestExportIncludesACustomFieldColumn(t *testing.T) {
 	for _, e := range Engines(t) {
 		t.Run(e.Name, func(t *testing.T) {
@@ -92,7 +101,7 @@ func TestExportIncludesACustomFieldColumn(t *testing.T) {
 			if err != nil {
 				t.Fatalf("listing: %v", err)
 			}
-			table, err := f.s.ExportAssets(f.ctx, rows)
+			table, err := f.s.ExportAssetCustomFields(f.ctx, rows)
 			if err != nil {
 				t.Fatalf("exporting: %v", err)
 			}
@@ -108,8 +117,8 @@ func TestExportIncludesACustomFieldColumn(t *testing.T) {
 }
 
 // TestARetiredFieldStillExportsUnderARetiredHeader is design.md §7's whole
-// promise: retiring a field destroys no value, and the export is where an
-// operator goes to see what they still hold.
+// promise: retiring a field destroys no value, and ExportAssetCustomFields
+// is where an operator goes to see what they still hold.
 //
 // THE HEADER IS ASSERTED WITH AN EXACT COMPARISON, NOT strings.Contains.
 // "Cost Centre" is a substring of "Cost Centre (retired)", so a Contains
@@ -145,7 +154,7 @@ func TestARetiredFieldStillExportsUnderARetiredHeader(t *testing.T) {
 			if err != nil {
 				t.Fatalf("listing: %v", err)
 			}
-			table, err := f.s.ExportAssets(f.ctx, rows)
+			table, err := f.s.ExportAssetCustomFields(f.ctx, rows)
 			if err != nil {
 				t.Fatalf("exporting: %v", err)
 			}
@@ -174,7 +183,8 @@ func TestARetiredFieldStillExportsUnderARetiredHeader(t *testing.T) {
 
 // TestACustomValueIsDefusedLikeEveryOtherCell. WP-G5 defuses at the boundary
 // where text becomes a spreadsheet; a custom value an operator typed freely
-// is not an exception to that rule.
+// is not an exception to that rule, wherever it exports -- including
+// ExportAssetCustomFields, now that the custom-field columns live there.
 func TestACustomValueIsDefusedLikeEveryOtherCell(t *testing.T) {
 	for _, e := range Engines(t) {
 		t.Run(e.Name, func(t *testing.T) {
@@ -186,7 +196,7 @@ func TestACustomValueIsDefusedLikeEveryOtherCell(t *testing.T) {
 			if err != nil {
 				t.Fatalf("listing: %v", err)
 			}
-			table, err := f.s.ExportAssets(f.ctx, rows)
+			table, err := f.s.ExportAssetCustomFields(f.ctx, rows)
 			if err != nil {
 				t.Fatalf("exporting: %v", err)
 			}
@@ -221,7 +231,7 @@ func TestAFieldWithNoValueExportsAnEmptyCell(t *testing.T) {
 			if err != nil {
 				t.Fatalf("listing: %v", err)
 			}
-			table, err := f.s.ExportAssets(f.ctx, rows)
+			table, err := f.s.ExportAssetCustomFields(f.ctx, rows)
 			if err != nil {
 				t.Fatalf("exporting: %v", err)
 			}
@@ -237,9 +247,9 @@ func TestAFieldWithNoValueExportsAnEmptyCell(t *testing.T) {
 }
 
 // TestOnlyAssetFieldsAppearInTheAssetExport: a custom field defined for
-// services must not grow a column on the asset export -- entity_type scopes
-// custom fields, and the export has to respect it the same way every other
-// surface does.
+// services must not grow a column on ExportAssetCustomFields --
+// entity_type scopes custom fields, and the export has to respect it the
+// same way every other surface does.
 func TestOnlyAssetFieldsAppearInTheAssetExport(t *testing.T) {
 	for _, e := range Engines(t) {
 		t.Run(e.Name, func(t *testing.T) {
@@ -251,7 +261,7 @@ func TestOnlyAssetFieldsAppearInTheAssetExport(t *testing.T) {
 			if err != nil {
 				t.Fatalf("listing: %v", err)
 			}
-			table, err := f.s.ExportAssets(f.ctx, rows)
+			table, err := f.s.ExportAssetCustomFields(f.ctx, rows)
 			if err != nil {
 				t.Fatalf("exporting: %v", err)
 			}
@@ -263,9 +273,9 @@ func TestOnlyAssetFieldsAppearInTheAssetExport(t *testing.T) {
 	}
 }
 
-// TestServiceExportIncludesACustomFieldColumn is ExportAssets' test above,
-// against ExportServices -- the signature change this task owns
-// (ctx, error) makes it reachable at all.
+// TestServiceExportIncludesACustomFieldColumn is
+// TestExportIncludesACustomFieldColumn's counterpart, against
+// ExportServiceCustomFields.
 func TestServiceExportIncludesACustomFieldColumn(t *testing.T) {
 	for _, e := range Engines(t) {
 		t.Run(e.Name, func(t *testing.T) {
@@ -277,7 +287,7 @@ func TestServiceExportIncludesACustomFieldColumn(t *testing.T) {
 			if err != nil {
 				t.Fatalf("listing: %v", err)
 			}
-			table, err := f.s.ExportServices(f.ctx, rows)
+			table, err := f.s.ExportServiceCustomFields(f.ctx, rows)
 			if err != nil {
 				t.Fatalf("exporting: %v", err)
 			}
@@ -300,11 +310,11 @@ func TestServiceExportIncludesACustomFieldColumn(t *testing.T) {
 
 // TestCustomFieldColumnsMergeAcrossChunks calls customFieldColumns directly
 // with 501 entity ids -- one more than idChunkSize (store.go) -- so
-// chunkIDs splits it into two chunks. Every shipped ExportAssets test above
-// goes through ListAssets, which is capped at AssetListLimit (500) and can
-// therefore never produce more than one chunk; this is the only place the
-// 500-id boundary, the seen-map dedup, and the cross-chunk value
-// accumulation are exercised at all.
+// chunkIDs splits it into two chunks. Every shipped
+// ExportAssetCustomFields test above goes through ListAssets, which is
+// capped at AssetListLimit (500) and can therefore never produce more than
+// one chunk; this is the only place the 500-id boundary, the seen-map dedup,
+// and the cross-chunk value accumulation are exercised at all.
 //
 // The two ids that matter sit at the two positions a broken merge would get
 // wrong: f.assetID at index 0 (first chunk) and f.secondAssetID at the very

@@ -217,12 +217,23 @@ type assetListPage struct {
 	Kinds        []store.VocabularyTerm
 	Filter       store.AssetFilter
 	FormData     assetFormData
+	// CustomFieldsCSVLink is this exact filter as a custom-field-values
+	// download -- a separate, non-importable file from CSVLink. See
+	// AssetCustomFieldsCSV and store.ExportAssetCustomFields.
+	CustomFieldsCSVLink string
 }
 
-// AssetList renders the asset inventory with filters.
-func (a *App) AssetList(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
-	filter := store.AssetFilter{
+// assetFilterFrom builds the asset list filter from a request's query
+// string.
+//
+// EXTRACTED so AssetCustomFieldsCSV -- its own route, per the fix for the
+// custom-field export defect, rather than a ?format= flag on this one -- can
+// read exactly the same filter instead of parsing the query a second time
+// and risking the two definitions drifting apart. That drift is precisely
+// what the comment below still warns about for AssetList's own format=csv
+// branch, and extracting this keeps the warning true for both routes at once.
+func assetFilterFrom(q url.Values) store.AssetFilter {
+	return store.AssetFilter{
 		Kind:           q.Get("kind"),
 		EnvironmentID:  q.Get("environment"),
 		Lifecycle:      q.Get("lifecycle"),
@@ -230,6 +241,12 @@ func (a *App) AssetList(w http.ResponseWriter, r *http.Request) {
 		Query:          q.Get("q"),
 		IncludeRetired: q.Get("retired") == "1",
 	}
+}
+
+// AssetList renders the asset inventory with filters.
+func (a *App) AssetList(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	filter := assetFilterFrom(q)
 
 	assets, err := a.Store.ListAssets(r.Context(), filter)
 	if err != nil {
@@ -265,16 +282,40 @@ func (a *App) AssetList(w http.ResponseWriter, r *http.Request) {
 		// Derived, not literal: /assets?kind=firewall is the rail's Firewalls
 		// entry under Network, and telling the rail "assets" would open Estate
 		// instead. See AssetListNav.
-		Base:         a.base(r, "Assets", AssetListNav(filter.Kind)),
-		Assets:       assets,
-		Environments: envs,
-		Kinds:        kinds,
-		Filter:       filter,
-		FormData:     a.newAssetForm(r, nil, envs, kinds, assets),
+		Base:                a.base(r, "Assets", AssetListNav(filter.Kind)),
+		Assets:              assets,
+		Environments:        envs,
+		Kinds:               kinds,
+		Filter:              filter,
+		FormData:            a.newAssetForm(r, nil, envs, kinds, assets),
+		CustomFieldsCSVLink: customFieldsCSVLinkFor("/assets/custom-fields.csv", r),
 	}
 	// Filtering swaps only the table, so typing in the filter box does not
 	// rebuild the page around it.
 	a.Render.Respond(w, r, http.StatusOK, "asset_list", "asset_table", data)
+}
+
+// AssetCustomFieldsCSV downloads custom-field values for the current asset
+// filter, on its own route rather than the format=csv flag AssetList answers.
+//
+// A SEPARATE FILE, NOT A COLUMN ON THE IMPORTABLE EXPORT (see
+// store.ExportAssetCustomFields). Folding these columns into ExportAssets
+// made every asset export with even one custom field fail ParseAssetCSV
+// outright, because assetImportColumns is a closed set that has never
+// included them -- the defect this route exists to not repeat.
+func (a *App) AssetCustomFieldsCSV(w http.ResponseWriter, r *http.Request) {
+	filter := assetFilterFrom(r.URL.Query())
+	assets, err := a.Store.ListAssets(r.Context(), filter)
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
+	table, err := a.Store.ExportAssetCustomFields(r.Context(), assets)
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
+	render.CSV(w, r, table, a.Store.Now())
 }
 
 type assetDetailPage struct {

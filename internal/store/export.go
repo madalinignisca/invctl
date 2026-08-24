@@ -281,8 +281,9 @@ func retiredDate(retiredAt string) string {
 // Every Table this package builds is read exactly once, by render.CSV, which
 // already defuses every cell of every row (including these) at the boundary
 // where the file is written. This call exists because
-// TestACustomValueIsDefusedLikeEveryOtherCell asserts against ExportAssets'
-// and ExportServices' RETURNED Table directly, never going through
+// TestACustomValueIsDefusedLikeEveryOtherCell asserts against
+// ExportAssetCustomFields' and ExportServiceCustomFields' RETURNED Table
+// directly, never going through
 // render.CSV -- so the Table itself has to already carry a defused value for
 // that assertion to mean anything. If that test, or the reason it bypasses
 // render.CSV, ever goes away, this call can go with it; until then, deleting
@@ -301,12 +302,23 @@ func customFieldCells(cols []customExportColumn, values map[string]map[string]st
 
 // ExportAssets renders an asset list as an importable table.
 //
-// The header is the importer's own column set, in the order docs/IMPORT.md
-// documents, followed by one column per custom field definition -- see
-// customFieldColumns. A column the importer does not accept does not belong
-// among the first group: it would make the file look round-trippable and fail
-// on load. The custom-field columns are exempt from that rule by design
-// (design.md §7): they are not in scope for the importer at all.
+// The header is EXACTLY the importer's own column set (assetImportColumns,
+// internal/store/import.go), in the order docs/IMPORT.md documents, and
+// nothing else. A column the importer does not accept does not belong here:
+// ParseAssetCSV's header check treats an unrecognised column as an error by
+// design ("an unknown column IS an error, because the alternative is
+// silently ignoring the one column somebody cared about"), so any column
+// added here that the importer does not know makes every file this function
+// produces fail to load back through ParseAssetCSV.
+//
+// CUSTOM-FIELD COLUMNS DO NOT BELONG HERE, EVEN THOUGH AN EARLIER VERSION OF
+// THIS FUNCTION PUT THEM HERE. assetImportColumns is a closed set that has
+// never included them, so an estate with even one custom field produced an
+// export its own importer refused outright -- exactly the failure this
+// function's own doc comment warns against for every other column. Custom
+// field values leave through ExportAssetCustomFields instead, a separate,
+// explicitly non-importable download; see that function's comment and
+// docs/custom-fields-design.md §7.
 func (s *SQLStore) ExportAssets(ctx context.Context, rows []AssetRow) (Table, error) {
 	paths, err := s.AssetPaths(ctx)
 	if err != nil {
@@ -331,21 +343,12 @@ func (s *SQLStore) ExportAssets(ctx context.Context, rows []AssetRow) (Table, er
 		deviceRef[r.ID] = r.Ref
 	}
 
-	ids := make([]string, len(rows))
-	for i, a := range rows {
-		ids[i] = a.ID
-	}
-	cfCols, cfValues, err := s.customFieldColumns(ctx, domain.CustomFieldEntityAsset, ids)
-	if err != nil {
-		return Table{}, err
-	}
-
 	t := Table{
 		Name: "assets",
-		Header: append([]string{
+		Header: []string{
 			"name", "kind", "parent", "serial", "asset_tag", "vendor", "model",
 			"lifecycle", "eol_date", "environments", "team", "manager_role", "device_type",
-		}, headersOf(cfCols)...),
+		},
 	}
 	for _, a := range rows {
 		parent := ""
@@ -365,7 +368,49 @@ func (s *SQLStore) ExportAssets(ctx context.Context, rows []AssetRow) (Table, er
 			a.TeamCode, orEmpty1(a.ManagerRole),
 			deviceRefOf(deviceRef, a.DeviceTypeID),
 		}
-		row = append(row, customFieldCells(cfCols, cfValues, a.ID)...)
+		t.Rows = append(t.Rows, row)
+	}
+	return t, nil
+}
+
+// ExportAssetCustomFields renders one row per asset and one column per
+// custom field definition, live and retired together -- the columns
+// ExportAssets used to carry, moved here rather than left where they broke
+// the importer.
+//
+// KEYED BY THE ASSET'S CONTAINMENT PATH, not by its id, for the same reason
+// ExportAssets resolves paths instead of emitting UUIDs: a path is what a
+// human can match against the asset list or the other export on screen. It
+// is read-only reuse of AssetPaths, not a promise that this column is
+// editable -- see the next paragraph.
+//
+// NOT IMPORTABLE, BY DESIGN, on the same footing ExportPrefixes already
+// documents for itself: assetImportColumns (internal/store/import.go) is a
+// closed set and does not include a single custom-field column, so these
+// columns are chosen to be READ, not to round-trip -- and saying so here
+// stops somebody assuming otherwise. `attrs` is excluded from this export
+// the same way it is excluded from the importer: opaque by design, and a
+// value worth reporting on belongs in a real column instead.
+func (s *SQLStore) ExportAssetCustomFields(ctx context.Context, rows []AssetRow) (Table, error) {
+	paths, err := s.AssetPaths(ctx)
+	if err != nil {
+		return Table{}, err
+	}
+	ids := make([]string, len(rows))
+	for i, a := range rows {
+		ids[i] = a.ID
+	}
+	cfCols, cfValues, err := s.customFieldColumns(ctx, domain.CustomFieldEntityAsset, ids)
+	if err != nil {
+		return Table{}, err
+	}
+
+	t := Table{
+		Name:   "asset-custom-fields",
+		Header: append([]string{"asset"}, headersOf(cfCols)...),
+	}
+	for _, a := range rows {
+		row := append([]string{paths[a.ID]}, customFieldCells(cfCols, cfValues, a.ID)...)
 		t.Rows = append(t.Rows, row)
 	}
 	return t, nil
@@ -380,13 +425,38 @@ func headersOf(cols []customExportColumn) []string {
 	return headers
 }
 
-// ExportServices renders a service list, with one column per custom field
-// definition appended -- live and retired together, same as ExportAssets.
+// ExportServices renders a service list.
 //
-// A METHOD, NOT A FREE FUNCTION, and that is the signature change this task
-// owns: it needs the database to resolve the custom-field column set, exactly
-// the reason ExportAssets already takes a context.
-func (s *SQLStore) ExportServices(ctx context.Context, rows []ServiceRow) (Table, error) {
+// BACK TO A FREE FUNCTION, NOT A METHOD. It briefly took a context and became
+// a *SQLStore method solely to resolve the custom-field column set that used
+// to be appended here; now those columns live in ExportServiceCustomFields
+// instead (same reason as ExportAssets -- see its comment), and this function
+// no longer touches the database at all.
+func ExportServices(rows []ServiceRow) Table {
+	t := Table{
+		Name:   "services",
+		Header: []string{"code", "name", "tier", "availability", "environment", "team", "lifecycle"},
+	}
+	for _, svc := range rows {
+		t.Rows = append(t.Rows, []string{
+			svc.Code, svc.Name, strconv.Itoa(svc.Tier), svc.Availability,
+			svc.EnvironmentCode, svc.TeamCode, svc.Lifecycle,
+		})
+	}
+	return t
+}
+
+// ExportServiceCustomFields renders one row per service and one column per
+// custom field definition, live and retired together -- ExportServices'
+// counterpart to ExportAssetCustomFields, and subject to the same rule: not
+// importable, because no importer -- for services or otherwise -- accepts a
+// custom-field column, and saying so here stops somebody assuming otherwise.
+//
+// KEYED BY THE SERVICE'S CODE. A service has no containment path, but
+// service.code is its own natural key already (unique, and the identifier an
+// operator types), so it plays the same role here that the asset path plays
+// in ExportAssetCustomFields.
+func (s *SQLStore) ExportServiceCustomFields(ctx context.Context, rows []ServiceRow) (Table, error) {
 	ids := make([]string, len(rows))
 	for i, svc := range rows {
 		ids[i] = svc.ID
@@ -397,16 +467,11 @@ func (s *SQLStore) ExportServices(ctx context.Context, rows []ServiceRow) (Table
 	}
 
 	t := Table{
-		Name: "services",
-		Header: append([]string{"code", "name", "tier", "availability", "environment", "team", "lifecycle"},
-			headersOf(cfCols)...),
+		Name:   "service-custom-fields",
+		Header: append([]string{"service"}, headersOf(cfCols)...),
 	}
 	for _, svc := range rows {
-		row := []string{
-			svc.Code, svc.Name, strconv.Itoa(svc.Tier), svc.Availability,
-			svc.EnvironmentCode, svc.TeamCode, svc.Lifecycle,
-		}
-		row = append(row, customFieldCells(cfCols, cfValues, svc.ID)...)
+		row := append([]string{svc.Code}, customFieldCells(cfCols, cfValues, svc.ID)...)
 		t.Rows = append(t.Rows, row)
 	}
 	return t, nil

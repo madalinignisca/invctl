@@ -701,3 +701,22 @@ func csvLinkFor(r *http.Request) string {
 	q.Set("format", "csv")
 	return r.URL.Path + "?" + q.Encode()
 }
+
+// customFieldsCSVLinkFor is the current request's filter, pointed at the
+// custom-field-values download for that resource -- ITS OWN ROUTE, not a
+// query flag on this one. Custom-field columns are not importable the way
+// ExportAssets/ExportServices are (see store.ExportAssetCustomFields), so
+// this deliberately does not reuse csvLinkFor's format=csv on the same path:
+// a shared format flag would invite somebody to assume the two files carry
+// the same round-trip guarantee, which is exactly the assumption the defect
+// this route exists to fix was built on.
+//
+// path is the dedicated route (e.g. "/assets/custom-fields.csv"), not
+// r.URL.Path, since that always names the list page this link is rendered
+// from.
+func customFieldsCSVLinkFor(path string, r *http.Request) string {
+	q := r.URL.Query()
+	q.Del("edit")
+	q.Del("format")
+	return path + "?" + q.Encode()
+}

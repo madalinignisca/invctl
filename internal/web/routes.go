@@ -152,6 +152,11 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	read("GET /environments", app.EnvironmentList)
 	read("GET /environments/{id}/map", app.EnvironmentMap)
 	read("GET /assets", app.AssetList)
+	// Its own route, not a ?format= flag on /assets: custom-field values are
+	// not importable the way the /assets?format=csv export is (see
+	// store.ExportAssetCustomFields), and a shared query flag would invite the
+	// assumption that they carry the same round-trip guarantee.
+	read("GET /assets/custom-fields.csv", app.AssetCustomFieldsCSV)
 	read("GET /assets/{id}", app.AssetDetail)
 	read("GET /assets/{id}/impact", app.AssetImpact)
 	// A view, and only a view: GET, no CSRF, no RequireAdmin, and nothing on
@@ -179,6 +184,8 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	read("GET /help/{topic}", app.Help)
 	read("GET /paths", app.ServicePath)
 	read("GET /services", app.ServiceList)
+	// Same split as /assets/custom-fields.csv, and for the same reason.
+	read("GET /services/custom-fields.csv", app.ServiceCustomFieldsCSV)
 	read("GET /services/{id}", app.ServiceDetail)
 	read("GET /prefixes", app.PrefixList)
 	read("GET /vlans", app.VLANList)

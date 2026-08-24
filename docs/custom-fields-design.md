@@ -358,7 +358,10 @@ field already holds the same `(entity_type, code)`.
 
 ## 7. Export
 
-CSV export gains one column per field, live or retired.
+A dedicated CSV export, `ExportAssetCustomFields` / `ExportServiceCustomFields`,
+gains one column per field, live or retired — separate from `ExportAssets` and
+`ExportServices`, which carry none. See the correction at the end of this
+section for why they are separate rather than merged.
 
 **Every header is `Label (code)`, unconditionally — never plain `Label`, and
 never conditional on whether another field happens to collide.** A retired
@@ -443,13 +446,30 @@ again for readability** — that is the mistake this rule replaced, twice.
 Every value passes through the same formula-injection defusing WP-G5 already
 applies at the boundary where text becomes a spreadsheet.
 
-*A wide file is the accepted cost. An estate with thirty historical fields gets
-thirty extra columns, and the alternative — a separate custom-fields export —
-means the asset export no longer round-trips.*
+*Custom fields leave through their own export, `ExportAssetCustomFields` and
+`ExportServiceCustomFields`, deliberately separate from `ExportAssets` and
+`ExportServices`. An earlier version of this section put the custom-field
+columns directly on the asset and service exports and argued FOR that on the
+grounds that a separate export "means the asset export no longer
+round-trips" — that reasoning was backwards. `assetImportColumns`
+(`internal/store/import.go`) is a closed, unknown-column-is-an-error set that
+has never included a custom-field column, so folding them into `ExportAssets`
+did not preserve the round trip; it broke it, silently, the moment an estate
+defined even one custom field — `ParseAssetCSV` refused the file outright.
+The separate export is the option that PRESERVES the round trip: `ExportAssets`
+and `ExportServices` stay exactly the importer's own column set (services have
+no importer yet, but the same rule applies pre-emptively), and the
+custom-field columns live in their own, explicitly non-importable download —
+the same footing `ExportPrefixes` already documents for itself: chosen to be
+READ, not to round-trip. `attrs` is excluded from both the importer and this
+export, same as it always was.*
 
-`ExportAssets(ctx, rows) (Table, error)` already takes a context and can query.
-`ExportServices(rows) Table` does not, and gains both — a signature change this
-work package owns.
+`ExportAssets(ctx, rows) (Table, error)` and `ExportAssetCustomFields(ctx,
+rows) (Table, error)` both take a context and can query. `ExportServices(rows)
+Table` is a free function again, same as before this work package briefly
+turned it into a `*SQLStore` method to resolve a custom-field column set that
+no longer lives there; `ExportServiceCustomFields(ctx, rows) (Table, error)`
+is the method that needs the database now.
 
 ---
 

@@ -73,4 +73,12 @@
   <a href="{{.CSVLink}}">Download this list as CSV</a>
 </p>
 
+{{/* Custom-field values are a separate download -- no importer accepts a
+     custom-field column, so these never belonged on the file above. See
+     store.ExportServiceCustomFields. */}}
+<p class="hint" style="margin-top:4px">
+  <a href="{{.CustomFieldsCSVLink}}">Download custom field values as CSV</a>
+  — a separate file, keyed by service code; not importable.
+</p>
+
 {{end}}
