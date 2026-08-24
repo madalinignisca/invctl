@@ -9,11 +9,15 @@
 package web_test
 
 import (
+	"context"
 	"net/http"
 	"net/url"
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/madalinignisca/invctl/internal/domain"
+	"github.com/madalinignisca/invctl/internal/store"
 )
 
 // The detail-page half of WP-A4: the grouped display and the value editor,
@@ -413,6 +417,20 @@ func TestAFieldRetiredBetweenRenderAndSubmitIsSilentlyDropped(t *testing.T) {
 	if resp.StatusCode != http.StatusSeeOther {
 		t.Errorf("a value for a field retired mid-flight must be dropped, not refused: got %d", resp.StatusCode)
 	}
+
+	// The assertion the test's own name promises: not just that the
+	// submission succeeded, but that the value for the retired field was
+	// never written. A retired field renders no panel of its own (design.md
+	// §6), so the store is the only place left to check.
+	values, err := h.store.CustomValuesFor(context.Background(), "asset", assetID)
+	if err != nil {
+		t.Fatalf("reading the asset's custom values: %v", err)
+	}
+	for _, v := range values {
+		if v.FieldID == id {
+			t.Fatalf("the value for the field retired mid-flight was written after all: %q", v.ValueText)
+		}
+	}
 }
 
 // selectedCustomFieldOption reads which <option> the value editor's select
@@ -485,5 +503,60 @@ func mustSetServiceValueViaHTTP(t *testing.T, h *harness, serviceID, fieldID, va
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusSeeOther {
 		t.Fatalf("setting service custom value: got %d", resp.StatusCode)
+	}
+}
+
+// TestAnUnrepresentableStoredValueRendersAsTextInstead is the render-time
+// half of the defence `select` already had (loadCustomFieldsPanel's "FINAL
+// REVIEW B1"). No path inside this feature can produce "+42" for a number
+// field or "0000-01-01" for a date field -- postCustomFields validates
+// through domain.CanonicalCustomValue before anything is written -- so both
+// values are inserted directly, the way an import, a restored older
+// backup, or a validator loosened since the row was written could arrive.
+// A typed <input type="number"> / <input type="date"> BLANKS a value it
+// cannot represent, and the next unrelated save on that form would then
+// post the blank back as an explicit clear.
+func TestAnUnrepresentableStoredValueRendersAsTextInstead(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+	numberID := mustCreateFieldViaHTTP(t, h, "asset", "legacy_wattage", "Legacy Wattage", "number")
+	dateID := mustCreateFieldViaHTTP(t, h, "asset", "legacy_installed", "Legacy Installed", "date")
+	assetID := h.refs.Assets["hv-01"]
+
+	insertCustomValueDirectly(t, h, numberID, assetID, "+42")
+	insertCustomValueDirectly(t, h, dateID, assetID, "0000-01-01")
+
+	page := body(t, h.get("/assets/"+assetID, false))
+
+	if !strings.Contains(page, `id="cf-`+numberID+`" class="" type="text"`) {
+		t.Errorf("an unrepresentable number must render as a text input, not a number widget:\n%s", page)
+	}
+	// html/template escapes "+" to "&#43;" in an attribute -- the same
+	// reason h.csrfToken has to un-escape a token that can carry one.
+	if !strings.Contains(page, `value="&#43;42"`) {
+		t.Error("the unrepresentable number's stored value must still be drawn back verbatim")
+	}
+	if !strings.Contains(page, `id="cf-`+dateID+`" class="" type="text"`) {
+		t.Errorf("an unrepresentable date must render as a text input, not a date widget:\n%s", page)
+	}
+	if !strings.Contains(page, `value="0000-01-01"`) {
+		t.Error("the unrepresentable date's stored value must still be drawn back verbatim")
+	}
+}
+
+// insertCustomValueDirectly writes a custom_field_value row by hand,
+// bypassing every Go-side validator -- SetCustomValues refuses "+42" and
+// "0000-01-01" correctly, so a value that can only arrive from outside this
+// feature has to arrive the same way here: straight SQL, the same pattern
+// TestTheFormOffersWhatTheTableHoldsNotWhatGoWasBuiltWith in network_test.go
+// uses for its own "data outran the code" fixture.
+func insertCustomValueDirectly(t *testing.T, h *harness, fieldID, assetID, value string) {
+	t.Helper()
+	now := domain.FormatTime(h.store.Now())
+	if _, err := h.store.DB().Writer.Exec(h.store.DB().Rebind(
+		`INSERT INTO custom_field_value (id, field_id, entity_id, value_text, created_at, updated_at, row_version)
+		 VALUES (?, ?, ?, ?, ?, ?, 1)`),
+		store.NewID(), fieldID, assetID, value, now, now); err != nil {
+		t.Fatalf("inserting a custom value directly: %v", err)
 	}
 }

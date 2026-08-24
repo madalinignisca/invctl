@@ -85,11 +85,33 @@
         <input id="cf-{{$row.Field.ID}}" class="{{if $.Edit.Err $name}}invalid{{end}}" type="text"
                name="{{$name}}" value="{{$.Edit.Value $name $row.Value}}">
         {{else if eq $row.Field.Kind "number"}}
+        {{if $row.Representable}}
         <input id="cf-{{$row.Field.ID}}" class="{{if $.Edit.Err $name}}invalid{{end}}" type="number" step="any"
                name="{{$name}}" value="{{$.Edit.Value $name $row.Value}}">
+        {{else}}
+        {{/* A stored value the typed widget cannot draw back -- an import,
+             a restored older backup, or a validator loosened since it was
+             written, never this feature's own writer (postCustomFields
+             always validates through the same domain.CanonicalCustomValue
+             this flag consults). A number widget BLANKS a value it cannot
+             represent, and the next unrelated save posts that blank as an
+             explicit clear -- text does not, so the stored text survives
+             an unrelated save until someone corrects it. */}}
+        <input id="cf-{{$row.Field.ID}}" class="{{if $.Edit.Err $name}}invalid{{end}}" type="text"
+               name="{{$name}}" value="{{$.Edit.Value $name $row.Value}}">
+        <div class="field-hint">This value predates the current number rule and is shown as
+          text so saving does not discard it.</div>
+        {{end}}
         {{else if eq $row.Field.Kind "date"}}
+        {{if $row.Representable}}
         <input id="cf-{{$row.Field.ID}}" class="{{if $.Edit.Err $name}}invalid{{end}}" type="date"
                name="{{$name}}" value="{{$.Edit.Value $name $row.Value}}">
+        {{else}}
+        <input id="cf-{{$row.Field.ID}}" class="{{if $.Edit.Err $name}}invalid{{end}}" type="text"
+               name="{{$name}}" value="{{$.Edit.Value $name $row.Value}}">
+        <div class="field-hint">This value predates the current date rule and is shown as
+          text so saving does not discard it.</div>
+        {{end}}
         {{else if eq $row.Field.Kind "boolean"}}
         {{/* THREE-STATE, NOT A CHECKBOX -- design.md §8, amended after a
              Critical. A checkbox cannot represent "no assertion": unticked

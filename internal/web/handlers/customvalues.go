@@ -35,6 +35,21 @@ type customFieldFormRow struct {
 	// but is never offered to a new one (design.md §3), so only live ones
 	// belong in a picker.
 	Options []domain.CustomFieldOption
+	// Representable reports whether Value would be accepted by
+	// domain.CanonicalCustomValue TODAY, under the current validator and
+	// (for select) the current live options -- an empty Value always
+	// counts as representable. This is the render-time half of the defence
+	// select already had (see the "FINAL REVIEW B1" comment above): a
+	// typed HTML widget -- <input type="number">, <input type="date"> --
+	// silently BLANKS a value it cannot draw, and a blank posts back as an
+	// explicit clear on the next unrelated save. Nothing in this feature
+	// can produce such a value today, which is exactly why this flag has to
+	// exist rather than "fix the writer": the day it stops being safe is an
+	// import, a restored backup from an older build, or a future loosening
+	// of the validator, none of which go through postCustomFields. When
+	// this is false, the template draws a plain text input instead of the
+	// typed widget so a save cannot discard what it cannot parse.
+	Representable bool
 }
 
 // InputName is the one name a submission may use to touch this field:
@@ -129,6 +144,21 @@ func (a *App) loadCustomFieldsPanel(r *http.Request, entityType, entityID string
 						}
 					}
 				}
+			}
+		}
+		// Representability is checked against the SAME options the widget
+		// would offer (row.Options, which for a select already carries the
+		// appended retired option above), never a fresh membership list --
+		// otherwise this check would fight the fix directly above it and
+		// mark a select's own retained value as unrepresentable.
+		row.Representable = row.Value == ""
+		if !row.Representable {
+			optValues := make([]string, 0, len(row.Options))
+			for _, o := range row.Options {
+				optValues = append(optValues, o.Value)
+			}
+			if _, err := domain.CanonicalCustomValue(d.Kind, row.Value, optValues); err == nil {
+				row.Representable = true
 			}
 		}
 		rows = append(rows, row)
