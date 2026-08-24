@@ -152,9 +152,15 @@ actually needs to correct — but retyping a field with 214 text values into a
 number is a data migration wearing a form control. The refusal names the count
 and suggests creating a new field.
 
-**Retiring a `select` option follows the same rule as retiring a field**:
-existing values keep displaying, no new value may select it. "Keeps
-displaying" means literally that: the value editor renders the retired option
+**Retiring a `select` option is NOT the same as retiring a field, and the
+difference is the opposite of what it sounds like.** Retiring a FIELD keeps
+its values in storage but removes them from every surface -- the detail page,
+the editor, everything -- because a value the form draws is a value a
+clear-all can enumerate and destroy, so not drawing it IS the protection (see
+"a submission may only name what the operator was shown" below); Restore
+brings back the field and every retained value. Retiring an OPTION is the
+case where a value does keep displaying: no new value may select it, but the
+one already stored is still drawn. "Keeps displaying" means literally that: the value editor renders the retired option
 too, marked as retired, whenever it is the value the entity currently holds —
 never for any other retired option — so the widget can actually draw back
 what is stored (the invariant above) instead of falling back to its own blank

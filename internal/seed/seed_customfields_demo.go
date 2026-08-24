@@ -346,8 +346,22 @@ func StageCustomFieldSpread(ctx context.Context, s *store.SQLStore, adminUsernam
 	//
 	// A ticketing reference from before the estate moved to its current
 	// system: exactly the "we stopped using this, what happens to the old
-	// values" question a client asks. Populated first, retired second, so
-	// the three assets keep showing what they already held.
+	// values" question a client asks. Populated first, retired second.
+	//
+	// WHERE THIS SHOWS, AND WHERE IT DELIBERATELY DOES NOT. A retired FIELD
+	// vanishes from the asset pages entirely -- do not expect these three
+	// references to appear there, and do not "fix" it if they do not.
+	// Keeping a retired field's value off every surface is what PROTECTS it:
+	// a value the form draws is a value a clear-all can enumerate and
+	// destroy, so it is drawn nowhere (docs/custom-fields-design.md, "a
+	// submission may only name what the operator was shown"). The
+	// demonstration is on /custom-fields, which lists this field as retired
+	// with "3 values retained" and a Restore button -- storage kept, surface
+	// withdrawn, reversible. That is the honest answer to the client's
+	// question, and it is a better one than "the values still show".
+	//
+	// The retired OPTION below is the opposite case and the one where a
+	// value does keep displaying. The two read alike and behave oppositely.
 	legacy, err := domain.NewCustomField(store.NewID(), domain.CustomFieldEntityAsset,
 		"legacy_ticket_ref", "Legacy Ticket Reference", domain.CustomFieldText,
 		"the reference in the ticketing system this estate used before the 2024 migration; "+
