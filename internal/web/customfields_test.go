@@ -62,8 +62,10 @@ func TestDefiningACustomFieldIsAdminOnly(t *testing.T) {
 	}
 	resp := h.post("/custom-fields", form, false)
 	resp.Body.Close()
-	if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusSeeOther {
-		t.Fatalf("a viewer must not be able to define a custom field (%d)", resp.StatusCode)
+	// Anything looser than 403 -- the old "not 200, not 303" shape -- would
+	// let a 500 from a broken RequireAdmin pass as "correctly refused".
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("a viewer must not be able to define a custom field: got %d, want 403", resp.StatusCode)
 	}
 }
 
@@ -310,6 +312,48 @@ func firstFieldIDFor(t *testing.T, page, code string) string {
 		t.Fatalf("the registry does not list a field with code %q", code)
 	}
 	return firstEditID(t, page[i:])
+}
+
+// TestCustomFieldMutationsRequireAdmin is the auth review's finding made
+// concrete: of the seven mutating custom-field routes, only POST
+// /custom-fields had a test that failed if its authorization were removed.
+// Change any ONE of the six routes below from write( to read( in routes.go
+// and this must go red -- see the mutation-testing note in the delivery
+// report for the six confirmed kills. Asserting anything looser than 403
+// (the old "not 200, not 303" shape TestTeamWritesRequireAdmin uses) would
+// let a 500 from a broken RequireAdmin pass silently, which is exactly the
+// failure mode this test exists to close off.
+func TestCustomFieldMutationsRequireAdmin(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+	fieldID := mustCreateCustomField(t, h, "asset", "admin-gate-text", "text")
+	selectFieldID := mustCreateCustomField(t, h, "asset", "admin-gate-select", "select")
+	assetID := h.refs.Assets["hv-01"]
+	serviceID := h.refs.Services["orders-api"]
+
+	h.logout()
+	h.login("viewer", "viewer-password")
+
+	cases := []struct {
+		name, path string
+	}{
+		{"update a field", "/custom-fields/" + fieldID},
+		{"retire a field", "/custom-fields/" + fieldID + "/retire"},
+		{"restore a field", "/custom-fields/" + fieldID + "/restore"},
+		{"add an option", "/custom-fields/" + selectFieldID + "/options"},
+		{"set an asset's values", "/assets/" + assetID + "/custom-fields"},
+		{"set a service's values", "/services/" + serviceID + "/custom-fields"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			token := h.csrfToken("/custom-fields")
+			resp := h.post(tc.path, url.Values{"csrf_token": {token}}, false)
+			resp.Body.Close()
+			if resp.StatusCode != http.StatusForbidden {
+				t.Errorf("POST %s as viewer returned %d, want 403", tc.path, resp.StatusCode)
+			}
+		})
+	}
 }
 
 // mustCreateCustomField defines a field through the real handler and returns
