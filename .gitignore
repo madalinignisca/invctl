@@ -24,3 +24,12 @@ shot-*.png
 # web/static/app.css is generated but *is* committed: the Go build embeds it,
 # and requiring the Tailwind binary to build the binary would defeat the point
 # of having no Node runtime in the pipeline.
+
+# Playwright/E2E local artefacts. auth-state.json holds a LIVE session cookie
+# for whatever instance the run authenticated against -- scratch only, never
+# committed, even though the demo's own credentials are public by design.
+tests/e2e/auth-state.json
+tests/e2e/**/auth-state.json
+tests/e2e/test-results/
+tests/e2e/playwright-report/
+**/shot-*.png
