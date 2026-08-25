@@ -82,6 +82,13 @@
       {{$name := $row.InputName}}
       <div class="field">
         <label for="cf-{{$row.Field.ID}}">{{$row.Field.Label}}</label>
+        {{/* The description belongs HERE, not only on the show panel and the
+             registry. description is NOT NULL precisely so somebody has to say
+             why a field exists at the cheapest moment; the moment it earns that
+             is when an operator is looking at this input wondering what to type,
+             or has just been refused by it. Sending them to another page to read
+             a sentence we already hold is how a support call starts. */}}
+        {{with $row.Field.Description}}<div class="field-hint">{{.}}</div>{{end}}
         {{if eq $row.Field.Kind "text"}}
         <input id="cf-{{$row.Field.ID}}" class="{{if $.Edit.Err $name}}invalid{{end}}" type="text"
                name="{{$name}}" value="{{$.Edit.Value $name $row.Value}}">

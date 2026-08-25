@@ -24,6 +24,48 @@ import (
 // docs/custom-fields-design.md §4, §6 and §8. Task 5 built the registry;
 // this is the last user-facing piece.
 
+// TestTheEditorRendersEachFieldsDescription.
+//
+// From the senior review of WP-A4. `description` is NOT NULL so that somebody
+// has to say why a field exists at the moment that is cheapest -- creation.
+// The moment it EARNS that cost is the moment an operator is looking at the
+// input wondering what to type, or has just been refused by it. That moment
+// happens in the editor, and the editor was the one surface that rendered the
+// label alone: the show panel had the description, the registry had it, and
+// the person actually stuck had to navigate away to read a sentence already
+// loaded on the row they were looking at. That navigation is where a support
+// call starts, which is the whole reason this feature exists.
+func TestTheEditorRendersEachFieldsDescription(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+	// mustCreateFieldViaHTTP sets this description; asserting on the helper's
+	// own string keeps the test honest about what was actually stored.
+	const why = "a fixture field for the web test suite"
+	id := mustCreateFieldViaHTTP(t, h, "asset", "cost_centre", "Cost Centre", "text")
+
+	assetID := h.refs.Assets["hv-01"]
+	page := body(t, h.get("/assets/"+assetID+"?edit=custom-fields", false))
+
+	// Scoped to the EDITOR's own markup, deliberately. The show panel on this
+	// same page already renders the description, so a bare Contains(page, why)
+	// passes whether or not the editor draws it -- the assertion would be
+	// vacuous, which is exactly the shape this repo keeps finding. Anchor on
+	// this field's label and look only at what follows it.
+	label := strings.Index(page, `for="cf-`+id+`"`)
+	if label < 0 {
+		t.Fatalf("the editor did not draw an input for the field; this test would prove nothing")
+	}
+	rest := page[label:]
+	if end := strings.Index(rest, `for="cf-`); end > 0 {
+		rest = rest[:end] // stop at the next field, so a neighbour cannot satisfy this
+	}
+	if !strings.Contains(rest, why) {
+		t.Errorf("the editor renders the label without the description: an operator "+
+			"refused by this input cannot see why the field exists without leaving "+
+			"the page. Wanted %q after this field's own label", why)
+	}
+}
+
 func TestCustomFieldsRenderInTheirOwnSection(t *testing.T) {
 	// Grouped and labelled as the organisation's own, never interleaved with
 	// built-in fields: a new hire must be able to tell at a glance which of
