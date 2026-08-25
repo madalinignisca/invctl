@@ -278,7 +278,7 @@ func (s *SQLStore) RetireService(ctx context.Context, actor domain.Actor, id str
 			return translateWriteErr(err, "retiring service")
 		}
 		diff := fmt.Sprintf(`{"lifecycle":{"old":%q,"new":%q}}`, before.Lifecycle, domain.LifecycleRetired)
-		return t.log(ctx, "service", id, domain.ActionRetire, diff)
+		return t.log(ctx, "service", id, domain.ActionRetire, diff, "")
 	})
 }
 
@@ -475,7 +475,7 @@ func (s *SQLStore) RetireInstance(ctx context.Context, actor domain.Actor, id st
 		}
 		diff := fmt.Sprintf(`{"lifecycle":{"old":%q,"new":%q}}`,
 			before.Lifecycle, domain.LifecycleRetired)
-		return t.log(ctx, "service_instance", id, domain.ActionRetire, diff)
+		return t.log(ctx, "service_instance", id, domain.ActionRetire, diff, "")
 	})
 }
 

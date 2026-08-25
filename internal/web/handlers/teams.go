@@ -9,6 +9,7 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/madalinignisca/invctl/internal/domain"
@@ -169,10 +170,154 @@ func (a *App) TeamUpdate(w http.ResponseWriter, r *http.Request) {
 // is the estate saying "this was theirs and nobody has picked it up", which is a
 // finding worth seeing; clearing the column would erase the question with the
 // answer.
+//
+// This is "retire anyway" from the confirmation screen (TeamRetireConfirm)
+// as well as the direct route -- unchanged by WP-G7 piece 2 on purpose.
+// Nothing here requires the confirmation screen to have been seen, and
+// nothing here reassigns anything: see team_reassignment.go's own comment on
+// why RetireTeam must never call it.
 func (a *App) TeamRetire(w http.ResponseWriter, r *http.Request) {
 	if err := a.Store.RetireTeam(r.Context(), actor(r), r.PathValue("id")); err != nil {
 		a.handleStoreError(w, r, err)
 		return
 	}
 	render.Redirect(w, r, "/teams")
+}
+
+// teamRetireConfirmPage is the screen shown before a team is retired
+// (docs/ownership-report-design.md §5): what it looks after, and the offer to
+// move that somewhere else before the team goes. Never a block -- "retire
+// anyway" stays one click away regardless of what Counts says.
+type teamRetireConfirmPage struct {
+	Base
+	Team    *store.TeamRow
+	Counts  *store.TeamOwnershipCounts
+	Targets []store.TeamRow
+	Errors  map[string]string
+}
+
+// TeamRetireConfirm shows what a team looks after before it is retired, and
+// offers reassignment inline.
+//
+// GET, but registered under the admin-write bucket rather than the public
+// read routes -- like /imports, this view exists purely to feed a mutation
+// (TeamReassignAndRetire or TeamRetire) and a read-only user has no use for
+// it. It performs no mutation itself: nothing here writes anything, so an
+// operator can load this page, read the counts, and walk away having changed
+// nothing.
+func (a *App) TeamRetireConfirm(w http.ResponseWriter, r *http.Request) {
+	a.renderTeamRetireConfirm(w, r, http.StatusOK, nil)
+}
+
+func (a *App) renderTeamRetireConfirm(w http.ResponseWriter, r *http.Request, status int, errs map[string]string) {
+	id := r.PathValue("id")
+	team, err := a.Store.GetTeam(r.Context(), id)
+	if err != nil {
+		a.handleStoreError(w, r, err)
+		return
+	}
+	counts, err := a.Store.TeamOwnershipCounts(r.Context(), id)
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
+
+	// Only fetched when there is something to reassign: an already-empty team
+	// needs no picker, and the design is explicit that a zero-count team
+	// skips straight to the plain confirmation (design §5).
+	var targets []store.TeamRow
+	if counts.Total() > 0 {
+		all, err := a.Store.TeamOptions(r.Context())
+		if err != nil {
+			a.serverError(w, r, err)
+			return
+		}
+		for _, opt := range all {
+			if opt.ID != id {
+				targets = append(targets, opt)
+			}
+		}
+	}
+
+	a.Render.Respond(w, r, status, "team_retire_confirm", "team_retire_confirm", teamRetireConfirmPage{
+		Base:    a.base(r, "Retire team: "+team.Name, "teams"),
+		Team:    team,
+		Counts:  counts,
+		Targets: targets,
+		Errors:  orEmpty(errs),
+	})
+}
+
+// teamReassignResultPage reports what happened, one line per entity -- never
+// a bare count (design §4: "10 updated, 1 skipped tells the operator
+// nothing").
+type teamReassignResultPage struct {
+	Base
+	Team     *store.TeamRow
+	Target   *store.TeamRow
+	Outcomes []store.ReassignOutcome
+}
+
+// TeamReassignAndRetire moves everything the team looks after to the chosen
+// target, then retires the team -- the fix offered inline on
+// TeamRetireConfirm (design §5).
+//
+// Retirement runs REGARDLESS of the reassignment outcomes. A stale or failed
+// entity is reported, not treated as a reason to abandon the retirement --
+// forcing that choice is exactly what design §1 rejects: "retire anyway"
+// must stay available, and an entity this call could not move simply becomes
+// a report finding the same way it would if reassignment were never offered
+// at all.
+func (a *App) TeamReassignAndRetire(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	target := formValue(r, "target_team_id")
+	if target == "" {
+		a.renderTeamRetireConfirm(w, r, http.StatusUnprocessableEntity,
+			map[string]string{"target_team_id": "Choose a team to reassign to."})
+		return
+	}
+
+	who := actor(r)
+	outcomes, err := a.Store.ReassignTeamOwnership(r.Context(), who, id, target)
+	if err != nil {
+		if errs, ok := validationErrors(err); ok {
+			a.renderTeamRetireConfirm(w, r, http.StatusUnprocessableEntity, errs)
+			return
+		}
+		// ReassignTeamOwnership reports an invalid target (missing, retired,
+		// or the same team being retired) as domain.ErrInvalid rather than a
+		// domain.ValidationError -- there is no form to re-check field by
+		// field, only the one choice the operator made. Re-render the same
+		// confirmation screen with that explained, rather than the bare 422
+		// handleStoreError would otherwise show.
+		if errors.Is(err, domain.ErrInvalid) {
+			a.renderTeamRetireConfirm(w, r, http.StatusUnprocessableEntity,
+				map[string]string{"target_team_id": "That team cannot be the reassignment target."})
+			return
+		}
+		a.handleStoreError(w, r, err)
+		return
+	}
+	if err := a.Store.RetireTeam(r.Context(), who, id); err != nil {
+		a.handleStoreError(w, r, err)
+		return
+	}
+
+	team, err := a.Store.GetTeam(r.Context(), id)
+	if err != nil {
+		a.handleStoreError(w, r, err)
+		return
+	}
+	targetTeam, err := a.Store.GetTeam(r.Context(), target)
+	if err != nil {
+		a.handleStoreError(w, r, err)
+		return
+	}
+
+	a.Render.Respond(w, r, http.StatusOK, "team_reassign_result", "team_reassign_result", teamReassignResultPage{
+		Base:     a.base(r, "Team retired: "+team.Name, "teams"),
+		Team:     team,
+		Target:   targetTeam,
+		Outcomes: outcomes,
+	})
 }

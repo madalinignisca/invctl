@@ -264,7 +264,12 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 
 	write("POST /teams", app.TeamCreate)
 	write("POST /teams/{id}", app.TeamUpdate)
+	// GET, but admin-only: this view exists purely to feed the two mutations
+	// below and reveals nothing a read-only user has a use for -- the same
+	// reasoning /imports already applies to its own GET.
+	write("GET /teams/{id}/retire", app.TeamRetireConfirm)
 	write("POST /teams/{id}/retire", app.TeamRetire)
+	write("POST /teams/{id}/reassign-retire", app.TeamReassignAndRetire)
 	write("POST /projects", app.ProjectCreate)
 	write("POST /projects/{id}", app.ProjectUpdate)
 	write("POST /projects/{id}/retire", app.ProjectRetire)

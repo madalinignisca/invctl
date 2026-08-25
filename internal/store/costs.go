@@ -367,7 +367,7 @@ func (s *SQLStore) retireCost(ctx context.Context, actor domain.Actor, t costTab
 		}
 		diff := fmt.Sprintf(`{"lifecycle":{"old":%q,"new":%q}}`,
 			before.Lifecycle, domain.LifecycleRetired)
-		return tx.log(ctx, t.entity, id, domain.ActionRetire, diff)
+		return tx.log(ctx, t.entity, id, domain.ActionRetire, diff, "")
 	})
 }
 

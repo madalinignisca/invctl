@@ -86,6 +86,22 @@ func (r OwnershipRow) Eligibility() domain.OwnerEligibility {
 // its own visual treatment rather than reading identically to a retired one.
 func (r OwnershipRow) Transitional() bool { return r.Eligibility() == domain.OwnerTransitional }
 
+// teamOwnershipCountColumns is the five correlated-subquery counts across
+// the WP-G7 ownership surface (design §3): asset, service, project, identity,
+// custom_field, live only. Shared between noContactTeams (below) and
+// TeamOwnershipCounts (team_reassignment.go, piece 2's retirement
+// confirmation screen) so there is exactly one query that answers "what does
+// this team own", the way design §5 asks piece 2 to reuse piece 1's store
+// code rather than write a second one. Placeholder order: the four
+// per-entity lifecycle exclusions, top to bottom -- custom_field carries no
+// lifecycle column (migration 00051) and takes none.
+const teamOwnershipCountColumns = `
+	       (SELECT COUNT(*) FROM asset a WHERE a.team_id = t.id AND a.lifecycle <> ?) AS asset_count,
+	       (SELECT COUNT(*) FROM service s WHERE s.team_id = t.id AND s.lifecycle <> ?) AS service_count,
+	       (SELECT COUNT(*) FROM project p WHERE p.team_id = t.id AND p.lifecycle <> ?) AS project_count,
+	       (SELECT COUNT(*) FROM identity i WHERE i.team_id = t.id AND i.lifecycle <> ?) AS identity_count,
+	       (SELECT COUNT(*) FROM custom_field cf WHERE cf.owner_team_id = t.id AND cf.retired_at IS NULL) AS custom_field_count`
+
 // NoContactTeam is finding 3: one row per TEAM, not per entity it owns. A
 // team owning forty things with no contact is one finding with one fix --
 // edit the team -- not forty rows burying everything else (design §2).
@@ -403,12 +419,8 @@ func (s *SQLStore) noContactTeams(ctx context.Context) ([]NoContactTeam, error) 
 
 	var rows []NoContactTeam
 	if err := s.read(ctx, &rows, `
-		SELECT t.id AS team_id, t.code AS team_code, t.name AS team_name,
-		       (SELECT COUNT(*) FROM asset a WHERE a.team_id = t.id AND a.lifecycle <> ?) AS asset_count,
-		       (SELECT COUNT(*) FROM service s WHERE s.team_id = t.id AND s.lifecycle <> ?) AS service_count,
-		       (SELECT COUNT(*) FROM project p WHERE p.team_id = t.id AND p.lifecycle <> ?) AS project_count,
-		       (SELECT COUNT(*) FROM identity i WHERE i.team_id = t.id AND i.lifecycle <> ?) AS identity_count,
-		       (SELECT COUNT(*) FROM custom_field cf WHERE cf.owner_team_id = t.id AND cf.retired_at IS NULL) AS custom_field_count
+		SELECT t.id AS team_id, t.code AS team_code, t.name AS team_name,`+
+		teamOwnershipCountColumns+`
 		FROM team t
 		WHERE t.lifecycle IN (`+inClause+`)
 		  AND (t.contact_ref IS NULL OR t.contact_ref = '')

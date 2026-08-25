@@ -201,7 +201,7 @@ func (s *SQLStore) RetireTeam(ctx context.Context, actor domain.Actor, id string
 		}
 		diff := fmt.Sprintf(`{"lifecycle":{"old":%q,"new":%q}}`,
 			before.Lifecycle, domain.LifecycleRetired)
-		if err := tx.log(ctx, "team", id, domain.ActionRetire, diff); err != nil {
+		if err := tx.log(ctx, "team", id, domain.ActionRetire, diff, ""); err != nil {
 			return err
 		}
 		// Reindexed, which retirement elsewhere in this codebase does not need

@@ -207,7 +207,7 @@ func (s *SQLStore) PruneObservedTransitions(ctx context.Context, actor domain.Ac
 		// One row per run, whether or not anything matched. "The prune ran and
 		// found nothing" and "the prune did not run" are different facts, and
 		// the second is the one an auditor cares about.
-		return t.log(ctx, prunableTable, report.RunID, domain.ActionDelete, diff)
+		return t.log(ctx, prunableTable, report.RunID, domain.ActionDelete, diff, "")
 	})
 	if err != nil {
 		return nil, err
@@ -404,7 +404,7 @@ func (s *SQLStore) PruneUnmatchedObservations(ctx context.Context, actor domain.
 		// One row per run whether or not anything matched, for the same reason
 		// the transition prune does it: "ran and found nothing" and "did not
 		// run" are different facts and the second is the one an auditor wants.
-		return t.log(ctx, unmatchedTable, report.RunID, domain.ActionDelete, diff)
+		return t.log(ctx, unmatchedTable, report.RunID, domain.ActionDelete, diff, "")
 	})
 	if err != nil {
 		return nil, err

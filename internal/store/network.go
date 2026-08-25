@@ -280,7 +280,7 @@ func (s *SQLStore) RetireLink(ctx context.Context, actor domain.Actor, id string
 			return translateWriteErr(err, "retiring link")
 		}
 		diff := fmt.Sprintf(`{"lifecycle":{"old":%q,"new":%q}}`, before.Lifecycle, domain.LifecycleRetired)
-		return t.log(ctx, "link", id, domain.ActionRetire, diff)
+		return t.log(ctx, "link", id, domain.ActionRetire, diff, "")
 	})
 }
 

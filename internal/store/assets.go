@@ -897,7 +897,7 @@ func (s *SQLStore) RetireAsset(ctx context.Context, actor domain.Actor, id strin
 			return translateWriteErr(err, "retiring asset")
 		}
 		diff := fmt.Sprintf(`{"lifecycle":{"old":%q,"new":%q}}`, before.Lifecycle, domain.LifecycleRetired)
-		if err := t.log(ctx, "asset", id, domain.ActionRetire, diff); err != nil {
+		if err := t.log(ctx, "asset", id, domain.ActionRetire, diff, ""); err != nil {
 			return err
 		}
 		return retireAssetTopology(ctx, t, id, at)
@@ -923,7 +923,7 @@ func retireAssetTopology(ctx context.Context, t *tx, assetID, at string) error {
 			return translateWriteErr(err, "retiring net group membership")
 		}
 		diff := fmt.Sprintf(`{"lifecycle":{"old":%q,"new":%q}}`, domain.LifecycleActive, domain.LifecycleRetired)
-		if err := t.log(ctx, "net_group_member", m.GroupID+"/"+assetID, domain.ActionRetire, diff); err != nil {
+		if err := t.log(ctx, "net_group_member", m.GroupID+"/"+assetID, domain.ActionRetire, diff, ""); err != nil {
 			return err
 		}
 	}
@@ -974,7 +974,7 @@ func retireAssetTopology(ctx context.Context, t *tx, assetID, at string) error {
 			return translateWriteErr(err, "retiring link")
 		}
 		diff := fmt.Sprintf(`{"lifecycle":{"old":%q,"new":%q}}`, domain.LifecycleActive, domain.LifecycleRetired)
-		if err := t.log(ctx, "link", id, domain.ActionRetire, diff); err != nil {
+		if err := t.log(ctx, "link", id, domain.ActionRetire, diff, ""); err != nil {
 			return err
 		}
 	}

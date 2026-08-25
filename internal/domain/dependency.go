@@ -296,7 +296,13 @@ type ChangeLog struct {
 	ActorName  *string `db:"actor_name"`
 	Diff       string  `db:"diff"`
 	TicketRef  *string `db:"ticket_ref"`
-	At         string  `db:"at"`
+	// BatchID is set only for a row that is one entity's share of a bulk
+	// operation (WP-G7 piece 2's team-retirement reassignment is the first),
+	// so the whole set can be reconstructed later. NULL for the overwhelming
+	// majority of rows, which are one operator's edit to one row and need
+	// nothing else to explain them.
+	BatchID *string `db:"batch_id"`
+	At      string  `db:"at"`
 }
 
 // DisplayActor returns a human-readable name for the actor, falling back to

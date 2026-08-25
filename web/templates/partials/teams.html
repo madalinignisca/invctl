@@ -58,6 +58,15 @@
       nobody has picked these up. Reassign them rather than expecting the list to empty.
     </p>
   </div>
+  {{else if .CanWrite}}
+  {{/* A plain link, not hx-post + hx-confirm: the confirmation this action
+       needs is counts plus a team picker, which a text prompt cannot hold
+       (docs/ownership-report-design.md §5). It is a real page, reachable
+       with JavaScript off, and performs no mutation on its own -- it only
+       leads to one. */}}
+  <div class="panel-head" style="border:none;padding-bottom:0">
+    <a class="btn btn-sm btn-danger" href="/teams/{{.Team.ID}}/retire">Retire this team&hellip;</a>
+  </div>
   {{end}}
 
   <div class="panel">
@@ -197,5 +206,142 @@
     </form>
   </div>
   {{end}}
+</div>
+{{end}}
+
+{{/* The retirement confirmation screen (WP-G7 piece 2,
+     docs/ownership-report-design.md §5): what the team looks after, before
+     it goes, with the fix offered right there.
+
+     NEITHER A BLOCK NOR A BARE WARNING. "Retire this team anyway" is always
+     present and never disabled by anything on this page -- the language
+     below must keep saying the same thing team_panel's disbanded callout
+     says after the fact ("what it looked after keeps pointing at it"),
+     never a stronger claim like "you must reassign these first". */}}
+{{define "team_retire_confirm"}}
+<div id="team-retire-confirm">
+  <div class="crumbs">
+    <a href="/teams">teams</a><span class="sep">/</span>
+    <a href="/teams/{{.Team.ID}}">{{.Team.Code}}</a><span class="sep">/</span><span>retire</span>
+  </div>
+
+  {{if eq .Counts.Total 0}}
+  <div class="panel">
+    <div class="panel-head">
+      <h2>Retire {{.Team.Name}}?</h2>
+      <span class="panel-note">Nothing is currently assigned to this team.</span>
+    </div>
+    <div class="panel-body">
+      <form method="post" action="/teams/{{.Team.ID}}/retire" hx-post="/teams/{{.Team.ID}}/retire">
+        <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+        <button class="btn btn-danger" type="submit">Retire team</button>
+        <a class="btn btn-sm" href="/teams/{{.Team.ID}}">Cancel</a>
+      </form>
+    </div>
+  </div>
+  {{else}}
+  <div class="panel">
+    <div class="panel-head">
+      <h2>{{.Team.Name}} looks after {{.Counts.Total}} {{pluralise .Counts.Total "thing" "things"}}</h2>
+      <span class="panel-note">
+        Retiring it does not clear these -- a retired team owning live things is
+        how the estate says nobody has picked them up yet. Move them to another
+        team now, while you know why this one is going away, or retire anyway
+        and let the <a href="/reports/ownership">ownership report</a> catch them
+        later.
+      </span>
+    </div>
+    <div class="panel-body">
+      <table>
+        <tbody>
+          <tr><td>Assets</td><td class="num">{{.Counts.AssetCount}}</td></tr>
+          <tr><td>Services</td><td class="num">{{.Counts.ServiceCount}}</td></tr>
+          <tr><td>Projects</td><td class="num">{{.Counts.ProjectCount}}</td></tr>
+          <tr><td>Identities</td><td class="num">{{.Counts.IdentityCount}}</td></tr>
+          <tr><td>Custom fields</td><td class="num">{{.Counts.CustomFieldCount}}</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head">
+      <h2>Reassign, then retire</h2>
+      <span class="panel-note">Moves everything above to the team you choose, then retires {{.Team.Code}}.</span>
+    </div>
+    <form class="panel-body" method="post" action="/teams/{{.Team.ID}}/reassign-retire"
+          hx-post="/teams/{{.Team.ID}}/reassign-retire">
+      <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+      <div class="field">
+        <label for="rr-target">Reassign to</label>
+        <select id="rr-target" name="target_team_id" required>
+          <option value="">— choose a team —</option>
+          {{range .Targets}}<option value="{{.ID}}">{{.Code}} — {{.Name}}</option>{{end}}
+        </select>
+        {{with index .Errors "target_team_id"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <button class="btn btn-primary" type="submit">Reassign and retire</button>
+    </form>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head">
+      <h2>Retire anyway</h2>
+      <span class="panel-note">
+        Leaves everything above pointing at {{.Team.Code}}. It becomes a finding
+        on the ownership report, not an error -- someone can pick it up later.
+      </span>
+    </div>
+    <div class="panel-body">
+      <form method="post" action="/teams/{{.Team.ID}}/retire" hx-post="/teams/{{.Team.ID}}/retire">
+        <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+        <button class="btn btn-danger" type="submit">Retire {{.Team.Code}} without reassigning</button>
+      </form>
+    </div>
+  </div>
+
+  <p><a href="/teams/{{.Team.ID}}">Cancel</a></p>
+  {{end}}
+</div>
+{{end}}
+
+{{/* The outcome of a reassign-then-retire, one line per entity -- never a
+     bare count (design §4: "10 updated, 1 skipped tells the operator
+     nothing"). */}}
+{{define "team_reassign_result"}}
+<div id="team-reassign-result">
+  <div class="panel">
+    <div class="panel-head">
+      <h2>{{.Team.Name}} retired</h2>
+      <span class="panel-note">Reassigned to {{.Target.Name}} ({{.Target.Code}}).</span>
+    </div>
+    {{if .Outcomes}}
+    <div class="scroll-x">
+      <table>
+        <thead><tr><th>Type</th><th>What</th><th>Result</th></tr></thead>
+        <tbody>
+          {{range .Outcomes}}
+          <tr>
+            <td><span class="pill pill-muted">{{.EntityType}}</span></td>
+            <td>{{.Name}}</td>
+            <td>
+              {{if eq .Result "assigned"}}
+                <span class="pill pill-up">reassigned</span>
+              {{else if eq .Result "no_longer_owned_by_this_team"}}
+                <span class="pill pill-degraded" title="Somebody else changed this before this request ran">no longer owned by this team</span>
+              {{else}}
+                <span class="pill pill-down" title="{{.Detail}}">write failed</span>
+              {{end}}
+            </td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+    {{else}}
+    <div class="empty">This team had nothing assigned to it.</div>
+    {{end}}
+  </div>
+  <p><a href="/teams">Back to teams</a></p>
 </div>
 {{end}}

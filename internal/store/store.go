@@ -98,11 +98,27 @@ func (t *tx) selectAll(ctx context.Context, dest any, query string, args ...any)
 }
 
 // log writes the audit row. Callers pass a pre-rendered JSON diff.
-func (t *tx) log(ctx context.Context, entityType, entityID, action, diff string) error {
+//
+// batchID is NULL for the overwhelming majority of writes -- one operator's
+// edit to one row needs nothing else to reconstruct it. Pass a non-empty
+// value only when several change_log rows across different entities are the
+// outcome of ONE bulk operation (currently: team-retirement reassignment,
+// WP-G7 piece 2, docs/ownership-report-design.md §4) -- timestamp clustering
+// alone cannot tell a reader "one operator claimed fifty things" from
+// "fifty independent edits landed in the same second", and the column cannot
+// be added retroactively because change_log admits no UPDATE. This is the
+// ONLY INSERT into change_log in the codebase; every other writer in this
+// file and every caller elsewhere goes through log, logCreate or logUpdate
+// rather than a second insertion point.
+func (t *tx) log(ctx context.Context, entityType, entityID, action, diff, batchID string) error {
+	var batch any
+	if batchID != "" {
+		batch = batchID
+	}
 	_, err := t.exec(ctx,
-		`INSERT INTO change_log (id, entity_type, entity_id, action, actor, actor_kind, diff, at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		NewID(), entityType, entityID, action, t.actor.ID, t.actor.Kind, diff, t.at)
+		`INSERT INTO change_log (id, entity_type, entity_id, action, actor, actor_kind, diff, batch_id, at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		NewID(), entityType, entityID, action, t.actor.ID, t.actor.Kind, diff, batch, t.at)
 	if err != nil {
 		return fmt.Errorf("writing change log for %s %s: %w", entityType, entityID, err)
 	}
@@ -115,7 +131,7 @@ func (t *tx) logCreate(ctx context.Context, entityType, entityID string, entity 
 	if err != nil {
 		return err
 	}
-	return t.log(ctx, entityType, entityID, domain.ActionCreate, snapshot)
+	return t.log(ctx, entityType, entityID, domain.ActionCreate, snapshot, "")
 }
 
 // logUpdate records the field-level difference. A no-op update writes nothing:
@@ -128,7 +144,7 @@ func (t *tx) logUpdate(ctx context.Context, entityType, entityID string, before,
 	if !changed {
 		return nil
 	}
-	return t.log(ctx, entityType, entityID, domain.ActionUpdate, diff)
+	return t.log(ctx, entityType, entityID, domain.ActionUpdate, diff, "")
 }
 
 // write runs fn inside a transaction on the writer pool.

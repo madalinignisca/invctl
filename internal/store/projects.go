@@ -402,7 +402,7 @@ func (s *SQLStore) releaseLinks(ctx context.Context, t *tx, table, column, proje
 	}
 	for _, id := range ids {
 		if err := t.log(ctx, table, projectID+"/"+id, domain.ActionRetire,
-			`{"lifecycle":["active","retired"],"reason":["","project retired"]}`); err != nil {
+			`{"lifecycle":["active","retired"],"reason":["","project retired"]}`, ""); err != nil {
 			return err
 		}
 	}
@@ -597,6 +597,6 @@ func (s *SQLStore) retireLink(ctx context.Context, actor domain.Actor, table, co
 			return translateWriteErr(err, "retiring project link")
 		}
 		return t.log(ctx, table, projectID+"/"+entityID, domain.ActionRetire,
-			`{"lifecycle":["active","retired"]}`)
+			`{"lifecycle":["active","retired"]}`, "")
 	})
 }

@@ -340,7 +340,7 @@ func (s *SQLStore) RetireCertificate(ctx context.Context, actor domain.Actor, id
 		}
 		diff := fmt.Sprintf(`{"lifecycle":{"old":%q,"new":%q}}`,
 			before.Lifecycle, domain.LifecycleRetired)
-		return t.log(ctx, "certificate", id, domain.ActionRetire, diff)
+		return t.log(ctx, "certificate", id, domain.ActionRetire, diff, "")
 	})
 }
 
@@ -548,7 +548,7 @@ func (s *SQLStore) deployCertificate(ctx context.Context, actor domain.Actor,
 			return translateWriteErr(err, "recording a certificate deployment")
 		}
 		return t.log(ctx, "certificate", certificateID, domain.ActionUpdate,
-			fmt.Sprintf(`{"deployment":{"new":%q,"note":%q}}`, entityID, derefOr(note, "")))
+			fmt.Sprintf(`{"deployment":{"new":%q,"note":%q}}`, entityID, derefOr(note, "")), "")
 	})
 }
 
@@ -589,7 +589,7 @@ func (s *SQLStore) undeployCertificate(ctx context.Context, actor domain.Actor,
 				certificateID, entityID, domain.ErrNotFound)
 		}
 		return t.log(ctx, "certificate", certificateID, domain.ActionUpdate,
-			fmt.Sprintf(`{"deployment":{"old":%q}}`, entityID))
+			fmt.Sprintf(`{"deployment":{"old":%q}}`, entityID), "")
 	})
 }
 

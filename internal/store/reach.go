@@ -116,7 +116,7 @@ func (s *SQLStore) RetireNetGroup(ctx context.Context, actor domain.Actor, id st
 			return translateWriteErr(err, "retiring net group")
 		}
 		diff := fmt.Sprintf(`{"lifecycle":{"old":%q,"new":%q}}`, before.Lifecycle, domain.LifecycleRetired)
-		if err := t.log(ctx, "net_group", id, domain.ActionRetire, diff); err != nil {
+		if err := t.log(ctx, "net_group", id, domain.ActionRetire, diff, ""); err != nil {
 			return err
 		}
 		return retireNetGroupCascade(ctx, t, id, at)
@@ -140,7 +140,7 @@ func retireNetGroupCascade(ctx context.Context, t *tx, groupID, at string) error
 			return translateWriteErr(err, "retiring net group member")
 		}
 		diff := fmt.Sprintf(`{"lifecycle":{"old":%q,"new":%q}}`, domain.LifecycleActive, domain.LifecycleRetired)
-		if err := t.log(ctx, "net_group_member", groupID+"/"+assetID, domain.ActionRetire, diff); err != nil {
+		if err := t.log(ctx, "net_group_member", groupID+"/"+assetID, domain.ActionRetire, diff, ""); err != nil {
 			return err
 		}
 	}
@@ -191,7 +191,7 @@ func retireRows(ctx context.Context, t *tx, table string, ids []string, at strin
 			return translateWriteErr(err, "retiring "+table)
 		}
 		diff := fmt.Sprintf(`{"lifecycle":{"old":%q,"new":%q}}`, domain.LifecycleActive, domain.LifecycleRetired)
-		if err := t.log(ctx, table, id, domain.ActionRetire, diff); err != nil {
+		if err := t.log(ctx, table, id, domain.ActionRetire, diff, ""); err != nil {
 			return err
 		}
 	}
@@ -285,7 +285,7 @@ func (s *SQLStore) RetireNetGroupMember(ctx context.Context, actor domain.Actor,
 			return nil // already retired, or never a member -- a no-op, not an error
 		}
 		diff := fmt.Sprintf(`{"lifecycle":{"old":%q,"new":%q}}`, domain.LifecycleActive, domain.LifecycleRetired)
-		return t.log(ctx, "net_group_member", groupID+"/"+assetID, domain.ActionRetire, diff)
+		return t.log(ctx, "net_group_member", groupID+"/"+assetID, domain.ActionRetire, diff, "")
 	})
 }
 
@@ -386,7 +386,7 @@ func (s *SQLStore) RetireNetUplink(ctx context.Context, actor domain.Actor, id s
 			return translateWriteErr(err, "retiring net uplink")
 		}
 		diff := fmt.Sprintf(`{"lifecycle":{"old":%q,"new":%q}}`, before.Lifecycle, domain.LifecycleRetired)
-		return t.log(ctx, "net_uplink", id, domain.ActionRetire, diff)
+		return t.log(ctx, "net_uplink", id, domain.ActionRetire, diff, "")
 	})
 }
 
@@ -609,7 +609,7 @@ func (s *SQLStore) RetireNetAttachment(ctx context.Context, actor domain.Actor, 
 			return translateWriteErr(err, "retiring net attachment")
 		}
 		diff := fmt.Sprintf(`{"lifecycle":{"old":%q,"new":%q}}`, before.Lifecycle, domain.LifecycleRetired)
-		return t.log(ctx, "net_attachment", id, domain.ActionRetire, diff)
+		return t.log(ctx, "net_attachment", id, domain.ActionRetire, diff, "")
 	})
 }
 
@@ -683,7 +683,7 @@ func (s *SQLStore) RetireNetAnchor(ctx context.Context, actor domain.Actor, id s
 			return translateWriteErr(err, "retiring net anchor")
 		}
 		diff := fmt.Sprintf(`{"lifecycle":{"old":%q,"new":%q}}`, before.Lifecycle, domain.LifecycleRetired)
-		return t.log(ctx, "net_anchor", id, domain.ActionRetire, diff)
+		return t.log(ctx, "net_anchor", id, domain.ActionRetire, diff, "")
 	})
 }
 

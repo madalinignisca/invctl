@@ -257,6 +257,15 @@ var DeclaredColumns = map[string][]string{
 	"change_log": {
 		"id", "entity_type", "entity_id", "action", "actor", "actor_kind",
 		"diff", "ticket_ref", "at",
+		// batch_id (WP-G7 piece 2, docs/ownership-report-design.md §4) groups
+		// several change_log rows written by ONE bulk operation on ONE row's
+		// person-driven act -- the batch is a UI convenience for
+		// reconstructing what one operator did in one request, not a second
+		// fact about the world. Declared for the same reason the rest of this
+		// row is: it is written by tx.log alongside everything else here, on
+		// the same act, and carries no observed or provenance meaning of its
+		// own.
+		"batch_id",
 	},
 	"dependency": {
 		"id", "consumer_service_id", "consumer_instance_id", "provider_endpoint_id",

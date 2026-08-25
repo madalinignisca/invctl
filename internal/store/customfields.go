@@ -404,7 +404,7 @@ func (s *SQLStore) RetireCustomField(ctx context.Context, actor domain.Actor, id
 		}
 		diff := fmt.Sprintf(`{"retired_at":{"old":null,"new":%q},"retired_by":{"old":null,"new":%q}}`,
 			at, actor.ID)
-		return t.log(ctx, "custom_field", id, domain.ActionRetire, diff)
+		return t.log(ctx, "custom_field", id, domain.ActionRetire, diff, "")
 	})
 }
 
@@ -455,7 +455,7 @@ func (s *SQLStore) RestoreCustomField(ctx context.Context, actor domain.Actor, i
 		// the update it is: two columns moving back to their zero value.
 		diff := fmt.Sprintf(`{"retired_at":{"old":%q,"new":null},"retired_by":{"old":%q,"new":null}}`,
 			retiredAt, actorOrEmpty(before.RetiredBy))
-		return t.log(ctx, "custom_field", id, domain.ActionUpdate, diff)
+		return t.log(ctx, "custom_field", id, domain.ActionUpdate, diff, "")
 	})
 }
 
