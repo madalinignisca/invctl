@@ -10,13 +10,11 @@ package store
 
 import (
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/madalinignisca/invctl/internal/domain"
@@ -151,46 +149,49 @@ func entityCustomValues(ctx context.Context, t *tx, entityID string) ([]domain.C
 	return values, nil
 }
 
-// foldCustomValues renders an entity's values as "code=#digest,code=#digest".
+// foldCustomValues renders an entity's values as "code@n,code@n" -- n is
+// custom_field_value.row_version, not the value itself.
 //
-// GDPR MITIGATION, LANDED. This used to render "code=value" -- the plaintext
-// itself, permanently, in an append-only table that is never pruned. See
-// docs/AUDIT.md's custom_field_value row and docs/custom-fields-design.md §5
-// for the full history: an administrator can define a field like "Owner
-// email" or "Contact phone" at any time, and CLAUDE.md's position that the
-// audit trail "carries no personal data and can be kept forever with no
-// retention argument" rested, for this feature alone, on nobody ever doing
-// so.
+// THIS REPLACED A KEYED HMAC DIGEST (see git history and
+// docs/custom-fields-design.md §5's changelog for the full account). The
+// digest was pseudonymisation, not anonymisation -- its key lived in the same
+// database and the same backup as the log it protected -- and it was
+// invertible with no key at all for a `select` or `boolean` field, since
+// `/changes` is readable by any authenticated user and a `select` field's
+// option list is published on the registry: identical values digest
+// identically, so a reader with the public option list can simply try each
+// one. It also had a real, if small, chance of writing NO change_log row at
+// all: a 48-bit digest collision on one (field, entity) pair made diffJSON
+// report changed=false while row_version bumped and the value changed on the
+// entity's own page -- a mutation of declared state with no audit entry.
 //
-// The fix folds a KEYED DIGEST of the value instead: HMAC-SHA256 over the
-// value, the first 12 hex characters, prefixed with "#" so a reader can tell
-// at a glance this is a digest and not a value (see foldDigest below). That
-// keeps the property the fold exists for -- a set replacement that leaves
-// every column of the parent untouched still produces a diff, because the
-// digest still changes when the value does -- while writing nothing about
-// the value itself into change_log. What is lost, and it is an accepted,
-// permanent cost rather than an oversight: change_log now shows that a
-// custom value changed and which field, never what it changed to. The
-// current value still lives in custom_field_value and on the entity's own
-// page; only the audit trail's copy of it is gone.
+// A CHANGE COUNTER HAS NEITHER PROBLEM. custom_field_value.row_version
+// already advances by exactly one on every real change and holds still on a
+// no-op resubmission (setCustomValues preserves it verbatim for an unchanged
+// value) -- it is already exactly the change token this fold needs, so this
+// reuses it rather than inventing a second counter. Two consecutive values of
+// the same field can never collide (the counter strictly increases), there is
+// no key to manage, keep outside the database, or accidentally rotate, and
+// nothing about a counter can be inverted into the value it stands in for --
+// it carries no information about the value at all, which is a strictly
+// stronger property than a digest keyed correctly ever had.
 //
-// FORWARD-ONLY. change_log is append-only -- no UPDATE, no DELETE, ever --
-// so every entry written before this change still holds the plaintext it was
-// written with. This fold only changes what NEW entries record.
+// WHAT IS LOST is exactly what the digest already gave up: change_log shows
+// that a custom value changed and which field, never what it changed to or
+// what it changed FROM. The current value still lives in custom_field_value
+// and on the entity's own page; only the audit trail's copy is gone.
 //
-// SORTED BY CODE BEFORE JOINING, the same reason dependencyAudit sorts its data
+// FORWARD-ONLY, unchanged from before. change_log is append-only -- no
+// UPDATE, no DELETE, ever -- so every entry written before this shipped still
+// holds whatever it was written with: entries from before the digest carry
+// the plaintext value, entries written under the digest carry
+// "code=#digest", and entries from here on carry "code@n". A reader of an old
+// entry meets a format that no longer exists, and nothing rewrites it.
+//
+// SORTED BEFORE JOINING, the same reason dependencyAudit sorts its data
 // classes: a set written in a different order is not a change, and an audit
 // trail that reports one teaches its readers to ignore it.
-//
-// A key of zero length is a wiring bug -- SetCustomValues is called against a
-// store nobody attached SQLStore.WithFoldKey to -- and foldDigest refuses to
-// compute a digest under an empty key, which would be silently worthless as a
-// keyed digest and indistinguishable from a correctly folded one to anyone
-// reading it later. It returns an error rather than panicking: CLAUDE.md's
-// "never panic outside main" admits no exception here, and failing the write
-// closed -- refusing to fold rather than folding wrong -- is the same
-// fail-closed posture, expressed as an error instead of a crash.
-func foldCustomValues(key []byte, defs map[string]domain.CustomField, values []domain.CustomFieldValue) (string, error) {
+func foldCustomValues(defs map[string]domain.CustomField, values []domain.CustomFieldValue) string {
 	pairs := make([]string, 0, len(values))
 	for _, v := range values {
 		def, ok := defs[v.FieldID]
@@ -200,51 +201,10 @@ func foldCustomValues(key []byte, defs map[string]domain.CustomField, values []d
 			// entity does not have.
 			continue
 		}
-		digest, err := foldDigest(key, v.ValueText)
-		if err != nil {
-			return "", err
-		}
-		pairs = append(pairs, def.Code+"="+digest)
+		pairs = append(pairs, def.Code+"@"+strconv.Itoa(v.RowVersion))
 	}
 	sort.Strings(pairs)
-	return strings.Join(pairs, ","), nil
-}
-
-// foldDigest renders a keyed digest of one custom value: HMAC-SHA256, first
-// 12 hex characters, prefixed with "#".
-//
-// 12 hex characters is 48 bits. The birthday bound across the WHOLE
-// change_log table is the wrong model: two folded digests only need to differ
-// from each other when they belong to the SAME field on the SAME entity,
-// because that is the only pair diffJSON ever compares. A collision between
-// unrelated rows is not merely invisible -- it is worse if it lands on the
-// SAME (field, entity) pair across two consecutive saves: if custom_fields is
-// the only thing that moved, a colliding digest makes diffJSON report
-// changed=false, and NO change_log row is written at all -- row_version still
-// bumps and the value on the entity's own page still changes, so this is a
-// mutation of declared state with no audit entry, the exact failure rule 7
-// exists to prevent. So the realistic exposure is one field's value history
-// on one entity over a deployment's life: even an estate saving a value a day
-// for 50 years is under 20,000 digests for that one (field, entity) pair, and
-// the birthday bound for a 48-bit space at that count is (20000^2)/2 / 2^48
-// =~ 7e-7 -- roughly one in a million, for a scenario already far more saves
-// than any custom field this system describes will see. 12 hex characters is
-// comfortable for what this digest actually has to distinguish, and the cost
-// of being wrong is stated above rather than only "unlikely".
-//
-// The key must be stable across restarts -- see ResolveAuditFoldKey in
-// foldkey.go -- or every entity holding a custom value shows a spurious diff
-// on its next save after every restart, forever, which would be worse than
-// the plaintext exposure this replaces.
-func foldDigest(key []byte, value string) (string, error) {
-	if len(key) == 0 {
-		return "", errors.New("folding a custom value into the audit trail: " +
-			"no audit fold key configured; call SQLStore.WithFoldKey before " +
-			"writing custom values, or every digest would be computed under an empty key")
-	}
-	mac := hmac.New(sha256.New, key)
-	mac.Write([]byte(value))
-	return "#" + hex.EncodeToString(mac.Sum(nil))[:12], nil
+	return strings.Join(pairs, ",")
 }
 
 // customFieldsAudit renders an entity's custom values as the string that folds
@@ -259,7 +219,7 @@ func customFieldsAudit(ctx context.Context, t *tx, entityType, entityID string) 
 	if err != nil {
 		return "", err
 	}
-	return foldCustomValues(t.foldKey, defs, values)
+	return foldCustomValues(defs, values), nil
 }
 
 // setCustomValues applies one entity's submitted custom values INSIDE t.

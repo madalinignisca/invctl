@@ -217,13 +217,13 @@
     <div class="callout callout-warn">
       <strong>Think before you name this "Owner email".</strong>
       <p style="margin-top:6px">
-        A field's values are recorded as a digest in the audit trail, not as
-        text — so a change shows that a value moved and which field, never
-        what it changed to. But the value itself still lives on the entity's
-        own page in <code>custom_field_value</code>, unencrypted, for as long
-        as anybody keeps it there. Casual personal data still does not belong
-        in a custom field; this only closes the audit-trail exposure, not the
-        entity page.
+        A field's values are recorded as a plain change counter in the audit
+        trail, not as text — so a change shows that a value moved and which
+        field, never what it changed to. But the value itself still lives on
+        the entity's own page in <code>custom_field_value</code>, unencrypted,
+        for as long as anybody keeps it there. Casual personal data still
+        does not belong in a custom field; this only closes the audit-trail
+        exposure, not the entity page.
       </p>
     </div>
 

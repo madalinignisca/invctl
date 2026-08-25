@@ -34,20 +34,6 @@ type Config struct {
 	SessionKey     []byte
 	SessionTimeout time.Duration
 
-	// AuditFoldKey is the HMAC key custom field values are folded into the
-	// audit trail under, as a digest rather than plaintext (docs/AUDIT.md's
-	// custom_field_value row). nil means INV_AUDIT_FOLD_KEY was not set --
-	// UNLIKE SessionKey, THIS IS NEVER GENERATED HERE. A session key
-	// regenerated at startup only logs people out; a fold key regenerated at
-	// startup changes every digest ever folded and puts a spurious diff on
-	// every entity holding a custom value the next time it is saved, forever
-	// -- change_log is append-only. So when this is nil, cmd/invctl resolves
-	// the key against the database instead (store.ResolveAuditFoldKey),
-	// which persists a generated key the first time and reads it back on
-	// every start after. This field only ever carries an operator-supplied
-	// key, validated the same way SessionKey is.
-	AuditFoldKey []byte
-
 	// AdminUsers is the POC authorization model in its entirety: membership
 	// grants write access, everyone else is read-only.
 	AdminUsers []string
@@ -160,12 +146,6 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 	cfg.SessionKey = key
-
-	foldKey, err := auditFoldKey()
-	if err != nil {
-		return nil, err
-	}
-	cfg.AuditFoldKey = foldKey
 
 	agents, err := loadAgentCredentials()
 	if err != nil {
@@ -327,32 +307,6 @@ func sessionKey() ([]byte, error) {
 
 // SessionKeyGenerated reports whether the key came from the environment.
 func SessionKeyGenerated() bool { return os.Getenv("INV_SESSION_KEY") == "" }
-
-// auditFoldKey reads INV_AUDIT_FOLD_KEY, validated exactly the way
-// sessionKey validates INV_SESSION_KEY: base64, at least 32 bytes, refuse to
-// start rather than accept a weak key.
-//
-// UNLIKE sessionKey, THIS NEVER GENERATES ONE. When the variable is unset it
-// returns (nil, nil) and leaves key resolution to cmd/invctl, which asks the
-// database for a key persisted on an earlier start, generating one only if
-// none exists yet -- see store.ResolveAuditFoldKey for why that has to
-// happen against the database rather than here: this function runs before
-// the database is even open, and the whole point is that the key must not
-// change across a restart.
-func auditFoldKey() ([]byte, error) {
-	raw := os.Getenv("INV_AUDIT_FOLD_KEY")
-	if raw == "" {
-		return nil, nil
-	}
-	key, err := base64.StdEncoding.DecodeString(raw)
-	if err != nil {
-		return nil, fmt.Errorf("decoding INV_AUDIT_FOLD_KEY: expected base64: %w", err)
-	}
-	if len(key) < 32 {
-		return nil, fmt.Errorf("decoding INV_AUDIT_FOLD_KEY: need at least 32 bytes, got %d", len(key))
-	}
-	return key, nil
-}
 
 func envOr(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {

@@ -85,15 +85,15 @@ func TestACustomFieldRendersOnAServiceDetailPage(t *testing.T) {
 }
 
 // TestTheValueEditorWarnsAboutPIIWithoutOverclaimingTheAuditTrail is FINAL
-// REVIEW AX(a), updated for the GDPR digest fold: the creation form's
-// warning (Ruling AD) is opened by whoever DEFINES a field, never by
+// REVIEW AX(a), updated for the GDPR change-counter fold: the creation
+// form's warning (Ruling AD) is opened by whoever DEFINES a field, never by
 // whoever later TYPES a value into one on an asset or service page -- often
 // somebody who has never seen the creation form at all. This is the warning
 // at the point PII actually gets typed.
 //
 // The warning changed shape along with the fold: a value's text no longer
-// reaches change_log (foldCustomValues folds a keyed digest instead, see
-// internal/store/customvalues.go), so the editor must stop claiming the
+// reaches change_log (foldCustomValues folds a plain change counter instead,
+// see internal/store/customvalues.go), so the editor must stop claiming the
 // audit trail keeps it forever -- that claim is no longer true, and this
 // test would previously have kept passing against a template that had
 // quietly become wrong. It still has to warn that the value itself lives on
@@ -106,10 +106,10 @@ func TestTheValueEditorWarnsAboutPIIWithoutOverclaimingTheAuditTrail(t *testing.
 	page := body(t, h.get("/assets/"+h.refs.Assets["hv-01"], false))
 	if strings.Contains(page, "kept in the audit trail forever") {
 		t.Error("the value editor still claims the audit trail keeps the value forever, " +
-			"which is no longer true once the fold digests it")
+			"which is no longer true once the fold counts it")
 	}
-	if !strings.Contains(page, "digest") {
-		t.Error("the value editor does not explain that the audit trail records a digest, not the value")
+	if !strings.Contains(page, "change counter") {
+		t.Error("the value editor does not explain that the audit trail records a change counter, not the value")
 	}
 	if !strings.Contains(page, "personal data") {
 		t.Error("the value editor does not warn against typing personal data")
@@ -184,16 +184,16 @@ func TestARetiredFieldDisappearsFromTheDetailPage(t *testing.T) {
 	}
 }
 
-// TestTheTimelineExplainsACustomFieldsDigestTheSameWayTheChangesListDoes is
+// TestTheTimelineExplainsACustomFieldsCounterTheSameWayTheChangesListDoes is
 // the fix for the one surface that rendered a custom_fields diff raw: the
 // asset's own Timeline panel (web/templates/partials/audit.html's
 // timeline_panel) used to print change_log.diff verbatim instead of going
 // through store.ParseDiff the way "/changes" and the entry page already do,
-// so an operator reading the timeline met a bare
-// "custom_fields: #a3f9c1b2d4e6" with none of the explanation the other two
-// surfaces carry (diff.go's customFieldsExplanation). There is no plaintext
-// exposure either way -- this is legibility, not a redaction concern.
-func TestTheTimelineExplainsACustomFieldsDigestTheSameWayTheChangesListDoes(t *testing.T) {
+// so an operator reading the timeline met a bare "custom_fields: cost_centre@3"
+// with none of the explanation the other two surfaces carry (diff.go's
+// customFieldsExplanation). There is no plaintext exposure either way --
+// this is legibility, not a redaction concern.
+func TestTheTimelineExplainsACustomFieldsCounterTheSameWayTheChangesListDoes(t *testing.T) {
 	h := newHarness(t)
 	h.login("admin", "admin-password")
 	id := mustCreateFieldViaHTTP(t, h, "asset", "cost_centre", "Cost Centre", "text")
@@ -204,9 +204,9 @@ func TestTheTimelineExplainsACustomFieldsDigestTheSameWayTheChangesListDoes(t *t
 	if !strings.Contains(page, "custom_fields") {
 		t.Fatal("the timeline does not show the custom_fields row at all")
 	}
-	if !strings.Contains(page, "recorded as a digest") {
+	if !strings.Contains(page, "recorded as a change counter") {
 		t.Error("the timeline renders a custom_fields change without the reader note " +
-			"the changes list and the entry page both carry -- an unexplained digest " +
+			"the changes list and the entry page both carry -- an unexplained counter " +
 			"reads as corruption, which is the support call this feature exists to prevent")
 	}
 }

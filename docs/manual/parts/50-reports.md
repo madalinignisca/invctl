@@ -122,14 +122,16 @@ to a display name when it can; scrubbing an account answers an erasure request
 while the log keeps its integrity and simply stops resolving that person.
 
 A custom field's own value, if your estate has defined one, is folded into
-the change log as a keyed digest rather than as text — an entry shows that
-the value changed and which field, never what it changed to. The value still
-lives on the entity's own page, unencrypted, so an administrator who names a
-field "Owner email" or similar has still put personal data somewhere in the
-system, just not in a record with no retention argument. The software warns
-about this when a field is defined and again when a value is typed in.
-Entries written before this behaviour shipped still hold the value's text —
-the change is forward-only, and nothing rewrites a stored entry.
+the change log as a plain change counter rather than as text — an entry
+shows that the value changed and which field, never what it changed to. The
+value still lives on the entity's own page, unencrypted, so an administrator
+who names a field "Owner email" or similar has still put personal data
+somewhere in the system, just not in a record with no retention argument.
+The software warns about this when a field is defined and again when a value
+is typed in. The change is forward-only, and nothing rewrites a stored
+entry: entries written before this behaviour shipped still hold the value's
+text, and entries written during this feature's brief use of a keyed digest
+still hold that digest.
 
 Every entry shows **what kind of actor** made the change beside who: a person, a
 system process, or an agent. The log is append-only — a wrong entry is corrected

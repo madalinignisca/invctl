@@ -121,11 +121,6 @@ func run() error {
 
 	st := store.New(db)
 
-	st, err = attachFoldKey(ctx, st, cfg)
-	if err != nil {
-		return err
-	}
-
 	// An import that was running when this process last stopped did NOT commit
 	// -- it is one transaction and it went with the process. Leaving the row
 	// saying "running" would have its page poll for ever for work nobody is
@@ -554,63 +549,6 @@ func setupLogging(level string) {
 		l = slog.LevelInfo
 	}
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: l})))
-}
-
-// attachFoldKey resolves the key custom field values are folded into the
-// audit trail under, as a digest rather than plaintext, and returns a store
-// with it attached.
-//
-// cfg.AuditFoldKey is nil unless an operator set INV_AUDIT_FOLD_KEY -- see
-// config.auditFoldKey, which validates it the same way INV_SESSION_KEY is
-// validated but, deliberately, never generates one. When it IS nil this asks
-// the database instead (store.ResolveAuditFoldKey), which persists a
-// generated key on the very first start against a given database and reads
-// that same key back on every start after. Doing this here, after Migrate
-// and before anything else touches the store, means every write path that
-// could fold a custom value sees a store that already has a key -- there is
-// no window where SetCustomValues could run against one that does not.
-//
-// THE MODE IS LOGGED, THE KEY NEVER IS. An operator restarting a deployment
-// and NOT seeing "persisted" here has just learned their custom-field audit
-// history is about to grow a spurious diff on every entity holding a value --
-// worth catching immediately rather than a release cycle later.
-func attachFoldKey(ctx context.Context, st *store.SQLStore, cfg *config.Config) (*store.SQLStore, error) {
-	if cfg.AuditFoldKey != nil {
-		// A divergence from whatever is already persisted is not refused --
-		// a deliberate rotation is a legitimate operator decision -- but it
-		// is never safe to pass in silence: it changes every digest ever
-		// folded, and change_log is append-only, so the consequence is
-		// permanent. hasPersisted is false only on the very first start of a
-		// database that already has the variable set, in which case there
-		// is nothing yet to diverge from.
-		hasPersisted, differs, err := st.CheckAuditFoldKeyDivergence(ctx, cfg.AuditFoldKey)
-		if err != nil {
-			return nil, fmt.Errorf("checking the audit fold key against the database: %w", err)
-		}
-		if hasPersisted && differs {
-			slog.Warn("INV_AUDIT_FOLD_KEY does not match the key persisted in this database; " +
-				"every existing custom-field digest was folded under the OLD key, so every entity " +
-				"holding a custom value will show a spurious diff on its next save -- this cannot be " +
-				"undone, since the audit trail is append-only. If this was not a deliberate key " +
-				"rotation, unset INV_AUDIT_FOLD_KEY to restore the original key.")
-		}
-		slog.Info("audit fold key loaded from INV_AUDIT_FOLD_KEY")
-		return st.WithFoldKey(cfg.AuditFoldKey), nil
-	}
-	key, mode, err := st.ResolveAuditFoldKey(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("resolving the audit fold key: %w", err)
-	}
-	switch mode {
-	case store.FoldKeyGenerated:
-		slog.Info("audit fold key generated and persisted for future starts; " +
-			"to manage it outside the database instead (the GDPR-correct deployment), read the " +
-			"EXISTING key out with 'SELECT key_b64 FROM audit_fold_key' and set INV_AUDIT_FOLD_KEY " +
-			"to that value -- do NOT generate a new one, or every digest already folded will change")
-	case store.FoldKeyPersisted:
-		slog.Info("audit fold key loaded from the database (generated on an earlier start)")
-	}
-	return st.WithFoldKey(key), nil
 }
 
 // newSessionManager builds a database-backed session store.

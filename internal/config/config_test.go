@@ -38,7 +38,7 @@ func pristineEnv(t *testing.T) {
 		"INV_LDAP_URL", "INV_LISTEN", "INV_LOG_LEVEL", "INV_SECURE_COOKIES",
 		"INV_SEED", "INV_SESSION_KEY", "INV_SESSION_TIMEOUT",
 		"INV_AGENT_TOKENS", "INV_AGENT_SCOPES", "INV_AGENT_VOCAB",
-		"INV_API_TOKENS", "INV_API_SCOPES", "INV_AUDIT_FOLD_KEY",
+		"INV_API_TOKENS", "INV_API_SCOPES",
 	} {
 		t.Setenv(key, "")
 	}
@@ -145,18 +145,6 @@ func TestValidationRefusesToStart(t *testing.T) {
 			name: "session key is too short",
 			env: map[string]string{
 				"INV_SESSION_KEY": base64.StdEncoding.EncodeToString([]byte("too-short")),
-			},
-			wantErr: "at least 32 bytes",
-		},
-		{
-			name:    "audit fold key is not base64",
-			env:     map[string]string{"INV_AUDIT_FOLD_KEY": "not base64!!"},
-			wantErr: "expected base64",
-		},
-		{
-			name: "audit fold key is too short",
-			env: map[string]string{
-				"INV_AUDIT_FOLD_KEY": base64.StdEncoding.EncodeToString([]byte("too-short")),
 			},
 			wantErr: "at least 32 bytes",
 		},

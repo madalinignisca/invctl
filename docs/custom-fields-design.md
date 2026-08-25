@@ -236,12 +236,12 @@ before against after. Custom values fold in the same way, as a second field:
 type assetAudit struct {
     domain.Asset
     Environments string `db:"environments"`
-    CustomFields string `db:"custom_fields"`   // "asset_tag=#a1b2c3d4e5f6,cost_centre=#0f1e2d3c4b5a"
+    CustomFields string `db:"custom_fields"`   // "asset_tag@1,cost_centre@3"
 }
 ```
 
-Each value is folded as a **keyed digest**, not the value itself — see the
-GDPR mitigation below.
+Each value is folded as a **change counter**, not the value itself — see the
+GDPR note below.
 
 Sorted by code before joining, so reordering is never reported as a change —
 the same reason `dependencyAudit` sorts its classes.
@@ -266,43 +266,65 @@ writing one, which `auditFields` now panics on rather than tolerates.
 Field definitions are declared state in their own right: create, edit, retire
 and restore each write their own `change_log` row against `custom_field`.
 
-### GDPR mitigation: a keyed digest, not the value
+### GDPR: a change counter, not the value
 
-`foldCustomValues` (`internal/store/customvalues.go`) folds a **keyed
-digest** of each value instead of the value itself: HMAC-SHA256 over the
-value, the first 12 hex characters, prefixed with `#` so a reader can tell
-at a glance a fold entry is a digest and not a value —
-`cost_centre=#0f1e2d3c4b5a`. The key is resolved once at startup
-(`store.ResolveAuditFoldKey`, `INV_AUDIT_FOLD_KEY`) and **must never change
-under a running deployment's data**: unlike a session key, which is free to
-regenerate on every start because a generated one only logs people out, a
-regenerated fold key would change every digest ever folded and put a
-spurious diff on every entity holding a custom value on its very next save,
-forever. So a key set via the environment is used as-is, and one left unset
-is generated exactly once and persisted (migration `00052`,
-`audit_fold_key`), read back unchanged on every later start.
+`foldCustomValues` (`internal/store/customvalues.go`) folds a **plain change
+counter** into each pair instead of the value itself — `cost_centre@3`,
+where `3` is `custom_field_value.row_version` at the point the fold runs.
+`setCustomValues` already carries `row_version` across the delete-then-insert
+that replaces this set — advancing it by one on a real change, preserving it
+verbatim on a no-op resubmission — so it is already exactly the change token
+this fold needs, and nothing invents a second counter.
 
 This keeps the property the fold exists for — a set replacement that leaves
 every column of the parent untouched still produces a diff, because the
-digest still changes when the value does — while writing nothing about the
+counter still moves when the value does — while writing nothing about the
 value itself into `change_log`.
 
-**The cost is real and accepted, not hidden.** `change_log` now shows that a
-custom value changed and which field, **never what it changed to**. The
-current value still lives in `custom_field_value` and on the entity's own
-page; only the audit trail's copy of it is gone. Do not present this as
-having made a custom field's value disappear — it has not, and the value
-**editor** (`custom_fields_form.html`) still carries a warning for exactly
-that reason. The **creation** form (`custom_field_form.html`) carries the
-matching one, worded for whoever names the field rather than whoever later
-types a value.
+**This replaced a keyed HMAC-SHA256 digest** (`code=#<digest>`), which held
+for three days before a review found it was the wrong primitive. A digest
+whose key sits in the same database and backup as the log it protects is
+**pseudonymisation, not anonymisation** (GDPR Art. 4(5), Recital 26) — the
+"additional information" that could re-identify a value was not "kept
+separately", so `INV_AUDIT_FOLD_KEY` had to be qualified with an
+environment-variable caveat to reach the GDPR-correct deployment at all. On
+inspection it was worse than that: identical values digest identically and
+carry no other secret, so for a `select` or `boolean` field a reader needs no
+key whatsoever to invert one — `/changes` is readable by any authenticated
+user (§4), and a `select` field's option list is published on the registry,
+so every possible value is already public. A 48-bit digest could also
+collide on one (field, entity) pair and write **no `change_log` row at
+all** — `diffJSON` reporting `changed=false` while `row_version` bumped and
+the value changed on the entity's own page, a mutation of declared state
+with no audit entry.
 
-**The fix is forward-only.** `change_log` is append-only — no `UPDATE`, no
-`DELETE`, ever — so every entry written before this shipped still holds the
-plaintext it was written with. This fold only changes what NEW entries
-record; there is no retroactive scrub of what is already there. An estate
-that needs the pre-mitigation entries dealt with needs a separate,
-deliberate decision — this section is not that decision.
+A counter has none of this. It is not personal data under any reading,
+because it carries no information about the value at all — not even whether
+two different values are the same length or the same shape. It cannot
+collide between two values of the same field, because it is monotonic
+rather than a hash of bounded width. And there is no key: nothing to
+generate, hold outside the database, divulge in an environment variable, or
+accidentally rotate under a running deployment's data.
+
+**The cost is unchanged, still real, and still accepted, not hidden.**
+`change_log` shows that a custom value changed and which field, **never what
+it changed to**. The current value still lives in `custom_field_value` and
+on the entity's own page; only the audit trail's copy of it is gone. Do not
+present this as having made a custom field's value disappear — it has not,
+and the value **editor** (`custom_fields_form.html`) still carries a warning
+for exactly that reason. The **creation** form (`custom_field_form.html`)
+carries the matching one, worded for whoever names the field rather than
+whoever later types a value.
+
+**The fix is forward-only, and the log is now heterogeneous across two
+boundaries rather than one.** `change_log` is append-only — no `UPDATE`, no
+`DELETE`, ever — so an entry written before the digest still holds the
+plaintext value it was written with, and an entry written under the digest
+(a matter of days, in this deployment's history) still holds
+`code=#<digest>`. Neither is rewritten. Only an entry written from this
+change forward carries `code@<n>`. A reader of an old entry meets a format
+that no longer exists in the code, and that is expected, not a bug — the fix
+only changes what NEW entries record.
 
 Neither `docs/API.md` nor the registry repeats the warning; nothing in
 WP-A4 propagates it anywhere beyond the two forms named above.

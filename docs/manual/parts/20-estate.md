@@ -118,12 +118,12 @@ write anything here about a person that you would not want kept indefinitely.
 An estate's own custom fields (defined by an administrator, values recorded
 per asset or service) carry a related warning for a different reason. A
 change to a custom value is audited like everything else, but the audit
-trail records only that the value changed and which field — a keyed digest,
-never the text itself — so a value does not accumulate in the log the way a
-note does. It still lives on the entity's own page, unencrypted, for as long
-as anybody keeps it there, so the same caution applies to what you type: the
-software warns about it at both places you can type one, defining the field
-and filling in a value.
+trail records only that the value changed and which field — a plain change
+counter, never the text itself — so a value does not accumulate in the log
+the way a note does. It still lives on the entity's own page, unencrypted,
+for as long as anybody keeps it there, so the same caution applies to what
+you type: the software warns about it at both places you can type one,
+defining the field and filling in a value.
 
 ## Clusters
 

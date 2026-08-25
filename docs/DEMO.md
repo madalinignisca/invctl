@@ -203,21 +203,23 @@ Then **Changes** in the nav. Every declared mutation, with `actor` and
 an account answers an erasure request while the log keeps its integrity.
 
 **One caveat if it comes up:** custom fields are free text an administrator
-defines the meaning of, folded into the same audited entry as a keyed digest
-rather than the text itself — so a change shows that a value moved and which
-field, never what it changed to. That is not the same as saying the value is
-gone: it still lives on the entity's own page, unencrypted, for as long as
-anybody keeps it there, so the product still warns against a field like
-"Owner email" at the point of typing. The digest closes the audit-trail
-exposure, not the row.
+defines the meaning of, folded into the same audited entry as a plain change
+counter rather than the text itself — so a change shows that a value moved,
+which field, and how many times it has changed, never what it changed to.
+That is not the same as saying the value is gone: it still lives on the
+entity's own page, unencrypted, for as long as anybody keeps it there, so the
+product still warns against a field like "Owner email" at the point of
+typing. The counter closes the audit-trail exposure, not the row.
 
-**The fix is forward-only, and this instance shows it**: the log is
-append-only, so any change-log entry written before this fix shipped
-still holds the plaintext value, unchanged — do not claim otherwise
-against a live demo. And the digest is a keyed HMAC, not encryption:
-generated inside this database it is pseudonymisation, not erasure —
-setting `INV_AUDIT_FOLD_KEY` to hold that key outside the database is
-what makes it the GDPR-correct deployment.
+**The fix is forward-only, and this instance shows it, twice over**: the log
+is append-only, so any change-log entry written before this fix shipped
+still holds the plaintext value, unchanged, and an entry written in the
+handful of days this feature briefly used a keyed HMAC digest instead still
+holds that digest — do not claim otherwise against a live demo. The counter
+that replaced the digest is not a cryptographic primitive at all: there is no
+key, nothing to generate, and nothing to configure — the number is not
+personal data under any reading, because it carries no information about the
+value.
 
 ---
 

@@ -104,15 +104,15 @@ func TestAFieldWithNoDescriptionIsRefusedWith422(t *testing.T) {
 }
 
 // TestTheCreationFormWarnsAboutPIIWithoutOverclaimingTheAuditTrail is Ruling
-// AD's gate, updated for the GDPR digest fold. A custom value's text used to
-// enter change_log permanently with redaction all-or-nothing across every
-// field (domain.IsRedacted is keyed by column, and the fold was one opaque
-// key, "custom_fields"), which made this the one moment a warning could
-// still change anybody's mind -- while an administrator is naming the
+// AD's gate, updated for the GDPR change-counter fold. A custom value's text
+// used to enter change_log permanently with redaction all-or-nothing across
+// every field (domain.IsRedacted is keyed by column, and the fold was one
+// opaque key, "custom_fields"), which made this the one moment a warning
+// could still change anybody's mind -- while an administrator is naming the
 // field, not in a help page and not behind a tooltip they must hover.
 //
-// foldCustomValues (internal/store/customvalues.go) now folds a keyed
-// digest instead of the value, so the audit-trail half of that claim is no
+// foldCustomValues (internal/store/customvalues.go) now folds a plain change
+// counter instead of the value, so the audit-trail half of that claim is no
 // longer true, and the form must not go on asserting it: this test used to
 // require exactly that string and would have kept passing silently against
 // a form that had become wrong the moment the fold changed underneath it.
@@ -125,14 +125,14 @@ func TestTheCreationFormWarnsAboutPIIWithoutOverclaimingTheAuditTrail(t *testing
 	page := body(t, h.get("/custom-fields", false))
 	if strings.Contains(page, "recorded permanently in the audit trail") {
 		t.Error("the creation form still claims values are recorded permanently in the audit trail, " +
-			"which is no longer true once the fold digests them")
+			"which is no longer true once the fold counts them")
 	}
 	if strings.Contains(page, "cannot be removed") {
 		t.Error("the creation form still claims a custom value cannot be removed, " +
 			"which described the audit trail and no longer applies to it")
 	}
 	for _, want := range []string{
-		"digest",
+		"change counter",
 		"personal data",
 	} {
 		if !strings.Contains(page, want) {

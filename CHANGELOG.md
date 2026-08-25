@@ -66,25 +66,26 @@ footnote.
   loading back through the importer. Deliberately absent from `/api/v1` —
   see `docs/API.md`. See `docs/custom-fields-design.md`.
 
-- **A custom field's value is folded into the audit trail as a digest, not as
-  text.** A change to `change_log` now shows that a value changed and which
-  field, never what it changed to — the value itself still lives on the
-  entity's own page. This closes the one place in the codebase where the
-  audit trail's "carries no personal data, keep it forever" claim previously
-  did not hold: an administrator naming a field "Owner email" no longer
-  writes that text into an append-only table. It is **forward-only** — any
-  entry written before you upgrade still holds the plaintext it was written
-  with, because `change_log` is append-only and nothing rewrites a stored
-  entry. The change log and the change entry page explain the digest in
-  place, so a row like `cost_centre=#a3f9c1b2d4e6` reads as intended rather
-  than as corruption. The key is `INV_AUDIT_FOLD_KEY` — same format as
-  `INV_SESSION_KEY`, base64, at least 32 bytes — and, unlike the session key,
-  it is **never regenerated on restart if you leave it unset**: a fresh key
-  each start would change every digest and put a spurious diff on every
-  entity holding a custom value on its next save. Leaving it unset is fine —
-  a key is generated once and persisted in the database — but setting it
-  explicitly is how you keep it independent of the database if you ever need
-  to. See `docs/AUDIT.md` and `docs/custom-fields-design.md` §5.
+- **A custom field's value is folded into the audit trail as a plain change
+  counter, not as text.** A change to `change_log` now shows that a value
+  changed, which field, and how many times it has changed, never what it
+  changed to — the value itself still lives on the entity's own page. This
+  closes the one place in the codebase where the audit trail's "carries no
+  personal data, keep it forever" claim previously did not hold: an
+  administrator naming a field "Owner email" no longer writes that text into
+  an append-only table. It is **forward-only** — any entry written before you
+  upgrade still holds the plaintext it was written with, because `change_log`
+  is append-only and nothing rewrites a stored entry. The change log and the
+  change entry page explain the counter in place, so a row like
+  `cost_centre@3` reads as intended rather than as corruption. There is no
+  key and nothing to configure: an early build of this same unreleased
+  feature folded a keyed HMAC digest instead (`code=#<digest>`, needing
+  `INV_AUDIT_FOLD_KEY` held outside the database to be GDPR-correct), which a
+  review found was pseudonymisation rather than anonymisation and, for a
+  `select` or `boolean` field, invertible with no key at all. That digest is
+  gone; migration `00053` drops the table it was persisted in, and
+  `INV_AUDIT_FOLD_KEY` is no longer read. See `docs/AUDIT.md` and
+  `docs/custom-fields-design.md` §5.
 
 ---
 

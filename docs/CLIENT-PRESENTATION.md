@@ -153,14 +153,13 @@ Infrastructure inventory and impact analysis
 > the point of typing. Do not oversell this: "the audit trail doesn't keep
 > it" is true and "this makes custom fields GDPR-proof" is not — the value
 > still exists somewhere, on the record it belongs to, for as long as
-> anybody keeps it. Two more things if it's pressed further: the fix is
+> anybody keeps it. One more thing if it's pressed further: the fix is
 > **forward-only** — the log is append-only, so any entry written before
 > this shipped still holds the plaintext it was written with — and what
-> replaces the text is a keyed digest whose key, generated inside this
-> database, makes it pseudonymised rather than erased; setting
-> `INV_AUDIT_FOLD_KEY` to hold that key outside the database is the
-> GDPR-correct deployment. Say this before a client asks; it lands better
-> offered than found.
+> replaces the text is a plain change counter (which field, how many times
+> it has changed), not a hash or a key of any kind, so there is no
+> pseudonymisation caveat and nothing to configure to make it correct. Say
+> this before a client asks; it lands better offered than found.
 
 ---
 
@@ -328,7 +327,7 @@ Plus: *"12 of 19 things in this footprint carry a price"* — so the total is a 
 - **576 automated tests**, every one run against **both** database engines
 - The impact engine is tested against a real fixture estate, not mocks
 - Rules the codebase enforces on itself: audit coverage, no hard deletes, portability between engines
-- A custom field's text never reaches the audit log — a keyed digest stands in its place (Slide 8 covers what that does and does not cover)
+- A custom field's text never reaches the audit log — a plain change counter stands in its place (Slide 8 covers what that does and does not cover)
 - Reviewed for security and correctness, repeatedly, with findings acted on
 
 > **Speaker note:** Use this if the client is technical or is buying a POC they

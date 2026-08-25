@@ -26,9 +26,8 @@ import (
 // runs unmodified on both engines; the two dialect-specific concerns (search,
 // session storage) are isolated behind their own types.
 type SQLStore struct {
-	db      *DB
-	now     func() time.Time
-	foldKey []byte
+	db  *DB
+	now func() time.Time
 }
 
 // New builds a store over an open database.
@@ -41,24 +40,6 @@ func New(db *DB) *SQLStore {
 func (s *SQLStore) WithClock(now func() time.Time) *SQLStore {
 	clone := *s
 	clone.now = now
-	return &clone
-}
-
-// WithFoldKey attaches the HMAC key used to fold a custom field's value into
-// the audit trail as a digest rather than plaintext (see foldDigest in
-// customvalues.go, and docs/AUDIT.md's custom_field_value row).
-//
-// Resolving the key needs the database -- it may be persisted there, see
-// ResolveAuditFoldKey in foldkey.go -- so it cannot be supplied to New, which
-// runs before migrations. cmd/invctl wires this in after New and after
-// migrating; a store built without it returns an error the first time it
-// actually has to fold a non-empty set of custom values (foldDigest refuses
-// an empty key rather than panicking, CLAUDE.md's "never panic outside
-// main"), which is the correct failure for a wiring bug rather than folding
-// under a silently empty key.
-func (s *SQLStore) WithFoldKey(key []byte) *SQLStore {
-	clone := *s
-	clone.foldKey = key
 	return &clone
 }
 
@@ -88,11 +69,10 @@ func (s *SQLStore) Now() time.Time { return s.now().UTC() }
 // so an audit entry cannot survive a rolled-back change and a change cannot
 // escape without an entry.
 type tx struct {
-	tx      *sqlx.Tx
-	db      *DB
-	actor   domain.Actor
-	at      string
-	foldKey []byte
+	tx    *sqlx.Tx
+	db    *DB
+	actor domain.Actor
+	at    string
 }
 
 // rebind rewrites `?` placeholders for the target engine.
@@ -207,7 +187,7 @@ func (s *SQLStore) writeTx(ctx context.Context, actor domain.Actor, opts *sql.Tx
 	if err != nil {
 		return fmt.Errorf("beginning transaction: %w", err)
 	}
-	t := &tx{tx: sqlTx, db: s.db, actor: actor, at: domain.FormatTime(s.now()), foldKey: s.foldKey}
+	t := &tx{tx: sqlTx, db: s.db, actor: actor, at: domain.FormatTime(s.now())}
 
 	if err := fn(t); err != nil {
 		if rbErr := sqlTx.Rollback(); rbErr != nil && !errors.Is(rbErr, sql.ErrTxDone) {
@@ -264,9 +244,8 @@ func translateWriteErr(err error, what string) error {
 //
 // Split out from translateWriteErr so a caller that needs to distinguish
 // "this specific write lost a race" from "this write failed for some other
-// reason" -- ResolveAuditFoldKey, foldkey.go -- can ask the narrow question
-// without also matching a foreign key or check-constraint failure as if it
-// were the same case.
+// reason" can ask the narrow question without also matching a foreign key or
+// check-constraint failure as if it were the same case.
 func isUniqueViolation(err error) bool {
 	if err == nil {
 		return false

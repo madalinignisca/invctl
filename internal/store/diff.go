@@ -188,7 +188,7 @@ type FieldChange struct {
 	// rendered value would otherwise be mistaken for corruption. Empty for
 	// every ordinary field.
 	//
-	// custom_fields is the one case today: unexplained, "cost_centre=#a3f9c1b2d4e6"
+	// custom_fields is the one case today: unexplained, "cost_centre@3"
 	// reads as garbage rather than as the deliberate GDPR mitigation it is
 	// (foldCustomValues, internal/store/customvalues.go) -- and "looks like
 	// corruption" is exactly the support call this whole work package exists
@@ -198,10 +198,11 @@ type FieldChange struct {
 }
 
 // customFieldsExplanation is the note shown beside a custom_fields row --
-// the one field this codebase folds as a digest rather than a value, so an
-// operator reading it unexplained would otherwise reasonably conclude the
-// log is corrupt. See foldCustomValues's doc comment for the full reasoning.
-const customFieldsExplanation = "Custom field values are recorded as a digest, not their text, " +
+// the one field this codebase folds as a change counter rather than a
+// value, so an operator reading it unexplained would otherwise reasonably
+// conclude the log is corrupt. See foldCustomValues's doc comment for the
+// full reasoning, including why this replaced an earlier keyed digest.
+const customFieldsExplanation = "Custom field values are recorded as a change counter, not their text, " +
 	"so the log carries no personal data. The current value is on the entity's own page."
 
 // ChangeDetail is a stored diff turned into something a human can scan.

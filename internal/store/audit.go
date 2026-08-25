@@ -400,8 +400,8 @@ func (e TimelineEntry) IsFlapClose() bool {
 // ParsedDetail turns Detail into the same field-row shape the "changes" list
 // and the entry page (misc.go's changeDetails and ChangeEntry) already render
 // through ParseDiff, so a declared row in the timeline explains a
-// custom_fields digest the same way those two surfaces do rather than
-// printing the raw diff text -- see FieldChange.Note and
+// custom_fields change counter the same way those two surfaces do rather
+// than printing the raw diff text -- see FieldChange.Note and
 // customFieldsExplanation in diff.go. Meaningless, and never called, on an
 // observed or journal row: Detail is empty there by construction (see the
 // field's own doc comment), and ParseDiff on an empty string returns a

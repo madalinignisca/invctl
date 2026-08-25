@@ -9,7 +9,6 @@
 package store
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -23,16 +22,9 @@ import (
 
 var testActor = domain.Actor{ID: "tester", Name: "tester", Kind: "user"}
 
-// testFoldKey is a fixed 32-byte key used everywhere a test needs a store
-// that can fold a custom field's value -- it is not a secret, it never
-// leaves this process, and it is deliberately the SAME key across every
-// test so a test asserting a fold's exact digest (customvalues_test.go) can
-// compute the expected value with foldDigest directly.
-var testFoldKey = bytes.Repeat([]byte{0x5a}, 32)
-
 func newStore(t *testing.T, e Engine) (*SQLStore, context.Context) {
 	t.Helper()
-	return New(e.Open(t)).WithFoldKey(testFoldKey), context.Background()
+	return New(e.Open(t)), context.Background()
 }
 
 // mustEnvironment creates an environment and returns its id.

@@ -61,17 +61,18 @@
          defined (custom_field_form.html) -- but that form is opened by
          whoever DEFINES a field, never by whoever later TYPES a value into
          one on an asset or service page. This is the warning at the point
-         PII actually gets typed. Updated for the GDPR digest fold: the audit
-         trail no longer keeps the text, so the warning is now about where
-         this value DOES still live rather than about the audit trail. */}}
+         PII actually gets typed. Updated for the GDPR change-counter fold:
+         the audit trail no longer keeps the text, so the warning is now
+         about where this value DOES still live rather than about the audit
+         trail. */}}
     <div class="callout callout-warn">
       <strong>Still worth thinking about.</strong>
       <p style="margin-top:6px">
-        This value is recorded as a digest in the audit trail, not as text —
-        a change shows that it moved, never what it changed to. It still
-        lives on this entity's own page, unencrypted, for as long as anybody
-        keeps it there. Avoid an email address, a phone number or a person's
-        name here unless the field was defined for exactly that.
+        This value is recorded as a plain change counter in the audit trail,
+        not as text — a change shows that it moved, never what it changed to.
+        It still lives on this entity's own page, unencrypted, for as long as
+        anybody keeps it there. Avoid an email address, a phone number or a
+        person's name here unless the field was defined for exactly that.
       </p>
     </div>
     {{with .Edit.Err "_form"}}<div class="field-error">{{.}}</div>{{end}}

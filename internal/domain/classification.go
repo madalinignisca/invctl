@@ -82,7 +82,6 @@ var ExemptTables = map[string]string{
 	"goose_db_version":         "migration bookkeeping, owned by goose",
 	"goose_db_version_dialect": "migration bookkeeping for the dialect-split migrations",
 	"sessions":                 "session store, owned by scs; holds no inventory fact",
-	"audit_fold_key":           "the HMAC key custom field values are folded into change_log under (migration 00052); an internal secret this process needs to keep behaving the way it behaved yesterday, the same category as a TLS private key -- not a fact about the estate, and auditing it would defeat its own purpose",
 	"search_index":             "derived index over declared columns; rebuilt, never authored",
 	"search_index_config":      "FTS5 shadow table (SQLite only)",
 	"search_index_content":     "FTS5 shadow table (SQLite only)",

@@ -90,9 +90,9 @@
             {{else}}
               {{/* A declared row, rendered through ParsedDetail rather than
                    the raw stored text: the "changes" list and the entry page
-                   both explain a custom_fields row as a digest via the same
-                   parse, and this was the one surface that did not (rule 15).
-                   An unexplained "cost_centre=#a3f9c1b2d4e6" reads as
+                   both explain a custom_fields row as a change counter via
+                   the same parse, and this was the one surface that did not
+                   (rule 15). An unexplained "cost_centre@3" reads as
                    corruption; ParseDiff's Note (diff.go) is what says
                    otherwise. There is no plaintext exposure either way --
                    this is legibility, not a redaction concern. */}}
