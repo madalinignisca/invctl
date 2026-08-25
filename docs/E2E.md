@@ -97,6 +97,26 @@ shown. If a future spec needs to exercise a mutation, it must run against a
 disposable local instance only, and that constraint should be stated loudly
 at the top of that spec, not assumed.
 
+## Where the ownership report's mutation is covered instead
+
+`ownership-report.spec.js` checks that the report renders its three findings,
+that an admin is offered a fix path with a CSRF token and selectable rows, and
+that no target team is offered while retired. It does **not** submit the
+assignment form, for the reason above: bulk assignment writes, and a stray
+assignment on the shared demo is a permanent change to an estate other people
+are looking at.
+
+The mutation is covered by the Go web suite, which runs against a disposable
+database on both engines: `TestOwnershipAssignMovesExactlyTheSelectedIDs`,
+`TestOwnershipAssignSkipsAnEntityClaimedInTheMeantime`,
+`TestOwnershipAssignRefusesARetiredTarget` and
+`TestOwnershipAssignRequiresAdmin` in `internal/web/ownership_assign_test.go`.
+
+That split is deliberate rather than a gap: the Go tests can assert on what
+reached the database, which is the thing that matters for a mutation, and this
+spec asserts on what a browser actually rendered, which is the thing they
+cannot see.
+
 ## What each spec guards
 
 - **`login-and-version.spec.js`** -- the first thing a real person hits: can
