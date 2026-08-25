@@ -1,0 +1,51 @@
+{{/*
+  invctl — infrastructure inventory
+  Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+
+  Licensed under the GNU Affero General Public License, version 3 only —
+  no later version applies. See LICENSE for the full text.
+
+  SPDX-License-Identifier: AGPL-3.0-only
+*/}}
+{{/*
+  entity_tags_show is the read-only half of docs/tags-design.md §4a: what
+  this asset, service or project carries, on its own page rather than in the
+  registry.
+
+  Standalone: always rendered, even with nothing applied yet, so an operator
+  looking at an untagged entity is told that rather than seeing the section
+  vanish -- unlike custom_fields_show, which disappears when an estate never
+  defines any field. A registry that has at least one live tag makes tagging
+  a live possibility on every entity, whether or not this one has been
+  reached yet.
+
+  A RETIRED TAG STILL DISPLAYS HERE. .Applied comes from
+  store.EntityTagsFor, which does not filter on tag.retired_at -- design.md
+  §2, the same rule a retired custom-field option already follows.
+
+  Expects: .Applied ([]domain.Tag).
+*/}}
+{{define "entity_tags_show"}}
+<div class="panel" id="entity-tags-show">
+  <div class="panel-head">
+    <h2>Tags</h2>
+    <span class="panel-note">
+      Cuts across the estate — see the <a href="/tags">tags registry</a> for
+      what each one means.
+    </span>
+  </div>
+  <div class="panel-body">
+    {{if .Applied}}
+    <div class="tag-list">
+      {{range .Applied}}
+      <span class="pill {{if .RetiredAt}}pill-muted{{else}}pill-info{{end}}" title="{{.Description}}">
+        {{.Label}}{{if .RetiredAt}} (retired){{end}}
+      </span>
+      {{end}}
+    </div>
+    {{else}}
+    <span style="color:var(--faint)">nothing tagged</span>
+    {{end}}
+  </div>
+</div>
+{{end}}

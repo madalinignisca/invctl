@@ -231,9 +231,11 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	write("POST /assets/{id}/storage", app.AssetStorageClaim)
 	write("POST /assets/{id}/occupants", app.AssetOccupants)
 	write("POST /assets/{id}/custom-fields", app.AssetCustomFields)
+	write("POST /assets/{id}/tags", app.AssetTags)
 
 	write("POST /services", app.ServiceCreate)
 	write("POST /services/{id}/custom-fields", app.ServiceCustomFields)
+	write("POST /services/{id}/tags", app.ServiceTags)
 	// One route per surface, as with costs: an entity type arriving in a URL
 	// is an entity type arriving from a request, and it would select a table.
 	write("POST /certificates", app.CertificateCreate)
@@ -289,6 +291,7 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	// that depends on connectivity.
 	write("POST /projects/{id}/circuits", app.ProjectCircuitLink)
 	write("POST /projects/{id}/circuits/{circuitID}/retire", app.ProjectCircuitRetire)
+	write("POST /projects/{id}/tags", app.ProjectTags)
 
 	// Cost lines. One route per surface rather than a generic
 	// /costs/{type}/{id}: an entity type arriving in a URL is an entity type

@@ -19,6 +19,19 @@ import (
 	"time"
 )
 
+// Taggable entity types, piece 2 of WP-G4a (docs/tags-design.md §3): the
+// CHECK on entity_tag.entity_type in migration 00057 limits application to
+// exactly these, so a typo cannot invent a new entity kind and adding a
+// fourth taggable type later is a deliberate migration, not an accident.
+const (
+	TagEntityAsset   = "asset"
+	TagEntityService = "service"
+	TagEntityProject = "project"
+)
+
+// TagEntityTypes are the permitted values of entity_tag.entity_type.
+var TagEntityTypes = []string{TagEntityAsset, TagEntityService, TagEntityProject}
+
 // Tag is a label an administrator defined, and why it exists. description is
 // required for the identical reason custom_field.description is: an
 // administrator who cannot say why a tag exists is the origin of the support

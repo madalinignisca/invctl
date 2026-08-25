@@ -88,6 +88,11 @@ type projectPage struct {
 	AllServices []store.ServiceRow
 	AllCircuits []store.CircuitRow
 	Relations   []string
+
+	// Tags is this project's applied tag set (WP-G4a piece 2,
+	// docs/tags-design.md §4a), the same panel the asset and service pages
+	// render.
+	Tags entityTagsPanel
 }
 
 type projectMapPage struct {
@@ -159,11 +164,15 @@ func (a *App) ProjectOverview(w http.ResponseWriter, r *http.Request) {
 // renderProject draws the page. submitted carries a refused save, so the form
 // redraws on what the operator typed rather than on what is stored.
 func (a *App) renderProject(w http.ResponseWriter, r *http.Request, status int, errs map[string]string) {
-	a.renderProjectWith(w, r, status, errs, nil)
+	a.renderProjectWith(w, r, status, errs, nil, nil)
 }
 
+// renderProjectWith draws the page, at any status. tagsEdit carries a
+// refused tag submission back to its own panel, the same shape asset and
+// service detail pages give their customFieldsEditID/entityTagsEditID
+// sentinels -- see ProjectTags.
 func (a *App) renderProjectWith(w http.ResponseWriter, r *http.Request, status int,
-	errs map[string]string, submitted *domain.ProjectSpec) {
+	errs map[string]string, submitted *domain.ProjectSpec, tagsEdit *editState) {
 	id := r.PathValue("id")
 	project, err := a.Store.GetProject(r.Context(), id)
 	if err != nil {
@@ -268,8 +277,16 @@ func (a *App) renderProjectWith(w http.ResponseWriter, r *http.Request, status i
 		return
 	}
 
+	tags, err := a.loadEntityTagsPanel(r, domain.TagEntityProject, project.ID,
+		project.RowVersion, "/projects/"+project.ID+"/tags", base.CSRF, base.CanWrite, tagsEdit)
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
+
 	a.Render.Respond(w, r, status, "project_detail", "project_panel", projectPage{
 		Providers:   providers,
+		Tags:        tags,
 		Base:        base,
 		Edit:        edit,
 		Teams:       teams,
@@ -342,7 +359,7 @@ func (a *App) ProjectUpdate(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		a.renderProjectWith(w, r, refusalStatus(err), messages, &spec)
+		a.renderProjectWith(w, r, refusalStatus(err), messages, &spec, nil)
 		return
 	}
 	render.Redirect(w, r, "/projects/"+id)

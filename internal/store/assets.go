@@ -138,19 +138,30 @@ type assetAudit struct {
 	domain.Asset
 	Environments string `db:"environments"`
 	CustomFields string `db:"custom_fields"`
+	// Tags folds this asset's applied tag set for the identical reason as
+	// CustomFields and Environments (WP-G4a piece 2,
+	// docs/tags-design.md §4): entity_tag is a child table, so applying or
+	// removing a tag leaves every column of the asset untouched and would
+	// otherwise write no audit entry at all. Sorted STABLE IDS, never codes
+	// -- design.md §4's amendment: folding a code means renaming it rewrites
+	// this fold for every entity carrying the tag, logging a spurious diff
+	// on the next unrelated save of each. See internal/store/entitytags.go.
+	Tags string `db:"tags"`
 }
 
 // auditedAsset builds the audited shape. custom is the folded custom-value
-// string from customFieldsAudit; every call site passes it, because one that
-// quietly passed nothing would write an entry that looks complete and omits the
+// string from customFieldsAudit and tags is the folded tag-id string from
+// entityTagsAudit; every call site passes both, because one that quietly
+// passed nothing would write an entry that looks complete and omits the
 // values -- the failure this fold exists to prevent.
-func auditedAsset(a *domain.Asset, codes []string, custom string) *assetAudit {
+func auditedAsset(a *domain.Asset, codes []string, custom, tags string) *assetAudit {
 	sorted := append([]string(nil), codes...)
 	sort.Strings(sorted)
 	return &assetAudit{
 		Asset:        *a,
 		Environments: strings.Join(sorted, ","),
 		CustomFields: custom,
+		Tags:         tags,
 	}
 }
 
@@ -761,11 +772,12 @@ func (s *SQLStore) insertAsset(ctx context.Context, t *tx, a *domain.Asset, envi
 	if err := setAssetEnvironments(ctx, t, a.ID, environmentIDs); err != nil {
 		return err
 	}
-	// No custom values can exist yet: a.ID was generated for this statement and
-	// nothing has had the chance to write against it. Empty is the true fold,
-	// not a call site that forgot one -- and querying for it here would put two
-	// extra reads on every row of a bulk import, which shares this function.
-	if err := t.logCreate(ctx, "asset", a.ID, auditedAsset(a, codes, "")); err != nil {
+	// No custom values or tags can exist yet: a.ID was generated for this
+	// statement and nothing has had the chance to write against it. Empty is
+	// the true fold, not a call site that forgot one -- and querying for it
+	// here would put two extra reads on every row of a bulk import, which
+	// shares this function.
+	if err := t.logCreate(ctx, "asset", a.ID, auditedAsset(a, codes, "", "")); err != nil {
 		return err
 	}
 	return s.indexAsset(ctx, t, a)
@@ -853,17 +865,21 @@ func (s *SQLStore) UpdateAsset(ctx context.Context, actor domain.Actor, a *domai
 		if err := setAssetEnvironments(ctx, t, a.ID, environmentIDs); err != nil {
 			return err
 		}
-		// This method does not touch custom values, so the same fold goes on
-		// both sides and cancels. It is read rather than left empty because an
+		// This method does not touch custom values or tags, so the same folds
+		// go on both sides and cancel. Read rather than left empty because an
 		// audit entry that omits half the asset while claiming to describe it
 		// is worse than one query.
 		custom, err := customFieldsAudit(ctx, t, domain.CustomFieldEntityAsset, a.ID)
 		if err != nil {
 			return err
 		}
+		tags, err := entityTagsAudit(ctx, t, domain.TagEntityAsset, a.ID)
+		if err != nil {
+			return err
+		}
 		if err := t.logUpdate(ctx, "asset", a.ID,
-			auditedAsset(&before.Asset, beforeCodes, custom),
-			auditedAsset(a, afterCodes, custom)); err != nil {
+			auditedAsset(&before.Asset, beforeCodes, custom, tags),
+			auditedAsset(a, afterCodes, custom, tags)); err != nil {
 			return err
 		}
 		return s.indexAsset(ctx, t, a)

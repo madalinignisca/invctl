@@ -699,6 +699,17 @@ var DeclaredColumns = map[string][]string{
 		"created_by", "created_at", "retired_at", "retired_by",
 		"row_version",
 	},
+	// Applying tags to entities, piece 2 of WP-G4a (docs/tags-design.md §3,
+	// migration 00057). Declared, the identical reasoning as
+	// custom_field_value above: entity_type and entity_id name WHAT was
+	// tagged, tag_id names WHICH tag, and created_at/created_by are a
+	// person's attestation, not the estate reporting on itself. The row is
+	// the current value of a set the entity owns, replaced wholesale and
+	// folded into assetAudit.Tags / serviceAudit.Tags / projectAudit.Tags
+	// (entitytags.go) so the replacement cannot produce an empty diff.
+	"entity_tag": {
+		"tag_id", "entity_type", "entity_id", "created_at", "created_by",
+	},
 }
 
 // ClassifyColumn returns the class of a column. ok is false when the column is

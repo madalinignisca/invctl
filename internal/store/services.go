@@ -37,10 +37,14 @@ type serviceAudit struct {
 	domain.Service
 	// Sorted by code before joining, so a reordering is never a change.
 	CustomFields string `db:"custom_fields"`
+	// Tags folds this service's applied tag set, the same reason and the same
+	// shape as assetAudit.Tags -- sorted STABLE IDS, never codes (WP-G4a
+	// piece 2, docs/tags-design.md §4). See internal/store/entitytags.go.
+	Tags string `db:"tags"`
 }
 
-func auditedService(svc *domain.Service, custom string) *serviceAudit {
-	return &serviceAudit{Service: *svc, CustomFields: custom}
+func auditedService(svc *domain.Service, custom, tags string) *serviceAudit {
+	return &serviceAudit{Service: *svc, CustomFields: custom, Tags: tags}
 }
 
 // ServiceFilter narrows a service list query.
@@ -205,10 +209,10 @@ func (s *SQLStore) CreateService(ctx context.Context, actor domain.Actor, svc *d
 		if err != nil {
 			return translateWriteErr(err, "creating service")
 		}
-		// No custom value can exist yet -- svc.ID was generated for this
-		// statement -- so the empty fold is the true one, not a forgotten
-		// argument. Same reasoning as insertAsset.
-		if err := t.logCreate(ctx, "service", svc.ID, auditedService(svc, "")); err != nil {
+		// No custom value or tag can exist yet -- svc.ID was generated for
+		// this statement -- so the empty fold is the true one, not a
+		// forgotten argument. Same reasoning as insertAsset.
+		if err := t.logCreate(ctx, "service", svc.ID, auditedService(svc, "", "")); err != nil {
 			return err
 		}
 		return s.indexService(ctx, t, svc)
@@ -251,16 +255,20 @@ func (s *SQLStore) UpdateService(ctx context.Context, actor domain.Actor, svc *d
 		if err := requireVersion(res, "service", svc.ID, &svc.RowVersion); err != nil {
 			return err
 		}
-		// This method does not touch custom values, so the same fold goes on
-		// both sides and cancels; it is read rather than assumed empty so the
+		// This method does not touch custom values or tags, so the same folds
+		// go on both sides and cancel; read rather than assumed empty so the
 		// entry describes the whole service.
 		custom, err := customFieldsAudit(ctx, t, domain.CustomFieldEntityService, svc.ID)
 		if err != nil {
 			return err
 		}
+		tags, err := entityTagsAudit(ctx, t, domain.TagEntityService, svc.ID)
+		if err != nil {
+			return err
+		}
 		if err := t.logUpdate(ctx, "service", svc.ID,
-			auditedService(&before.Service, custom),
-			auditedService(svc, custom)); err != nil {
+			auditedService(&before.Service, custom, tags),
+			auditedService(svc, custom, tags)); err != nil {
 			return err
 		}
 		return s.indexService(ctx, t, svc)

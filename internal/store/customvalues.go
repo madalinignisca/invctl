@@ -516,6 +516,13 @@ func logAssetCustomValues(ctx context.Context, t *tx, assetID string, expected i
 		WHERE ae.asset_id = ?`, assetID); err != nil {
 		return fmt.Errorf("reading environments of asset %s for its audit entry: %w", assetID, err)
 	}
+	// This write does not touch tags, so the same fold goes on both sides and
+	// cancels -- the identical reasoning UpdateAsset already gives for
+	// reading custom fields fresh when only environments moved.
+	tags, err := entityTagsAudit(ctx, t, domain.TagEntityAsset, assetID)
+	if err != nil {
+		return err
+	}
 	res, err := t.exec(ctx,
 		`UPDATE asset SET row_version = row_version + 1, updated_at = ?
 		 WHERE id = ? AND row_version = ?`, t.at, assetID, expected)
@@ -523,7 +530,7 @@ func logAssetCustomValues(ctx context.Context, t *tx, assetID string, expected i
 		return err
 	}
 	return t.logUpdate(ctx, "asset", assetID,
-		auditedAsset(&a, codes, before), auditedAsset(&a, codes, after))
+		auditedAsset(&a, codes, before, tags), auditedAsset(&a, codes, after, tags))
 }
 
 // logServiceCustomValues is the service half of the same thing.
@@ -535,6 +542,12 @@ func logServiceCustomValues(ctx context.Context, t *tx, serviceID string, expect
 		}
 		return fmt.Errorf("reading service %s for its audit entry: %w", serviceID, err)
 	}
+	// This write does not touch tags, so the same fold goes on both sides and
+	// cancels.
+	tags, err := entityTagsAudit(ctx, t, domain.TagEntityService, serviceID)
+	if err != nil {
+		return err
+	}
 	res, err := t.exec(ctx,
 		`UPDATE service SET row_version = row_version + 1, updated_at = ?
 		 WHERE id = ? AND row_version = ?`, t.at, serviceID, expected)
@@ -542,5 +555,5 @@ func logServiceCustomValues(ctx context.Context, t *tx, serviceID string, expect
 		return err
 	}
 	return t.logUpdate(ctx, "service", serviceID,
-		auditedService(&svc, before), auditedService(&svc, after))
+		auditedService(&svc, before, tags), auditedService(&svc, after, tags))
 }

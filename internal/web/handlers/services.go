@@ -122,6 +122,9 @@ type serviceDetailPage struct {
 	// their own section (WP-A4, docs/custom-fields-design.md §4). Absent
 	// from the page entirely when its Rows is empty.
 	CustomFields customFieldsPanel
+	// Tags is this service's applied tag set (WP-G4a piece 2,
+	// docs/tags-design.md §4a), the same panel the asset page renders.
+	Tags         entityTagsPanel
 	Service      *store.ServiceRow
 	Certificates []store.DeployedCertificate
 	Costs        []store.CostRow
@@ -336,9 +339,23 @@ func (a *App) renderServiceDetail(w http.ResponseWriter, r *http.Request, status
 		return
 	}
 
+	// Tags (WP-G4a piece 2): the sentinel never collides with a real row id
+	// or with customFieldsEditID's own sentinel -- see entityTagsEditID.
+	var tagsEdit *editState
+	if edit != nil && edit.ID == entityTagsEditID(service.ID) {
+		tagsEdit = edit
+	}
+	tags, err := a.loadEntityTagsPanel(r, domain.TagEntityService, service.ID,
+		service.RowVersion, "/services/"+service.ID+"/tags", b.CSRF, b.CanWrite, tagsEdit)
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
+
 	a.Render.Page(w, status, "service_detail", serviceDetailPage{
 		Providers:      providers,
 		CustomFields:   customFields,
+		Tags:           tags,
 		Base:           b,
 		Service:        service,
 		Certificates:   certificates,

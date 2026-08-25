@@ -1,0 +1,104 @@
+{{/*
+  invctl — infrastructure inventory
+  Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+
+  Licensed under the GNU Affero General Public License, version 3 only —
+  no later version applies. See LICENSE for the full text.
+
+  SPDX-License-Identifier: AGPL-3.0-only
+*/}}
+{{/*
+  entity_tags_form is the editable half of docs/tags-design.md §4a: a
+  checkbox per tag this entity could carry, submitted together against the
+  entity's own row_version -- never a per-tag token, the same reasoning
+  custom_fields_form gives (design.md says nothing new here; §4a's "same
+  shape as the custom-field editor beside it" is exactly this rule).
+
+  THE SUBMISSION IS THE WHOLE SET (store.SetEntityTags's own contract,
+  unlike custom values): every offered checkbox rides one shared name,
+  tag_id, and what is ticked when the form posts IS what the entity carries
+  afterwards. An unticked box is not "untouched", it is "remove this one" --
+  there is no clear-vs-untouched distinction to make because a tag has no
+  value, only membership.
+
+  A RETIRED TAG THIS ENTITY ALREADY HOLDS still gets a checkbox here (ticked,
+  from .Applied), so an unrelated resubmission of this form does not drop it
+  -- the retired-option hazard custom_fields_form documents, applied to
+  tags. A retired tag NOT already held never appears: .Offerable is built
+  from live tags only (loadEntityTagsPanel), so there is nothing here to
+  newly tick it with.
+
+  CREATE-AND-APPLY, docs/tags-design.md §4a: the registry stays where tags
+  are managed, but a tag is created once per audit rather than once for
+  hundreds of entities, so the friction of leaving this page lands far more
+  often. The three new_tag_ fields below create a tag and apply it in the
+  same submission; left blank, they change nothing.
+
+  Expects: .Applied, .Offerable ([]domain.Tag), .Action, .CSRF, .RowVersion,
+  .Edit (nil-safe editState).
+*/}}
+{{define "entity_tags_form"}}
+<div class="panel">
+  <div class="panel-head">
+    <h2>Edit tags</h2>
+    <span class="panel-note">
+      Saved together, against this entity's own version. Defined by this
+      estate's own administrators, not by invctl — see the
+      <a href="/tags">tags registry</a> if one of these looks wrong.
+    </span>
+  </div>
+  <form class="panel-body" method="post" action="{{.Action}}">
+    <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+    <input type="hidden" name="row_version" value="{{.Edit.Value "row_version" (itoa .RowVersion)}}">
+    {{with .Edit.Err "_form"}}<div class="field-error">{{.}}</div>{{end}}
+    <div class="checks">
+      {{range .Applied}}
+      <label class="check">
+        <input type="checkbox" name="tag_id" value="{{.ID}}" {{if $.Ticked .ID}}checked{{end}}>
+        {{.Label}}{{if .RetiredAt}} (retired){{end}}
+      </label>
+      {{end}}
+      {{range .Offerable}}
+      <label class="check">
+        <input type="checkbox" name="tag_id" value="{{.ID}}" {{if $.Ticked .ID}}checked{{end}}>
+        {{.Label}}
+      </label>
+      {{end}}
+      {{if not (or .Applied .Offerable)}}
+      <span style="color:var(--faint)">no live tags defined yet</span>
+      {{end}}
+    </div>
+
+    {{/* Create-and-apply, docs/tags-design.md §4a. A description is required
+         to actually create a tag (domain.NewTag), so leaving all three
+         blank is a real no-op rather than a refused submission -- it is
+         only checked server-side once a code is typed. */}}
+    <fieldset class="field-group">
+      <legend>Define a new tag and apply it here</legend>
+      <div class="field-row">
+        <div class="field">
+          <label for="new-tag-code-{{.RowVersion}}">Code</label>
+          <input id="new-tag-code-{{.RowVersion}}" class="{{if .Edit.Err "new_tag_code"}}invalid{{end}}"
+                 type="text" name="new_tag_code" value="{{.Edit.Value "new_tag_code" ""}}" placeholder="dr">
+          {{with .Edit.Err "new_tag_code"}}<div class="field-error">{{.}}</div>{{end}}
+        </div>
+        <div class="field">
+          <label for="new-tag-label-{{.RowVersion}}">Label</label>
+          <input id="new-tag-label-{{.RowVersion}}" class="{{if .Edit.Err "new_tag_label"}}invalid{{end}}"
+                 type="text" name="new_tag_label" value="{{.Edit.Value "new_tag_label" ""}}" placeholder="DR">
+          {{with .Edit.Err "new_tag_label"}}<div class="field-error">{{.}}</div>{{end}}
+        </div>
+      </div>
+      <div class="field">
+        <label for="new-tag-desc-{{.RowVersion}}">Why this tag exists</label>
+        <input id="new-tag-desc-{{.RowVersion}}" class="{{if .Edit.Err "new_tag_description"}}invalid{{end}}"
+               type="text" name="new_tag_description" value="{{.Edit.Value "new_tag_description" ""}}"
+               placeholder="in scope for the annual DR exercise">
+        {{with .Edit.Err "new_tag_description"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+    </fieldset>
+
+    <button class="btn btn-primary" type="submit">Save tags</button>
+  </form>
+</div>
+{{end}}

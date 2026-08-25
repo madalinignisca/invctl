@@ -32,12 +32,31 @@ import (
 //     would be arbitrary. SQLite's single-writer pool hides this entirely,
 //     which is exactly how two active cables once ended up on one port.
 //
-//   - There is no projectAudit fold. The set-replacement rule in CLAUDE.md --
-//     the one assetAudit and dependencyAudit exist for -- is about sets
-//     REPLACED WHOLESALE inside a parent's transaction, where a diff on the
-//     parent struct would show nothing. These links are added and retired one
-//     at a time and each writes its own change_log row, so folding them into
-//     the project's audit value would double-count every change.
+//   - There was no projectAudit fold for owns/uses links. The set-replacement
+//     rule in CLAUDE.md -- the one assetAudit and dependencyAudit exist for --
+//     is about sets REPLACED WHOLESALE inside a parent's transaction, where a
+//     diff on the parent struct would show nothing. Those links are added and
+//     retired one at a time and each writes its own change_log row, so
+//     folding them into the project's audit value would double-count every
+//     change.
+//
+//   - Tags ARE exactly that shape, though (WP-G4a piece 2,
+//     docs/tags-design.md §4): entity_tag is replaced wholesale by one
+//     submission against the project's own picker, so projectAudit exists
+//     now, folding only Tags -- the owns/uses reasoning above is unaffected
+//     and those links still log their own rows one at a time.
+
+// projectAudit is the audited shape of a project: the row plus the tags it
+// carries, folded the way assetAudit and serviceAudit fold theirs. See
+// internal/store/entitytags.go.
+type projectAudit struct {
+	domain.Project
+	Tags string `db:"tags"`
+}
+
+func auditedProject(p *domain.Project, tags string) *projectAudit {
+	return &projectAudit{Project: *p, Tags: tags}
+}
 
 // ProjectRow is a project with the counts a list needs, so a page showing
 // twenty projects still costs one query.
@@ -283,7 +302,10 @@ func (s *SQLStore) CreateProject(ctx context.Context, actor domain.Actor, p *dom
 		if err != nil {
 			return translateWriteErr(err, "creating project")
 		}
-		if err := t.logCreate(ctx, "project", p.ID, p); err != nil {
+		// No tag can exist yet -- p.ID was generated for this statement --
+		// so the empty fold is the true one, the same reasoning as
+		// insertAsset and CreateService.
+		if err := t.logCreate(ctx, "project", p.ID, auditedProject(p, "")); err != nil {
 			return err
 		}
 		return s.indexEntity(ctx, t, searchDoc{
@@ -328,7 +350,14 @@ func (s *SQLStore) UpdateProject(ctx context.Context, actor domain.Actor, p *dom
 		if err := requireVersion(res, "project", p.ID, &p.RowVersion); err != nil {
 			return err
 		}
-		if err := t.logUpdate(ctx, "project", p.ID, &before, p); err != nil {
+		// This method does not touch tags, so the same fold goes on both
+		// sides and cancels; read rather than assumed empty so the entry
+		// describes the whole project.
+		tags, err := entityTagsAudit(ctx, t, domain.TagEntityProject, p.ID)
+		if err != nil {
+			return err
+		}
+		if err := t.logUpdate(ctx, "project", p.ID, auditedProject(&before, tags), auditedProject(p, tags)); err != nil {
 			return err
 		}
 		return s.indexEntity(ctx, t, searchDoc{

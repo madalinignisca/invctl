@@ -729,6 +729,14 @@ func TestTheOnlyFactDeletingStatementIsThePrune(t *testing.T) {
 		// entity's own transaction, folded into assetAudit.CustomFields /
 		// serviceAudit.CustomFields so it cannot produce an empty diff.
 		"internal/store/customvalues.go": "custom_field_value: what one entity holds for each custom field, replaced wholesale",
+		// entity_tag: the set of tags one asset, service or project carries.
+		// Same rule, eleventh time (WP-G4a piece 2, docs/tags-design.md §4).
+		// Replaced wholesale inside the ENTITY'S own transaction by
+		// SetEntityTags, and folded into assetAudit.Tags / serviceAudit.Tags /
+		// projectAudit.Tags so the replacement cannot produce an empty diff --
+		// TestApplyingATagWritesExactlyOneChangeLogRowOnTheParent and its
+		// removal counterpart are exactly the tests this rule exists for.
+		"internal/store/entitytags.go": "entity_tag: the tags an entity carries, replaced wholesale",
 	}
 
 	root := repoRoot(t)

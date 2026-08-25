@@ -402,6 +402,12 @@ type assetDetailPage struct {
 	// docs/custom-fields-design.md §4). Absent from the page entirely when
 	// its Rows is empty -- see custom_fields_show.html.
 	CustomFields customFieldsPanel
+	// Tags is this asset's applied tag set (WP-G4a piece 2,
+	// docs/tags-design.md §4a), rendered as its own panel beside custom
+	// fields -- both are "yours, not the vendor's", but tags cut across
+	// entity types where custom fields do not, so they are shown separately
+	// rather than merged into one section.
+	Tags entityTagsPanel
 }
 
 // AssetDetail renders one asset with its containment, ports and workloads.
@@ -534,6 +540,18 @@ func (a *App) renderAssetDetail(w http.ResponseWriter, r *http.Request, status i
 	}
 	customFields, err := a.loadCustomFieldsPanel(r, domain.CustomFieldEntityAsset, asset.ID,
 		asset.RowVersion, "/assets/"+asset.ID+"/custom-fields", assetBase.CSRF, assetBase.CanWrite, cfEdit)
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
+	// Tags (WP-G4a piece 2): the sentinel never collides with a real row id
+	// or with customFieldsEditID's own sentinel -- see entityTagsEditID.
+	var tagsEdit *editState
+	if edit != nil && edit.ID == entityTagsEditID(asset.ID) {
+		tagsEdit = edit
+	}
+	tags, err := a.loadEntityTagsPanel(r, domain.TagEntityAsset, asset.ID,
+		asset.RowVersion, "/assets/"+asset.ID+"/tags", assetBase.CSRF, assetBase.CanWrite, tagsEdit)
 	if err != nil {
 		a.serverError(w, r, err)
 		return
@@ -696,6 +714,7 @@ func (a *App) renderAssetDetail(w http.ResponseWriter, r *http.Request, status i
 		Edit:            edit,
 		AssetEdit:       assetEdit,
 		CustomFields:    customFields,
+		Tags:            tags,
 		Asset:           asset,
 		Certificates:    certificates,
 		Costs:           costs,

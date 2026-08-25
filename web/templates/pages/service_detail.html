@@ -322,4 +322,9 @@
      keeps each editor's token the first one a reader (or a test) finds. */}}
 {{template "custom_fields_show" .CustomFields}}
 {{if .CustomFields.CanWrite}}{{template "custom_fields_form" .CustomFields}}{{end}}
+
+{{/* Tags, WP-G4a piece 2 (docs/tags-design.md §4a). Its own panel, same
+     reasoning as the asset detail page. */}}
+{{template "entity_tags_show" .Tags}}
+{{if .Tags.CanWrite}}{{template "entity_tags_form" .Tags}}{{end}}
 {{end}}
