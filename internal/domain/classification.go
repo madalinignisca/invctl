@@ -688,6 +688,17 @@ var DeclaredColumns = map[string][]string{
 		"id", "field_id", "entity_id", "value_text",
 		"created_at", "updated_at", "row_version",
 	},
+	// Tags, piece 1 of WP-G4a (docs/tags-design.md, migration 00056):
+	// an administrator names a label before it can be applied to anything.
+	// The identical reasoning as custom_field above -- created_by/retired_by
+	// are a PERSON's attestation, not provenance (that is source/confidence,
+	// which a tag carries neither of), and every column here is somebody
+	// asserting a fact, none is the estate reporting one.
+	"tag": {
+		"id", "code", "label", "description",
+		"created_by", "created_at", "retired_at", "retired_by",
+		"row_version",
+	},
 }
 
 // ClassifyColumn returns the class of a column. ok is false when the column is

@@ -1,0 +1,29 @@
+{{/*
+  invctl — infrastructure inventory
+  Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+
+  Licensed under the GNU Affero General Public License, version 3 only —
+  no later version applies. See LICENSE for the full text.
+
+  SPDX-License-Identifier: AGPL-3.0-only
+*/}}
+{{define "content"}}
+<div class="page-head">
+  <div class="eyebrow">Settings</div>
+  <h1>Tags</h1>
+  <p class="lede">
+    Labels this estate defined, crossing asset and service types — "everything
+    in the DR scope", "PCI in play". A tag is created here before it can be
+    applied to anything, the same way a
+    <a href="/custom-fields">custom field</a> is defined before it holds a
+    value: it keeps "dr", "DR" and "disaster-recovery" from becoming three
+    different tags meaning one thing.
+  </p>
+</div>
+
+{{template "tag_list_panel" .}}
+
+{{if .CanWrite}}
+{{template "tag_form" .}}
+{{end}}
+{{end}}

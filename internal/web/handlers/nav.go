@@ -115,6 +115,7 @@ var navGroups = []NavGroup{
 		{Label: "Vocabularies", Href: "/vocabularies", Nav: "vocabularies"},
 		{Label: "Inflation", Href: "/inflation", Nav: "inflation"},
 		{Label: "Custom fields", Href: "/custom-fields", Nav: "custom-fields"},
+		{Label: "Tags", Href: "/tags", Nav: "tags"},
 	}},
 }
 

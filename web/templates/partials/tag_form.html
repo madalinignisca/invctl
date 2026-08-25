@@ -1,0 +1,163 @@
+{{/*
+  invctl — infrastructure inventory
+  Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+
+  Licensed under the GNU Affero General Public License, version 3 only —
+  no later version applies. See LICENSE for the full text.
+
+  SPDX-License-Identifier: AGPL-3.0-only
+*/}}
+
+{{/*
+  tag_row renders one definition: a plain row, or its edit form in place of
+  it when $.Page.Base.EditRow (or a rejected edit) names this tag.
+
+  Takes dict{Row, Page} rather than the row alone, the same shape
+  custom_field_row does, so $p.CanWrite / $p.CSRF / $p.Edit are all in reach.
+*/}}
+{{define "tag_row"}}
+{{$row := .Row}}
+{{$p := .Page}}
+{{if and $p.CanWrite (eq $row.ID $p.Base.EditRow)}}
+<tr class="row-editing">
+  <td>
+    <input form="tag-{{$row.ID}}" class="mono {{if $p.Edit.Err "code"}}invalid{{end}}" type="text" name="code"
+           value="{{$p.Edit.Value "code" $row.Code}}" aria-label="Code" required style="width:10em">
+    {{with $p.Edit.Err "code"}}<div class="field-error">{{.}}</div>{{end}}
+  </td>
+  <td>
+    <input form="tag-{{$row.ID}}" class="{{if $p.Edit.Err "label"}}invalid{{end}}" type="text" name="label"
+           value="{{$p.Edit.Value "label" $row.Label}}" aria-label="Label" required>
+    {{with $p.Edit.Err "label"}}<div class="field-error">{{.}}</div>{{end}}
+  </td>
+  <td>
+    <input form="tag-{{$row.ID}}" class="{{if $p.Edit.Err "description"}}invalid{{end}}" type="text" name="description"
+           value="{{$p.Edit.Value "description" $row.Description}}" aria-label="Description" required style="width:100%">
+    {{with $p.Edit.Err "description"}}<div class="field-error">{{.}}</div>{{end}}
+  </td>
+  <td style="white-space:nowrap">
+    <form id="tag-{{$row.ID}}" method="post" action="/tags/{{$row.ID}}" style="display:inline">
+      <input type="hidden" name="csrf_token" value="{{$p.CSRF}}">
+      <input type="hidden" name="row_version" value="{{$p.Edit.Value "row_version" (itoa $row.RowVersion)}}">
+      <button class="btn btn-sm btn-primary" type="submit">Save</button>
+    </form>
+    <a class="btn btn-sm" href="/tags">Cancel</a>
+  </td>
+</tr>
+{{else}}
+<tr>
+  <td class="mono">{{$row.Code}}</td>
+  <td>{{$row.Label}}</td>
+  <td>{{$row.Description}}</td>
+  <td style="font-size:12px">
+    {{$row.CreatedByName}}<br>
+    <span style="color:var(--muted)">{{shortTime $row.CreatedAt}}</span>
+  </td>
+  <td style="white-space:nowrap">
+    {{if $p.CanWrite}}
+    <a class="btn btn-sm" href="/tags?edit={{$row.ID}}">Edit</a>
+    <form method="post" action="/tags/{{$row.ID}}/retire" style="display:inline">
+      <input type="hidden" name="csrf_token" value="{{$p.CSRF}}">
+      <button class="btn btn-sm btn-danger" type="submit"
+              onclick="return confirm('Retire this tag? Anything already carrying it keeps it.')">Retire</button>
+    </form>
+    {{end}}
+  </td>
+</tr>
+{{end}}
+{{end}}
+
+{{define "tag_list_panel"}}
+<div id="tag-registry">
+
+  <div class="panel">
+    <div class="panel-head">
+      <h2>Tags</h2>
+      <span class="panel-note">{{pluralise (len .Tags) "tag" "tags"}}</span>
+    </div>
+    {{if .Tags}}
+    <div class="scroll-x">
+      <table>
+        <thead>
+          <tr><th>Code</th><th>Label</th><th>Description</th><th>Defined by</th><th></th></tr>
+        </thead>
+        <tbody>
+          {{range .Tags}}{{template "tag_row" dict "Row" . "Page" $}}{{end}}
+        </tbody>
+      </table>
+    </div>
+    {{else}}
+    <div class="empty"><strong>No tags defined yet.</strong></div>
+    {{end}}
+  </div>
+
+  {{if .Retired}}
+  <div class="panel">
+    <div class="panel-head">
+      <h2>Retired tags</h2>
+      <span class="panel-note">Kept on anything that already carries them, never deleted.</span>
+    </div>
+    <div class="scroll-x">
+      <table>
+        <thead>
+          <tr><th>Code</th><th>Label</th><th>Retired by</th><th>Retired</th><th></th></tr>
+        </thead>
+        <tbody>
+          {{range .Retired}}
+          <tr>
+            <td class="mono">{{.Code}}</td>
+            <td>{{.Label}}</td>
+            <td>{{deref .RetiredByName}}</td>
+            <td>{{if .RetiredAt}}{{shortTime (deref .RetiredAt)}}{{end}}</td>
+            <td>
+              {{if $.CanWrite}}
+              <form method="post" action="/tags/{{.ID}}/restore" style="display:inline">
+                <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+                <button class="btn btn-sm" type="submit">Restore</button>
+              </form>
+              {{end}}
+            </td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {{end}}
+
+</div>
+{{end}}
+
+{{define "tag_form"}}
+<div class="panel">
+  <div class="panel-head"><h2>Define a tag</h2></div>
+  {{/* Plain POST, no hx-post -- the same reasoning as custom_field_form
+       (FINAL REVIEW F5 there): a 422 fragment swapping into this form's own
+       innerHTML would nest a <form> inside itself, and every other form on
+       this page is a plain POST too. */}}
+  <form class="panel-body" method="post" action="/tags">
+    <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+    <div class="field-row">
+      <div class="field">
+        <label for="tag-code">Code</label>
+        <input id="tag-code" class="mono" type="text" name="code" value="{{.Spec.Code}}" required
+               placeholder="dr">
+        {{with index .Errors "code"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="tag-label">Label</label>
+        <input id="tag-label" type="text" name="label" value="{{.Spec.Label}}" required
+               placeholder="DR">
+        {{with index .Errors "label"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+    </div>
+    <div class="field">
+      <label for="tag-desc">Description — why this tag exists</label>
+      <input id="tag-desc" type="text" name="description" value="{{.Spec.Description}}" required
+             placeholder="In scope for the annual disaster-recovery exercise">
+      {{with index .Errors "description"}}<div class="field-error">{{.}}</div>{{end}}
+    </div>
+    <button class="btn btn-primary" type="submit">Define tag</button>
+  </form>
+</div>
+{{end}}
