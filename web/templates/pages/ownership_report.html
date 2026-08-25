@@ -1,0 +1,201 @@
+{{/*
+  invctl — infrastructure inventory
+  Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+
+  Licensed under the GNU Affero General Public License, version 3 only —
+  no later version applies. See LICENSE for the full text.
+
+  SPDX-License-Identifier: AGPL-3.0-only
+*/}}
+{{define "content"}}
+<div class="crumbs">
+  <span>reports</span><span class="sep">/</span><span>ownership</span>
+</div>
+
+<div class="page-head">
+  <div class="eyebrow">analysis</div>
+  <h1>Ownership</h1>
+  <p class="lede">
+    What in this estate has no owner, or an owner who cannot act. Retired
+    things are left out on purpose — nobody needs to look after those. This
+    page is read-only: nothing here reassigns anything.
+  </p>
+</div>
+
+{{template "ownership_report" .}}
+{{end}}
+
+{{define "ownership_report"}}
+<div id="ownership-report">
+{{with .Report}}
+
+{{if .Empty}}
+<div class="panel">
+  <div class="empty">
+    <strong>No ownership gaps.</strong>
+    Every live asset, service, project, identity and custom field names a
+    team, every one of those teams can act, and every team that owns
+    something can be reached.
+  </div>
+</div>
+{{else}}
+
+<div class="stat-row">
+  <div class="stat">
+    <div class="k">unowned</div>
+    <div class="v">{{.UnownedTotal}}</div>
+  </div>
+  <div class="stat">
+    <div class="k">owner cannot act</div>
+    <div class="v">{{.CannotActTotal}}</div>
+  </div>
+  <div class="stat">
+    <div class="k">owner has no contact</div>
+    <div class="v">{{len .NoContact}}</div>
+  </div>
+</div>
+
+<div class="panel">
+  <div class="panel-head">
+    <h2>Unowned</h2>
+    <p class="panel-note">
+      The team reference is empty. Nobody ever said who looks after this.
+    </p>
+  </div>
+  {{if .Unowned}}
+  <div class="scroll-x">
+    <table>
+      <thead><tr><th>Type</th><th>What</th></tr></thead>
+      <tbody>
+        {{range .Unowned}}
+        <tr>
+          <td><span class="pill pill-muted">{{.EntityType}}</span></td>
+          <td>
+            {{if eq .EntityType "asset"}}
+              <a class="id" href="/assets/{{.ID}}">{{.Name}}</a>
+            {{else if eq .EntityType "service"}}
+              <a class="id" href="/services/{{.ID}}">{{.Name}}</a>
+              {{if .Code}}<div style="color:var(--muted);font-size:12px">{{.Code}}</div>{{end}}
+            {{else if eq .EntityType "project"}}
+              <a class="id" href="/projects/{{.ID}}">{{.Name}}</a>
+            {{else if eq .EntityType "custom_field"}}
+              <a class="id" href="/custom-fields">{{.Name}}</a>
+              {{if .Code}}<div style="color:var(--muted);font-size:12px">{{.Code}}</div>{{end}}
+            {{else}}
+              {{/* identity has no detail page in this product yet. */}}
+              {{.Name}}
+            {{end}}
+          </td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{if .UnownedTruncated}}
+  <div class="panel-body">
+    <p class="panel-note">
+      Showing the first {{len .Unowned}} of {{.UnownedTotal}}.
+    </p>
+  </div>
+  {{end}}
+  {{else}}
+  <div class="empty">Nothing unowned.</div>
+  {{end}}
+</div>
+
+<div class="panel">
+  <div class="panel-head">
+    <h2>Owner cannot act</h2>
+    <p class="panel-note">
+      The team exists but its lifecycle says it will not answer — a
+      <span class="pill pill-degraded">deprecated</span> team is on its way
+      out and still owns this; a
+      <span class="pill pill-down">retired</span> team is already gone.
+    </p>
+  </div>
+  {{if .CannotAct}}
+  <div class="scroll-x">
+    <table>
+      <thead><tr><th>Type</th><th>What</th><th>Owner</th><th>Owner's state</th></tr></thead>
+      <tbody>
+        {{range .CannotAct}}
+        <tr>
+          <td><span class="pill pill-muted">{{.EntityType}}</span></td>
+          <td>
+            {{if eq .EntityType "asset"}}
+              <a class="id" href="/assets/{{.ID}}">{{.Name}}</a>
+            {{else if eq .EntityType "service"}}
+              <a class="id" href="/services/{{.ID}}">{{.Name}}</a>
+            {{else if eq .EntityType "project"}}
+              <a class="id" href="/projects/{{.ID}}">{{.Name}}</a>
+            {{else if eq .EntityType "custom_field"}}
+              <a class="id" href="/custom-fields">{{.Name}}</a>
+            {{else}}
+              {{.Name}}
+            {{end}}
+          </td>
+          <td><a class="id" href="/teams/{{.TeamID}}">{{.TeamName}}</a></td>
+          <td>
+            {{if .Transitional}}
+              <span class="pill pill-degraded" title="On its way out, but still owns this">{{.TeamLifecycle}}</span>
+            {{else}}
+              <span class="pill pill-down" title="Gone; nobody has picked this up">{{.TeamLifecycle}}</span>
+            {{end}}
+          </td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{if .CannotActTruncated}}
+  <div class="panel-body">
+    <p class="panel-note">
+      Showing the first {{len .CannotAct}} of {{.CannotActTotal}}.
+    </p>
+  </div>
+  {{end}}
+  {{else}}
+  <div class="empty">No live entity is owned by a team that cannot act.</div>
+  {{end}}
+</div>
+
+<div class="panel">
+  <div class="panel-head">
+    <h2>Owner has no contact</h2>
+    <p class="panel-note">
+      An active team owns at least one live thing but names no group address,
+      queue or channel. One row per team, not per entity it owns — the fix is
+      the same regardless of how much it looks after.
+    </p>
+  </div>
+  {{if .NoContact}}
+  <div class="scroll-x">
+    <table>
+      <thead>
+        <tr><th>Team</th><th>Assets</th><th>Services</th><th>Projects</th>
+            <th>Identities</th><th>Custom fields</th><th></th></tr>
+      </thead>
+      <tbody>
+        {{range .NoContact}}
+        <tr>
+          <td><a class="id" href="/teams/{{.TeamID}}">{{.TeamName}}</a></td>
+          <td>{{.AssetCount}}</td>
+          <td>{{.ServiceCount}}</td>
+          <td>{{.ProjectCount}}</td>
+          <td>{{.IdentityCount}}</td>
+          <td>{{.CustomFieldCount}}</td>
+          <td><a href="/teams/{{.TeamID}}">Fix it</a></td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{else}}
+  <div class="empty">Every eligible team that owns something can be reached.</div>
+  {{end}}
+</div>
+
+{{end}}
+{{end}}
+</div>
+{{end}}

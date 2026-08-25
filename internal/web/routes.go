@@ -172,6 +172,7 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	read("GET /reports/power", app.PowerReport)
 	read("GET /reports/cost", app.CostReport)
 	read("GET /reports/suppliers", app.SupplierReport)
+	read("GET /reports/ownership", app.OwnershipReport)
 	read("GET /teams", app.TeamList)
 	read("GET /teams/{id}", app.TeamDetail)
 	read("GET /projects", app.ProjectList)

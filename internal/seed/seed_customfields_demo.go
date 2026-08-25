@@ -407,6 +407,93 @@ func StageCustomFieldSpread(ctx context.Context, s *store.SQLStore, adminUsernam
 		return fmt.Errorf("retiring the low criticality_tier option: %w", err)
 	}
 
+	// ---------- the ownership report's own gaps (WP-G7) ----------
+	//
+	// StageCustomFields already stages the two states its OWN fixture
+	// assertion counts exactly (TestTheSeedFixtureCoversEveryCustomFieldKind's
+	// neighbour, in customfields_test.go: "1 unowned", "1 owned by a
+	// since-retired team") -- widening that file would mean widening that
+	// assertion too, for no gain. This layer is additive and untested by
+	// count, so it is where the report's other two conditions get real data
+	// instead: a DEPRECATED owner (design §2's "arguably the most
+	// interesting finding" -- a team on its way out that still owns
+	// something, which a binary active/retired check misses silently) and
+	// an ACTIVE owner nobody can reach (no contact_ref at all).
+	//
+	// Reassigning support_tier and sla_minutes -- already defined and
+	// already carrying values across the estate -- rather than defining new
+	// fields: SetCustomFieldOptions and the value maps above are untouched,
+	// so this cannot disturb hv-02/vault's "every field gets a value"
+	// coverage the way adding a field would.
+	if err := assignAndDeprecateOwner(ctx, s, actor, serviceFieldIDs["support_tier"], "sunset-support"); err != nil {
+		return fmt.Errorf("staging a deprecated owner for support_tier: %w", err)
+	}
+	if err := assignToUnreachableOwner(ctx, s, actor, serviceFieldIDs["sla_minutes"], "silent-ops"); err != nil {
+		return fmt.Errorf("staging a contactless owner for sla_minutes: %w", err)
+	}
+
+	return nil
+}
+
+// assignAndDeprecateOwner builds a small, single-purpose ACTIVE team (so the
+// reassignment itself passes requireActiveOwnerTeam), assigns it as fieldID's
+// owner through the real store path, and then moves the team to DEPRECATED --
+// not retired. That is the transitional case docs/ownership-report-design.md
+// §2 singles out: the team has not fully gone, it still owns this, and a
+// check that only tests for `lifecycle = 'retired'` would miss it silently.
+func assignAndDeprecateOwner(ctx context.Context, s *store.SQLStore, actor domain.Actor, fieldID, teamCode string) error {
+	team, err := domain.NewTeam(store.NewID(), domain.TeamSpec{
+		Code: teamCode, Name: "Support Contract Winding Down",
+		Description: str("On its way out as its work is handed off, but still named as the owner of record."),
+		ContactRef:  str(teamCode + "@example.com"),
+	}, s.Now())
+	if err != nil {
+		return fmt.Errorf("building the soon-to-deprecate team: %w", err)
+	}
+	if err := s.CreateTeam(ctx, actor, team); err != nil {
+		return fmt.Errorf("creating the soon-to-deprecate team: %w", err)
+	}
+
+	field, err := s.GetCustomField(ctx, fieldID)
+	if err != nil {
+		return fmt.Errorf("reading field %s to reassign its owner: %w", fieldID, err)
+	}
+	field.OwnerTeamID = &team.ID
+	if err := s.UpdateCustomField(ctx, actor, &field.CustomField); err != nil {
+		return fmt.Errorf("reassigning field %s to the soon-to-deprecate team: %w", fieldID, err)
+	}
+
+	team.Lifecycle = domain.LifecycleDeprecated
+	if err := s.UpdateTeam(ctx, actor, team); err != nil {
+		return fmt.Errorf("deprecating team %s: %w", teamCode, err)
+	}
+	return nil
+}
+
+// assignToUnreachableOwner builds an ACTIVE team with NO contact_ref and
+// assigns it as fieldID's owner -- finding 3 (design §2): the owner exists
+// and can still act, and is unreachable anyway because nobody ever gave it a
+// group address, a queue or a channel.
+func assignToUnreachableOwner(ctx context.Context, s *store.SQLStore, actor domain.Actor, fieldID, teamCode string) error {
+	team, err := domain.NewTeam(store.NewID(), domain.TeamSpec{
+		Code: teamCode, Name: "Owns This, Nobody Can Reach It",
+		Description: str("An active team that owns something and was never given a contact."),
+	}, s.Now())
+	if err != nil {
+		return fmt.Errorf("building the contactless team: %w", err)
+	}
+	if err := s.CreateTeam(ctx, actor, team); err != nil {
+		return fmt.Errorf("creating the contactless team: %w", err)
+	}
+
+	field, err := s.GetCustomField(ctx, fieldID)
+	if err != nil {
+		return fmt.Errorf("reading field %s to reassign its owner: %w", fieldID, err)
+	}
+	field.OwnerTeamID = &team.ID
+	if err := s.UpdateCustomField(ctx, actor, &field.CustomField); err != nil {
+		return fmt.Errorf("reassigning field %s to the contactless team: %w", fieldID, err)
+	}
 	return nil
 }
 
