@@ -480,6 +480,38 @@ carrying real traffic.** Every part of the value depends on the observed side
 working, and building the collector first would produce a second inventory with
 nowhere to put its disagreements.
 
+**WP-G7 · Ownership report** — S
+`RetireTeam` states the philosophy already: a retired team still owning things
+is "how the estate says *this used to be theirs and nobody has picked it up*,
+which is a finding; silently nulling the column would erase the question along
+with the answer." Correct — and the promise it makes next, that "the pages
+render a retired team plainly so the gap is visible", is only half kept. The
+gap is visible one entity at a time. Nothing answers "what has no owner?"
+across the estate, and none of the five existing reports looks.
+
+Two distinct findings, deliberately not collapsed: **unowned** (`team_id IS
+NULL` — nobody ever said) and **owner retired** (somebody said and the answer
+expired). The second is the more actionable, because there is a name to start
+from.
+
+Covers every team-owned entity — `asset`, `service`, `project`, `identity`,
+`custom_field.owner_team_id` — not one feature's orphans. A custom-field-only
+view would be the third bespoke attribution mechanism in a product that
+already has two.
+
+Includes the smallest and highest-value piece: **retiring a team warns instead
+of blocking.** `RetireTeam` counts nothing today. Showing "this team looks
+after 12 assets, 3 services and 2 custom fields" before confirming preserves
+the finding while removing the silence. Not forced reassignment — the person
+disbanding a team rarely knows who should inherit twelve services, and forcing
+a choice there converts a fact about the estate into a guess made under time
+pressure.
+
+*Lint-shaped but not the lint engine: the five existing reports set the
+precedent that a targeted query surface is a report, not a rule engine.
+Open question: whether assignment needs to be bulk, which is a different
+transaction and a different audit story — twelve `change_log` rows, not one.*
+
 ---
 
 ### Group H — Configuration data
