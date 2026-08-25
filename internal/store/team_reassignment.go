@@ -11,7 +11,6 @@ package store
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 
 	"github.com/madalinignisca/invctl/internal/domain"
@@ -145,19 +144,12 @@ func (s *SQLStore) ReassignTeamOwnership(ctx context.Context, actor domain.Actor
 
 	// Validated ONCE, up front, rather than once per entity: a target team
 	// that does not exist or is retired is refused before anything moves,
-	// instead of being reported as N separate write_failed rows.
-	var targetLifecycle string
-	if err := s.readOne(ctx, &targetLifecycle, `SELECT lifecycle FROM team WHERE id = ?`, toTeamID); err != nil {
-		if errors.Is(err, domain.ErrNotFound) {
-			return nil, fmt.Errorf(
-				"reassigning team ownership: target team %s does not exist: %w", toTeamID, domain.ErrInvalid)
-		}
-		return nil, fmt.Errorf("checking target team %s: %w", toTeamID, err)
-	}
-	if targetLifecycle == domain.LifecycleRetired {
-		return nil, fmt.Errorf(
-			"reassigning team ownership: target team %s is retired, choose an active team: %w",
-			toTeamID, domain.ErrInvalid)
+	// instead of being reported as N separate write_failed rows. Shared with
+	// BulkAssignOwnership (bulk_ownership.go, WP-G7 piece 3) via
+	// requireActiveTeam, so the two callers of "make this the new owner"
+	// cannot drift on what counts as an eligible target.
+	if err := s.requireActiveTeam(ctx, toTeamID); err != nil {
+		return nil, fmt.Errorf("reassigning team ownership: %w", err)
 	}
 
 	batchID := NewID()

@@ -59,6 +59,9 @@ type ProjectFilter struct {
 	// IncludeRetired defaults false: a retired project is kept forever and is
 	// noise in day-to-day lists, exactly like a retired asset.
 	IncludeRetired bool
+	// Unowned narrows to team_id IS NULL -- see AssetFilter.Unowned's comment;
+	// same reuse, same reasoning, for WP-G7 piece 3's bulk-assignment screen.
+	Unowned bool
 }
 
 // ProjectAssetRow is one linked asset, with enough of the asset to render a
@@ -123,6 +126,9 @@ func (s *SQLStore) ListProjects(ctx context.Context, f ProjectFilter) ([]Project
 	if f.TeamID != "" {
 		where = append(where, `p.team_id = ?`)
 		args = append(args, f.TeamID)
+	}
+	if f.Unowned {
+		where = append(where, `p.team_id IS NULL`)
 	}
 	if f.Query != "" {
 		// LOWER on both sides, like every other filter in this codebase.

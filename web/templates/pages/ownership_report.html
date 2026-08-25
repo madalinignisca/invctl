@@ -17,8 +17,9 @@
   <h1>Ownership</h1>
   <p class="lede">
     What in this estate has no owner, or an owner who cannot act. Retired
-    things are left out on purpose — nobody needs to look after those. This
-    page is read-only: nothing here reassigns anything.
+    things are left out on purpose — nobody needs to look after those. The
+    findings below are read-only; the Unowned section also offers a bulk fix,
+    admin-only, one entity type at a time.
   </p>
 </div>
 
@@ -60,9 +61,29 @@
     <h2>Unowned</h2>
     <p class="panel-note">
       The team reference is empty. Nobody ever said who looks after this.
+      {{if $.CanWrite}}
+      Grouped by type below, with a bulk fix for each — select-all applies
+      only to what is shown after narrowing, never to every unowned row of
+      that type.
+      {{end}}
     </p>
   </div>
   {{if .Unowned}}
+  {{if .UnownedTruncated}}
+  <div class="panel-body">
+    <p class="panel-note">
+      Showing the first {{len .Unowned}} of {{.UnownedTotal}}.
+    </p>
+  </div>
+  {{end}}
+
+  {{if $.CanWrite}}
+  {{range $.UnownedGroups}}
+  {{template "ownership_assign_group" dict
+      "EntityType" .EntityType "EntityLabel" .EntityLabel "Rows" .Rows
+      "Targets" $.Targets "CSRF" $.CSRF}}
+  {{end}}
+  {{else}}
   <div class="scroll-x">
     <table>
       <thead><tr><th>Type</th><th>What</th></tr></thead>
@@ -90,12 +111,6 @@
         {{end}}
       </tbody>
     </table>
-  </div>
-  {{if .UnownedTruncated}}
-  <div class="panel-body">
-    <p class="panel-note">
-      Showing the first {{len .Unowned}} of {{.UnownedTotal}}.
-    </p>
   </div>
   {{end}}
   {{else}}

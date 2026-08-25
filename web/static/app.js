@@ -268,6 +268,73 @@ document.addEventListener('alpine:init', () => {
       }
     },
   }));
+
+  // The ownership report's bulk-assignment groups (WP-G7 piece 3,
+  // docs/ownership-report-design.md §6). Local UI state only: which
+  // checkboxes are ticked and which team is picked, so the confirm message
+  // can name a count and a target before the request ever leaves the
+  // browser. It fetches nothing itself -- the ids it reads are whatever
+  // OwnershipCandidates most recently rendered into this group, which is
+  // what makes "select all" apply to the CURRENT FILTERED VIEW rather than
+  // to every unowned row of this type: there is no unfiltered list for it to
+  // reach past.
+  //
+  // entityLabel comes through data-entity-label, not x-data(...): the CSP
+  // build's x-data is a bare component name, the same reason diagramZoom
+  // reads data-width instead of taking an argument.
+  Alpine.data('bulkAssign', () => ({
+    entityLabel: 'items',
+    selected: 0,
+    teamValue: '',
+    teamLabel: '',
+    init() {
+      this.entityLabel = this.$el.dataset.entityLabel || 'items';
+      this.updateSelected();
+      this.updateTeamLabel();
+    },
+    checkboxes() {
+      return this.$el.querySelectorAll('input[name="ids"]');
+    },
+    updateSelected() {
+      this.selected = this.$el.querySelectorAll('input[name="ids"]:checked').length;
+    },
+    updateTeamLabel() {
+      const select = this.$el.querySelector('select[name="team_id"]');
+      if (!select || select.selectedIndex < 0) {
+        this.teamValue = '';
+        this.teamLabel = '';
+        return;
+      }
+      this.teamValue = select.value;
+      this.teamLabel = select.options[select.selectedIndex].textContent;
+    },
+    // "Select all IN THE CURRENT FILTERED VIEW" (design §6) -- this toggles
+    // exactly the checkboxes present in the DOM right now, which is exactly
+    // whatever OwnershipCandidates rendered for the active filter. There is
+    // no broader set for it to reach past.
+    selectAll() {
+      this.checkboxes().forEach((cb) => {
+        cb.checked = true;
+      });
+      this.updateSelected();
+    },
+    clearAll() {
+      this.checkboxes().forEach((cb) => {
+        cb.checked = false;
+      });
+      this.updateSelected();
+    },
+    get canSubmit() {
+      return this.selected > 0 && this.teamValue !== '';
+    },
+    get disableSubmit() {
+      return !this.canSubmit;
+    },
+    get confirmMessage() {
+      const team = this.teamLabel || 'the selected team';
+      return 'Assign ' + this.selected + ' ' + this.entityLabel + ' to ' + team + '?';
+    },
+  }));
 });
 
 // A 422 carries a re-rendered form and must be swapped in.

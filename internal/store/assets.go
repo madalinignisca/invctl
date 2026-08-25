@@ -189,6 +189,13 @@ type AssetFilter struct {
 	// how a fast application becomes a slow one without any single change being
 	// to blame.
 	Limit int
+	// Unowned narrows to team_id IS NULL -- the WP-G7 piece 3 bulk-assignment
+	// screen's candidate list (docs/ownership-report-design.md §6), reusing
+	// this filter and assetFilterFrom rather than a second, parallel filter
+	// type for "which unowned assets match this narrowing". Mutually exclusive
+	// with TeamID in practice, though nothing here refuses combining them --
+	// team_id = X AND team_id IS NULL simply, and correctly, matches nothing.
+	Unowned bool
 }
 
 // AssetListLimit is the default ceiling on a list page.
@@ -231,6 +238,9 @@ func (s *SQLStore) ListAssets(ctx context.Context, f AssetFilter) ([]AssetRow, e
 	if f.DeviceTypeID != "" {
 		where = append(where, `a.device_type_id = ?`)
 		args = append(args, f.DeviceTypeID)
+	}
+	if f.Unowned {
+		where = append(where, `a.team_id IS NULL`)
 	}
 	if f.Query != "" {
 		// LIKE with a leading wildcard, not a full-text match: this is the

@@ -53,6 +53,9 @@ type ServiceFilter struct {
 	Tier           int
 	Query          string
 	IncludeRetired bool
+	// Unowned narrows to team_id IS NULL -- see AssetFilter.Unowned's comment;
+	// same reuse, same reasoning.
+	Unowned bool
 }
 
 // ServiceRow is a service plus what a list view needs to render without
@@ -126,6 +129,9 @@ func (s *SQLStore) ListServices(ctx context.Context, f ServiceFilter) ([]Service
 	if f.Tier > 0 {
 		where = append(where, `s.tier = ?`)
 		args = append(args, f.Tier)
+	}
+	if f.Unowned {
+		where = append(where, `s.team_id IS NULL`)
 	}
 	if f.Query != "" {
 		where = append(where, `(LOWER(s.name) LIKE ? ESCAPE '\' OR LOWER(s.code) LIKE ? ESCAPE '\')`)

@@ -1,0 +1,146 @@
+{{/*
+  invctl — infrastructure inventory
+  Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+
+  Licensed under the GNU Affero General Public License, version 3 only —
+  no later version applies. See LICENSE for the full text.
+
+  SPDX-License-Identifier: AGPL-3.0-only
+*/}}
+{{/* WP-G7 piece 3: bulk assignment of the Unowned finding
+     (docs/ownership-report-design.md §4, §6).
+
+     Two standalone partials:
+       - ownership_assign_group: one entity type's filtered candidate list,
+         its checkboxes and its own team picker. Rendered inline by
+         ownership_report on first load, and re-rendered by
+         GET /reports/ownership/candidates whenever the filter changes.
+       - ownership_assign_result: the per-item outcome after a POST to
+         /reports/ownership/assign -- never a bare count (design §4).
+
+     Expects (group): .EntityType, .EntityLabel, .Rows ([]store.OwnershipCandidate),
+     .Targets ([]store.TeamRow), .CSRF, .Error (optional). */}}
+{{define "ownership_assign_group"}}
+<div id="ownership-assign-{{.EntityType}}" class="panel bulk-assign"
+     x-data="bulkAssign" data-entity-label="{{.EntityLabel}}">
+  <div class="panel-head">
+    <h3>Assign {{.EntityLabel}}</h3>
+  </div>
+
+  {{if .Error}}
+  <div class="flash flash-error">{{.Error}}</div>
+  {{end}}
+
+  {{if .Rows}}
+  <form hx-post="/reports/ownership/assign"
+        hx-target="#ownership-assign-{{.EntityType}}"
+        hx-swap="outerHTML">
+    <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+    <input type="hidden" name="entity_type" value="{{.EntityType}}">
+
+    {{if eq .EntityType "asset"}}
+    <div class="filter-row"
+         hx-get="/reports/ownership/candidates"
+         hx-trigger="change"
+         hx-target="#ownership-assign-{{.EntityType}}"
+         hx-swap="outerHTML"
+         hx-include="this">
+      <input type="hidden" name="entity_type" value="asset">
+      <input type="text" name="q" placeholder="Search name or serial">
+    </div>
+    {{else if eq .EntityType "service"}}
+    <div class="filter-row"
+         hx-get="/reports/ownership/candidates"
+         hx-trigger="change"
+         hx-target="#ownership-assign-{{.EntityType}}"
+         hx-swap="outerHTML"
+         hx-include="this">
+      <input type="hidden" name="entity_type" value="service">
+      <input type="text" name="q" placeholder="Search name or code">
+    </div>
+    {{else}}
+    <div class="filter-row"
+         hx-get="/reports/ownership/candidates"
+         hx-trigger="change"
+         hx-target="#ownership-assign-{{.EntityType}}"
+         hx-swap="outerHTML"
+         hx-include="this">
+      <input type="hidden" name="entity_type" value="{{.EntityType}}">
+      <input type="text" name="q" placeholder="Search">
+    </div>
+    {{end}}
+
+    <div class="scroll-x">
+      <table>
+        <thead><tr><th></th><th>Name</th></tr></thead>
+        <tbody>
+          {{range .Rows}}
+          <tr>
+            <td><input type="checkbox" name="ids" value="{{.ID}}" x-on:change="updateSelected"></td>
+            <td>
+              {{.Name}}
+              {{if .Code}}<div style="color:var(--muted);font-size:12px">{{.Code}}</div>{{end}}
+            </td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="form-actions">
+      <button type="button" class="btn btn-sm" x-on:click="selectAll">
+        Select all shown ({{len .Rows}}) — this filtered view only
+      </button>
+      <button type="button" class="btn btn-sm" x-on:click="clearAll">Clear</button>
+
+      <select name="team_id" x-on:change="updateTeamLabel">
+        <option value="">Choose a team</option>
+        {{range .Targets}}<option value="{{.ID}}">{{.Code}}</option>{{end}}
+      </select>
+
+      <button type="submit" class="btn btn-primary btn-sm"
+              x-bind:disabled="disableSubmit"
+              x-bind:hx-confirm="confirmMessage">
+        Assign selected
+      </button>
+    </div>
+  </form>
+  {{else}}
+  <div class="empty">Nothing unowned to assign here.</div>
+  {{end}}
+</div>
+{{end}}
+
+{{/* Expects: .EntityType, .EntityLabel, .Outcomes ([]store.ReassignOutcome). */}}
+{{define "ownership_assign_result"}}
+<div id="ownership-assign-{{.EntityType}}" class="panel bulk-assign-result">
+  <div class="panel-head">
+    <h3>{{.EntityLabel}}: assignment result</h3>
+  </div>
+  <div class="scroll-x">
+    <table>
+      <thead><tr><th>Name</th><th>Result</th><th></th></tr></thead>
+      <tbody>
+        {{range .Outcomes}}
+        <tr>
+          <td>{{.Name}}</td>
+          <td>
+            {{if .Assigned}}
+              <span class="pill pill-ok">assigned</span>
+            {{else if eq .Result "no_longer_unowned"}}
+              <span class="pill pill-degraded">no longer unowned</span>
+            {{else}}
+              <span class="pill pill-down">failed</span>
+            {{end}}
+          </td>
+          <td>{{.Detail}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  <div class="panel-body">
+    <a href="/reports/ownership">Back to the ownership report</a>
+  </div>
+</div>
+{{end}}

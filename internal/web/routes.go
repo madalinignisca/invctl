@@ -270,6 +270,12 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	write("GET /teams/{id}/retire", app.TeamRetireConfirm)
 	write("POST /teams/{id}/retire", app.TeamRetire)
 	write("POST /teams/{id}/reassign-retire", app.TeamReassignAndRetire)
+	// WP-G7 piece 3: bulk assignment offered on the ownership report itself
+	// (docs/ownership-report-design.md §6). The GET feeds the POST the same
+	// way /teams/{id}/retire's GET does -- nothing a read-only user has a use
+	// for, since the report itself already shows the same data read-only.
+	write("GET /reports/ownership/candidates", app.OwnershipCandidates)
+	write("POST /reports/ownership/assign", app.OwnershipAssign)
 	write("POST /projects", app.ProjectCreate)
 	write("POST /projects/{id}", app.ProjectUpdate)
 	write("POST /projects/{id}/retire", app.ProjectRetire)
