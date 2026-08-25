@@ -658,9 +658,14 @@ var DeclaredColumns = map[string][]string{
 	// came from, and custom fields carry neither. These are a PERSON's
 	// attestation -- who defined this, who retired it -- the same reasoning
 	// that classifies dependency.verified_by/.verified_at as declared above.
+	//
+	// owner_team_id (migration 00054) is declared for the same reason:
+	// somebody assigning a field to a team is an assertion, not a
+	// measurement, exactly like team_id on asset and service above.
 	"custom_field": {
 		"id", "entity_type", "code", "label", "kind", "description",
-		"created_by", "created_at", "retired_at", "retired_by", "row_version",
+		"created_by", "created_at", "retired_at", "retired_by", "owner_team_id",
+		"row_version",
 	},
 	// The vocabulary a `select` field offers. Declared: somebody typed the
 	// options; nothing observes or derives them.

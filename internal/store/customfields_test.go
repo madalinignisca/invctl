@@ -29,6 +29,13 @@ type customFieldFixture struct {
 	secondAssetID string
 	serviceID     string
 	username      string
+	// teamID is an ACTIVE team, offered to a new field's owner picker.
+	// retiredTeamID starts active too and is retired by the caller when a
+	// test needs a field whose owner has since disbanded -- kept separate
+	// from teamID so "the field's own owner retiring" never accidentally
+	// invalidates every OTHER fixture field's owner in the same test run.
+	teamID        string
+	retiredTeamID string
 }
 
 func newCustomFieldFixture(t *testing.T, e Engine) *customFieldFixture {
@@ -66,18 +73,37 @@ func newCustomFieldFixture(t *testing.T, e Engine) *customFieldFixture {
 		t.Fatalf("creating fixture service: %v", err)
 	}
 
+	teamID := mustCustomFieldTeam(t, s, ctx, "cf-owner")
+	retiredTeamID := mustCustomFieldTeam(t, s, ctx, "cf-owner-to-retire")
+
 	return &customFieldFixture{
 		s: s, ctx: ctx, actor: actor,
 		assetID: assetID, secondAssetID: secondAssetID, serviceID: svc.ID,
-		username: username,
+		username: username, teamID: teamID, retiredTeamID: retiredTeamID,
 	}
 }
 
-// mustField creates a live definition and returns its id.
+// mustCustomFieldTeam builds an active team, for a fixture field's own
+// owner_team_id -- NewCustomField refuses an empty one, with no escape
+// hatch, so every fixture field needs a real one to point at.
+func mustCustomFieldTeam(t *testing.T, s *SQLStore, ctx context.Context, code string) string {
+	t.Helper()
+	team, err := domain.NewTeam(NewID(), domain.TeamSpec{Code: code, Name: code}, s.Now())
+	if err != nil {
+		t.Fatalf("building fixture team %s: %v", code, err)
+	}
+	if err := s.CreateTeam(ctx, testActor, team); err != nil {
+		t.Fatalf("creating fixture team %s: %v", code, err)
+	}
+	return team.ID
+}
+
+// mustField creates a live definition and returns its id, owned by the
+// fixture's own active team.
 func mustField(t *testing.T, f *customFieldFixture, entityType, code, kind string) string {
 	t.Helper()
 	cf, err := domain.NewCustomField(NewID(), entityType, code, code, kind,
-		"a fixture field for the store test suite", f.actor.ID, f.s.Now())
+		"a fixture field for the store test suite", f.actor.ID, f.teamID, f.s.Now())
 	if err != nil {
 		t.Fatalf("building custom field %s: %v", code, err)
 	}
@@ -308,7 +334,7 @@ func TestARetiredCodeCanBeUsedAgain(t *testing.T) {
 			}
 
 			cf, err := domain.NewCustomField(NewID(), "asset", "cost_centre", "Cost Centre",
-				domain.CustomFieldText, "reused after retirement", f.actor.ID, f.s.Now())
+				domain.CustomFieldText, "reused after retirement", f.actor.ID, f.teamID, f.s.Now())
 			if err != nil {
 				t.Fatalf("building the second field: %v", err)
 			}
@@ -328,7 +354,7 @@ func TestTwoLiveFieldsCannotShareACode(t *testing.T) {
 			mustField(t, f, "asset", "cost_centre", domain.CustomFieldText)
 
 			cf, err := domain.NewCustomField(NewID(), "asset", "cost_centre", "Cost Centre",
-				domain.CustomFieldText, "a second, still-live attempt", f.actor.ID, f.s.Now())
+				domain.CustomFieldText, "a second, still-live attempt", f.actor.ID, f.teamID, f.s.Now())
 			if err != nil {
 				t.Fatalf("building the second field: %v", err)
 			}
@@ -942,6 +968,169 @@ func TestAStaleOptionsSubmissionDoesNotRetireAnOptionJustAdded(t *testing.T) {
 				if o.Value == "silver" && o.RetiredAt != nil {
 					t.Fatal("the stale submission retired silver, which the operator never saw added")
 				}
+			}
+		})
+	}
+}
+
+// ---------- owner team (WP-A4 follow-up): "who do I ask" ----------
+//
+// created_by answers "who defined this field", which is the wrong answer to
+// "who do I ask" the moment that person leaves -- a senior review's own
+// finding. owner_team_id is required with no escape hatch, editable forever
+// after, and follows the exact rule already applied to a retired `select`
+// option: what is STORED keeps displaying, what is RETIRED is not newly
+// selectable.
+
+// TestCreateRefusesANonexistentOwnerTeam: the friendly refusal
+// requireActiveOwnerTeam exists for, rather than a bare foreign-key failure
+// with no column translateWriteErr can name.
+func TestCreateRefusesANonexistentOwnerTeam(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newCustomFieldFixture(t, e)
+			cf, err := domain.NewCustomField(NewID(), "asset", "cost_centre", "Cost Centre",
+				domain.CustomFieldText, "an owner that does not exist", f.actor.ID, NewID(), f.s.Now())
+			if err != nil {
+				t.Fatalf("building: %v", err)
+			}
+			if err := f.s.CreateCustomField(f.ctx, f.actor, cf); !errors.Is(err, domain.ErrInvalid) {
+				t.Fatalf("got %v, want domain.ErrInvalid for a nonexistent owner team", err)
+			}
+		})
+	}
+}
+
+// TestCreateRefusesARetiredOwnerTeam is the half of the symmetry that
+// matters most: a retired team is not offered to a NEW field -- a picker
+// only ever offers what somebody may choose NOW, TeamOptions's own rule,
+// enforced here at the write path too rather than trusted to the form alone.
+func TestCreateRefusesARetiredOwnerTeam(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newCustomFieldFixture(t, e)
+			if err := f.s.RetireTeam(f.ctx, f.actor, f.retiredTeamID); err != nil {
+				t.Fatalf("retiring the fixture team: %v", err)
+			}
+			cf, err := domain.NewCustomField(NewID(), "asset", "cost_centre", "Cost Centre",
+				domain.CustomFieldText, "a retired owner", f.actor.ID, f.retiredTeamID, f.s.Now())
+			if err != nil {
+				t.Fatalf("building: %v", err)
+			}
+			if err := f.s.CreateCustomField(f.ctx, f.actor, cf); !errors.Is(err, domain.ErrInvalid) {
+				t.Fatalf("got %v, want domain.ErrInvalid for a retired owner team", err)
+			}
+		})
+	}
+}
+
+// TestAFieldAlreadyOwnedByASinceRetiredTeamStillShowsThatTeam is the other
+// half: what is STORED keeps displaying. A team retiring after it was
+// assigned must not blank the field's attribution -- it is a finding
+// ("nobody has picked this up"), not an error to hide.
+func TestAFieldAlreadyOwnedByASinceRetiredTeamStillShowsThatTeam(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newCustomFieldFixture(t, e)
+			cf, err := domain.NewCustomField(NewID(), "asset", "cost_centre", "Cost Centre",
+				domain.CustomFieldText, "an owner about to retire", f.actor.ID, f.retiredTeamID, f.s.Now())
+			if err != nil {
+				t.Fatalf("building: %v", err)
+			}
+			if err := f.s.CreateCustomField(f.ctx, f.actor, cf); err != nil {
+				t.Fatalf("creating with an active owner: %v", err)
+			}
+
+			if err := f.s.RetireTeam(f.ctx, f.actor, f.retiredTeamID); err != nil {
+				t.Fatalf("retiring the owner team: %v", err)
+			}
+
+			row, err := f.s.GetCustomField(f.ctx, cf.ID)
+			if err != nil {
+				t.Fatalf("reading: %v", err)
+			}
+			if row.OwnerTeamID == nil || *row.OwnerTeamID != f.retiredTeamID {
+				t.Fatalf("the field's owner must survive the team's own retirement, got %v", row.OwnerTeamID)
+			}
+			if !row.OwnerRetired() {
+				t.Fatal("OwnerRetired must report true once the owning team is retired")
+			}
+			if row.OwnerDisplay() == "" {
+				t.Fatal("OwnerDisplay must still resolve something to show, not go blank")
+			}
+
+			// An UNRELATED edit -- correcting the label -- must still be
+			// allowed with the owner left untouched: this is the
+			// "unchanged owner" exception requireActiveOwnerTeam's own
+			// comment describes, and without it a team retiring would
+			// retroactively freeze every OTHER field of that team's too.
+			row.Label = "Corrected Label"
+			if err := f.s.UpdateCustomField(f.ctx, f.actor, &row.CustomField); err != nil {
+				t.Fatalf("an unrelated edit with the owner unchanged must be allowed even though "+
+					"the owner has since retired: %v", err)
+			}
+		})
+	}
+}
+
+// TestUpdateRefusesAssigningANewlyRetiredTeamAsOwner: an operator MAY NOT
+// newly choose a retired team as a field's owner, even one that already owns
+// a different field -- retirement blocks being newly picked, it does not
+// merely block being picked for the first time ever.
+func TestUpdateRefusesAssigningANewlyRetiredTeamAsOwner(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newCustomFieldFixture(t, e)
+			id := mustField(t, f, "asset", "cost_centre", domain.CustomFieldText)
+			if err := f.s.RetireTeam(f.ctx, f.actor, f.retiredTeamID); err != nil {
+				t.Fatalf("retiring the fixture team: %v", err)
+			}
+
+			row, err := f.s.GetCustomField(f.ctx, id)
+			if err != nil {
+				t.Fatalf("reading: %v", err)
+			}
+			retired := f.retiredTeamID
+			row.OwnerTeamID = &retired
+			if err := f.s.UpdateCustomField(f.ctx, f.actor, &row.CustomField); !errors.Is(err, domain.ErrInvalid) {
+				t.Fatalf("got %v, want domain.ErrInvalid for newly choosing a retired team", err)
+			}
+		})
+	}
+}
+
+// TestChangingTheOwnerWritesExactlyOneChangeLogRowWhoseDiffShowsOldAndNew is
+// the audit obligation CLAUDE.md states plainly: every mutation of declared
+// state writes a change_log row in the same transaction, no exceptions.
+// owner_team_id is a plain column on customFieldAudit's embedded
+// domain.CustomField, not a folded set, so diffJSON already walks it --
+// this proves that rather than assuming it.
+func TestChangingTheOwnerWritesExactlyOneChangeLogRowWhoseDiffShowsOldAndNew(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newCustomFieldFixture(t, e)
+			id := mustField(t, f, "asset", "cost_centre", domain.CustomFieldText)
+			newOwner := mustCustomFieldTeam(t, f.s, f.ctx, "cf-owner-2")
+
+			before := changeCount(t, f, "custom_field", id)
+
+			row, err := f.s.GetCustomField(f.ctx, id)
+			if err != nil {
+				t.Fatalf("reading: %v", err)
+			}
+			oldOwner := *row.OwnerTeamID
+			row.OwnerTeamID = &newOwner
+			if err := f.s.UpdateCustomField(f.ctx, f.actor, &row.CustomField); err != nil {
+				t.Fatalf("changing the owner: %v", err)
+			}
+
+			after := changeCount(t, f, "custom_field", id)
+			if after != before+1 {
+				t.Fatalf("changing the owner wrote %d change_log rows, want exactly %d", after-before, 1)
+			}
+			diff := lastChangeDiff(t, f, "custom_field", id)
+			if !strings.Contains(diff, oldOwner) || !strings.Contains(diff, newOwner) {
+				t.Fatalf("the diff must show both the old and the new owner; got %s", diff)
 			}
 		})
 	}

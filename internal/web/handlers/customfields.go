@@ -39,6 +39,7 @@ type customFieldForm struct {
 	Label       string
 	Kind        string
 	Description string
+	OwnerTeamID string
 }
 
 // customFieldListPage is the registry.
@@ -57,6 +58,11 @@ type customFieldListPage struct {
 	RetiredFields []store.CustomFieldRow
 	EntityTypes   []string
 	Kinds         []string
+	// Teams is the ACTIVE owner picker -- store.TeamOptions, the same
+	// exclude-retired rule every other team picker in this codebase follows
+	// (see its own comment): a picker offers what somebody may choose NOW.
+	// Used by both the create form and, per row, OwnerOptions below.
+	Teams []store.TeamRow
 	// Edit is set only when a definition edit was refused; see editState.
 	Edit *editState
 	// EditOptions is the id of the field whose option editor is open, read
@@ -135,6 +141,42 @@ func (p customFieldListPage) OptionsRowVersion(row store.CustomFieldRow) string 
 	return strconv.Itoa(row.RowVersion)
 }
 
+// OwnerOptions is the owner picker for one row's edit form: the active
+// teams (p.Teams) plus, if row's CURRENT owner has since been retired, that
+// one team too, appended and rendered "(retired)".
+//
+// The reasoning is the exact symmetry docs/custom-fields-design.md §3 and
+// §4 both name explicitly: what is STORED must keep displaying, what is
+// RETIRED must not be newly selectable. TeamOptions already enforces the
+// second half by excluding retired teams outright; this function is the
+// first half, restoring the one retired team a row is actually pinned to
+// so the select can draw back what custom_field.owner_team_id already
+// holds (the same round-trip requirement a `select` field's own retired
+// option answers in loadCustomFieldsPanel) -- without it the browser would
+// silently fall back to the FIRST active team in the list, and the next
+// unrelated save on this row would reassign the field's owner as a side
+// effect of correcting its label.
+func (p customFieldListPage) OwnerOptions(row store.CustomFieldRow) []store.TeamRow {
+	if row.OwnerTeamID == nil {
+		return p.Teams
+	}
+	for _, t := range p.Teams {
+		if t.ID == *row.OwnerTeamID {
+			return p.Teams // already active and already in the list
+		}
+	}
+	if row.OwnerTeamCode == nil {
+		return p.Teams // nothing to reconstruct a display row from
+	}
+	retired := store.TeamRow{}
+	retired.ID = *row.OwnerTeamID
+	retired.Code = *row.OwnerTeamCode
+	retired.Lifecycle = domain.LifecycleRetired
+	out := make([]store.TeamRow, 0, len(p.Teams)+1)
+	out = append(out, p.Teams...)
+	return append(out, retired)
+}
+
 // enrichOptions fills in Options on the one row matching id, in place. A
 // no-op if id names no row in rows -- the field being edited lives in the
 // other slice (asset vs service), and this is called against both.
@@ -164,6 +206,11 @@ func (a *App) renderCustomFieldList(w http.ResponseWriter, r *http.Request, stat
 	errs map[string]string, spec customFieldForm, edit *editState, optionsEdit *editState) {
 
 	all, err := a.Store.ListCustomFields(r.Context(), "", true)
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
+	teams, err := a.Store.TeamOptions(r.Context())
 	if err != nil {
 		a.serverError(w, r, err)
 		return
@@ -228,6 +275,7 @@ func (a *App) renderCustomFieldList(w http.ResponseWriter, r *http.Request, stat
 		RetiredFields: retired,
 		EntityTypes:   domain.CustomFieldEntityTypes,
 		Kinds:         domain.CustomFieldKinds,
+		Teams:         teams,
 		Edit:          edit,
 		EditOptions:   editOptions,
 		OptionsEdit:   optionsEdit,
@@ -242,10 +290,30 @@ func (a *App) CustomFieldCreate(w http.ResponseWriter, r *http.Request) {
 		Label:       formValue(r, "label"),
 		Kind:        formValue(r, "kind"),
 		Description: formValue(r, "description"),
+		OwnerTeamID: formValue(r, "owner_team_id"),
+	}
+
+	// THE SPECIFIC, NAMED REFUSAL: an estate with no active team cannot name
+	// one no matter what it submits, and domain.checkOwnerTeam's generic
+	// "is required" would tell that operator to do something the form
+	// cannot let them do. Checked before NewCustomField is even called, and
+	// worded like migration 00014's own comment ("create the teams first
+	// and set team_id") rather than inventing new phrasing for the same
+	// situation.
+	teams, err := a.Store.TeamOptions(r.Context())
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
+	if len(teams) == 0 {
+		a.renderCustomFieldList(w, r, http.StatusUnprocessableEntity, "custom_field_form",
+			map[string]string{"owner_team_id": "no active teams exist: create the teams first and set an owner before defining a custom field"},
+			spec, nil, nil)
+		return
 	}
 
 	f, err := domain.NewCustomField(store.NewID(), spec.EntityType, spec.Code, spec.Label,
-		spec.Kind, spec.Description, actor(r).ID, a.Store.Now())
+		spec.Kind, spec.Description, actor(r).ID, spec.OwnerTeamID, a.Store.Now())
 	if err == nil {
 		err = a.Store.CreateCustomField(r.Context(), actor(r), f)
 	}
@@ -258,6 +326,17 @@ func (a *App) CustomFieldCreate(w http.ResponseWriter, r *http.Request) {
 			a.renderCustomFieldList(w, r, http.StatusUnprocessableEntity, "custom_field_form",
 				map[string]string{"code": "a live field with that code already exists for this entity type"},
 				spec, nil, nil)
+			return
+		}
+		// requireActiveOwnerTeam's own refusals -- a nonexistent or a
+		// retired team named as owner -- wrap domain.ErrInvalid rather than
+		// ValidationError, since the check runs against the database inside
+		// the write transaction, not against the shape NewCustomField alone
+		// can see. Attributed to "owner_team_id" specifically: it is the
+		// only field this refusal can ever be about.
+		if errors.Is(err, domain.ErrInvalid) {
+			a.renderCustomFieldList(w, r, http.StatusUnprocessableEntity, "custom_field_form",
+				map[string]string{"owner_team_id": trimSentinel(err, domain.ErrInvalid)}, spec, nil, nil)
 			return
 		}
 		a.handleStoreError(w, r, err)
@@ -285,6 +364,7 @@ func (a *App) CustomFieldUpdate(w http.ResponseWriter, r *http.Request) {
 	updated.Label = formValue(r, "label")
 	updated.Kind = formValue(r, "kind")
 	updated.Description = formValue(r, "description")
+	updated.OwnerTeamID = submittedString(r, "owner_team_id", updated.OwnerTeamID)
 	updated.RowVersion = submittedVersion(r, updated.RowVersion)
 
 	if err := a.Store.UpdateCustomField(r.Context(), actor(r), &updated); err != nil {
@@ -296,17 +376,23 @@ func (a *App) CustomFieldUpdate(w http.ResponseWriter, r *http.Request) {
 			case isConflict(err):
 				messages = map[string]string{"code": "a live field with that code already exists for this entity type"}
 			case errors.Is(err, domain.ErrInvalid):
-				// Two distinct store refusals share this sentinel: the
+				// Three distinct store refusals share this sentinel: the
 				// kind-frozen-while-values-exist guard, which belongs
-				// against "kind", and the entity_type-immutable guard --
+				// against "kind"; the entity_type-immutable guard --
 				// unreachable from this handler today because the form
 				// never offers entity_type, but a change elsewhere in the
 				// call chain should not silently mislabel it as a kind
-				// problem if it ever does become reachable. Told apart by
-				// which guard actually wrote the message, not guessed.
+				// problem if it ever does become reachable; and
+				// requireActiveOwnerTeam's own refusal, reachable whenever
+				// an operator changes the owner to a team that no longer
+				// exists or has since retired. Told apart by which guard
+				// actually wrote the message, not guessed.
 				field := "kind"
-				if strings.Contains(err.Error(), "belongs to") {
+				switch {
+				case strings.Contains(err.Error(), "belongs to"):
 					field = "entity_type"
+				case strings.Contains(err.Error(), "owner team"):
+					field = "owner_team_id"
 				}
 				messages = map[string]string{field: trimSentinel(err, domain.ErrInvalid)}
 			default:
@@ -315,7 +401,7 @@ func (a *App) CustomFieldUpdate(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		a.renderCustomFieldList(w, r, refusalStatus(err), "custom_field_list_panel", nil, customFieldForm{},
-			rejected(r, id, messages, "code", "label", "kind", "description"), nil)
+			rejected(r, id, messages, "code", "label", "kind", "description", "owner_team_id"), nil)
 		return
 	}
 

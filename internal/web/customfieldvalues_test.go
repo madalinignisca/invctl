@@ -66,6 +66,60 @@ func TestTheEditorRendersEachFieldsDescription(t *testing.T) {
 	}
 }
 
+// TestTheEditorRendersTheFieldsOwnerBesideAValidationError is the senior
+// review's own finding, made concrete: "who defined this" (created_by,
+// resolved to an individual) is the wrong answer to "who do I ask" the
+// moment that person leaves, and the moment that answer actually matters is
+// exactly the one this test forces -- an operator staring at a refused
+// value. contact_ref ("platform@example.com", seed_teams.go) is the
+// actionable part and must appear, not merely the team's bare code.
+//
+// SCOPED TO THE EDITOR'S OWN MARKUP, deliberately, the same anchoring
+// TestTheEditorRendersEachFieldsDescription already uses and for the same
+// reason: the registry page and the show panel on this same asset page both
+// name "platform" and its contact too, so a bare strings.Contains(page, ...)
+// would pass whether or not the EDITOR draws it -- exactly the mistake made
+// in that test before it was fixed. Anchored on this field's own label and
+// cut off at the next one, so a neighbouring field cannot satisfy it.
+func TestTheEditorRendersTheFieldsOwnerBesideAValidationError(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+	const ownerContact = "platform@example.com" // seed_teams.go's own value
+	id := mustCreateFieldViaHTTPOwnedBy(t, h, "asset", "owned_field", "Owned Field", "number", h.refs.Teams["platform"])
+
+	assetID := h.refs.Assets["hv-01"]
+	page := body(t, h.get("/assets/"+assetID, false))
+
+	// A value a number widget cannot represent -- refused, so the form
+	// re-renders with the error IN the editor, which is the moment this
+	// test exists to cover.
+	resp := h.post("/assets/"+assetID+"/custom-fields", url.Values{
+		"csrf_token":  {h.csrfToken("/assets/" + assetID)},
+		"row_version": {versionInForm(t, page)},
+		"cf_" + id:    {"not-a-number"},
+	}, false)
+	refused := body(t, resp)
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("submitting an unrepresentable number: got %d, want 422", resp.StatusCode)
+	}
+
+	label := strings.Index(refused, `for="cf-`+id+`"`)
+	if label < 0 {
+		t.Fatalf("the editor did not draw an input for the field; this test would prove nothing")
+	}
+	block := refused[label:]
+	if end := strings.Index(block, `for="cf-`); end > 0 {
+		block = block[:end] // stop at the next field, so a neighbour cannot satisfy this
+	}
+	if !strings.Contains(block, "field-error") {
+		t.Fatalf("the value was not actually refused within this field's own block; this test "+
+			"would prove nothing about \"beside a validation error\": %s", block)
+	}
+	if !strings.Contains(block, ownerContact) {
+		t.Errorf("the editor does not name the owner's contact beside the refused value: %s", block)
+	}
+}
+
 func TestCustomFieldsRenderInTheirOwnSection(t *testing.T) {
 	// Grouped and labelled as the organisation's own, never interleaved with
 	// built-in fields: a new hire must be able to tell at a glance which of
@@ -499,12 +553,24 @@ func selectedCustomFieldOption(t *testing.T, page, fieldID string) string {
 
 // mustCreateFieldViaHTTP defines a field through the real handler and
 // returns its id, for tests that need one to already exist.
+//
+// Owned by the "platform" fixture team -- owner_team_id is required with no
+// escape hatch, the same as every other required field on this form.
 func mustCreateFieldViaHTTP(t *testing.T, h *harness, entityType, code, label, kind string) string {
+	t.Helper()
+	return mustCreateFieldViaHTTPOwnedBy(t, h, entityType, code, label, kind, h.refs.Teams["platform"])
+}
+
+// mustCreateFieldViaHTTPOwnedBy is the same as mustCreateFieldViaHTTP but
+// lets a test name a specific owner team -- used by the tests that assert
+// on the owner itself rather than merely needing a field to exist.
+func mustCreateFieldViaHTTPOwnedBy(t *testing.T, h *harness, entityType, code, label, kind, ownerTeamID string) string {
 	t.Helper()
 	form := url.Values{
 		"csrf_token":  {h.csrfToken("/custom-fields")},
 		"entity_type": {entityType}, "code": {code}, "label": {label},
 		"kind": {kind}, "description": {"a fixture field for the web test suite"},
+		"owner_team_id": {ownerTeamID},
 	}
 	resp := h.post("/custom-fields", form, false)
 	resp.Body.Close()

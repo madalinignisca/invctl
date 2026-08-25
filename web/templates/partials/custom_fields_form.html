@@ -89,6 +89,13 @@
              or has just been refused by it. Sending them to another page to read
              a sentence we already hold is how a support call starts. */}}
         {{with $row.Field.Description}}<div class="field-hint">{{.}}</div>{{end}}
+        {{/* FINAL REVIEW ATTRIBUTION, continued: "who do I ask" belongs
+             right here, in the block a validation error also lands in --
+             a senior review found this editor was the one surface that
+             sent an operator stuck on a refused value elsewhere to find
+             out. contact_ref is shown when the team has one (the
+             actionable part); the team's own code is the fallback. */}}
+        {{if $row.OwnerDisplay}}<div class="field-hint">Owner: {{$row.OwnerDisplay}}{{if $row.OwnerRetired}} (retired){{end}}</div>{{end}}
         {{if eq $row.Field.Kind "text"}}
         <input id="cf-{{$row.Field.ID}}" class="{{if $.Edit.Err $name}}invalid{{end}}" type="text"
                name="{{$name}}" value="{{$.Edit.Value $name $row.Value}}">

@@ -125,3 +125,52 @@ func TestTheSeedFixtureCoversEveryCustomFieldKind(t *testing.T) {
 			len(againFields), len(assetFields))
 	}
 }
+
+// TestTheDemoEstateHasAnOwnershipMix guards the property the NEXT work
+// package (an estate-wide ownership report) depends on: a demo estate where
+// every custom field is owned gives that report nothing to find, and a
+// correct empty result is then indistinguishable from a broken one. Most
+// fields keep a live owner; power_budget_watts is left deliberately
+// unowned (the state migration 00054 left the eleven pre-existing fields
+// in, which no application write path can otherwise reproduce);
+// criticality_tier keeps a NAMED owner whose team has since retired.
+func TestTheDemoEstateHasAnOwnershipMix(t *testing.T) {
+	f := newFixture(t)
+
+	admin, err := domain.NewAppUser(store.NewID(), "admin", domain.UserSourceLocal, f.store.Now())
+	if err != nil {
+		t.Fatalf("building admin: %v", err)
+	}
+	if err := f.store.CreateUser(f.ctx, domain.SystemActor, admin); err != nil {
+		t.Fatalf("creating admin: %v", err)
+	}
+	if err := seed.StageCustomFields(f.ctx, f.store, "admin"); err != nil {
+		t.Fatalf("staging custom fields: %v", err)
+	}
+
+	fields, err := f.store.ListCustomFields(f.ctx, domain.CustomFieldEntityAsset, true)
+	if err != nil {
+		t.Fatalf("listing asset fields: %v", err)
+	}
+
+	var unowned, sinceRetired, owned int
+	for _, field := range fields {
+		switch {
+		case field.OwnerTeamID == nil:
+			unowned++
+		case field.OwnerRetired():
+			sinceRetired++
+		default:
+			owned++
+		}
+	}
+	if unowned != 1 {
+		t.Errorf("got %d unowned asset fields, want exactly 1 (power_budget_watts)", unowned)
+	}
+	if sinceRetired != 1 {
+		t.Errorf("got %d asset fields owned by a since-retired team, want exactly 1 (criticality_tier)", sinceRetired)
+	}
+	if owned == 0 {
+		t.Error("the demo must still have fields with a live owner -- most of them, not none")
+	}
+}

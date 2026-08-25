@@ -110,7 +110,22 @@ func StageCustomFields(ctx context.Context, s *store.SQLStore, adminUsername str
 	actor := domain.UserActor(admin)
 	now := s.Now()
 
-	assetFields, err := defineCustomFields(ctx, s, actor, admin.ID, now, domain.CustomFieldEntityAsset, []customFieldSpec{
+	// Owner teams, resolved by code -- domain.NewCustomField requires one,
+	// with no escape hatch, the same rule the create form now enforces.
+	// "platform" owns the asset fields (cross-cutting estate attributes,
+	// the same team that owns "the shared substrate everything else runs
+	// on" per seed_teams.go); "developers" owns the service fields, since
+	// runbooks and DR posture are squarely an application team's business.
+	platformTeamID, err := lookupTeamID(ctx, s, "platform")
+	if err != nil {
+		return fmt.Errorf("resolving the platform team for custom field ownership: %w", err)
+	}
+	developersTeamID, err := lookupTeamID(ctx, s, "developers")
+	if err != nil {
+		return fmt.Errorf("resolving the developers team for custom field ownership: %w", err)
+	}
+
+	assetFields, err := defineCustomFields(ctx, s, actor, admin.ID, platformTeamID, now, domain.CustomFieldEntityAsset, []customFieldSpec{
 		{"procurement_ref", "Procurement Reference", domain.CustomFieldText,
 			"the purchase order or vendor quote this asset was bought against", nil},
 		{"power_budget_watts", "Power Budget (W)", domain.CustomFieldNumber,
@@ -127,7 +142,7 @@ func StageCustomFields(ctx context.Context, s *store.SQLStore, adminUsername str
 		return err
 	}
 
-	serviceFields, err := defineCustomFields(ctx, s, actor, admin.ID, now, domain.CustomFieldEntityService, []customFieldSpec{
+	serviceFields, err := defineCustomFields(ctx, s, actor, admin.ID, developersTeamID, now, domain.CustomFieldEntityService, []customFieldSpec{
 		{"runbook_url", "Runbook URL", domain.CustomFieldText,
 			"where the on-call runbook for this service lives", nil},
 		{"sla_minutes", "SLA (minutes to restore)", domain.CustomFieldNumber,
@@ -142,6 +157,24 @@ func StageCustomFields(ctx context.Context, s *store.SQLStore, adminUsername str
 	})
 	if err != nil {
 		return err
+	}
+
+	// ---------- ownership is a MIX, deliberately ----------
+	//
+	// Every field above was just created through defineCustomFields, which
+	// means every one of them has a live, active owner -- domain.NewCustomField
+	// admits no other outcome. Left there, this demo estate would have
+	// nothing for the ownership report the next work package builds to
+	// find: that report's whole job is surfacing an UNOWNED field and a
+	// field whose owner has since RETIRED, and a fixture where neither
+	// condition ever occurs makes a correct empty result indistinguishable
+	// from a broken one. Two of the ten fields above are deliberately
+	// disturbed after the fact to give it something real to report.
+	if err := orphanCustomFieldOwner(ctx, s, assetFields["power_budget_watts"]); err != nil {
+		return fmt.Errorf("orphaning power_budget_watts's owner for the ownership-report fixture: %w", err)
+	}
+	if err := assignAndRetireOwner(ctx, s, actor, assetFields["criticality_tier"], "decommissioned"); err != nil {
+		return fmt.Errorf("staging a since-retired owner for criticality_tier: %w", err)
 	}
 
 	// hv-02: every field, a value. sw-oob-1 is left untouched -- see the note
@@ -171,12 +204,12 @@ func StageCustomFields(ctx context.Context, s *store.SQLStore, adminUsername str
 // around. createdBy is the app_user id the FK requires; actor is the same
 // identity, used to attribute the change_log entry the way the real handler
 // does (internal/web/handlers/customfields.go).
-func defineCustomFields(ctx context.Context, s *store.SQLStore, actor domain.Actor, createdBy string,
+func defineCustomFields(ctx context.Context, s *store.SQLStore, actor domain.Actor, createdBy, ownerTeamID string,
 	now time.Time, entityType string, specs []customFieldSpec) (map[string]string, error) {
 	ids := make(map[string]string, len(specs))
 	for _, spec := range specs {
 		f, err := domain.NewCustomField(store.NewID(), entityType, spec.code, spec.label,
-			spec.kind, spec.description, createdBy, now)
+			spec.kind, spec.description, createdBy, ownerTeamID, now)
 		if err != nil {
 			return ids, fmt.Errorf("building custom field %s: %w", spec.code, err)
 		}
@@ -247,4 +280,74 @@ func lookupServiceID(ctx context.Context, s *store.SQLStore, code string) (strin
 		return "", fmt.Errorf("finding service %s: %w", code, err)
 	}
 	return id, nil
+}
+
+// lookupTeamID resolves a fixture team's own code to an id, the same
+// disconnected-from-*Refs reasoning lookupAssetID and lookupServiceID give:
+// this phase runs as its own call, after Load's *Refs has already gone out
+// of scope. Used to give this phase's own custom fields an owner
+// (docs/custom-fields-design.md §4 update): NewCustomField now REQUIRES one,
+// with no escape hatch, and this fixture's teams (seed_teams.go) are always
+// staged earlier in Load than StageCustomFields runs.
+func lookupTeamID(ctx context.Context, s *store.SQLStore, code string) (string, error) {
+	var id string
+	if err := s.DB().Reader.GetContext(ctx, &id, s.DB().Rebind(
+		`SELECT id FROM team WHERE code = ?`), code); err != nil {
+		return "", fmt.Errorf("finding team %s: %w", code, err)
+	}
+	return id, nil
+}
+
+// orphanCustomFieldOwner reproduces, deliberately, the ONE state
+// CreateCustomField and UpdateCustomField can never produce: a live field
+// with no owner at all. That state is real -- it is exactly what migration
+// 00054 left the eleven pre-existing fields in, because a migration cannot
+// invent an owner nobody chose -- and it is the first thing the coming
+// ownership report has to find. A raw UPDATE, outside the store's own
+// write path and writing no change_log row, is the only way to reach it
+// honestly: the real event this recreates (the migration landing) did not
+// go through the application and wrote no change_log entry either.
+func orphanCustomFieldOwner(ctx context.Context, s *store.SQLStore, fieldID string) error {
+	_, err := s.DB().Writer.ExecContext(ctx, s.DB().Rebind(
+		`UPDATE custom_field SET owner_team_id = NULL WHERE id = ?`), fieldID)
+	if err != nil {
+		return fmt.Errorf("nulling owner_team_id on field %s: %w", fieldID, err)
+	}
+	return nil
+}
+
+// assignAndRetireOwner builds a small, single-purpose team, assigns it as
+// fieldID's owner through the real store path (so the reassignment itself
+// is properly audited, the same way an administrator's own correction would
+// be), and then retires the team -- leaving the field with an owner who is
+// still named but can no longer be reached. Its OWN team, not one of the
+// six the rest of this estate depends on: retiring "platform" or
+// "developers" to manufacture this state would disband a team half the
+// company estate still points at, which is a much bigger disturbance than
+// this fixture is trying to make.
+func assignAndRetireOwner(ctx context.Context, s *store.SQLStore, actor domain.Actor, fieldID, teamCode string) error {
+	team, err := domain.NewTeam(store.NewID(), domain.TeamSpec{
+		Code: teamCode, Name: "Decommissioned Team",
+		Description: str("Existed only long enough to demonstrate a custom field whose owner has since disbanded."),
+	}, s.Now())
+	if err != nil {
+		return fmt.Errorf("building the soon-to-retire team: %w", err)
+	}
+	if err := s.CreateTeam(ctx, actor, team); err != nil {
+		return fmt.Errorf("creating the soon-to-retire team: %w", err)
+	}
+
+	field, err := s.GetCustomField(ctx, fieldID)
+	if err != nil {
+		return fmt.Errorf("reading field %s to reassign its owner: %w", fieldID, err)
+	}
+	field.OwnerTeamID = &team.ID
+	if err := s.UpdateCustomField(ctx, actor, &field.CustomField); err != nil {
+		return fmt.Errorf("reassigning field %s to the soon-to-retire team: %w", fieldID, err)
+	}
+
+	if err := s.RetireTeam(ctx, actor, team.ID); err != nil {
+		return fmt.Errorf("retiring team %s: %w", teamCode, err)
+	}
+	return nil
 }

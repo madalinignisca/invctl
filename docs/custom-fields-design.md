@@ -219,6 +219,54 @@ for that entity type, so an estate that never uses the feature never sees it.
 page operates — tens of fields — that is not worth caching, and stating it here
 is cheaper than discovering it later.*
 
+### An individual was the wrong answer to "who do I ask"
+
+`created_by` answers "who defined this field" — a fact worth keeping, and it
+stays. But a senior review found that the product's answer to the question
+somebody stuck actually asks — **who do I ask about this** — was that same
+column, resolved to an individual's display name. That fails in exactly the
+turnover scenario this feature exists to defend against: the person who
+defined `cost_centre` leaves the company. The registry's own `LEFT JOIN`
+comment (`internal/store/customfields.go`) already documents that a GDPR
+erasure request against that person leaves the row "readable... without a
+name to show for it" — one erasure request quietly blanks the feature's only
+attribution surface.
+
+`custom_field.owner_team_id` (migration `00054`) is the fix, and it reuses
+rather than invents: `team.contact_ref` (migration `00014`) already exists
+for exactly this, already documented and GDPR-argued as non-personal — "a
+GROUP address, a ticket queue or a channel... never an individual". A team
+outlives the people in it the same way it already does on `asset.team_id`
+and `service.team_id`.
+
+**Nullable in the schema, required on the create form, with no escape
+hatch.** The eleven fields that existed before this migration have no owner
+and a migration cannot invent one — nobody can guess who owns `cost_centre`
+from the schema alone. They become visible orphans on the registry,
+deliberately: **finding and assigning them is a separate piece of work**, not
+something this change should paper over with a default team nobody chose.
+Every field defined through the create form from this point on must name an
+active team; an estate with no active teams is refused outright, pointed at
+`/teams`, the same wording migration `00014`'s own comment already uses
+("create the teams first and set `team_id`"). The owner stays editable
+forever after that, the same as `label` and `description`.
+
+**A RETIRED team is not offered for a NEW field, but keeps displaying on a
+field that already names it** — the identical rule this document already
+states for a retired `select` option (§3 above), for the identical reason:
+what is STORED must keep displaying, what is RETIRED must not be newly
+selectable. The registry, the edit form's owner picker, and the value
+editor's owner line all mark a retired owner "(retired)" rather than hiding
+it.
+
+Rendered everywhere the support-burden goal (this document's opening
+paragraph) actually needs it: the registry beside "Defined by", the
+detail-page show panel, and — the moment a senior review specifically called
+out as missing — the value editor, right beside the validation error an
+operator is looking at when they need to know who to ask. The team's
+`contact_ref` is shown when it has one, since that is the actionable part;
+the team's own code is the fallback when it does not.
+
 ---
 
 ## 5. Audit

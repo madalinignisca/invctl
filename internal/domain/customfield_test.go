@@ -21,15 +21,59 @@ func TestACustomFieldRefusesAnEmptyDescription(t *testing.T) {
 	// vendor. An administrator who cannot say why a field exists is the
 	// origin of that call, and creation is the cheapest moment to ask.
 	_, err := NewCustomField("id", CustomFieldEntityAsset, "cost_centre",
-		"Cost Centre", CustomFieldText, "   ", "user-1", customFieldNow)
+		"Cost Centre", CustomFieldText, "   ", "user-1", "team-1", customFieldNow)
 	if err == nil {
 		t.Fatal("a field with no description must be refused")
 	}
 }
 
+// TestACustomFieldRefusesAnEmptyOwnerTeam is the senior review's own finding,
+// made concrete: "who defined this" (created_by) is the wrong answer to "who
+// do I ask" the moment that person leaves, and owner_team_id is required with
+// no escape hatch precisely so a new field cannot join the eleven
+// pre-existing ones a migration could not backfill an owner for.
+func TestACustomFieldRefusesAnEmptyOwnerTeam(t *testing.T) {
+	_, err := NewCustomField("id", CustomFieldEntityAsset, "cost_centre",
+		"Cost Centre", CustomFieldText, "SAP cost centre", "user-1", "   ", customFieldNow)
+	if err == nil {
+		t.Fatal("a field with no owner team must be refused")
+	}
+	ve, ok := AsValidation(err)
+	if !ok {
+		t.Fatalf("got %v, want a ValidationError naming owner_team_id", err)
+	}
+	found := false
+	for _, f := range ve.Fields {
+		if f.Field == "owner_team_id" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("validation error %v does not name owner_team_id", ve.Fields)
+	}
+}
+
+// TestUpdatingACustomFieldAlsoRequiresAnOwnerTeam: Validate (the shared path
+// UpdateCustomField's own test suite exercises) refuses an empty owner the
+// same way construction does -- an administrator correcting one of the
+// eleven pre-existing orphans must set an owner in the same edit, not leave
+// it unassigned forever because the requirement was only ever a creation-time
+// check.
+func TestUpdatingACustomFieldAlsoRequiresAnOwnerTeam(t *testing.T) {
+	f, err := NewCustomField("id", CustomFieldEntityAsset, "cost_centre",
+		"Cost Centre", CustomFieldText, "SAP cost centre", "user-1", "team-1", customFieldNow)
+	if err != nil {
+		t.Fatalf("building: %v", err)
+	}
+	f.OwnerTeamID = nil
+	if err := f.Validate(); err == nil {
+		t.Fatal("clearing the owner team on an edit must be refused")
+	}
+}
+
 func TestACustomFieldCodeIsLowerCased(t *testing.T) {
 	f, err := NewCustomField("id", CustomFieldEntityAsset, "Cost_Centre",
-		"Cost Centre", CustomFieldText, "SAP cost centre", "user-1", customFieldNow)
+		"Cost Centre", CustomFieldText, "SAP cost centre", "user-1", "team-1", customFieldNow)
 	if err != nil {
 		t.Fatalf("building: %v", err)
 	}
@@ -42,7 +86,7 @@ func TestACustomFieldRefusesACodeWithASpace(t *testing.T) {
 	// code participates in a unique index and surfaces in HTML form field
 	// names and CSV headers, where a space is a mess.
 	_, err := NewCustomField("id", CustomFieldEntityAsset, "cost centre",
-		"Cost Centre", CustomFieldText, "SAP cost centre", "user-1", customFieldNow)
+		"Cost Centre", CustomFieldText, "SAP cost centre", "user-1", "team-1", customFieldNow)
 	if err == nil {
 		t.Fatal("a code containing a space must be refused")
 	}
@@ -50,7 +94,7 @@ func TestACustomFieldRefusesACodeWithASpace(t *testing.T) {
 
 func TestACustomFieldRefusesAnUnknownEntityType(t *testing.T) {
 	_, err := NewCustomField("id", "network", "cost_centre",
-		"Cost Centre", CustomFieldText, "SAP cost centre", "user-1", customFieldNow)
+		"Cost Centre", CustomFieldText, "SAP cost centre", "user-1", "team-1", customFieldNow)
 	if err == nil {
 		t.Fatal("an unknown entity type must be refused")
 	}
@@ -58,7 +102,7 @@ func TestACustomFieldRefusesAnUnknownEntityType(t *testing.T) {
 
 func TestACustomFieldRefusesAnUnknownKind(t *testing.T) {
 	_, err := NewCustomField("id", CustomFieldEntityAsset, "cost_centre",
-		"Cost Centre", "colour", "SAP cost centre", "user-1", customFieldNow)
+		"Cost Centre", "colour", "SAP cost centre", "user-1", "team-1", customFieldNow)
 	if err == nil {
 		t.Fatal("an unknown kind must be refused")
 	}
@@ -66,7 +110,7 @@ func TestACustomFieldRefusesAnUnknownKind(t *testing.T) {
 
 func TestACustomFieldStampsItsCreatedAtFromTheClockParameter(t *testing.T) {
 	f, err := NewCustomField("id", CustomFieldEntityAsset, "cost_centre",
-		"Cost Centre", CustomFieldText, "SAP cost centre", "user-1", customFieldNow)
+		"Cost Centre", CustomFieldText, "SAP cost centre", "user-1", "team-1", customFieldNow)
 	if err != nil {
 		t.Fatalf("building: %v", err)
 	}
@@ -77,7 +121,7 @@ func TestACustomFieldStampsItsCreatedAtFromTheClockParameter(t *testing.T) {
 
 func TestANewCustomFieldIsNotRetired(t *testing.T) {
 	f, err := NewCustomField("id", CustomFieldEntityAsset, "cost_centre",
-		"Cost Centre", CustomFieldText, "SAP cost centre", "user-1", customFieldNow)
+		"Cost Centre", CustomFieldText, "SAP cost centre", "user-1", "team-1", customFieldNow)
 	if err != nil {
 		t.Fatalf("building: %v", err)
 	}
@@ -88,7 +132,7 @@ func TestANewCustomFieldIsNotRetired(t *testing.T) {
 
 func TestARetiredCustomFieldReportsItself(t *testing.T) {
 	f, err := NewCustomField("id", CustomFieldEntityAsset, "cost_centre",
-		"Cost Centre", CustomFieldText, "SAP cost centre", "user-1", customFieldNow)
+		"Cost Centre", CustomFieldText, "SAP cost centre", "user-1", "team-1", customFieldNow)
 	if err != nil {
 		t.Fatalf("building: %v", err)
 	}

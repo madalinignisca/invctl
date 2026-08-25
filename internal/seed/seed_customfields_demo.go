@@ -362,10 +362,14 @@ func StageCustomFieldSpread(ctx context.Context, s *store.SQLStore, adminUsernam
 	//
 	// The retired OPTION below is the opposite case and the one where a
 	// value does keep displaying. The two read alike and behave oppositely.
+	platformTeamID, err := lookupTeamID(ctx, s, "platform")
+	if err != nil {
+		return fmt.Errorf("resolving the platform team for the legacy ticket reference field: %w", err)
+	}
 	legacy, err := domain.NewCustomField(store.NewID(), domain.CustomFieldEntityAsset,
 		"legacy_ticket_ref", "Legacy Ticket Reference", domain.CustomFieldText,
 		"the reference in the ticketing system this estate used before the 2024 migration; "+
-			"kept for lookup on older assets, nothing new is filed against it", admin.ID, now)
+			"kept for lookup on older assets, nothing new is filed against it", admin.ID, platformTeamID, now)
 	if err != nil {
 		return fmt.Errorf("building the legacy ticket reference field: %w", err)
 	}

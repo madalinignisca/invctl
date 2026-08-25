@@ -38,6 +38,20 @@
     </select>
     {{with $p.Edit.Err "kind"}}<div class="field-error">{{.}}</div>{{end}}
   </td>
+  <td>
+    {{/* OwnerOptions restores a RETIRED current owner into the list so this
+         select can draw back what owner_team_id already holds -- otherwise
+         the browser silently falls back to the first active team, and
+         Save would reassign the field's owner as a side effect of fixing
+         a typo in its label. */}}
+    <select form="cf-{{$row.ID}}" name="owner_team_id" aria-label="Owner team" required>
+      {{$owner := $p.Edit.Value "owner_team_id" (deref $row.OwnerTeamID)}}
+      {{range $p.OwnerOptions $row}}
+      <option value="{{.ID}}" {{if eq .ID $owner}}selected{{end}}>{{.Code}}{{if eq .Lifecycle "retired"}} (retired){{end}}</option>
+      {{end}}
+    </select>
+    {{with $p.Edit.Err "owner_team_id"}}<div class="field-error">{{.}}</div>{{end}}
+  </td>
   <td colspan="3">
     <input form="cf-{{$row.ID}}" class="{{if $p.Edit.Err "description"}}invalid{{end}}" type="text" name="description"
            value="{{$p.Edit.Value "description" $row.Description}}" aria-label="Description" required style="width:100%">
@@ -57,6 +71,13 @@
   <td class="mono">{{$row.Code}}</td>
   <td>{{$row.Label}}</td>
   <td><span class="pill pill-muted">{{$row.Kind}}</span></td>
+  <td style="font-size:12px">
+    {{/* "Who do I ask", not "who defined it" -- see custom_field_form's own
+         callout and docs/custom-fields-design.md §4. Empty only for one of
+         the eleven fields migration 00054 could not backfill an owner for. */}}
+    {{if $row.OwnerDisplay}}{{$row.OwnerDisplay}}{{if $row.OwnerRetired}} (retired){{end}}
+    {{else}}<span style="color:var(--faint)">unassigned</span>{{end}}
+  </td>
   <td>{{$row.Description}}</td>
   <td style="font-size:12px">
     {{$row.CreatedByName}}<br>
@@ -80,7 +101,7 @@
 {{end}}
 {{if and (eq $row.Kind "select") (eq $row.ID $p.EditOptions)}}
 <tr>
-  <td colspan="7">
+  <td colspan="8">
     <form method="post" action="/custom-fields/{{$row.ID}}/options" class="panel-body" style="padding:8px 0">
       <input type="hidden" name="csrf_token" value="{{$p.CSRF}}">
       <input type="hidden" name="row_version" value="{{$p.OptionsRowVersion $row}}">
@@ -124,7 +145,7 @@
     <div class="scroll-x">
       <table>
         <thead>
-          <tr><th>Code</th><th>Label</th><th>Kind</th><th>Description</th>
+          <tr><th>Code</th><th>Label</th><th>Kind</th><th>Owner</th><th>Description</th>
               <th>Defined by</th><th class="num">In use</th><th></th></tr>
         </thead>
         <tbody>
@@ -146,7 +167,7 @@
     <div class="scroll-x">
       <table>
         <thead>
-          <tr><th>Code</th><th>Label</th><th>Kind</th><th>Description</th>
+          <tr><th>Code</th><th>Label</th><th>Kind</th><th>Owner</th><th>Description</th>
               <th>Defined by</th><th class="num">In use</th><th></th></tr>
         </thead>
         <tbody>
@@ -168,7 +189,7 @@
     <div class="scroll-x">
       <table>
         <thead>
-          <tr><th>Entity</th><th>Code</th><th>Label</th><th>Kind</th>
+          <tr><th>Entity</th><th>Code</th><th>Label</th><th>Kind</th><th>Owner</th>
               <th>Retired by</th><th>Retired</th><th class="num">Values retained</th><th></th></tr>
         </thead>
         <tbody>
@@ -178,6 +199,10 @@
             <td class="mono">{{.Code}}</td>
             <td>{{.Label}}</td>
             <td><span class="pill pill-muted">{{.Kind}}</span></td>
+            <td style="font-size:12px">
+              {{if .OwnerDisplay}}{{.OwnerDisplay}}{{if .OwnerRetired}} (retired){{end}}
+              {{else}}<span style="color:var(--faint)">unassigned</span>{{end}}
+            </td>
             <td>{{deref .RetiredByName}}</td>
             <td>{{if .RetiredAt}}{{shortTime (deref .RetiredAt)}}{{end}}</td>
             <td class="num">{{.UsageCount}}</td>
@@ -253,6 +278,26 @@
           {{range .Kinds}}<option value="{{.}}" {{if eq . $.Spec.Kind}}selected{{end}}>{{.}}</option>{{end}}
         </select>
         {{with index .Errors "kind"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="cf-owner">Owner team — who to ask about this field</label>
+        {{/* REQUIRED, WITH NO ESCAPE HATCH: unlike every OTHER team picker in
+             this codebase (forms.html), this select offers no blank "—"
+             option. A senior review found the product's answer to "who do
+             I ask" was an individual who leaves the company; the fix is
+             worthless if the field it lives on stays optional. The
+             disabled placeholder below cannot be submitted -- browsers
+             refuse to post a disabled option -- so it is a hint, not a
+             choice. */}}
+        <select id="cf-owner" name="owner_team_id" required>
+          <option value="" disabled {{if not $.Spec.OwnerTeamID}}selected{{end}}>choose a team</option>
+          {{range .Teams}}
+          <option value="{{.ID}}" {{if eq .ID $.Spec.OwnerTeamID}}selected{{end}}>
+            {{.Code}}{{if .ContactRef}} ({{deref .ContactRef}}){{end}}
+          </option>
+          {{end}}
+        </select>
+        {{with index .Errors "owner_team_id"}}<div class="field-error">{{.}}</div>{{end}}
       </div>
     </div>
     <div class="field">

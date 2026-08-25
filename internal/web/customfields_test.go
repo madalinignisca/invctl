@@ -26,7 +26,8 @@ func TestTheRegistryShowsWhoDefinedAFieldAndWhy(t *testing.T) {
 		"csrf_token":  {h.csrfToken("/custom-fields")},
 		"entity_type": {"asset"}, "code": {"cost_centre"},
 		"label": {"Cost Centre"}, "kind": {"text"},
-		"description": {"SAP cost centre finance rebills against"},
+		"description":   {"SAP cost centre finance rebills against"},
+		"owner_team_id": {h.refs.Teams["platform"]},
 	}
 	if code := h.post("/custom-fields", form, false).StatusCode; code != http.StatusSeeOther {
 		t.Fatalf("creating: got %d", code)
@@ -149,6 +150,7 @@ func TestARetiredFieldOffersRestoreAndKeepsItsValues(t *testing.T) {
 		"csrf_token":  {h.csrfToken("/custom-fields")},
 		"entity_type": {"asset"}, "code": {"retire_me"}, "label": {"Retire Me"},
 		"kind": {"text"}, "description": {"a field this test retires"},
+		"owner_team_id": {h.refs.Teams["platform"]},
 	}
 	h.post("/custom-fields", create, false).Body.Close()
 
@@ -203,6 +205,7 @@ func TestAStaleOptionsSubmissionIsRefusedWith409(t *testing.T) {
 		"csrf_token":  {h.csrfToken("/custom-fields")},
 		"entity_type": {"asset"}, "code": {"tier"}, "label": {"Tier"},
 		"kind": {"select"}, "description": {"a field this test manages options on"},
+		"owner_team_id": {h.refs.Teams["platform"]},
 	}
 	h.post("/custom-fields", create, false).Body.Close()
 	id := firstFieldIDFor(t, body(t, h.get("/custom-fields", false)), "tier")
@@ -365,6 +368,7 @@ func mustCreateCustomField(t *testing.T, h *harness, entityType, code, kind stri
 		"csrf_token":  {h.csrfToken("/custom-fields")},
 		"entity_type": {entityType}, "code": {code}, "label": {code},
 		"kind": {kind}, "description": {"a fixture field for the web test suite"},
+		"owner_team_id": {h.refs.Teams["platform"]},
 	}
 	resp := h.post("/custom-fields", form, false)
 	resp.Body.Close()
@@ -372,4 +376,118 @@ func mustCreateCustomField(t *testing.T, h *harness, entityType, code, kind stri
 		t.Fatalf("defining custom field %s: got %d", code, resp.StatusCode)
 	}
 	return firstFieldIDFor(t, body(t, h.get("/custom-fields", false)), code)
+}
+
+// ---------- owner team (WP-A4 follow-up): "who do I ask" ----------
+
+// TestCreatingACustomFieldWithNoOwnerIsRefused is the create-form half of
+// design.md §4's update: owner_team_id is required with no escape hatch,
+// exactly like a missing description -- 422, the form partial re-rendered,
+// never a silent NULL and never a 500.
+func TestCreatingACustomFieldWithNoOwnerIsRefused(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+	form := url.Values{
+		"csrf_token":  {h.csrfToken("/custom-fields")},
+		"entity_type": {"asset"}, "code": {"unowned"}, "label": {"Unowned"},
+		"kind": {"text"}, "description": {"a field with no owner"},
+		// owner_team_id deliberately absent.
+	}
+	resp := h.post("/custom-fields", form, true)
+	page := body(t, resp)
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("creating a field with no owner: got %d, want 422", resp.StatusCode)
+	}
+	if !strings.Contains(page, "owner_team_id") && !strings.Contains(page, "who should be asked") {
+		t.Errorf("the re-rendered form does not say the owner is missing: %s", page)
+	}
+	if strings.Contains(page, ">unowned<") {
+		t.Error("a field with no owner must not have been created")
+	}
+}
+
+// TestTheCreateFormOffersActiveTeamsButNotARetiredOne is design.md §3's rule,
+// applied to the owner picker: a retired team is not offered as the owner of
+// a NEW field, the same rule TeamOptions already enforces for every other
+// team picker in this codebase.
+func TestTheCreateFormOffersActiveTeamsButNotARetiredOne(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	retiredID := h.refs.Teams["observability"]
+	resp := h.post("/teams/"+retiredID+"/retire",
+		url.Values{"csrf_token": {h.csrfToken("/teams")}}, false)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("retiring the fixture team: got %d", resp.StatusCode)
+	}
+
+	page := body(t, h.get("/custom-fields", false))
+	i := strings.Index(page, `id="cf-owner"`)
+	if i < 0 {
+		t.Fatal("the create form does not render an owner select")
+	}
+	end := strings.Index(page[i:], "</select>")
+	if end < 0 {
+		t.Fatal("the owner select was not closed; this test would prove nothing")
+	}
+	block := page[i : i+end]
+	if !strings.Contains(block, `platform (`) {
+		t.Errorf("an active team must be offered to a new field's owner: %s", block)
+	}
+	if strings.Contains(block, `observability (`) {
+		t.Errorf("a RETIRED team must not be offered to a NEW field: %s", block)
+	}
+}
+
+// TestARetiredOwnerStillShowsOnTheRegistry is the other half of the same
+// rule read backwards: what is STORED keeps displaying. A field already
+// naming a team that has since retired must not lose its attribution --
+// that would defeat the entire point of the feature, which is answering
+// "who do I ask" even after turnover.
+func TestARetiredOwnerStillShowsOnTheRegistry(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	ownerID := h.refs.Teams["observability"]
+	id := mustCreateFieldViaHTTPOwnedBy(t, h, "asset", "orphan_soon", "Orphan Soon", "text", ownerID)
+
+	resp := h.post("/teams/"+ownerID+"/retire",
+		url.Values{"csrf_token": {h.csrfToken("/teams")}}, false)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("retiring the owner team: got %d", resp.StatusCode)
+	}
+
+	page := body(t, h.get("/custom-fields", false))
+	i := strings.Index(page, ">orphan_soon<")
+	if i < 0 {
+		t.Fatal("the field itself disappeared from the registry")
+	}
+	row := page[i:]
+	if j := strings.Index(row, "</tr>"); j >= 0 {
+		row = row[:j]
+	}
+	// OwnerDisplay prefers contact_ref ("#obs-oncall", seed_teams.go's own
+	// value for "observability") over the bare code -- the actionable part.
+	if !strings.Contains(row, "#obs-oncall") {
+		t.Errorf("the registry row must still name the team's contact even after it retired: %s", row)
+	}
+	if !strings.Contains(row, "(retired)") {
+		t.Errorf("a retired owner must be marked as retired, not shown as though it were active: %s", row)
+	}
+
+	// The field's OWN edit form must still offer its current owner, marked
+	// retired, so re-saving the row without touching Owner does not
+	// silently fall back to whatever team happens to render first.
+	editPage := body(t, h.get("/custom-fields?edit="+id, false))
+	k := strings.Index(editPage, `name="owner_team_id"`)
+	if k < 0 {
+		t.Fatal("the edit row does not render an owner select")
+	}
+	end := strings.Index(editPage[k:], "</select>")
+	block := editPage[k : k+end]
+	if !strings.Contains(block, "selected") || !strings.Contains(block, "observability") {
+		t.Errorf("the edit form must draw back the field's own retired owner: %s", block)
+	}
 }

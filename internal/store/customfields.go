@@ -10,6 +10,8 @@ package store
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -29,6 +31,15 @@ type CustomFieldRow struct {
 	CreatedByName string  `db:"created_by_name"`
 	RetiredByName *string `db:"retired_by_name"`
 	UsageCount    int     `db:"usage_count"`
+	// The owning team, resolved the same way CreatedByName is -- a LEFT
+	// JOIN, so a since-retired team still leaves the field readable. Unlike
+	// the app_user join above, this one is not about a GDPR scrub: a team
+	// is never scrubbed, it is only ever retired, and OwnerTeamLifecycle is
+	// exactly how a reader tells "still active" from "disbanded, nobody has
+	// picked this up" -- see OwnerRetired.
+	OwnerTeamCode       *string `db:"owner_team_code"`
+	OwnerTeamContactRef *string `db:"owner_team_contact_ref"`
+	OwnerTeamLifecycle  *string `db:"owner_team_lifecycle"`
 	// Options is populated by GetCustomField. ListCustomFields leaves it
 	// empty on every row it returns: loading every field's options on every
 	// registry row would be an N+1 query, and the registry's own list and
@@ -37,6 +48,33 @@ type CustomFieldRow struct {
 	// separate GetCustomField call against just that row -- see
 	// renderCustomFieldList -- rather than by this method ever populating it.
 	Options []domain.CustomFieldOption
+}
+
+// OwnerDisplay is who to ask about this field: the team's contact_ref when
+// it has one -- a group address or a channel, the actionable part -- falling
+// back to the team's own code when contact_ref was left blank. Empty only
+// for the handful of fields migration 00054 could not retroactively assign
+// an owner to; every field created through CreateCustomField from this
+// change forward always has one (domain.checkOwnerTeam).
+func (r CustomFieldRow) OwnerDisplay() string {
+	if r.OwnerTeamContactRef != nil && *r.OwnerTeamContactRef != "" {
+		return *r.OwnerTeamContactRef
+	}
+	if r.OwnerTeamCode != nil {
+		return *r.OwnerTeamCode
+	}
+	return ""
+}
+
+// OwnerRetired reports whether the team currently named as owner has since
+// been disbanded. The field's own attribution is unaffected by this --
+// exactly the rule docs/custom-fields-design.md §3 already applies to a
+// retired `select` option: what is STORED keeps displaying, marked as
+// retired; what is RETIRED is simply not offered again as a new choice. The
+// symmetry between the two is not a coincidence, and OwnerOptions
+// (internal/web/handlers/customfields.go) reuses it explicitly.
+func (r CustomFieldRow) OwnerRetired() bool {
+	return r.OwnerTeamLifecycle != nil && *r.OwnerTeamLifecycle == domain.LifecycleRetired
 }
 
 // customFieldSelect resolves both attribution columns the way
@@ -55,10 +93,14 @@ const customFieldSelect = `
 	       COALESCE(cu.display_name, cu.username) AS created_by_name,
 	       COALESCE(ru.display_name, ru.username) AS retired_by_name,
 	       (SELECT COUNT(DISTINCT cv.entity_id) FROM custom_field_value cv
-	         WHERE cv.field_id = cf.id) AS usage_count
+	         WHERE cv.field_id = cf.id) AS usage_count,
+	       ot.code       AS owner_team_code,
+	       ot.contact_ref AS owner_team_contact_ref,
+	       ot.lifecycle  AS owner_team_lifecycle
 	FROM custom_field cf
 	LEFT JOIN app_user cu ON cu.id = cf.created_by
-	LEFT JOIN app_user ru ON ru.id = cf.retired_by`
+	LEFT JOIN app_user ru ON ru.id = cf.retired_by
+	LEFT JOIN team ot ON ot.id = cf.owner_team_id`
 
 // customFieldAudit is the audited shape of a definition: the row itself plus
 // the LIVE option values it currently offers, folded in the same way
@@ -161,12 +203,21 @@ func (s *SQLStore) ListCustomFields(ctx context.Context, entityType string, incl
 func (s *SQLStore) CreateCustomField(ctx context.Context, actor domain.Actor, f *domain.CustomField) error {
 	f.RowVersion = 1
 	return s.write(ctx, actor, func(t *tx) error {
+		// f.OwnerTeamID is never nil here: domain.checkOwnerTeam refuses an
+		// empty one before this method is ever reached. Checked inside the
+		// same transaction as the insert, not before s.write is called,
+		// because there is no "unchanged owner" exception on a create the
+		// way UpdateCustomField needs one -- every owner named on a brand
+		// new field is, by definition, newly chosen.
+		if err := t.requireActiveOwnerTeam(ctx, *f.OwnerTeamID); err != nil {
+			return err
+		}
 		_, err := t.exec(ctx, `
 			INSERT INTO custom_field (id, entity_type, code, label, kind, description,
-			                           created_by, created_at, row_version)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			                           created_by, created_at, owner_team_id, row_version)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			f.ID, f.EntityType, f.Code, f.Label, f.Kind, f.Description,
-			f.CreatedBy, f.CreatedAt, f.RowVersion)
+			f.CreatedBy, f.CreatedAt, f.OwnerTeamID, f.RowVersion)
 		if err != nil {
 			return translateWriteErr(err, "creating custom field")
 		}
@@ -174,6 +225,30 @@ func (s *SQLStore) CreateCustomField(ctx context.Context, actor domain.Actor, f 
 		// the only writer of custom_field_option.
 		return t.logCreate(ctx, "custom_field", f.ID, auditedCustomField(f, nil))
 	})
+}
+
+// requireActiveOwnerTeam checks that a custom field's owner names a LIVE
+// team before the write reaches the foreign key -- the same reasoning
+// requireRole (teams.go) already gives for manager_role: a naked FK failure
+// reports no column SQLite's engine can name, so translateWriteErr can only
+// turn it into an unstyled 422 with the form contents lost. Also refuses a
+// team that exists but has since been RETIRED, because a picker only ever
+// offers what somebody may choose NOW (TeamOptions's own rule) -- a retired
+// team is not a legitimate NEW choice, only a legitimate EXISTING one, which
+// is why callers editing an unchanged owner must skip this check entirely
+// rather than pass it a laxer version of it.
+func (t *tx) requireActiveOwnerTeam(ctx context.Context, ownerTeamID string) error {
+	var lifecycle string
+	if err := t.get(ctx, &lifecycle, `SELECT lifecycle FROM team WHERE id = ?`, ownerTeamID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("owner team %s does not exist: %w", ownerTeamID, domain.ErrInvalid)
+		}
+		return fmt.Errorf("checking owner team %s: %w", ownerTeamID, err)
+	}
+	if lifecycle == domain.LifecycleRetired {
+		return fmt.Errorf("owner team %s is retired: choose an active team: %w", ownerTeamID, domain.ErrInvalid)
+	}
+	return nil
 }
 
 // UpdateCustomField persists field changes. The label and the description
@@ -266,11 +341,30 @@ func (s *SQLStore) UpdateCustomField(ctx context.Context, actor domain.Actor, f 
 			}
 		}
 
+		// requireActiveOwnerTeam runs ONLY when the owner is actually
+		// CHANGING. f.OwnerTeamID is never nil by this point -- Validate
+		// already refused an empty one -- but before.OwnerTeamID can be, for
+		// one of the eleven fields migration 00054 could not backfill: an
+		// administrator correcting that field's label for the first time
+		// must be allowed to set an owner in the same edit, which is exactly
+		// "changing" and goes through the check like any other change. What
+		// must NOT go through it is a field whose owner already names a team
+		// that has since retired -- the exact "keeps displaying, is not
+		// newly selectable" rule from design.md §3, applied to this picker:
+		// retirement must not retroactively invalidate every field that
+		// team already owned, only stop it being chosen again.
+		ownerChanged := before.OwnerTeamID == nil || *before.OwnerTeamID != *f.OwnerTeamID
+		if ownerChanged {
+			if err := t.requireActiveOwnerTeam(ctx, *f.OwnerTeamID); err != nil {
+				return err
+			}
+		}
+
 		res, err := t.exec(ctx, `
 			UPDATE custom_field SET entity_type = ?, code = ?, label = ?, kind = ?,
-			                         description = ?, row_version = row_version + 1
+			                         description = ?, owner_team_id = ?, row_version = row_version + 1
 			WHERE id = ? AND row_version = ?`,
-			f.EntityType, f.Code, f.Label, f.Kind, f.Description, f.ID, f.RowVersion)
+			f.EntityType, f.Code, f.Label, f.Kind, f.Description, f.OwnerTeamID, f.ID, f.RowVersion)
 		if err != nil {
 			return translateWriteErr(err, "updating custom field")
 		}

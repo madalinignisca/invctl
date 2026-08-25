@@ -37,7 +37,12 @@
   <div class="panel-body">
     <dl class="kv">
       {{range .Rows}}
-      <dt>{{.Field.Label}}{{with .Field.Description}}<div class="field-hint">{{.}}</div>{{end}}</dt>
+      <dt>{{.Field.Label}}{{with .Field.Description}}<div class="field-hint">{{.}}</div>{{end}}
+        {{/* "Who do I ask" -- docs/custom-fields-design.md §4's update. Empty
+             only for one of the eleven fields a migration could not
+             backfill an owner for. */}}
+        {{if .OwnerDisplay}}<div class="field-hint">Owner: {{.OwnerDisplay}}{{if .OwnerRetired}} (retired){{end}}</div>{{end}}
+      </dt>
       <dd class="mono">{{if .Value}}{{.Value}}{{else}}<span style="color:var(--faint)">not recorded</span>{{end}}</dd>
       {{end}}
     </dl>

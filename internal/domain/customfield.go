@@ -69,6 +69,14 @@ type CustomField struct {
 	CreatedAt   string  `db:"created_at"`
 	RetiredAt   *string `db:"retired_at"`
 	RetiredBy   *string `db:"retired_by"`
+	// OwnerTeamID is who to ask about this field -- migration 00054. Nullable
+	// in the schema only because the eleven fields that predate this column
+	// cannot be given an owner by a migration; every field created or edited
+	// through this package is required to name one (see validateShape). A
+	// team, never a person: the same GDPR reasoning that already keeps
+	// team.contact_ref a group address applies here by construction, since
+	// this is a reference to a team row and not a place to type a name.
+	OwnerTeamID *string `db:"owner_team_id"`
 	RowVersion  int     `db:"row_version"`
 }
 
@@ -107,6 +115,33 @@ func (f *CustomField) validateShape(ve *ValidationError) {
 	checkEnum(ve, "entity_type", f.EntityType, CustomFieldEntityTypes)
 	checkEnum(ve, "kind", f.Kind, CustomFieldKinds)
 	f.Description = checkRequired(ve, "description", f.Description)
+	f.OwnerTeamID = checkOwnerTeam(ve, f.OwnerTeamID)
+}
+
+// checkOwnerTeam trims and requires a custom field's owner_team_id. Required
+// on BOTH construction and every later edit -- unlike Label and Description,
+// which are merely required, this is the field a senior review found
+// missing entirely: "who defined this" (created_by) answers the wrong
+// question the moment that person leaves, and a nullable-in-the-schema
+// column that stayed optional in the form would let every NEW field join
+// the eleven pre-existing orphans this migration cannot retroactively fix.
+// Whether the named team is still ACTIVE is not this package's business --
+// domain has zero external dependencies and cannot query `team` -- that half
+// lives in internal/store (requireActiveOwnerTeam), which is also the only
+// place that can tell "the team this field already had" apart from "a team
+// newly chosen", the distinction a retired owner needs (design.md §3's rule
+// applied here: what is stored keeps displaying, what is retired is not
+// newly selectable).
+func checkOwnerTeam(ve *ValidationError, teamID *string) *string {
+	trimmed := ""
+	if teamID != nil {
+		trimmed = strings.TrimSpace(*teamID)
+	}
+	if trimmed == "" {
+		ve.Add("owner_team_id", "is required: who should be asked about this field")
+		return nil
+	}
+	return &trimmed
 }
 
 // Validate re-checks a CustomField after field updates, mirroring
@@ -123,7 +158,17 @@ func (f *CustomField) Validate() error {
 // NewCustomField validates and constructs a field definition. now is the
 // clock, last parameter, formatted here — the shape every constructor in this
 // package follows, so the store never generates a timestamp.
-func NewCustomField(id, entityType, code, label, kind, description, createdBy string, now time.Time) (*CustomField, error) {
+//
+// ownerTeamID is REQUIRED, with no escape hatch: checkOwnerTeam refuses an
+// empty one the same way it refuses one on every later edit. It takes a
+// plain string rather than a *string, unlike OwnerTeamID on the struct --
+// every OTHER caller of this constructor already has a real team id in hand
+// by the time it can call this at all (the handler refuses to reach here
+// with no active teams; the seed resolves one from its own fixture), so
+// there is no legitimate "absent" value for a constructor argument to carry,
+// only a caller bug -- and checkOwnerTeam still catches an accidental "" the
+// same as it would a nil.
+func NewCustomField(id, entityType, code, label, kind, description, createdBy, ownerTeamID string, now time.Time) (*CustomField, error) {
 	f := &CustomField{
 		ID:          id,
 		EntityType:  entityType,
@@ -132,6 +177,7 @@ func NewCustomField(id, entityType, code, label, kind, description, createdBy st
 		Kind:        kind,
 		Description: description,
 		CreatedBy:   createdBy,
+		OwnerTeamID: &ownerTeamID,
 		CreatedAt:   FormatTime(now),
 		RowVersion:  1,
 	}

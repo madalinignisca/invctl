@@ -43,6 +43,14 @@ footnote.
   404, indistinguishable from a path that was never defined, until a token is
   configured. That is the answer to "I upgraded and `/api/v1` 404s."
 
+- **Custom fields defined before this release have no owning team, and
+  migration `00054` cannot invent one.** They will show as "unassigned" on
+  the `/custom-fields` registry from this release forward. Finding and
+  assigning them is deliberately left as a follow-up you do at your own pace
+  — nothing stops working, and every existing value is untouched — but
+  budget a pass through `/custom-fields` to set an owner on each. Every
+  *new* field requires one at creation, with no way to skip it.
+
 ### Added
 
 - **A read-only, token-scoped inventory API at `/api/v1`.** Assets, services,
@@ -86,6 +94,20 @@ footnote.
   gone; migration `00053` drops the table it was persisted in, and
   `INV_AUDIT_FOLD_KEY` is no longer read. See `docs/AUDIT.md` and
   `docs/custom-fields-design.md` §5.
+
+- **A custom field now names an owning team, not just the individual who
+  defined it.** `created_by` answers "who defined this field", which turned
+  out to be the wrong answer to "who do I ask about it" the moment that
+  person leaves — a GDPR erasure request against them already left the
+  registry's only attribution blank. `owner_team_id` reuses `team.contact_ref`
+  (never a person, already documented as such) and is required on every
+  field created from this release forward, editable afterwards like its
+  label and description. Shown on the registry, the entity detail page, and
+  — specifically, since this is the moment it matters — beside a validation
+  error in the value editor. A team that later retires keeps displaying,
+  marked "(retired)", on every field that already names it; it is simply not
+  offered to a new one. See migration `00054`, `docs/AUDIT.md`, and
+  `docs/custom-fields-design.md` §4.
 
 ---
 

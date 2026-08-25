@@ -50,6 +50,18 @@ type customFieldFormRow struct {
 	// this is false, the template draws a plain text input instead of the
 	// typed widget so a save cannot discard what it cannot parse.
 	Representable bool
+	// OwnerDisplay is who to ask about this field -- store.CustomFieldRow's
+	// own OwnerDisplay(), carried across because the editor's row here is
+	// built from domain.CustomField alone (see below), which does not
+	// resolve a team's contact_ref or code. Empty for one of the eleven
+	// fields migration 00054 could not backfill; the template renders
+	// nothing in that case rather than a blank "Owner:" line.
+	OwnerDisplay string
+	// OwnerRetired mirrors store.CustomFieldRow.OwnerRetired(): the field's
+	// owner is unaffected by the team's own retirement (design.md §3's
+	// rule, applied to this picker) -- this only controls whether "(retired)"
+	// is appended to what OwnerDisplay already shows.
+	OwnerRetired bool
 }
 
 // InputName is the one name a submission may use to touch this field:
@@ -108,7 +120,12 @@ func (a *App) loadCustomFieldsPanel(r *http.Request, entityType, entityID string
 
 	rows := make([]customFieldFormRow, 0, len(defs))
 	for _, d := range defs {
-		row := customFieldFormRow{Field: d.CustomField, Value: byField[d.ID]}
+		row := customFieldFormRow{
+			Field:        d.CustomField,
+			Value:        byField[d.ID],
+			OwnerDisplay: d.OwnerDisplay(),
+			OwnerRetired: d.OwnerRetired(),
+		}
 		if d.Kind == domain.CustomFieldSelect {
 			full, err := a.Store.GetCustomField(r.Context(), d.ID)
 			if err != nil {
