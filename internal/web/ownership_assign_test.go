@@ -214,6 +214,46 @@ func TestOwnershipAssignSkipsAnEntityClaimedInTheMeantime(t *testing.T) {
 // TestOwnershipAssignRefusesARetiredTarget: a retired team must not be
 // selectable as a bulk-assignment target, exactly as piece 2 already
 // enforces for reassignment.
+// TestTheTargetPickerMarksATeamThatCannotFullyAct.
+//
+// A `deprecated` team classifies as OwnerTransitional
+// (internal/domain/ownership.go), which is precisely what finding 2 of this
+// report flags. So assigning orphans to one is a fix that recreates the
+// finding -- and the picker used to render every non-retired team as a bare
+// code, making that indistinguishable from assigning to a healthy team.
+//
+// Marked rather than forbidden, deliberately: a `planned` team forming right
+// now is a legitimate target, and this codebase already prefers showing a
+// state to hiding the option (see the retired select option in
+// docs/custom-fields-design.md §3). The operator must be able to SEE what
+// they are choosing; they do not need to be prevented from choosing it.
+func TestTheTargetPickerMarksATeamThatCannotFullyAct(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	fading := mustTeamWeb(t, h, "http-fading-target")
+	team, err := h.store.GetTeam(context.Background(), fading)
+	if err != nil {
+		t.Fatalf("GetTeam: %v", err)
+	}
+	team.Lifecycle = domain.LifecycleDeprecated
+	if err := h.store.UpdateTeam(context.Background(), domain.SystemActor, &team.Team); err != nil {
+		t.Fatalf("deprecating team: %v", err)
+	}
+	mustUnownedAssetWeb(t, h, domain.KindVM, "http-asset-for-marked-picker")
+
+	page := body(t, h.get("/reports/ownership", false))
+	if !strings.Contains(page, "http-fading-target") {
+		t.Fatal("the deprecated team is not offered at all; this test would prove nothing")
+	}
+	if !strings.Contains(page, "http-fading-target ("+domain.LifecycleDeprecated+")") {
+		t.Errorf("the picker offers a deprecated team without marking it: an operator "+
+			"cannot tell it from a healthy one, and assigning to it recreates the very "+
+			"finding this page exists to clear. Wanted %q marked in the rendered picker",
+			"http-fading-target")
+	}
+}
+
 func TestOwnershipAssignRefusesARetiredTarget(t *testing.T) {
 	h := newHarness(t)
 	h.login("admin", "admin-password")

@@ -95,7 +95,14 @@
 
       <select name="team_id" x-on:change="updateTeamLabel">
         <option value="">Choose a team</option>
-        {{range .Targets}}<option value="{{.ID}}">{{.Code}}</option>{{end}}
+        {{/* The lifecycle is rendered, not filtered out. A `deprecated` team
+             classifies as OwnerTransitional (internal/domain/ownership.go), so
+             assigning orphans to one immediately recreates the very finding this
+             page exists to clear. Forbidding it would be wrong too -- a `planned`
+             team forming now is a legitimate target. So show the state and let the
+             operator see what they are choosing, the same way a retired select
+             option keeps displaying rather than vanishing. */}}
+        {{range .Targets}}<option value="{{.ID}}">{{.Code}}{{if ne .Lifecycle "active"}} ({{.Lifecycle}}){{end}}</option>{{end}}
       </select>
 
       <button type="submit" class="btn btn-primary btn-sm"

@@ -276,7 +276,9 @@
         <label for="rr-target">Reassign to</label>
         <select id="rr-target" name="target_team_id" required>
           <option value="">— choose a team —</option>
-          {{range .Targets}}<option value="{{.ID}}">{{.Code}} — {{.Name}}</option>{{end}}
+          {{/* Lifecycle shown for the same reason as the ownership report's picker:
+               reassigning to a `deprecated` team is a fix that creates a finding. */}}
+          {{range .Targets}}<option value="{{.ID}}">{{.Code}} — {{.Name}}{{if ne .Lifecycle "active"}} ({{.Lifecycle}}){{end}}</option>{{end}}
         </select>
         {{with index .Errors "target_team_id"}}<div class="field-error">{{.}}</div>{{end}}
       </div>
