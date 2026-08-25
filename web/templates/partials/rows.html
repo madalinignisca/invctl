@@ -120,40 +120,52 @@
     <span class="panel-note">One row per logical service, however many replicas run.</span>
   </div>
   {{if .Services}}
-  <div class="scroll-x">
-    <table>
-      <thead>
-        <tr>
-          <th>Code</th><th>Name</th><th>Kind</th><th>Environment</th>
-          <th>Project</th><th>Availability</th><th>Instances</th><th>Tier</th>
-        </tr>
-      </thead>
-      <tbody>
-        {{range .Services}}
-        <tr>
-          <td><a class="id" href="/services/{{.ID}}">{{.Code}}</a></td>
-          <td>{{.Name}}</td>
-          <td><span class="pill pill-muted">{{.Kind}}</span></td>
-          <td><span class="pill pill-info">{{.EnvironmentCode}}</span></td>
-          <td>
-            {{if .OwningProjectID}}
-              <a class="id" href="/projects/{{.OwningProjectID}}">{{.OwningProjectName}}</a>
-            {{else}}
-              <span class="pill pill-degraded" title="No project owns this service">unowned</span>
+  {{/* WP-G4a piece 3 (docs/tags-design.md §4a): see asset_table.html's
+       identical block for the reasoning. */}}
+  {{$bulkTag := and .CanWrite .ApplyTags}}
+  <form {{if $bulkTag}}hx-post="/services/tags/apply" hx-target="#services-bulk-tag-result" hx-swap="outerHTML"
+        x-data="bulkTagApply" data-entity-label="services"{{end}}>
+    {{if $bulkTag}}<input type="hidden" name="csrf_token" value="{{.CSRF}}">{{end}}
+    <div class="scroll-x">
+      <table>
+        <thead>
+          <tr>
+            {{if $bulkTag}}<th></th>{{end}}
+            <th>Code</th><th>Name</th><th>Kind</th><th>Environment</th>
+            <th>Project</th><th>Availability</th><th>Instances</th><th>Tier</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .Services}}
+          <tr>
+            {{if $bulkTag}}
+            <td><input type="checkbox" name="entity" value="{{.ID}}:{{.RowVersion}}" x-on:change="updateSelected"></td>
             {{end}}
-          </td>
-          <td>
-            <span class="mono" style="font-size:12px">{{.Availability}}</span>
-            {{if .MinHealthy}}<span class="mono" style="color:var(--faint)"> min {{.MinHealthy}}</span>{{end}}
-            {{if .FailoverMode}}<div class="mono" style="color:var(--faint);font-size:11.5px">failover: {{deref .FailoverMode}}</div>{{end}}
-          </td>
-          <td class="num">{{.InstanceCount}}</td>
-          <td><span class="{{tierClass .Tier}}">tier {{.Tier}}</span></td>
-        </tr>
-        {{end}}
-      </tbody>
-    </table>
-  </div>
+            <td><a class="id" href="/services/{{.ID}}">{{.Code}}</a></td>
+            <td>{{.Name}}</td>
+            <td><span class="pill pill-muted">{{.Kind}}</span></td>
+            <td><span class="pill pill-info">{{.EnvironmentCode}}</span></td>
+            <td>
+              {{if .OwningProjectID}}
+                <a class="id" href="/projects/{{.OwningProjectID}}">{{.OwningProjectName}}</a>
+              {{else}}
+                <span class="pill pill-degraded" title="No project owns this service">unowned</span>
+              {{end}}
+            </td>
+            <td>
+              <span class="mono" style="font-size:12px">{{.Availability}}</span>
+              {{if .MinHealthy}}<span class="mono" style="color:var(--faint)"> min {{.MinHealthy}}</span>{{end}}
+              {{if .FailoverMode}}<div class="mono" style="color:var(--faint);font-size:11.5px">failover: {{deref .FailoverMode}}</div>{{end}}
+            </td>
+            <td class="num">{{.InstanceCount}}</td>
+            <td><span class="{{tierClass .Tier}}">tier {{.Tier}}</span></td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+    {{if $bulkTag}}{{template "bulk_tag_panel" .}}{{end}}
+  </form>
   {{else}}
   <div class="empty">
     <strong>No services match those filters.</strong>
@@ -161,6 +173,7 @@
   </div>
   {{end}}
 </div>
+<div id="services-bulk-tag-result"></div>
 {{end}}
 
 

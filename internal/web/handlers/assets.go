@@ -221,6 +221,11 @@ type assetListPage struct {
 	// download -- a separate, non-importable file from CSVLink. See
 	// AssetCustomFieldsCSV and store.ExportAssetCustomFields.
 	CustomFieldsCSVLink string
+	// FilterTags and ApplyTags are the two tag pickers this page offers --
+	// see loadTagListOptions for why they are deliberately different lists
+	// (docs/tags-design.md §2, §4a, §5).
+	FilterTags []store.TagRow
+	ApplyTags  []domain.Tag
 }
 
 // assetFilterFrom builds the asset list filter from a request's query
@@ -240,6 +245,12 @@ func assetFilterFrom(q url.Values) store.AssetFilter {
 		DeviceTypeID:   q.Get("device_type_id"),
 		Query:          q.Get("q"),
 		IncludeRetired: q.Get("retired") == "1",
+		// Repeating ?tag=, the same shape environment or kind checkboxes
+		// elsewhere on this page would use if this page offered more than
+		// one of either. store.tagFilterClause dedupes and AND-combines them
+		// (docs/tags-design.md §5); a blank value here is simply dropped
+		// there.
+		TagIDs: q["tag"],
 	}
 }
 
@@ -259,6 +270,11 @@ func (a *App) AssetList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	kinds, err := a.Store.AssetKinds(r.Context())
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
+	filterTags, applyTags, err := a.loadTagListOptions(r.Context())
 	if err != nil {
 		a.serverError(w, r, err)
 		return
@@ -289,6 +305,8 @@ func (a *App) AssetList(w http.ResponseWriter, r *http.Request) {
 		Filter:              filter,
 		FormData:            a.newAssetForm(r, nil, envs, kinds, assets),
 		CustomFieldsCSVLink: customFieldsCSVLinkFor("/assets/custom-fields.csv", r),
+		FilterTags:          filterTags,
+		ApplyTags:           applyTags,
 	}
 	// Filtering swaps only the table, so typing in the filter box does not
 	// rebuild the page around it.

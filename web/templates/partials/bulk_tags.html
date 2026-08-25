@@ -1,0 +1,77 @@
+{{/*
+  invctl — infrastructure inventory
+  Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+
+  Licensed under the GNU Affero General Public License, version 3 only —
+  no later version applies. See LICENSE for the full text.
+
+  SPDX-License-Identifier: AGPL-3.0-only
+*/}}
+{{/* WP-G4a piece 3: bulk application of a tag from a filtered asset or
+     service list (docs/tags-design.md §4a, §5).
+
+     bulk_tag_panel is the checkbox column's footer -- select-all/clear, the
+     tag picker and the confirming submit button. Rendered INSIDE
+     asset_table / service_table (the same swappable unit the checkboxes
+     themselves live in), so a filter change resets any in-progress
+     selection along with everything else in that panel: there is no stale
+     selection left over from a filter the operator has since changed.
+
+     Expects: .ApplyTags ([]domain.Tag, live only -- see loadTagListOptions).
+     The enclosing form supplies the route, the CSRF token and the checkbox
+     column this panel's buttons act on. */}}
+{{define "bulk_tag_panel"}}
+{{if .ApplyTags}}
+<div class="form-actions" style="margin-top:8px">
+  <button type="button" class="btn btn-sm" x-on:click="selectAll">Select all shown — this filtered view only</button>
+  <button type="button" class="btn btn-sm" x-on:click="clearAll">Clear</button>
+
+  <select name="tag_id" x-on:change="updateTagLabel">
+    <option value="">Choose a tag</option>
+    {{range .ApplyTags}}<option value="{{.ID}}">{{.Label}}</option>{{end}}
+  </select>
+
+  <button type="submit" class="btn btn-primary btn-sm"
+          x-bind:disabled="disableSubmit"
+          x-bind:hx-confirm="confirmMessage">
+    Apply tag to selected
+  </button>
+</div>
+{{end}}
+{{end}}
+
+{{/* Expects: .EntityLabel, .ListPath, .Outcomes ([]store.TagApplyOutcome),
+     .Error (optional -- a refusal, 422). */}}
+{{define "bulk_tag_result"}}
+<div id="{{.EntityLabel}}-bulk-tag-result" class="panel bulk-assign-result">
+  {{if .Error}}
+  <div class="flash flash-error">{{.Error}}</div>
+  {{else}}
+  <div class="panel-head">
+    <h3>Tag application result</h3>
+  </div>
+  <div class="scroll-x">
+    <table>
+      <thead><tr><th>Name</th><th>Result</th><th></th></tr></thead>
+      <tbody>
+        {{range .Outcomes}}
+        <tr>
+          <td>{{.Name}}</td>
+          <td>
+            {{if .Tagged}}
+              <span class="pill pill-ok">tagged</span>
+            {{else if .Stale}}
+              <span class="pill pill-degraded">changed since shown</span>
+            {{else}}
+              <span class="pill pill-down">failed</span>
+            {{end}}
+          </td>
+          <td>{{.Detail}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{end}}
+</div>
+{{end}}

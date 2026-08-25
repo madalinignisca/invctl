@@ -30,6 +30,10 @@ type serviceListPage struct {
 	// download -- see ServiceCustomFieldsCSV and
 	// store.ExportServiceCustomFields.
 	CustomFieldsCSVLink string
+	// FilterTags and ApplyTags: see assetListPage's identical fields and
+	// loadTagListOptions.
+	FilterTags []store.TagRow
+	ApplyTags  []domain.Tag
 }
 
 // serviceFilterFrom builds the service list filter from a request's query
@@ -44,6 +48,8 @@ func serviceFilterFrom(q url.Values, tier int) store.ServiceFilter {
 		ProjectID:     q.Get("project"),
 		Tier:          tier,
 		Query:         q.Get("q"),
+		// See assetFilterFrom's identical field for the shape.
+		TagIDs: q["tag"],
 	}
 }
 
@@ -72,6 +78,11 @@ func (a *App) ServiceList(w http.ResponseWriter, r *http.Request) {
 		a.serverError(w, r, err)
 		return
 	}
+	filterTags, applyTags, err := a.loadTagListOptions(r.Context())
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
 
 	if render.WantsCSV(r) {
 		render.CSV(w, r, store.ExportServices(services), a.Store.Now())
@@ -89,6 +100,8 @@ func (a *App) ServiceList(w http.ResponseWriter, r *http.Request) {
 		Filter:              filter,
 		FormData:            a.newServiceForm(r, nil, domain.ServiceSpec{}, envs, kinds),
 		CustomFieldsCSVLink: customFieldsCSVLinkFor("/services/custom-fields.csv", r),
+		FilterTags:          filterTags,
+		ApplyTags:           applyTags,
 	}
 	a.Render.Respond(w, r, http.StatusOK, "service_list", "service_table", data)
 }

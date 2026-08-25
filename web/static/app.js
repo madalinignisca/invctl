@@ -335,6 +335,65 @@ document.addEventListener('alpine:init', () => {
       return 'Assign ' + this.selected + ' ' + this.entityLabel + ' to ' + team + '?';
     },
   }));
+
+  // WP-G4a piece 3's bulk-tag-apply panel (docs/tags-design.md §4a), the tag
+  // twin of bulkAssign above -- same shape, same reasoning: local UI state
+  // only, "select all" toggles exactly the checkboxes present in this
+  // filtered view (there is no broader set for it to reach past), and the
+  // confirm message names a count and a tag before the request leaves the
+  // browser. Kept as its own component rather than parameterising bulkAssign
+  // over a field name, since the two screens' targets (a team, a tag) read
+  // and confirm differently enough that sharing one object would mean more
+  // conditionals than code saved.
+  Alpine.data('bulkTagApply', () => ({
+    entityLabel: 'items',
+    selected: 0,
+    tagValue: '',
+    tagLabel: '',
+    init() {
+      this.entityLabel = this.$el.dataset.entityLabel || 'items';
+      this.updateSelected();
+      this.updateTagLabel();
+    },
+    checkboxes() {
+      return this.$el.querySelectorAll('input[name="entity"]');
+    },
+    updateSelected() {
+      this.selected = this.$el.querySelectorAll('input[name="entity"]:checked').length;
+    },
+    updateTagLabel() {
+      const select = this.$el.querySelector('select[name="tag_id"]');
+      if (!select || select.selectedIndex < 0) {
+        this.tagValue = '';
+        this.tagLabel = '';
+        return;
+      }
+      this.tagValue = select.value;
+      this.tagLabel = select.options[select.selectedIndex].textContent;
+    },
+    selectAll() {
+      this.checkboxes().forEach((cb) => {
+        cb.checked = true;
+      });
+      this.updateSelected();
+    },
+    clearAll() {
+      this.checkboxes().forEach((cb) => {
+        cb.checked = false;
+      });
+      this.updateSelected();
+    },
+    get canSubmit() {
+      return this.selected > 0 && this.tagValue !== '';
+    },
+    get disableSubmit() {
+      return !this.canSubmit;
+    },
+    get confirmMessage() {
+      const tag = this.tagLabel || 'the selected tag';
+      return 'Apply ' + tag + ' to ' + this.selected + ' ' + this.entityLabel + '?';
+    },
+  }));
 });
 
 // A 422 carries a re-rendered form and must be swapped in.

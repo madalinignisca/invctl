@@ -137,6 +137,18 @@ func (t *tx) logCreate(ctx context.Context, entityType, entityID string, entity 
 // logUpdate records the field-level difference. A no-op update writes nothing:
 // an audit trail full of empty entries is worse than one without them.
 func (t *tx) logUpdate(ctx context.Context, entityType, entityID string, before, after any) error {
+	return t.logUpdateBatch(ctx, entityType, entityID, before, after, "")
+}
+
+// logUpdateBatch is logUpdate with a batch id attached -- the WP-G4a piece 3
+// counterpart of what team_reassignment.go and bulk_ownership.go already do
+// for ownership moves: several change_log rows across different entities,
+// one per entity, sharing one batch_id because they are all the outcome of
+// ONE bulk operation (docs/tags-design.md §4a: "each entity gets its own
+// change_log row sharing one batch id"). logUpdate is the batchID=""
+// special case, kept as its own name because that is still the overwhelming
+// majority of writes in this codebase.
+func (t *tx) logUpdateBatch(ctx context.Context, entityType, entityID string, before, after any, batchID string) error {
 	diff, changed, err := diffJSON(before, after)
 	if err != nil {
 		return err
@@ -144,7 +156,7 @@ func (t *tx) logUpdate(ctx context.Context, entityType, entityID string, before,
 	if !changed {
 		return nil
 	}
-	return t.log(ctx, entityType, entityID, domain.ActionUpdate, diff, "")
+	return t.log(ctx, entityType, entityID, domain.ActionUpdate, diff, batchID)
 }
 
 // write runs fn inside a transaction on the writer pool.

@@ -53,6 +53,18 @@
           {{range $.Availabilities}}<option value="{{.}}" {{if eq . $.Filter.Availability}}selected{{end}}>{{.}}</option>{{end}}
         </select>
       </div>
+      {{/* See asset_list.html's identical field: AND, not OR
+           (docs/tags-design.md §5), and a retired tag stays offered here. */}}
+      <div class="field">
+        <label for="sf-tag">Tags (all of)</label>
+        <select id="sf-tag" name="tag" multiple size="3">
+          {{range $.FilterTags}}
+          <option value="{{.ID}}" {{if has $.Filter.TagIDs .ID}}selected{{end}}>
+            {{.Code}}{{if .RetiredAt}} (retired){{end}}
+          </option>
+          {{end}}
+        </select>
+      </div>
     </form>
   </div>
 </div>

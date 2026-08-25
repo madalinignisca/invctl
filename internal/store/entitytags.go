@@ -113,6 +113,17 @@ func entityTagsAudit(ctx context.Context, t *tx, entityType, entityID string) (s
 // resubmission of the same set -- the identical "an unchanged value is not a
 // new value" reasoning setCustomValues gives for a retired select option.
 func (s *SQLStore) SetEntityTags(ctx context.Context, actor domain.Actor, entityType, entityID string, expected int, tagIDs []string) error {
+	return s.setEntityTags(ctx, actor, entityType, entityID, expected, tagIDs, "")
+}
+
+// setEntityTags is SetEntityTags plus a batch id, so that WP-G4a piece 3's
+// bulk apply (bulk_tags.go) can thread one batch id across many entities'
+// change_log rows without a second, near-duplicate mutation path. batchID is
+// "" for every ordinary caller -- SetEntityTags -- and non-empty only from
+// bulk_tags.go, exactly the way BulkAssignOwnership shares
+// assignOneEntity/requireActiveTeam with ReassignTeamOwnership rather than
+// inventing a second write path.
+func (s *SQLStore) setEntityTags(ctx context.Context, actor domain.Actor, entityType, entityID string, expected int, tagIDs []string, batchID string) error {
 	switch entityType {
 	case domain.TagEntityAsset, domain.TagEntityService, domain.TagEntityProject:
 	default:
@@ -209,11 +220,11 @@ func (s *SQLStore) SetEntityTags(ctx context.Context, actor domain.Actor, entity
 
 		switch entityType {
 		case domain.TagEntityAsset:
-			return logAssetTags(ctx, t, entityID, expected, before, after)
+			return logAssetTags(ctx, t, entityID, expected, before, after, batchID)
 		case domain.TagEntityService:
-			return logServiceTags(ctx, t, entityID, expected, before, after)
+			return logServiceTags(ctx, t, entityID, expected, before, after, batchID)
 		default:
-			return logProjectTags(ctx, t, entityID, expected, before, after)
+			return logProjectTags(ctx, t, entityID, expected, before, after, batchID)
 		}
 	})
 }
@@ -225,7 +236,7 @@ func (s *SQLStore) SetEntityTags(ctx context.Context, actor domain.Actor, entity
 // logAssetCustomValues in customvalues.go, mirrored rather than shared
 // because each reads a different set fresh and folds a different one from
 // its own before/after.
-func logAssetTags(ctx context.Context, t *tx, assetID string, expected int, before, after string) error {
+func logAssetTags(ctx context.Context, t *tx, assetID string, expected int, before, after, batchID string) error {
 	var a domain.Asset
 	if err := t.get(ctx, &a, `SELECT * FROM asset WHERE id = ?`, assetID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -250,12 +261,12 @@ func logAssetTags(ctx context.Context, t *tx, assetID string, expected int, befo
 	if err := bumpedParentVersion(res, err, "asset", assetID, expected); err != nil {
 		return err
 	}
-	return t.logUpdate(ctx, "asset", assetID,
-		auditedAsset(&a, codes, custom, before), auditedAsset(&a, codes, custom, after))
+	return t.logUpdateBatch(ctx, "asset", assetID,
+		auditedAsset(&a, codes, custom, before), auditedAsset(&a, codes, custom, after), batchID)
 }
 
 // logServiceTags is the service half of the same thing.
-func logServiceTags(ctx context.Context, t *tx, serviceID string, expected int, before, after string) error {
+func logServiceTags(ctx context.Context, t *tx, serviceID string, expected int, before, after, batchID string) error {
 	var svc domain.Service
 	if err := t.get(ctx, &svc, `SELECT * FROM service WHERE id = ?`, serviceID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -273,15 +284,15 @@ func logServiceTags(ctx context.Context, t *tx, serviceID string, expected int, 
 	if err := bumpedParentVersion(res, err, "service", serviceID, expected); err != nil {
 		return err
 	}
-	return t.logUpdate(ctx, "service", serviceID,
-		auditedService(&svc, custom, before), auditedService(&svc, custom, after))
+	return t.logUpdateBatch(ctx, "service", serviceID,
+		auditedService(&svc, custom, before), auditedService(&svc, custom, after), batchID)
 }
 
 // logProjectTags is the project half. Projects hold no custom field values
 // (domain.CustomFieldEntityTypes does not include "project"), so there is no
 // second fold to read fresh here -- Tags is the only thing projectAudit
 // carries beyond the row itself.
-func logProjectTags(ctx context.Context, t *tx, projectID string, expected int, before, after string) error {
+func logProjectTags(ctx context.Context, t *tx, projectID string, expected int, before, after, batchID string) error {
 	var p domain.Project
 	if err := t.get(ctx, &p, `SELECT * FROM project WHERE id = ?`, projectID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -295,8 +306,8 @@ func logProjectTags(ctx context.Context, t *tx, projectID string, expected int, 
 	if err := bumpedParentVersion(res, err, "project", projectID, expected); err != nil {
 		return err
 	}
-	return t.logUpdate(ctx, "project", projectID,
-		auditedProject(&p, before), auditedProject(&p, after))
+	return t.logUpdateBatch(ctx, "project", projectID,
+		auditedProject(&p, before), auditedProject(&p, after), batchID)
 }
 
 // EntityTagOrphan is one entity_tag row whose entity_id names nothing that

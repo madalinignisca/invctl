@@ -207,6 +207,14 @@ type AssetFilter struct {
 	// with TeamID in practice, though nothing here refuses combining them --
 	// team_id = X AND team_id IS NULL simply, and correctly, matches nothing.
 	Unowned bool
+	// TagIDs narrows to assets carrying EVERY tag named, AND not OR
+	// (docs/tags-design.md §5). Empty means "do not filter" -- see
+	// tagFilterClause's own comment for why that has to be decided before the
+	// query is built rather than left to fall out of the SQL. A retired tag's
+	// id here still matches: "a retired tag can still be FILTERED on" is
+	// design.md §2's rule made literal, and this filter never looks at
+	// tag.retired_at at all.
+	TagIDs []string
 }
 
 // AssetListLimit is the default ceiling on a list page.
@@ -252,6 +260,10 @@ func (s *SQLStore) ListAssets(ctx context.Context, f AssetFilter) ([]AssetRow, e
 	}
 	if f.Unowned {
 		where = append(where, `a.team_id IS NULL`)
+	}
+	if clause, cargs := tagFilterClause("a.id", domain.TagEntityAsset, f.TagIDs); clause != "" {
+		where = append(where, clause)
+		args = append(args, cargs...)
 	}
 	if f.Query != "" {
 		// LIKE with a leading wildcard, not a full-text match: this is the

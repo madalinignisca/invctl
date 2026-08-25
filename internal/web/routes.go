@@ -232,10 +232,16 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	write("POST /assets/{id}/occupants", app.AssetOccupants)
 	write("POST /assets/{id}/custom-fields", app.AssetCustomFields)
 	write("POST /assets/{id}/tags", app.AssetTags)
+	// WP-G4a piece 3: bulk application from the filtered asset list, distinct
+	// from the per-entity picker above (docs/tags-design.md §4a). Not a GET
+	// candidates route the way /reports/ownership/candidates is -- the
+	// candidates ARE /assets's own filtered table (see bulk_tags.go).
+	write("POST /assets/tags/apply", app.AssetsBulkTagApply)
 
 	write("POST /services", app.ServiceCreate)
 	write("POST /services/{id}/custom-fields", app.ServiceCustomFields)
 	write("POST /services/{id}/tags", app.ServiceTags)
+	write("POST /services/tags/apply", app.ServicesBulkTagApply)
 	// One route per surface, as with costs: an entity type arriving in a URL
 	// is an entity type arriving from a request, and it would select a table.
 	write("POST /certificates", app.CertificateCreate)

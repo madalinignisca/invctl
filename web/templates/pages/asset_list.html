@@ -41,6 +41,21 @@
           {{range $.Environments}}<option value="{{.ID}}" {{if eq .ID $.Filter.EnvironmentID}}selected{{end}}>{{.Code}}</option>{{end}}
         </select>
       </div>
+      {{/* WP-G4a piece 3 (docs/tags-design.md §5): AND, not OR -- picking
+           more than one tag narrows to assets carrying every one picked. A
+           retired tag stays offered here even though it is not offered for
+           new application (below): things still carry it, so it must still
+           be findable by it. */}}
+      <div class="field">
+        <label for="f-tag">Tags (all of)</label>
+        <select id="f-tag" name="tag" multiple size="3">
+          {{range $.FilterTags}}
+          <option value="{{.ID}}" {{if has $.Filter.TagIDs .ID}}selected{{end}}>
+            {{.Code}}{{if .RetiredAt}} (retired){{end}}
+          </option>
+          {{end}}
+        </select>
+      </div>
       <label class="check" style="margin-bottom:2px">
         <input type="checkbox" name="retired" value="1" {{if .Filter.IncludeRetired}}checked{{end}}>
         Include retired

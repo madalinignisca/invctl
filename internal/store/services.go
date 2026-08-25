@@ -60,6 +60,9 @@ type ServiceFilter struct {
 	// Unowned narrows to team_id IS NULL -- see AssetFilter.Unowned's comment;
 	// same reuse, same reasoning.
 	Unowned bool
+	// TagIDs is AssetFilter.TagIDs's twin -- see its comment and
+	// tagFilterClause in tag_filter.go.
+	TagIDs []string
 }
 
 // ServiceRow is a service plus what a list view needs to render without
@@ -136,6 +139,10 @@ func (s *SQLStore) ListServices(ctx context.Context, f ServiceFilter) ([]Service
 	}
 	if f.Unowned {
 		where = append(where, `s.team_id IS NULL`)
+	}
+	if clause, cargs := tagFilterClause("s.id", domain.TagEntityService, f.TagIDs); clause != "" {
+		where = append(where, clause)
+		args = append(args, cargs...)
 	}
 	if f.Query != "" {
 		where = append(where, `(LOWER(s.name) LIKE ? ESCAPE '\' OR LOWER(s.code) LIKE ? ESCAPE '\')`)
