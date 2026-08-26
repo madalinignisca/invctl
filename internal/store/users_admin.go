@@ -226,20 +226,49 @@ func (s *SQLStore) SetUserActive(ctx context.Context, actor domain.Actor, id str
 	})
 }
 
+// scrubbedUsername renders a non-identifying, still-unique replacement for a
+// scrubbed account's username. A username is very often a person's actual
+// name, so clearing display_name/email and leaving it behind would answer
+// half an erasure request and call it done. It cannot be NULL or empty --
+// username is NOT NULL UNIQUE -- so this needs a value, and it is built from
+// the row's own id (already globally unique) rather than a truncated prefix
+// of it: id is a UUIDv7, whose leading bytes are a millisecond timestamp, so
+// a short prefix is shared by every account created in the same window and
+// is not the uniqueness guarantee it looks like.
+func scrubbedUsername(id string) string { return "scrubbed-" + id }
+
 // ScrubUser is the GDPR erasure operation this codebase has described in nine
 // comments and never implemented (CLAUDE.md, "Declared vs observed"). It
-// clears display name, email and password hash while keeping the row and its
+// clears display name, email and password hash, replaces username with a
+// non-identifying token, sets is_active to FALSE, and keeps the row and its
 // id: change_log.actor keeps referencing a real row, the audit trail keeps
 // its integrity, and every defensive "LEFT JOIN app_user" already written for
 // this case finally has something real to degrade from.
 //
+// is_active = FALSE IS THE WHOLE POINT, NOT A DETAIL. password_hash is
+// cleared too, but that only stops a LOCAL account: an LDAP account
+// authenticates by binding against the directory (internal/auth/ldap.go) and
+// never consults password_hash at all. is_active is the ONLY column that
+// stops a scrubbed LDAP user's next bind from succeeding -- found during
+// review, because password_hash alone silently erases a local user's ability
+// to log in and does nothing at all for an LDAP one, which is most users in
+// the deployment this is built for.
+//
+// CONSEQUENCE, AND IT IS REAL: because username is replaced, if this person
+// later authenticates against LDAP again, UpsertLDAPUser looks their
+// username up, finds nothing, and creates a NEW app_user row rather than
+// reactivating this one. That is correct -- the earlier relationship was
+// erased on request, not merely paused -- but it means change_log
+// attribution now splits across two ids, and every entry naming the old one
+// resolves to a row with no name, exactly as docs/AUDIT.md describes for a
+// scrubbed account.
+//
 // Scrub is spec §8's third guarded verb, and unconditionally so -- unlike
 // SetUserRole/SetUserActive, which only guard the specific change that
 // removes administrator capability, scrubbing an active Administrator always
-// ends their ability to act as one (their password is gone), regardless of
-// what role or is_active still say. Demote, deactivate and scrub all reach
-// the same state -- no active administrator -- and a guard on two of the
-// three verbs is a guard on none.
+// ends their ability to act as one, regardless of what role still says.
+// Demote, deactivate and scrub all reach the same state -- no active
+// administrator -- and a guard on two of the three verbs is a guard on none.
 func (s *SQLStore) ScrubUser(ctx context.Context, actor domain.Actor, id string) error {
 	return s.writeSerializable(ctx, actor, func(t *tx) error {
 		before, err := t.getUser(ctx, id)
@@ -251,15 +280,21 @@ func (s *SQLStore) ScrubUser(ctx context.Context, actor domain.Actor, id string)
 				return err
 			}
 		}
+		scrubbedName := scrubbedUsername(id)
 		if _, err := t.exec(ctx,
-			`UPDATE app_user SET display_name = NULL, email = NULL, password_hash = NULL WHERE id = ?`,
-			id); err != nil {
+			`UPDATE app_user
+			 SET username = ?, display_name = NULL, email = NULL,
+			     password_hash = NULL, is_active = FALSE
+			 WHERE id = ?`,
+			scrubbedName, id); err != nil {
 			return translateWriteErr(err, "scrubbing user "+id)
 		}
 		after := *before
+		after.Username = scrubbedName
 		after.DisplayName = nil
 		after.Email = nil
 		after.PasswordHash = nil
+		after.IsActive = false
 		return t.logUpdate(ctx, "app_user", id, before, &after)
 	})
 }

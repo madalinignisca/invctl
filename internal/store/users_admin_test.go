@@ -469,3 +469,79 @@ func TestTwoSimultaneousDemotionsCannotRemoveTheLastAdministrator(t *testing.T) 
 		t.Errorf("active administrators after the race = %d, want 1", n)
 	}
 }
+
+// TestAScrubbedLDAPAccountCannotAuthenticate covers the gap a review found in
+// this task: an LDAP account authenticates by binding against the directory
+// (internal/auth/ldap.go) and never consults password_hash at all, so
+// clearing it -- the whole of ScrubUser's first cut -- stopped a local user
+// and stopped nothing for an LDAP one, which is most users in the deployment
+// this is built for. is_active is the ONLY column ldap.go's Authenticate
+// checks after a successful bind, so that is what this test pins.
+//
+// This is a store test, not an LDAP one, because the property that matters
+// lives entirely in the store: does the row a directory bind would resolve
+// to still say IsActive == true. Standing up a real LDAP server to prove
+// that would test go-ldap's bind implementation, not this codebase.
+//
+// Mutation: remove `is_active = FALSE` from ScrubUser's UPDATE (and from the
+// `after` struct it audits) -- this must fail.
+func TestAScrubbedLDAPAccountCannotAuthenticate(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			s, ctx := newStore(t, e)
+			admin := mustUserWithRole(t, s, ctx, "admin", domain.RoleAdministrator)
+
+			// UpsertLDAPUser is exactly what a successful bind runs before
+			// ldap.go's Authenticate checks IsActive -- this is the row shape
+			// a real directory login produces, with no password_hash at all.
+			ldapUser, err := s.UpsertLDAPUser(ctx, "bob", "Bob Example", "bob@example.com")
+			if err != nil {
+				t.Fatalf("recording ldap user: %v", err)
+			}
+			if ldapUser.PasswordHash != nil {
+				t.Fatal("setup: an ldap user was given a password hash")
+			}
+
+			if err := s.ScrubUser(ctx, domain.UserActor(admin), ldapUser.ID); err != nil {
+				t.Fatalf("scrubbing: %v", err)
+			}
+
+			after, err := s.GetUser(ctx, ldapUser.ID)
+			if err != nil {
+				t.Fatalf("getting scrubbed user: %v", err)
+			}
+			// This is the gate internal/auth/ldap.go's Authenticate checks
+			// after every successful bind. password_hash being nil already
+			// (an LDAP account never has one) proves nothing on its own --
+			// is_active is what has to be false.
+			if after.IsActive {
+				t.Fatal("a scrubbed LDAP account is still active; " +
+					"ldap.go's Authenticate would let the next successful bind through")
+			}
+			if after.Username == "bob" {
+				t.Error("scrubbing left the original username in place")
+			}
+
+			// The documented consequence: a later bind as "bob" cannot find
+			// this row by username any more, so it mints a NEW account
+			// rather than reactivating the scrubbed one. That new account
+			// starts as a fresh Observer (NewAppUser's safe default) --
+			// it does not inherit whatever role the scrubbed row had.
+			again, err := s.UpsertLDAPUser(ctx, "bob", "", "")
+			if err != nil {
+				t.Fatalf("second ldap sign-in: %v", err)
+			}
+			if again.ID == ldapUser.ID {
+				t.Fatal("a later bind reactivated the scrubbed row instead of minting a new one")
+			}
+			if !again.IsActive {
+				t.Error("the newly minted account is not active")
+			}
+			if again.Role != domain.RoleObserver {
+				t.Errorf("the newly minted account has role %q, want the safe default %q -- "+
+					"a scrubbed account must not hand its old privileges to whoever logs in next",
+					again.Role, domain.RoleObserver)
+			}
+		})
+	}
+}
