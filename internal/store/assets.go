@@ -27,7 +27,7 @@ func (s *SQLStore) CreateEnvironment(ctx context.Context, actor domain.Actor, en
 	// Without this a caller that creates and then updates the SAME struct
 	// compares 0 against 1 and gets a conflict against itself.
 	env.RowVersion = 1
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		if err := t.requireVocabulary(ctx, vocabEnvironmentRole, "role", env.Role); err != nil {
 			return err
 		}
@@ -60,7 +60,7 @@ func (s *SQLStore) UpdateEnvironment(ctx context.Context, actor domain.Actor, en
 	env.CreatedAt = before.CreatedAt
 	env.UpdatedAt = domain.FormatTime(s.now())
 
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		if err := t.requireVocabulary(ctx, vocabEnvironmentRole, "role", env.Role); err != nil {
 			return err
 		}
@@ -721,7 +721,7 @@ func (s *SQLStore) CreateAsset(ctx context.Context, actor domain.Actor, a *domai
 	if err := s.requireFreeRackSpace(ctx, a); err != nil {
 		return err
 	}
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		return s.insertAsset(ctx, t, a, environmentIDs, codes)
 	})
 }
@@ -826,7 +826,7 @@ func (s *SQLStore) UpdateAsset(ctx context.Context, actor domain.Actor, a *domai
 		}
 	}
 
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		if err := t.requireVocabulary(ctx, vocabAssetKind, "kind", a.Kind); err != nil {
 			return err
 		}
@@ -927,7 +927,7 @@ func (s *SQLStore) RetireAsset(ctx context.Context, actor domain.Actor, id strin
 		return nil
 	}
 	at := domain.FormatTime(s.now())
-	return s.writeSerializable(ctx, actor, func(t *tx) error {
+	return s.writeSerializable(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		_, err := t.exec(ctx, `UPDATE asset SET lifecycle = ?, updated_at = ?,
 			                       row_version = row_version + 1 WHERE id = ?`,
 			domain.LifecycleRetired, at, id)
@@ -1066,7 +1066,7 @@ func (s *SQLStore) ReparentAsset(ctx context.Context, actor domain.Actor, id str
 	}
 
 	at := domain.FormatTime(s.now())
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		if newParentID != nil {
 			// Moving a node underneath its own descendant would detach the
 			// subtree into a cycle, and the closure table has no way to

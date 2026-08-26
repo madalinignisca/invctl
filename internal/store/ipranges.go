@@ -56,7 +56,7 @@ func (s *SQLStore) CreateIPRange(ctx context.Context, actor domain.Actor, r *dom
 	r.RowVersion = 1
 	at := domain.FormatTime(s.now())
 	r.CreatedAt, r.UpdatedAt = &at, &at
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		_, err := t.exec(ctx, `
 			INSERT INTO ip_range (id, start_text, end_text, addr_family, addr_start, addr_end,
 			                      vrf_id, role, description, lifecycle, created_at, updated_at)
@@ -90,7 +90,7 @@ func (s *SQLStore) UpdateIPRange(ctx context.Context, actor domain.Actor, r *dom
 	at := domain.FormatTime(s.now())
 	r.UpdatedAt = &at
 
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		res, err := t.exec(ctx, `
 			UPDATE ip_range SET start_text = ?, end_text = ?, addr_family = ?,
 			                    addr_start = ?, addr_end = ?, vrf_id = ?,
@@ -134,7 +134,7 @@ func (s *SQLStore) RetireIPRange(ctx context.Context, actor domain.Actor, id str
 	after.Lifecycle = domain.LifecycleRetired
 	after.UpdatedAt = &at
 
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		res, err := t.exec(ctx, `
 			UPDATE ip_range SET lifecycle = 'retired', updated_at = ?,
 			                    row_version = row_version + 1

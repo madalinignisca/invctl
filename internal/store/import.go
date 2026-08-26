@@ -328,7 +328,7 @@ func (s *SQLStore) ImportAssets(ctx context.Context, actor domain.Actor, rows []
 		seen[row.Path()] = row.Line
 	}
 
-	err := s.write(ctx, actor, func(t *tx) error {
+	err := s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		existing, err := existingAssetPaths(ctx, t)
 		if err != nil {
 			return err

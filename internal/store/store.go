@@ -69,10 +69,11 @@ func (s *SQLStore) Now() time.Time { return s.now().UTC() }
 // so an audit entry cannot survive a rolled-back change and a change cannot
 // escape without an entry.
 type tx struct {
-	tx    *sqlx.Tx
-	db    *DB
-	actor domain.Actor
-	at    string
+	tx     *sqlx.Tx
+	db     *DB
+	permit domain.Permit
+	actor  domain.Actor
+	at     string
 }
 
 // rebind rewrites `?` placeholders for the target engine.
@@ -111,6 +112,30 @@ func (t *tx) selectAll(ctx context.Context, dest any, query string, args ...any)
 // file and every caller elsewhere goes through log, logCreate or logUpdate
 // rather than a second insertion point.
 func (t *tx) log(ctx context.Context, entityType, entityID, action, diff, batchID string) error {
+	// THE OBJECT-LEVEL AUTHORIZATION CHECK LIVES HERE, and it lives here
+	// specifically -- not in write/writeSerializable/writeTx, and not in any
+	// of the 148 individual store methods -- because log is the ONLY
+	// insertion point into change_log (see this function's doc above) and
+	// therefore the only place every declared mutation is guaranteed to
+	// pass through. Moving this into individual store methods means forty
+	// places to forget it, which is precisely the failure mode
+	// docs/rbac-design.md §6 names and rejects. And the converse is now also
+	// true and worth stating plainly: if a second `INSERT INTO change_log`
+	// is ever added anywhere in this codebase, that statement has also
+	// added a second, unguarded authorization bypass -- which is exactly
+	// what TestChangeLogIsAppendOnly and TestNoAssembledWriteReachesChangeLog
+	// already exist to make impossible to add unnoticed.
+	//
+	// A nil permit is refused rather than treated as "no restriction": every
+	// caller of write/writeSerializable/writeTx is required to supply one
+	// (they take domain.Permit, not domain.Actor, precisely so a caller
+	// cannot pass "nothing"), so a nil here means a bug in this package, not
+	// an absent credential -- and the fail-closed answer to a bug in the
+	// authorization path is deny, not allow.
+	if t.permit == nil || !t.permit.Covers(entityType, entityID) {
+		return fmt.Errorf("writing change log for %s %s: %w", entityType, entityID, domain.ErrForbidden)
+	}
+
 	var batch any
 	if batchID != "" {
 		batch = batchID
@@ -163,8 +188,14 @@ func (t *tx) logUpdateBatch(ctx context.Context, entityType, entityID string, be
 //
 // On SQLite the writer pool holds a single connection, so concurrent callers
 // queue here rather than colliding on the database lock.
-func (s *SQLStore) write(ctx context.Context, actor domain.Actor, fn func(*tx) error) error {
-	return s.writeTx(ctx, actor, nil, fn)
+//
+// Takes a domain.Permit, not a domain.Actor -- WP-G1 Task 7. domain.Actor is
+// deliberately unable to satisfy domain.Permit (see that interface's doc
+// comment), so this is a compile-time requirement that every write transaction,
+// present and future, carries an authorization decision rather than merely an
+// identity to blame the row on afterwards.
+func (s *SQLStore) write(ctx context.Context, p domain.Permit, fn func(*tx) error) error {
+	return s.writeTx(ctx, p, nil, fn)
 }
 
 // writeSerializable runs fn under an isolation level that actually prevents
@@ -177,7 +208,7 @@ func (s *SQLStore) write(ctx context.Context, actor domain.Actor, fn func(*tx) e
 // produced two active cables on one port. SQLite never showed the bug because
 // its writer pool holds a single connection, so the primary development engine
 // silently masks a defect that is live on the deployment target.
-func (s *SQLStore) writeSerializable(ctx context.Context, actor domain.Actor, fn func(*tx) error) error {
+func (s *SQLStore) writeSerializable(ctx context.Context, p domain.Permit, fn func(*tx) error) error {
 	opts := &sql.TxOptions{Isolation: sql.LevelSerializable}
 	if s.db.Driver != DriverPostgres {
 		// SQLite serialises writes already, and modernc rejects an explicit
@@ -187,10 +218,18 @@ func (s *SQLStore) writeSerializable(ctx context.Context, actor domain.Actor, fn
 
 	// A serialization failure means "you raced, try again", not "this is
 	// impossible" -- so retry rather than surfacing it to the operator.
+	//
+	// p is passed to every attempt UNCHANGED, and that is not merely
+	// convenient -- it is the property TestAPermitIsUnchangedByARolledBackTransaction
+	// pins. A Permit carries no transaction-scoped state (see scopedPermit's
+	// doc comment in internal/domain/role.go), so a discarded, retried
+	// transaction has nothing to reset the permit to: the same value that
+	// authorized attempt 1 authorizes attempt 3, because it is the literal
+	// same value, not a rebuilt one.
 	const attempts = 3
 	var err error
 	for attempt := 1; attempt <= attempts; attempt++ {
-		err = s.writeTx(ctx, actor, opts, fn)
+		err = s.writeTx(ctx, p, opts, fn)
 		if err == nil || !isSerializationFailure(err) {
 			return err
 		}
@@ -210,12 +249,26 @@ func isSerializationFailure(err error) bool {
 		strings.Contains(msg, "concurrent update")
 }
 
-func (s *SQLStore) writeTx(ctx context.Context, actor domain.Actor, opts *sql.TxOptions, fn func(*tx) error) error {
+func (s *SQLStore) writeTx(ctx context.Context, p domain.Permit, opts *sql.TxOptions, fn func(*tx) error) error {
 	sqlTx, err := s.db.Writer.BeginTxx(ctx, opts)
 	if err != nil {
 		return fmt.Errorf("beginning transaction: %w", err)
 	}
-	t := &tx{tx: sqlTx, db: s.db, actor: actor, at: domain.FormatTime(s.now())}
+	// actor is derived from the permit rather than carried separately, so
+	// log's INSERT -- which names t.actor.ID and t.actor.Kind -- needs no
+	// change at all: the permit is now the single source both of "who gets
+	// blamed" and "what may they touch".
+	//
+	// p is guarded against nil here, rather than left to panic on p.Actor():
+	// a nil Permit reaching this far is already a bug in this package (every
+	// public store method requires one), and the fail-closed answer to a bug
+	// on the authorization path is log's ErrForbidden, not a crash that
+	// takes the request down before the transaction even rolls back cleanly.
+	var actor domain.Actor
+	if p != nil {
+		actor = p.Actor()
+	}
+	t := &tx{tx: sqlTx, db: s.db, permit: p, actor: actor, at: domain.FormatTime(s.now())}
 
 	if err := fn(t); err != nil {
 		if rbErr := sqlTx.Rollback(); rbErr != nil && !errors.Is(rbErr, sql.ErrTxDone) {

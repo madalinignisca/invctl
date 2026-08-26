@@ -116,14 +116,14 @@ func (f *projectFixture) circuit(t *testing.T, cid string) string {
 	if err != nil {
 		t.Fatalf("building the provider: %v", err)
 	}
-	if err := f.s.CreateProvider(f.ctx, testActor, p); err != nil {
+	if err := f.s.CreateProvider(f.ctx, testPermit, p); err != nil {
 		t.Fatalf("creating the provider: %v", err)
 	}
 	c, err := domain.NewCircuit(NewID(), cid, p.ID)
 	if err != nil {
 		t.Fatalf("building the circuit: %v", err)
 	}
-	if err := f.s.CreateCircuit(f.ctx, testActor, c); err != nil {
+	if err := f.s.CreateCircuit(f.ctx, testPermit, c); err != nil {
 		t.Fatalf("creating the circuit: %v", err)
 	}
 	f.circuits[cid] = c.ID

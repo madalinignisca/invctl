@@ -122,7 +122,7 @@ func (s *SQLStore) ImportDeviceTypes(ctx context.Context, actor domain.Actor,
 		seen[row.Path()] = row.Line
 	}
 
-	err := s.write(ctx, actor, func(t *tx) error {
+	err := s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		makers, err := manufacturersByCode(ctx, t)
 		if err != nil {
 			return err

@@ -320,7 +320,7 @@ func (s *SQLStore) assignOneEntity(ctx context.Context, actor domain.Actor, enti
 	}
 
 	var affected int64
-	err := s.write(ctx, actor, func(t *tx) error {
+	err := s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		res, err := do(t)
 		if err != nil {
 			return translateWriteErr(err, "assigning "+entityType+" "+id)

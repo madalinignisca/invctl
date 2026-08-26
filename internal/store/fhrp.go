@@ -95,7 +95,7 @@ func (s *SQLStore) CreateFHRPGroup(ctx context.Context, actor domain.Actor, g *d
 	g.RowVersion = 1
 	at := domain.FormatTime(s.now())
 	g.CreatedAt, g.UpdatedAt = &at, &at
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		_, err := t.exec(ctx, `
 			INSERT INTO fhrp_group (id, protocol, group_number, name, description,
 			                        lifecycle, created_at, updated_at)
@@ -135,7 +135,7 @@ func (s *SQLStore) RetireFHRPGroup(ctx context.Context, actor domain.Actor, id s
 	after.Lifecycle = domain.LifecycleRetired
 	after.UpdatedAt = &at
 
-	return s.writeSerializable(ctx, actor, func(t *tx) error {
+	return s.writeSerializable(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		var vips int
 		if err := t.get(ctx, &vips,
 			`SELECT COUNT(*) FROM ip_address WHERE fhrp_group_id = ?`, id); err != nil {
@@ -210,7 +210,7 @@ func (s *SQLStore) SetFHRPMembers(ctx context.Context, actor domain.Actor,
 	before := auditedFHRPGroup(group, current)
 	at := domain.FormatTime(s.now())
 
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		if _, err := t.exec(ctx,
 			`DELETE FROM fhrp_member WHERE group_id = ?`, groupID); err != nil {
 			return translateWriteErr(err, "clearing fhrp membership")
@@ -289,7 +289,7 @@ func (s *SQLStore) AssignVIP(ctx context.Context, actor domain.Actor, addressID,
 	after.InterfaceID = nil
 	after.UpdatedAt = &at
 
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		res, err := t.exec(ctx, `
 			UPDATE ip_address SET fhrp_group_id = ?, interface_id = NULL, updated_at = ?,
 			                      row_version = row_version + 1

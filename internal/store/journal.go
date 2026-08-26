@@ -82,7 +82,7 @@ func (s *SQLStore) CreateJournalEntry(ctx context.Context, actor domain.Actor, e
 		return err
 	}
 	e.RowVersion = 1
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		_, err := t.exec(ctx, `
 			INSERT INTO journal_entry (id, entity_type, entity_id, kind, body, author,
 			                           lifecycle, created_at, updated_at)
@@ -109,7 +109,7 @@ func (s *SQLStore) UpdateJournalEntry(ctx context.Context, actor domain.Actor, e
 		return err
 	}
 	e.UpdatedAt = domain.FormatTime(s.now())
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		before, err := getJournalForUpdate(ctx, t, e.ID)
 		if err != nil {
 			return err
@@ -135,7 +135,7 @@ func (s *SQLStore) UpdateJournalEntry(ctx context.Context, actor domain.Actor, e
 // said, and the change_log row recording the withdrawal refers to an entry that
 // has to still exist for the trail to mean anything.
 func (s *SQLStore) RetireJournalEntry(ctx context.Context, actor domain.Actor, id string) error {
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		before, err := getJournalForUpdate(ctx, t, id)
 		if err != nil {
 			return err

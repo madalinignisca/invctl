@@ -145,7 +145,7 @@ func (s *SQLStore) CreateAggregate(ctx context.Context, actor domain.Actor, a *d
 	a.RowVersion = 1
 	at := domain.FormatTime(s.now())
 	a.CreatedAt, a.UpdatedAt = &at, &at
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		_, err := t.exec(ctx, `
 			INSERT INTO aggregate (id, cidr_text, addr_family, addr_start, addr_end,
 			                       rir_id, allocated_on, description, lifecycle,
@@ -179,7 +179,7 @@ func (s *SQLStore) RetireAggregate(ctx context.Context, actor domain.Actor, id s
 	after := before
 	after.Lifecycle = domain.LifecycleRetired
 	after.UpdatedAt = &at
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		res, err := t.exec(ctx, `
 			UPDATE aggregate SET lifecycle = 'retired', updated_at = ?,
 			                     row_version = row_version + 1
@@ -215,7 +215,7 @@ func (s *SQLStore) CreateRIR(ctx context.Context, actor domain.Actor, r *domain.
 	r.RowVersion = 1
 	at := domain.FormatTime(s.now())
 	r.CreatedAt, r.UpdatedAt = &at, &at
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		_, err := t.exec(ctx, `
 			INSERT INTO rir (id, name, is_private, description, lifecycle, created_at, updated_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -261,7 +261,7 @@ func (s *SQLStore) CreateASN(ctx context.Context, actor domain.Actor, a *domain.
 	a.RowVersion = 1
 	at := domain.FormatTime(s.now())
 	a.CreatedAt, a.UpdatedAt = &at, &at
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		_, err := t.exec(ctx, `
 			INSERT INTO asn (id, number, name, rir_id, description, lifecycle,
 			                 created_at, updated_at)
@@ -296,7 +296,7 @@ func (s *SQLStore) RetireASN(ctx context.Context, actor domain.Actor, id string)
 	after := before
 	after.Lifecycle = domain.LifecycleRetired
 	after.UpdatedAt = &at
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		res, err := t.exec(ctx, `
 			UPDATE asn SET lifecycle = 'retired', updated_at = ?, row_version = row_version + 1
 			WHERE id = ? AND row_version = ?`, at, id, before.RowVersion)

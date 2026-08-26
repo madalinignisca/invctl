@@ -261,7 +261,7 @@ func (s *SQLStore) reassignEntity(ctx context.Context, actor domain.Actor,
 	do func(t *tx) (sql.Result, error)) ReassignOutcome {
 
 	var affected int64
-	err := s.write(ctx, actor, func(t *tx) error {
+	err := s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		res, err := do(t)
 		if err != nil {
 			return translateWriteErr(err, "reassigning "+entityType+" "+entityID)

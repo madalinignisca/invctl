@@ -202,7 +202,7 @@ func (s *SQLStore) addCost(ctx context.Context, actor domain.Actor, t costTable,
 	if err := c.Validate(); err != nil {
 		return err
 	}
-	return s.write(ctx, actor, func(tx *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(tx *tx) error {
 		if err := tx.requireVocabulary(ctx, vocabCostKind, "kind", c.Kind); err != nil {
 			return err
 		}
@@ -265,7 +265,7 @@ func (s *SQLStore) updateCost(ctx context.Context, actor domain.Actor, t costTab
 	c.CreatedAt = before.CreatedAt
 	c.UpdatedAt = domain.FormatTime(s.now())
 
-	return s.write(ctx, actor, func(tx *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(tx *tx) error {
 		if err := tx.requireVocabulary(ctx, vocabCostKind, "kind", c.Kind); err != nil {
 			return err
 		}
@@ -358,7 +358,7 @@ func (s *SQLStore) retireCost(ctx context.Context, actor domain.Actor, t costTab
 		return nil
 	}
 	at := domain.FormatTime(s.now())
-	return s.write(ctx, actor, func(tx *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(tx *tx) error {
 		if _, err := tx.exec(ctx,
 			`UPDATE `+t.name+` SET lifecycle = ?, updated_at = ?,
 			                       row_version = row_version + 1 WHERE id = ?`,
@@ -443,7 +443,7 @@ func (s *SQLStore) SetCostConsumers(ctx context.Context, actor domain.Actor,
 		return err
 	}
 	at := domain.FormatTime(s.Now())
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		beforeAudit, err := costScopeAudit(ctx, t, &before.Cost)
 		if err != nil {
 			return err

@@ -94,7 +94,7 @@ func (s *SQLStore) SetOccupants(ctx context.Context, actor domain.Actor,
 		return fmt.Errorf("a retired asset houses nobody: %w", domain.ErrInvalid)
 	}
 	at := domain.FormatTime(s.Now())
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		before, err := occupancyAudit(ctx, t, &asset.Asset)
 		if err != nil {
 			return err

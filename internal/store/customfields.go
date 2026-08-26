@@ -202,7 +202,7 @@ func (s *SQLStore) ListCustomFields(ctx context.Context, entityType string, incl
 // 00051 are the second line of defence, not the first.
 func (s *SQLStore) CreateCustomField(ctx context.Context, actor domain.Actor, f *domain.CustomField) error {
 	f.RowVersion = 1
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		// f.OwnerTeamID is never nil here: domain.checkOwnerTeam refuses an
 		// empty one before this method is ever reached. Checked inside the
 		// same transaction as the insert, not before s.write is called,
@@ -327,7 +327,7 @@ func (s *SQLStore) UpdateCustomField(ctx context.Context, actor domain.Actor, f 
 	// customvalues.go): belt as well as braces, at no extra cost, because it
 	// needs the kind, the retirement state and the codes regardless.
 	// TestAKindChangeAbortsAgainstAConcurrentValueWrite asserts the outcome.
-	return s.writeSerializable(ctx, actor, func(t *tx) error {
+	return s.writeSerializable(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		if f.Kind != before.Kind {
 			n, err := t.countOne(ctx,
 				`SELECT COUNT(*) FROM custom_field_value WHERE field_id = ?`, f.ID)
@@ -390,7 +390,7 @@ func (s *SQLStore) RetireCustomField(ctx context.Context, actor domain.Actor, id
 		return nil
 	}
 	at := domain.FormatTime(s.now())
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		res, err := t.exec(ctx, `
 			UPDATE custom_field SET retired_at = ?, retired_by = ?, row_version = row_version + 1
 			WHERE id = ? AND row_version = ?`,
@@ -433,7 +433,7 @@ func (s *SQLStore) RestoreCustomField(ctx context.Context, actor domain.Actor, i
 			before.Code, domain.ErrConflict)
 	}
 
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		res, err := t.exec(ctx, `
 			UPDATE custom_field SET retired_at = NULL, retired_by = NULL, row_version = row_version + 1
 			WHERE id = ? AND row_version = ?`,
@@ -534,7 +534,7 @@ func (s *SQLStore) SetCustomFieldOptions(ctx context.Context, actor domain.Actor
 	}
 
 	at := domain.FormatTime(s.now())
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		// The stale-token guard, first and alone: refused outright, before a
 		// single option row is touched, so a collision never leaves a partial
 		// write behind for the transaction to roll back around.

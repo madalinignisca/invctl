@@ -247,7 +247,7 @@ func (s *SQLStore) CreateCertificate(ctx context.Context, actor domain.Actor, c 
 	// database. A security review demonstrated what gets in through that seam.
 	names := c.SANs
 
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		// The same check assets and services make. Without it an unknown role
 		// reaches the foreign key, and SQLite reports that as "FOREIGN KEY
 		// constraint failed" with no column in it -- a bare 422 with no field
@@ -290,7 +290,7 @@ func (s *SQLStore) UpdateCertificate(ctx context.Context, actor domain.Actor, c 
 	c.UpdatedAt = domain.FormatTime(s.now())
 	names := c.SANs
 
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		if err := requireRole(ctx, t, c.ManagerRole); err != nil {
 			return err
 		}
@@ -331,7 +331,7 @@ func (s *SQLStore) RetireCertificate(ctx context.Context, actor domain.Actor, id
 		return nil
 	}
 	at := domain.FormatTime(s.now())
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		if _, err := t.exec(ctx,
 			`UPDATE certificate SET lifecycle = ?, updated_at = ?, row_version = row_version + 1
 			 WHERE id = ?`,
@@ -509,7 +509,7 @@ func (s *SQLStore) deployCertificate(ctx context.Context, actor domain.Actor,
 	table, column, certificateID, entityID string, note *string) error {
 
 	at := domain.FormatTime(s.now())
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		// What is there now, so a no-op can be recognised. An audit trail full
 		// of entries saying nothing changed is worse than one without them --
 		// the rule logUpdate enforces everywhere else, which a hand-built diff
@@ -568,7 +568,7 @@ func (s *SQLStore) undeployCertificate(ctx context.Context, actor domain.Actor,
 	table, column, certificateID, entityID string) error {
 
 	at := domain.FormatTime(s.now())
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		res, err := t.exec(ctx,
 			`UPDATE `+table+` SET lifecycle = ?, updated_at = ?
 			 WHERE certificate_id = ? AND `+column+` = ? AND lifecycle = ?`,

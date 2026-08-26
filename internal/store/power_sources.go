@@ -46,7 +46,7 @@ func (s *SQLStore) CreatePowerSource(ctx context.Context, actor domain.Actor, p 
 	if err := p.Validate(); err != nil {
 		return err
 	}
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		if err := requireLiveAsset(ctx, t, "site_id", p.SiteID); err != nil {
 			return err
 		}
@@ -98,7 +98,7 @@ func (s *SQLStore) UpdatePowerSource(ctx context.Context, actor domain.Actor, p 
 	p.CreatedAt = before.CreatedAt
 	p.UpdatedAt = domain.FormatTime(s.now())
 
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		if p.ParentID != nil {
 			if err := requireLiveSource(ctx, t, *p.ParentID); err != nil {
 				return err
@@ -173,7 +173,7 @@ func (s *SQLStore) RetirePowerSource(ctx context.Context, actor domain.Actor, id
 			before.Children, pluralWord(before.Children, "supply", "supplies"), domain.ErrConflict)
 	}
 	at := domain.FormatTime(s.now())
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		_, err := t.exec(ctx,
 			`UPDATE power_source SET lifecycle = ?, updated_at = ?, row_version = row_version + 1
 			 WHERE id = ?`, domain.LifecycleRetired, at, id)

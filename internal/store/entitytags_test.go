@@ -143,7 +143,7 @@ func (f *entityTagFixture) lastDiff(t *testing.T, entityType, entityID string) s
 func (f *entityTagFixture) tagsFold(t *testing.T, entityType, entityID string) string {
 	t.Helper()
 	var fold string
-	err := f.s.write(f.ctx, f.actor, func(tx *tx) error {
+	err := f.s.write(f.ctx, domain.AdministratorPermit(f.actor), func(tx *tx) error {
 		var err error
 		fold, err = entityTagsAudit(f.ctx, tx, entityType, entityID)
 		return err
@@ -566,7 +566,7 @@ func TestTagIntegrityViolationsFindsAnOrphan(t *testing.T) {
 			// Written directly through a bare transaction, bypassing
 			// SetEntityTags's own validation on purpose: that validation is
 			// exactly what a hand-written fix or a bad import bypasses too.
-			err = f.s.write(f.ctx, f.actor, func(tx *tx) error {
+			err = f.s.write(f.ctx, domain.AdministratorPermit(f.actor), func(tx *tx) error {
 				_, err := tx.exec(f.ctx, `
 					INSERT INTO entity_tag (tag_id, entity_type, entity_id, created_at, created_by)
 					VALUES (?, ?, ?, ?, ?)`,

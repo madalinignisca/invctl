@@ -128,7 +128,7 @@ func (s *SQLStore) CreateTeam(ctx context.Context, actor domain.Actor, t *domain
 	if err := t.Validate(); err != nil {
 		return err
 	}
-	return s.write(ctx, actor, func(tx *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(tx *tx) error {
 		_, err := tx.exec(ctx, `
 			INSERT INTO team (id, code, name, description, contact_ref, lifecycle,
 			                  created_at, updated_at)
@@ -157,7 +157,7 @@ func (s *SQLStore) UpdateTeam(ctx context.Context, actor domain.Actor, t *domain
 	t.CreatedAt = before.CreatedAt
 	t.UpdatedAt = domain.FormatTime(s.now())
 
-	return s.write(ctx, actor, func(tx *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(tx *tx) error {
 		res, err := tx.exec(ctx, `
 			UPDATE team SET code = ?, name = ?, description = ?, contact_ref = ?,
 			                lifecycle = ?, updated_at = ?, row_version = row_version + 1
@@ -192,7 +192,7 @@ func (s *SQLStore) RetireTeam(ctx context.Context, actor domain.Actor, id string
 		return nil
 	}
 	at := domain.FormatTime(s.now())
-	return s.write(ctx, actor, func(tx *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(tx *tx) error {
 		if _, err := tx.exec(ctx,
 			`UPDATE team SET lifecycle = ?, updated_at = ?,
 			                 row_version = row_version + 1 WHERE id = ?`,

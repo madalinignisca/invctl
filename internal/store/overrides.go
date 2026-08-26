@@ -205,7 +205,7 @@ func (s *SQLStore) CreateHealthOverride(ctx context.Context, actor domain.Actor,
 	}
 
 	now := s.Now()
-	return s.writeSerializable(ctx, actor, func(t *tx) error {
+	return s.writeSerializable(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		existing, err := t.overrideForEntity(ctx, o.EntityType, o.EntityID)
 		if err != nil {
 			return err
@@ -250,7 +250,7 @@ func (s *SQLStore) CreateHealthOverride(ctx context.Context, actor domain.Actor,
 func (s *SQLStore) AmendHealthOverride(ctx context.Context, actor domain.Actor, id string, spec domain.HealthOverrideSpec) (*domain.HealthOverride, error) {
 	now := s.Now()
 	var out *domain.HealthOverride
-	err := s.write(ctx, actor, func(t *tx) error {
+	err := s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		before, err := t.overrideByID(ctx, id)
 		if err != nil {
 			return err
@@ -278,7 +278,7 @@ func (s *SQLStore) AmendHealthOverride(ctx context.Context, actor domain.Actor, 
 // the fact, by somebody asking why an outage went unnoticed.
 func (s *SQLStore) ClearHealthOverride(ctx context.Context, actor domain.Actor, id string) error {
 	now := s.Now()
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		before, err := t.overrideByID(ctx, id)
 		if err != nil {
 			return err

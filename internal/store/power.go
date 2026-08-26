@@ -42,7 +42,7 @@ func (s *SQLStore) CreatePowerPanel(ctx context.Context, actor domain.Actor, p *
 	if err := p.Validate(); err != nil {
 		return err
 	}
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		if err := requireLiveAsset(ctx, t, "site_id", p.SiteID); err != nil {
 			return err
 		}
@@ -83,7 +83,7 @@ func (s *SQLStore) UpdatePowerPanel(ctx context.Context, actor domain.Actor, p *
 	p.CreatedAt = before.CreatedAt
 	p.UpdatedAt = domain.FormatTime(s.now())
 
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		if err := requireUniquePowerName(ctx, t,
 			`power_panel`, `site_id`, p.SiteID, p.Name, p.Lifecycle, p.ID); err != nil {
 			return err
@@ -191,7 +191,7 @@ func (s *SQLStore) CreatePowerFeed(ctx context.Context, actor domain.Actor, f *d
 	if err := f.Validate(); err != nil {
 		return err
 	}
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		if err := requireLivePanel(ctx, t, f.PanelID); err != nil {
 			return err
 		}
@@ -227,7 +227,7 @@ func (s *SQLStore) UpdatePowerFeed(ctx context.Context, actor domain.Actor, f *d
 	f.CreatedAt = before.CreatedAt
 	f.UpdatedAt = domain.FormatTime(s.now())
 
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		if err := requireUniquePowerName(ctx, t,
 			`power_feed`, `panel_id`, f.PanelID, f.Name, f.Lifecycle, f.ID); err != nil {
 			return err
@@ -329,7 +329,7 @@ func (s *SQLStore) CreatePowerInput(ctx context.Context, actor domain.Actor, i *
 	if err := i.Validate(); err != nil {
 		return err
 	}
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		if err := requireLiveAsset(ctx, t, "asset_id", i.AssetID); err != nil {
 			return err
 		}
@@ -371,7 +371,7 @@ func (s *SQLStore) UpdatePowerInput(ctx context.Context, actor domain.Actor, i *
 	i.CreatedAt = before.CreatedAt
 	i.UpdatedAt = domain.FormatTime(s.now())
 
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		if err := requireLiveFeed(ctx, t, i.FeedID); err != nil {
 			return err
 		}
@@ -442,7 +442,7 @@ func (s *SQLStore) RetirePowerInput(ctx context.Context, actor domain.Actor, id 
 // RetirePowerPanelRow performs the panel soft delete.
 func (s *SQLStore) retirePanelRow(ctx context.Context, actor domain.Actor, before *domain.PowerPanel) error {
 	at := domain.FormatTime(s.now())
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		_, err := t.exec(ctx,
 			`UPDATE power_panel SET lifecycle = ?, updated_at = ?, row_version = row_version + 1
 			 WHERE id = ?`, domain.LifecycleRetired, at, before.ID)
@@ -457,7 +457,7 @@ func (s *SQLStore) retirePanelRow(ctx context.Context, actor domain.Actor, befor
 
 func (s *SQLStore) retireFeedRow(ctx context.Context, actor domain.Actor, before *domain.PowerFeed) error {
 	at := domain.FormatTime(s.now())
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		_, err := t.exec(ctx,
 			`UPDATE power_feed SET lifecycle = ?, updated_at = ?, row_version = row_version + 1
 			 WHERE id = ?`, domain.LifecycleRetired, at, before.ID)
@@ -472,7 +472,7 @@ func (s *SQLStore) retireFeedRow(ctx context.Context, actor domain.Actor, before
 
 func (s *SQLStore) retireInputRow(ctx context.Context, actor domain.Actor, before *domain.PowerInput) error {
 	at := domain.FormatTime(s.now())
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		_, err := t.exec(ctx,
 			`UPDATE power_input SET lifecycle = ?, updated_at = ?, row_version = row_version + 1
 			 WHERE id = ?`, domain.LifecycleRetired, at, before.ID)

@@ -80,7 +80,7 @@ func (s *SQLStore) ImportAssetsBatched(ctx context.Context, actor domain.Actor,
 	// The snapshot, read once. Everything a row is checked against.
 	var existing, teams, environments map[string]string
 	var models deviceTypeIndex
-	if err := s.write(ctx, actor, func(t *tx) error {
+	if err := s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		var err error
 		if existing, err = existingAssetPaths(ctx, t); err != nil {
 			return err
@@ -177,7 +177,7 @@ func (s *SQLStore) ImportAssetsBatched(ctx context.Context, actor domain.Actor,
 		// batch rolls back these ids have to go with it.
 		pending := map[string]string{}
 
-		err := s.write(ctx, actor, func(t *tx) error {
+		err := s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 			for i := start; i < end; i++ {
 				row, asset := keep[i], built[i]
 				if row.Parent != "" && asset.ParentID == nil {
@@ -261,7 +261,7 @@ func (s *SQLStore) ImportDeviceTypesBatched(ctx context.Context, actor domain.Ac
 
 	var makers map[string]manufacturerRef
 	var existing map[string]string
-	if err := s.write(ctx, actor, func(t *tx) error {
+	if err := s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		var err error
 		if makers, err = manufacturersByCode(ctx, t); err != nil {
 			return err
@@ -318,7 +318,7 @@ func (s *SQLStore) ImportDeviceTypesBatched(ctx context.Context, actor domain.Ac
 	for start := 0; start < len(built); start += ImportBatchSize {
 		end := min(start+ImportBatchSize, len(built))
 
-		err := s.write(ctx, actor, func(t *tx) error {
+		err := s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 			for i := start; i < end; i++ {
 				if err := s.insertDeviceType(ctx, t, built[i], names[i]); err != nil {
 					var ve *domain.ValidationError

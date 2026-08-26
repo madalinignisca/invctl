@@ -71,7 +71,7 @@ func (s *SQLStore) CreateVLAN(ctx context.Context, actor domain.Actor, v *domain
 	v.RowVersion = 1
 	at := domain.FormatTime(s.now())
 	v.CreatedAt, v.UpdatedAt = &at, &at
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		_, err := t.exec(ctx, `
 			INSERT INTO vlan (id, vid, name, group_id, role, environment_id,
 			                  description, lifecycle, created_at, updated_at)
@@ -105,7 +105,7 @@ func (s *SQLStore) UpdateVLAN(ctx context.Context, actor domain.Actor, v *domain
 	at := domain.FormatTime(s.now())
 	v.UpdatedAt = &at
 
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		res, err := t.exec(ctx, `
 			UPDATE vlan SET vid = ?, name = ?, group_id = ?, role = ?,
 			                environment_id = ?, description = ?,
@@ -150,7 +150,7 @@ func (s *SQLStore) RetireVLAN(ctx context.Context, actor domain.Actor, id string
 	after.Lifecycle = domain.LifecycleRetired
 	after.UpdatedAt = &at
 
-	return s.writeSerializable(ctx, actor, func(t *tx) error {
+	return s.writeSerializable(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		var users int
 		if err := t.get(ctx, &users, `
 			SELECT (SELECT COUNT(*) FROM prefix WHERE vlan_ref_id = ?)
@@ -209,7 +209,7 @@ func (s *SQLStore) CreateVLANGroup(ctx context.Context, actor domain.Actor, g *d
 	g.RowVersion = 1
 	at := domain.FormatTime(s.now())
 	g.CreatedAt, g.UpdatedAt = &at, &at
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		_, err := t.exec(ctx, `
 			INSERT INTO vlan_group (id, name, scope_asset_id, description, lifecycle,
 			                        created_at, updated_at)
@@ -287,7 +287,7 @@ func (s *SQLStore) SetInterfaceVLANs(ctx context.Context, actor domain.Actor,
 	before := auditedInterfaceVLANs(iface, beforeMembers)
 	at := domain.FormatTime(s.now())
 
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		if _, err := t.exec(ctx,
 			`DELETE FROM interface_vlan WHERE interface_id = ?`, interfaceID); err != nil {
 			return translateWriteErr(err, "clearing vlan membership")

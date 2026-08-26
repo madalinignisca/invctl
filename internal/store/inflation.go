@@ -83,7 +83,7 @@ func (s *SQLStore) SetInflationRate(ctx context.Context, actor domain.Actor, r *
 	now := domain.FormatTime(s.now())
 	r.UpdatedAt = now
 
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		year := strconv.Itoa(r.Year)
 		var before domain.InflationRate
 		existed := true

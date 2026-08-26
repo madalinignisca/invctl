@@ -196,7 +196,7 @@ func (s *SQLStore) CreateService(ctx context.Context, actor domain.Actor, svc *d
 	if err := svc.Validate(); err != nil {
 		return err
 	}
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		if err := t.requireVocabulary(ctx, vocabServiceKind, "kind", svc.Kind); err != nil {
 			return err
 		}
@@ -238,7 +238,7 @@ func (s *SQLStore) UpdateService(ctx context.Context, actor domain.Actor, svc *d
 	svc.CreatedAt = before.CreatedAt
 	svc.UpdatedAt = domain.FormatTime(s.now())
 
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		if err := t.requireVocabulary(ctx, vocabServiceKind, "kind", svc.Kind); err != nil {
 			return err
 		}
@@ -292,7 +292,7 @@ func (s *SQLStore) RetireService(ctx context.Context, actor domain.Actor, id str
 		return nil
 	}
 	at := domain.FormatTime(s.now())
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		if _, err := t.exec(ctx, `UPDATE service SET lifecycle = ?, updated_at = ?,
 			                         row_version = row_version + 1 WHERE id = ?`,
 			domain.LifecycleRetired, at, id); err != nil {
@@ -391,7 +391,7 @@ func (s *SQLStore) CreateInstance(ctx context.Context, actor domain.Actor, si *d
 		return ve
 	}
 
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		_, err := t.exec(ctx, `
 			INSERT INTO service_instance (id, service_id, host_asset_id, runtime_type, role, shard,
 			                              ordinal, desired_state, source, created_at, updated_at)
@@ -447,7 +447,7 @@ func (s *SQLStore) UpdateInstance(ctx context.Context, actor domain.Actor, si *d
 	si.CreatedAt = before.CreatedAt
 	si.UpdatedAt = domain.FormatTime(s.now())
 
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		res, err := t.exec(ctx, `
 			UPDATE service_instance
 			SET host_asset_id = ?, runtime_type = ?, role = ?, shard = ?, ordinal = ?,
@@ -487,7 +487,7 @@ func (s *SQLStore) RetireInstance(ctx context.Context, actor domain.Actor, id st
 		return nil
 	}
 	at := domain.FormatTime(s.now())
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		if _, err := t.exec(ctx,
 			`UPDATE service_instance SET lifecycle = ?, updated_at = ?,
 			                             row_version = row_version + 1 WHERE id = ?`,
@@ -504,7 +504,7 @@ func (s *SQLStore) RetireInstance(ctx context.Context, actor domain.Actor, id st
 
 // SetRuntimeSystemd upserts the systemd detail for an instance.
 func (s *SQLStore) SetRuntimeSystemd(ctx context.Context, actor domain.Actor, rt *domain.RTSystemd) error {
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		_, err := t.exec(ctx, `
 			INSERT INTO rt_systemd (instance_id, unit_name, unit_type, exec_start, run_as_user,
 			                        run_as_group, restart, unit_after, unit_requires, drop_ins)
@@ -526,7 +526,7 @@ func (s *SQLStore) SetRuntimeSystemd(ctx context.Context, actor domain.Actor, rt
 
 // SetRuntimeContainer upserts the container detail for an instance.
 func (s *SQLStore) SetRuntimeContainer(ctx context.Context, actor domain.Actor, rt *domain.RTContainer) error {
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		// engine is nullable -- "not recorded" is a legitimate state and a NULL
 		// child column is exempt from foreign key checking on both engines --
 		// so only a value present is checked.
@@ -558,7 +558,7 @@ func (s *SQLStore) SetRuntimeContainer(ctx context.Context, actor domain.Actor, 
 
 // SetRuntimeWindows upserts the Windows service detail for an instance.
 func (s *SQLStore) SetRuntimeWindows(ctx context.Context, actor domain.Actor, rt *domain.RTWindows) error {
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		_, err := t.exec(ctx, `
 			INSERT INTO rt_windows (instance_id, service_name, display_name, binary_path,
 			                        start_type, logon_identity_id, depends_on_svc, recovery_action)
@@ -579,7 +579,7 @@ func (s *SQLStore) SetRuntimeWindows(ctx context.Context, actor domain.Actor, rt
 
 // SetRuntimeK8s upserts the Kubernetes workload detail for an instance.
 func (s *SQLStore) SetRuntimeK8s(ctx context.Context, actor domain.Actor, rt *domain.RTK8s) error {
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		_, err := t.exec(ctx, `
 			INSERT INTO rt_k8s (instance_id, cluster_asset_id, namespace, workload_kind,
 			                    workload_name, replicas_desired, service_account, image_digest)

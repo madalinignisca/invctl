@@ -72,7 +72,7 @@ func (s *SQLStore) CountUsers(ctx context.Context) (int, error) {
 // The change log records the account, never the hash: an audit trail is read
 // by more people than the user table is.
 func (s *SQLStore) CreateUser(ctx context.Context, actor domain.Actor, u *domain.AppUser) error {
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		// role and can_see_costs are named explicitly, not left to the
 		// column defaults migration 00058 set. NewAppUser already populates
 		// Role with domain.RoleObserver and CanSeeCosts with its safe

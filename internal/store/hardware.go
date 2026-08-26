@@ -35,7 +35,7 @@ func (s *SQLStore) CreateManufacturer(ctx context.Context, actor domain.Actor, m
 	if err := m.Validate(); err != nil {
 		return err
 	}
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		_, err := t.exec(ctx, `
 			INSERT INTO manufacturer (id, code, name, support_ref, lifecycle, created_at, updated_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -59,7 +59,7 @@ func (s *SQLStore) UpdateManufacturer(ctx context.Context, actor domain.Actor, m
 	m.CreatedAt = before.CreatedAt
 	m.UpdatedAt = domain.FormatTime(s.now())
 
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		res, err := t.exec(ctx, `
 			UPDATE manufacturer
 			SET code = ?, name = ?, support_ref = ?, lifecycle = ?, updated_at = ?,
@@ -126,7 +126,7 @@ func (s *SQLStore) RetireManufacturer(ctx context.Context, actor domain.Actor, i
 			pluralWord(before.DeviceTypes, "model", "models"), domain.ErrConflict)
 	}
 	at := domain.FormatTime(s.now())
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		if _, err := t.exec(ctx,
 			`UPDATE manufacturer SET lifecycle = ?, updated_at = ?, row_version = row_version + 1
 			 WHERE id = ?`, domain.LifecycleRetired, at, id); err != nil {
@@ -168,7 +168,7 @@ func (s *SQLStore) CreateDeviceType(ctx context.Context, actor domain.Actor, d *
 	if err := d.Validate(); err != nil {
 		return err
 	}
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		maker, err := requireLiveManufacturer(ctx, t, d.ManufacturerID)
 		if err != nil {
 			return err
@@ -221,7 +221,7 @@ func (s *SQLStore) UpdateDeviceType(ctx context.Context, actor domain.Actor, d *
 	d.CreatedAt = before.CreatedAt
 	d.UpdatedAt = domain.FormatTime(s.now())
 
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		res, err := t.exec(ctx, `
 			UPDATE device_type
 			SET model = ?, part_number = ?, u_height = ?, full_depth = ?,
@@ -298,7 +298,7 @@ func (s *SQLStore) RetireDeviceType(ctx context.Context, actor domain.Actor, id 
 		return err
 	}
 	at := domain.FormatTime(s.now())
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		if _, err := t.exec(ctx,
 			`UPDATE device_type SET lifecycle = ?, updated_at = ?, row_version = row_version + 1
 			 WHERE id = ?`, domain.LifecycleRetired, at, id); err != nil {

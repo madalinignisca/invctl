@@ -315,7 +315,7 @@ func (s *SQLStore) UpsertVocabularyTerm(ctx context.Context, actor domain.Actor,
 		return err
 	}
 
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		var before VocabularyTerm
 		err := t.get(ctx, &before,
 			`SELECT code, label, sort_order, description FROM `+table+` WHERE code = ?`, term.Code)

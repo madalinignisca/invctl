@@ -186,7 +186,7 @@ func (s *SQLStore) SetStorageClaim(ctx context.Context, actor domain.Actor,
 	}
 
 	now := domain.FormatTime(s.Now())
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		before, err := storageAudit(ctx, t, &asset.Asset)
 		if err != nil {
 			return err

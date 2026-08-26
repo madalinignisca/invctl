@@ -62,7 +62,7 @@ func (s *SQLStore) CreateL2VPN(ctx context.Context, actor domain.Actor, v *domai
 	v.RowVersion = 1
 	at := domain.FormatTime(s.now())
 	v.CreatedAt, v.UpdatedAt = &at, &at
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		_, err := t.exec(ctx, `
 			INSERT INTO l2vpn (id, name, kind, identifier, description, lifecycle,
 			                   created_at, updated_at)
@@ -97,7 +97,7 @@ func (s *SQLStore) RetireL2VPN(ctx context.Context, actor domain.Actor, id strin
 	after.Lifecycle = domain.LifecycleRetired
 	after.UpdatedAt = &at
 
-	return s.writeSerializable(ctx, actor, func(t *tx) error {
+	return s.writeSerializable(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		var live int
 		if err := t.get(ctx, &live, `
 			SELECT COUNT(*) FROM l2vpn_termination
@@ -165,7 +165,7 @@ func (s *SQLStore) CreateL2VPNTermination(ctx context.Context, actor domain.Acto
 	t.RowVersion = 1
 	at := domain.FormatTime(s.now())
 	t.CreatedAt, t.UpdatedAt = &at, &at
-	return s.write(ctx, actor, func(tx *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(tx *tx) error {
 		_, err := tx.exec(ctx, `
 			INSERT INTO l2vpn_termination (id, l2vpn_id, vlan_id, interface_id,
 			                               lifecycle, created_at, updated_at)
@@ -192,7 +192,7 @@ func (s *SQLStore) RetireL2VPNTermination(ctx context.Context, actor domain.Acto
 	after := before
 	after.Lifecycle = domain.LifecycleRetired
 	after.UpdatedAt = &at
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		res, err := t.exec(ctx, `
 			UPDATE l2vpn_termination SET lifecycle = 'retired', updated_at = ?,
 			                             row_version = row_version + 1

@@ -331,7 +331,7 @@ func TestUnknownVocabularyValueIsRejectedOnEveryColumn(t *testing.T) {
 // The class is checked before the insert is attempted, so the write never gets
 // far enough to need one -- which is the behaviour being asserted.
 func setDataClassesForTest(ctx context.Context, s *SQLStore, depID string, classes []string) error {
-	return s.write(ctx, testActor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(testActor), func(t *tx) error {
 		return setDataClasses(ctx, t, depID, classes)
 	})
 }

@@ -62,14 +62,22 @@ func (s *SQLStore) GetCircuit(ctx context.Context, id string) (*domain.Circuit, 
 }
 
 // CreateCircuit declares a contracted connection.
-func (s *SQLStore) CreateCircuit(ctx context.Context, actor domain.Actor, c *domain.Circuit) error {
+//
+// Takes a domain.Permit -- WP-G1 Task 7's proof surface. Circuit is classified
+// domain.ScopeProjectLinked (internal/domain/role.go), so a project owner's
+// ScopedPermit can authorize this once Task 12/14 mint one from an actual
+// request; every caller today (handlers, the seeder) still mints
+// domain.AdministratorPermit or domain.SystemPermit, so nothing about who may
+// create a circuit changes yet -- only that the authorization decision is now
+// a real value threaded through, rather than an identity nothing checks.
+func (s *SQLStore) CreateCircuit(ctx context.Context, permit domain.Permit, c *domain.Circuit) error {
 	if err := c.Validate(); err != nil {
 		return err
 	}
 	c.RowVersion = 1
 	at := domain.FormatTime(s.now())
 	c.CreatedAt, c.UpdatedAt = &at, &at
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, permit, func(t *tx) error {
 		_, err := t.exec(ctx, `
 			INSERT INTO circuit (id, cid, provider_id, service_type, commit_mbps,
 			                     install_date, contract_end, description, lifecycle,
@@ -92,7 +100,7 @@ func (s *SQLStore) CreateCircuit(ctx context.Context, actor domain.Actor, c *dom
 }
 
 // UpdateCircuit corrects a circuit.
-func (s *SQLStore) UpdateCircuit(ctx context.Context, actor domain.Actor, c *domain.Circuit) error {
+func (s *SQLStore) UpdateCircuit(ctx context.Context, permit domain.Permit, c *domain.Circuit) error {
 	if err := c.Validate(); err != nil {
 		return err
 	}
@@ -102,7 +110,7 @@ func (s *SQLStore) UpdateCircuit(ctx context.Context, actor domain.Actor, c *dom
 	}
 	at := domain.FormatTime(s.now())
 	c.UpdatedAt = &at
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, permit, func(t *tx) error {
 		res, err := t.exec(ctx, `
 			UPDATE circuit SET cid = ?, provider_id = ?, service_type = ?,
 			                   commit_mbps = ?, install_date = ?, contract_end = ?,
@@ -130,7 +138,7 @@ func (s *SQLStore) UpdateCircuit(ctx context.Context, actor domain.Actor, c *dom
 // RetireCircuit ceases a circuit. Soft, like everything: a ceased circuit that
 // carried a site for four years is exactly what somebody reads the change log
 // to find.
-func (s *SQLStore) RetireCircuit(ctx context.Context, actor domain.Actor, id string) error {
+func (s *SQLStore) RetireCircuit(ctx context.Context, permit domain.Permit, id string) error {
 	before, err := s.GetCircuit(ctx, id)
 	if err != nil {
 		return err
@@ -142,7 +150,7 @@ func (s *SQLStore) RetireCircuit(ctx context.Context, actor domain.Actor, id str
 	after := *before
 	after.Lifecycle = domain.LifecycleRetired
 	after.UpdatedAt = &at
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, permit, func(t *tx) error {
 		res, err := t.exec(ctx, `
 			UPDATE circuit SET lifecycle = 'retired', updated_at = ?,
 			                   row_version = row_version + 1
@@ -182,14 +190,21 @@ func (s *SQLStore) ListProviders(ctx context.Context) ([]ProviderRow, error) {
 }
 
 // CreateProvider declares a carrier.
-func (s *SQLStore) CreateProvider(ctx context.Context, actor domain.Actor, p *domain.Provider) error {
+//
+// provider is classified domain.ScopeEstateConfig, not project-linked -- a
+// carrier is shared across the whole estate the way a team or a vocabulary
+// term is, so a ScopedPermit can never Covers() one. This method still
+// changes its parameter to domain.Permit, because it shares s.write with the
+// five other transactions in this file and the whole point of the seam is
+// that it has no per-method exception.
+func (s *SQLStore) CreateProvider(ctx context.Context, permit domain.Permit, p *domain.Provider) error {
 	if err := p.Validate(); err != nil {
 		return err
 	}
 	p.RowVersion = 1
 	at := domain.FormatTime(s.now())
 	p.CreatedAt, p.UpdatedAt = &at, &at
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, permit, func(t *tx) error {
 		_, err := t.exec(ctx, `
 			INSERT INTO provider (id, name, account_ref, portal_url, description,
 			                      lifecycle, created_at, updated_at)
@@ -236,7 +251,7 @@ func (s *SQLStore) ListCircuitTerminations(ctx context.Context, circuitID string
 }
 
 // CreateCircuitTermination lands one end of a circuit.
-func (s *SQLStore) CreateCircuitTermination(ctx context.Context, actor domain.Actor,
+func (s *SQLStore) CreateCircuitTermination(ctx context.Context, permit domain.Permit,
 	t *domain.CircuitTermination) error {
 
 	if err := t.Validate(); err != nil {
@@ -245,7 +260,7 @@ func (s *SQLStore) CreateCircuitTermination(ctx context.Context, actor domain.Ac
 	t.RowVersion = 1
 	at := domain.FormatTime(s.now())
 	t.CreatedAt, t.UpdatedAt = &at, &at
-	return s.write(ctx, actor, func(tx *tx) error {
+	return s.write(ctx, permit, func(tx *tx) error {
 		_, err := tx.exec(ctx, `
 			INSERT INTO circuit_termination (id, circuit_id, side, asset_id, interface_id,
 			                                 lifecycle, created_at, updated_at)
@@ -260,7 +275,7 @@ func (s *SQLStore) CreateCircuitTermination(ctx context.Context, actor domain.Ac
 }
 
 // RetireCircuitTermination lifts one end.
-func (s *SQLStore) RetireCircuitTermination(ctx context.Context, actor domain.Actor, id string) error {
+func (s *SQLStore) RetireCircuitTermination(ctx context.Context, permit domain.Permit, id string) error {
 	var before domain.CircuitTermination
 	if err := s.readOne(ctx, &before,
 		`SELECT * FROM circuit_termination WHERE id = ?`, id); err != nil {
@@ -273,7 +288,7 @@ func (s *SQLStore) RetireCircuitTermination(ctx context.Context, actor domain.Ac
 	after := before
 	after.Lifecycle = domain.LifecycleRetired
 	after.UpdatedAt = &at
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, permit, func(t *tx) error {
 		res, err := t.exec(ctx, `
 			UPDATE circuit_termination SET lifecycle = 'retired', updated_at = ?,
 			                               row_version = row_version + 1

@@ -172,7 +172,7 @@ func (s *SQLStore) PruneObservedTransitions(ctx context.Context, actor domain.Ac
 		return report, nil
 	}
 
-	err := s.write(ctx, actor, func(t *tx) error {
+	err := s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		for _, entityType := range domain.ObservableEntityTypes {
 			inScope, ok := inScopeSubquery[entityType]
 			if !ok {
@@ -392,7 +392,7 @@ func (s *SQLStore) PruneUnmatchedObservations(ctx context.Context, actor domain.
 		return report, nil
 	}
 
-	err = s.write(ctx, actor, func(t *tx) error {
+	err = s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		if _, err := t.exec(ctx,
 			`DELETE FROM unmatched_observation WHERE last_seen_at < ?`, cutoff); err != nil {
 			return translateWriteErr(err, "pruning "+unmatchedTable)

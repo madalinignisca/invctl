@@ -145,7 +145,7 @@ func (s *SQLStore) reprice(ctx context.Context, actor domain.Actor, t costTable,
 		return nil, err
 	}
 
-	err = s.write(ctx, actor, func(tx *tx) error {
+	err = s.write(ctx, domain.AdministratorPermit(actor), func(tx *tx) error {
 		res, err := tx.exec(ctx,
 			`UPDATE `+t.name+` SET valid_until = ?, updated_at = ?,
 			                       row_version = row_version + 1

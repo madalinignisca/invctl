@@ -454,7 +454,7 @@ func (s *SQLStore) SetCustomValues(ctx context.Context, actor domain.Actor, enti
 			entityType, domain.ErrInvalid)
 	}
 
-	return s.writeSerializable(ctx, actor, func(t *tx) error {
+	return s.writeSerializable(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		before, err := customFieldsAudit(ctx, t, entityType, entityID)
 		if err != nil {
 			return err

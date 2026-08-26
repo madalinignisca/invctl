@@ -138,7 +138,7 @@ func (s *SQLStore) setEntityTags(ctx context.Context, actor domain.Actor, entity
 		}
 	}
 
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		existingIDs, err := entityTagIDs(ctx, t, entityType, entityID)
 		if err != nil {
 			return err

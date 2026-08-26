@@ -17,6 +17,17 @@ import (
 	"github.com/madalinignisca/invctl/internal/web/render"
 )
 
+// domain.AdministratorPermit(actor(r)) below is TEMPORARY SCAFFOLDING, not
+// the finished authorization decision. WP-G1 Task 7 changed the six
+// internal/store/circuits.go write transactions to take a domain.Permit
+// instead of a domain.Actor, which is why these call sites now have to mint
+// one at all -- but the request-scoped gate that will mint a real
+// project-owner-aware permit from the signed-in user is Task 12, not this
+// one. Every route in this file already sits behind RequireAdmin
+// (internal/web/routes.go), so wrapping in AdministratorPermit changes
+// nothing about who can reach these handlers today; it only stops being a
+// placeholder once Task 12 replaces it with whatever that gate hands
+// handlers instead of a bare Actor.
 type circuitListPage struct {
 	Base
 	Circuits  []store.CircuitRow
@@ -139,7 +150,7 @@ func (a *App) CircuitCreate(w http.ResponseWriter, r *http.Request) {
 		circuit.Description = optionalString(r, "description")
 		err = circuit.Validate()
 		if err == nil {
-			err = a.Store.CreateCircuit(r.Context(), actor(r), circuit)
+			err = a.Store.CreateCircuit(r.Context(), domain.AdministratorPermit(actor(r)), circuit)
 		}
 	}
 	if err != nil {
@@ -161,7 +172,7 @@ func (a *App) CircuitCreate(w http.ResponseWriter, r *http.Request) {
 
 // CircuitRetire ceases a circuit.
 func (a *App) CircuitRetire(w http.ResponseWriter, r *http.Request) {
-	if err := a.Store.RetireCircuit(r.Context(), actor(r), r.PathValue("id")); err != nil {
+	if err := a.Store.RetireCircuit(r.Context(), domain.AdministratorPermit(actor(r)), r.PathValue("id")); err != nil {
 		a.handleStoreError(w, r, err)
 		return
 	}
@@ -179,7 +190,7 @@ func (a *App) ProviderCreate(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		p.AccountRef = optionalString(r, "account_ref")
 		p.PortalURL = optionalString(r, "portal_url")
-		err = a.Store.CreateProvider(r.Context(), actor(r), p)
+		err = a.Store.CreateProvider(r.Context(), domain.AdministratorPermit(actor(r)), p)
 	}
 	if err != nil {
 		messages, ok := validationErrors(err)
@@ -208,7 +219,7 @@ func (a *App) CircuitLand(w http.ResponseWriter, r *http.Request) {
 	term, err := domain.NewCircuitTermination(store.NewID(), id, formValue(r, "side"),
 		optionalString(r, "asset_id"), optionalString(r, "interface_id"))
 	if err == nil {
-		err = a.Store.CreateCircuitTermination(r.Context(), actor(r), term)
+		err = a.Store.CreateCircuitTermination(r.Context(), domain.AdministratorPermit(actor(r)), term)
 	}
 	if err != nil {
 		messages, ok := validationErrors(err)
@@ -229,7 +240,7 @@ func (a *App) CircuitLand(w http.ResponseWriter, r *http.Request) {
 // CircuitLift removes one end.
 func (a *App) CircuitLift(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if err := a.Store.RetireCircuitTermination(r.Context(), actor(r), r.PathValue("termID")); err != nil {
+	if err := a.Store.RetireCircuitTermination(r.Context(), domain.AdministratorPermit(actor(r)), r.PathValue("termID")); err != nil {
 		a.handleStoreError(w, r, err)
 		return
 	}

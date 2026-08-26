@@ -137,7 +137,7 @@ func (s *SQLStore) SetUserRole(ctx context.Context, actor domain.Actor, id, role
 		return err
 	}
 
-	return s.writeSerializable(ctx, actor, func(t *tx) error {
+	return s.writeSerializable(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		before, err := t.getUser(ctx, id)
 		if err != nil {
 			return err
@@ -177,7 +177,7 @@ func (s *SQLStore) SetUserCostVisibility(ctx context.Context, actor domain.Actor
 	if current.CanSeeCosts == canSee {
 		return nil
 	}
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		before, err := t.getUser(ctx, id)
 		if err != nil {
 			return err
@@ -204,7 +204,7 @@ func (s *SQLStore) SetUserActive(ctx context.Context, actor domain.Actor, id str
 	if current.IsActive == active {
 		return nil
 	}
-	return s.writeSerializable(ctx, actor, func(t *tx) error {
+	return s.writeSerializable(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		before, err := t.getUser(ctx, id)
 		if err != nil {
 			return err
@@ -270,7 +270,7 @@ func scrubbedUsername(id string) string { return "scrubbed-" + id }
 // Demote, deactivate and scrub all reach the same state -- no active
 // administrator -- and a guard on two of the three verbs is a guard on none.
 func (s *SQLStore) ScrubUser(ctx context.Context, actor domain.Actor, id string) error {
-	return s.writeSerializable(ctx, actor, func(t *tx) error {
+	return s.writeSerializable(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		before, err := t.getUser(ctx, id)
 		if err != nil {
 			return err

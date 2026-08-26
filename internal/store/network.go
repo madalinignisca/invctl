@@ -156,7 +156,7 @@ func (s *SQLStore) CreateInterface(ctx context.Context, actor domain.Actor, i *d
 	i.RowVersion = 1
 	at := domain.FormatTime(s.now())
 	i.CreatedAt, i.UpdatedAt = &at, &at
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		if err := t.requireVocabulary(ctx, vocabInterfaceFormFactor, "form_factor", i.FormFactor); err != nil {
 			return err
 		}
@@ -195,7 +195,7 @@ func (s *SQLStore) UpdateInterface(ctx context.Context, actor domain.Actor, i *d
 	at := domain.FormatTime(s.now())
 	i.UpdatedAt = &at
 
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		if err := t.requireVocabulary(ctx, vocabInterfaceFormFactor, "form_factor", i.FormFactor); err != nil {
 			return err
 		}
@@ -224,7 +224,7 @@ func (s *SQLStore) CreateLink(ctx context.Context, actor domain.Actor, l *domain
 	// Serializable: the COUNT below asserts an invariant this transaction is
 	// about to break, and at read-committed two concurrent patches both see an
 	// unpatched port and both commit. See writeSerializable.
-	return s.writeSerializable(ctx, actor, func(t *tx) error {
+	return s.writeSerializable(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		// A port has one active cable. Catching the second one here gives a
 		// usable error instead of a silently duplicated topology. A retired
 		// link does not count -- unpatching a port is exactly what frees it up
@@ -274,7 +274,7 @@ func (s *SQLStore) RetireLink(ctx context.Context, actor domain.Actor, id string
 	if before.Lifecycle == domain.LifecycleRetired {
 		return nil
 	}
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		if _, err := t.exec(ctx, `UPDATE link SET lifecycle = ? WHERE id = ?`,
 			domain.LifecycleRetired, id); err != nil {
 			return translateWriteErr(err, "retiring link")
@@ -294,7 +294,7 @@ func (s *SQLStore) CreateIPAddress(ctx context.Context, actor domain.Actor, a *d
 	a.RowVersion = 1
 	at := domain.FormatTime(s.now())
 	a.CreatedAt, a.UpdatedAt = &at, &at
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		if err := t.requireVocabulary(ctx, vocabIPAddressRole, "role", a.Role); err != nil {
 			return err
 		}
@@ -339,7 +339,7 @@ func (s *SQLStore) UpdateIPAddress(ctx context.Context, actor domain.Actor, a *d
 	at := domain.FormatTime(s.now())
 	a.UpdatedAt = &at
 
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		if err := t.requireVocabulary(ctx, vocabIPAddressRole, "role", a.Role); err != nil {
 			return err
 		}
@@ -387,7 +387,7 @@ func (s *SQLStore) UpdatePrefix(ctx context.Context, actor domain.Actor, p *doma
 	at := domain.FormatTime(s.now())
 	p.UpdatedAt = &at
 
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		res, err := t.exec(ctx, `
 			UPDATE prefix SET cidr_text = ?, addr_family = ?, addr_start = ?, addr_end = ?,
 			                  vlan_ref_id = ?, environment_id = ?, role = ?,
@@ -419,7 +419,7 @@ func (s *SQLStore) CreatePrefix(ctx context.Context, actor domain.Actor, p *doma
 	p.RowVersion = 1
 	at := domain.FormatTime(s.now())
 	p.CreatedAt, p.UpdatedAt = &at, &at
-	return s.write(ctx, actor, func(t *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		_, err := t.exec(ctx, `
 			INSERT INTO prefix (id, cidr_text, addr_family, addr_start, addr_end,
 			                    vlan_ref_id, environment_id, role, created_at, updated_at)

@@ -229,7 +229,7 @@ func (b *builder) overlayAndCircuit() {
 		return
 	}
 	p.AccountRef = str("ACC-0001")
-	if err := b.store.CreateProvider(b.ctx, Actor, p); err != nil {
+	if err := b.store.CreateProvider(b.ctx, domain.AdministratorPermit(Actor), p); err != nil {
 		b.fail(fmt.Errorf("seeding provider: %w", err))
 		return
 	}
@@ -244,7 +244,7 @@ func (b *builder) overlayAndCircuit() {
 	// has a row rather than only assets and certificates.
 	circuit.ContractEnd = str(domain.FormatDate(b.now.AddDate(0, 2, 0)))
 	circuit.Description = str("one end recorded; where it comes from was never entered")
-	if err := b.store.CreateCircuit(b.ctx, Actor, circuit); err != nil {
+	if err := b.store.CreateCircuit(b.ctx, domain.AdministratorPermit(Actor), circuit); err != nil {
 		b.fail(fmt.Errorf("seeding circuit: %w", err))
 		return
 	}
@@ -254,7 +254,7 @@ func (b *builder) overlayAndCircuit() {
 			b.fail(fmt.Errorf("building circuit end: %w", err))
 			return
 		}
-		if err := b.store.CreateCircuitTermination(b.ctx, Actor, t); err != nil {
+		if err := b.store.CreateCircuitTermination(b.ctx, domain.AdministratorPermit(Actor), t); err != nil {
 			b.fail(fmt.Errorf("seeding circuit end: %w", err))
 		}
 	}

@@ -70,7 +70,7 @@ func (s *SQLStore) ListTags(ctx context.Context, includeRetired bool) ([]TagRow,
 // the first.
 func (s *SQLStore) CreateTag(ctx context.Context, actor domain.Actor, t *domain.Tag) error {
 	t.RowVersion = 1
-	return s.write(ctx, actor, func(tx *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(tx *tx) error {
 		_, err := tx.exec(ctx, `
 			INSERT INTO tag (id, code, label, description, created_by, created_at, row_version)
 			VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -102,7 +102,7 @@ func (s *SQLStore) UpdateTag(ctx context.Context, actor domain.Actor, t *domain.
 	t.RetiredAt = before.RetiredAt
 	t.RetiredBy = before.RetiredBy
 
-	return s.write(ctx, actor, func(tx *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(tx *tx) error {
 		res, err := tx.exec(ctx, `
 			UPDATE tag SET code = ?, label = ?, description = ?, row_version = row_version + 1
 			WHERE id = ? AND row_version = ?`,
@@ -128,7 +128,7 @@ func (s *SQLStore) RetireTag(ctx context.Context, actor domain.Actor, id string)
 		return nil
 	}
 	at := domain.FormatTime(s.now())
-	return s.write(ctx, actor, func(tx *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(tx *tx) error {
 		res, err := tx.exec(ctx, `
 			UPDATE tag SET retired_at = ?, retired_by = ?, row_version = row_version + 1
 			WHERE id = ? AND row_version = ?`,
@@ -169,7 +169,7 @@ func (s *SQLStore) RestoreTag(ctx context.Context, actor domain.Actor, id string
 			before.Code, domain.ErrConflict)
 	}
 
-	return s.write(ctx, actor, func(tx *tx) error {
+	return s.write(ctx, domain.AdministratorPermit(actor), func(tx *tx) error {
 		res, err := tx.exec(ctx, `
 			UPDATE tag SET retired_at = NULL, retired_by = NULL, row_version = row_version + 1
 			WHERE id = ? AND row_version = ?`,
