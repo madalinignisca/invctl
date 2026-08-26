@@ -119,16 +119,20 @@ func TestAddingAndRemovingACostLine(t *testing.T) {
 	}
 }
 
-// A read-only user sees the numbers and cannot change them. That is the whole
-// authorization model today, stated as a test so that changing it is deliberate.
-func TestCostsAreReadableByEveryoneAndWritableByAdminsOnly(t *testing.T) {
+// An ungranted read-only user cannot see money at all, and cannot change it
+// either. WP-G1 Task 4 narrowed CanSeeCosts from "everyone who can read" to
+// "Administrators, plus anyone individually granted can_see_costs" -- the
+// "viewer" fixture account is an Observer with no grant, so it is the case
+// this test now has to prove (see CHANGELOG.md's Action Required entry for
+// the release note this test guards).
+func TestCostsAreHiddenFromAnUngrantedObserverAndWritableByAdminsOnly(t *testing.T) {
 	viewer := newHarness(t)
 	viewer.login("viewer", "viewer-password")
 
 	id := viewer.refs.Assets["hv-01"]
 	page := body(t, viewer.get("/assets/"+id, false))
-	if !strings.Contains(page, "€8,400.00") {
-		t.Error("a read-only user cannot see costs; today they should")
+	if strings.Contains(page, "€8,400.00") {
+		t.Error("an ungranted Observer could see the acquisition price")
 	}
 	if strings.Contains(page, "Add cost") {
 		t.Error("a read-only user was shown the add-cost form")
@@ -248,7 +252,8 @@ func TestACostLineCannotBeEditedThroughAnotherAssetsURL(t *testing.T) {
 
 // The edit row is asked for by URL, so the guard has to be on the permission
 // and not merely on whether a link was drawn. A reader who types the query
-// parameter gets the same read-only table.
+// parameter gets no edit row -- and, since Task 4, no amount either, because
+// this "viewer" account has no can_see_costs grant.
 func TestAReadOnlyUserGetsNoEditableCostRow(t *testing.T) {
 	// ONE harness, two logins. Two harnesses seed two databases with two sets
 	// of UUIDs, so the admin's cost id names nothing in the viewer's estate and
@@ -265,8 +270,8 @@ func TestAReadOnlyUserGetsNoEditableCostRow(t *testing.T) {
 	if strings.Contains(page, `<form id="cost-`) || strings.Contains(page, `name="amount"`) {
 		t.Error("a read-only user asking for the edit row by id was given one")
 	}
-	if !strings.Contains(page, "€8,400.00") {
-		t.Error("a read-only user cannot read the cost at all")
+	if strings.Contains(page, "€8,400.00") {
+		t.Error("an ungranted Observer could read the cost through the edit-row query parameter")
 	}
 }
 

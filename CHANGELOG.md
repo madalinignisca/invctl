@@ -38,6 +38,23 @@ footnote.
 
 ### Action required
 
+- **Cost figures are no longer visible to every reader by default.**
+  `Authorizer.CanSeeCosts` used to return exactly what `CanRead` did, so every
+  authenticated user saw acquisition prices, support contract values and
+  project totals. It now consults `app_user.can_see_costs` for everyone
+  except Administrators, who still see costs implicitly. If your deployment
+  relies on all readers seeing costs, grant `can_see_costs` on the accounts
+  that need it — see `docs/rbac-design.md` §3 for why Observers and project
+  owners are treated identically here (giving Observers costs implicitly was
+  a real defect: demoting a project owner to Observer would have *widened*
+  their cost visibility to the whole estate).
+
+- **`INV_ADMIN_USERS` now overrides `app_user.role`, not just seeds it.** A
+  user named in the list has full write access regardless of their role
+  column — this is required for it to work as the break-glass recovery path
+  described in `docs/RECOVERY.md`. A deactivated account named in the list
+  still cannot write.
+
 - **The read-only inventory API is absent until you set `INV_API_TOKENS`.**
   Upgrading alone does not turn it on — every route under `/api/v1` answers
   404, indistinguishable from a path that was never defined, until a token is

@@ -86,10 +86,12 @@ type Base struct {
 	NavGroups []NavGroup
 	User      *domain.AppUser
 	CanWrite  bool
-	// CanSeeCosts is CanWrite's read-only sibling for money. It is true for
-	// every authenticated user today; it exists so that the day a deployment
-	// needs to hide commercial figures from part of its audience, the change is
-	// one function body rather than every template that renders an amount.
+	// CanSeeCosts is CanWrite's read-only sibling for money. Since WP-G1 Task
+	// 4 it is true for Administrators unconditionally, and for everyone else
+	// only when app_user.can_see_costs is granted (docs/rbac-design.md §3) --
+	// the whole point of routing every check through Authorizer.CanSeeCosts is
+	// that this change was its function body, not every template that renders
+	// an amount.
 	CanSeeCosts bool
 	CSRF        string
 	Flash       *Flash

@@ -46,15 +46,17 @@ func TestTheSupplierReportRendersAndSaysWhatItCannotRank(t *testing.T) {
 
 // TestTheSupplierReportIsBehindAuthentication.
 //
-// NOT a test that a read-only user is refused: auth.go states as a decision that
-// CanSeeCosts returns exactly what CanRead does, because gating commercial
-// figures now would invent a requirement, and "a permission nobody has thought
-// through is worse than none, because it looks like protection". A test asserting
-// the opposite would have quietly contradicted that decision.
+// NOT a test that a read-only user is refused the PAGE: this route is gated on
+// CanRead, not CanSeeCosts -- it names suppliers, not amounts, so an Observer
+// without the cost grant still reaches it. WP-G1 Task 4 narrowed CanSeeCosts
+// off CanRead (Administrator implicit, Observer/ProjectOwner only when
+// granted, docs/rbac-design.md §3), which is exactly why this test asserts
+// page reachability rather than any figure on it: a claim about a specific
+// amount here would need to track the grant, and this route deliberately
+// carries no such claim.
 //
 // What IS guaranteed is that the report is not public, and that it renders
-// through the same permission the other money pages use — so the day
-// CanSeeCosts stops equalling CanRead, this page follows without being touched.
+// through CanRead the same way every other read path does.
 func TestTheSupplierReportIsBehindAuthentication(t *testing.T) {
 	h := newHarness(t)
 
@@ -64,10 +66,9 @@ func TestTheSupplierReportIsBehindAuthentication(t *testing.T) {
 		t.Error("the supplier report is served to somebody who has not signed in")
 	}
 
-	// A read-only account sees it, which is today's declared policy.
+	// A read-only account sees the report page itself.
 	h.login("viewer", "viewer-password")
 	if page := body(t, h.get("/reports/suppliers", false)); !strings.Contains(page, "Suppliers") {
-		t.Error("a read-only account cannot reach the supplier report, which " +
-			"contradicts CanSeeCosts returning what CanRead does")
+		t.Error("a read-only account cannot reach the supplier report")
 	}
 }

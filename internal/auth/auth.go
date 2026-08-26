@@ -166,38 +166,79 @@ func NewAuthorizer(adminUsers []string) *Authorizer {
 	return &Authorizer{admins: admins}
 }
 
+// isAdministrator reports whether user has full Administrator authority --
+// either by role, or because INV_ADMIN_USERS names them (docs/rbac-design.md
+// §5, §8). The env list OVERRIDES the role column rather than merely seeding
+// it: an operator setting it is recovering BECAUSE the column says otherwise,
+// so §8's break-glass path would not work if this only applied at bootstrap.
+//
+// Callers must check user.IsActive themselves, and must do so BEFORE calling
+// this -- break-glass restores a role, not a disabled account. If the
+// activity check moved below this lookup, a deactivated account named in
+// INV_ADMIN_USERS (an ex-employee's name can sit there long after they left)
+// would write again the moment the variable is set for someone else's
+// recovery. See TestADeactivatedAdministratorMayNotWriteEvenWhenNamedInTheEnvironment.
+func (a *Authorizer) isAdministrator(user *domain.AppUser) bool {
+	if a.admins[strings.ToLower(user.Username)] {
+		return true
+	}
+	return user.Role == domain.RoleAdministrator
+}
+
 // CanWrite reports whether a user may mutate anything.
 //
-// This is a one-liner today by design. LDAP group-based roles land post-POC,
-// and the point of routing every check through this function is that they
-// should only require changing its body -- not touching every handler.
+// Administrator (by role, or by the INV_ADMIN_USERS override) may write
+// everything. Observer may write nothing.
+//
+// RoleProjectOwner deliberately returns false here, unconditionally, even
+// once they are assigned to a project. Object-level scope -- "may write
+// entities linked to their own project" -- is a per-handler check against the
+// object, decided by WP-G1 Task 13, and does not exist yet. Treating a
+// project owner as writable before that check lands would grant them
+// unrestricted write over the whole estate, which is worse than today's
+// model. This is the deliberate fail-closed state, not a bug -- see
+// TestAProjectOwnerCannotWriteAnythingUntilTheObjectGateIsLive. Do not "fix"
+// it without Task 13 also landing.
 func (a *Authorizer) CanWrite(user *domain.AppUser) bool {
 	if user == nil || !user.IsActive {
 		return false
 	}
-	return a.admins[strings.ToLower(user.Username)]
+	return a.isAdministrator(user)
 }
 
 // CanRead reports whether a user may see anything. Every authenticated user
-// can read in the POC.
+// can read -- see docs/rbac-design.md §2, a deliberate decision to avoid the
+// disclosure risk and impact-engine correctness cost of read scoping.
 func (a *Authorizer) CanRead(user *domain.AppUser) bool {
 	return user != nil && user.IsActive
 }
 
-// CanSeeCosts reports whether a user may see money: acquisition prices, support
-// contract values, project totals.
+// CanSeeCosts reports whether a user may see money: acquisition prices,
+// support contract values, project totals. See docs/rbac-design.md §3.
 //
-// It returns exactly what CanRead does, and that is a DECISION rather than an
-// oversight. This application is not yet aimed at an audience some of whom must
-// be kept away from commercial figures, so gating them now would be inventing a
-// requirement -- and a permission nobody has thought through is worse than none,
-// because it looks like protection.
+// Administrator sees costs implicitly and never consults the grant column --
+// withholding money from someone who can already see and change everything
+// else would be theatre.
 //
-// It exists as its own function anyway, for the same reason CanWrite is a
-// one-liner: cost visibility is the most likely FIRST thing a real deployment
-// wants to separate from ordinary read access, and when that day comes the whole
-// change should be this function's body rather than every handler and template
-// that renders an amount.
+// Observer AND ProjectOwner see costs only if app_user.can_see_costs is set,
+// and BOTH consult the same column the SAME way. This is deliberate and is
+// the fix for a real defect an earlier draft shipped: giving Observers costs
+// implicitly made the permission non-monotonic, because demoting a project
+// owner (grant=false) to Observer would have taken them from one project's
+// costs to the whole estate's -- exactly backwards for the case this exists
+// to serve, a newly hired product owner who must not see costs for a
+// contractual period. See
+// TestDemotingAProjectOwnerToObserverNeverWidensTheirCostVisibility.
+//
+// This narrows behaviour for every existing deployment: CanSeeCosts used to
+// return CanRead(user) verbatim, so every reader saw costs. That is a
+// documented behaviour change (CHANGELOG.md), not a silent regression.
 func (a *Authorizer) CanSeeCosts(user *domain.AppUser) bool {
-	return a.CanRead(user)
+	if user == nil || !user.IsActive {
+		return false
+	}
+	if a.isAdministrator(user) {
+		return true
+	}
+	return user.CanSeeCosts
 }

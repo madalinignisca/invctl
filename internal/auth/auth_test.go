@@ -315,6 +315,157 @@ func TestEmptyAdminListGrantsNothing(t *testing.T) {
 	}
 }
 
+// TestAnAdministratorByRoleMayWriteWithoutBeingNamedInTheEnvironment: the
+// role column, not INV_ADMIN_USERS, is meant to be the ordinary way someone
+// becomes an Administrator (docs/rbac-design.md §5) -- the env list is the
+// bootstrap/break-glass, not the everyday mechanism.
+func TestAnAdministratorByRoleMayWriteWithoutBeingNamedInTheEnvironment(t *testing.T) {
+	authz := NewAuthorizer(nil)
+	user := &domain.AppUser{Username: "priya", IsActive: true, Role: domain.RoleAdministrator}
+
+	if !authz.CanWrite(user) {
+		t.Error("an Administrator by role, unnamed in INV_ADMIN_USERS, could not write")
+	}
+}
+
+// TestAUserNamedInTheEnvironmentIsAnAdministratorWhateverTheirRoleColumnSays:
+// spec §5 -- INV_ADMIN_USERS OVERRIDES the role column, it does not merely
+// seed it. An operator sets this variable BECAUSE the column says otherwise;
+// if it only seeded the role, §8's recovery path would not work at the
+// moment it is needed.
+func TestAUserNamedInTheEnvironmentIsAnAdministratorWhateverTheirRoleColumnSays(t *testing.T) {
+	authz := NewAuthorizer([]string{"priya"})
+	user := &domain.AppUser{Username: "priya", IsActive: true, Role: domain.RoleObserver}
+
+	if !authz.CanWrite(user) {
+		t.Error("a user named in INV_ADMIN_USERS with role=observer could not write")
+	}
+}
+
+// TestADeactivatedAdministratorMayNotWriteEvenWhenNamedInTheEnvironment:
+// break-glass restores a role, not a disabled account. Otherwise deactivation
+// is defeated by a variable an ex-employee's name may still be sitting in --
+// see the comment on isAdministrator for why the ordering of the two checks
+// is the whole point of this test.
+func TestADeactivatedAdministratorMayNotWriteEvenWhenNamedInTheEnvironment(t *testing.T) {
+	authz := NewAuthorizer([]string{"priya"})
+	user := &domain.AppUser{Username: "priya", IsActive: false, Role: domain.RoleAdministrator}
+
+	if authz.CanWrite(user) {
+		t.Error("a deactivated account named in INV_ADMIN_USERS could still write")
+	}
+}
+
+// TestAnObserverMayReadEverythingAndWriteNothing is the plain baseline the
+// rest of this suite's project-owner tests are contrasted against.
+func TestAnObserverMayReadEverythingAndWriteNothing(t *testing.T) {
+	authz := NewAuthorizer(nil)
+	user := &domain.AppUser{Username: "sam", IsActive: true, Role: domain.RoleObserver}
+
+	if !authz.CanRead(user) {
+		t.Error("an Observer could not read")
+	}
+	if authz.CanWrite(user) {
+		t.Error("an Observer could write")
+	}
+}
+
+// TestAProjectOwnerCannotWriteAnythingUntilTheObjectGateIsLive is the
+// fail-closed ruling from docs/rbac-design.md §6/§8, asserted directly:
+// CanWrite(project owner) == false, exactly, full stop. Object-level scope
+// ("may write entities linked to their own project") is decided per-handler
+// against the object and does not exist yet -- it is WP-G1 Task 13. Until
+// that lands, treating a project owner as writable here would hand them
+// unrestricted write over the entire estate, which is worse than refusing
+// them outright. THIS IS NOT A BUG. Do not "fix" a red version of this test
+// by loosening CanWrite -- land Task 13's object-level check first.
+func TestAProjectOwnerCannotWriteAnythingUntilTheObjectGateIsLive(t *testing.T) {
+	authz := NewAuthorizer(nil)
+	user := &domain.AppUser{Username: "priya", IsActive: true, Role: domain.RoleProjectOwner}
+
+	if authz.CanWrite(user) {
+		t.Error("a project owner could write before the object-level gate (Task 13) exists")
+	}
+}
+
+// TestAProjectOwnerAssignedToAProjectStillCannotWrite is the same ruling,
+// with a project assignment recorded, because that is the state an
+// Administrator will actually create during WP-G1 Pieces 1-2: a project
+// owner is assigned to a project, on the shape of the data long before any
+// code consults it for a write decision.
+func TestAProjectOwnerAssignedToAProjectStillCannotWrite(t *testing.T) {
+	authz := NewAuthorizer(nil)
+	user := &domain.AppUser{
+		Username: "priya", IsActive: true, Role: domain.RoleProjectOwner,
+	}
+	// CanWrite takes no project/assignment argument at all today -- there is
+	// nothing yet for an assignment to change. That absence is exactly what
+	// this test is pinning down: assignment data existing must not, by
+	// itself, alter the answer until Task 13 wires an object check in.
+	if authz.CanWrite(user) {
+		t.Error("an assigned project owner could write before the object-level gate exists")
+	}
+}
+
+// TestAProjectOwnerSeesCostsOnlyWhenGranted.
+func TestAProjectOwnerSeesCostsOnlyWhenGranted(t *testing.T) {
+	authz := NewAuthorizer(nil)
+	ungranted := &domain.AppUser{Username: "priya", IsActive: true, Role: domain.RoleProjectOwner, CanSeeCosts: false}
+	granted := &domain.AppUser{Username: "priya", IsActive: true, Role: domain.RoleProjectOwner, CanSeeCosts: true}
+
+	if authz.CanSeeCosts(ungranted) {
+		t.Error("an ungranted project owner could see costs")
+	}
+	if !authz.CanSeeCosts(granted) {
+		t.Error("a granted project owner could not see costs")
+	}
+}
+
+// TestAnObserverSeesCostsOnlyWhenGranted is the corrected rule (spec §3): an
+// earlier draft gave Observers costs implicitly, which this test forbids.
+func TestAnObserverSeesCostsOnlyWhenGranted(t *testing.T) {
+	authz := NewAuthorizer(nil)
+	ungranted := &domain.AppUser{Username: "sam", IsActive: true, Role: domain.RoleObserver, CanSeeCosts: false}
+	granted := &domain.AppUser{Username: "sam", IsActive: true, Role: domain.RoleObserver, CanSeeCosts: true}
+
+	if authz.CanSeeCosts(ungranted) {
+		t.Error("an ungranted Observer could see costs")
+	}
+	if !authz.CanSeeCosts(granted) {
+		t.Error("a granted Observer could not see costs")
+	}
+}
+
+// TestDemotingAProjectOwnerToObserverNeverWidensTheirCostVisibility is the
+// monotonicity defect from spec §3, written as a test. Under the earlier
+// (wrong) rule, demoting a project owner to Observer took them from one
+// project's costs to the whole estate's, defeating exactly the case this
+// exists to serve: a newly hired product owner who must not see costs for a
+// contractual period. A narrower role must never widen what someone can see.
+func TestDemotingAProjectOwnerToObserverNeverWidensTheirCostVisibility(t *testing.T) {
+	authz := NewAuthorizer(nil)
+	asProjectOwner := &domain.AppUser{Username: "priya", IsActive: true, Role: domain.RoleProjectOwner, CanSeeCosts: false}
+	asObserver := &domain.AppUser{Username: "priya", IsActive: true, Role: domain.RoleObserver, CanSeeCosts: false}
+
+	if authz.CanSeeCosts(asProjectOwner) != authz.CanSeeCosts(asObserver) {
+		t.Error("demoting a project owner to Observer changed their cost visibility with the grant unchanged")
+	}
+	if authz.CanSeeCosts(asObserver) {
+		t.Error("demotion to Observer granted cost visibility that was never given")
+	}
+}
+
+// TestAnAdministratorSeesCostsWithoutTheGrant: Administrator is the one role
+// that does not consult app_user.can_see_costs at all.
+func TestAnAdministratorSeesCostsWithoutTheGrant(t *testing.T) {
+	authz := NewAuthorizer(nil)
+	user := &domain.AppUser{Username: "gabriel", IsActive: true, Role: domain.RoleAdministrator, CanSeeCosts: false}
+
+	if !authz.CanSeeCosts(user) {
+		t.Error("an Administrator without the can_see_costs grant could not see costs")
+	}
+}
+
 // TestSafeUsernameRejectsDNInjection: the bind DN is assembled by
 // substitution, so a username containing DN metacharacters could otherwise
 // change which entry is bound.

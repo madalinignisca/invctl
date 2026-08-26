@@ -108,7 +108,7 @@ INV_DB_DRIVER=sqlite              # or postgres
 INV_DB_DSN=file:invctl.db?_txlock=immediate
 INV_LISTEN=0.0.0.0:8088           # what `make demo` uses; :8080 if unset
 INV_SESSION_KEY=<32 random bytes, base64>   # generated if unset
-INV_ADMIN_USERS=gabriel,nikolaj   # comma-separated; membership grants write access
+INV_ADMIN_USERS=gabriel,nikolaj   # comma-separated break-glass override — see docs/RECOVERY.md
 INV_AUTH_LOCAL=true
 INV_AUTH_LDAP=false
 INV_SEED=false                    # load the demo estate when the database is empty
@@ -136,6 +136,10 @@ value itself. There is no key involved and nothing to configure; see
 If no account exists on first run, one is created. Without
 `INV_ADMIN_PASSWORD` a random password is generated and logged once — there is
 no default password.
+
+If every account ever loses write access — the last Administrator was
+demoted, deactivated, or never handed off — `docs/RECOVERY.md` is the
+documented way back in.
 
 ## How it is put together
 

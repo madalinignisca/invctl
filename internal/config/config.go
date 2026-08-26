@@ -34,8 +34,13 @@ type Config struct {
 	SessionKey     []byte
 	SessionTimeout time.Duration
 
-	// AdminUsers is the POC authorization model in its entirety: membership
-	// grants write access, everyone else is read-only.
+	// AdminUsers is the break-glass override, not the whole model. A named
+	// user has full write access regardless of their app_user.role column
+	// (docs/rbac-design.md §5, §8) -- it exists so an operator can recover
+	// write access when nobody's role column allows it, and to bootstrap the
+	// very first Administrator before anyone can grant a role. A deactivated
+	// account named here still cannot write; the override restores a role,
+	// not a disabled account.
 	AdminUsers []string
 
 	// Currency is the symbol every amount is rendered with, estate-wide.

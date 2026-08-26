@@ -398,7 +398,9 @@ worth simulating.
 
 **WP-G1 · Object-level permissions** — L
 Constraint-based RBAC ("this group may edit assets at these sites only"). The
-single biggest gap against NetBox for multi-team and MSP use.
+single biggest gap against NetBox for multi-team and MSP use. Design in
+`docs/rbac-design.md`; if every account ever loses write access, the
+documented way back in is `docs/RECOVERY.md`.
 
 **WP-G2 · Webhooks and event rules** — M
 Fire on declared-state change. Outbound HTTP to a *user-configured* endpoint is
