@@ -57,7 +57,7 @@ func TestGrantingARoleWritesOneChangeLogRowNamingTheActorAndTheSubject(t *testin
 				t.Fatalf("counting before: %v", err)
 			}
 
-			if err := s.SetUserRole(ctx, domain.UserActor(admin), subject.ID, domain.RoleProjectOwner); err != nil {
+			if err := s.SetUserRole(ctx, domain.AdministratorPermit(domain.UserActor(admin)), subject.ID, domain.RoleProjectOwner); err != nil {
 				t.Fatalf("granting role: %v", err)
 			}
 
@@ -112,7 +112,7 @@ func TestARoleGrantNeverPutsAUsernameInTheAuditTrail(t *testing.T) {
 			admin := mustUserWithRole(t, s, ctx, "admin", domain.RoleAdministrator)
 			subject := mustUserWithRole(t, s, ctx, "alice", domain.RoleObserver)
 
-			if err := s.SetUserRole(ctx, domain.UserActor(admin), subject.ID, domain.RoleProjectOwner); err != nil {
+			if err := s.SetUserRole(ctx, domain.AdministratorPermit(domain.UserActor(admin)), subject.ID, domain.RoleProjectOwner); err != nil {
 				t.Fatalf("granting role: %v", err)
 			}
 
@@ -137,7 +137,7 @@ func TestSettingTheSameRoleTwiceWritesNoSecondEntry(t *testing.T) {
 			admin := mustUserWithRole(t, s, ctx, "admin", domain.RoleAdministrator)
 			subject := mustUserWithRole(t, s, ctx, "alice", domain.RoleObserver)
 
-			if err := s.SetUserRole(ctx, domain.UserActor(admin), subject.ID, domain.RoleProjectOwner); err != nil {
+			if err := s.SetUserRole(ctx, domain.AdministratorPermit(domain.UserActor(admin)), subject.ID, domain.RoleProjectOwner); err != nil {
 				t.Fatalf("first grant: %v", err)
 			}
 			before, err := s.countOne(ctx,
@@ -147,7 +147,7 @@ func TestSettingTheSameRoleTwiceWritesNoSecondEntry(t *testing.T) {
 				t.Fatalf("counting before: %v", err)
 			}
 
-			if err := s.SetUserRole(ctx, domain.UserActor(admin), subject.ID, domain.RoleProjectOwner); err != nil {
+			if err := s.SetUserRole(ctx, domain.AdministratorPermit(domain.UserActor(admin)), subject.ID, domain.RoleProjectOwner); err != nil {
 				t.Fatalf("second grant of the same role: %v", err)
 			}
 
@@ -188,7 +188,7 @@ func TestARoleWriteNeverCarriesAPasswordHash(t *testing.T) {
 				t.Fatalf("creating user: %v", err)
 			}
 
-			if err := s.SetUserRole(ctx, domain.UserActor(admin), subject.ID, domain.RoleProjectOwner); err != nil {
+			if err := s.SetUserRole(ctx, domain.AdministratorPermit(domain.UserActor(admin)), subject.ID, domain.RoleProjectOwner); err != nil {
 				t.Fatalf("granting role: %v", err)
 			}
 			afterRole, err := s.ListChangesForEntity(ctx, "app_user", subject.ID, 10)
@@ -262,7 +262,7 @@ func TestDemotingTheLastActiveAdministratorIsRefused(t *testing.T) {
 			s, ctx := newStore(t, e)
 			admin := mustUserWithRole(t, s, ctx, "admin", domain.RoleAdministrator)
 
-			err := s.SetUserRole(ctx, domain.UserActor(admin), admin.ID, domain.RoleObserver)
+			err := s.SetUserRole(ctx, domain.AdministratorPermit(domain.UserActor(admin)), admin.ID, domain.RoleObserver)
 			if err == nil {
 				t.Fatal("demoting the only administrator succeeded")
 			}
@@ -288,7 +288,7 @@ func TestDemotingAnAdministratorIsAllowedWhileAnotherRemainsActive(t *testing.T)
 			admin1 := mustUserWithRole(t, s, ctx, "admin-1", domain.RoleAdministrator)
 			admin2 := mustUserWithRole(t, s, ctx, "admin-2", domain.RoleAdministrator)
 
-			if err := s.SetUserRole(ctx, domain.UserActor(admin2), admin1.ID, domain.RoleObserver); err != nil {
+			if err := s.SetUserRole(ctx, domain.AdministratorPermit(domain.UserActor(admin2)), admin1.ID, domain.RoleObserver); err != nil {
 				t.Fatalf("demoting while another administrator remains active: %v", err)
 			}
 
@@ -355,7 +355,7 @@ func TestTheLastAdministratorGuardCoversAllThreeVerbs(t *testing.T) {
 				var err error
 				switch verb {
 				case "demote":
-					err = s.SetUserRole(ctx, domain.UserActor(admin), admin.ID, domain.RoleObserver)
+					err = s.SetUserRole(ctx, domain.AdministratorPermit(domain.UserActor(admin)), admin.ID, domain.RoleObserver)
 				case "deactivate":
 					err = s.SetUserActive(ctx, domain.UserActor(admin), admin.ID, false)
 				case "scrub":
@@ -438,7 +438,7 @@ func TestTwoSimultaneousDemotionsCannotRemoveTheLastAdministrator(t *testing.T) 
 	var wg sync.WaitGroup
 	demote := func(id string) {
 		defer wg.Done()
-		results <- s.SetUserRole(ctx, testActor, id, domain.RoleObserver)
+		results <- s.SetUserRole(ctx, domain.AdministratorPermit(testActor), id, domain.RoleObserver)
 	}
 	wg.Add(2)
 	go demote(admin1.ID)
@@ -489,7 +489,7 @@ func TestScrubbingAUserLeavesEveryChangeLogRowIntactAndStillReferencingTheirId(t
 
 			// Give the subject some prior history of their own -- a role grant --
 			// so there is something on record to prove untouched.
-			if err := s.SetUserRole(ctx, domain.UserActor(admin), subject.ID, domain.RoleProjectOwner); err != nil {
+			if err := s.SetUserRole(ctx, domain.AdministratorPermit(domain.UserActor(admin)), subject.ID, domain.RoleProjectOwner); err != nil {
 				t.Fatalf("granting role: %v", err)
 			}
 

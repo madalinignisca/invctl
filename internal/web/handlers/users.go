@@ -186,7 +186,11 @@ func (a *App) UserCreate(w http.ResponseWriter, r *http.Request) {
 func (a *App) UserSetRole(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	role := formValue(r, "role")
-	err := a.Store.SetUserRole(r.Context(), actor(r), id, role)
+	// This route is RequireAdmin-only (see routes.go), so the caller here is
+	// already known to be an Administrator; AdministratorPermit is the
+	// pre-Task-10 shim every not-yet-converted method still gets from its
+	// handler, matching circuits.go's pattern.
+	err := a.Store.SetUserRole(r.Context(), domain.AdministratorPermit(actor(r)), id, role)
 	a.respondUserMutation(w, r, id, err, "Role updated.")
 }
 

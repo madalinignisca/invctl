@@ -123,7 +123,15 @@ func (t *tx) refuseIfLastActiveAdministrator(ctx context.Context, verb string) e
 // is a no-op: no write, no change_log row, and -- because of that -- no
 // transaction even opens, matching the "retiring twice is a no-op" pattern
 // the rest of this package already uses (see RetireCluster).
-func (s *SQLStore) SetUserRole(ctx context.Context, actor domain.Actor, id, role string) error {
+//
+// Takes a domain.Permit, not a domain.Actor -- WP-G1 Task 9, ahead of the
+// rest of this package's Task 10 conversion, because this is exactly the
+// write systemPermit.Covers was written to refuse: a system actor granting
+// itself (or anyone) a role is the privilege-escalation shape WP-G1 exists
+// to close, and that refusal can only be tested if a caller can hand this
+// method something other than an unconditional Administrator permit. See
+// TestASystemPermitCannotChangeAnExistingUsersRole.
+func (s *SQLStore) SetUserRole(ctx context.Context, permit domain.Permit, id, role string) error {
 	current, err := s.GetUser(ctx, id)
 	if err != nil {
 		return err
@@ -137,7 +145,7 @@ func (s *SQLStore) SetUserRole(ctx context.Context, actor domain.Actor, id, role
 		return err
 	}
 
-	return s.writeSerializable(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.writeSerializable(ctx, permit, func(t *tx) error {
 		before, err := t.getUser(ctx, id)
 		if err != nil {
 			return err
