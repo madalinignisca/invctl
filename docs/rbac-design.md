@@ -59,12 +59,25 @@ an inventory fact and may be worth having; it is not a permission.
 `auth.Authorizer.CanSeeCosts` already exists, separate from `CanWrite`. It
 stays separate.
 
-- Administrator and Observer see costs implicitly.
-- A project owner sees costs only if granted, per person.
+- **Administrator** sees costs implicitly — they can see and change everything
+  else, so withholding money would be theatre.
+- **Observer AND Project owner** see costs only if granted, per person.
+
+An earlier draft gave Observers costs implicitly and required the grant only
+for project owners. **That was wrong, and the planner caught it**: it makes the
+permission non-monotonic. Demoting the newly hired product owner you did not
+want seeing costs turns them into an Observer, and they see every cost in the
+estate. A narrower role must never widen what a person can see, or the model
+cannot be reasoned about at all.
 
 The case this serves, in the client's own words: a newly hired product owner
 who, for a contractual reason, should not see a project's costs for their
-first months. One boolean, one existing axis, no matrix.
+first months. One boolean, one existing axis, no matrix — and a manager who
+should see costs is simply granted it.
+
+`auth.CanSeeCosts` returns `CanRead(user)` verbatim today, so every reader
+sees costs. Narrowing it is a behaviour change for existing deployments and
+needs saying out loud in the release note, not discovered.
 
 ## 4. What a project owner may write
 
@@ -90,6 +103,15 @@ Creating and linking in one transaction cannot do that, because the entity did
 not exist to be seized. Linking something that already exists can, so
 `POST /projects/{id}/assets` and its siblings stay **Administrator-only**. A
 PO adds their own new server; an Administrator decides what enters a project.
+
+**How the two are told apart at enforcement time.** Both a create-and-link and
+a link-an-existing write the same `project_asset` row, so the distinction is
+invisible in the audit entry alone. It IS expressible, and the plan's proposal
+is adopted: **an entity whose id was minted inside the same transaction is a
+create; one that existed before the transaction opened is a link.** That is
+precisely the security boundary — you cannot seize something that did not
+exist a moment ago — and it must be tested by attempting the escalation
+directly, not inferred.
 
 **Both endpoints of a relationship must be in scope.** A dependency edge from
 an in-scope service to an out-of-scope one is a write against something the PO
@@ -218,6 +240,20 @@ five-hundred-method read-scoping project §2 rejects.
 
 This is the boundary between "the inventory is not a secret" and "the way in
 is". Everything else stays readable.
+
+## 10a. This product has no user administration at all
+
+The plan brought this back and it is correct: §5, §8 and §9 all assume screens
+for granting a role, guarding the last Administrator and auditing a change —
+and **none of that exists.** There are no user routes, no user store methods
+beyond `GetUserByUsername`/`UpsertLDAPUser`/`CreateUser`/`CountUsers`, and no
+templates. The only write to `app_user` outside a test sets `last_login_at`.
+Nor is there any scrub, though nine comments across the codebase describe how
+one would degrade gracefully.
+
+So "assign a role through invctl's own screens" is not a small addition to an
+existing surface; it is the surface. That is real work this document assumed
+into existence, and it is why the size below changed.
 
 ## 11. Size
 
