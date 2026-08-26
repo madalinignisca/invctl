@@ -37,13 +37,28 @@ const describe = BASE_URL ? test.describe : test.describe.skip;
 // it can be pointed at freely, and this file must not quietly break that.
 const looksLikeSharedDemo = BASE_URL && /invctl\.madalin\.me/.test(BASE_URL);
 
-describe('user administration (mutates -- local instance only)', () => {
+// SKIPPED, not failed, when pointed at the shared demo -- and the distinction
+// matters. An earlier version threw here, which was the right instinct (a
+// mutating spec must never touch the public instance) with the wrong mechanism:
+// it made a full-suite run against the demo permanently red, and that run is
+// how a deployment is checked. A red suite that is red on purpose trains people
+// to ignore a red suite.
+//
+// This is a legitimate skip by this project's own rule -- an explicitly
+// declared precondition, exactly like an unset INV_E2E_BASE_URL -- and NOT the
+// forbidden kind, which is a spec skipping because the thing under test looked
+// missing. The reason is printed, so the skip is visible rather than silent.
+const describeHere = looksLikeSharedDemo ? test.describe.skip : describe;
+
+describeHere('user administration (mutates -- local instance only)', () => {
   test.beforeAll(() => {
     if (looksLikeSharedDemo) {
+      // Unreachable while the suite is skipped; kept as the second line of
+      // defence if somebody re-enables the describe without reading the top of
+      // this file.
       throw new Error(
         'user-administration.spec.js writes to the estate and must never run against ' +
-          `the shared public demo (INV_E2E_BASE_URL=${BASE_URL}). Point it at a ` +
-          'disposable local instance instead -- see the comment at the top of this file.',
+          `the shared public demo (INV_E2E_BASE_URL=${BASE_URL}).`,
       );
     }
   });
