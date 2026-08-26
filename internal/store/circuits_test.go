@@ -359,6 +359,89 @@ func TestARefusedWriteLeavesTheRowUnchangedAndWritesNoAuditRow(t *testing.T) {
 	}
 }
 
+// TestANoOpUpdateIsStillAuthorized closes the bypass an authorization review
+// found: logUpdateBatch used to check `if !changed { return nil }` BEFORE
+// ever reaching tx.log's Covers check, so resubmitting a row's CURRENT
+// values -- a diff of nothing -- skipped authorization entirely while the
+// unconditional `UPDATE ... row_version = row_version + 1` earlier in the
+// same transaction had already run. A ScopedPermit covering nothing could
+// still bump row_version and move updated_at on an entity it does not own,
+// with no change_log row naming who did it.
+//
+// Unlike TestARefusedWriteLeavesTheRowUnchangedAndWritesNoAuditRow, which
+// submits CHANGED values, this submits the row's OWN current values back
+// unmodified -- diffJSON reports no change, which is exactly the condition
+// that let the old code path skip past authorize() unnoticed.
+func TestANoOpUpdateIsStillAuthorized(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			s, ctx := newStore(t, e)
+
+			pid := mustProvider(t, s, ctx, "Broadnet")
+			otherID := mustCircuit(t, s, ctx, pid, "OTHER-1", nil)
+			targetID := mustCircuit(t, s, ctx, pid, "TARGET-1", nil)
+
+			before, err := s.GetCircuit(ctx, targetID)
+			if err != nil {
+				t.Fatalf("reading before: %v", err)
+			}
+			beforeCount, err := s.countOne(ctx,
+				`SELECT COUNT(*) FROM change_log WHERE entity_type = ? AND entity_id = ?`,
+				"circuit", targetID)
+			if err != nil {
+				t.Fatalf("counting change_log before: %v", err)
+			}
+
+			// Covers nothing -- otherID is a decoy, targetID is deliberately
+			// absent from the scope.
+			scoped := domain.ScopedPermit(
+				domain.Actor{ID: "po-3", Name: "po-3", Kind: domain.ActorKindUser},
+				[]string{"proj-3"},
+				domain.ScopedEntities{"circuit": {otherID: true}},
+			)
+
+			// Resubmit the row's OWN current values, unmodified -- the no-op
+			// case the bug depended on.
+			resubmit, err := s.GetCircuit(ctx, targetID)
+			if err != nil {
+				t.Fatalf("reading target: %v", err)
+			}
+			err = s.UpdateCircuit(ctx, scoped, resubmit)
+			if !errors.Is(err, domain.ErrForbidden) {
+				t.Fatalf("UpdateCircuit(no-op) error = %v, want ErrForbidden", err)
+			}
+
+			after, err := s.GetCircuit(ctx, targetID)
+			if err != nil {
+				t.Fatalf("reading after: %v", err)
+			}
+			if !reflect.DeepEqual(before, after) {
+				t.Fatalf("the row changed despite a refused no-op write.\nbefore: %+v\nafter:  %+v",
+					before, after)
+			}
+			if before.RowVersion != after.RowVersion {
+				t.Fatalf("row_version moved from %d to %d on a refused write",
+					before.RowVersion, after.RowVersion)
+			}
+			if derefString(before.UpdatedAt) != derefString(after.UpdatedAt) {
+				t.Fatalf("updated_at moved from %v to %v on a refused write",
+					derefString(before.UpdatedAt), derefString(after.UpdatedAt))
+			}
+
+			afterCount, err := s.countOne(ctx,
+				`SELECT COUNT(*) FROM change_log WHERE entity_type = ? AND entity_id = ?`,
+				"circuit", targetID)
+			if err != nil {
+				t.Fatalf("counting change_log after: %v", err)
+			}
+			if afterCount != beforeCount {
+				t.Fatalf("change_log gained %d row(s) for a no-op write that was refused",
+					afterCount-beforeCount)
+			}
+		})
+	}
+}
+
 // TestAnAdministratorPermitCoversEveryCircuit -- or the mechanism is a denial
 // of service on the people who are supposed to have access. An
 // Administrator's write must not start failing merely because a circuit's

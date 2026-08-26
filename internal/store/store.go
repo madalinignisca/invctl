@@ -111,29 +111,46 @@ func (t *tx) selectAll(ctx context.Context, dest any, query string, args ...any)
 // ONLY INSERT into change_log in the codebase; every other writer in this
 // file and every caller elsewhere goes through log, logCreate or logUpdate
 // rather than a second insertion point.
-func (t *tx) log(ctx context.Context, entityType, entityID, action, diff, batchID string) error {
-	// THE OBJECT-LEVEL AUTHORIZATION CHECK LIVES HERE, and it lives here
-	// specifically -- not in write/writeSerializable/writeTx, and not in any
-	// of the 148 individual store methods -- because log is the ONLY
-	// insertion point into change_log (see this function's doc above) and
-	// therefore the only place every declared mutation is guaranteed to
-	// pass through. Moving this into individual store methods means forty
-	// places to forget it, which is precisely the failure mode
-	// docs/rbac-design.md §6 names and rejects. And the converse is now also
-	// true and worth stating plainly: if a second `INSERT INTO change_log`
-	// is ever added anywhere in this codebase, that statement has also
-	// added a second, unguarded authorization bypass -- which is exactly
-	// what TestChangeLogIsAppendOnly and TestNoAssembledWriteReachesChangeLog
-	// already exist to make impossible to add unnoticed.
-	//
-	// A nil permit is refused rather than treated as "no restriction": every
-	// caller of write/writeSerializable/writeTx is required to supply one
-	// (they take domain.Permit, not domain.Actor, precisely so a caller
-	// cannot pass "nothing"), so a nil here means a bug in this package, not
-	// an absent credential -- and the fail-closed answer to a bug in the
-	// authorization path is deny, not allow.
+// authorize is THE OBJECT-LEVEL AUTHORIZATION CHECK, and it is called from
+// two places deliberately -- log (so every audited write is gated) and
+// logUpdateBatch, BEFORE the no-op short-circuit (so a write that changes
+// nothing is still refused rather than silently allowed to bump row_version
+// unaudited). It used to live inline inside log alone; a no-op update that
+// returned before ever reaching log's INSERT bypassed it entirely -- the
+// physical `UPDATE ... row_version = row_version + 1` had already run by
+// then, so a ScopedPermit covering nothing could still mutate a row it did
+// not own, provided the caller resubmitted the row's current values. See
+// TestANoOpUpdateIsStillAuthorized.
+//
+// Extracting this out of log does not change log's contract: log is still
+// the only insertion point into change_log (see its doc above), and
+// therefore the only place every declared mutation that DOES produce a diff
+// is guaranteed to pass through. Moving the check into individual store
+// methods instead of a shared helper means forty places to forget it, which
+// is precisely the failure mode docs/rbac-design.md §6 names and rejects.
+// And the converse is now also true and worth stating plainly: if a second
+// `INSERT INTO change_log` is ever added anywhere in this codebase, that
+// statement has also added a second, unguarded authorization bypass --
+// which is exactly what TestChangeLogIsAppendOnly and
+// TestNoAssembledWriteReachesChangeLog already exist to make impossible to
+// add unnoticed.
+//
+// A nil permit is refused rather than treated as "no restriction": every
+// caller of write/writeSerializable/writeTx is required to supply one
+// (they take domain.Permit, not domain.Actor, precisely so a caller cannot
+// pass "nothing"), so a nil here means a bug in this package, not an
+// absent credential -- and the fail-closed answer to a bug in the
+// authorization path is deny, not allow.
+func (t *tx) authorize(entityType, entityID string) error {
 	if t.permit == nil || !t.permit.Covers(entityType, entityID) {
 		return fmt.Errorf("writing change log for %s %s: %w", entityType, entityID, domain.ErrForbidden)
+	}
+	return nil
+}
+
+func (t *tx) log(ctx context.Context, entityType, entityID, action, diff, batchID string) error {
+	if err := t.authorize(entityType, entityID); err != nil {
+		return err
 	}
 
 	var batch any
@@ -174,6 +191,12 @@ func (t *tx) logUpdate(ctx context.Context, entityType, entityID string, before,
 // special case, kept as its own name because that is still the overwhelming
 // majority of writes in this codebase.
 func (t *tx) logUpdateBatch(ctx context.Context, entityType, entityID string, before, after any, batchID string) error {
+	// Authorize BEFORE the no-op short-circuit below, not after. A refused
+	// write must be refused whether or not it happens to produce a diff --
+	// see authorize's doc comment for the bypass this closes.
+	if err := t.authorize(entityType, entityID); err != nil {
+		return err
+	}
 	diff, changed, err := diffJSON(before, after)
 	if err != nil {
 		return err
