@@ -215,7 +215,7 @@ func (b *builder) drCircuit() {
 		return
 	}
 	p.AccountRef = str("NF-2291")
-	if err := b.store.CreateProvider(b.ctx, domain.AdministratorPermit(Actor), p); err != nil {
+	if err := b.store.CreateProvider(b.ctx, Permit, p); err != nil {
 		b.fail(fmt.Errorf("seeding the fibre provider: %w", err))
 		return
 	}
@@ -230,7 +230,7 @@ func (b *builder) drCircuit() {
 	circuit.InstallDate = str(domain.FormatDate(b.now.AddDate(-2, -3, 0)))
 	circuit.ContractEnd = str(domain.FormatDate(b.now.AddDate(1, 5, 0)))
 	circuit.Description = str("Oslo to Bergen dark fibre — the only path to the DR site")
-	if err := b.store.CreateCircuit(b.ctx, domain.AdministratorPermit(Actor), circuit); err != nil {
+	if err := b.store.CreateCircuit(b.ctx, Permit, circuit); err != nil {
 		b.fail(fmt.Errorf("seeding the DR fibre: %w", err))
 		return
 	}
@@ -255,7 +255,7 @@ func (b *builder) drCircuit() {
 			b.fail(fmt.Errorf("building the %s end of the DR fibre: %w", end.side, err))
 			return
 		}
-		if err := b.store.CreateCircuitTermination(b.ctx, domain.AdministratorPermit(Actor), t); err != nil {
+		if err := b.store.CreateCircuitTermination(b.ctx, Permit, t); err != nil {
 			b.fail(fmt.Errorf("landing the %s end of the DR fibre: %w", end.side, err))
 			return
 		}

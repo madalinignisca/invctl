@@ -739,7 +739,7 @@ func (b *builder) attributeSuppliers() {
 			return
 		}
 		p.AccountRef = str(sup.account)
-		if err := b.store.CreateProvider(b.ctx, domain.AdministratorPermit(Actor), p); err != nil {
+		if err := b.store.CreateProvider(b.ctx, Permit, p); err != nil {
 			b.fail(fmt.Errorf("seeding supplier %s: %w", sup.name, err))
 			return
 		}

@@ -30,6 +30,24 @@ import (
 // distinguishable from anything an operator typed.
 var Actor = domain.Actor{ID: "seed", Name: "seed", Kind: "system"}
 
+// Permit is what the handful of already-Permit-taking store methods this
+// package calls (CreateProvider, CreateCircuit, CreateCircuitTermination --
+// the pilot conversion WP-G1 Task 7 made ahead of Task 10's mass one) get
+// instead of domain.AdministratorPermit(Actor).
+//
+// WP-G1 Task 9. The seeder is not a signed-in operator and must not be a hole
+// by which the demo estate quietly proves that a system credential can mint
+// Administrator capability -- see TestTheSeederRunsUnderASystemPermitAndNotAnAdministratorOne.
+// domain.SystemPermit("seed").Actor() returns domain.SystemActor (id
+// "system"), not the "seed" id the Actor variable above carries: the two
+// diverge here on purpose, because SystemPermit is fixed to attribute every
+// write it authorizes to the one system identity, not to whichever reason
+// string a caller passes -- see that constructor's own doc comment in
+// internal/domain/role.go. The rows these three methods write are attributed
+// to "system" rather than "seed"; TestAuditTrailAlwaysShowsWhoAndWhatKind
+// (internal/web/web_test.go) was updated to expect that.
+var Permit = domain.SystemPermit("seed")
+
 // Refs holds the ids of the fixture rows the tests need to name. Building it
 // as a return value keeps the tests from hard-coding ids or looking rows up by
 // display name.
