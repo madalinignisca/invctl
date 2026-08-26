@@ -164,11 +164,27 @@ func (e ScopedEntities) covers(entityType, entityID string) bool {
 func ScopedPermit(a Actor, projects []string, entities ScopedEntities) Permit {
 	// Copied rather than aliased: the permit is immutable for the life of a
 	// request (see the note on scopedPermit below), and a caller holding the
-	// original slice must not be able to reach into a permit already handed
-	// to a store call and change what it authorizes out from under it.
+	// original slice or map must not be able to reach into a permit already
+	// handed to a store call and change what it authorizes out from under
+	// it.
+	//
+	// entities is deep-copied, not just the outer map: entities is what
+	// Covers actually consults, so aliasing it would leave the guarantee
+	// this comment already claims for projects unenforced for the field
+	// that matters. A caller holding the original map could add an id, or
+	// an entire entity type, to a permit already minted and in flight --
+	// see TestScopedPermitEntitiesAreNotAliased.
 	cp := make([]string, len(projects))
 	copy(cp, projects)
-	return &scopedPermit{actor: a, projects: cp, entities: entities}
+	entitiesCopy := make(ScopedEntities, len(entities))
+	for entityType, ids := range entities {
+		idsCopy := make(map[string]bool, len(ids))
+		for id, ok := range ids {
+			idsCopy[id] = ok
+		}
+		entitiesCopy[entityType] = idsCopy
+	}
+	return &scopedPermit{actor: a, projects: cp, entities: entitiesCopy}
 }
 
 // scopedPermit carries NO transaction-scoped or otherwise mutable state.

@@ -125,3 +125,46 @@ func TestTheGoConstantSetMatchesTheDatabaseCheck(t *testing.T) {
 		}
 	}
 }
+
+// TestScopedPermitEntitiesAreNotAliased closes F1: ScopedPermit's doc comment
+// already claimed a caller "must not be able to reach into a permit already
+// handed to a store call and change what it authorizes" -- and the code
+// delivered that for projects while storing entities, the map Covers
+// actually consults, by reference. This proves the deep copy holds for both
+// ways the original map could be mutated after minting: adding an id to an
+// entity type the permit already had, and adding a whole new entity type
+// that was not there at all.
+func TestScopedPermitEntitiesAreNotAliased(t *testing.T) {
+	actor := Actor{ID: "po-1", Name: "po-1", Kind: ActorKindUser}
+	original := ScopedEntities{
+		"asset": {"asset-1": true},
+	}
+
+	permit := ScopedPermit(actor, nil, original)
+
+	// Covers before mutation: only asset-1 is authorized, and only for
+	// "asset".
+	if !permit.Covers("asset", "asset-1") {
+		t.Fatalf("Covers(asset, asset-1) = false before mutation, want true")
+	}
+	if permit.Covers("asset", "asset-2") {
+		t.Fatalf("Covers(asset, asset-2) = true before mutation, want false")
+	}
+	if permit.Covers("service", "svc-1") {
+		t.Fatalf("Covers(service, svc-1) = true before mutation, want false")
+	}
+
+	// Mutation 1: add an id to an entity type the permit already had.
+	original["asset"]["asset-2"] = true
+	// Mutation 2: add a whole entity type that was not there at all.
+	original["service"] = map[string]bool{"svc-1": true}
+
+	if permit.Covers("asset", "asset-2") {
+		t.Fatalf("Covers(asset, asset-2) = true after the caller's map was mutated, " +
+			"want false -- entities was aliased, not copied")
+	}
+	if permit.Covers("service", "svc-1") {
+		t.Fatalf("Covers(service, svc-1) = true after the caller's map was mutated, " +
+			"want false -- entities was aliased, not copied")
+	}
+}
