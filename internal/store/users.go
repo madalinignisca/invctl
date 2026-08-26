@@ -71,6 +71,28 @@ func (s *SQLStore) CountUsers(ctx context.Context) (int, error) {
 //
 // The change log records the account, never the hash: an audit trail is read
 // by more people than the user table is.
+//
+// WHY AN ADMINISTRATOR PERMIT ON A PATH REACHABLE WITHOUT AUTHENTICATION.
+// POST /login is public and reaches here through UpsertLDAPUser: the account
+// exists because the directory said so, and refusing the write would mean no
+// LDAP user could ever sign in. It cannot use SystemPermit, because that one
+// refuses app_user outright (domain.systemPermit.Covers) precisely so a system
+// actor can never grant a role.
+//
+// So the permit here is wider than the operation, and the defence is at the
+// COLUMN rather than the path -- which is the honest place for it:
+//   - NewAppUser takes no role parameter, so nothing an unauthenticated caller
+//     supplies can influence the role. It is always RoleObserver.
+//   - This is an INSERT and never an upsert, so it cannot take over an
+//     existing account.
+//   - TestNoWriteOutsideTheRoleManagementFileNamesTheRoleColumn (an AST walk,
+//     internal/store/role_management_test.go) forbids any file but
+//     users_admin.go from naming app_user.role or can_see_costs in a write.
+//     That is what stops somebody later adding "UPDATE app_user SET role" here
+//     and finding it compiles.
+//
+// If you are widening what this function writes, that test is the one you will
+// have to argue with, and it is the conversation you should be having.
 func (s *SQLStore) CreateUser(ctx context.Context, actor domain.Actor, u *domain.AppUser) error {
 	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
 		// role and can_see_costs are named explicitly, not left to the
