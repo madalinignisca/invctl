@@ -73,12 +73,24 @@ func (s *SQLStore) CountUsers(ctx context.Context) (int, error) {
 // by more people than the user table is.
 func (s *SQLStore) CreateUser(ctx context.Context, actor domain.Actor, u *domain.AppUser) error {
 	return s.write(ctx, actor, func(t *tx) error {
+		// role and can_see_costs are named explicitly, not left to the
+		// column defaults migration 00058 set. NewAppUser already populates
+		// Role with domain.RoleObserver and CanSeeCosts with its safe
+		// zero value, and until WP-G1 Task 3 they agreed with the schema
+		// default by coincidence rather than by construction: the INSERT
+		// named neither column, so the Go value was silently discarded and
+		// the row took whatever the migration said. Both happened to be
+		// 'observer'/FALSE, so nothing broke -- but a later change to
+		// NewAppUser's default would have had no effect, and nothing would
+		// have said why.
 		_, err := t.exec(ctx, `
 			INSERT INTO app_user (id, username, display_name, email, source,
-			                      password_hash, is_active, last_login_at, created_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			                      password_hash, is_active, last_login_at, created_at,
+			                      role, can_see_costs)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			u.ID, u.Username, u.DisplayName, u.Email, u.Source,
-			u.PasswordHash, u.IsActive, u.LastLoginAt, u.CreatedAt)
+			u.PasswordHash, u.IsActive, u.LastLoginAt, u.CreatedAt,
+			u.Role, u.CanSeeCosts)
 		if err != nil {
 			return translateWriteErr(err, "creating user")
 		}
