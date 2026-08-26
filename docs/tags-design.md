@@ -29,11 +29,18 @@ has a PERSON as its subject.
   things. The honest reason to defer is that filters need their own design,
   not that one storage choice dodges GDPR.
 - **Table configs** are genuinely per-user, and would be the first table in
-  this product whose SUBJECT is a person rather than its author. That is not
-  forbidden — a person's preferred columns are configuration, and the scrub
-  path that already answers an erasure request for `created_by` extends to it
-  cheaply. **Deferred until WP-G1** anyway, because per-user state is close to
-  meaningless while authorization is a comma-separated list of usernames.
+  this product whose SUBJECT is a person rather than its author. **Deferred
+  until WP-G1**, because per-user state is close to meaningless while
+  authorization is a comma-separated list of usernames.
+
+  An earlier draft of this line claimed the scrub path answering an erasure
+  request for `created_by` would extend to it cheaply. **There is no such
+  path.** `scrub` appears in nine comments across this codebase, every join is
+  written defensively so a scrubbed account degrades to a raw id, and
+  `docs/AUDIT.md` rests its indefinite-retention argument on the operation —
+  but no code performs it, and there is no user-management route at all. The
+  only write to `app_user` outside a test is `last_login_at`. Anything storing
+  data whose SUBJECT is a person needs that operation to exist first.
 
 ## 1. Is this a third estate-defined metadata mechanism?
 
