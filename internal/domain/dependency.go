@@ -523,6 +523,7 @@ func NewAppUser(id, username, source string, now time.Time) (*AppUser, error) {
 	return &AppUser{
 		ID: id, Username: username, Source: source,
 		IsActive: true, CreatedAt: FormatTime(now),
+		Role: RoleObserver,
 	}, nil
 }
 
