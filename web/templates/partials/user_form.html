@@ -1,0 +1,39 @@
+{{/*
+  invctl — infrastructure inventory
+  Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+
+  Licensed under the GNU Affero General Public License, version 3 only —
+  no later version applies. See LICENSE for the full text.
+
+  SPDX-License-Identifier: AGPL-3.0-only
+*/}}
+{{/* The account-creation form, standalone -- it is included on user_list.html
+     and re-rendered nowhere else, but every partial in this codebase must
+     work on its own, and this one is no exception. Always Observer to start:
+     see UserCreate's own doc comment for why a role is never chosen here. */}}
+{{define "user_form"}}
+<div class="panel" id="user-form">
+  <div class="panel-head"><h2>Add a user</h2></div>
+  <form class="panel-body" method="post" action="/users" hx-post="/users">
+    <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+    <div class="field-row">
+      <div class="field">
+        <label for="u-username">Username</label>
+        <input id="u-username" class="mono" type="text" name="username"
+               value="{{.FormUsername}}" autocomplete="off" required>
+        {{with index .Errors "username"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="u-password">Password</label>
+        <input id="u-password" type="password" name="password" autocomplete="new-password" required>
+        {{with index .Errors "password"}}<div class="field-error">{{.}}</div>{{end}}
+        <div class="field-hint">At least 12 characters. LDAP accounts never need one — sign in through the directory instead.</div>
+      </div>
+    </div>
+    <button class="btn btn-primary" type="submit">Add user</button>
+    <div class="field-hint" style="margin-top:8px">
+      New accounts start as Observer, read-only. Grant a role from the roster below once the account exists.
+    </div>
+  </form>
+</div>
+{{end}}

@@ -384,6 +384,14 @@ type DependencyRow struct {
 	ProviderSvc  string  `db:"provider_service_id"`
 	ProviderCode string  `db:"provider_code"`
 	IdentityName *string `db:"identity_name"`
+	// IdentitySecretRef is the raw column value -- a Vault path, never a
+	// secret -- and it is RAW DELIBERATELY: this type is a store-layer read,
+	// and the store has no notion of who is asking. Redaction for a
+	// non-administrator happens in the handler's view model (depRowData.
+	// SecretRef, internal/web/handlers/forms.go), never here and never in a
+	// template -- see CLAUDE.md and WP-G1 Task 5. Nothing in this package
+	// may render this field directly.
+	IdentitySecretRef *string `db:"identity_secret_ref"`
 	// VerifiedByName resolves the opaque id in verified_by for display. It is
 	// nil when the account was scrubbed or never existed, in which case the UI
 	// falls back to saying only that somebody verified it.
@@ -419,6 +427,7 @@ const dependencySelect = `
 	       COALESCE(pes.id, res.id, '') AS provider_service_id,
 	       COALESCE(pes.code, res.code, '') AS provider_code,
 	       idn.name AS identity_name,
+	       idn.secret_ref AS identity_secret_ref,
 	       COALESCE(vu.display_name, vu.username) AS verified_by_name
 	FROM dependency d
 	JOIN service cs ON cs.id = d.consumer_service_id

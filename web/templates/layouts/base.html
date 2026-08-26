@@ -58,8 +58,10 @@
              right failure: every link stays reachable. */}}
         <div class="rail-group-links" x-show="open" x-cloak>
           {{range .Links}}
+          {{if or (not .AdminOnly) $.IsAdmin}}
           <a class="rail-link" href="{{.Href}}"
              {{if .IsCurrent $.Nav}}aria-current="page"{{end}}>{{.Label}}</a>
+          {{end}}
           {{end}}
         </div>
       </div>

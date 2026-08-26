@@ -1,0 +1,115 @@
+{{/*
+  invctl — infrastructure inventory
+  Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+
+  Licensed under the GNU Affero General Public License, version 3 only —
+  no later version applies. See LICENSE for the full text.
+
+  SPDX-License-Identifier: AGPL-3.0-only
+*/}}
+{{/* The roster. Standalone (rendered on user_list.html) and also swapped in
+     place after every one of the four row mutations -- see user_row below,
+     which is the actual swap target and renders standalone on its own. */}}
+{{define "user_list_panel"}}
+<div id="user-list" class="panel">
+  <div class="panel-head">
+    <h2>{{pluralise (len .Rows) "user" "users"}}</h2>
+    <span class="panel-note">
+      {{.ActiveAdminCount}} active administrator{{if ne .ActiveAdminCount 1}}s{{end}}.
+      The last one cannot be demoted, deactivated or scrubbed.
+    </span>
+  </div>
+  {{if .Rows}}
+  <div class="scroll-x">
+    <table>
+      <thead>
+        <tr>
+          <th>Username</th><th>Name</th><th>Source</th><th>Role</th>
+          <th>Sees costs</th><th>State</th><th></th>
+        </tr>
+      </thead>
+      <tbody id="user-rows">
+        {{range .Rows}}{{template "user_row" .}}{{end}}
+      </tbody>
+    </table>
+  </div>
+  {{else}}
+  <div class="empty"><strong>No accounts.</strong></div>
+  {{end}}
+</div>
+{{end}}
+
+{{/* One account. THE SWAP TARGET IS THIS ROW, id="user-row-{id}", declared
+     here rather than chosen by the handler -- every one of the four mutating
+     routes (role, costs, active, scrub) targets exactly this element. */}}
+{{define "user_row"}}
+<tr id="user-row-{{.User.ID}}">
+  <td class="mono">{{.User.Username}}</td>
+  <td>{{.User.Display}}</td>
+  <td><span class="pill pill-muted">{{.User.Source}}</span></td>
+  <td>
+    <form hx-post="/users/{{.User.ID}}/role" hx-target="#user-row-{{.User.ID}}" hx-swap="outerHTML"
+          method="post" action="/users/{{.User.ID}}/role" style="display:flex;gap:6px;align-items:center">
+      <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+      <select name="role" aria-label="Role for {{.User.Username}}">
+        {{$role := .User.Role}}
+        {{range .Roles}}
+        <option value="{{.}}" {{if eq . $role}}selected{{end}}>{{.}}</option>
+        {{end}}
+      </select>
+      <button class="btn btn-sm" type="submit">Save</button>
+    </form>
+    {{/* The fail-closed state, visible: object-level write for a project
+         owner is not live until WP-G1 Task 13, and Task 13 must remove this
+         badge along with TestTheRosterMarksAProjectOwnerAsPendingWhileTheGate
+         IsNotLive -- a "pending" badge that outlives the gate is a lie. */}}
+    {{if eq .User.Role "project_owner"}}
+    <div class="pill pill-muted" style="margin-top:4px"
+         title="Object-level write for project owners lands with project scoping">
+      pending — takes effect when project scoping ships
+    </div>
+    {{end}}
+  </td>
+  <td>
+    {{/* The single cost-grant control (spec §3): the same route and the same
+         checkbox for an Observer and a project owner alike. There is no
+         second mechanism anywhere else in this codebase. */}}
+    <form hx-post="/users/{{.User.ID}}/costs" hx-target="#user-row-{{.User.ID}}" hx-swap="outerHTML"
+          method="post" action="/users/{{.User.ID}}/costs">
+      <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+      <label style="display:flex;gap:4px;align-items:center;font-weight:normal">
+        <input type="checkbox" name="can_see_costs" value="true"
+               {{if .User.CanSeeCosts}}checked{{end}}
+               onchange="this.form.requestSubmit()">
+        sees costs
+      </label>
+    </form>
+  </td>
+  <td>
+    {{if .User.IsActive}}
+      <span class="pill pill-info">active</span>
+    {{else}}
+      <span class="pill pill-muted">deactivated</span>
+    {{end}}
+  </td>
+  <td style="white-space:nowrap">
+    <form hx-post="/users/{{.User.ID}}/active" hx-target="#user-row-{{.User.ID}}" hx-swap="outerHTML"
+          method="post" action="/users/{{.User.ID}}/active" style="display:inline-block">
+      <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+      {{if .User.IsActive}}
+        <input type="hidden" name="active" value="false">
+        <button class="btn btn-sm" type="submit">Deactivate</button>
+      {{else}}
+        <input type="hidden" name="active" value="true">
+        <button class="btn btn-sm" type="submit">Activate</button>
+      {{end}}
+    </form>
+    <form hx-post="/users/{{.User.ID}}/scrub" hx-target="#user-row-{{.User.ID}}" hx-swap="outerHTML"
+          method="post" action="/users/{{.User.ID}}/scrub" style="display:inline-block"
+          hx-confirm="Scrub this account? It clears their name, email and password. The change_log keeps referencing their id, but it no longer resolves to a person. This cannot be undone.">
+      <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+      <button class="btn btn-sm btn-danger" type="submit">Scrub</button>
+    </form>
+  </td>
+</tr>
+{{end}}

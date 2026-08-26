@@ -103,6 +103,7 @@ func (a *App) DependencyVerify(w http.ResponseWriter, r *http.Request) {
 		CSRF:        b.CSRF,
 		Direction:   directionOf(r),
 		DataClasses: classes[id],
+		SecretRef:   secretRefDisplay(dep.IdentitySecretRef, b.IsAdmin),
 	}, oobFlash("success", "Marked "+dep.ConsumerCode+" → "+dep.ProviderCode+" as verified."))
 }
 

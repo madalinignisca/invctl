@@ -616,10 +616,21 @@ type depRowData struct {
 	CSRF        string
 	Direction   string // "upstream" or "downstream"
 	DataClasses []string
+	// SecretRef is the identity's secret_ref, ALREADY REDACTED for anyone who
+	// is not a full Administrator -- computed once here, in the handler's
+	// view model, rather than left to the template. A template-side
+	// {{if .IsAdmin}} around .Dep.IdentitySecretRef is one {{end}} away from
+	// leaking it, and it does nothing at all for a CSV export, which never
+	// passes through a template. Empty when the edge carries no identity, or
+	// the identity carries no secret_ref -- both render as "—", the same as
+	// every other absent field on this row.
+	SecretRef string
 }
 
-// depRows decorates dependency rows for rendering.
-func depRows(deps []store.DependencyRow, classes map[string][]string, direction, csrf string, canWrite bool) []depRowData {
+// depRows decorates dependency rows for rendering. isAdmin gates SecretRef --
+// see IsAdmin's doc comment on why this is deliberately narrower than
+// canWrite and must not be derived from it.
+func depRows(deps []store.DependencyRow, classes map[string][]string, direction, csrf string, canWrite, isAdmin bool) []depRowData {
 	out := make([]depRowData, len(deps))
 	for i := range deps {
 		out[i] = depRowData{
@@ -628,9 +639,23 @@ func depRows(deps []store.DependencyRow, classes map[string][]string, direction,
 			CSRF:        csrf,
 			Direction:   direction,
 			DataClasses: classes[deps[i].ID],
+			SecretRef:   secretRefDisplay(deps[i].IdentitySecretRef, isAdmin),
 		}
 	}
 	return out
+}
+
+// secretRefDisplay applies the read-path redaction identity.secret_ref needs
+// (spec §10): a non-administrator gets domain.Redacted, never the value,
+// never merely a hidden field a client could still read out of the response.
+func secretRefDisplay(ref *string, isAdmin bool) string {
+	if ref == nil || *ref == "" {
+		return ""
+	}
+	if !isAdmin {
+		return domain.Redacted
+	}
+	return *ref
 }
 
 // submittedEnvironments reads the environment checkbox group.

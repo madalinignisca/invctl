@@ -38,6 +38,10 @@
     {{if .Dep.IdentityName}}{{deref .Dep.IdentityName}}{{else}}—{{end}}
     {{if .Dep.AuthMethod}}<div style="color:var(--faint)">{{deref .Dep.AuthMethod}}</div>{{end}}
     {{if .Dep.FirewallRuleRef}}<div style="color:var(--faint)">{{deref .Dep.FirewallRuleRef}}</div>{{end}}
+    {{/* .SecretRef is already redacted for a non-administrator by the
+         handler's view model (depRowData.SecretRef) -- this template never
+         sees the raw column and has nothing to leak. */}}
+    {{if .SecretRef}}<div style="color:var(--faint)">secret: {{.SecretRef}}</div>{{end}}
   </td>
   <td>
     {{if .Dep.VerifiedAt}}

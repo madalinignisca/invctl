@@ -52,6 +52,11 @@ type NavLink struct {
 	// The query string is what tells the two apart, and it is a fact the
 	// request carries. See AssetListNav.
 	Nav string
+	// AdminOnly hides this link from a rendered rail for anyone who is not a
+	// full Administrator (WP-G1 Task 5's user-administration screen). The
+	// route itself is already behind RequireAdmin -- this only stops the rail
+	// from advertising a link that a click would answer with 403.
+	AdminOnly bool
 }
 
 // NavGroup is a heading and the links under it.
@@ -116,6 +121,10 @@ var navGroups = []NavGroup{
 		{Label: "Inflation", Href: "/inflation", Nav: "inflation"},
 		{Label: "Custom fields", Href: "/custom-fields", Nav: "custom-fields"},
 		{Label: "Tags", Href: "/tags", Nav: "tags"},
+		// WP-G1 Task 5: the only place a role is granted, a cost grant is
+		// made, or an account is scrubbed. Administrator-only -- see
+		// AdminOnly's doc comment.
+		{Label: "Users", Href: "/users", Nav: "users", AdminOnly: true},
 	}},
 }
 

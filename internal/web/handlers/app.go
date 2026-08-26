@@ -86,6 +86,11 @@ type Base struct {
 	NavGroups []NavGroup
 	User      *domain.AppUser
 	CanWrite  bool
+	// IsAdmin is narrower than CanWrite -- see Authorizer.IsAdministrator's
+	// doc comment for why the two must stay separate. Used wherever a page
+	// decides whether to show a value rather than whether to accept a write,
+	// starting with identity.secret_ref on the service page (WP-G1 Task 5).
+	IsAdmin bool
 	// CanSeeCosts is CanWrite's read-only sibling for money. Since WP-G1 Task
 	// 4 it is true for Administrators unconditionally, and for everyone else
 	// only when app_user.can_see_costs is granted (docs/rbac-design.md §3) --
@@ -276,6 +281,7 @@ func (a *App) base(r *http.Request, title, nav string) Base {
 		NavGroups:   NavFor(nav),
 		User:        user,
 		CanWrite:    a.Authz.CanWrite(user),
+		IsAdmin:     a.Authz.IsAdministrator(user),
 		CanSeeCosts: a.Authz.CanSeeCosts(user),
 		CSRF:        nosurf.Token(r),
 		// Which row the operator asked to edit, if any. In the query string

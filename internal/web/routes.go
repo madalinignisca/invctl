@@ -224,6 +224,19 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 
 	write("POST /environments", app.EnvironmentCreate)
 
+	// User administration (WP-G1 Task 5). The only screen that grants a
+	// role, grants cost visibility, activates/deactivates an account, or
+	// scrubs one -- see internal/web/handlers/users.go's package comment.
+	// GET is here too, deliberately, same reasoning as /imports: this view
+	// exists purely to feed the five mutations below and a read-only user
+	// has no use for it.
+	write("GET /users", app.UserList)
+	write("POST /users", app.UserCreate)
+	write("POST /users/{id}/role", app.UserSetRole)
+	write("POST /users/{id}/costs", app.UserSetCosts)
+	write("POST /users/{id}/active", app.UserSetActive)
+	write("POST /users/{id}/scrub", app.UserScrub)
+
 	write("POST /assets", app.AssetCreate)
 	write("POST /assets/{id}", app.AssetUpdate)
 	write("POST /assets/{id}/retire", app.AssetRetire)

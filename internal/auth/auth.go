@@ -185,6 +185,25 @@ func (a *Authorizer) isAdministrator(user *domain.AppUser) bool {
 	return user.Role == domain.RoleAdministrator
 }
 
+// IsAdministrator reports whether user holds full Administrator authority --
+// by role, or by the INV_ADMIN_USERS break-glass override -- and is active.
+//
+// DELIBERATELY SEPARATE FROM CanWrite, even though the two agree on every
+// input today: CanWrite is "may mutate anything", which happens to equal "is
+// an Administrator" only because RoleProjectOwner is fail-closed until Task
+// 13 (see CanWrite's own comment). A caller asking "is this specifically an
+// Administrator" -- the secret-reference redaction on the service page is
+// exactly that caller -- must not borrow CanWrite for it: the day a project
+// owner's scoped write lands, CanWrite(project owner) starts returning true
+// for their own objects, and a check that meant "administrator" would start
+// handing them every other identity's credential path along with it.
+func (a *Authorizer) IsAdministrator(user *domain.AppUser) bool {
+	if user == nil || !user.IsActive {
+		return false
+	}
+	return a.isAdministrator(user)
+}
+
 // CanWrite reports whether a user may mutate anything.
 //
 // Administrator (by role, or by the INV_ADMIN_USERS override) may write

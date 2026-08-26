@@ -470,6 +470,78 @@ func TestTwoSimultaneousDemotionsCannotRemoveTheLastAdministrator(t *testing.T) 
 	}
 }
 
+// TestScrubbingAUserLeavesEveryChangeLogRowIntactAndStillReferencingTheirId is
+// the whole point of ScrubUser keeping the row's id: change_log.actor is an
+// opaque id, not a name, so scrubbing must not touch a single row that already
+// names this account as the actor of some earlier change -- count and actor
+// values byte-identical before and after.
+//
+// Mutation: make ScrubUser null the id (or otherwise change it) -- this must
+// fail, because every prior change_log row naming the old id would stop
+// resolving to this account at all, which is a worse failure than the erasure
+// this method exists to perform correctly.
+func TestScrubbingAUserLeavesEveryChangeLogRowIntactAndStillReferencingTheirId(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			s, ctx := newStore(t, e)
+			admin := mustUserWithRole(t, s, ctx, "admin", domain.RoleAdministrator)
+			subject := mustUserWithRole(t, s, ctx, "alice", domain.RoleObserver)
+
+			// Give the subject some prior history of their own -- a role grant --
+			// so there is something on record to prove untouched.
+			if err := s.SetUserRole(ctx, domain.UserActor(admin), subject.ID, domain.RoleProjectOwner); err != nil {
+				t.Fatalf("granting role: %v", err)
+			}
+
+			before, err := s.ListChangesForEntity(ctx, "app_user", subject.ID, 50)
+			if err != nil {
+				t.Fatalf("listing changes before: %v", err)
+			}
+
+			if err := s.ScrubUser(ctx, domain.UserActor(admin), subject.ID); err != nil {
+				t.Fatalf("scrubbing: %v", err)
+			}
+
+			after, err := s.ListChangesForEntity(ctx, "app_user", subject.ID, 50)
+			if err != nil {
+				t.Fatalf("listing changes after: %v", err)
+			}
+			// Scrubbing itself writes exactly one new row -- see
+			// TestScrubbingIsItselfAudited in internal/web for the HTTP-level
+			// version of that claim -- so "after" is "before" plus one.
+			if len(after) != len(before)+1 {
+				t.Fatalf("change_log rows for the subject went %d -> %d, want exactly one new row",
+					len(before), len(after))
+			}
+			// The prior entries (after skips the new one, which sorts first)
+			// must be byte-identical, actor included.
+			for i, b := range before {
+				a := after[i+1]
+				if a.ID != b.ID || a.Actor != b.Actor || a.EntityID != b.EntityID || a.Diff != b.Diff {
+					t.Errorf("change_log row %d changed after scrubbing: before=%+v after=%+v", i, b, a)
+				}
+			}
+
+			scrubbed, err := s.GetUser(ctx, subject.ID)
+			if err != nil {
+				t.Fatalf("loading the scrubbed row: %v", err)
+			}
+			if scrubbed.ID != subject.ID {
+				t.Fatalf("the scrubbed row's id changed: %q -> %q", subject.ID, scrubbed.ID)
+			}
+			// And the id still resolves, from every row that named it.
+			for _, c := range after {
+				if c.Actor == admin.ID {
+					continue
+				}
+				if c.EntityID != subject.ID {
+					t.Errorf("a change_log row for the subject no longer names their id: %+v", c)
+				}
+			}
+		})
+	}
+}
+
 // TestAScrubbedLDAPAccountCannotAuthenticate covers the gap a review found in
 // this task: an LDAP account authenticates by binding against the directory
 // (internal/auth/ldap.go) and never consults password_hash at all, so
