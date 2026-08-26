@@ -48,6 +48,13 @@
   <td>{{.User.Display}}</td>
   <td><span class="pill pill-muted">{{.User.Source}}</span></td>
   <td>
+    {{/* Effective access, computed in the handler (a.userRow) from a.Authz --
+         NEVER inferred here from .User.Role. A stored role of "observer"
+         does not mean read-only if INV_ADMIN_USERS names this account: see
+         Authorizer.EnvOverride's doc comment. */}}
+    {{if .OverrideNote}}
+    <div class="pill pill-info" style="margin-bottom:4px" title="{{.OverrideNote}}">{{.OverrideNote}}</div>
+    {{end}}
     <form hx-post="/users/{{.User.ID}}/role" hx-target="#user-row-{{.User.ID}}" hx-swap="outerHTML"
           method="post" action="/users/{{.User.ID}}/role" style="display:flex;gap:6px;align-items:center">
       <input type="hidden" name="csrf_token" value="{{.CSRF}}">

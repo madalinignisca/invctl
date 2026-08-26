@@ -204,6 +204,26 @@ func (a *Authorizer) IsAdministrator(user *domain.AppUser) bool {
 	return a.isAdministrator(user)
 }
 
+// EnvOverride reports whether user's write access, if any, is granted
+// specifically by the INV_ADMIN_USERS break-glass list -- independent of what
+// app_user.role says, and independent of IsActive.
+//
+// Exported for exactly one caller: the user-administration roster (WP-G1 Task
+// 5), which has to say WHERE effective access comes from, not just what
+// CanWrite/IsAdministrator currently answers. Every existing estate upgrading
+// into role-based access starts with every row at role='observer' (migration
+// 00058's default) while INV_ADMIN_USERS keeps naming the real operators --
+// so the roster showing the stored column alone would name its only writer a
+// reader, on the one screen whose entire job is answering "who can write
+// here". See docs/RECOVERY.md for what this environment variable is and why
+// it exists.
+func (a *Authorizer) EnvOverride(user *domain.AppUser) bool {
+	if user == nil {
+		return false
+	}
+	return a.admins[strings.ToLower(user.Username)]
+}
+
 // CanWrite reports whether a user may mutate anything.
 //
 // Administrator (by role, or by the INV_ADMIN_USERS override) may write

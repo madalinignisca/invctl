@@ -62,6 +62,39 @@ type userRowView struct {
 	User  *domain.AppUser
 	CSRF  string
 	Roles []string
+	// EffectiveAdmin and OverrideNote answer "who can write here" from
+	// a.Authz, NEVER from User.Role read directly -- see userRow's own doc
+	// comment for why that distinction is the whole point of this screen.
+	EffectiveAdmin bool
+	OverrideNote   string
+}
+
+// userRow builds one row's view model, computing effective access from
+// a.Authz rather than reading User.Role straight off the database.
+//
+// EVERY EXISTING ESTATE UPGRADING INTO ROLE-BASED ACCESS HAS EVERY ROW AT
+// role='observer' -- migration 00058's default -- while INV_ADMIN_USERS keeps
+// naming whoever can actually write, break-glass override (Task 4). A roster
+// that rendered User.Role unmodified would show the one person who can
+// change anything on this estate as a read-only Observer, on the one screen
+// whose entire job is answering who can write here. Computed here, in the
+// handler's view model, for the same reason secret_ref redaction lives here
+// and not in the template: a template-side branch on the role string is one
+// {{end}} away from silently reintroducing exactly this.
+//
+// Mutation: render User.Role alone again (drop this function's callers) --
+// TestTheRosterShowsEffectiveAdminAccessGrantedByEnvOverride must go red.
+func (a *App) userRow(u *domain.AppUser, csrf string) userRowView {
+	v := userRowView{User: u, CSRF: csrf, Roles: domain.Roles}
+	v.EffectiveAdmin = a.Authz.IsAdministrator(u)
+	// The note is only useful when it explains a DIVERGENCE: an active
+	// administrator named in INV_ADMIN_USERS whose role column also says
+	// administrator needs no explanation, and showing one anyway is the
+	// "otherwise the marker is decoration" case this file's own tests guard.
+	if v.EffectiveAdmin && u.Role != domain.RoleAdministrator && a.Authz.EnvOverride(u) {
+		v.OverrideNote = "Administrator (from INV_ADMIN_USERS) — overrides the role picker below. See docs/RECOVERY.md."
+	}
+	return v
 }
 
 // UserList renders the roster.
@@ -86,7 +119,7 @@ func (a *App) renderUserList(w http.ResponseWriter, r *http.Request, status int,
 	b := a.base(r, "Users", "users")
 	rows := make([]userRowView, len(users))
 	for i := range users {
-		rows[i] = userRowView{User: &users[i], CSRF: b.CSRF, Roles: domain.Roles}
+		rows[i] = a.userRow(&users[i], b.CSRF)
 	}
 
 	a.Render.Respond(w, r, status, "user_list", "user_list_panel", userListPage{
@@ -228,7 +261,7 @@ func (a *App) renderUserRowError(w http.ResponseWriter, r *http.Request, id stri
 	if render.IsHTMX(r) {
 		b := a.base(r, "", "")
 		a.Render.PartialWithOOB(w, http.StatusUnprocessableEntity, "user_row",
-			userRowView{User: u, CSRF: b.CSRF, Roles: domain.Roles},
+			a.userRow(u, b.CSRF),
 			oobFlash("error", err.Error()))
 		return
 	}
@@ -245,7 +278,7 @@ func (a *App) respondUserRow(w http.ResponseWriter, r *http.Request, u *domain.A
 	if render.IsHTMX(r) {
 		b := a.base(r, "", "")
 		a.Render.PartialWithOOB(w, http.StatusOK, "user_row",
-			userRowView{User: u, CSRF: b.CSRF, Roles: domain.Roles},
+			a.userRow(u, b.CSRF),
 			oobFlash(flashKind, flashText))
 		return
 	}

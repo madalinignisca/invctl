@@ -269,6 +269,76 @@ func TestTheRosterMarksAProjectOwnerAsPendingWhileTheGateIsNotLive(t *testing.T)
 	}
 }
 
+// TestTheRosterShowsEffectiveAdminAccessGrantedByEnvOverride.
+//
+// The seeded "admin" account is exactly the case that motivates this: its
+// app_user.role column is "observer" (NewAppUser's default, migration
+// 00058), and it writes everything only because the harness's INV_ADMIN_USERS
+// names it (webTemplate / newHarnessSecure's cfg.AdminUsers). Every existing
+// estate upgrading into role-based access looks like this on day one. A
+// roster that rendered the stored column alone would show the only account
+// that can change anything here as read-only.
+//
+// Mutation: make a.userRow return userRowView{User: u, ...} without computing
+// EffectiveAdmin/OverrideNote (i.e. render .User.Role alone again) -- this
+// must go red.
+func TestTheRosterShowsEffectiveAdminAccessGrantedByEnvOverride(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	admin, err := h.store.GetUserByUsername(context.Background(), "admin")
+	if err != nil {
+		t.Fatalf("loading the seeded admin: %v", err)
+	}
+	if admin.Role != domain.RoleObserver {
+		t.Fatalf("setup: the seeded admin's role column = %q, want %q -- "+
+			"the whole point of this test depends on the column disagreeing "+
+			"with effective access", admin.Role, domain.RoleObserver)
+	}
+
+	page := body(t, h.get("/users", false))
+	adminRow := rowByID(t, page, "user-row-"+admin.ID)
+	if !strings.Contains(adminRow, "INV_ADMIN_USERS") {
+		t.Errorf("the seeded admin's row does not say its access comes from INV_ADMIN_USERS: %s", adminRow)
+	}
+	if !strings.Contains(strings.ToLower(adminRow), "administrator") {
+		t.Errorf("the seeded admin's row does not say Administrator anywhere despite writing everything: %s", adminRow)
+	}
+}
+
+// TestTheRosterShowsNoOverrideMarkerForARealAdministrator: the marker must be
+// absent when it would explain nothing, or it is decoration rather than
+// information -- an administrator by role, not named in INV_ADMIN_USERS at
+// all, needs no note about where their access comes from.
+func TestTheRosterShowsNoOverrideMarkerForARealAdministrator(t *testing.T) {
+	h := newHarness(t)
+	real := mustWebUserWithRole(t, h, "role-based-admin", domain.RoleAdministrator)
+	h.login("admin", "admin-password")
+
+	page := body(t, h.get("/users", false))
+	row := rowByID(t, page, "user-row-"+real.ID)
+	if strings.Contains(row, "INV_ADMIN_USERS") {
+		t.Errorf("a role-based administrator's row carries an override note it does not need: %s", row)
+	}
+}
+
+// rowByID extracts the <tr id="{marker}">...</tr> fragment so an assertion
+// about one row cannot accidentally match another row's markup elsewhere on
+// the same page. Distinct from costs_test.go's rowContaining, which matches
+// on a form attribute rather than the row's own id.
+func rowByID(t *testing.T, page, marker string) string {
+	t.Helper()
+	start := strings.Index(page, `id="`+marker+`"`)
+	if start == -1 {
+		t.Fatalf("no row found with id %q", marker)
+	}
+	end := strings.Index(page[start:], "</tr>")
+	if end == -1 {
+		t.Fatalf("row %q was never closed", marker)
+	}
+	return page[start : start+end]
+}
+
 // TestScrubbingTheLastActiveAdministratorIsRefused: spec §8's guard applies to
 // this verb too, reached through its own HTTP route rather than only at the
 // store layer -- store.TestTheLastAdministratorGuardCoversAllThreeVerbs
