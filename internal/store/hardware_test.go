@@ -848,7 +848,7 @@ func TestABatchedCatalogueImportWritesAndRefusesTheSameWay(t *testing.T) {
 			s, ctx := newStore(t, e)
 			mustManufacturer(t, s, ctx, "dell", "Dell")
 
-			report, err := s.ImportDeviceTypesBatched(ctx, testActor,
+			report, err := s.ImportDeviceTypesBatched(ctx, domain.AdministratorPermit(testActor),
 				catalogueCSV(t, catalogueHeader+"dell,R650\ndell,R750\n"), nil)
 			if err != nil {
 				t.Fatalf("importing: %v", err)
@@ -862,7 +862,7 @@ func TestABatchedCatalogueImportWritesAndRefusesTheSameWay(t *testing.T) {
 
 			// Create only, on the path that writes -- the gap the asset version
 			// had until mutation testing found it.
-			again, err := s.ImportDeviceTypesBatched(ctx, testActor,
+			again, err := s.ImportDeviceTypesBatched(ctx, domain.AdministratorPermit(testActor),
 				catalogueCSV(t, catalogueHeader+"dell,R650\n"), nil)
 			if err != nil {
 				t.Fatalf("re-importing: %v", err)
@@ -873,7 +873,7 @@ func TestABatchedCatalogueImportWritesAndRefusesTheSameWay(t *testing.T) {
 
 			// An unknown manufacturer is still refused before anything is
 			// written, so a bad row in a batched file leaves nothing half-done.
-			bad, err := s.ImportDeviceTypesBatched(ctx, testActor,
+			bad, err := s.ImportDeviceTypesBatched(ctx, domain.AdministratorPermit(testActor),
 				catalogueCSV(t, catalogueHeader+"dell,R850\nnosuchmaker,R950\n"), nil)
 			if err != nil {
 				t.Fatalf("importing: %v", err)

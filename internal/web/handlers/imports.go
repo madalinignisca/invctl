@@ -202,6 +202,10 @@ func (a *App) runImport(w http.ResponseWriter, r *http.Request, kind importKind)
 	}
 
 	who := actor(r)
+	// Minted HERE, once, from whoever is signed in for this request -- see
+	// importWork.permit's doc comment for why the runner must not do this
+	// itself later, on context.Background(), with nothing to derive it from.
+	permit := a.Authz.Permit(middleware.UserFrom(r.Context()))
 	job := store.ImportJob{
 		ID: store.NewID(), Kind: kind.Slug, Filename: header.Filename,
 		Actor: who.ID, ActorKind: who.Kind, Status: store.ImportQueued,
@@ -211,7 +215,7 @@ func (a *App) runImport(w http.ResponseWriter, r *http.Request, kind importKind)
 		a.serverError(w, r, err)
 		return
 	}
-	a.importer().submit(importWork{job: job, assets: rows, types: types, actor: who})
+	a.importer().submit(importWork{job: job, assets: rows, types: types, actor: who, permit: permit})
 	render.Redirect(w, r, "/imports/"+job.ID)
 }
 

@@ -111,7 +111,7 @@ func TestAtScale(t *testing.T) {
 		return fmt.Sprintf("%d would be created, %d problems", len(rep.Created), len(rep.Problems))
 	})
 	timed("real import (batched)", func() string {
-		rep, err := s.ImportAssetsBatched(ctx, actor, rows, nil)
+		rep, err := s.ImportAssetsBatched(ctx, domain.AdministratorPermit(actor), rows, nil)
 		if err != nil {
 			t.Fatalf("import: %v", err)
 		}
@@ -146,7 +146,7 @@ func TestAtScale(t *testing.T) {
 				time.Sleep(20 * time.Millisecond)
 			}
 		}()
-		rep, err := s.ImportAssetsBatched(ctx, actor, secondFile(), nil)
+		rep, err := s.ImportAssetsBatched(ctx, domain.AdministratorPermit(actor), secondFile(), nil)
 		close(stop)
 		if err != nil {
 			t.Fatalf("second import: %v", err)

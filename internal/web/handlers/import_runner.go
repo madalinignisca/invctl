@@ -44,6 +44,25 @@ type importWork struct {
 	// when the work runs and is never the system actor: the audit trail names
 	// the person who uploaded the file.
 	actor domain.Actor
+	// permit is minted from the submitter at SUBMIT time (WP-G1 Task 9) and
+	// carried unchanged into the run, for the same reason actor is: importWork
+	// runs on context.Background(), long after the request and its session are
+	// gone, so there is nothing to derive a fresh authorization decision from
+	// when the worker finally gets to it. It is NOT domain.SystemPermit or
+	// domain.AdministratorPermit minted here regardless of who submitted --
+	// that would turn "upload a CSV" into the one route by which a project
+	// owner acquires estate-wide write, which looks entirely reasonable in
+	// review and is exactly the escalation this task exists to close.
+	//
+	// DELIBERATELY NOT REFRESHED if the submitter's role changes while this
+	// sits in the queue or runs: the authorization decision was made the
+	// moment the operator pressed submit, matching the choice already made
+	// for actor above. The alternative -- re-deriving the permit from the
+	// database before every batch, or every row -- would mean a promotion
+	// or demotion mid-run silently changes what an already-queued job is
+	// allowed to do, which is a worse property than a stale-but-honest
+	// snapshot of a decision that was correct when it was made.
+	permit domain.Permit
 }
 
 // importRunner owns the queue, the single worker, and the live progress figures.
@@ -120,9 +139,9 @@ func (r *importRunner) run(w importWork) {
 		// saving anything. Both kinds batch -- a catalogue is small, but an
 		// import that sometimes holds the database is a rule with an exception
 		// in it. See ImportAssetsBatched for what the batching costs.
-		report, err = r.store.ImportAssetsBatched(ctx, w.actor, w.assets, progress)
+		report, err = r.store.ImportAssetsBatched(ctx, w.permit, w.assets, progress)
 	case store.ImportKindDeviceTypes:
-		report, err = r.store.ImportDeviceTypesBatched(ctx, w.actor, w.types, progress)
+		report, err = r.store.ImportDeviceTypesBatched(ctx, w.permit, w.types, progress)
 	default:
 		err = errUnknownImportKind
 	}

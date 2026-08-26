@@ -56,7 +56,18 @@ const ImportBatchSize = 200
 // Used by the background job. The preview still runs ImportAssets, which is one
 // transaction and rolls back -- a preview is somebody standing there waiting,
 // it writes nothing, and its lock is as short as the work.
-func (s *SQLStore) ImportAssetsBatched(ctx context.Context, actor domain.Actor,
+//
+// Takes a domain.Permit, not a domain.Actor -- WP-G1 Task 9. This runs on
+// context.Background(), long after the request that queued it is gone, so
+// there is no session to derive an authorization decision from at write time.
+// The caller (internal/web/handlers/import_runner.go) mints the permit ONCE,
+// from whoever submitted the file, and hands it here unchanged: minting
+// domain.AdministratorPermit internally -- the way the not-yet-converted
+// methods in this package still do -- would turn "upload a CSV" into the
+// route by which a project owner acquires estate-wide write, which is exactly
+// the privilege escalation this task exists to close off before Task 10's
+// mass conversion buries it under 148 other call sites.
+func (s *SQLStore) ImportAssetsBatched(ctx context.Context, permit domain.Permit,
 	rows []AssetImportRow, progress func(done int)) (*ImportReport, error) {
 
 	report := &ImportReport{Rows: len(rows)}
@@ -80,7 +91,7 @@ func (s *SQLStore) ImportAssetsBatched(ctx context.Context, actor domain.Actor,
 	// The snapshot, read once. Everything a row is checked against.
 	var existing, teams, environments map[string]string
 	var models deviceTypeIndex
-	if err := s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	if err := s.write(ctx, permit, func(t *tx) error {
 		var err error
 		if existing, err = existingAssetPaths(ctx, t); err != nil {
 			return err
@@ -176,10 +187,34 @@ func (s *SQLStore) ImportAssetsBatched(ctx context.Context, actor domain.Actor,
 		// the commit, so every intra-batch parent looked missing -- and if the
 		// batch rolls back these ids have to go with it.
 		pending := map[string]string{}
+		// wrote tracks which offsets in [start,end) actually landed, so the
+		// bookkeeping below never counts a row the permit refused as created.
+		wrote := make([]bool, end-start)
 
-		err := s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+		err := s.write(ctx, permit, func(t *tx) error {
 			for i := start; i < end; i++ {
 				row, asset := keep[i], built[i]
+
+				// CHECKED BEFORE insertAsset RUNS, not caught after. insertAsset's
+				// own INSERT executes before its logCreate call reaches this same
+				// Covers gate (tx.log is the audit chokepoint, and it necessarily
+				// runs last -- see store.go's doc comment on log). A transaction
+				// has no per-statement undo here: if the row's INSERT had already
+				// run before a refusal surfaced, skipping the error and continuing
+				// the loop would leave that INSERT uncommitted-but-executed inside
+				// a transaction this loop goes on to commit -- an authorization
+				// refusal that failed to prevent the write it refused. Asking the
+				// same question the audit gate would ask, before doing anything
+				// that needs undoing, is what makes "skip this row, keep the
+				// batch" safe rather than a hole.
+				if !permit.Covers("asset", asset.ID) {
+					report.Problems = append(report.Problems, ImportProblem{
+						Line: row.Line, Path: row.Path(),
+						Message: "outside the submitter's permitted scope; not created",
+					})
+					continue
+				}
+
 				if row.Parent != "" && asset.ParentID == nil {
 					id, ok := created[row.Parent]
 					if !ok {
@@ -203,6 +238,7 @@ func (s *SQLStore) ImportAssetsBatched(ctx context.Context, actor domain.Actor,
 					return fmt.Errorf("importing %s (line %d): %w", row.Path(), row.Line, err)
 				}
 				pending[row.Path()] = asset.ID
+				wrote[i-start] = true
 			}
 			return nil
 		})
@@ -226,11 +262,17 @@ func (s *SQLStore) ImportAssetsBatched(ctx context.Context, actor domain.Actor,
 		}
 
 		for i := start; i < end; i++ {
+			if !wrote[i-start] {
+				// Refused for this row alone -- see the errors.Is(err,
+				// domain.ErrForbidden) branch above. Not created, not counted,
+				// and NOT available as a parent for a later row.
+				continue
+			}
 			created[keep[i].Path()] = built[i].ID
 			report.Created = append(report.Created, keep[i].Path())
+			done++
 		}
 
-		done = end
 		if progress != nil {
 			progress(done)
 		}
@@ -248,7 +290,10 @@ func (s *SQLStore) ImportAssetsBatched(ctx context.Context, actor domain.Actor,
 // import must not be the one write in this application that can hold the
 // database against everybody else. A rule with an exception in it is a rule
 // somebody has to remember.
-func (s *SQLStore) ImportDeviceTypesBatched(ctx context.Context, actor domain.Actor,
+// ImportDeviceTypesBatched validates a catalogue file, then writes it in
+// batches. Takes a domain.Permit for the same reason ImportAssetsBatched
+// does -- see that function's doc comment.
+func (s *SQLStore) ImportDeviceTypesBatched(ctx context.Context, permit domain.Permit,
 	rows []DeviceTypeImportRow, progress func(done int)) (*ImportReport, error) {
 
 	report := &ImportReport{Rows: len(rows)}
@@ -261,7 +306,7 @@ func (s *SQLStore) ImportDeviceTypesBatched(ctx context.Context, actor domain.Ac
 
 	var makers map[string]manufacturerRef
 	var existing map[string]string
-	if err := s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	if err := s.write(ctx, permit, func(t *tx) error {
 		var err error
 		if makers, err = manufacturersByCode(ctx, t); err != nil {
 			return err
@@ -318,8 +363,22 @@ func (s *SQLStore) ImportDeviceTypesBatched(ctx context.Context, actor domain.Ac
 	for start := 0; start < len(built); start += ImportBatchSize {
 		end := min(start+ImportBatchSize, len(built))
 
-		err := s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+		wrote := make([]bool, end-start)
+
+		err := s.write(ctx, permit, func(t *tx) error {
 			for i := start; i < end; i++ {
+				// See ImportAssetsBatched's identical check: asked BEFORE the
+				// insert runs, because tx.log's Covers gate fires only at the
+				// end of insertDeviceType, after the row is already written
+				// inside this open transaction -- too late to skip just one
+				// row without also undoing the INSERT that already ran.
+				if !permit.Covers("device_type", built[i].ID) {
+					report.Problems = append(report.Problems, ImportProblem{
+						Line: keep[i].Line, Path: keep[i].Path(),
+						Message: "outside the submitter's permitted scope; not created",
+					})
+					continue
+				}
 				if err := s.insertDeviceType(ctx, t, built[i], names[i]); err != nil {
 					var ve *domain.ValidationError
 					if errors.As(err, &ve) {
@@ -333,6 +392,7 @@ func (s *SQLStore) ImportDeviceTypesBatched(ctx context.Context, actor domain.Ac
 					}
 					return fmt.Errorf("importing %s (line %d): %w", keep[i].Path(), keep[i].Line, err)
 				}
+				wrote[i-start] = true
 			}
 			return nil
 		})
@@ -349,9 +409,12 @@ func (s *SQLStore) ImportDeviceTypesBatched(ctx context.Context, actor domain.Ac
 		}
 
 		for i := start; i < end; i++ {
+			if !wrote[i-start] {
+				continue
+			}
 			report.Created = append(report.Created, keep[i].Path())
+			done++
 		}
-		done = end
 		if progress != nil {
 			progress(done)
 		}

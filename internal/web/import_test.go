@@ -18,6 +18,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/madalinignisca/invctl/internal/domain"
+	"github.com/madalinignisca/invctl/internal/store"
 )
 
 // upload posts a CSV to the import route the way a browser would.
@@ -356,5 +359,177 @@ func TestAnImportInProgressDoesNotWedgeEveryOtherWrite(t *testing.T) {
 		t.Fatal("an ordinary write hung while an import was running. The import holds " +
 			"the single SQLite writer, so nothing it does may itself need that " +
 			"connection -- which is exactly how the progress update deadlocked.")
+	}
+}
+
+// --- WP-G1 Task 9: the import runner carries the submitter's permit ---
+//
+// These three go straight at store.ImportAssetsBatched rather than through
+// the queued HTTP path. The real route is admin-only (see
+// TestImportIsAdminOnlyOnBothVerbs above), so every submitter the HTTP layer
+// can produce today already resolves to domain.AdministratorPermit -- there
+// is no logged-in path yet that reaches this handler with anything narrower.
+// What Task 9 is settling is the STORE method's contract for the day a
+// narrower submitter exists (project owners import too, eventually), so
+// these mint the permit by hand, the way internal/web/handlers/imports.go's
+// a.Authz.Permit(user) call will for a real one.
+
+func importSubmitter(id string) domain.Actor {
+	return domain.Actor{ID: id, Name: id, Kind: domain.ActorKindUser}
+}
+
+// TestAnImportRunsUnderThePermitOfWhoeverSubmittedIt proves the created
+// rows' change_log entries name the submitter, not this process.
+func TestAnImportRunsUnderThePermitOfWhoeverSubmittedIt(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+
+	submitter := importSubmitter("import-submitter-1")
+	permit := domain.AdministratorPermit(submitter)
+
+	report, err := h.store.ImportAssetsBatched(ctx, permit,
+		[]store.AssetImportRow{{Line: 2, Name: "task9-submitter-asset", Kind: "site"}}, nil)
+	if err != nil {
+		t.Fatalf("ImportAssetsBatched: %v", err)
+	}
+	if len(report.Created) != 1 {
+		t.Fatalf("created %d rows, want 1: %+v", len(report.Created), report.Problems)
+	}
+
+	// Scoped to THIS row by name, not "most recent": the test clock is
+	// shared with the seed fixture, so change_log.at ties do not reliably
+	// order a fresh row after seeded ones.
+	actorID := h.lookup(`SELECT actor FROM change_log WHERE entity_type = 'asset'
+	                      AND entity_id = (SELECT id FROM asset WHERE name = 'task9-submitter-asset')`)
+	actorKind := h.lookup(`SELECT actor_kind FROM change_log WHERE entity_type = 'asset'
+	                       AND entity_id = (SELECT id FROM asset WHERE name = 'task9-submitter-asset')`)
+	if actorID != submitter.ID {
+		t.Errorf("change_log.actor = %q, want the submitter's id %q -- the import runs "+
+			"under whoever uploaded the file, not the process running it", actorID, submitter.ID)
+	}
+	if actorKind != domain.ActorKindUser {
+		t.Errorf("change_log.actor_kind = %q, want %q", actorKind, domain.ActorKindUser)
+	}
+}
+
+// TestAnImportCannotCreateAnAssetOutsideTheSubmittersScope is the mutation
+// target: have the runner mint domain.AdministratorPermit(work.actor) instead
+// of the captured permit and this goes red, because every row would then
+// succeed regardless of scope.
+//
+// A ScopedPermit cannot yet authorize the CREATE of a not-yet-existing row at
+// all: entities is checked by id, and an asset's id is a fresh UUIDv7 minted
+// inside ImportAssetsBatched, unknowable to any caller ahead of the write --
+// see ScopedPermit's own doc comment in internal/domain/role.go, and Task
+// 13/14, which is what will let a project owner's create actually land in
+// their own project. So today every row submitted under a ScopedPermit is,
+// correctly and safely, outside the submitter's scope: this test proves that
+// refusal is a PER-ROW outcome (report.Problems, not a hard error) and that
+// the batch still finishes rather than aborting.
+func TestAnImportCannotCreateAnAssetOutsideTheSubmittersScope(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+
+	submitter := importSubmitter("import-submitter-2")
+	// Covers project "P" in name only: entities is nil, so nothing this
+	// permit could ever be asked to authorize a CREATE for is in it.
+	permit := domain.ScopedPermit(submitter, []string{"P"}, nil)
+
+	rows := []store.AssetImportRow{
+		{Line: 2, Name: "task9-scope-a", Kind: "site"},
+		{Line: 3, Name: "task9-scope-b", Kind: "site"},
+	}
+	report, err := h.store.ImportAssetsBatched(ctx, permit, rows, nil)
+	if err != nil {
+		t.Fatalf("ImportAssetsBatched returned an error rather than a per-row outcome: %v", err)
+	}
+	if len(report.Created) != 0 {
+		t.Errorf("created %v, want nothing created under a permit that covers none of it",
+			report.Created)
+	}
+	if len(report.Problems) != len(rows) {
+		t.Fatalf("got %d per-row problems, want %d (one per refused row): %+v",
+			len(report.Problems), len(rows), report.Problems)
+	}
+	for _, p := range report.Problems {
+		if !strings.Contains(p.Message, "scope") {
+			t.Errorf("problem for line %d does not name authorization as the reason: %q",
+				p.Line, p.Message)
+		}
+	}
+	if n := h.count(`SELECT COUNT(*) FROM asset WHERE name IN ('task9-scope-a', 'task9-scope-b')`); n != 0 {
+		t.Errorf("%d rows were created despite being refused -- the per-row outcome must "+
+			"mean the row was not written, not just that the report says so", n)
+	}
+}
+
+// TestAPermitCapturedAtSubmitIsNotRefreshedMidRun documents the decision:
+// once a permit is minted for a submission, it authorizes that submission's
+// writes for as long as the job runs, even if the submitter's role changes
+// in the database before the job finishes.
+//
+// This is the same choice already made for the actor captured alongside it
+// (see importWork's doc comment): the authorization decision was made the
+// moment the operator pressed submit, and it is defensible on its own terms
+// -- an operator watching a page they just acted on expects that action to
+// go through. The alternative, re-deriving the permit from the database
+// before every batch or every row, is worse: it would mean a demotion that
+// lands mid-run silently changes what an already-running job is allowed to
+// do, mid-file, which is a stranger and harder-to-reason-about failure mode
+// than "the decision was made when the button was pressed".
+//
+// domain.AdministratorPermit does not consult the database at all -- it is a
+// static decision baked in at mint time (see its doc comment in
+// internal/domain/role.go) -- so demoting the underlying app_user row after
+// minting and confirming the import still succeeds is a direct proof of the
+// property, not an inference from it.
+func TestAPermitCapturedAtSubmitIsNotRefreshedMidRun(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+
+	admin, err := h.store.GetUserByUsername(ctx, "admin")
+	if err != nil {
+		t.Fatalf("loading the seeded admin: %v", err)
+	}
+	subject, err := domain.NewAppUser(store.NewID(), "task9-demoted-submitter",
+		domain.UserSourceLocal, h.store.Now())
+	if err != nil {
+		t.Fatalf("NewAppUser: %v", err)
+	}
+	if err := h.store.CreateUser(ctx, domain.UserActor(admin), subject); err != nil {
+		t.Fatalf("creating the subject user: %v", err)
+	}
+	// The seeded "admin" account is an Administrator by the INV_ADMIN_USERS
+	// break-glass list, not by app_user.role -- so without this, subject
+	// would become the ONLY role-column Administrator, and demoting it below
+	// would be refused by the last-administrator guard for an unrelated
+	// reason. Granting admin the role column too, harmlessly, keeps this
+	// test about the permit-freshness property rather than that guard.
+	if err := h.store.SetUserRole(ctx, domain.AdministratorPermit(domain.UserActor(admin)), admin.ID, domain.RoleAdministrator); err != nil {
+		t.Fatalf("granting the seeded admin the role column: %v", err)
+	}
+	if err := h.store.SetUserRole(ctx, domain.AdministratorPermit(domain.UserActor(admin)), subject.ID, domain.RoleAdministrator); err != nil {
+		t.Fatalf("granting administrator: %v", err)
+	}
+
+	// Captured NOW, while subject is still an Administrator -- this is the
+	// permit the import will run under, exactly as importWork.permit is
+	// minted once at submit and never touched again.
+	permit := domain.AdministratorPermit(domain.UserActor(subject))
+
+	// Demoted BEFORE the import runs. A permit re-derived from the database
+	// at write time would see this and refuse; the captured one must not.
+	if err := h.store.SetUserRole(ctx, domain.AdministratorPermit(domain.UserActor(admin)), subject.ID, domain.RoleObserver); err != nil {
+		t.Fatalf("demoting the subject: %v", err)
+	}
+
+	report, err := h.store.ImportAssetsBatched(ctx, permit,
+		[]store.AssetImportRow{{Line: 2, Name: "task9-stale-permit-asset", Kind: "site"}}, nil)
+	if err != nil {
+		t.Fatalf("ImportAssetsBatched: %v", err)
+	}
+	if len(report.Created) != 1 {
+		t.Errorf("created %d rows, want 1 -- a permit captured before the demotion must "+
+			"still authorize the write it was minted for: %+v", len(report.Created), report.Problems)
 	}
 }

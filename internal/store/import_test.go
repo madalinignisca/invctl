@@ -773,7 +773,7 @@ func TestABatchedImportWritesTheWholeFile(t *testing.T) {
 				"dc-a,rack-1,rack\n"+
 				",dc-a,site\n")
 
-			report, err := s.ImportAssetsBatched(ctx, testActor, rows, nil)
+			report, err := s.ImportAssetsBatched(ctx, domain.AdministratorPermit(testActor), rows, nil)
 			if err != nil {
 				t.Fatalf("importing: %v", err)
 			}
@@ -800,7 +800,7 @@ func TestABatchedImportWritesTheWholeFile(t *testing.T) {
 			// CREATE ONLY, on this path too. The rule was tested against the
 			// preview path and not against the one that actually writes -- caught
 			// by mutating the batched check and watching everything stay green.
-			again, err := s.ImportAssetsBatched(ctx, testActor,
+			again, err := s.ImportAssetsBatched(ctx, domain.AdministratorPermit(testActor),
 				importCSV(t, importHeader+"dc-a,rack-1,rack\n"), nil)
 			if err != nil {
 				t.Fatalf("re-importing: %v", err)
