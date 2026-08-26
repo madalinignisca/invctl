@@ -150,6 +150,13 @@ var DeclaredColumns = map[string][]string{
 	"app_user": {
 		"id", "username", "display_name", "email", "source",
 		"password_hash", "is_active", "created_at",
+		// Access control (migration 00058, WP-G1). Both declared: a person
+		// assigns a role and a person grants the cost-visibility exception --
+		// neither is observed about the estate or a claim about where a fact
+		// came from. `role` defaults to observer and `can_see_costs` to
+		// FALSE; see the migration for why that direction, not the reverse,
+		// is the safe one.
+		"role", "can_see_costs",
 	},
 	"asset": {
 		"id", "kind", "name", "parent_id", "serial", "asset_tag", "vendor",

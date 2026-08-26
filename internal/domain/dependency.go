@@ -494,6 +494,13 @@ type AppUser struct {
 	IsActive     bool    `db:"is_active"`
 	LastLoginAt  *string `db:"last_login_at"`
 	CreatedAt    string  `db:"created_at"`
+	// Access control (migration 00058, WP-G1 task 1). Raw fields only --
+	// `SELECT * FROM app_user` (users.go) uses sqlx's strict StructScan, so a
+	// column with no matching field fails every read with "missing
+	// destination name", not just a write path nobody reached yet. The typed
+	// role vocabulary and CanSeeCosts semantics belong to task 2/4, not here.
+	Role        string `db:"role"`
+	CanSeeCosts bool   `db:"can_see_costs"`
 }
 
 // User sources.
