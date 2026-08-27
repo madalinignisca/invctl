@@ -138,6 +138,19 @@ func TestNetworkGroupValidationIs422(t *testing.T) {
 // contract through the real router: posting to /network/derive must render a
 // proposal and must not create any row anywhere in the topology tables.
 //
+// WP-G1 Task 15: this is the test the brief names as
+// TestNetworkDeriveProposesAndDoesNotWriteAnything and asks to be linked to
+// the task -- it already existed (network topology's own M5 propose-only
+// guarantee), and the brief's own reasoning for exempting POST
+// /network/derive from a per-row scope check is exactly what this test
+// pins: no write means no change_log row means nothing for Covers to ever
+// check. The change_log count assertion below is the part Task 15 adds --
+// the attachment-count assertion above proves no TOPOLOGY row appeared;
+// this proves no AUDIT row did either, which is the more direct statement
+// of "there is nothing here for the seam to authorize". If derive ever
+// starts writing, this is the assertion that fails loudly, not silently
+// passing because nobody thought to look at change_log specifically.
+//
 // Since M5 the seed declares an attachment for every cable it lays, so
 // derivation against an untouched fixture correctly proposes nothing -- that
 // is the fixture agreeing with itself, and it would make this test assert
@@ -177,6 +190,7 @@ func TestNetworkDeriveProposesAndDoesNotWriteThroughUI(t *testing.T) {
 	if err != nil {
 		t.Fatalf("listing attachments: %v", err)
 	}
+	changeLogBefore := h.count(`SELECT COUNT(*) FROM change_log`)
 
 	token := h.csrfToken("/network")
 	resp := h.post("/network/derive", url.Values{"csrf_token": {token}}, true)
@@ -202,6 +216,11 @@ func TestNetworkDeriveProposesAndDoesNotWriteThroughUI(t *testing.T) {
 	if len(after) != len(before) {
 		t.Errorf("derivation changed the attachment count from %d to %d through the UI; "+
 			"it must be propose-only", len(before), len(after))
+	}
+	if changeLogAfter := h.count(`SELECT COUNT(*) FROM change_log`); changeLogAfter != changeLogBefore {
+		t.Errorf("change_log grew from %d to %d rows; derivation must write nothing at all, "+
+			"which is the whole reason it needs no per-row scope check",
+			changeLogBefore, changeLogAfter)
 	}
 }
 
