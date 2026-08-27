@@ -238,7 +238,7 @@ func StageDemoOverride(ctx context.Context, s *store.SQLStore, username string) 
 	if err != nil {
 		return fmt.Errorf("building the demo override: %w", err)
 	}
-	if err := s.CreateHealthOverride(ctx, domain.UserActor(admin), o); err != nil {
+	if err := s.CreateHealthOverride(ctx, domain.AdministratorPermit(domain.UserActor(admin)), o); err != nil {
 		return fmt.Errorf("recording the demo override: %w", err)
 	}
 	return nil

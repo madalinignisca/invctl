@@ -38,7 +38,7 @@ func (f *observedFixture) mustOverride(t *testing.T, spec domain.HealthOverrideS
 	if err != nil {
 		t.Fatalf("building override: %v", err)
 	}
-	if err := f.store.CreateHealthOverride(f.ctx, testActor, o); err != nil {
+	if err := f.store.CreateHealthOverride(f.ctx, testPermit, o); err != nil {
 		t.Fatalf("creating override: %v", err)
 	}
 	return o
@@ -155,7 +155,7 @@ func TestOverrideMutationsAreAudited(t *testing.T) {
 			}
 
 			f.clock.Advance(5 * time.Minute)
-			amended, err := f.store.AmendHealthOverride(f.ctx, testActor, o.ID, domain.HealthOverrideSpec{
+			amended, err := f.store.AmendHealthOverride(f.ctx, testPermit, o.ID, domain.HealthOverrideSpec{
 				AssertedState: "degraded",
 				Reason:        "partially recovered, still not trusting the probe",
 				ExpiresAt:     f.clock.Now().Add(30 * time.Minute),
@@ -171,7 +171,7 @@ func TestOverrideMutationsAreAudited(t *testing.T) {
 			}
 
 			f.clock.Advance(time.Minute)
-			if err := f.store.ClearHealthOverride(f.ctx, testActor, o.ID); err != nil {
+			if err := f.store.ClearHealthOverride(f.ctx, testPermit, o.ID); err != nil {
 				t.Fatalf("clearing override: %v", err)
 			}
 			if got := f.changeCount(t, "health_override"); got != 3 {
@@ -306,7 +306,7 @@ func TestASecondOverrideConflictsButSupersedesALapsedOne(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building the second override: %v", err)
 			}
-			err = f.store.CreateHealthOverride(f.ctx, testActor, second)
+			err = f.store.CreateHealthOverride(f.ctx, testPermit, second)
 			if !errors.Is(err, domain.ErrConflict) {
 				t.Fatalf("second override while one is active = %v, want ErrConflict", err)
 			}
@@ -318,7 +318,7 @@ func TestASecondOverrideConflictsButSupersedesALapsedOne(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building the third override: %v", err)
 			}
-			if err := f.store.CreateHealthOverride(f.ctx, testActor, third); err != nil {
+			if err := f.store.CreateHealthOverride(f.ctx, testPermit, third); err != nil {
 				t.Fatalf("creating an override after the previous one lapsed: %v", err)
 			}
 
@@ -353,7 +353,7 @@ func TestOverrideOnSomethingThatDoesNotExistIs404(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building override: %v", err)
 			}
-			err = f.store.CreateHealthOverride(f.ctx, testActor, o)
+			err = f.store.CreateHealthOverride(f.ctx, testPermit, o)
 			if !errors.Is(err, domain.ErrNotFound) {
 				t.Fatalf("override on an unknown entity = %v, want ErrNotFound", err)
 			}

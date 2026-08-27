@@ -68,9 +68,9 @@ func (s *SQLStore) ListTags(ctx context.Context, includeRetired bool) ([]TagRow,
 // label and description -- is the domain constructor's job (NewTag); the
 // CHECK constraints in migration 00056 are the second line of defence, not
 // the first.
-func (s *SQLStore) CreateTag(ctx context.Context, actor domain.Actor, t *domain.Tag) error {
+func (s *SQLStore) CreateTag(ctx context.Context, p domain.Permit, t *domain.Tag) error {
 	t.RowVersion = 1
-	return s.write(ctx, domain.AdministratorPermit(actor), func(tx *tx) error {
+	return s.write(ctx, p, func(tx *tx) error {
 		_, err := tx.exec(ctx, `
 			INSERT INTO tag (id, code, label, description, created_by, created_at, row_version)
 			VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -87,7 +87,7 @@ func (s *SQLStore) CreateTag(ctx context.Context, actor domain.Actor, t *domain.
 // rename is a correction somebody makes deliberately, and piece 2's fold
 // folds a tag's stable id rather than its code precisely so this rename
 // never rewrites every entity carrying it).
-func (s *SQLStore) UpdateTag(ctx context.Context, actor domain.Actor, t *domain.Tag) error {
+func (s *SQLStore) UpdateTag(ctx context.Context, p domain.Permit, t *domain.Tag) error {
 	before, err := s.GetTag(ctx, t.ID)
 	if err != nil {
 		return err
@@ -102,7 +102,7 @@ func (s *SQLStore) UpdateTag(ctx context.Context, actor domain.Actor, t *domain.
 	t.RetiredAt = before.RetiredAt
 	t.RetiredBy = before.RetiredBy
 
-	return s.write(ctx, domain.AdministratorPermit(actor), func(tx *tx) error {
+	return s.write(ctx, p, func(tx *tx) error {
 		res, err := tx.exec(ctx, `
 			UPDATE tag SET code = ?, label = ?, description = ?, row_version = row_version + 1
 			WHERE id = ? AND row_version = ?`,
@@ -119,7 +119,7 @@ func (s *SQLStore) UpdateTag(ctx context.Context, actor domain.Actor, t *domain.
 
 // RetireTag soft-deletes a tag. A tag already retired is left alone rather
 // than refused, the way RetireCustomField treats a second retirement.
-func (s *SQLStore) RetireTag(ctx context.Context, actor domain.Actor, id string) error {
+func (s *SQLStore) RetireTag(ctx context.Context, p domain.Permit, id string) error {
 	before, err := s.GetTag(ctx, id)
 	if err != nil {
 		return err
@@ -128,11 +128,11 @@ func (s *SQLStore) RetireTag(ctx context.Context, actor domain.Actor, id string)
 		return nil
 	}
 	at := domain.FormatTime(s.now())
-	return s.write(ctx, domain.AdministratorPermit(actor), func(tx *tx) error {
+	return s.write(ctx, p, func(tx *tx) error {
 		res, err := tx.exec(ctx, `
 			UPDATE tag SET retired_at = ?, retired_by = ?, row_version = row_version + 1
 			WHERE id = ? AND row_version = ?`,
-			at, actor.ID, id, before.RowVersion)
+			at, p.Actor().ID, id, before.RowVersion)
 		if err != nil {
 			return translateWriteErr(err, "retiring tag")
 		}
@@ -141,7 +141,7 @@ func (s *SQLStore) RetireTag(ctx context.Context, actor domain.Actor, id string)
 			return err
 		}
 		diff := fmt.Sprintf(`{"retired_at":{"old":null,"new":%q},"retired_by":{"old":null,"new":%q}}`,
-			at, actor.ID)
+			at, p.Actor().ID)
 		return tx.log(ctx, "tag", id, domain.ActionRetire, diff, "")
 	})
 }
@@ -150,7 +150,7 @@ func (s *SQLStore) RetireTag(ctx context.Context, actor domain.Actor, id string)
 // code -- the partial unique index freed that code for reuse the moment
 // this tag was retired, and restoring the original would produce two live
 // tags with one code.
-func (s *SQLStore) RestoreTag(ctx context.Context, actor domain.Actor, id string) error {
+func (s *SQLStore) RestoreTag(ctx context.Context, p domain.Permit, id string) error {
 	before, err := s.GetTag(ctx, id)
 	if err != nil {
 		return err
@@ -169,7 +169,7 @@ func (s *SQLStore) RestoreTag(ctx context.Context, actor domain.Actor, id string
 			before.Code, domain.ErrConflict)
 	}
 
-	return s.write(ctx, domain.AdministratorPermit(actor), func(tx *tx) error {
+	return s.write(ctx, p, func(tx *tx) error {
 		res, err := tx.exec(ctx, `
 			UPDATE tag SET retired_at = NULL, retired_by = NULL, row_version = row_version + 1
 			WHERE id = ? AND row_version = ?`,

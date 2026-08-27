@@ -200,9 +200,9 @@ func (s *SQLStore) ListCustomFields(ctx context.Context, entityType string, incl
 // entity type and kind, a non-empty description -- is the domain
 // constructor's job (NewCustomField); the CHECK constraints in migration
 // 00051 are the second line of defence, not the first.
-func (s *SQLStore) CreateCustomField(ctx context.Context, actor domain.Actor, f *domain.CustomField) error {
+func (s *SQLStore) CreateCustomField(ctx context.Context, p domain.Permit, f *domain.CustomField) error {
 	f.RowVersion = 1
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, p, func(t *tx) error {
 		// f.OwnerTeamID is never nil here: domain.checkOwnerTeam refuses an
 		// empty one before this method is ever reached. Checked inside the
 		// same transaction as the insert, not before s.write is called,
@@ -256,7 +256,7 @@ func (t *tx) requireActiveOwnerTeam(ctx context.Context, ownerTeamID string) err
 // correct -- but a Kind change is refused once any value exists: retyping a
 // field that holds values is a data migration wearing a form control, and the
 // refusal names how many values are in the way.
-func (s *SQLStore) UpdateCustomField(ctx context.Context, actor domain.Actor, f *domain.CustomField) error {
+func (s *SQLStore) UpdateCustomField(ctx context.Context, p domain.Permit, f *domain.CustomField) error {
 	before, err := s.GetCustomField(ctx, f.ID)
 	if err != nil {
 		return err
@@ -327,7 +327,7 @@ func (s *SQLStore) UpdateCustomField(ctx context.Context, actor domain.Actor, f 
 	// customvalues.go): belt as well as braces, at no extra cost, because it
 	// needs the kind, the retirement state and the codes regardless.
 	// TestAKindChangeAbortsAgainstAConcurrentValueWrite asserts the outcome.
-	return s.writeSerializable(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.writeSerializable(ctx, p, func(t *tx) error {
 		if f.Kind != before.Kind {
 			n, err := t.countOne(ctx,
 				`SELECT COUNT(*) FROM custom_field_value WHERE field_id = ?`, f.ID)
@@ -381,7 +381,7 @@ func (s *SQLStore) UpdateCustomField(ctx context.Context, actor domain.Actor, f 
 // RetireCustomField soft-deletes a definition. It deletes no value, ever --
 // see docs/custom-fields-design.md §6. A field already retired is left alone
 // rather than refused, the way RetireTeam treats a second retirement.
-func (s *SQLStore) RetireCustomField(ctx context.Context, actor domain.Actor, id string) error {
+func (s *SQLStore) RetireCustomField(ctx context.Context, p domain.Permit, id string) error {
 	before, err := s.GetCustomField(ctx, id)
 	if err != nil {
 		return err
@@ -390,11 +390,11 @@ func (s *SQLStore) RetireCustomField(ctx context.Context, actor domain.Actor, id
 		return nil
 	}
 	at := domain.FormatTime(s.now())
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, p, func(t *tx) error {
 		res, err := t.exec(ctx, `
 			UPDATE custom_field SET retired_at = ?, retired_by = ?, row_version = row_version + 1
 			WHERE id = ? AND row_version = ?`,
-			at, actor.ID, id, before.RowVersion)
+			at, p.Actor().ID, id, before.RowVersion)
 		if err != nil {
 			return translateWriteErr(err, "retiring custom field")
 		}
@@ -403,7 +403,7 @@ func (s *SQLStore) RetireCustomField(ctx context.Context, actor domain.Actor, id
 			return err
 		}
 		diff := fmt.Sprintf(`{"retired_at":{"old":null,"new":%q},"retired_by":{"old":null,"new":%q}}`,
-			at, actor.ID)
+			at, p.Actor().ID)
 		return t.log(ctx, "custom_field", id, domain.ActionRetire, diff, "")
 	})
 }
@@ -413,7 +413,7 @@ func (s *SQLStore) RetireCustomField(ctx context.Context, actor domain.Actor, id
 // (entity_type, code) -- the partial unique index freed that code for reuse
 // the moment this field was retired, and restoring the original would
 // produce two live fields with one code.
-func (s *SQLStore) RestoreCustomField(ctx context.Context, actor domain.Actor, id string) error {
+func (s *SQLStore) RestoreCustomField(ctx context.Context, p domain.Permit, id string) error {
 	before, err := s.GetCustomField(ctx, id)
 	if err != nil {
 		return err
@@ -433,7 +433,7 @@ func (s *SQLStore) RestoreCustomField(ctx context.Context, actor domain.Actor, i
 			before.Code, domain.ErrConflict)
 	}
 
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, p, func(t *tx) error {
 		res, err := t.exec(ctx, `
 			UPDATE custom_field SET retired_at = NULL, retired_by = NULL, row_version = row_version + 1
 			WHERE id = ? AND row_version = ?`,
@@ -490,7 +490,7 @@ func actorOrEmpty(id *string) string {
 // submitting administrator never saw. A stale token is refused outright with
 // domain.ErrStale (409), which closes both directions at once rather than
 // reasoning about either.
-func (s *SQLStore) SetCustomFieldOptions(ctx context.Context, actor domain.Actor, fieldID string, expected int, opts []domain.CustomFieldOption) error {
+func (s *SQLStore) SetCustomFieldOptions(ctx context.Context, p domain.Permit, fieldID string, expected int, opts []domain.CustomFieldOption) error {
 	before, err := s.GetCustomField(ctx, fieldID)
 	if err != nil {
 		return err
@@ -534,7 +534,7 @@ func (s *SQLStore) SetCustomFieldOptions(ctx context.Context, actor domain.Actor
 	}
 
 	at := domain.FormatTime(s.now())
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, p, func(t *tx) error {
 		// The stale-token guard, first and alone: refused outright, before a
 		// single option row is touched, so a collision never leaves a partial
 		// write behind for the transaction to roll back around.

@@ -77,7 +77,7 @@ func (f *entityTagFixture) tag(t *testing.T, code string) string {
 	if err != nil {
 		t.Fatalf("building tag %s: %v", code, err)
 	}
-	if err := f.s.CreateTag(f.ctx, f.actor, tg); err != nil {
+	if err := f.s.CreateTag(f.ctx, domain.AdministratorPermit(f.actor), tg); err != nil {
 		t.Fatalf("creating tag %s: %v", code, err)
 	}
 	return tg.ID
@@ -85,7 +85,7 @@ func (f *entityTagFixture) tag(t *testing.T, code string) string {
 
 func (f *entityTagFixture) retire(t *testing.T, tagID string) {
 	t.Helper()
-	if err := f.s.RetireTag(f.ctx, f.actor, tagID); err != nil {
+	if err := f.s.RetireTag(f.ctx, domain.AdministratorPermit(f.actor), tagID); err != nil {
 		t.Fatalf("retiring tag %s: %v", tagID, err)
 	}
 }
@@ -279,7 +279,7 @@ func TestTheTagFoldIsStableAcrossARename(t *testing.T) {
 				t.Fatalf("reading the tag: %v", err)
 			}
 			row.Code = "dr-site"
-			if err := f.s.UpdateTag(f.ctx, f.actor, &row.Tag); err != nil {
+			if err := f.s.UpdateTag(f.ctx, domain.AdministratorPermit(f.actor), &row.Tag); err != nil {
 				t.Fatalf("renaming the tag's code: %v", err)
 			}
 
@@ -314,7 +314,7 @@ func TestRenamingATagDoesNotManufactureATagsDiffOnTheNextUnrelatedSave(t *testin
 				t.Fatalf("reading the tag: %v", err)
 			}
 			row.Code = "dr-site"
-			if err := f.s.UpdateTag(f.ctx, f.actor, &row.Tag); err != nil {
+			if err := f.s.UpdateTag(f.ctx, domain.AdministratorPermit(f.actor), &row.Tag); err != nil {
 				t.Fatalf("renaming the tag's code: %v", err)
 			}
 

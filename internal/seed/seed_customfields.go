@@ -213,13 +213,13 @@ func defineCustomFields(ctx context.Context, s *store.SQLStore, actor domain.Act
 		if err != nil {
 			return ids, fmt.Errorf("building custom field %s: %w", spec.code, err)
 		}
-		if err := s.CreateCustomField(ctx, actor, f); err != nil {
+		if err := s.CreateCustomField(ctx, domain.AdministratorPermit(actor), f); err != nil {
 			return ids, fmt.Errorf("seeding custom field %s: %w", spec.code, err)
 		}
 		ids[spec.code] = f.ID
 
 		if spec.kind == domain.CustomFieldSelect {
-			if err := s.SetCustomFieldOptions(ctx, actor, f.ID, f.RowVersion, spec.options); err != nil {
+			if err := s.SetCustomFieldOptions(ctx, domain.AdministratorPermit(actor), f.ID, f.RowVersion, spec.options); err != nil {
 				return ids, fmt.Errorf("setting options of custom field %s: %w", spec.code, err)
 			}
 		}
@@ -238,7 +238,7 @@ func setAssetCustomValues(ctx context.Context, s *store.SQLStore, actor domain.A
 	if err != nil {
 		return fmt.Errorf("reading asset %s for its custom values: %w", assetName, err)
 	}
-	if err := s.SetCustomValues(ctx, actor, domain.CustomFieldEntityAsset, id, row.RowVersion, vals); err != nil {
+	if err := s.SetCustomValues(ctx, domain.AdministratorPermit(actor), domain.CustomFieldEntityAsset, id, row.RowVersion, vals); err != nil {
 		return fmt.Errorf("setting custom values on asset %s: %w", assetName, err)
 	}
 	return nil
@@ -254,7 +254,7 @@ func setServiceCustomValues(ctx context.Context, s *store.SQLStore, actor domain
 	if err != nil {
 		return fmt.Errorf("reading service %s for its custom values: %w", serviceCode, err)
 	}
-	if err := s.SetCustomValues(ctx, actor, domain.CustomFieldEntityService, id, row.RowVersion, vals); err != nil {
+	if err := s.SetCustomValues(ctx, domain.AdministratorPermit(actor), domain.CustomFieldEntityService, id, row.RowVersion, vals); err != nil {
 		return fmt.Errorf("setting custom values on service %s: %w", serviceCode, err)
 	}
 	return nil
@@ -342,7 +342,7 @@ func assignAndRetireOwner(ctx context.Context, s *store.SQLStore, actor domain.A
 		return fmt.Errorf("reading field %s to reassign its owner: %w", fieldID, err)
 	}
 	field.OwnerTeamID = &team.ID
-	if err := s.UpdateCustomField(ctx, actor, &field.CustomField); err != nil {
+	if err := s.UpdateCustomField(ctx, domain.AdministratorPermit(actor), &field.CustomField); err != nil {
 		return fmt.Errorf("reassigning field %s to the soon-to-retire team: %w", fieldID, err)
 	}
 

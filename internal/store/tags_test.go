@@ -53,7 +53,7 @@ func mustTag(t *testing.T, f *tagFixture, code string) string {
 	if err != nil {
 		t.Fatalf("building tag %s: %v", code, err)
 	}
-	if err := f.s.CreateTag(f.ctx, f.actor, tag); err != nil {
+	if err := f.s.CreateTag(f.ctx, domain.AdministratorPermit(f.actor), tag); err != nil {
 		t.Fatalf("creating tag %s: %v", code, err)
 	}
 	return tag.ID
@@ -103,7 +103,7 @@ func TestARetiredTagCodeCanBeUsedAgain(t *testing.T) {
 		t.Run(e.Name, func(t *testing.T) {
 			f := newTagFixture(t, e)
 			first := mustTag(t, f, "dr")
-			if err := f.s.RetireTag(f.ctx, f.actor, first); err != nil {
+			if err := f.s.RetireTag(f.ctx, domain.AdministratorPermit(f.actor), first); err != nil {
 				t.Fatalf("retiring: %v", err)
 			}
 
@@ -111,7 +111,7 @@ func TestARetiredTagCodeCanBeUsedAgain(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building the second tag: %v", err)
 			}
-			if err := f.s.CreateTag(f.ctx, f.actor, tag); err != nil {
+			if err := f.s.CreateTag(f.ctx, domain.AdministratorPermit(f.actor), tag); err != nil {
 				t.Fatalf("a retired code must be usable again: %v", err)
 			}
 		})
@@ -139,7 +139,7 @@ func TestTwoLiveTagsCannotShareACode(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building the second tag: %v", err)
 			}
-			if err := f.s.CreateTag(f.ctx, f.actor, tag); err == nil {
+			if err := f.s.CreateTag(f.ctx, domain.AdministratorPermit(f.actor), tag); err == nil {
 				t.Fatal("two live tags must not be able to share one code")
 			} else if !errors.Is(err, domain.ErrConflict) {
 				t.Fatalf("got %v, want a conflict", err)
@@ -178,7 +178,7 @@ func TestUpdatingATagWritesChangeLogWithOldAndNewCode(t *testing.T) {
 				t.Fatalf("reading: %v", err)
 			}
 			row.Code = "dr-site"
-			if err := f.s.UpdateTag(f.ctx, f.actor, &row.Tag); err != nil {
+			if err := f.s.UpdateTag(f.ctx, domain.AdministratorPermit(f.actor), &row.Tag); err != nil {
 				t.Fatalf("renaming: %v", err)
 			}
 
@@ -208,7 +208,7 @@ func TestCodeStaysEditable(t *testing.T) {
 				t.Fatalf("reading: %v", err)
 			}
 			row.Code = "disaster-recovery"
-			if err := f.s.UpdateTag(f.ctx, f.actor, &row.Tag); err != nil {
+			if err := f.s.UpdateTag(f.ctx, domain.AdministratorPermit(f.actor), &row.Tag); err != nil {
 				t.Fatalf("renaming the code must be allowed: %v", err)
 			}
 			after, err := f.s.GetTag(f.ctx, id)
@@ -229,7 +229,7 @@ func TestRetiringATagWritesChangeLog(t *testing.T) {
 			id := mustTag(t, f, "dr")
 			before := tagChangeCount(t, f, id)
 
-			if err := f.s.RetireTag(f.ctx, f.actor, id); err != nil {
+			if err := f.s.RetireTag(f.ctx, domain.AdministratorPermit(f.actor), id); err != nil {
 				t.Fatalf("retiring: %v", err)
 			}
 
@@ -253,12 +253,12 @@ func TestRestoringATagWritesChangeLog(t *testing.T) {
 		t.Run(e.Name, func(t *testing.T) {
 			f := newTagFixture(t, e)
 			id := mustTag(t, f, "dr")
-			if err := f.s.RetireTag(f.ctx, f.actor, id); err != nil {
+			if err := f.s.RetireTag(f.ctx, domain.AdministratorPermit(f.actor), id); err != nil {
 				t.Fatalf("retiring: %v", err)
 			}
 			before := tagChangeCount(t, f, id)
 
-			if err := f.s.RestoreTag(f.ctx, f.actor, id); err != nil {
+			if err := f.s.RestoreTag(f.ctx, domain.AdministratorPermit(f.actor), id); err != nil {
 				t.Fatalf("restoring: %v", err)
 			}
 
@@ -285,12 +285,12 @@ func TestRestoreIsRefusedWhenALiveTagHoldsTheCode(t *testing.T) {
 		t.Run(e.Name, func(t *testing.T) {
 			f := newTagFixture(t, e)
 			first := mustTag(t, f, "dr")
-			if err := f.s.RetireTag(f.ctx, f.actor, first); err != nil {
+			if err := f.s.RetireTag(f.ctx, domain.AdministratorPermit(f.actor), first); err != nil {
 				t.Fatalf("retiring: %v", err)
 			}
 			mustTag(t, f, "dr") // a new, live tag now holds the freed code
 
-			if err := f.s.RestoreTag(f.ctx, f.actor, first); err == nil {
+			if err := f.s.RestoreTag(f.ctx, domain.AdministratorPermit(f.actor), first); err == nil {
 				t.Fatal("restoring must be refused while a live tag holds the same code")
 			} else if !errors.Is(err, domain.ErrConflict) {
 				t.Fatalf("got %v, want a conflict", err)
@@ -313,7 +313,7 @@ func TestAStaleRowVersionIsRefused(t *testing.T) {
 			}
 			// Somebody else's edit lands first, advancing row_version.
 			row.Label = "DR (first editor)"
-			if err := f.s.UpdateTag(f.ctx, f.actor, &row.Tag); err != nil {
+			if err := f.s.UpdateTag(f.ctx, domain.AdministratorPermit(f.actor), &row.Tag); err != nil {
 				t.Fatalf("first update: %v", err)
 			}
 
@@ -324,7 +324,7 @@ func TestAStaleRowVersionIsRefused(t *testing.T) {
 			}
 			stale.RowVersion = 1 // the token the second editor's form was rendered with
 			stale.Label = "DR (second editor)"
-			err = f.s.UpdateTag(f.ctx, f.actor, &stale.Tag)
+			err = f.s.UpdateTag(f.ctx, domain.AdministratorPermit(f.actor), &stale.Tag)
 			if err == nil {
 				t.Fatal("a stale row_version must be refused")
 			}
@@ -343,12 +343,12 @@ func TestRetireLeavesAnAlreadyRetiredTagAlone(t *testing.T) {
 		t.Run(e.Name, func(t *testing.T) {
 			f := newTagFixture(t, e)
 			id := mustTag(t, f, "dr")
-			if err := f.s.RetireTag(f.ctx, f.actor, id); err != nil {
+			if err := f.s.RetireTag(f.ctx, domain.AdministratorPermit(f.actor), id); err != nil {
 				t.Fatalf("retiring: %v", err)
 			}
 			before := tagChangeCount(t, f, id)
 
-			if err := f.s.RetireTag(f.ctx, f.actor, id); err != nil {
+			if err := f.s.RetireTag(f.ctx, domain.AdministratorPermit(f.actor), id); err != nil {
 				t.Fatalf("retiring an already-retired tag must be a no-op, not an error: %v", err)
 			}
 			if after := tagChangeCount(t, f, id); after != before {
@@ -384,7 +384,7 @@ func TestListTagsOrdersByCodeAndSplitsRetired(t *testing.T) {
 			mustTag(t, f, "zeta")
 			mustTag(t, f, "alpha")
 			retired := mustTag(t, f, "middle")
-			if err := f.s.RetireTag(f.ctx, f.actor, retired); err != nil {
+			if err := f.s.RetireTag(f.ctx, domain.AdministratorPermit(f.actor), retired); err != nil {
 				t.Fatalf("retiring: %v", err)
 			}
 

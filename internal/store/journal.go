@@ -77,12 +77,12 @@ func (s *SQLStore) GetJournalEntry(ctx context.Context, id string) (*JournalRow,
 }
 
 // CreateJournalEntry writes a note.
-func (s *SQLStore) CreateJournalEntry(ctx context.Context, actor domain.Actor, e *domain.JournalEntry) error {
+func (s *SQLStore) CreateJournalEntry(ctx context.Context, p domain.Permit, e *domain.JournalEntry) error {
 	if err := e.Validate(); err != nil {
 		return err
 	}
 	e.RowVersion = 1
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, p, func(t *tx) error {
 		_, err := t.exec(ctx, `
 			INSERT INTO journal_entry (id, entity_type, entity_id, kind, body, author,
 			                           lifecycle, created_at, updated_at)
@@ -104,12 +104,12 @@ func (s *SQLStore) CreateJournalEntry(ctx context.Context, actor domain.Actor, e
 // timeline with corrections nobody wants to read. The edit is audited, so the
 // previous wording is recoverable from change_log -- which is the property that
 // makes editing safe rather than the ability to edit being the risk.
-func (s *SQLStore) UpdateJournalEntry(ctx context.Context, actor domain.Actor, e *domain.JournalEntry) error {
+func (s *SQLStore) UpdateJournalEntry(ctx context.Context, p domain.Permit, e *domain.JournalEntry) error {
 	if err := e.Validate(); err != nil {
 		return err
 	}
 	e.UpdatedAt = domain.FormatTime(s.now())
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, p, func(t *tx) error {
 		before, err := getJournalForUpdate(ctx, t, e.ID)
 		if err != nil {
 			return err
@@ -134,8 +134,8 @@ func (s *SQLStore) UpdateJournalEntry(ctx context.Context, actor domain.Actor, e
 // SOFT, like everything else here. A withdrawn note is still a thing that was
 // said, and the change_log row recording the withdrawal refers to an entry that
 // has to still exist for the trail to mean anything.
-func (s *SQLStore) RetireJournalEntry(ctx context.Context, actor domain.Actor, id string) error {
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+func (s *SQLStore) RetireJournalEntry(ctx context.Context, p domain.Permit, id string) error {
+	return s.write(ctx, p, func(t *tx) error {
 		before, err := getJournalForUpdate(ctx, t, id)
 		if err != nil {
 			return err

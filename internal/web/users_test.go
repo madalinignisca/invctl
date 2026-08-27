@@ -387,7 +387,7 @@ func TestAScrubbedUserResolvesToNoPersonalDataAnywhereItIsRendered(t *testing.T)
 	if err != nil {
 		t.Fatalf("building journal entry: %v", err)
 	}
-	if err := h.store.CreateJournalEntry(ctx, domain.UserActor(subject), entry); err != nil {
+	if err := h.store.CreateJournalEntry(ctx, domain.AdministratorPermit(domain.UserActor(subject)), entry); err != nil {
 		t.Fatalf("creating journal entry: %v", err)
 	}
 

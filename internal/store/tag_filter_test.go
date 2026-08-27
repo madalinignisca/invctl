@@ -61,7 +61,7 @@ func newTagFilterFixture(t *testing.T, e Engine) *tagFilterFixture {
 		if err != nil {
 			t.Fatalf("building tag %s: %v", code, err)
 		}
-		if err := s.CreateTag(ctx, actor, tg); err != nil {
+		if err := s.CreateTag(ctx, domain.AdministratorPermit(actor), tg); err != nil {
 			t.Fatalf("creating tag %s: %v", code, err)
 		}
 		return tg.ID
@@ -190,7 +190,7 @@ func TestListAssetsFiltersByARetiredTag(t *testing.T) {
 	for _, e := range Engines(t) {
 		t.Run(e.Name, func(t *testing.T) {
 			f := newTagFilterFixture(t, e)
-			if err := f.s.RetireTag(f.ctx, f.actor, f.dr); err != nil {
+			if err := f.s.RetireTag(f.ctx, domain.AdministratorPermit(f.actor), f.dr); err != nil {
 				t.Fatalf("retiring dr: %v", err)
 			}
 
@@ -248,7 +248,7 @@ func newServiceTagFilterFixture(t *testing.T, e Engine) *serviceTagFilterFixture
 		if err != nil {
 			t.Fatalf("building tag %s: %v", code, err)
 		}
-		if err := s.CreateTag(ctx, actor, tg); err != nil {
+		if err := s.CreateTag(ctx, domain.AdministratorPermit(actor), tg); err != nil {
 			t.Fatalf("creating tag %s: %v", code, err)
 		}
 		return tg.ID

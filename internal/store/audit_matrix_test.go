@@ -527,7 +527,7 @@ var auditMatrix = []auditCase{
 			if err != nil {
 				t.Fatalf("building tag: %v", err)
 			}
-			if err := s.CreateTag(ctx, testActor, tag); err != nil {
+			if err := s.CreateTag(ctx, testPermit, tag); err != nil {
 				t.Fatalf("creating tag: %v", err)
 			}
 			return tag.ID, domain.ActionCreate
@@ -545,7 +545,7 @@ var auditMatrix = []auditCase{
 			if err != nil {
 				t.Fatalf("building tag: %v", err)
 			}
-			if err := s.CreateTag(ctx, actor, tag); err != nil {
+			if err := s.CreateTag(ctx, domain.AdministratorPermit(actor), tag); err != nil {
 				t.Fatalf("creating tag: %v", err)
 			}
 			return tag.ID
@@ -557,7 +557,7 @@ var auditMatrix = []auditCase{
 			}
 			updated := row.Tag
 			updated.Label = "Audit Tag Update Renamed"
-			if err := s.UpdateTag(ctx, testActor, &updated); err != nil {
+			if err := s.UpdateTag(ctx, testPermit, &updated); err != nil {
 				t.Fatalf("updating tag: %v", err)
 			}
 			return id, domain.ActionUpdate
@@ -575,7 +575,7 @@ var auditMatrix = []auditCase{
 			if err != nil {
 				t.Fatalf("building tag: %v", err)
 			}
-			if err := s.CreateTag(ctx, actor, tag); err != nil {
+			if err := s.CreateTag(ctx, domain.AdministratorPermit(actor), tag); err != nil {
 				t.Fatalf("creating tag: %v", err)
 			}
 			// Returned UNPACKED, unlike the child-row cases above: mutate
@@ -591,7 +591,7 @@ var auditMatrix = []auditCase{
 				t.Fatalf("getting tag: %v", err)
 			}
 			actor := domain.Actor{ID: row.CreatedBy, Name: row.CreatedBy, Kind: domain.ActorKindUser}
-			if err := s.RetireTag(ctx, actor, id); err != nil {
+			if err := s.RetireTag(ctx, domain.AdministratorPermit(actor), id); err != nil {
 				t.Fatalf("retiring tag: %v", err)
 			}
 			return id, domain.ActionRetire
@@ -615,7 +615,7 @@ var auditMatrix = []auditCase{
 			if err != nil {
 				t.Fatalf("building custom field: %v", err)
 			}
-			if err := s.CreateCustomField(ctx, testActor, cf); err != nil {
+			if err := s.CreateCustomField(ctx, testPermit, cf); err != nil {
 				t.Fatalf("creating custom field: %v", err)
 			}
 			return cf.ID, domain.ActionCreate
@@ -637,7 +637,7 @@ var auditMatrix = []auditCase{
 			if err != nil {
 				t.Fatalf("building custom field: %v", err)
 			}
-			if err := s.CreateCustomField(ctx, testActor, cf); err != nil {
+			if err := s.CreateCustomField(ctx, testPermit, cf); err != nil {
 				t.Fatalf("creating custom field: %v", err)
 			}
 			return cf.ID
@@ -649,7 +649,7 @@ var auditMatrix = []auditCase{
 			}
 			updated := row.CustomField
 			updated.Label = "Audit Field Update Renamed"
-			if err := s.UpdateCustomField(ctx, testActor, &updated); err != nil {
+			if err := s.UpdateCustomField(ctx, testPermit, &updated); err != nil {
 				t.Fatalf("updating custom field: %v", err)
 			}
 			return id, domain.ActionUpdate
@@ -669,7 +669,7 @@ var auditMatrix = []auditCase{
 			if err != nil {
 				t.Fatalf("building custom field: %v", err)
 			}
-			if err := s.CreateCustomField(ctx, testActor, cf); err != nil {
+			if err := s.CreateCustomField(ctx, testPermit, cf); err != nil {
 				t.Fatalf("creating custom field: %v", err)
 			}
 			// Returned UNPACKED for the same reason as the tag retire case
@@ -683,7 +683,7 @@ var auditMatrix = []auditCase{
 				t.Fatalf("getting custom field: %v", err)
 			}
 			actor := domain.Actor{ID: row.CreatedBy, Name: row.CreatedBy, Kind: domain.ActorKindUser}
-			if err := s.RetireCustomField(ctx, actor, id); err != nil {
+			if err := s.RetireCustomField(ctx, domain.AdministratorPermit(actor), id); err != nil {
 				t.Fatalf("retiring custom field: %v", err)
 			}
 			return id, domain.ActionRetire
@@ -700,7 +700,7 @@ var auditMatrix = []auditCase{
 		setup:      func(t *testing.T, s *SQLStore, ctx context.Context) string { return "" },
 		mutate: func(t *testing.T, s *SQLStore, ctx context.Context, _ string) (string, string) {
 			code := "audit-vocab-create"
-			if err := s.UpsertVocabularyTerm(ctx, testActor, "asset_kind", VocabularyTerm{
+			if err := s.UpsertVocabularyTerm(ctx, testPermit, "asset_kind", VocabularyTerm{
 				Code: code, Label: "Audit Vocabulary Term",
 			}); err != nil {
 				t.Fatalf("upserting vocabulary term: %v", err)
@@ -715,7 +715,7 @@ var auditMatrix = []auditCase{
 		scope:      domain.ScopeEstateConfig,
 		setup: func(t *testing.T, s *SQLStore, ctx context.Context) string {
 			code := "audit-vocab-update"
-			if err := s.UpsertVocabularyTerm(ctx, testActor, "asset_kind", VocabularyTerm{
+			if err := s.UpsertVocabularyTerm(ctx, testPermit, "asset_kind", VocabularyTerm{
 				Code: code, Label: "Audit Vocabulary Term Update",
 			}); err != nil {
 				t.Fatalf("upserting vocabulary term: %v", err)
@@ -723,7 +723,7 @@ var auditMatrix = []auditCase{
 			return code
 		},
 		mutate: func(t *testing.T, s *SQLStore, ctx context.Context, code string) (string, string) {
-			if err := s.UpsertVocabularyTerm(ctx, testActor, "asset_kind", VocabularyTerm{
+			if err := s.UpsertVocabularyTerm(ctx, testPermit, "asset_kind", VocabularyTerm{
 				Code: code, Label: "Audit Vocabulary Term Update Renamed",
 			}); err != nil {
 				t.Fatalf("upserting vocabulary term: %v", err)

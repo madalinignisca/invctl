@@ -224,7 +224,7 @@ func TestAValueForAnUnknownFieldIsRefused(t *testing.T) {
 	for _, e := range Engines(t) {
 		t.Run(e.Name, func(t *testing.T) {
 			f := newCustomFieldFixture(t, e)
-			err := f.s.SetCustomValues(f.ctx, f.actor, "asset", f.assetID,
+			err := f.s.SetCustomValues(f.ctx, domain.AdministratorPermit(f.actor), "asset", f.assetID,
 				entityVersion(t, f, "asset", f.assetID), map[string]string{NewID(): "IT-42"})
 			if err == nil {
 				t.Fatal("a value for a field that does not exist must be refused")
@@ -245,7 +245,7 @@ func TestAValueForTheWrongEntityTypeIsRefused(t *testing.T) {
 			f := newCustomFieldFixture(t, e)
 			assetField := mustField(t, f, "asset", "cost_centre", domain.CustomFieldText)
 
-			err := f.s.SetCustomValues(f.ctx, f.actor, "service", f.serviceID,
+			err := f.s.SetCustomValues(f.ctx, domain.AdministratorPermit(f.actor), "service", f.serviceID,
 				entityVersion(t, f, "service", f.serviceID), map[string]string{assetField: "IT-42"})
 			if err == nil {
 				t.Fatal("an asset field must not accept a value against a service")
@@ -266,11 +266,11 @@ func TestARetiredFieldTakesNoNewValue(t *testing.T) {
 			f := newCustomFieldFixture(t, e)
 			id := mustField(t, f, "asset", "cost_centre", domain.CustomFieldText)
 			mustValue(t, f, id, f.assetID, "IT-42")
-			if err := f.s.RetireCustomField(f.ctx, f.actor, id); err != nil {
+			if err := f.s.RetireCustomField(f.ctx, domain.AdministratorPermit(f.actor), id); err != nil {
 				t.Fatalf("retiring: %v", err)
 			}
 
-			err := f.s.SetCustomValues(f.ctx, f.actor, "asset", f.secondAssetID,
+			err := f.s.SetCustomValues(f.ctx, domain.AdministratorPermit(f.actor), "asset", f.secondAssetID,
 				entityVersion(t, f, "asset", f.secondAssetID), map[string]string{id: "IT-99"})
 			if err == nil {
 				t.Fatal("a retired field must take no new value")
@@ -315,17 +315,17 @@ func TestASelectValueMustBeALiveOption(t *testing.T) {
 				t.Fatalf("got %v, want a single value of gold", values)
 			}
 
-			if err := f.s.SetCustomValues(f.ctx, f.actor, "asset", f.secondAssetID,
+			if err := f.s.SetCustomValues(f.ctx, domain.AdministratorPermit(f.actor), "asset", f.secondAssetID,
 				entityVersion(t, f, "asset", f.secondAssetID), map[string]string{id: "bronze"}); err == nil {
 				t.Fatal("a value that is not an option at all must be refused")
 			}
 
 			// Retire "silver" by submitting only "gold".
-			if err := f.s.SetCustomFieldOptions(f.ctx, f.actor, id, fieldVersion(t, f, id),
+			if err := f.s.SetCustomFieldOptions(f.ctx, domain.AdministratorPermit(f.actor), id, fieldVersion(t, f, id),
 				[]domain.CustomFieldOption{{Value: "gold", Label: "Gold"}}); err != nil {
 				t.Fatalf("retiring silver: %v", err)
 			}
-			if err := f.s.SetCustomValues(f.ctx, f.actor, "asset", f.secondAssetID,
+			if err := f.s.SetCustomValues(f.ctx, domain.AdministratorPermit(f.actor), "asset", f.secondAssetID,
 				entityVersion(t, f, "asset", f.secondAssetID), map[string]string{id: "silver"}); err == nil {
 				t.Fatal("a retired option must take no new value")
 			}
@@ -361,7 +361,7 @@ func TestCustomValuesAreCanonicalised(t *testing.T) {
 					f := newCustomFieldFixture(t, e)
 					id := mustField(t, f, "asset", "probe", c.kind)
 
-					err := f.s.SetCustomValues(f.ctx, f.actor, "asset", f.assetID,
+					err := f.s.SetCustomValues(f.ctx, domain.AdministratorPermit(f.actor), "asset", f.assetID,
 						entityVersion(t, f, "asset", f.assetID), map[string]string{id: c.raw})
 					if c.refused {
 						if err == nil {
@@ -487,7 +487,7 @@ func TestAValueForAnUnknownEntityIsRefused(t *testing.T) {
 			id := mustField(t, f, "asset", "cost_centre", domain.CustomFieldText)
 			ghost := NewID()
 
-			err := f.s.SetCustomValues(f.ctx, f.actor, "asset", ghost, 1,
+			err := f.s.SetCustomValues(f.ctx, domain.AdministratorPermit(f.actor), "asset", ghost, 1,
 				map[string]string{id: "IT-42"})
 			if err == nil {
 				t.Fatal("a value for an asset that does not exist must be refused")
@@ -514,7 +514,7 @@ func TestSetCustomValuesRefusesAnUnknownEntityType(t *testing.T) {
 	for _, e := range Engines(t) {
 		t.Run(e.Name, func(t *testing.T) {
 			f := newCustomFieldFixture(t, e)
-			err := f.s.SetCustomValues(f.ctx, f.actor, "project", f.assetID, 1, nil)
+			err := f.s.SetCustomValues(f.ctx, domain.AdministratorPermit(f.actor), "project", f.assetID, 1, nil)
 			if err == nil {
 				t.Fatal("only assets and services hold custom fields")
 			}
@@ -644,7 +644,7 @@ func TestARetiredFieldsValueSurvivesALaterEdit(t *testing.T) {
 			ccID := mustField(t, f, "asset", "cost_centre", domain.CustomFieldText)
 			mustSetValues(t, f, f.assetID, map[string]string{tagID: "ABC-1", ccID: "IT-42"})
 
-			if err := f.s.RetireCustomField(f.ctx, f.actor, ccID); err != nil {
+			if err := f.s.RetireCustomField(f.ctx, domain.AdministratorPermit(f.actor), ccID); err != nil {
 				t.Fatalf("retiring cost_centre: %v", err)
 			}
 
@@ -678,7 +678,7 @@ func TestARetiredFieldsValueSurvivesALaterEdit(t *testing.T) {
 			}
 
 			// Restore brings back a field that still holds its value.
-			if err := f.s.RestoreCustomField(f.ctx, f.actor, ccID); err != nil {
+			if err := f.s.RestoreCustomField(f.ctx, domain.AdministratorPermit(f.actor), ccID); err != nil {
 				t.Fatalf("restoring: %v", err)
 			}
 			restored, err := f.s.GetCustomField(f.ctx, ccID)
@@ -725,7 +725,7 @@ func TestAValueOnARetiredOptionSurvivesALaterEdit(t *testing.T) {
 			mustSetValues(t, f, f.assetID, map[string]string{tierID: "silver", tagID: "ABC-1"})
 
 			// Retire "silver" by offering only "gold".
-			if err := f.s.SetCustomFieldOptions(f.ctx, f.actor, tierID, fieldVersion(t, f, tierID),
+			if err := f.s.SetCustomFieldOptions(f.ctx, domain.AdministratorPermit(f.actor), tierID, fieldVersion(t, f, tierID),
 				[]domain.CustomFieldOption{{Value: "gold", Label: "Gold"}}); err != nil {
 				t.Fatalf("retiring the silver option: %v", err)
 			}
@@ -746,7 +746,7 @@ func TestAValueOnARetiredOptionSurvivesALaterEdit(t *testing.T) {
 			}
 
 			// A genuinely NEW value on the retired option is still refused.
-			if err := f.s.SetCustomValues(f.ctx, f.actor, "asset", f.secondAssetID,
+			if err := f.s.SetCustomValues(f.ctx, domain.AdministratorPermit(f.actor), "asset", f.secondAssetID,
 				entityVersion(t, f, "asset", f.secondAssetID),
 				map[string]string{tierID: "silver"}); err == nil {
 				t.Fatal("a NEW value selecting a retired option must still be refused")
@@ -824,7 +824,7 @@ func TestASecondSaveFromOneTokenIsRefused(t *testing.T) {
 			id := mustField(t, f, "asset", "cost_centre", domain.CustomFieldText)
 			token := entityVersion(t, f, "asset", f.assetID)
 
-			if err := f.s.SetCustomValues(f.ctx, f.actor, "asset", f.assetID, token,
+			if err := f.s.SetCustomValues(f.ctx, domain.AdministratorPermit(f.actor), "asset", f.assetID, token,
 				map[string]string{id: "IT-42"}); err != nil {
 				t.Fatalf("the first save from a fresh token must succeed: %v", err)
 			}
@@ -832,7 +832,7 @@ func TestASecondSaveFromOneTokenIsRefused(t *testing.T) {
 				t.Fatalf("got version %d after one save, want %d", got, token+1)
 			}
 
-			err := f.s.SetCustomValues(f.ctx, f.actor, "asset", f.assetID, token,
+			err := f.s.SetCustomValues(f.ctx, domain.AdministratorPermit(f.actor), "asset", f.assetID, token,
 				map[string]string{id: "IT-99"})
 			if err == nil {
 				t.Fatal("a second save from one token must be refused")
@@ -866,7 +866,7 @@ func TestASaveThatChangesNothingStillMovesTheToken(t *testing.T) {
 			token := entityVersion(t, f, "asset", f.assetID)
 			changes := changeCount(t, f, "asset", f.assetID)
 
-			if err := f.s.SetCustomValues(f.ctx, f.actor, "asset", f.assetID, token,
+			if err := f.s.SetCustomValues(f.ctx, domain.AdministratorPermit(f.actor), "asset", f.assetID, token,
 				map[string]string{id: "IT-42"}); err != nil {
 				t.Fatalf("re-saving the same value: %v", err)
 			}
@@ -877,7 +877,7 @@ func TestASaveThatChangesNothingStillMovesTheToken(t *testing.T) {
 			if got := changeCount(t, f, "asset", f.assetID); got != changes {
 				t.Fatalf("a no-op save wrote %d change_log rows, want 0", got-changes)
 			}
-			if err := f.s.SetCustomValues(f.ctx, f.actor, "asset", f.assetID, token,
+			if err := f.s.SetCustomValues(f.ctx, domain.AdministratorPermit(f.actor), "asset", f.assetID, token,
 				map[string]string{id: "IT-42"}); !errors.Is(err, domain.ErrStale) {
 				t.Fatalf("the same token twice must be refused, got %v", err)
 			}
@@ -893,14 +893,14 @@ func TestAServiceValueEditCarriesTheSameToken(t *testing.T) {
 			id := mustField(t, f, "service", "sla_ref", domain.CustomFieldText)
 			token := entityVersion(t, f, "service", f.serviceID)
 
-			if err := f.s.SetCustomValues(f.ctx, f.actor, "service", f.serviceID, token,
+			if err := f.s.SetCustomValues(f.ctx, domain.AdministratorPermit(f.actor), "service", f.serviceID, token,
 				map[string]string{id: "SLA-7"}); err != nil {
 				t.Fatalf("first save: %v", err)
 			}
 			if got := entityVersion(t, f, "service", f.serviceID); got != token+1 {
 				t.Fatalf("got version %d, want %d", got, token+1)
 			}
-			if err := f.s.SetCustomValues(f.ctx, f.actor, "service", f.serviceID, token,
+			if err := f.s.SetCustomValues(f.ctx, domain.AdministratorPermit(f.actor), "service", f.serviceID, token,
 				map[string]string{id: "SLA-8"}); !errors.Is(err, domain.ErrStale) {
 				t.Fatalf("want ErrStale from a stale token, got %v", err)
 			}
@@ -931,7 +931,7 @@ func TestARestoreBetweenRenderAndSubmitDestroysNothing(t *testing.T) {
 			ccID := mustField(t, f, "asset", "cost_centre", domain.CustomFieldText)
 			mustSetValues(t, f, f.assetID, map[string]string{tagID: "ABC-1", ccID: "IT-42"})
 
-			if err := f.s.RetireCustomField(f.ctx, f.actor, ccID); err != nil {
+			if err := f.s.RetireCustomField(f.ctx, domain.AdministratorPermit(f.actor), ccID); err != nil {
 				t.Fatalf("retiring cost_centre: %v", err)
 			}
 
@@ -941,7 +941,7 @@ func TestARestoreBetweenRenderAndSubmitDestroysNothing(t *testing.T) {
 			token := entityVersion(t, f, "asset", f.assetID)
 
 			// An administrator restores the field in the window.
-			if err := f.s.RestoreCustomField(f.ctx, f.actor, ccID); err != nil {
+			if err := f.s.RestoreCustomField(f.ctx, domain.AdministratorPermit(f.actor), ccID); err != nil {
 				t.Fatalf("restoring cost_centre: %v", err)
 			}
 			// The operator's token is STILL CURRENT -- the restore moved
@@ -953,7 +953,7 @@ func TestARestoreBetweenRenderAndSubmitDestroysNothing(t *testing.T) {
 			}
 
 			// SUBMIT.
-			if err := f.s.SetCustomValues(f.ctx, f.actor, "asset", f.assetID, token, submitted); err != nil {
+			if err := f.s.SetCustomValues(f.ctx, domain.AdministratorPermit(f.actor), "asset", f.assetID, token, submitted); err != nil {
 				t.Fatalf("submitting: %v", err)
 			}
 
@@ -1035,13 +1035,13 @@ func TestARetiredValueRePostedUnchangedInADifferentCaseIsAccepted(t *testing.T) 
 			flagID := mustField(t, f, "asset", "pci_scope", domain.CustomFieldBoolean)
 			tagID := mustField(t, f, "asset", "asset_tag", domain.CustomFieldText)
 			mustSetValues(t, f, f.assetID, map[string]string{flagID: "true", tagID: "ABC-1"})
-			if err := f.s.RetireCustomField(f.ctx, f.actor, flagID); err != nil {
+			if err := f.s.RetireCustomField(f.ctx, domain.AdministratorPermit(f.actor), flagID); err != nil {
 				t.Fatalf("retiring pci_scope: %v", err)
 			}
 
 			// Canonicalisation collapses "TRUE" onto the stored "true", so this
 			// is not a new value and must not be refused.
-			if err := f.s.SetCustomValues(f.ctx, f.actor, "asset", f.assetID,
+			if err := f.s.SetCustomValues(f.ctx, domain.AdministratorPermit(f.actor), "asset", f.assetID,
 				entityVersion(t, f, "asset", f.assetID),
 				map[string]string{flagID: "TRUE", tagID: "ABC-2"}); err != nil {
 				t.Fatalf("re-posting an unchanged retired value in a different case: %v", err)
@@ -1059,7 +1059,7 @@ func TestARetiredValueRePostedUnchangedInADifferentCaseIsAccepted(t *testing.T) 
 			}
 
 			// A genuinely different value on the retired field is still refused.
-			if err := f.s.SetCustomValues(f.ctx, f.actor, "asset", f.assetID,
+			if err := f.s.SetCustomValues(f.ctx, domain.AdministratorPermit(f.actor), "asset", f.assetID,
 				entityVersion(t, f, "asset", f.assetID),
 				map[string]string{flagID: "false"}); err == nil {
 				t.Fatal("a NEW value for a retired field must still be refused")
@@ -1095,7 +1095,7 @@ func TestAClearAllLeavesARetiredFieldsRetainedValue(t *testing.T) {
 			ccID := mustField(t, f, "asset", "cost_centre", domain.CustomFieldText)
 			mustSetValues(t, f, f.assetID, map[string]string{tagID: "ABC-1", ccID: "IT-42"})
 
-			if err := f.s.RetireCustomField(f.ctx, f.actor, ccID); err != nil {
+			if err := f.s.RetireCustomField(f.ctx, domain.AdministratorPermit(f.actor), ccID); err != nil {
 				t.Fatalf("retiring cost_centre: %v", err)
 			}
 
@@ -1167,7 +1167,7 @@ func TestAFieldCreatedBetweenRenderAndSubmitIsNotCleared(t *testing.T) {
 			for _, id := range rendered {
 				vals[id] = ""
 			}
-			err := f.s.SetCustomValues(f.ctx, f.actor, "asset", f.assetID, token, vals)
+			err := f.s.SetCustomValues(f.ctx, domain.AdministratorPermit(f.actor), "asset", f.assetID, token, vals)
 			if !errors.Is(err, domain.ErrStale) {
 				t.Fatalf("want ErrStale from a token that predates the concurrent value, got %v", err)
 			}

@@ -93,7 +93,7 @@ func TestExportIncludesACustomFieldColumn(t *testing.T) {
 				t.Fatalf("reading: %v", err)
 			}
 			row.Label = "Cost Centre"
-			if err := f.s.UpdateCustomField(f.ctx, f.actor, &row.CustomField); err != nil {
+			if err := f.s.UpdateCustomField(f.ctx, domain.AdministratorPermit(f.actor), &row.CustomField); err != nil {
 				t.Fatalf("relabelling: %v", err)
 			}
 
@@ -133,12 +133,12 @@ func TestARetiredFieldStillExportsUnderARetiredHeader(t *testing.T) {
 				t.Fatalf("reading: %v", err)
 			}
 			row.Label = "Cost Centre"
-			if err := f.s.UpdateCustomField(f.ctx, f.actor, &row.CustomField); err != nil {
+			if err := f.s.UpdateCustomField(f.ctx, domain.AdministratorPermit(f.actor), &row.CustomField); err != nil {
 				t.Fatalf("relabelling: %v", err)
 			}
 			mustValue(t, f, id, f.assetID, "IT-42")
 
-			if err := f.s.RetireCustomField(f.ctx, f.actor, id); err != nil {
+			if err := f.s.RetireCustomField(f.ctx, domain.AdministratorPermit(f.actor), id); err != nil {
 				t.Fatalf("retiring: %v", err)
 			}
 			retired, err := f.s.GetCustomField(f.ctx, id)
@@ -394,7 +394,7 @@ func TestEveryHeaderCarriesItsCodeUnconditionally(t *testing.T) {
 				t.Fatalf("reading: %v", err)
 			}
 			row.Label = "Cost Centre"
-			if err := f.s.UpdateCustomField(f.ctx, f.actor, &row.CustomField); err != nil {
+			if err := f.s.UpdateCustomField(f.ctx, domain.AdministratorPermit(f.actor), &row.CustomField); err != nil {
 				t.Fatalf("relabelling: %v", err)
 			}
 
@@ -429,7 +429,7 @@ func TestTwoFieldsSharingALabelGetDifferentHeadersByCode(t *testing.T) {
 					t.Fatalf("reading %s: %v", fieldID, err)
 				}
 				row.Label = label
-				if err := f.s.UpdateCustomField(f.ctx, f.actor, &row.CustomField); err != nil {
+				if err := f.s.UpdateCustomField(f.ctx, domain.AdministratorPermit(f.actor), &row.CustomField); err != nil {
 					t.Fatalf("relabelling %s: %v", fieldID, err)
 				}
 			}
@@ -478,7 +478,7 @@ func TestTwoRetiredFieldsSharingALabelReadAsLabelRetiredCode(t *testing.T) {
 					t.Fatalf("reading %s: %v", fieldID, err)
 				}
 				row.Label = label
-				if err := f.s.UpdateCustomField(f.ctx, f.actor, &row.CustomField); err != nil {
+				if err := f.s.UpdateCustomField(f.ctx, domain.AdministratorPermit(f.actor), &row.CustomField); err != nil {
 					t.Fatalf("relabelling %s: %v", fieldID, err)
 				}
 			}
@@ -486,10 +486,10 @@ func TestTwoRetiredFieldsSharingALabelReadAsLabelRetiredCode(t *testing.T) {
 			relabel(first, "Cost Centre")
 			second := mustField(t, f, "asset", "cc", domain.CustomFieldText)
 			relabel(second, "Cost Centre")
-			if err := f.s.RetireCustomField(f.ctx, f.actor, first); err != nil {
+			if err := f.s.RetireCustomField(f.ctx, domain.AdministratorPermit(f.actor), first); err != nil {
 				t.Fatalf("retiring %s: %v", first, err)
 			}
-			if err := f.s.RetireCustomField(f.ctx, f.actor, second); err != nil {
+			if err := f.s.RetireCustomField(f.ctx, domain.AdministratorPermit(f.actor), second); err != nil {
 				t.Fatalf("retiring %s: %v", second, err)
 			}
 			firstRow, err := f.s.GetCustomField(f.ctx, first)
@@ -536,7 +536,7 @@ func TestALiveAndARetiredFieldSharingALabelGetDifferentHeaders(t *testing.T) {
 					t.Fatalf("reading %s: %v", fieldID, err)
 				}
 				row.Label = label
-				if err := f.s.UpdateCustomField(f.ctx, f.actor, &row.CustomField); err != nil {
+				if err := f.s.UpdateCustomField(f.ctx, domain.AdministratorPermit(f.actor), &row.CustomField); err != nil {
 					t.Fatalf("relabelling %s: %v", fieldID, err)
 				}
 			}
@@ -544,7 +544,7 @@ func TestALiveAndARetiredFieldSharingALabelGetDifferentHeaders(t *testing.T) {
 			relabel(live, "Cost Centre")
 			retired := mustField(t, f, "asset", "cc", domain.CustomFieldText)
 			relabel(retired, "Cost Centre")
-			if err := f.s.RetireCustomField(f.ctx, f.actor, retired); err != nil {
+			if err := f.s.RetireCustomField(f.ctx, domain.AdministratorPermit(f.actor), retired); err != nil {
 				t.Fatalf("retiring %s: %v", retired, err)
 			}
 			retiredRow, err := f.s.GetCustomField(f.ctx, retired)
@@ -597,7 +597,7 @@ func TestTwoRetiredFieldsSharingCodeAndLabelOnDifferentDaysGetDistinctHeaders(t 
 					t.Fatalf("reading %s: %v", fieldID, err)
 				}
 				row.Label = label
-				if err := f.s.UpdateCustomField(f.ctx, f.actor, &row.CustomField); err != nil {
+				if err := f.s.UpdateCustomField(f.ctx, domain.AdministratorPermit(f.actor), &row.CustomField); err != nil {
 					t.Fatalf("relabelling %s: %v", fieldID, err)
 				}
 			}
@@ -606,7 +606,7 @@ func TestTwoRetiredFieldsSharingCodeAndLabelOnDifferentDaysGetDistinctHeaders(t 
 			relabel(first, "Cost Centre")
 			day1 := time.Date(2026, 1, 10, 9, 0, 0, 0, time.UTC)
 			onDay1 := f.s.WithClock(func() time.Time { return day1 })
-			if err := onDay1.RetireCustomField(f.ctx, f.actor, first); err != nil {
+			if err := onDay1.RetireCustomField(f.ctx, domain.AdministratorPermit(f.actor), first); err != nil {
 				t.Fatalf("retiring first: %v", err)
 			}
 
@@ -617,7 +617,7 @@ func TestTwoRetiredFieldsSharingCodeAndLabelOnDifferentDaysGetDistinctHeaders(t 
 			relabel(second, "Cost Centre")
 			day2 := time.Date(2026, 3, 4, 9, 0, 0, 0, time.UTC)
 			onDay2 := f.s.WithClock(func() time.Time { return day2 })
-			if err := onDay2.RetireCustomField(f.ctx, f.actor, second); err != nil {
+			if err := onDay2.RetireCustomField(f.ctx, domain.AdministratorPermit(f.actor), second); err != nil {
 				t.Fatalf("retiring second: %v", err)
 			}
 
@@ -666,14 +666,14 @@ func TestALiveLabelImitatingTheRetiredMarkerDoesNotCollideWithARetiredField(t *t
 					t.Fatalf("reading %s: %v", fieldID, err)
 				}
 				row.Label = label
-				if err := f.s.UpdateCustomField(f.ctx, f.actor, &row.CustomField); err != nil {
+				if err := f.s.UpdateCustomField(f.ctx, domain.AdministratorPermit(f.actor), &row.CustomField); err != nil {
 					t.Fatalf("relabelling %s: %v", fieldID, err)
 				}
 			}
 
 			retiredField := mustField(t, f, "asset", "support", domain.CustomFieldText)
 			relabel(retiredField, "Support")
-			if err := f.s.RetireCustomField(f.ctx, f.actor, retiredField); err != nil {
+			if err := f.s.RetireCustomField(f.ctx, domain.AdministratorPermit(f.actor), retiredField); err != nil {
 				t.Fatalf("retiring: %v", err)
 			}
 			retiredRow, err := f.s.GetCustomField(f.ctx, retiredField)
@@ -731,7 +731,7 @@ func TestAddingASecondFieldDoesNotRenameTheFirstsHeader(t *testing.T) {
 				t.Fatalf("reading %s: %v", first, err)
 			}
 			row.Label = "Cost Centre"
-			if err := f.s.UpdateCustomField(f.ctx, f.actor, &row.CustomField); err != nil {
+			if err := f.s.UpdateCustomField(f.ctx, domain.AdministratorPermit(f.actor), &row.CustomField); err != nil {
 				t.Fatalf("relabelling %s: %v", first, err)
 			}
 
@@ -751,7 +751,7 @@ func TestAddingASecondFieldDoesNotRenameTheFirstsHeader(t *testing.T) {
 				t.Fatalf("reading %s: %v", second, err)
 			}
 			row2.Label = "Cost Centre"
-			if err := f.s.UpdateCustomField(f.ctx, f.actor, &row2.CustomField); err != nil {
+			if err := f.s.UpdateCustomField(f.ctx, domain.AdministratorPermit(f.actor), &row2.CustomField); err != nil {
 				t.Fatalf("relabelling %s: %v", second, err)
 			}
 

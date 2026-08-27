@@ -101,7 +101,7 @@ func (a *App) TagCreate(w http.ResponseWriter, r *http.Request) {
 
 	t, err := domain.NewTag(store.NewID(), spec.Code, spec.Label, spec.Description, actor(r).ID, a.Store.Now())
 	if err == nil {
-		err = a.Store.CreateTag(r.Context(), actor(r), t)
+		err = a.Store.CreateTag(r.Context(), permit(r), t)
 	}
 	if err != nil {
 		if messages, ok := validationErrors(err); ok {
@@ -138,7 +138,7 @@ func (a *App) TagUpdate(w http.ResponseWriter, r *http.Request) {
 	updated.Description = formValue(r, "description")
 	updated.RowVersion = submittedVersion(r, updated.RowVersion)
 
-	if err := a.Store.UpdateTag(r.Context(), actor(r), &updated); err != nil {
+	if err := a.Store.UpdateTag(r.Context(), permit(r), &updated); err != nil {
 		messages, ok := validationErrors(err)
 		if !ok {
 			switch {
@@ -165,7 +165,7 @@ func (a *App) TagUpdate(w http.ResponseWriter, r *http.Request) {
 // rather than refused if it is already retired, the way CustomFieldRetire
 // treats a second retirement.
 func (a *App) TagRetire(w http.ResponseWriter, r *http.Request) {
-	if err := a.Store.RetireTag(r.Context(), actor(r), r.PathValue("id")); err != nil {
+	if err := a.Store.RetireTag(r.Context(), permit(r), r.PathValue("id")); err != nil {
 		a.handleStoreError(w, r, err)
 		return
 	}
@@ -176,7 +176,7 @@ func (a *App) TagRetire(w http.ResponseWriter, r *http.Request) {
 // TagRestore brings a retired tag back. Refused if a live tag already holds
 // the same code.
 func (a *App) TagRestore(w http.ResponseWriter, r *http.Request) {
-	if err := a.Store.RestoreTag(r.Context(), actor(r), r.PathValue("id")); err != nil {
+	if err := a.Store.RestoreTag(r.Context(), permit(r), r.PathValue("id")); err != nil {
 		a.handleStoreError(w, r, err)
 		return
 	}

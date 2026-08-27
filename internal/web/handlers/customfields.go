@@ -315,7 +315,7 @@ func (a *App) CustomFieldCreate(w http.ResponseWriter, r *http.Request) {
 	f, err := domain.NewCustomField(store.NewID(), spec.EntityType, spec.Code, spec.Label,
 		spec.Kind, spec.Description, actor(r).ID, spec.OwnerTeamID, a.Store.Now())
 	if err == nil {
-		err = a.Store.CreateCustomField(r.Context(), actor(r), f)
+		err = a.Store.CreateCustomField(r.Context(), permit(r), f)
 	}
 	if err != nil {
 		if messages, ok := validationErrors(err); ok {
@@ -367,7 +367,7 @@ func (a *App) CustomFieldUpdate(w http.ResponseWriter, r *http.Request) {
 	updated.OwnerTeamID = submittedString(r, "owner_team_id", updated.OwnerTeamID)
 	updated.RowVersion = submittedVersion(r, updated.RowVersion)
 
-	if err := a.Store.UpdateCustomField(r.Context(), actor(r), &updated); err != nil {
+	if err := a.Store.UpdateCustomField(r.Context(), permit(r), &updated); err != nil {
 		messages, ok := validationErrors(err)
 		if !ok {
 			switch {
@@ -413,7 +413,7 @@ func (a *App) CustomFieldUpdate(w http.ResponseWriter, r *http.Request) {
 // docs/custom-fields-design.md §6 -- and a field already retired is left
 // alone rather than refused, the way TeamRetire treats a second retirement.
 func (a *App) CustomFieldRetire(w http.ResponseWriter, r *http.Request) {
-	if err := a.Store.RetireCustomField(r.Context(), actor(r), r.PathValue("id")); err != nil {
+	if err := a.Store.RetireCustomField(r.Context(), permit(r), r.PathValue("id")); err != nil {
 		a.handleStoreError(w, r, err)
 		return
 	}
@@ -424,7 +424,7 @@ func (a *App) CustomFieldRetire(w http.ResponseWriter, r *http.Request) {
 // CustomFieldRestore brings a retired field and every value it still retains
 // back. Refused if a live field already holds the same (entity_type, code).
 func (a *App) CustomFieldRestore(w http.ResponseWriter, r *http.Request) {
-	if err := a.Store.RestoreCustomField(r.Context(), actor(r), r.PathValue("id")); err != nil {
+	if err := a.Store.RestoreCustomField(r.Context(), permit(r), r.PathValue("id")); err != nil {
 		a.handleStoreError(w, r, err)
 		return
 	}
@@ -475,7 +475,7 @@ func (a *App) CustomFieldOptions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	expected := submittedVersion(r, existing.RowVersion)
-	if err := a.Store.SetCustomFieldOptions(r.Context(), actor(r), id, expected, opts); err != nil {
+	if err := a.Store.SetCustomFieldOptions(r.Context(), permit(r), id, expected, opts); err != nil {
 		// FINAL REVIEW AY: err.Error() must never reach the browser verbatim
 		// -- CLAUDE.md, "never return a raw driver error to the HTTP layer".
 		// Only a domain-recognised refusal gets its own styled per-field

@@ -192,7 +192,7 @@ func (s *SQLStore) ListActiveOverrides(ctx context.Context) ([]HealthOverrideRow
 // racing would both read "no active override" and one would get a bare
 // constraint error instead of the conflict the other half of this method
 // reports.
-func (s *SQLStore) CreateHealthOverride(ctx context.Context, actor domain.Actor, o *domain.HealthOverride) error {
+func (s *SQLStore) CreateHealthOverride(ctx context.Context, p domain.Permit, o *domain.HealthOverride) error {
 	if err := o.Validate(); err != nil {
 		return err
 	}
@@ -205,7 +205,7 @@ func (s *SQLStore) CreateHealthOverride(ctx context.Context, actor domain.Actor,
 	}
 
 	now := s.Now()
-	return s.writeSerializable(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.writeSerializable(ctx, p, func(t *tx) error {
 		existing, err := t.overrideForEntity(ctx, o.EntityType, o.EntityID)
 		if err != nil {
 			return err
@@ -216,7 +216,7 @@ func (s *SQLStore) CreateHealthOverride(ctx context.Context, actor domain.Actor,
 					o.EntityType, o.EntityID, existing.ExpiresAt, domain.ErrConflict)
 			}
 			superseded := *existing
-			if err := superseded.Clear(actor, now); err != nil {
+			if err := superseded.Clear(p.Actor(), now); err != nil {
 				return fmt.Errorf("superseding lapsed override %s: %w", existing.ID, err)
 			}
 			if err := t.saveOverride(ctx, &superseded); err != nil {
@@ -247,16 +247,16 @@ func (s *SQLStore) CreateHealthOverride(ctx context.Context, actor domain.Actor,
 // would otherwise silently revert a colleague's edit and the change_log would
 // attribute the revert to whoever pressed the button last. That is the same
 // defect rule 1 names on the observed side, and it is just as available here.
-func (s *SQLStore) AmendHealthOverride(ctx context.Context, actor domain.Actor, id string, spec domain.HealthOverrideSpec) (*domain.HealthOverride, error) {
+func (s *SQLStore) AmendHealthOverride(ctx context.Context, p domain.Permit, id string, spec domain.HealthOverrideSpec) (*domain.HealthOverride, error) {
 	now := s.Now()
 	var out *domain.HealthOverride
-	err := s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	err := s.write(ctx, p, func(t *tx) error {
 		before, err := t.overrideByID(ctx, id)
 		if err != nil {
 			return err
 		}
 		amended := *before
-		if err := amended.Amend(spec, actor, now); err != nil {
+		if err := amended.Amend(spec, p.Actor(), now); err != nil {
 			return err
 		}
 		if err := t.saveOverride(ctx, &amended); err != nil {
@@ -276,15 +276,15 @@ func (s *SQLStore) AmendHealthOverride(ctx context.Context, actor domain.Actor, 
 // The row stays. Soft delete applies here as everywhere else, and for a sharper
 // reason than usual: "who silenced this, for how long, and why" is read after
 // the fact, by somebody asking why an outage went unnoticed.
-func (s *SQLStore) ClearHealthOverride(ctx context.Context, actor domain.Actor, id string) error {
+func (s *SQLStore) ClearHealthOverride(ctx context.Context, p domain.Permit, id string) error {
 	now := s.Now()
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, p, func(t *tx) error {
 		before, err := t.overrideByID(ctx, id)
 		if err != nil {
 			return err
 		}
 		cleared := *before
-		if err := cleared.Clear(actor, now); err != nil {
+		if err := cleared.Clear(p.Actor(), now); err != nil {
 			return err
 		}
 		if err := t.saveOverride(ctx, &cleared); err != nil {

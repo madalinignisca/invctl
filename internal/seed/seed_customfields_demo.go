@@ -373,7 +373,7 @@ func StageCustomFieldSpread(ctx context.Context, s *store.SQLStore, adminUsernam
 	if err != nil {
 		return fmt.Errorf("building the legacy ticket reference field: %w", err)
 	}
-	if err := s.CreateCustomField(ctx, actor, legacy); err != nil {
+	if err := s.CreateCustomField(ctx, domain.AdministratorPermit(actor), legacy); err != nil {
 		return fmt.Errorf("staging the legacy ticket reference field: %w", err)
 	}
 	legacyValues := map[string]string{
@@ -386,7 +386,7 @@ func StageCustomFieldSpread(ctx context.Context, s *store.SQLStore, adminUsernam
 			return fmt.Errorf("staging legacy ticket references: %w", err)
 		}
 	}
-	if err := s.RetireCustomField(ctx, actor, legacy.ID); err != nil {
+	if err := s.RetireCustomField(ctx, domain.AdministratorPermit(actor), legacy.ID); err != nil {
 		return fmt.Errorf("retiring the legacy ticket reference field: %w", err)
 	}
 
@@ -403,7 +403,7 @@ func StageCustomFieldSpread(ctx context.Context, s *store.SQLStore, adminUsernam
 		return fmt.Errorf("reading criticality_tier to retire its low option: %w", err)
 	}
 	remaining := selectOptions(optionSpec{"medium", "Medium"}, optionSpec{"high", "High"})
-	if err := s.SetCustomFieldOptions(ctx, actor, critField.ID, critField.RowVersion, remaining); err != nil {
+	if err := s.SetCustomFieldOptions(ctx, domain.AdministratorPermit(actor), critField.ID, critField.RowVersion, remaining); err != nil {
 		return fmt.Errorf("retiring the low criticality_tier option: %w", err)
 	}
 
@@ -459,7 +459,7 @@ func assignAndDeprecateOwner(ctx context.Context, s *store.SQLStore, actor domai
 		return fmt.Errorf("reading field %s to reassign its owner: %w", fieldID, err)
 	}
 	field.OwnerTeamID = &team.ID
-	if err := s.UpdateCustomField(ctx, actor, &field.CustomField); err != nil {
+	if err := s.UpdateCustomField(ctx, domain.AdministratorPermit(actor), &field.CustomField); err != nil {
 		return fmt.Errorf("reassigning field %s to the soon-to-deprecate team: %w", fieldID, err)
 	}
 
@@ -491,7 +491,7 @@ func assignToUnreachableOwner(ctx context.Context, s *store.SQLStore, actor doma
 		return fmt.Errorf("reading field %s to reassign its owner: %w", fieldID, err)
 	}
 	field.OwnerTeamID = &team.ID
-	if err := s.UpdateCustomField(ctx, actor, &field.CustomField); err != nil {
+	if err := s.UpdateCustomField(ctx, domain.AdministratorPermit(actor), &field.CustomField); err != nil {
 		return fmt.Errorf("reassigning field %s to the contactless team: %w", fieldID, err)
 	}
 	return nil

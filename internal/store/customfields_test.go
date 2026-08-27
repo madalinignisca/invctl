@@ -107,7 +107,7 @@ func mustField(t *testing.T, f *customFieldFixture, entityType, code, kind strin
 	if err != nil {
 		t.Fatalf("building custom field %s: %v", code, err)
 	}
-	if err := f.s.CreateCustomField(f.ctx, f.actor, cf); err != nil {
+	if err := f.s.CreateCustomField(f.ctx, domain.AdministratorPermit(f.actor), cf); err != nil {
 		t.Fatalf("creating custom field %s: %v", code, err)
 	}
 	return cf.ID
@@ -136,7 +136,7 @@ func mustOptions(t *testing.T, f *customFieldFixture, fieldID string, values ...
 	for _, v := range values {
 		opts = append(opts, domain.CustomFieldOption{Value: v, Label: v})
 	}
-	if err := f.s.SetCustomFieldOptions(f.ctx, f.actor, fieldID,
+	if err := f.s.SetCustomFieldOptions(f.ctx, domain.AdministratorPermit(f.actor), fieldID,
 		fieldVersion(t, f, fieldID), opts); err != nil {
 		t.Fatalf("setting the options of field %s to %v: %v", fieldID, values, err)
 	}
@@ -185,7 +185,7 @@ func mustValue(t *testing.T, f *customFieldFixture, fieldID, entityID, raw strin
 func mustSetValues(t *testing.T, f *customFieldFixture, entityID string, vals map[string]string) {
 	t.Helper()
 	entityType := entityTypeOf(t, f, entityID)
-	if err := f.s.SetCustomValues(f.ctx, f.actor, entityType, entityID,
+	if err := f.s.SetCustomValues(f.ctx, domain.AdministratorPermit(f.actor), entityType, entityID,
 		entityVersion(t, f, entityType, entityID), vals); err != nil {
 		t.Fatalf("setting custom values on %s %s: %v", entityType, entityID, err)
 	}
@@ -329,7 +329,7 @@ func TestARetiredCodeCanBeUsedAgain(t *testing.T) {
 		t.Run(e.Name, func(t *testing.T) {
 			f := newCustomFieldFixture(t, e)
 			first := mustField(t, f, "asset", "cost_centre", domain.CustomFieldText)
-			if err := f.s.RetireCustomField(f.ctx, f.actor, first); err != nil {
+			if err := f.s.RetireCustomField(f.ctx, domain.AdministratorPermit(f.actor), first); err != nil {
 				t.Fatalf("retiring: %v", err)
 			}
 
@@ -338,7 +338,7 @@ func TestARetiredCodeCanBeUsedAgain(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building the second field: %v", err)
 			}
-			if err := f.s.CreateCustomField(f.ctx, f.actor, cf); err != nil {
+			if err := f.s.CreateCustomField(f.ctx, domain.AdministratorPermit(f.actor), cf); err != nil {
 				t.Fatalf("a retired code must be usable again: %v", err)
 			}
 		})
@@ -358,7 +358,7 @@ func TestTwoLiveFieldsCannotShareACode(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building the second field: %v", err)
 			}
-			if err := f.s.CreateCustomField(f.ctx, f.actor, cf); err == nil {
+			if err := f.s.CreateCustomField(f.ctx, domain.AdministratorPermit(f.actor), cf); err == nil {
 				t.Fatal("two live fields must not be able to share one code")
 			}
 		})
@@ -379,7 +379,7 @@ func TestAFieldsKindCannotChangeWhileValuesExist(t *testing.T) {
 				t.Fatalf("reading: %v", err)
 			}
 			got.Kind = domain.CustomFieldNumber
-			err = f.s.UpdateCustomField(f.ctx, f.actor, &got.CustomField)
+			err = f.s.UpdateCustomField(f.ctx, domain.AdministratorPermit(f.actor), &got.CustomField)
 			if err == nil {
 				t.Fatal("retyping a field that holds values must be refused: " +
 					"it is a data migration wearing a form control")
@@ -406,7 +406,7 @@ func TestTheLabelAndDescriptionStayEditableWithValues(t *testing.T) {
 			}
 			row.Label = "SAP Cost Centre"
 			row.Description = "the code finance rebills against"
-			if err := f.s.UpdateCustomField(f.ctx, f.actor, &row.CustomField); err != nil {
+			if err := f.s.UpdateCustomField(f.ctx, domain.AdministratorPermit(f.actor), &row.CustomField); err != nil {
 				t.Fatalf("renaming a field that holds values must be allowed: %v", err)
 			}
 			after, err := f.s.GetCustomField(f.ctx, id)
@@ -440,7 +440,7 @@ func TestCodeStaysEditableWithValues(t *testing.T) {
 				t.Fatalf("reading: %v", err)
 			}
 			row.Code = "cost_center_us"
-			if err := f.s.UpdateCustomField(f.ctx, f.actor, &row.CustomField); err != nil {
+			if err := f.s.UpdateCustomField(f.ctx, domain.AdministratorPermit(f.actor), &row.CustomField); err != nil {
 				t.Fatalf("renaming the code of a field that holds values must be allowed: %v", err)
 			}
 			after, err := f.s.GetCustomField(f.ctx, id)
@@ -469,7 +469,7 @@ func TestRetiringAFieldKeepsEveryValue(t *testing.T) {
 			id := mustField(t, f, "asset", "cost_centre", domain.CustomFieldText)
 			mustValue(t, f, id, f.assetID, "IT-42")
 
-			if err := f.s.RetireCustomField(f.ctx, f.actor, id); err != nil {
+			if err := f.s.RetireCustomField(f.ctx, domain.AdministratorPermit(f.actor), id); err != nil {
 				t.Fatalf("retiring: %v", err)
 			}
 			// countOne(ctx, query, args...) (int64, error) -- it returns the
@@ -495,12 +495,12 @@ func TestRestoreIsRefusedWhenALiveFieldHoldsTheCode(t *testing.T) {
 		t.Run(e.Name, func(t *testing.T) {
 			f := newCustomFieldFixture(t, e)
 			first := mustField(t, f, "asset", "cost_centre", domain.CustomFieldText)
-			if err := f.s.RetireCustomField(f.ctx, f.actor, first); err != nil {
+			if err := f.s.RetireCustomField(f.ctx, domain.AdministratorPermit(f.actor), first); err != nil {
 				t.Fatalf("retiring: %v", err)
 			}
 			mustField(t, f, "asset", "cost_centre", domain.CustomFieldText)
 
-			err := f.s.RestoreCustomField(f.ctx, f.actor, first)
+			err := f.s.RestoreCustomField(f.ctx, domain.AdministratorPermit(f.actor), first)
 			if err == nil {
 				t.Fatal("restoring must be refused while a live field holds the code")
 			}
@@ -575,10 +575,10 @@ func TestEveryDefinitionMutationWritesChangeLog(t *testing.T) {
 						return err
 					}
 					row.Label = "Renamed"
-					return f.s.UpdateCustomField(f.ctx, f.actor, &row.CustomField)
+					return f.s.UpdateCustomField(f.ctx, domain.AdministratorPermit(f.actor), &row.CustomField)
 				}},
-				{"retire", func() error { return f.s.RetireCustomField(f.ctx, f.actor, id) }},
-				{"restore", func() error { return f.s.RestoreCustomField(f.ctx, f.actor, id) }},
+				{"retire", func() error { return f.s.RetireCustomField(f.ctx, domain.AdministratorPermit(f.actor), id) }},
+				{"restore", func() error { return f.s.RestoreCustomField(f.ctx, domain.AdministratorPermit(f.actor), id) }},
 			}
 			// Creation already happened inside mustField; assert it logged too.
 			if n := changeCount(t, f, "custom_field", id); n != 1 {
@@ -634,7 +634,7 @@ func TestReorderingCustomFieldOptionsIsNotAChange(t *testing.T) {
 		t.Run(e.Name, func(t *testing.T) {
 			f := newCustomFieldFixture(t, e)
 			id := mustField(t, f, "asset", "tier", domain.CustomFieldSelect)
-			if err := f.s.SetCustomFieldOptions(f.ctx, f.actor, id, fieldVersion(t, f, id), []domain.CustomFieldOption{
+			if err := f.s.SetCustomFieldOptions(f.ctx, domain.AdministratorPermit(f.actor), id, fieldVersion(t, f, id), []domain.CustomFieldOption{
 				{Value: "gold", Label: "Gold"},
 				{Value: "silver", Label: "Silver"},
 			}); err != nil {
@@ -642,7 +642,7 @@ func TestReorderingCustomFieldOptionsIsNotAChange(t *testing.T) {
 			}
 			before := changeCount(t, f, "custom_field", id)
 
-			if err := f.s.SetCustomFieldOptions(f.ctx, f.actor, id, fieldVersion(t, f, id), []domain.CustomFieldOption{
+			if err := f.s.SetCustomFieldOptions(f.ctx, domain.AdministratorPermit(f.actor), id, fieldVersion(t, f, id), []domain.CustomFieldOption{
 				{Value: "silver", Label: "Silver"},
 				{Value: "gold", Label: "Gold"},
 			}); err != nil {
@@ -672,7 +672,7 @@ func TestRenamingAnOptionsLabelIsAuditedEvenWithNoOtherChange(t *testing.T) {
 		t.Run(e.Name, func(t *testing.T) {
 			f := newCustomFieldFixture(t, e)
 			id := mustField(t, f, "asset", "tier", domain.CustomFieldSelect)
-			if err := f.s.SetCustomFieldOptions(f.ctx, f.actor, id, fieldVersion(t, f, id), []domain.CustomFieldOption{
+			if err := f.s.SetCustomFieldOptions(f.ctx, domain.AdministratorPermit(f.actor), id, fieldVersion(t, f, id), []domain.CustomFieldOption{
 				{Value: "gold", Label: "Gold"},
 				{Value: "silver", Label: "Silver"},
 			}); err != nil {
@@ -681,7 +681,7 @@ func TestRenamingAnOptionsLabelIsAuditedEvenWithNoOtherChange(t *testing.T) {
 			before := changeCount(t, f, "custom_field", id)
 
 			// Same value, same position -- only the label moves.
-			if err := f.s.SetCustomFieldOptions(f.ctx, f.actor, id, fieldVersion(t, f, id), []domain.CustomFieldOption{
+			if err := f.s.SetCustomFieldOptions(f.ctx, domain.AdministratorPermit(f.actor), id, fieldVersion(t, f, id), []domain.CustomFieldOption{
 				{Value: "gold", Label: "Gold Tier"},
 				{Value: "silver", Label: "Silver"},
 			}); err != nil {
@@ -710,7 +710,7 @@ func TestRetiringAnOptionKeepsItSelectableOnExistingValues(t *testing.T) {
 			mustOptions(t, f, id, "gold", "silver")
 
 			// Drop "silver" by submitting only "gold".
-			if err := f.s.SetCustomFieldOptions(f.ctx, f.actor, id, fieldVersion(t, f, id), []domain.CustomFieldOption{
+			if err := f.s.SetCustomFieldOptions(f.ctx, domain.AdministratorPermit(f.actor), id, fieldVersion(t, f, id), []domain.CustomFieldOption{
 				{Value: "gold", Label: "Gold"},
 			}); err != nil {
 				t.Fatalf("dropping silver: %v", err)
@@ -745,7 +745,7 @@ func TestSetCustomFieldOptionsRefusesADuplicateValue(t *testing.T) {
 			f := newCustomFieldFixture(t, e)
 			id := mustField(t, f, "asset", "tier", domain.CustomFieldSelect)
 
-			err := f.s.SetCustomFieldOptions(f.ctx, f.actor, id, fieldVersion(t, f, id), []domain.CustomFieldOption{
+			err := f.s.SetCustomFieldOptions(f.ctx, domain.AdministratorPermit(f.actor), id, fieldVersion(t, f, id), []domain.CustomFieldOption{
 				{Value: "gold", Label: "Gold"},
 				{Value: "gold", Label: "Gold (again)"},
 			})
@@ -768,12 +768,12 @@ func TestSetCustomFieldOptionsRefusesAnEmptyValueOrLabel(t *testing.T) {
 			f := newCustomFieldFixture(t, e)
 			id := mustField(t, f, "asset", "tier", domain.CustomFieldSelect)
 
-			if err := f.s.SetCustomFieldOptions(f.ctx, f.actor, id, fieldVersion(t, f, id), []domain.CustomFieldOption{
+			if err := f.s.SetCustomFieldOptions(f.ctx, domain.AdministratorPermit(f.actor), id, fieldVersion(t, f, id), []domain.CustomFieldOption{
 				{Value: "  ", Label: "Gold"},
 			}); err == nil {
 				t.Fatal("an empty option value must be refused")
 			}
-			if err := f.s.SetCustomFieldOptions(f.ctx, f.actor, id, fieldVersion(t, f, id), []domain.CustomFieldOption{
+			if err := f.s.SetCustomFieldOptions(f.ctx, domain.AdministratorPermit(f.actor), id, fieldVersion(t, f, id), []domain.CustomFieldOption{
 				{Value: "gold", Label: "  "},
 			}); err == nil {
 				t.Fatal("an empty option label must be refused")
@@ -798,20 +798,20 @@ func TestSetCustomFieldOptionsBoundsValueAndLabel(t *testing.T) {
 			id := mustField(t, f, "asset", "tier", domain.CustomFieldSelect)
 
 			oversized := strings.Repeat("a", domain.MaxCustomTextLength+15)
-			if err := f.s.SetCustomFieldOptions(f.ctx, f.actor, id, fieldVersion(t, f, id), []domain.CustomFieldOption{
+			if err := f.s.SetCustomFieldOptions(f.ctx, domain.AdministratorPermit(f.actor), id, fieldVersion(t, f, id), []domain.CustomFieldOption{
 				{Value: oversized, Label: "Gold"},
 			}); err == nil {
 				t.Fatal("an option value over the length bound must be refused")
 			}
 
 			withNUL := "gold\x00" + strings.Repeat("a", 5000)
-			if err := f.s.SetCustomFieldOptions(f.ctx, f.actor, id, fieldVersion(t, f, id), []domain.CustomFieldOption{
+			if err := f.s.SetCustomFieldOptions(f.ctx, domain.AdministratorPermit(f.actor), id, fieldVersion(t, f, id), []domain.CustomFieldOption{
 				{Value: withNUL, Label: "Gold"},
 			}); err == nil {
 				t.Fatal("an option value with an embedded NUL byte must be refused")
 			}
 
-			if err := f.s.SetCustomFieldOptions(f.ctx, f.actor, id, fieldVersion(t, f, id), []domain.CustomFieldOption{
+			if err := f.s.SetCustomFieldOptions(f.ctx, domain.AdministratorPermit(f.actor), id, fieldVersion(t, f, id), []domain.CustomFieldOption{
 				{Value: "gold", Label: "Gold\x00"},
 			}); err == nil {
 				t.Fatal("an option label with an embedded NUL byte must be refused")
@@ -843,7 +843,7 @@ func TestUpdateRefusesADescriptionClearedToBlank(t *testing.T) {
 				t.Fatalf("reading: %v", err)
 			}
 			row.Description = "   "
-			if err := f.s.UpdateCustomField(f.ctx, f.actor, &row.CustomField); err == nil {
+			if err := f.s.UpdateCustomField(f.ctx, domain.AdministratorPermit(f.actor), &row.CustomField); err == nil {
 				t.Fatal("clearing the description to blank must be refused")
 			}
 		})
@@ -871,7 +871,7 @@ func TestEntityTypeCannotChangeEvenAtZeroValues(t *testing.T) {
 			// values. Refusing anyway is the entire point of this test --
 			// it is what tells entity_type apart from Kind.
 			row.EntityType = "service"
-			err = f.s.UpdateCustomField(f.ctx, f.actor, &row.CustomField)
+			err = f.s.UpdateCustomField(f.ctx, domain.AdministratorPermit(f.actor), &row.CustomField)
 			if err == nil {
 				t.Fatal("changing entity_type must be refused, even when the field holds no values")
 			}
@@ -901,14 +901,14 @@ func TestAStaleOptionsSubmissionDoesNotUnretireAnOption(t *testing.T) {
 			stale := fieldVersion(t, f, id)
 
 			// A second administrator retires "silver".
-			if err := f.s.SetCustomFieldOptions(f.ctx, f.actor, id, fieldVersion(t, f, id),
+			if err := f.s.SetCustomFieldOptions(f.ctx, domain.AdministratorPermit(f.actor), id, fieldVersion(t, f, id),
 				[]domain.CustomFieldOption{{Value: "gold", Label: "Gold"}}); err != nil {
 				t.Fatalf("retiring silver: %v", err)
 			}
 
 			// The stale submission, naming both options as though nothing had
 			// happened, must be refused rather than un-retiring silver.
-			err := f.s.SetCustomFieldOptions(f.ctx, f.actor, id, stale, []domain.CustomFieldOption{
+			err := f.s.SetCustomFieldOptions(f.ctx, domain.AdministratorPermit(f.actor), id, stale, []domain.CustomFieldOption{
 				{Value: "gold", Label: "Gold"},
 				{Value: "silver", Label: "Silver"},
 			})
@@ -944,7 +944,7 @@ func TestAStaleOptionsSubmissionDoesNotRetireAnOptionJustAdded(t *testing.T) {
 			stale := fieldVersion(t, f, id)
 
 			// A second administrator adds "silver".
-			if err := f.s.SetCustomFieldOptions(f.ctx, f.actor, id, fieldVersion(t, f, id),
+			if err := f.s.SetCustomFieldOptions(f.ctx, domain.AdministratorPermit(f.actor), id, fieldVersion(t, f, id),
 				[]domain.CustomFieldOption{
 					{Value: "gold", Label: "Gold"},
 					{Value: "silver", Label: "Silver"},
@@ -954,7 +954,7 @@ func TestAStaleOptionsSubmissionDoesNotRetireAnOptionJustAdded(t *testing.T) {
 
 			// The stale submission, naming only "gold" as though "silver" did
 			// not exist, must be refused rather than retiring it.
-			err := f.s.SetCustomFieldOptions(f.ctx, f.actor, id, stale,
+			err := f.s.SetCustomFieldOptions(f.ctx, domain.AdministratorPermit(f.actor), id, stale,
 				[]domain.CustomFieldOption{{Value: "gold", Label: "Gold"}})
 			if !errors.Is(err, domain.ErrStale) {
 				t.Fatalf("a stale options submission returned %v, want domain.ErrStale", err)
@@ -994,7 +994,7 @@ func TestCreateRefusesANonexistentOwnerTeam(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building: %v", err)
 			}
-			if err := f.s.CreateCustomField(f.ctx, f.actor, cf); !errors.Is(err, domain.ErrInvalid) {
+			if err := f.s.CreateCustomField(f.ctx, domain.AdministratorPermit(f.actor), cf); !errors.Is(err, domain.ErrInvalid) {
 				t.Fatalf("got %v, want domain.ErrInvalid for a nonexistent owner team", err)
 			}
 		})
@@ -1017,7 +1017,7 @@ func TestCreateRefusesARetiredOwnerTeam(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building: %v", err)
 			}
-			if err := f.s.CreateCustomField(f.ctx, f.actor, cf); !errors.Is(err, domain.ErrInvalid) {
+			if err := f.s.CreateCustomField(f.ctx, domain.AdministratorPermit(f.actor), cf); !errors.Is(err, domain.ErrInvalid) {
 				t.Fatalf("got %v, want domain.ErrInvalid for a retired owner team", err)
 			}
 		})
@@ -1037,7 +1037,7 @@ func TestAFieldAlreadyOwnedByASinceRetiredTeamStillShowsThatTeam(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building: %v", err)
 			}
-			if err := f.s.CreateCustomField(f.ctx, f.actor, cf); err != nil {
+			if err := f.s.CreateCustomField(f.ctx, domain.AdministratorPermit(f.actor), cf); err != nil {
 				t.Fatalf("creating with an active owner: %v", err)
 			}
 
@@ -1065,7 +1065,7 @@ func TestAFieldAlreadyOwnedByASinceRetiredTeamStillShowsThatTeam(t *testing.T) {
 			// comment describes, and without it a team retiring would
 			// retroactively freeze every OTHER field of that team's too.
 			row.Label = "Corrected Label"
-			if err := f.s.UpdateCustomField(f.ctx, f.actor, &row.CustomField); err != nil {
+			if err := f.s.UpdateCustomField(f.ctx, domain.AdministratorPermit(f.actor), &row.CustomField); err != nil {
 				t.Fatalf("an unrelated edit with the owner unchanged must be allowed even though "+
 					"the owner has since retired: %v", err)
 			}
@@ -1092,7 +1092,7 @@ func TestUpdateRefusesAssigningANewlyRetiredTeamAsOwner(t *testing.T) {
 			}
 			retired := f.retiredTeamID
 			row.OwnerTeamID = &retired
-			if err := f.s.UpdateCustomField(f.ctx, f.actor, &row.CustomField); !errors.Is(err, domain.ErrInvalid) {
+			if err := f.s.UpdateCustomField(f.ctx, domain.AdministratorPermit(f.actor), &row.CustomField); !errors.Is(err, domain.ErrInvalid) {
 				t.Fatalf("got %v, want domain.ErrInvalid for newly choosing a retired team", err)
 			}
 		})
@@ -1120,7 +1120,7 @@ func TestChangingTheOwnerWritesExactlyOneChangeLogRowWhoseDiffShowsOldAndNew(t *
 			}
 			oldOwner := *row.OwnerTeamID
 			row.OwnerTeamID = &newOwner
-			if err := f.s.UpdateCustomField(f.ctx, f.actor, &row.CustomField); err != nil {
+			if err := f.s.UpdateCustomField(f.ctx, domain.AdministratorPermit(f.actor), &row.CustomField); err != nil {
 				t.Fatalf("changing the owner: %v", err)
 			}
 

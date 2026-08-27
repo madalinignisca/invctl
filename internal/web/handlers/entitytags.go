@@ -210,7 +210,7 @@ func (a *App) postEntityTags(w http.ResponseWriter, r *http.Request, entityType,
 		newTag, err := domain.NewTag(store.NewID(), newCode, formValue(r, "new_tag_label"),
 			formValue(r, "new_tag_description"), actor(r).ID, a.Store.Now())
 		if err == nil {
-			err = a.Store.CreateTag(r.Context(), actor(r), newTag)
+			err = a.Store.CreateTag(r.Context(), permit(r), newTag)
 		}
 		if err != nil {
 			var msgs map[string]string

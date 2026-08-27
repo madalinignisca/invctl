@@ -185,7 +185,7 @@ func (f *ownershipFixture) customField(t *testing.T, code string, teamID *string
 	if err != nil {
 		t.Fatalf("building custom field %s: %v", code, err)
 	}
-	if err := f.s.CreateCustomField(f.ctx, f.actor, cf); err != nil {
+	if err := f.s.CreateCustomField(f.ctx, domain.AdministratorPermit(f.actor), cf); err != nil {
 		t.Fatalf("creating custom field %s: %v", code, err)
 	}
 	if teamID == nil {

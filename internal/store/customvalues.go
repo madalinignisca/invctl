@@ -446,7 +446,7 @@ func liveOptionValues(ctx context.Context, t *tx, fieldID string) ([]string, err
 //
 // The caller's token is not advanced in place; a handler re-reads the entity to
 // re-render it and gets the new one from there.
-func (s *SQLStore) SetCustomValues(ctx context.Context, actor domain.Actor, entityType, entityID string, expected int, vals map[string]string) error {
+func (s *SQLStore) SetCustomValues(ctx context.Context, p domain.Permit, entityType, entityID string, expected int, vals map[string]string) error {
 	switch entityType {
 	case domain.CustomFieldEntityAsset, domain.CustomFieldEntityService:
 	default:
@@ -454,7 +454,7 @@ func (s *SQLStore) SetCustomValues(ctx context.Context, actor domain.Actor, enti
 			entityType, domain.ErrInvalid)
 	}
 
-	return s.writeSerializable(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.writeSerializable(ctx, p, func(t *tx) error {
 		before, err := customFieldsAudit(ctx, t, entityType, entityID)
 		if err != nil {
 			return err

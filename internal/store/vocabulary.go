@@ -291,7 +291,7 @@ func VocabularyTables() []string {
 // The code is the primary key and is never rewritten: changing it would orphan
 // every row pointing at it, and the foreign keys would refuse anyway. Somebody
 // who wants a different code is adding a term, not editing one.
-func (s *SQLStore) UpsertVocabularyTerm(ctx context.Context, actor domain.Actor, table string, term VocabularyTerm) error {
+func (s *SQLStore) UpsertVocabularyTerm(ctx context.Context, p domain.Permit, table string, term VocabularyTerm) error {
 	if _, ok := vocabularyQueries[table]; !ok {
 		return fmt.Errorf("writing vocabulary: %q is not a lookup table: %w", table, domain.ErrInvalid)
 	}
@@ -315,7 +315,7 @@ func (s *SQLStore) UpsertVocabularyTerm(ctx context.Context, actor domain.Actor,
 		return err
 	}
 
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, p, func(t *tx) error {
 		var before VocabularyTerm
 		err := t.get(ctx, &before,
 			`SELECT code, label, sort_order, description FROM `+table+` WHERE code = ?`, term.Code)

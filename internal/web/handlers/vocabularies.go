@@ -69,7 +69,7 @@ func (a *App) VocabularyUpsert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := a.Store.UpsertVocabularyTerm(r.Context(), actor(r), table, term); err != nil {
+	if err := a.Store.UpsertVocabularyTerm(r.Context(), permit(r), table, term); err != nil {
 		if errs, ok := validationErrors(err); ok {
 			a.renderVocab(w, r, http.StatusUnprocessableEntity, errs, term.Code)
 			return
