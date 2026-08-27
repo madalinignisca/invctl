@@ -223,7 +223,7 @@ func (b *builder) retireOnPremDev() {
 		if !ok {
 			continue // the compute layer may not have run; nothing to retire
 		}
-		if err := b.store.RetireAsset(b.ctx, Actor, id); err != nil {
+		if err := b.store.RetireAsset(b.ctx, domain.AdministratorPermit(Actor), id); err != nil {
 			b.fail(fmt.Errorf("retiring %s: %w", name, err))
 			return
 		}

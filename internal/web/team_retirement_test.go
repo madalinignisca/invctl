@@ -205,7 +205,7 @@ func mustAssetOwnedByWeb(t *testing.T, h *harness, name, teamID string) string {
 		t.Fatalf("building asset %s: %v", name, err)
 	}
 	a.TeamID = &teamID
-	if err := h.store.CreateAsset(context.Background(), domain.SystemActor, a, nil); err != nil {
+	if err := h.store.CreateAsset(context.Background(), domain.AdministratorPermit(domain.SystemActor), a, nil); err != nil {
 		t.Fatalf("creating asset %s: %v", name, err)
 	}
 	return a.ID

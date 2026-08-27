@@ -22,12 +22,12 @@ import (
 // ---------- environments ----------
 
 // CreateEnvironment inserts an environment and its audit row.
-func (s *SQLStore) CreateEnvironment(ctx context.Context, actor domain.Actor, env *domain.Environment) error {
+func (s *SQLStore) CreateEnvironment(ctx context.Context, p domain.Permit, env *domain.Environment) error {
 	// The row the INSERT just wrote is version 1 (the column default).
 	// Without this a caller that creates and then updates the SAME struct
 	// compares 0 against 1 and gets a conflict against itself.
 	env.RowVersion = 1
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, p, func(t *tx) error {
 		if err := t.requireVocabulary(ctx, vocabEnvironmentRole, "role", env.Role); err != nil {
 			return err
 		}
@@ -49,7 +49,7 @@ func (s *SQLStore) CreateEnvironment(ctx context.Context, actor domain.Actor, en
 }
 
 // UpdateEnvironment persists a modified environment.
-func (s *SQLStore) UpdateEnvironment(ctx context.Context, actor domain.Actor, env *domain.Environment) error {
+func (s *SQLStore) UpdateEnvironment(ctx context.Context, p domain.Permit, env *domain.Environment) error {
 	if err := env.Validate(); err != nil {
 		return err
 	}
@@ -60,7 +60,7 @@ func (s *SQLStore) UpdateEnvironment(ctx context.Context, actor domain.Actor, en
 	env.CreatedAt = before.CreatedAt
 	env.UpdatedAt = domain.FormatTime(s.now())
 
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, p, func(t *tx) error {
 		if err := t.requireVocabulary(ctx, vocabEnvironmentRole, "role", env.Role); err != nil {
 			return err
 		}
@@ -699,7 +699,7 @@ func requireUniqueSiblingName(ctx context.Context, t *tx, field, name string, pa
 	return ve
 }
 
-func (s *SQLStore) CreateAsset(ctx context.Context, actor domain.Actor, a *domain.Asset, environmentIDs []string) error {
+func (s *SQLStore) CreateAsset(ctx context.Context, p domain.Permit, a *domain.Asset, environmentIDs []string) error {
 	// The row the INSERT just wrote is version 1 (the column default).
 	// Without this a caller that creates and then updates the SAME struct
 	// compares 0 against 1 and gets a conflict against itself.
@@ -721,7 +721,7 @@ func (s *SQLStore) CreateAsset(ctx context.Context, actor domain.Actor, a *domai
 	if err := s.requireFreeRackSpace(ctx, a); err != nil {
 		return err
 	}
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, p, func(t *tx) error {
 		return s.insertAsset(ctx, t, a, environmentIDs, codes)
 	})
 }
@@ -797,7 +797,7 @@ func (s *SQLStore) insertAsset(ctx context.Context, t *tx, a *domain.Asset, envi
 
 // UpdateAsset persists field changes. Reparenting is deliberately not handled
 // here -- it has to rebuild the closure subtree, so it gets its own method.
-func (s *SQLStore) UpdateAsset(ctx context.Context, actor domain.Actor, a *domain.Asset, environmentIDs []string) error {
+func (s *SQLStore) UpdateAsset(ctx context.Context, p domain.Permit, a *domain.Asset, environmentIDs []string) error {
 	if err := a.Validate(); err != nil {
 		return err
 	}
@@ -826,7 +826,7 @@ func (s *SQLStore) UpdateAsset(ctx context.Context, actor domain.Actor, a *domai
 		}
 	}
 
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, p, func(t *tx) error {
 		if err := t.requireVocabulary(ctx, vocabAssetKind, "kind", a.Kind); err != nil {
 			return err
 		}
@@ -918,7 +918,7 @@ func (s *SQLStore) UpdateAsset(ctx context.Context, actor domain.Actor, a *domai
 // guards transactions that are themselves serializable -- and the result is
 // exactly the state this method's contract says cannot exist: an active
 // attachment naming a retired asset.
-func (s *SQLStore) RetireAsset(ctx context.Context, actor domain.Actor, id string) error {
+func (s *SQLStore) RetireAsset(ctx context.Context, p domain.Permit, id string) error {
 	before, err := s.GetAsset(ctx, id)
 	if err != nil {
 		return err
@@ -927,7 +927,7 @@ func (s *SQLStore) RetireAsset(ctx context.Context, actor domain.Actor, id strin
 		return nil
 	}
 	at := domain.FormatTime(s.now())
-	return s.writeSerializable(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.writeSerializable(ctx, p, func(t *tx) error {
 		_, err := t.exec(ctx, `UPDATE asset SET lifecycle = ?, updated_at = ?,
 			                       row_version = row_version + 1 WHERE id = ?`,
 			domain.LifecycleRetired, at, id)
@@ -1051,7 +1051,7 @@ func insertClosureForNewNode(ctx context.Context, t *tx, id string, parentID *st
 // incrementally: incremental updates to a closure table are where these
 // implementations go wrong, and a subtree here is small enough that rebuilding
 // costs nothing.
-func (s *SQLStore) ReparentAsset(ctx context.Context, actor domain.Actor, id string, newParentID *string) error {
+func (s *SQLStore) ReparentAsset(ctx context.Context, p domain.Permit, id string, newParentID *string) error {
 	before, err := s.GetAsset(ctx, id)
 	if err != nil {
 		return err
@@ -1066,7 +1066,7 @@ func (s *SQLStore) ReparentAsset(ctx context.Context, actor domain.Actor, id str
 	}
 
 	at := domain.FormatTime(s.now())
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, p, func(t *tx) error {
 		if newParentID != nil {
 			// Moving a node underneath its own descendant would detach the
 			// subtree into a cycle, and the closure table has no way to

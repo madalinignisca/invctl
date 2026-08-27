@@ -98,7 +98,7 @@ func (f *ownershipFixture) asset(t *testing.T, name string, teamID *string, life
 	if lifecycle != "" {
 		a.Lifecycle = lifecycle
 	}
-	if err := f.s.CreateAsset(f.ctx, testActor, a, []string{f.env}); err != nil {
+	if err := f.s.CreateAsset(f.ctx, testPermit, a, []string{f.env}); err != nil {
 		t.Fatalf("creating asset %s: %v", name, err)
 	}
 	return a.ID
@@ -336,11 +336,11 @@ func TestOwnershipRetiredEntityExcluded(t *testing.T) {
 			retiredTeam := f.team(t, "gone-team", domain.LifecycleRetired, strp("gone@example.com"))
 
 			unownedID := f.asset(t, "retired-unowned-asset", nil, "")
-			if err := f.s.RetireAsset(f.ctx, testActor, unownedID); err != nil {
+			if err := f.s.RetireAsset(f.ctx, testPermit, unownedID); err != nil {
 				t.Fatalf("retiring asset: %v", err)
 			}
 			ownedID := f.asset(t, "retired-owned-by-gone-team", &retiredTeam, "")
-			if err := f.s.RetireAsset(f.ctx, testActor, ownedID); err != nil {
+			if err := f.s.RetireAsset(f.ctx, testPermit, ownedID); err != nil {
 				t.Fatalf("retiring asset: %v", err)
 			}
 
@@ -376,7 +376,7 @@ func TestOwnershipNoContactTeamAppearsOnce(t *testing.T) {
 
 			// A retired thing it owns must not inflate the count.
 			retiredID := f.asset(t, "nc-asset-retired", &noContact, "")
-			if err := f.s.RetireAsset(f.ctx, testActor, retiredID); err != nil {
+			if err := f.s.RetireAsset(f.ctx, testPermit, retiredID); err != nil {
 				t.Fatalf("retiring: %v", err)
 			}
 

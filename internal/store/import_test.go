@@ -306,7 +306,7 @@ func TestAnImportResolvesNamesAgainstTheEstateAndItself(t *testing.T) {
 				s, ctx := newStore(t, e)
 				site := mustAsset(t, s, ctx, domain.KindSite, "dc-a", nil)
 				gone := mustAsset(t, s, ctx, domain.KindRack, "rack-1", &site)
-				if err := s.RetireAsset(ctx, testActor, gone); err != nil {
+				if err := s.RetireAsset(ctx, testPermit, gone); err != nil {
 					t.Fatalf("retiring: %v", err)
 				}
 
@@ -716,7 +716,7 @@ func TestImportingAnAssetPointsItAtACataloguedModel(t *testing.T) {
 
 			t.Run("a retired model is not adopted from a file", func(t *testing.T) {
 				gone := mustDeviceType(t, s, ctx, dell, "PowerEdge R500", nil)
-				if err := s.RetireDeviceType(ctx, testActor, gone); err != nil {
+				if err := s.RetireDeviceType(ctx, testPermit, gone); err != nil {
 					t.Fatalf("retiring: %v", err)
 				}
 				rows, _ := ParseAssetCSV(strings.NewReader(

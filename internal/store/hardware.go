@@ -30,12 +30,12 @@ type ManufacturerRow struct {
 }
 
 // CreateManufacturer inserts a manufacturer and its audit row.
-func (s *SQLStore) CreateManufacturer(ctx context.Context, actor domain.Actor, m *domain.Manufacturer) error {
+func (s *SQLStore) CreateManufacturer(ctx context.Context, p domain.Permit, m *domain.Manufacturer) error {
 	m.RowVersion = 1
 	if err := m.Validate(); err != nil {
 		return err
 	}
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, p, func(t *tx) error {
 		_, err := t.exec(ctx, `
 			INSERT INTO manufacturer (id, code, name, support_ref, lifecycle, created_at, updated_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -48,7 +48,7 @@ func (s *SQLStore) CreateManufacturer(ctx context.Context, actor domain.Actor, m
 }
 
 // UpdateManufacturer persists field changes.
-func (s *SQLStore) UpdateManufacturer(ctx context.Context, actor domain.Actor, m *domain.Manufacturer) error {
+func (s *SQLStore) UpdateManufacturer(ctx context.Context, p domain.Permit, m *domain.Manufacturer) error {
 	if err := m.Validate(); err != nil {
 		return err
 	}
@@ -59,7 +59,7 @@ func (s *SQLStore) UpdateManufacturer(ctx context.Context, actor domain.Actor, m
 	m.CreatedAt = before.CreatedAt
 	m.UpdatedAt = domain.FormatTime(s.now())
 
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, p, func(t *tx) error {
 		res, err := t.exec(ctx, `
 			UPDATE manufacturer
 			SET code = ?, name = ?, support_ref = ?, lifecycle = ?, updated_at = ?,
@@ -115,7 +115,7 @@ func (s *SQLStore) ListManufacturers(ctx context.Context, includeRetired bool) (
 // cannot be removed. Retiring it anyway would leave device types pointing at a
 // maker the lists no longer show -- and a model whose manufacturer has silently
 // vanished from every picker is a model nobody can find to fix.
-func (s *SQLStore) RetireManufacturer(ctx context.Context, actor domain.Actor, id string) error {
+func (s *SQLStore) RetireManufacturer(ctx context.Context, p domain.Permit, id string) error {
 	before, err := s.GetManufacturer(ctx, id)
 	if err != nil {
 		return err
@@ -126,7 +126,7 @@ func (s *SQLStore) RetireManufacturer(ctx context.Context, actor domain.Actor, i
 			pluralWord(before.DeviceTypes, "model", "models"), domain.ErrConflict)
 	}
 	at := domain.FormatTime(s.now())
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, p, func(t *tx) error {
 		if _, err := t.exec(ctx,
 			`UPDATE manufacturer SET lifecycle = ?, updated_at = ?, row_version = row_version + 1
 			 WHERE id = ?`, domain.LifecycleRetired, at, id); err != nil {
@@ -163,12 +163,12 @@ const deviceTypeSelect = `
 	JOIN manufacturer m ON m.id = d.manufacturer_id`
 
 // CreateDeviceType inserts a model and its audit row.
-func (s *SQLStore) CreateDeviceType(ctx context.Context, actor domain.Actor, d *domain.DeviceType) error {
+func (s *SQLStore) CreateDeviceType(ctx context.Context, p domain.Permit, d *domain.DeviceType) error {
 	d.RowVersion = 1
 	if err := d.Validate(); err != nil {
 		return err
 	}
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, p, func(t *tx) error {
 		maker, err := requireLiveManufacturer(ctx, t, d.ManufacturerID)
 		if err != nil {
 			return err
@@ -209,7 +209,7 @@ func (s *SQLStore) insertDeviceType(ctx context.Context, t *tx, d *domain.Device
 // move a parent: it decides what the model IS, and moving a model between makers
 // silently re-labels every asset of it. Correct a mis-filed model by retiring it
 // and cataloguing the right one.
-func (s *SQLStore) UpdateDeviceType(ctx context.Context, actor domain.Actor, d *domain.DeviceType) error {
+func (s *SQLStore) UpdateDeviceType(ctx context.Context, p domain.Permit, d *domain.DeviceType) error {
 	before, err := s.GetDeviceType(ctx, d.ID)
 	if err != nil {
 		return err
@@ -221,7 +221,7 @@ func (s *SQLStore) UpdateDeviceType(ctx context.Context, actor domain.Actor, d *
 	d.CreatedAt = before.CreatedAt
 	d.UpdatedAt = domain.FormatTime(s.now())
 
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, p, func(t *tx) error {
 		res, err := t.exec(ctx, `
 			UPDATE device_type
 			SET model = ?, part_number = ?, u_height = ?, full_depth = ?,
@@ -292,13 +292,13 @@ func (s *SQLStore) ListDeviceTypes(ctx context.Context, f DeviceTypeFilter) ([]D
 // model, and the inherited EOL date keeps resolving -- withdrawing it would
 // quietly blank the expiry date on every asset of that model, which is the
 // opposite of what retiring it meant.
-func (s *SQLStore) RetireDeviceType(ctx context.Context, actor domain.Actor, id string) error {
+func (s *SQLStore) RetireDeviceType(ctx context.Context, p domain.Permit, id string) error {
 	before, err := s.GetDeviceType(ctx, id)
 	if err != nil {
 		return err
 	}
 	at := domain.FormatTime(s.now())
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, p, func(t *tx) error {
 		if _, err := t.exec(ctx,
 			`UPDATE device_type SET lifecycle = ?, updated_at = ?, row_version = row_version + 1
 			 WHERE id = ?`, domain.LifecycleRetired, at, id); err != nil {

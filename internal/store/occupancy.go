@@ -80,7 +80,7 @@ func (s *SQLStore) AllOccupancy(ctx context.Context) (map[string]*domain.Occupan
 // the ordinary state and is recorded as a change like any other -- somebody
 // deciding a machine is no longer shared is exactly the sort of thing a reader
 // needs to find later.
-func (s *SQLStore) SetOccupants(ctx context.Context, actor domain.Actor,
+func (s *SQLStore) SetOccupants(ctx context.Context, p domain.Permit,
 	assetID string, occupants []domain.Occupant) error {
 
 	if err := domain.ValidateOccupants(occupants); err != nil {
@@ -94,7 +94,7 @@ func (s *SQLStore) SetOccupants(ctx context.Context, actor domain.Actor,
 		return fmt.Errorf("a retired asset houses nobody: %w", domain.ErrInvalid)
 	}
 	at := domain.FormatTime(s.Now())
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, p, func(t *tx) error {
 		before, err := occupancyAudit(ctx, t, &asset.Asset)
 		if err != nil {
 			return err

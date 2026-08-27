@@ -524,7 +524,7 @@ func TestPathDropsRetiredTransit(t *testing.T) {
 				t.Fatal("sw-1 is not on the path, so retiring it proves nothing")
 			}
 
-			if err := f.s.RetireAsset(f.ctx, testActor, f.assets["sw-1"]); err != nil {
+			if err := f.s.RetireAsset(f.ctx, testPermit, f.assets["sw-1"]); err != nil {
 				t.Fatalf("retiring the switch: %v", err)
 			}
 

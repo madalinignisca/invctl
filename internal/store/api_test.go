@@ -175,7 +175,7 @@ func (f *apiFixture) environment(t *testing.T, code, role string, inScope bool, 
 	if err != nil {
 		t.Fatalf("building environment %s: %v", code, err)
 	}
-	if err := f.s.CreateEnvironment(f.ctx, testActor, env); err != nil {
+	if err := f.s.CreateEnvironment(f.ctx, testPermit, env); err != nil {
 		t.Fatalf("creating environment %s: %v", code, err)
 	}
 	f.envs[code] = env.ID
@@ -1295,7 +1295,7 @@ func TestALifecycleFilterNamesAValueAndTheDefaultExcludesRetired(t *testing.T) {
 			f := newAPIFixture(t, e)
 			scope := mustScope(t, "prod")
 			id := f.asset(t, domain.KindServer, "old-box", nil, "prod")
-			if err := f.s.RetireAsset(f.ctx, f.actor, id); err != nil {
+			if err := f.s.RetireAsset(f.ctx, domain.AdministratorPermit(f.actor), id); err != nil {
 				t.Fatalf("retiring: %v", err)
 			}
 
@@ -1368,7 +1368,7 @@ func TestARetiredHostsAddressesAreExcluded(t *testing.T) {
 				t.Fatal("dev-box's address is missing before it was retired; the test proves nothing")
 			}
 
-			if err := f.s.RetireAsset(f.ctx, f.actor, f.assets["dev-box"]); err != nil {
+			if err := f.s.RetireAsset(f.ctx, domain.AdministratorPermit(f.actor), f.assets["dev-box"]); err != nil {
 				t.Fatalf("retiring dev-box: %v", err)
 			}
 			after, err := f.s.APIListAddresses(f.ctx, scope, "", 500)
@@ -1405,7 +1405,7 @@ func TestASingleFetchStillReturnsARetiredEntity(t *testing.T) {
 
 			assetID := f.asset(t, domain.KindServer, "doomed-box", nil, "prod")
 			svcID := f.bareService(t, "doomed-svc", "prod")
-			if err := f.s.RetireAsset(f.ctx, f.actor, assetID); err != nil {
+			if err := f.s.RetireAsset(f.ctx, domain.AdministratorPermit(f.actor), assetID); err != nil {
 				t.Fatalf("retiring the asset: %v", err)
 			}
 			if err := f.s.RetireService(f.ctx, f.actor, svcID); err != nil {
@@ -1526,7 +1526,7 @@ func TestDecoratedListsExcludeWhatWasRetired(t *testing.T) {
 		{
 			name: "a retired host",
 			retire: func(t *testing.T, f *apiFixture, hostID, svcID string) {
-				if err := f.s.RetireAsset(f.ctx, f.actor, hostID); err != nil {
+				if err := f.s.RetireAsset(f.ctx, domain.AdministratorPermit(f.actor), hostID); err != nil {
 					t.Fatalf("retiring the host: %v", err)
 				}
 			},

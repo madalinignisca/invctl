@@ -54,7 +54,7 @@ func (f *projectFixture) setAssetEOLOn(t *testing.T, name, date string) {
 	for i, env := range row.Environments {
 		envIDs[i] = env.ID
 	}
-	if err := f.s.UpdateAsset(f.ctx, testActor, &a, envIDs); err != nil {
+	if err := f.s.UpdateAsset(f.ctx, testPermit, &a, envIDs); err != nil {
 		t.Fatalf("dating %s: %v", name, err)
 	}
 }

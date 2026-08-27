@@ -38,7 +38,7 @@ func (f *projectFixture) setAssetEOL(t *testing.T, name string, days int) {
 	for i, e := range row.Environments {
 		envIDs[i] = e.ID
 	}
-	if err := f.s.UpdateAsset(f.ctx, testActor, &a, envIDs); err != nil {
+	if err := f.s.UpdateAsset(f.ctx, testPermit, &a, envIDs); err != nil {
 		t.Fatalf("dating %s: %v", name, err)
 	}
 }
@@ -267,7 +267,7 @@ func TestExpiryCountsWhatItCannotSee(t *testing.T) {
 
 			// Retiring a dated asset removes it from the report AND from the
 			// undated count. A retired thing does not need replacing.
-			if err := f.s.RetireAsset(f.ctx, testActor, f.assets["sw-core-1"]); err != nil {
+			if err := f.s.RetireAsset(f.ctx, testPermit, f.assets["sw-core-1"]); err != nil {
 				t.Fatalf("retiring sw-core-1: %v", err)
 			}
 			after, err := f.s.Expiring(f.ctx, expiryNow, 12)
@@ -297,7 +297,7 @@ func TestExpiryIgnoresRetiredRows(t *testing.T) {
 				t.Fatalf("got %d rows before retiring, want 2", len(before.Rows))
 			}
 
-			if err := f.s.RetireAsset(f.ctx, testActor, f.assets["sw-core-1"]); err != nil {
+			if err := f.s.RetireAsset(f.ctx, testPermit, f.assets["sw-core-1"]); err != nil {
 				t.Fatalf("retiring the asset: %v", err)
 			}
 			if err := f.s.RetireService(f.ctx, testActor, f.services["orders-api"]); err != nil {

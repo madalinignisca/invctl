@@ -44,7 +44,7 @@ func (b *builder) catalogue() {
 			b.fail(fmt.Errorf("building manufacturer %s: %w", m.code, err))
 			return
 		}
-		if err := b.store.CreateManufacturer(b.ctx, Actor, src); err != nil {
+		if err := b.store.CreateManufacturer(b.ctx, domain.AdministratorPermit(Actor), src); err != nil {
 			b.fail(fmt.Errorf("seeding manufacturer %s: %w", m.code, err))
 			return
 		}
@@ -80,7 +80,7 @@ func (b *builder) catalogue() {
 			b.fail(fmt.Errorf("building device type %s: %w", m.model, err))
 			return
 		}
-		if err := b.store.CreateDeviceType(b.ctx, Actor, d); err != nil {
+		if err := b.store.CreateDeviceType(b.ctx, domain.AdministratorPermit(Actor), d); err != nil {
 			b.fail(fmt.Errorf("seeding device type %s: %w", m.model, err))
 			return
 		}

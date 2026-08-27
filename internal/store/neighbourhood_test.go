@@ -485,7 +485,7 @@ func TestNeighbourhoodOfARetiredAsset(t *testing.T) {
 		t.Run(e.Name, func(t *testing.T) {
 			f := newNeighbourFixture(t, e)
 
-			if err := f.s.RetireAsset(f.ctx, testActor, f.assets["vm-1"]); err != nil {
+			if err := f.s.RetireAsset(f.ctx, testPermit, f.assets["vm-1"]); err != nil {
 				t.Fatalf("retiring: %v", err)
 			}
 

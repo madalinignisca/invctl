@@ -394,7 +394,7 @@ func TestATopUpCanResolveEveryRefItsPhasesRead(t *testing.T) {
 			t.Fatalf("listing assets: %v", err)
 		}
 		for _, a := range assetsBefore {
-			if err := f.store.SetOccupants(f.ctx, seed.Actor, a.ID, nil); err != nil {
+			if err := f.store.SetOccupants(f.ctx, domain.AdministratorPermit(seed.Actor), a.ID, nil); err != nil {
 				t.Fatalf("clearing occupancy: %v", err)
 			}
 		}

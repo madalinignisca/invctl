@@ -33,7 +33,7 @@ func seedSearchable(t *testing.T, s *SQLStore, ctx context.Context) (assetID, se
 	serial := "FCH2033V0YR"
 	a.Serial = &serial
 	a.Vendor = strPtr("Dell")
-	if err := s.CreateAsset(ctx, testActor, a, []string{envID}); err != nil {
+	if err := s.CreateAsset(ctx, testPermit, a, []string{envID}); err != nil {
 		t.Fatalf("creating asset: %v", err)
 	}
 
@@ -300,7 +300,7 @@ func TestSearchIndexFollowsUpdates(t *testing.T) {
 			}
 			renamed := asset.Asset
 			renamed.Name = "hv-01-renamed"
-			if err := s.UpdateAsset(ctx, testActor, &renamed, nil); err != nil {
+			if err := s.UpdateAsset(ctx, testPermit, &renamed, nil); err != nil {
 				t.Fatalf("updating asset: %v", err)
 			}
 

@@ -507,7 +507,7 @@ func mustServerAsset(t *testing.T, f *fixture, name string) string {
 	if err != nil {
 		t.Fatalf("building asset %s: %v", name, err)
 	}
-	if err := f.store.CreateAsset(f.ctx, domain.SystemActor, a, nil); err != nil {
+	if err := f.store.CreateAsset(f.ctx, domain.AdministratorPermit(domain.SystemActor), a, nil); err != nil {
 		t.Fatalf("creating asset %s: %v", name, err)
 	}
 	return a.ID
@@ -742,7 +742,7 @@ func declareSplitTopology(t *testing.T, f *fixture, sideA, sideB []string) {
 	if err != nil {
 		t.Fatalf("building sw-acc-b: %v", err)
 	}
-	if err := f.store.CreateAsset(f.ctx, domain.SystemActor, accB, nil); err != nil {
+	if err := f.store.CreateAsset(f.ctx, domain.AdministratorPermit(domain.SystemActor), accB, nil); err != nil {
 		t.Fatalf("creating sw-acc-b: %v", err)
 	}
 

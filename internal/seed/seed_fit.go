@@ -93,7 +93,7 @@ func (b *builder) declarePortFaces() {
 		}
 		updated := dt.DeviceType
 		updated.PortFace = str(m.face)
-		if err := b.store.UpdateDeviceType(b.ctx, Actor, &updated); err != nil {
+		if err := b.store.UpdateDeviceType(b.ctx, domain.AdministratorPermit(Actor), &updated); err != nil {
 			b.fail(fmt.Errorf("declaring the port face of %s: %w", m.model, err))
 			return
 		}
@@ -146,7 +146,7 @@ func (b *builder) addTheStorageStack() {
 		updated := dt.DeviceType
 		updated.DepthMM, updated.WeightGrams = num(m.depth), num(m.grams)
 		updated.Airflow = str(domain.AirflowFrontToRear)
-		if err := b.store.UpdateDeviceType(b.ctx, Actor, &updated); err != nil {
+		if err := b.store.UpdateDeviceType(b.ctx, domain.AdministratorPermit(Actor), &updated); err != nil {
 			b.fail(fmt.Errorf("measuring %s: %w", m.model, err))
 			return
 		}
@@ -242,7 +242,7 @@ func (b *builder) measureModels() {
 		}
 		updated.WeightGrams = num(m.grams)
 		updated.Airflow = str(m.airflow)
-		if err := b.store.UpdateDeviceType(b.ctx, Actor, &updated); err != nil {
+		if err := b.store.UpdateDeviceType(b.ctx, domain.AdministratorPermit(Actor), &updated); err != nil {
 			b.fail(fmt.Errorf("measuring device type %s: %w", m.model, err))
 			return
 		}
@@ -291,7 +291,7 @@ func (b *builder) measureRacks() {
 		updated.WidthMM = num(r.width)
 		updated.UsableDepthMM = num(r.depth)
 		updated.MaxLoadGrams = num(r.kgs * 1000)
-		if err := b.store.UpdateAsset(b.ctx, Actor, &updated, nil); err != nil {
+		if err := b.store.UpdateAsset(b.ctx, domain.AdministratorPermit(Actor), &updated, nil); err != nil {
 			b.fail(fmt.Errorf("measuring rack %s: %w", r.name, err))
 			return
 		}
@@ -323,7 +323,7 @@ func (b *builder) placeTheSideBreather() {
 		updated.DepthMM = num(260)
 		updated.WeightGrams = num(4300)
 		updated.Airflow = str(domain.AirflowSideToRear)
-		if err := b.store.UpdateDeviceType(b.ctx, Actor, &updated); err != nil {
+		if err := b.store.UpdateDeviceType(b.ctx, domain.AdministratorPermit(Actor), &updated); err != nil {
 			b.fail(fmt.Errorf("measuring the FortiGate model: %w", err))
 			return
 		}

@@ -160,7 +160,7 @@ func (s *SQLStore) StorageOccupancyFor(ctx context.Context, poolID string) (*dom
 // -- it is what that workload was given -- and a reader asking "why did this VM
 // get more expensive" looks at the VM's history. Writing it against the pool
 // would scatter one machine's story across every pool it has ever touched.
-func (s *SQLStore) SetStorageClaim(ctx context.Context, actor domain.Actor,
+func (s *SQLStore) SetStorageClaim(ctx context.Context, p domain.Permit,
 	assetID, poolID string, allocatedGB int, note *string) error {
 
 	if assetID == poolID {
@@ -186,7 +186,7 @@ func (s *SQLStore) SetStorageClaim(ctx context.Context, actor domain.Actor,
 	}
 
 	now := domain.FormatTime(s.Now())
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, p, func(t *tx) error {
 		before, err := storageAudit(ctx, t, &asset.Asset)
 		if err != nil {
 			return err

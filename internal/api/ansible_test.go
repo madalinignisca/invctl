@@ -149,7 +149,7 @@ func TestAnsibleViewOmitsANonActiveAsset(t *testing.T) {
 		t.Fatalf("building asset: %v", err)
 	}
 	planned.Lifecycle = domain.LifecyclePlanned
-	if err := f.s.CreateAsset(f.ctx, domain.SystemActor, planned, []string{f.envs["prod"]}); err != nil {
+	if err := f.s.CreateAsset(f.ctx, domain.AdministratorPermit(domain.SystemActor), planned, []string{f.envs["prod"]}); err != nil {
 		t.Fatalf("creating planned asset: %v", err)
 	}
 	f.mustInterfaceAndAddress(planned.ID, "eth0", "10.9.9.9")

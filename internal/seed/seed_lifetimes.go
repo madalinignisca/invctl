@@ -106,7 +106,7 @@ func (b *builder) lifetimes() {
 		for i, e := range row.Environments {
 			envIDs[i] = e.ID
 		}
-		if err := b.store.UpdateAsset(b.ctx, Actor, &updated, envIDs); err != nil {
+		if err := b.store.UpdateAsset(b.ctx, domain.AdministratorPermit(Actor), &updated, envIDs); err != nil {
 			b.fail(fmt.Errorf("dating asset %s: %w", l.name, err))
 			return
 		}

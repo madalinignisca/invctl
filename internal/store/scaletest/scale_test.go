@@ -138,7 +138,7 @@ func TestAtScale(t *testing.T) {
 					fmt.Sprintf("probe-%d", time.Now().UnixNano()), "probe",
 					domain.EnvRoleProduction, false, 3, time.Now().UTC())
 				if err == nil {
-					_ = s.CreateEnvironment(ctx, actor, env)
+					_ = s.CreateEnvironment(ctx, domain.AdministratorPermit(actor), env)
 				}
 				if d := time.Since(t0); d > worst {
 					worst = d

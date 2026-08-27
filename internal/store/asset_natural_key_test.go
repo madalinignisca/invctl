@@ -60,7 +60,7 @@ func TestAnAssetNameIsUniqueAmongItsLiveSiblings(t *testing.T) {
 				if err != nil {
 					t.Fatalf("building asset: %v", err)
 				}
-				err = s.CreateAsset(ctx, testActor, a, nil)
+				err = s.CreateAsset(ctx, testPermit, a, nil)
 				if err == nil {
 					t.Fatal("two live assets called rack-1 in dc-a were both created; " +
 						"an import keyed on (parent, name) would then be ambiguous")
@@ -79,7 +79,7 @@ func TestAnAssetNameIsUniqueAmongItsLiveSiblings(t *testing.T) {
 				if err != nil {
 					t.Fatalf("building asset: %v", err)
 				}
-				if err := s.CreateAsset(ctx, testActor, a, nil); err != nil {
+				if err := s.CreateAsset(ctx, testPermit, a, nil); err != nil {
 					t.Fatalf("rack-1 in dc-b was refused: %v\n"+
 						"Two racks with the same name in different sites is normal, and "+
 						"forbidding it is the whole reason the key is (parent, name) and "+
@@ -95,7 +95,7 @@ func TestAnAssetNameIsUniqueAmongItsLiveSiblings(t *testing.T) {
 				if err != nil {
 					t.Fatalf("building asset: %v", err)
 				}
-				err = s.CreateAsset(ctx, testActor, a, nil)
+				err = s.CreateAsset(ctx, testPermit, a, nil)
 				if err == nil {
 					t.Fatal("two top-level assets called dc-a were both created. NULL parents " +
 						"do not collide in SQL, so the roots -- the layer everything else " +
@@ -108,14 +108,14 @@ func TestAnAssetNameIsUniqueAmongItsLiveSiblings(t *testing.T) {
 
 			t.Run("a retired sibling does not hold its name", func(t *testing.T) {
 				gone := mustAsset(t, s, ctx, domain.KindServer, "recycled", &dcB)
-				if err := s.RetireAsset(ctx, testActor, gone); err != nil {
+				if err := s.RetireAsset(ctx, testPermit, gone); err != nil {
 					t.Fatalf("retiring: %v", err)
 				}
 				a, err := domain.NewAsset(NewID(), domain.KindServer, "recycled", &dcB, s.Now())
 				if err != nil {
 					t.Fatalf("building asset: %v", err)
 				}
-				if err := s.CreateAsset(ctx, testActor, a, nil); err != nil {
+				if err := s.CreateAsset(ctx, testPermit, a, nil); err != nil {
 					t.Fatalf("a retired asset blocked its own name: %v\n"+
 						"Entities here are soft-deleted and never removed, so a plain unique "+
 						"index would spend that name forever on a row nobody can see and "+
@@ -132,7 +132,7 @@ func TestAnAssetNameIsUniqueAmongItsLiveSiblings(t *testing.T) {
 					t.Fatalf("reading back: %v", err)
 				}
 				got.Name = "srv-b"
-				err = s.UpdateAsset(ctx, testActor, &got.Asset, nil)
+				err = s.UpdateAsset(ctx, testPermit, &got.Asset, nil)
 				if err == nil {
 					t.Fatal("srv-a was renamed to srv-b alongside the real srv-b")
 				}
@@ -158,7 +158,7 @@ func TestAnAssetNameIsUniqueAmongItsLiveSiblings(t *testing.T) {
 				}
 				got.Name = "keeper"
 				got.Lifecycle = domain.LifecycleRetired
-				if err := s.UpdateAsset(ctx, testActor, &got.Asset, nil); err != nil {
+				if err := s.UpdateAsset(ctx, testPermit, &got.Asset, nil); err != nil {
 					t.Fatalf("retiring a row onto a taken name was refused: %v\n"+
 						"The indexes exclude retired rows, so this write is one the database "+
 						"accepts. A pre-check that refuses it makes the store stricter than "+
@@ -173,7 +173,7 @@ func TestAnAssetNameIsUniqueAmongItsLiveSiblings(t *testing.T) {
 				mustAsset(t, s, ctx, domain.KindServer, "twin", &dcA)
 				mover := mustAsset(t, s, ctx, domain.KindServer, "twin", &dcB)
 
-				err := s.ReparentAsset(ctx, testActor, mover, &dcA)
+				err := s.ReparentAsset(ctx, testPermit, mover, &dcA)
 				if err == nil {
 					t.Fatal("an asset was moved into a parent that already had a live " +
 						"asset of that name")

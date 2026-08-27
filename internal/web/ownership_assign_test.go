@@ -31,7 +31,7 @@ func mustUnownedAssetWeb(t *testing.T, h *harness, kind, name string) string {
 	if err != nil {
 		t.Fatalf("building asset %s: %v", name, err)
 	}
-	if err := h.store.CreateAsset(context.Background(), domain.SystemActor, a, nil); err != nil {
+	if err := h.store.CreateAsset(context.Background(), domain.AdministratorPermit(domain.SystemActor), a, nil); err != nil {
 		t.Fatalf("creating asset %s: %v", name, err)
 	}
 	return a.ID

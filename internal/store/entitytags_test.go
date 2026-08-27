@@ -324,7 +324,7 @@ func TestRenamingATagDoesNotManufactureATagsDiffOnTheNextUnrelatedSave(t *testin
 				t.Fatalf("reading the asset: %v", err)
 			}
 			asset.Name = "app-01-renamed"
-			if err := f.s.UpdateAsset(f.ctx, f.actor, &asset.Asset, nil); err != nil {
+			if err := f.s.UpdateAsset(f.ctx, domain.AdministratorPermit(f.actor), &asset.Asset, nil); err != nil {
 				t.Fatalf("saving an unrelated field: %v", err)
 			}
 
@@ -424,7 +424,7 @@ func TestAStaleParentRowVersionGets409(t *testing.T) {
 				t.Fatalf("reading the asset: %v", err)
 			}
 			asset.Name = "app-01-moved"
-			if err := f.s.UpdateAsset(f.ctx, f.actor, &asset.Asset, nil); err != nil {
+			if err := f.s.UpdateAsset(f.ctx, domain.AdministratorPermit(f.actor), &asset.Asset, nil); err != nil {
 				t.Fatalf("advancing the row_version: %v", err)
 			}
 

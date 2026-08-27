@@ -167,7 +167,7 @@ func TestVocabularyValueAddedAsDataIsUsableImmediately(t *testing.T) {
 			if err != nil {
 				t.Fatalf("the constructor rejected a well-formed unknown kind: %v", err)
 			}
-			err = s.CreateAsset(ctx, testActor, a, nil)
+			err = s.CreateAsset(ctx, testPermit, a, nil)
 			if err == nil {
 				t.Fatal("an asset with an unknown kind was stored")
 			}
@@ -193,7 +193,7 @@ func TestVocabularyValueAddedAsDataIsUsableImmediately(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building the asset: %v", err)
 			}
-			if err := s.CreateAsset(ctx, testActor, b, nil); err != nil {
+			if err := s.CreateAsset(ctx, testPermit, b, nil); err != nil {
 				t.Fatalf("storing an asset of a kind added as data: %v", err)
 			}
 
@@ -263,7 +263,7 @@ func TestUnknownVocabularyValueIsRejectedOnEveryColumn(t *testing.T) {
 						Criticality: 3, CreatedAt: domain.FormatTime(s.Now()),
 						UpdatedAt: domain.FormatTime(s.Now()),
 					}
-					return s.CreateEnvironment(ctx, testActor, env)
+					return s.CreateEnvironment(ctx, testPermit, env)
 				}},
 				{"asset.kind", "kind", func() error {
 					a := &domain.Asset{
@@ -271,7 +271,7 @@ func TestUnknownVocabularyValueIsRejectedOnEveryColumn(t *testing.T) {
 						Lifecycle: domain.LifecycleActive, Attrs: "{}",
 						CreatedAt: domain.FormatTime(s.Now()), UpdatedAt: domain.FormatTime(s.Now()),
 					}
-					return s.CreateAsset(ctx, testActor, a, nil)
+					return s.CreateAsset(ctx, testPermit, a, nil)
 				}},
 				{"interface.form_factor", "form_factor", func() error {
 					i := &domain.Interface{
@@ -453,7 +453,7 @@ func TestAVocabularyAddedAsDataIsUsable(t *testing.T) {
 			if err != nil {
 				t.Fatalf("the domain constructor refused a kind the database accepts: %v", err)
 			}
-			if err := s.CreateAsset(ctx, testActor, br, []string{envID}); err != nil {
+			if err := s.CreateAsset(ctx, testPermit, br, []string{envID}); err != nil {
 				t.Fatalf("creating an asset of the new kind: %v", err)
 			}
 

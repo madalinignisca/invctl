@@ -682,6 +682,20 @@ func checkbox(r *http.Request, key string) bool {
 	return v == "on" || v == "true" || v == "1"
 }
 
+// permit mints the write authorization handed to store methods.
+//
+// TEMPORARY, per WP-G1 Task 10 (step 6): every route that reaches here already
+// sits behind RequireAdmin (internal/web/routes.go), so handing back an
+// administrator permit changes nothing about who can reach these handlers
+// today -- it only replaces the `domain.AdministratorPermit(actor(r))` that
+// used to be typed out at each of the 148 call sites Task 10 converted from
+// `domain.Actor` to `domain.Permit`. Task 12 is the one that changes this
+// function's body to mint a real, request-scoped, project-owner-aware
+// decision; nothing else about this file should change when it does.
+func permit(r *http.Request) domain.Permit {
+	return domain.AdministratorPermit(actor(r))
+}
+
 // actor identifies the signed-in user for the audit trail.
 func actor(r *http.Request) domain.Actor {
 	if user := middleware.UserFrom(r.Context()); user != nil {

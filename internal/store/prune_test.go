@@ -99,7 +99,7 @@ func mustScopelessEnvironment(t *testing.T, s *SQLStore, ctx context.Context, co
 	if err != nil {
 		t.Fatalf("building environment %s: %v", code, err)
 	}
-	if err := s.CreateEnvironment(ctx, testActor, env); err != nil {
+	if err := s.CreateEnvironment(ctx, testPermit, env); err != nil {
 		t.Fatalf("creating environment %s: %v", code, err)
 	}
 	return env.ID
@@ -379,7 +379,7 @@ func mustAssetAs(t *testing.T, s *SQLStore, ctx context.Context, actor domain.Ac
 	if err != nil {
 		t.Fatalf("building asset %s: %v", name, err)
 	}
-	if err := s.CreateAsset(ctx, actor, a, nil); err != nil {
+	if err := s.CreateAsset(ctx, domain.AdministratorPermit(actor), a, nil); err != nil {
 		t.Fatalf("creating asset %s: %v", name, err)
 	}
 	return a.ID

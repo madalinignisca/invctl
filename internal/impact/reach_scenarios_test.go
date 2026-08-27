@@ -1505,7 +1505,7 @@ func buildLAGgedHost(t *testing.T, f *fixture) map[string]string {
 	if err != nil {
 		t.Fatalf("building the LAGged host: %v", err)
 	}
-	if err := f.store.CreateAsset(f.ctx, domain.SystemActor, host, nil); err != nil {
+	if err := f.store.CreateAsset(f.ctx, domain.AdministratorPermit(domain.SystemActor), host, nil); err != nil {
 		t.Fatalf("creating the LAGged host: %v", err)
 	}
 
@@ -1549,7 +1549,7 @@ func buildUnmodelledHost(t *testing.T, f *fixture) map[string]string {
 	if err != nil {
 		t.Fatalf("building the unmodelled host: %v", err)
 	}
-	if err := f.store.CreateAsset(f.ctx, domain.SystemActor, host, nil); err != nil {
+	if err := f.store.CreateAsset(f.ctx, domain.AdministratorPermit(domain.SystemActor), host, nil); err != nil {
 		t.Fatalf("creating the unmodelled host: %v", err)
 	}
 	svc := mustSimpleService(t, f, "unmodelled-svc", "Service on an uncabled host")

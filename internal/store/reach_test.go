@@ -587,7 +587,7 @@ func TestRetireAssetRetiresTopology(t *testing.T) {
 			// whole" -- promoting a host that just lost its only path into
 			// reading as MORE robust than before, the exact inversion this
 			// fix exists to prevent.
-			if err := s.RetireAsset(ctx, testActor, chassis); err != nil {
+			if err := s.RetireAsset(ctx, testPermit, chassis); err != nil {
 				t.Fatalf("retiring chassis: %v", err)
 			}
 
@@ -630,7 +630,7 @@ func TestRetireAssetRetiresTopology(t *testing.T) {
 			if err := s.CreateNetAttachment(ctx, testActor, na2, nil); err != nil {
 				t.Fatalf("creating attachment: %v", err)
 			}
-			if err := s.RetireAsset(ctx, testActor, hv2); err != nil {
+			if err := s.RetireAsset(ctx, testPermit, hv2); err != nil {
 				t.Fatalf("retiring host: %v", err)
 			}
 			var activeAttachments int
@@ -682,7 +682,7 @@ func TestRetireAssetRetiresLinkRows(t *testing.T) {
 				t.Fatalf("creating link: %v", err)
 			}
 
-			if err := s.RetireAsset(ctx, testActor, assetB); err != nil {
+			if err := s.RetireAsset(ctx, testPermit, assetB); err != nil {
 				t.Fatalf("retiring asset: %v", err)
 			}
 

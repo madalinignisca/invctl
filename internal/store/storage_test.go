@@ -27,7 +27,7 @@ func (f *projectFixture) pool(t *testing.T, name, kind string, rawGB int) string
 	}
 	a := row.Asset
 	a.StorageKind, a.RawCapacityGB = &kind, &rawGB
-	if err := f.s.UpdateAsset(f.ctx, testActor, &a, []string{f.env}); err != nil {
+	if err := f.s.UpdateAsset(f.ctx, testPermit, &a, []string{f.env}); err != nil {
 		t.Fatalf("sizing the pool: %v", err)
 	}
 	return id
@@ -77,7 +77,7 @@ func TestAPoolWithNoKindIsReadAtOneToOne(t *testing.T) {
 			a := row.Asset
 			raw := 1000
 			a.RawCapacityGB = &raw
-			if err := f.s.UpdateAsset(f.ctx, testActor, &a, []string{f.env}); err != nil {
+			if err := f.s.UpdateAsset(f.ctx, testPermit, &a, []string{f.env}); err != nil {
 				t.Fatalf("sizing: %v", err)
 			}
 
@@ -108,7 +108,7 @@ func TestWhatAWorkloadHoldsIsAudited(t *testing.T) {
 			poolID := f.pool(t, "ceph-block", "ceph_3x", 30720)
 			vm := f.assets["vm-app-1"]
 
-			if err := f.s.SetStorageClaim(f.ctx, testActor, vm, poolID, 200, nil); err != nil {
+			if err := f.s.SetStorageClaim(f.ctx, testPermit, vm, poolID, 200, nil); err != nil {
 				t.Fatalf("recording a claim: %v", err)
 			}
 			entries, err := f.s.ListChangesForEntity(f.ctx, "asset", vm, 10)
@@ -123,7 +123,7 @@ func TestWhatAWorkloadHoldsIsAudited(t *testing.T) {
 			}
 
 			// Correcting it is an update, not a second row to reconcile.
-			if err := f.s.SetStorageClaim(f.ctx, testActor, vm, poolID, 350, nil); err != nil {
+			if err := f.s.SetStorageClaim(f.ctx, testPermit, vm, poolID, 350, nil); err != nil {
 				t.Fatalf("correcting a claim: %v", err)
 			}
 			claims, err := f.s.StorageClaimsFor(f.ctx, vm)
@@ -153,13 +153,13 @@ func TestAPoolCannotHoldItselfAndARetiredOneHoldsNothing(t *testing.T) {
 			poolID := f.pool(t, "ceph-block", "ceph_3x", 30720)
 			vm := f.assets["vm-app-1"]
 
-			if err := f.s.SetStorageClaim(f.ctx, testActor, poolID, poolID, 10, nil); !errors.Is(err, domain.ErrInvalid) {
+			if err := f.s.SetStorageClaim(f.ctx, testPermit, poolID, poolID, 10, nil); !errors.Is(err, domain.ErrInvalid) {
 				t.Errorf("a pool holding itself returned %v, want ErrInvalid", err)
 			}
-			if err := f.s.RetireAsset(f.ctx, testActor, poolID); err != nil {
+			if err := f.s.RetireAsset(f.ctx, testPermit, poolID); err != nil {
 				t.Fatalf("retiring the pool: %v", err)
 			}
-			if err := f.s.SetStorageClaim(f.ctx, testActor, vm, poolID, 10, nil); !errors.Is(err, domain.ErrInvalid) {
+			if err := f.s.SetStorageClaim(f.ctx, testPermit, vm, poolID, 10, nil); !errors.Is(err, domain.ErrInvalid) {
 				t.Errorf("a claim against a retired pool returned %v, want ErrInvalid", err)
 			}
 		})
@@ -176,10 +176,10 @@ func TestAClaimOfZeroRemovesIt(t *testing.T) {
 			poolID := f.pool(t, "ceph-block", "ceph_3x", 30720)
 			vm := f.assets["vm-app-1"]
 
-			if err := f.s.SetStorageClaim(f.ctx, testActor, vm, poolID, 200, nil); err != nil {
+			if err := f.s.SetStorageClaim(f.ctx, testPermit, vm, poolID, 200, nil); err != nil {
 				t.Fatalf("recording: %v", err)
 			}
-			if err := f.s.SetStorageClaim(f.ctx, testActor, vm, poolID, 0, nil); err != nil {
+			if err := f.s.SetStorageClaim(f.ctx, testPermit, vm, poolID, 0, nil); err != nil {
 				t.Fatalf("withdrawing: %v", err)
 			}
 			o, err := f.s.StorageOccupancyFor(f.ctx, poolID)

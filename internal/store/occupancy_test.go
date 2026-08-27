@@ -24,7 +24,7 @@ func (f *projectFixture) share(t *testing.T, asset string, parts map[string]int)
 			ProjectID: f.projects[code], Percent: percent,
 		})
 	}
-	if err := f.s.SetOccupants(f.ctx, testActor, f.assets[asset], occ); err != nil {
+	if err := f.s.SetOccupants(f.ctx, testPermit, f.assets[asset], occ); err != nil {
 		t.Fatalf("declaring occupancy: %v", err)
 	}
 }
@@ -183,7 +183,7 @@ func TestDeclaringWhoSharesAMachineIsAudited(t *testing.T) {
 			}
 
 			// Deciding it is no longer shared is a change too.
-			if err := f.s.SetOccupants(f.ctx, testActor, vm, nil); err != nil {
+			if err := f.s.SetOccupants(f.ctx, testPermit, vm, nil); err != nil {
 				t.Fatalf("clearing: %v", err)
 			}
 			after, err := f.s.ListChangesForEntity(f.ctx, "asset", vm, 10)

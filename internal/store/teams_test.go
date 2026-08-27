@@ -44,7 +44,7 @@ func TestRetiringATeamLeavesWhatItLookedAfterPointingAtIt(t *testing.T) {
 			a.TeamID = &team.ID
 			role := "operator"
 			a.ManagerRole = &role
-			if err := s.UpdateAsset(ctx, testActor, &a, []string{env}); err != nil {
+			if err := s.UpdateAsset(ctx, testPermit, &a, []string{env}); err != nil {
 				t.Fatalf("assigning the team: %v", err)
 			}
 
@@ -90,7 +90,7 @@ func TestAnUnknownTeamIsRefused(t *testing.T) {
 			a := row.Asset
 			ghost := NewID()
 			a.TeamID = &ghost
-			if err := s.UpdateAsset(ctx, testActor, &a, []string{env}); err == nil {
+			if err := s.UpdateAsset(ctx, testPermit, &a, []string{env}); err == nil {
 				t.Error("an asset was assigned to a team that does not exist")
 			}
 		})
@@ -125,7 +125,7 @@ func TestAssigningATeamIsAudited(t *testing.T) {
 			}
 			a := row.Asset
 			a.TeamID = &team.ID
-			if err := s.UpdateAsset(ctx, testActor, &a, []string{env}); err != nil {
+			if err := s.UpdateAsset(ctx, testPermit, &a, []string{env}); err != nil {
 				t.Fatalf("assigning: %v", err)
 			}
 

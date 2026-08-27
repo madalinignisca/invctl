@@ -34,7 +34,7 @@ func mustEnvironment(t *testing.T, s *SQLStore, ctx context.Context, code, role 
 	if err != nil {
 		t.Fatalf("building environment %s: %v", code, err)
 	}
-	if err := s.CreateEnvironment(ctx, testActor, env); err != nil {
+	if err := s.CreateEnvironment(ctx, testPermit, env); err != nil {
 		t.Fatalf("creating environment %s: %v", code, err)
 	}
 	return env.ID
@@ -47,7 +47,7 @@ func mustAsset(t *testing.T, s *SQLStore, ctx context.Context, kind, name string
 	if err != nil {
 		t.Fatalf("building asset %s: %v", name, err)
 	}
-	if err := s.CreateAsset(ctx, testActor, a, envs); err != nil {
+	if err := s.CreateAsset(ctx, testPermit, a, envs); err != nil {
 		t.Fatalf("creating asset %s: %v", name, err)
 	}
 	return a.ID
@@ -215,7 +215,7 @@ func TestReparentRebuildsSubtree(t *testing.T) {
 			hv := mustAsset(t, s, ctx, domain.KindHypervisor, "hv-1", &rackA)
 			vm := mustAsset(t, s, ctx, domain.KindVM, "vm-1", &hv)
 
-			if err := s.ReparentAsset(ctx, testActor, hv, &rackB); err != nil {
+			if err := s.ReparentAsset(ctx, testPermit, hv, &rackB); err != nil {
 				t.Fatalf("reparenting: %v", err)
 			}
 
@@ -276,7 +276,7 @@ func TestReparentRejectsCycles(t *testing.T) {
 			hv := mustAsset(t, s, ctx, domain.KindHypervisor, "hv-1", &rack)
 
 			// Moving the rack under its own hypervisor.
-			err := s.ReparentAsset(ctx, testActor, rack, &hv)
+			err := s.ReparentAsset(ctx, testPermit, rack, &hv)
 			if err == nil {
 				t.Fatal("reparenting into a descendant succeeded; that would create a cycle")
 			}
@@ -285,7 +285,7 @@ func TestReparentRejectsCycles(t *testing.T) {
 			}
 
 			// Moving an asset under itself.
-			if err := s.ReparentAsset(ctx, testActor, rack, &rack); err == nil {
+			if err := s.ReparentAsset(ctx, testPermit, rack, &rack); err == nil {
 				t.Fatal("reparenting an asset under itself succeeded")
 			}
 
@@ -346,7 +346,7 @@ func TestEveryMutationWritesChangeLog(t *testing.T) {
 				vendor := "Dell"
 				updated.Vendor = &vendor
 
-				if err := s.UpdateAsset(ctx, testActor, &updated, nil); err != nil {
+				if err := s.UpdateAsset(ctx, testPermit, &updated, nil); err != nil {
 					t.Fatalf("updating asset: %v", err)
 				}
 
@@ -388,7 +388,7 @@ func TestEveryMutationWritesChangeLog(t *testing.T) {
 					t.Fatalf("getting asset: %v", err)
 				}
 				unchanged := asset.Asset
-				if err := s.UpdateAsset(ctx, testActor, &unchanged, nil); err != nil {
+				if err := s.UpdateAsset(ctx, testPermit, &unchanged, nil); err != nil {
 					t.Fatalf("updating asset: %v", err)
 				}
 				after, err := s.ListChangesForEntity(ctx, "asset", assetID, 50)
@@ -402,7 +402,7 @@ func TestEveryMutationWritesChangeLog(t *testing.T) {
 			})
 
 			t.Run("retire writes a retire entry", func(t *testing.T) {
-				if err := s.RetireAsset(ctx, testActor, assetID); err != nil {
+				if err := s.RetireAsset(ctx, testPermit, assetID); err != nil {
 					t.Fatalf("retiring asset: %v", err)
 				}
 				changes, err := s.ListChangesForEntity(ctx, "asset", assetID, 10)
@@ -441,7 +441,7 @@ func TestChangeLogActorIsAnOpaqueID(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building environment: %v", err)
 			}
-			if err := s.CreateEnvironment(ctx, domain.UserActor(user), env); err != nil {
+			if err := s.CreateEnvironment(ctx, domain.AdministratorPermit(domain.UserActor(user)), env); err != nil {
 				t.Fatalf("creating environment: %v", err)
 			}
 
@@ -498,7 +498,7 @@ func TestSoftDeleteKeepsTheRow(t *testing.T) {
 			s, ctx := newStore(t, e)
 			assetID := mustAsset(t, s, ctx, domain.KindServer, "srv-old", nil)
 
-			if err := s.RetireAsset(ctx, testActor, assetID); err != nil {
+			if err := s.RetireAsset(ctx, testPermit, assetID); err != nil {
 				t.Fatalf("retiring: %v", err)
 			}
 
@@ -527,7 +527,7 @@ func TestSoftDeleteKeepsTheRow(t *testing.T) {
 			}
 
 			// Retiring twice is a no-op, not an error or a second audit row.
-			if err := s.RetireAsset(ctx, testActor, assetID); err != nil {
+			if err := s.RetireAsset(ctx, testPermit, assetID); err != nil {
 				t.Errorf("retiring twice: %v", err)
 			}
 		})
@@ -548,7 +548,7 @@ func TestTransactionRollsBackBothWrites(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building asset: %v", err)
 			}
-			if err := s.CreateAsset(ctx, testActor, a, nil); err == nil {
+			if err := s.CreateAsset(ctx, testPermit, a, nil); err == nil {
 				t.Fatal("creating an asset with a dangling parent succeeded")
 			}
 
@@ -649,7 +649,7 @@ func TestConflictsAreTranslated(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building environment: %v", err)
 			}
-			err = s.CreateEnvironment(ctx, testActor, dup)
+			err = s.CreateEnvironment(ctx, testPermit, dup)
 			if err == nil {
 				t.Fatal("creating a duplicate environment code succeeded")
 			}
@@ -793,7 +793,7 @@ func TestAssetEnvironmentsCanBeCleared(t *testing.T) {
 
 			// Empty slice: remove all membership.
 			updated := asset.Asset
-			if err := s.UpdateAsset(ctx, testActor, &updated, []string{}); err != nil {
+			if err := s.UpdateAsset(ctx, testPermit, &updated, []string{}); err != nil {
 				t.Fatalf("updating asset: %v", err)
 			}
 			cleared, err := s.GetAsset(ctx, assetID)
@@ -806,12 +806,12 @@ func TestAssetEnvironmentsCanBeCleared(t *testing.T) {
 
 			// nil: leave membership alone.
 			restored := cleared.Asset
-			if err := s.UpdateAsset(ctx, testActor, &restored, []string{prod}); err != nil {
+			if err := s.UpdateAsset(ctx, testPermit, &restored, []string{prod}); err != nil {
 				t.Fatalf("restoring membership: %v", err)
 			}
 			again := restored
 			again.Name = "srv-1-renamed"
-			if err := s.UpdateAsset(ctx, testActor, &again, nil); err != nil {
+			if err := s.UpdateAsset(ctx, testPermit, &again, nil); err != nil {
 				t.Fatalf("updating without managing membership: %v", err)
 			}
 			final, err := s.GetAsset(ctx, assetID)
@@ -844,7 +844,7 @@ func TestSpanningAssetsExcludesRetired(t *testing.T) {
 				t.Fatalf("setup: got %d spanning assets, want 1", len(spanning))
 			}
 
-			if err := s.RetireAsset(ctx, testActor, assetID); err != nil {
+			if err := s.RetireAsset(ctx, testPermit, assetID); err != nil {
 				t.Fatalf("retiring: %v", err)
 			}
 			after, err := s.SpanningAssets(ctx)
@@ -1218,7 +1218,7 @@ func TestEnvironmentMembershipChangeIsAudited(t *testing.T) {
 					t.Fatalf("getting asset: %v", err)
 				}
 				updated := a.Asset
-				if err := s.UpdateAsset(ctx, testActor, &updated, []string{prod, dev}); err != nil {
+				if err := s.UpdateAsset(ctx, testPermit, &updated, []string{prod, dev}); err != nil {
 					t.Fatalf("updating asset: %v", err)
 				}
 
@@ -1238,7 +1238,7 @@ func TestEnvironmentMembershipChangeIsAudited(t *testing.T) {
 				before, _ := s.ListChangesForEntity(ctx, "asset", id, 50)
 				a, _ := s.GetAsset(ctx, id)
 				unchanged := a.Asset
-				if err := s.UpdateAsset(ctx, testActor, &unchanged, nil); err != nil {
+				if err := s.UpdateAsset(ctx, testPermit, &unchanged, nil); err != nil {
 					t.Fatalf("updating asset: %v", err)
 				}
 				after, _ := s.ListChangesForEntity(ctx, "asset", id, 50)

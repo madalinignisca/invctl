@@ -43,7 +43,7 @@ func TestTimelineFoldsBothLedgersInOneOrdering(t *testing.T) {
 			}
 			updated := asset.Asset
 			updated.Vendor = strptr("Dell")
-			if err := f.store.UpdateAsset(f.ctx, testActor, &updated, nil); err != nil {
+			if err := f.store.UpdateAsset(f.ctx, testPermit, &updated, nil); err != nil {
 				t.Fatalf("updating asset: %v", err)
 			}
 			declaredAt := domain.FormatTime(f.clock.Now())
@@ -118,7 +118,7 @@ func TestTimelineIncludesOneHopDeclaredNeighbours(t *testing.T) {
 			serviceID := instance.ServiceID
 
 			f.clock.Advance(time.Hour)
-			if err := f.store.RetireAsset(f.ctx, testActor, f.assetID); err != nil {
+			if err := f.store.RetireAsset(f.ctx, testPermit, f.assetID); err != nil {
 				t.Fatalf("retiring host: %v", err)
 			}
 
@@ -423,7 +423,7 @@ func TestObservedNoiseCannotEvictDeclaredHistory(t *testing.T) {
 				t.Fatalf("reading asset: %v", err)
 			}
 			a.Vendor = strptr("Dell")
-			if err := s.UpdateAsset(ctx, testActor, &a.Asset, nil); err != nil {
+			if err := s.UpdateAsset(ctx, testPermit, &a.Asset, nil); err != nil {
 				t.Fatalf("updating asset: %v", err)
 			}
 

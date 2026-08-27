@@ -29,7 +29,7 @@ func (f *projectFixture) setReplaces(t *testing.T, successor, predecessor string
 	for i, env := range row.Environments {
 		envIDs[i] = env.ID
 	}
-	return f.s.UpdateAsset(f.ctx, testActor, &a, envIDs)
+	return f.s.UpdateAsset(f.ctx, testPermit, &a, envIDs)
 }
 
 // TestAReplacementComparesAcquisitions is the question the CEO asked: what did

@@ -61,7 +61,7 @@ func TestTeamOwnershipCountsAcrossAllFiveTypes(t *testing.T) {
 
 			// A retired asset owned by the same team must not count.
 			retiredID := f.asset(t, "busy-asset-retired", &teamID, "")
-			if err := f.s.RetireAsset(f.ctx, testActor, retiredID); err != nil {
+			if err := f.s.RetireAsset(f.ctx, testPermit, retiredID); err != nil {
 				t.Fatalf("retiring asset: %v", err)
 			}
 

@@ -589,7 +589,7 @@ func TestChangesPagesWithoutLosingItsFilter(t *testing.T) {
 		if err != nil {
 			t.Fatalf("building environment %d: %v", i, err)
 		}
-		if err := h.store.CreateEnvironment(ctx, domain.SystemActor, env); err != nil {
+		if err := h.store.CreateEnvironment(ctx, domain.AdministratorPermit(domain.SystemActor), env); err != nil {
 			t.Fatalf("creating environment %d: %v", i, err)
 		}
 	}

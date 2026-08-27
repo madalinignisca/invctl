@@ -36,7 +36,7 @@ func describe(t *testing.T, s *SQLStore, ctx context.Context, env, assetID strin
 	a := row.Asset
 	serial, vendor, model := "FCH2033V0YR", "Dell Incorporated", "PowerEdge R640 rack server"
 	a.Serial, a.Vendor, a.Model = &serial, &vendor, &model
-	if err := s.UpdateAsset(ctx, testActor, &a, []string{env}); err != nil {
+	if err := s.UpdateAsset(ctx, testPermit, &a, []string{env}); err != nil {
 		t.Fatalf("describing the asset: %v", err)
 	}
 }
@@ -203,7 +203,7 @@ func TestSearchKeepsBodyOnlyMatchesButRanksThemLast(t *testing.T) {
 			a := row.Asset
 			vendor := "sw-core-1 replacement"
 			a.Vendor = &vendor
-			if err := s.UpdateAsset(ctx, testActor, &a, []string{env}); err != nil {
+			if err := s.UpdateAsset(ctx, testPermit, &a, []string{env}); err != nil {
 				t.Fatalf("describing: %v", err)
 			}
 

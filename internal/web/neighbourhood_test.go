@@ -309,7 +309,7 @@ func TestNeighbourhoodEscapesAHostileLabel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("building the asset: %v", err)
 	}
-	if err := h.store.CreateAsset(ctx, domain.SystemActor, asset, nil); err != nil {
+	if err := h.store.CreateAsset(ctx, domain.AdministratorPermit(domain.SystemActor), asset, nil); err != nil {
 		t.Fatalf("creating the asset: %v", err)
 	}
 
@@ -365,7 +365,7 @@ func TestNeighbourhoodOfAnIsolatedAssetIsNotBlank(t *testing.T) {
 	if err != nil {
 		t.Fatalf("building the asset: %v", err)
 	}
-	if err := h.store.CreateAsset(ctx, domain.SystemActor, asset, nil); err != nil {
+	if err := h.store.CreateAsset(ctx, domain.AdministratorPermit(domain.SystemActor), asset, nil); err != nil {
 		t.Fatalf("creating the asset: %v", err)
 	}
 

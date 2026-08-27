@@ -257,7 +257,7 @@ func (b *builder) environments() {
 			b.fail(fmt.Errorf("building environment %s: %w", e.code, err))
 			return
 		}
-		if err := b.store.CreateEnvironment(b.ctx, Actor, env); err != nil {
+		if err := b.store.CreateEnvironment(b.ctx, domain.AdministratorPermit(Actor), env); err != nil {
 			b.fail(fmt.Errorf("seeding environment %s: %w", e.code, err))
 			return
 		}
@@ -303,7 +303,7 @@ func (b *builder) asset(kind, name, parent string, envs []string, fields func(*d
 	for _, code := range envs {
 		envIDs = append(envIDs, b.env(code))
 	}
-	if err := b.store.CreateAsset(b.ctx, Actor, a, envIDs); err != nil {
+	if err := b.store.CreateAsset(b.ctx, domain.AdministratorPermit(Actor), a, envIDs); err != nil {
 		b.fail(fmt.Errorf("seeding asset %s: %w", name, err))
 		return
 	}
@@ -501,7 +501,7 @@ func (b *builder) storageClaim(asset, pool string, gb int, note string) {
 			return // already recorded, so a top-up neither rewrites nor fails
 		}
 	}
-	if err := b.store.SetStorageClaim(b.ctx, Actor, assetID, poolID, gb, &note); err != nil {
+	if err := b.store.SetStorageClaim(b.ctx, domain.AdministratorPermit(Actor), assetID, poolID, gb, &note); err != nil {
 		b.fail(fmt.Errorf("recording %s in %s: %w", asset, pool, err))
 	}
 }

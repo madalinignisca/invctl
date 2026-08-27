@@ -221,7 +221,7 @@ func (b *builder) measureAsset(name string, apply func(*domain.Asset)) error {
 	for i, env := range row.Environments {
 		envIDs[i] = env.ID
 	}
-	if err := b.store.UpdateAsset(b.ctx, Actor, &a, envIDs); err != nil {
+	if err := b.store.UpdateAsset(b.ctx, domain.AdministratorPermit(Actor), &a, envIDs); err != nil {
 		return fmt.Errorf("measuring %s: %w", name, err)
 	}
 	return nil
@@ -396,7 +396,7 @@ func (b *builder) refreshLineage() {
 		for i, env := range row.Environments {
 			envIDs[i] = env.ID
 		}
-		if err := b.store.UpdateAsset(b.ctx, Actor, &a, envIDs); err != nil {
+		if err := b.store.UpdateAsset(b.ctx, domain.AdministratorPermit(Actor), &a, envIDs); err != nil {
 			b.fail(fmt.Errorf("recording that %s replaced %s: %w",
 				p.successor, p.predecessor, err))
 			return
@@ -691,7 +691,7 @@ func (b *builder) sharedTenancy() {
 	if len(occupants) == 0 {
 		return
 	}
-	if err := b.store.SetOccupants(b.ctx, Actor, assetID, occupants); err != nil {
+	if err := b.store.SetOccupants(b.ctx, domain.AdministratorPermit(Actor), assetID, occupants); err != nil {
 		b.fail(fmt.Errorf("declaring shared tenancy: %w", err))
 	}
 }

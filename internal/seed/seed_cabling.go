@@ -65,7 +65,7 @@ func (b *builder) patchPanel() {
 		updated.Airflow = str(domain.AirflowPassive)
 		updated.PortFace = str(domain.PortFaceFront)
 		updated.FullDepth = false
-		if err := b.store.UpdateDeviceType(b.ctx, Actor, &updated); err != nil {
+		if err := b.store.UpdateDeviceType(b.ctx, domain.AdministratorPermit(Actor), &updated); err != nil {
 			b.fail(fmt.Errorf("measuring the patch panel model: %w", err))
 			return
 		}

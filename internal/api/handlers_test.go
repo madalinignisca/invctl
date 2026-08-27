@@ -121,7 +121,7 @@ func (f *apiHandlerFixture) mustEnv(code, role string) string {
 	if err != nil {
 		f.t.Fatalf("building environment %s: %v", code, err)
 	}
-	if err := f.s.CreateEnvironment(f.ctx, domain.SystemActor, env); err != nil {
+	if err := f.s.CreateEnvironment(f.ctx, domain.AdministratorPermit(domain.SystemActor), env); err != nil {
 		f.t.Fatalf("creating environment %s: %v", code, err)
 	}
 	return env.ID
@@ -137,7 +137,7 @@ func (f *apiHandlerFixture) mustAsset(kind, name string, parentID *string, envCo
 	for _, code := range envCodes {
 		ids = append(ids, f.envs[code])
 	}
-	if err := f.s.CreateAsset(f.ctx, domain.SystemActor, a, ids); err != nil {
+	if err := f.s.CreateAsset(f.ctx, domain.AdministratorPermit(domain.SystemActor), a, ids); err != nil {
 		f.t.Fatalf("creating asset %s: %v", name, err)
 	}
 	return a.ID

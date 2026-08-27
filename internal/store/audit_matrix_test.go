@@ -153,7 +153,7 @@ var auditMatrix = []auditCase{
 			if err != nil {
 				t.Fatalf("building asset: %v", err)
 			}
-			if err := s.CreateAsset(ctx, testActor, a, nil); err != nil {
+			if err := s.CreateAsset(ctx, testPermit, a, nil); err != nil {
 				t.Fatalf("creating asset: %v", err)
 			}
 			return a.ID, domain.ActionCreate
@@ -174,7 +174,7 @@ var auditMatrix = []auditCase{
 			}
 			updated := row.Asset
 			updated.Name = "audit-asset-update-renamed"
-			if err := s.UpdateAsset(ctx, testActor, &updated, nil); err != nil {
+			if err := s.UpdateAsset(ctx, testPermit, &updated, nil); err != nil {
 				t.Fatalf("updating asset: %v", err)
 			}
 			return id, domain.ActionUpdate
@@ -189,7 +189,7 @@ var auditMatrix = []auditCase{
 			return mustAsset(t, s, ctx, domain.KindServer, "audit-asset-retire", nil)
 		},
 		mutate: func(t *testing.T, s *SQLStore, ctx context.Context, id string) (string, string) {
-			if err := s.RetireAsset(ctx, testActor, id); err != nil {
+			if err := s.RetireAsset(ctx, testPermit, id); err != nil {
 				t.Fatalf("retiring asset: %v", err)
 			}
 			return id, domain.ActionRetire

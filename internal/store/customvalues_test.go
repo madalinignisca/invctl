@@ -206,7 +206,7 @@ func TestAnAssetUpdateStillCarriesItsCustomValues(t *testing.T) {
 			}
 			serial := "SN-9"
 			row.Serial = &serial
-			if err := f.s.UpdateAsset(f.ctx, f.actor, &row.Asset, nil); err != nil {
+			if err := f.s.UpdateAsset(f.ctx, domain.AdministratorPermit(f.actor), &row.Asset, nil); err != nil {
 				t.Fatalf("updating the asset: %v", err)
 			}
 

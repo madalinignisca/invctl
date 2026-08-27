@@ -39,7 +39,7 @@ func mustManufacturer(t *testing.T, s *SQLStore, ctx context.Context, code, name
 	if err != nil {
 		t.Fatalf("building manufacturer %s: %v", code, err)
 	}
-	if err := s.CreateManufacturer(ctx, testActor, m); err != nil {
+	if err := s.CreateManufacturer(ctx, testPermit, m); err != nil {
 		t.Fatalf("creating manufacturer %s: %v", code, err)
 	}
 	return m.ID
@@ -53,7 +53,7 @@ func mustDeviceType(t *testing.T, s *SQLStore, ctx context.Context, mfID, model 
 	if err != nil {
 		t.Fatalf("building device type %s: %v", model, err)
 	}
-	if err := s.CreateDeviceType(ctx, testActor, d); err != nil {
+	if err := s.CreateDeviceType(ctx, testPermit, d); err != nil {
 		t.Fatalf("creating device type %s: %v", model, err)
 	}
 	return d.ID
@@ -72,7 +72,7 @@ func assetOfType(t *testing.T, s *SQLStore, ctx context.Context, name, deviceTyp
 		a.DeviceTypeID = &deviceTypeID
 	}
 	a.EOLDate = ownEOL
-	if err := s.CreateAsset(ctx, testActor, a, nil); err != nil {
+	if err := s.CreateAsset(ctx, testPermit, a, nil); err != nil {
 		t.Fatalf("creating asset %s: %v", name, err)
 	}
 	return a.ID
@@ -277,7 +277,7 @@ func TestRetiringAModelKeepsItsDateWorking(t *testing.T) {
 			dt := mustDeviceType(t, s, ctx, mf, "R650", ptr("2026-09-30"))
 			assetOfType(t, s, ctx, "still-racked-01", dt, nil)
 
-			if err := s.RetireDeviceType(ctx, testActor, dt); err != nil {
+			if err := s.RetireDeviceType(ctx, testPermit, dt); err != nil {
 				t.Fatalf("retiring the model: %v", err)
 			}
 
@@ -305,7 +305,7 @@ func TestTheCatalogueRefusesWhatWouldStrandAModel(t *testing.T) {
 			mf := mustManufacturer(t, s, ctx, "dell", "Dell")
 			dt := mustDeviceType(t, s, ctx, mf, "R650", nil)
 
-			err := s.RetireManufacturer(ctx, testActor, mf)
+			err := s.RetireManufacturer(ctx, testPermit, mf)
 			if err == nil {
 				t.Fatal("a manufacturer with live models was retired, leaving them filed " +
 					"under a maker no picker shows")
@@ -316,10 +316,10 @@ func TestTheCatalogueRefusesWhatWouldStrandAModel(t *testing.T) {
 
 			// The control: once the model is gone, the maker can go too. Without
 			// this the test above passes on a method that refuses everything.
-			if err := s.RetireDeviceType(ctx, testActor, dt); err != nil {
+			if err := s.RetireDeviceType(ctx, testPermit, dt); err != nil {
 				t.Fatalf("retiring the model: %v", err)
 			}
-			if err := s.RetireManufacturer(ctx, testActor, mf); err != nil {
+			if err := s.RetireManufacturer(ctx, testPermit, mf); err != nil {
 				t.Errorf("retiring a manufacturer with no live models failed: %v", err)
 			}
 		})
@@ -353,7 +353,7 @@ func TestTheCatalogueIsAuditedLikeEverythingElse(t *testing.T) {
 				t.Fatalf("reading back: %v", err)
 			}
 			row.EOLDate = ptr("2030-01-01")
-			if err := s.UpdateDeviceType(ctx, testActor, &row.DeviceType); err != nil {
+			if err := s.UpdateDeviceType(ctx, testPermit, &row.DeviceType); err != nil {
 				t.Fatalf("updating: %v", err)
 			}
 			if got := count("device_type"); got != 2 {
@@ -366,7 +366,7 @@ func TestTheCatalogueIsAuditedLikeEverythingElse(t *testing.T) {
 			stale := row.DeviceType
 			stale.RowVersion = row.RowVersion - 1
 			stale.Model = "R650-v2"
-			if err := s.UpdateDeviceType(ctx, testActor, &stale); !errors.Is(err, domain.ErrConflict) {
+			if err := s.UpdateDeviceType(ctx, testPermit, &stale); !errors.Is(err, domain.ErrConflict) {
 				t.Errorf("a stale save returned %v, want ErrConflict", err)
 			}
 		})
@@ -415,7 +415,7 @@ func TestAPartNumberFindsTheModelAndCountsTheBoxes(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building: %v", err)
 			}
-			if err := s.CreateDeviceType(ctx, testActor, d); err != nil {
+			if err := s.CreateDeviceType(ctx, testPermit, d); err != nil {
 				t.Fatalf("creating: %v", err)
 			}
 			assetOfType(t, s, ctx, "dl-01", d.ID, nil)
@@ -460,7 +460,7 @@ func TestAPartNumberIsFoundInAnyCase(t *testing.T) {
 			d, _ := domain.NewDeviceType(NewID(), domain.DeviceTypeSpec{
 				ManufacturerID: mf, Model: "DL380", PartNumber: ptr("P30721-B21"),
 			}, s.Now())
-			if err := s.CreateDeviceType(ctx, testActor, d); err != nil {
+			if err := s.CreateDeviceType(ctx, testPermit, d); err != nil {
 				t.Fatalf("creating: %v", err)
 			}
 
@@ -500,7 +500,7 @@ func TestASerialIsFoundInWhateverCaseItWasReadOutIn(t *testing.T) {
 			}
 			a.Serial = ptr("FCH2033V0YR")
 			a.AssetTag = ptr("ASSET-0042")
-			if err := s.CreateAsset(ctx, testActor, a, nil); err != nil {
+			if err := s.CreateAsset(ctx, testPermit, a, nil); err != nil {
 				t.Fatalf("creating: %v", err)
 			}
 
@@ -555,7 +555,7 @@ func TestCorrectingAPartNumberCorrectsTheIndex(t *testing.T) {
 			d, _ := domain.NewDeviceType(NewID(), domain.DeviceTypeSpec{
 				ManufacturerID: mf, Model: "DL380", PartNumber: ptr("WRONG-1"),
 			}, s.Now())
-			if err := s.CreateDeviceType(ctx, testActor, d); err != nil {
+			if err := s.CreateDeviceType(ctx, testPermit, d); err != nil {
 				t.Fatalf("creating: %v", err)
 			}
 
@@ -564,7 +564,7 @@ func TestCorrectingAPartNumberCorrectsTheIndex(t *testing.T) {
 				t.Fatalf("reading back: %v", err)
 			}
 			row.PartNumber = ptr("P30721-B21")
-			if err := s.UpdateDeviceType(ctx, testActor, &row.DeviceType); err != nil {
+			if err := s.UpdateDeviceType(ctx, testPermit, &row.DeviceType); err != nil {
 				t.Fatalf("updating: %v", err)
 			}
 

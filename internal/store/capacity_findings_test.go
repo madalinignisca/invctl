@@ -40,7 +40,7 @@ func (f *projectFixture) sizeAsset(t *testing.T, name string, apply func(*domain
 	for i, env := range row.Environments {
 		envIDs[i] = env.ID
 	}
-	if err := f.s.UpdateAsset(f.ctx, testActor, &a, envIDs); err != nil {
+	if err := f.s.UpdateAsset(f.ctx, testPermit, &a, envIDs); err != nil {
 		t.Fatalf("sizing %s: %v", name, err)
 	}
 }

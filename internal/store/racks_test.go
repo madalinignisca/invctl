@@ -28,7 +28,7 @@ func rackWith(t *testing.T, s *SQLStore, ctx context.Context, units int) (string
 	}
 	if units > 0 {
 		row.UHeight = &units
-		if err := s.UpdateAsset(ctx, testActor, &row.Asset, nil); err != nil {
+		if err := s.UpdateAsset(ctx, testPermit, &row.Asset, nil); err != nil {
 			t.Fatalf("setting the rack height: %v", err)
 		}
 	}
@@ -51,7 +51,7 @@ func mount(t *testing.T, s *SQLStore, ctx context.Context, rack, name string,
 	if deviceType != "" {
 		a.DeviceTypeID = &deviceType
 	}
-	return s.CreateAsset(ctx, testActor, a, nil)
+	return s.CreateAsset(ctx, testPermit, a, nil)
 }
 
 func TestTwoBoxesCannotOccupyTheSameUnit(t *testing.T) {
@@ -97,7 +97,7 @@ func TestBackToBackHalfDepthBoxesShareAUnit(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building: %v", err)
 			}
-			if err := s.CreateDeviceType(ctx, testActor, half); err != nil {
+			if err := s.CreateDeviceType(ctx, testPermit, half); err != nil {
 				t.Fatalf("creating: %v", err)
 			}
 
@@ -119,7 +119,7 @@ func TestBackToBackHalfDepthBoxesShareAUnit(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building: %v", err)
 			}
-			if err := s.CreateDeviceType(ctx, testActor, full); err != nil {
+			if err := s.CreateDeviceType(ctx, testPermit, full); err != nil {
 				t.Fatalf("creating: %v", err)
 			}
 			if err := mount(t, s, ctx, rack, "srv-deep", 20, domain.FaceFront, full.ID); err == nil {
@@ -141,7 +141,7 @@ func TestAMultiUnitBoxOccupiesEveryUnitItCovers(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building: %v", err)
 			}
-			if err := s.CreateDeviceType(ctx, testActor, big); err != nil {
+			if err := s.CreateDeviceType(ctx, testPermit, big); err != nil {
 				t.Fatalf("creating: %v", err)
 			}
 
@@ -216,7 +216,7 @@ func TestAnElevationDrawsWhatIsPlacedAndListsWhatIsNot(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building: %v", err)
 			}
-			if err := s.CreateAsset(ctx, testActor, a, nil); err != nil {
+			if err := s.CreateAsset(ctx, testPermit, a, nil); err != nil {
 				t.Fatalf("creating: %v", err)
 			}
 

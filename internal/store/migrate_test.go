@@ -136,7 +136,7 @@ func TestInMemoryDatabaseIsUsable(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building environment: %v", err)
 			}
-			if err := s.CreateEnvironment(ctx, domain.SystemActor, env); err != nil {
+			if err := s.CreateEnvironment(ctx, domain.AdministratorPermit(domain.SystemActor), env); err != nil {
 				t.Fatalf("creating environment: %v", err)
 			}
 			if _, err := s.GetEnvironmentByCode(ctx, "prod"); err != nil {

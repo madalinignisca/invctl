@@ -259,12 +259,16 @@ func TestWriteRoutesCanFail(t *testing.T) {
 		t.Fatalf("reading assets.go: %v", err)
 	}
 
-	// AssetRetire calls actor(r) once, directly, to build the domain.Actor
-	// its store call carries. Deleting that call and writing
-	// domain.SystemActor in its place is exactly the mutation the brief
-	// describes: a real handler, edited to stop calling actor(r), and the
-	// question is whether the walk still says it does.
-	const from = "a.Store.RetireAsset(r.Context(), actor(r), id)"
+	// AssetRetire calls permit(r) once, directly, to build the domain.Permit
+	// its store call carries -- WP-G1 Task 10 moved every write call site
+	// from actor(r) to permit(r) once the store methods stopped taking a
+	// bare domain.Actor, and permit(r) itself calls actor(r) (see app.go),
+	// so the walk is still expected to reach actor( through that one extra
+	// hop. Deleting the permit(r) call and writing domain.SystemActor in its
+	// place removes that hop entirely, which is exactly the mutation the
+	// brief describes: a real handler, edited to stop reaching actor(r) at
+	// all, and the question is whether the walk still says it does.
+	const from = "a.Store.RetireAsset(r.Context(), permit(r), id)"
 	const to = "a.Store.RetireAsset(r.Context(), domain.SystemActor, id)"
 	if !strings.Contains(string(original), from) {
 		t.Fatalf("AssetRetire's store call no longer reads %q; update this test's fixture to match "+

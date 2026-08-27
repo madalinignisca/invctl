@@ -258,7 +258,7 @@ func TestUnownedAssetCandidatesRespectsTheFilter(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building switch: %v", err)
 			}
-			if err := f.s.CreateAsset(f.ctx, testActor, router, []string{f.env}); err != nil {
+			if err := f.s.CreateAsset(f.ctx, testPermit, router, []string{f.env}); err != nil {
 				t.Fatalf("creating switch: %v", err)
 			}
 			vmID := f.asset(t, "unowned-vm", nil, "")

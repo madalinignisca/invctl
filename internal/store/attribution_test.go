@@ -168,7 +168,7 @@ func TestAPoolDividesSeparatelyFromTheCluster(t *testing.T) {
 			if err := f.link(t, "orders", "vm-app-1", domain.ProjectOwns); err != nil {
 				t.Fatalf("linking: %v", err)
 			}
-			if err := f.s.SetStorageClaim(f.ctx, testActor, f.assets["vm-app-1"],
+			if err := f.s.SetStorageClaim(f.ctx, testPermit, f.assets["vm-app-1"],
 				poolID, 250, nil); err != nil {
 				t.Fatalf("claiming: %v", err)
 			}

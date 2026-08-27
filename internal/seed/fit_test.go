@@ -169,7 +169,7 @@ func TestNothingPhysicalEverRefusesAPlacement(t *testing.T) {
 		// refusing, and this test would pass for the wrong reason.
 		a.RackPosition, a.RackFace = intPtr(37), strPtr(domain.FaceFront)
 
-		if err := s.CreateAsset(ctx, seed.Actor, a, nil); err != nil {
+		if err := s.CreateAsset(ctx, domain.AdministratorPermit(seed.Actor), a, nil); err != nil {
 			t.Fatalf("a box too deep for its cabinet was REFUSED: %v\n"+
 				"Physical fit warns; it never refuses. The estate has to be able to "+
 				"describe a bad reality or people stop recording it.", err)
