@@ -224,7 +224,7 @@ func dedupeIDs(ids []string) []string {
 // ONE change_log ROW PER ENTITY, ALL SHARING ONE batch_id -- never one row
 // for the whole batch. See ReassignTeamOwnership's doc for the full
 // reasoning; it applies here without modification.
-func (s *SQLStore) BulkAssignOwnership(ctx context.Context, actor domain.Actor, entityType string, ids []string, toTeamID string) ([]ReassignOutcome, error) {
+func (s *SQLStore) BulkAssignOwnership(ctx context.Context, p domain.Permit, entityType string, ids []string, toTeamID string) ([]ReassignOutcome, error) {
 	if !bulkAssignEntityTypes[entityType] {
 		return nil, fmt.Errorf("bulk assigning ownership: unknown entity type %q: %w", entityType, domain.ErrInvalid)
 	}
@@ -239,7 +239,7 @@ func (s *SQLStore) BulkAssignOwnership(ctx context.Context, actor domain.Actor, 
 	batchID := NewID()
 	outcomes := make([]ReassignOutcome, 0, len(ids))
 	for _, id := range ids {
-		outcomes = append(outcomes, s.assignOneEntity(ctx, actor, entityType, id, s.bestEffortName(ctx, entityType, id), toTeamID, batchID))
+		outcomes = append(outcomes, s.assignOneEntity(ctx, p, entityType, id, s.bestEffortName(ctx, entityType, id), toTeamID, batchID))
 	}
 	return outcomes, nil
 }
@@ -269,7 +269,7 @@ func (s *SQLStore) bestEffortName(ctx context.Context, entityType, id string) st
 // counterpart of team_reassignment.go's reassignEntity, guarded by
 // "<owner column> IS NULL" instead of "<owner column> = fromTeamID" and
 // therefore an "old" value of null rather than a named team.
-func (s *SQLStore) assignOneEntity(ctx context.Context, actor domain.Actor, entityType, id, name, toTeamID, batchID string) ReassignOutcome {
+func (s *SQLStore) assignOneEntity(ctx context.Context, p domain.Permit, entityType, id, name, toTeamID, batchID string) ReassignOutcome {
 	var do func(t *tx) (sql.Result, error)
 	diffKey := "team_id"
 
@@ -320,7 +320,7 @@ func (s *SQLStore) assignOneEntity(ctx context.Context, actor domain.Actor, enti
 	}
 
 	var affected int64
-	err := s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	err := s.write(ctx, p, func(t *tx) error {
 		res, err := do(t)
 		if err != nil {
 			return translateWriteErr(err, "assigning "+entityType+" "+id)

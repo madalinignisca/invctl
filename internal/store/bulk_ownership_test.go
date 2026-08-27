@@ -33,7 +33,7 @@ func TestBulkAssignOwnershipMovesExactlyTheNamedIDs(t *testing.T) {
 			moved2 := f.asset(t, "move-me-2", nil, "")
 			leftBehind := f.asset(t, "leave-me", nil, "")
 
-			outcomes, err := f.s.BulkAssignOwnership(f.ctx, testActor, "asset", []string{moved1, moved2}, target)
+			outcomes, err := f.s.BulkAssignOwnership(f.ctx, testPermit, "asset", []string{moved1, moved2}, target)
 			if err != nil {
 				t.Fatalf("BulkAssignOwnership: %v", err)
 			}
@@ -97,7 +97,7 @@ func TestBulkAssignOwnershipAcrossAllFiveTypes(t *testing.T) {
 				{"custom_field", f.customField(t, "u_field", nil)},
 			}
 			for _, spec := range specs {
-				outcomes, err := f.s.BulkAssignOwnership(f.ctx, testActor, spec.entityType, []string{spec.id}, target)
+				outcomes, err := f.s.BulkAssignOwnership(f.ctx, testPermit, spec.entityType, []string{spec.id}, target)
 				if err != nil {
 					t.Fatalf("BulkAssignOwnership(%s): %v", spec.entityType, err)
 				}
@@ -145,7 +145,7 @@ func TestBulkAssignOwnershipSkipsAnEntityClaimedBySomebodyElse(t *testing.T) {
 				t.Fatalf("simulating a race: %v", err)
 			}
 
-			outcomes, err := f.s.BulkAssignOwnership(f.ctx, testActor, "asset", []string{assetID}, target)
+			outcomes, err := f.s.BulkAssignOwnership(f.ctx, testPermit, "asset", []string{assetID}, target)
 			if err != nil {
 				t.Fatalf("BulkAssignOwnership: %v", err)
 			}
@@ -189,7 +189,7 @@ func TestBulkAssignOwnershipRefusesARetiredTarget(t *testing.T) {
 			gone := f.team(t, "gone-target-bulk", domain.LifecycleRetired, strp("a@example.com"))
 			assetID := f.asset(t, "untouched-by-refused-target", nil, "")
 
-			_, err := f.s.BulkAssignOwnership(f.ctx, testActor, "asset", []string{assetID}, gone)
+			_, err := f.s.BulkAssignOwnership(f.ctx, testPermit, "asset", []string{assetID}, gone)
 			if !errors.Is(err, domain.ErrInvalid) {
 				t.Fatalf("err = %v, want domain.ErrInvalid", err)
 			}
@@ -213,7 +213,7 @@ func TestBulkAssignOwnershipRefusesEmptySelection(t *testing.T) {
 			f := newOwnershipFixture(t, e)
 			target := f.team(t, "nothing-to-do", "", strp("a@example.com"))
 
-			_, err := f.s.BulkAssignOwnership(f.ctx, testActor, "asset", nil, target)
+			_, err := f.s.BulkAssignOwnership(f.ctx, testPermit, "asset", nil, target)
 			if !errors.Is(err, domain.ErrInvalid) {
 				t.Fatalf("err = %v, want domain.ErrInvalid", err)
 			}
@@ -231,7 +231,7 @@ func TestBulkAssignOwnershipRefusesAnUnknownEntityType(t *testing.T) {
 			f := newOwnershipFixture(t, e)
 			target := f.team(t, "unknown-type-target", "", strp("a@example.com"))
 
-			_, err := f.s.BulkAssignOwnership(f.ctx, testActor, "not_a_real_table", []string{"whatever"}, target)
+			_, err := f.s.BulkAssignOwnership(f.ctx, testPermit, "not_a_real_table", []string{"whatever"}, target)
 			if !errors.Is(err, domain.ErrInvalid) {
 				t.Fatalf("err = %v, want domain.ErrInvalid", err)
 			}
@@ -280,7 +280,7 @@ func TestUnownedAssetCandidatesRespectsTheFilter(t *testing.T) {
 
 			// Assign exactly what the filtered view produced -- this is what
 			// a "select all" click sends.
-			if _, err := f.s.BulkAssignOwnership(f.ctx, testActor, "asset", ids, target); err != nil {
+			if _, err := f.s.BulkAssignOwnership(f.ctx, testPermit, "asset", ids, target); err != nil {
 				t.Fatalf("BulkAssignOwnership: %v", err)
 			}
 

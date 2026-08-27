@@ -296,7 +296,7 @@ var errRefused = errors.New("import: file refused")
 // could not be carried out" -- the database was unreachable, the actor could not
 // write. A file full of unresolvable parents is not an error, it is a successful
 // run whose answer is no, and the report carries the reasons.
-func (s *SQLStore) ImportAssets(ctx context.Context, actor domain.Actor, rows []AssetImportRow, dryRun bool,
+func (s *SQLStore) ImportAssets(ctx context.Context, p domain.Permit, rows []AssetImportRow, dryRun bool,
 	progress ...func(done int)) (*ImportReport, error) {
 	report := &ImportReport{DryRun: dryRun, Rows: len(rows)}
 	if len(rows) == 0 {
@@ -328,7 +328,7 @@ func (s *SQLStore) ImportAssets(ctx context.Context, actor domain.Actor, rows []
 		seen[row.Path()] = row.Line
 	}
 
-	err := s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	err := s.write(ctx, p, func(t *tx) error {
 		existing, err := existingAssetPaths(ctx, t)
 		if err != nil {
 			return err

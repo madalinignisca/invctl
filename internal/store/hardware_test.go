@@ -634,7 +634,7 @@ func TestImportingACatalogueFile(t *testing.T) {
 				if len(problems) > 0 {
 					t.Fatalf("parsing: %+v", problems)
 				}
-				report, err := s.ImportDeviceTypes(ctx, testActor, rows, false)
+				report, err := s.ImportDeviceTypes(ctx, testPermit, rows, false)
 				if err != nil {
 					t.Fatalf("importing: %v", err)
 				}
@@ -668,7 +668,7 @@ func TestImportingACatalogueFile(t *testing.T) {
 
 			t.Run("an unknown manufacturer is named, not created", func(t *testing.T) {
 				s, ctx := newStore(t, e)
-				report, err := s.ImportDeviceTypes(ctx, testActor,
+				report, err := s.ImportDeviceTypes(ctx, testPermit,
 					catalogueCSV(t, catalogueHeader+"nosuchmaker,R650\n"), false)
 				if err != nil {
 					t.Fatalf("importing: %v", err)
@@ -693,7 +693,7 @@ func TestImportingACatalogueFile(t *testing.T) {
 				mf := mustManufacturer(t, s, ctx, "dell", "Dell")
 				mustDeviceType(t, s, ctx, mf, "R650", ptr("2029-03-31"))
 
-				report, err := s.ImportDeviceTypes(ctx, testActor,
+				report, err := s.ImportDeviceTypes(ctx, testPermit,
 					catalogueCSV(t, "manufacturer,model,eol_date\ndell,R650,2035-01-01\n"), false)
 				if err != nil {
 					t.Fatalf("importing: %v", err)
@@ -714,7 +714,7 @@ func TestImportingACatalogueFile(t *testing.T) {
 				s, ctx := newStore(t, e)
 				mustManufacturer(t, s, ctx, "dell", "Dell")
 				mustManufacturer(t, s, ctx, "acme", "Acme")
-				report, err := s.ImportDeviceTypes(ctx, testActor,
+				report, err := s.ImportDeviceTypes(ctx, testPermit,
 					catalogueCSV(t, catalogueHeader+"dell,R650\nacme,R650\n"), false)
 				if err != nil {
 					t.Fatalf("importing: %v", err)
@@ -728,7 +728,7 @@ func TestImportingACatalogueFile(t *testing.T) {
 			t.Run("one bad row refuses the whole file", func(t *testing.T) {
 				s, ctx := newStore(t, e)
 				mustManufacturer(t, s, ctx, "dell", "Dell")
-				report, err := s.ImportDeviceTypes(ctx, testActor, catalogueCSV(t,
+				report, err := s.ImportDeviceTypes(ctx, testPermit, catalogueCSV(t,
 					catalogueHeader+"dell,R650\ndell,R750\nnosuchmaker,R850\n"), false)
 				if err != nil {
 					t.Fatalf("importing: %v", err)
@@ -760,7 +760,7 @@ func TestAYesNoColumnRefusesWhatItCannotRead(t *testing.T) {
 			// recognise, which turns a localised "ja" -- or a stray character --
 			// into a quiet no. A full-depth chassis recorded as half-depth is
 			// wrong in a way nobody notices until a rack diagram is built on it.
-			report, err := s.ImportDeviceTypes(ctx, testActor, catalogueCSV(t,
+			report, err := s.ImportDeviceTypes(ctx, testPermit, catalogueCSV(t,
 				"manufacturer,model,full_depth\ndell,R650,ja\n"), false)
 			if err != nil {
 				t.Fatalf("importing: %v", err)
@@ -776,7 +776,7 @@ func TestAYesNoColumnRefusesWhatItCannotRead(t *testing.T) {
 			// so the refusal above is not simply a column that never accepts
 			// anything.
 			for _, yes := range []string{"true", "TRUE", "yes", "Y", "1"} {
-				r, err := s.ImportDeviceTypes(ctx, testActor, catalogueCSV(t,
+				r, err := s.ImportDeviceTypes(ctx, testPermit, catalogueCSV(t,
 					"manufacturer,model,full_depth\ndell,M-"+yes+","+yes+"\n"), true)
 				if err != nil {
 					t.Fatalf("importing %q: %v", yes, err)
@@ -795,7 +795,7 @@ func TestAnUnreadableRackHeightIsRefusedRatherThanDropped(t *testing.T) {
 			s, ctx := newStore(t, e)
 			mustManufacturer(t, s, ctx, "dell", "Dell")
 
-			report, err := s.ImportDeviceTypes(ctx, testActor, catalogueCSV(t,
+			report, err := s.ImportDeviceTypes(ctx, testPermit, catalogueCSV(t,
 				"manufacturer,model,u_height\ndell,R650,1U\n"), false)
 			if err != nil {
 				t.Fatalf("importing: %v", err)
@@ -815,7 +815,7 @@ func TestACatalogueImportIsAuditedAndIndexed(t *testing.T) {
 			s, ctx := newStore(t, e)
 			mustManufacturer(t, s, ctx, "hpe", "HPE")
 
-			if _, err := s.ImportDeviceTypes(ctx, testActor, catalogueCSV(t,
+			if _, err := s.ImportDeviceTypes(ctx, testPermit, catalogueCSV(t,
 				"manufacturer,model,part_number\nhpe,DL380,P30721-B21\n"), false); err != nil {
 				t.Fatalf("importing: %v", err)
 			}

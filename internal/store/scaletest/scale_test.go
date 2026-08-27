@@ -104,7 +104,7 @@ func TestAtScale(t *testing.T) {
 	}
 
 	timed("dry run", func() string {
-		rep, err := s.ImportAssets(ctx, actor, rows, true)
+		rep, err := s.ImportAssets(ctx, domain.AdministratorPermit(actor), rows, true)
 		if err != nil {
 			t.Fatalf("dry run: %v", err)
 		}

@@ -91,7 +91,7 @@ func ParseDeviceTypeCSV(r io.Reader) ([]DeviceTypeImportRow, []ImportProblem) {
 }
 
 // ImportDeviceTypes applies a catalogue file, or reports why it will not.
-func (s *SQLStore) ImportDeviceTypes(ctx context.Context, actor domain.Actor,
+func (s *SQLStore) ImportDeviceTypes(ctx context.Context, p domain.Permit,
 	rows []DeviceTypeImportRow, dryRun bool,
 	progress ...func(done int)) (*ImportReport, error) {
 
@@ -122,7 +122,7 @@ func (s *SQLStore) ImportDeviceTypes(ctx context.Context, actor domain.Actor,
 		seen[row.Path()] = row.Line
 	}
 
-	err := s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	err := s.write(ctx, p, func(t *tx) error {
 		makers, err := manufacturersByCode(ctx, t)
 		if err != nil {
 			return err

@@ -77,7 +77,7 @@ var assetImport = importKind{
 		if len(problems) > 0 {
 			return nil, problems, nil
 		}
-		report, err := a.Store.ImportAssets(r.Context(), actor(r), rows, dry)
+		report, err := a.Store.ImportAssets(r.Context(), permit(r), rows, dry)
 		return report, nil, err
 	},
 }
@@ -100,7 +100,7 @@ var deviceTypeImport = importKind{
 		if len(problems) > 0 {
 			return nil, problems, nil
 		}
-		report, err := a.Store.ImportDeviceTypes(r.Context(), actor(r), rows, dry)
+		report, err := a.Store.ImportDeviceTypes(r.Context(), permit(r), rows, dry)
 		return report, nil, err
 	},
 }

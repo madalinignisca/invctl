@@ -71,7 +71,7 @@ func TestAnImportCreatesTheWholeFileOrNoneOfIt(t *testing.T) {
 					"dc-a,rack-1,rack\n"+
 					",dc-a,site\n")
 
-				report, err := s.ImportAssets(ctx, testActor, rows, false)
+				report, err := s.ImportAssets(ctx, testPermit, rows, false)
 				if err != nil {
 					t.Fatalf("importing: %v", err)
 				}
@@ -99,7 +99,7 @@ func TestAnImportCreatesTheWholeFileOrNoneOfIt(t *testing.T) {
 					"dc-a,rack-1,rack\n"+
 					"dc-a,rack-2,teleporter\n")
 
-				report, err := s.ImportAssets(ctx, testActor, rows, false)
+				report, err := s.ImportAssets(ctx, testPermit, rows, false)
 				if err != nil {
 					t.Fatalf("importing: %v", err)
 				}
@@ -124,7 +124,7 @@ func TestAnImportCreatesTheWholeFileOrNoneOfIt(t *testing.T) {
 					",dc-a,site\n"+
 					"dc-a,rack-2,teleporter\n")
 
-				report, err := s.ImportAssets(ctx, testActor, rows, false)
+				report, err := s.ImportAssets(ctx, testPermit, rows, false)
 				if err != nil {
 					t.Fatalf("importing: %v", err)
 				}
@@ -160,7 +160,7 @@ func TestAnImportCreatesAndNeverUpdates(t *testing.T) {
 				t.Fatalf("parsing: %+v", problems)
 			}
 
-			report, err := s.ImportAssets(ctx, testActor, rows, false)
+			report, err := s.ImportAssets(ctx, testPermit, rows, false)
 			if err != nil {
 				t.Fatalf("importing: %v", err)
 			}
@@ -199,7 +199,7 @@ func TestADryRunWritesNothingAndStillTellsTheTruth(t *testing.T) {
 				"dc-a,rack-1,rack\n" +
 				"dc-a/rack-1,esx-01,hypervisor\n"
 
-			dry, err := s.ImportAssets(ctx, testActor, importCSV(t, file), true)
+			dry, err := s.ImportAssets(ctx, testPermit, importCSV(t, file), true)
 			if err != nil {
 				t.Fatalf("dry run: %v", err)
 			}
@@ -217,7 +217,7 @@ func TestADryRunWritesNothingAndStillTellsTheTruth(t *testing.T) {
 				t.Fatalf("dry run says it would create %v, want 3 paths", dry.Created)
 			}
 
-			real, err := s.ImportAssets(ctx, testActor, importCSV(t, file), false)
+			real, err := s.ImportAssets(ctx, testPermit, importCSV(t, file), false)
 			if err != nil {
 				t.Fatalf("real run: %v", err)
 			}
@@ -244,7 +244,7 @@ func TestAnImportResolvesNamesAgainstTheEstateAndItself(t *testing.T) {
 				s, ctx := newStore(t, e)
 				mustAsset(t, s, ctx, domain.KindSite, "dc-a", nil)
 
-				report, err := s.ImportAssets(ctx, testActor,
+				report, err := s.ImportAssets(ctx, testPermit,
 					importCSV(t, importHeader+"dc-a,rack-9,rack\n"), false)
 				if err != nil {
 					t.Fatalf("importing: %v", err)
@@ -256,7 +256,7 @@ func TestAnImportResolvesNamesAgainstTheEstateAndItself(t *testing.T) {
 
 			t.Run("a parent nothing creates is named, not swallowed", func(t *testing.T) {
 				s, ctx := newStore(t, e)
-				report, err := s.ImportAssets(ctx, testActor,
+				report, err := s.ImportAssets(ctx, testPermit,
 					importCSV(t, importHeader+"dc-nowhere,rack-9,rack\n"), false)
 				if err != nil {
 					t.Fatalf("importing: %v", err)
@@ -272,7 +272,7 @@ func TestAnImportResolvesNamesAgainstTheEstateAndItself(t *testing.T) {
 
 			t.Run("two rows claiming one path are refused", func(t *testing.T) {
 				s, ctx := newStore(t, e)
-				report, err := s.ImportAssets(ctx, testActor,
+				report, err := s.ImportAssets(ctx, testPermit,
 					importCSV(t, importHeader+",dc-a,site\n,dc-a,site\n"), false)
 				if err != nil {
 					t.Fatalf("importing: %v", err)
@@ -289,7 +289,7 @@ func TestAnImportResolvesNamesAgainstTheEstateAndItself(t *testing.T) {
 
 			t.Run("the same name under two different parents is fine", func(t *testing.T) {
 				s, ctx := newStore(t, e)
-				report, err := s.ImportAssets(ctx, testActor, importCSV(t, importHeader+
+				report, err := s.ImportAssets(ctx, testPermit, importCSV(t, importHeader+
 					",dc-a,site\n,dc-b,site\n"+
 					"dc-a,rack-1,rack\ndc-b,rack-1,rack\n"), false)
 				if err != nil {
@@ -310,7 +310,7 @@ func TestAnImportResolvesNamesAgainstTheEstateAndItself(t *testing.T) {
 					t.Fatalf("retiring: %v", err)
 				}
 
-				report, err := s.ImportAssets(ctx, testActor,
+				report, err := s.ImportAssets(ctx, testPermit,
 					importCSV(t, importHeader+"dc-a,rack-1,rack\n"), false)
 				if err != nil {
 					t.Fatalf("importing: %v", err)
@@ -336,7 +336,7 @@ func TestAnImportedAssetIsAuditedLikeAnyOtherCreation(t *testing.T) {
 				t.Fatalf("counting: %v", err)
 			}
 
-			if _, err := s.ImportAssets(ctx, testActor, importCSV(t, importHeader+
+			if _, err := s.ImportAssets(ctx, testPermit, importCSV(t, importHeader+
 				",dc-a,site\ndc-a,rack-1,rack\n"), false); err != nil {
 				t.Fatalf("importing: %v", err)
 			}
@@ -367,7 +367,7 @@ func TestADryRunLeavesNoAuditTrailEither(t *testing.T) {
 				`SELECT COUNT(*) FROM change_log`); err != nil {
 				t.Fatalf("counting: %v", err)
 			}
-			if _, err := s.ImportAssets(ctx, testActor, importCSV(t, importHeader+
+			if _, err := s.ImportAssets(ctx, testPermit, importCSV(t, importHeader+
 				",dc-a,site\ndc-a,rack-1,rack\n"), true); err != nil {
 				t.Fatalf("dry run: %v", err)
 			}
@@ -465,7 +465,7 @@ func TestImportingOwnershipNamesATeamAndNeverAPerson(t *testing.T) {
 				if len(problems) > 0 {
 					t.Fatalf("parsing: %+v", problems)
 				}
-				report, err := s.ImportAssets(ctx, testActor, rows, false)
+				report, err := s.ImportAssets(ctx, testPermit, rows, false)
 				if err != nil {
 					t.Fatalf("importing: %v", err)
 				}
@@ -491,7 +491,7 @@ func TestImportingOwnershipNamesATeamAndNeverAPerson(t *testing.T) {
 			t.Run("an unknown team code is named, not dropped", func(t *testing.T) {
 				rows, _ := ParseAssetCSV(strings.NewReader(
 					"name,kind,team\nghost-01,server,no-such-team\n"))
-				report, err := s.ImportAssets(ctx, testActor, rows, false)
+				report, err := s.ImportAssets(ctx, testPermit, rows, false)
 				if err != nil {
 					t.Fatalf("importing: %v", err)
 				}
@@ -508,7 +508,7 @@ func TestImportingOwnershipNamesATeamAndNeverAPerson(t *testing.T) {
 				// path goes through it rather than around it.
 				rows, _ := ParseAssetCSV(strings.NewReader(
 					"name,kind,manager_role\norphan-01,server,owner\n"))
-				report, err := s.ImportAssets(ctx, testActor, rows, false)
+				report, err := s.ImportAssets(ctx, testPermit, rows, false)
 				if err != nil {
 					t.Fatalf("importing: %v", err)
 				}
@@ -594,13 +594,13 @@ func TestTheDocumentedExampleActuallyImports(t *testing.T) {
 					var rows []DeviceTypeImportRow
 					rows, problems = ParseDeviceTypeCSV(strings.NewReader(example))
 					if len(problems) == 0 {
-						report, err = s.ImportDeviceTypes(ctx, testActor, rows, false)
+						report, err = s.ImportDeviceTypes(ctx, testPermit, rows, false)
 					}
 				} else {
 					var rows []AssetImportRow
 					rows, problems = ParseAssetCSV(strings.NewReader(example))
 					if len(problems) == 0 {
-						report, err = s.ImportAssets(ctx, testActor, rows, false)
+						report, err = s.ImportAssets(ctx, testPermit, rows, false)
 					}
 				}
 
@@ -639,7 +639,7 @@ func TestImportingAnAssetPointsItAtACataloguedModel(t *testing.T) {
 				if len(problems) > 0 {
 					t.Fatalf("parsing: %+v", problems)
 				}
-				report, err := s.ImportAssets(ctx, testActor, rows, false)
+				report, err := s.ImportAssets(ctx, testPermit, rows, false)
 				if err != nil {
 					t.Fatalf("importing: %v", err)
 				}
@@ -668,7 +668,7 @@ func TestImportingAnAssetPointsItAtACataloguedModel(t *testing.T) {
 			t.Run("case is folded, so a lower-cased file still resolves", func(t *testing.T) {
 				rows, _ := ParseAssetCSV(strings.NewReader(
 					"name,kind,device_type\nlowercased-01,server,dell/poweredge r650\n"))
-				report, err := s.ImportAssets(ctx, testActor, rows, false)
+				report, err := s.ImportAssets(ctx, testPermit, rows, false)
 				if err != nil {
 					t.Fatalf("importing: %v", err)
 				}
@@ -682,7 +682,7 @@ func TestImportingAnAssetPointsItAtACataloguedModel(t *testing.T) {
 			t.Run("an unknown model is named, not silently left unset", func(t *testing.T) {
 				rows, _ := ParseAssetCSV(strings.NewReader(
 					"name,kind,device_type\nghost-01,server,dell/NoSuchModel\n"))
-				report, err := s.ImportAssets(ctx, testActor, rows, false)
+				report, err := s.ImportAssets(ctx, testPermit, rows, false)
 				if err != nil {
 					t.Fatalf("importing: %v", err)
 				}
@@ -697,7 +697,7 @@ func TestImportingAnAssetPointsItAtACataloguedModel(t *testing.T) {
 			t.Run("an asset's own date still beats the model's", func(t *testing.T) {
 				rows, _ := ParseAssetCSV(strings.NewReader(
 					"name,kind,device_type,eol_date\ncontracted-01,server,dell/PowerEdge R650,2031-12-31\n"))
-				if report, err := s.ImportAssets(ctx, testActor, rows, false); err != nil {
+				if report, err := s.ImportAssets(ctx, testPermit, rows, false); err != nil {
 					t.Fatalf("importing: %v", err)
 				} else if len(report.Problems) > 0 {
 					t.Fatalf("refused: %+v", report.Problems)
@@ -721,7 +721,7 @@ func TestImportingAnAssetPointsItAtACataloguedModel(t *testing.T) {
 				}
 				rows, _ := ParseAssetCSV(strings.NewReader(
 					"name,kind,device_type\nold-01,server,dell/PowerEdge R500\n"))
-				report, err := s.ImportAssets(ctx, testActor, rows, false)
+				report, err := s.ImportAssets(ctx, testPermit, rows, false)
 				if err != nil {
 					t.Fatalf("importing: %v", err)
 				}
@@ -751,7 +751,7 @@ func TestAnAmbiguousModelPathIsRefusedRatherThanGuessed(t *testing.T) {
 
 			rows, _ := ParseAssetCSV(strings.NewReader(
 				"name,kind,device_type\nwhich-01,server,dell/PowerEdge R650\n"))
-			report, err := s.ImportAssets(ctx, testActor, rows, false)
+			report, err := s.ImportAssets(ctx, testPermit, rows, false)
 			if err != nil {
 				t.Fatalf("importing: %v", err)
 			}
