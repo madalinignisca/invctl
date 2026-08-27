@@ -207,7 +207,7 @@ func (b *builder) environment(code, name, role string, inScope bool, criticality
 		b.fail(fmt.Errorf("building environment %s: %w", code, err))
 		return
 	}
-	if err := b.store.CreateEnvironment(b.ctx, domain.AdministratorPermit(Actor), env); err != nil {
+	if err := b.store.CreateEnvironment(b.ctx, Permit, env); err != nil {
 		b.fail(fmt.Errorf("seeding environment %s: %w", code, err))
 		return
 	}
@@ -229,7 +229,7 @@ func (b *builder) manufacturer(code, name, support string) {
 		b.fail(fmt.Errorf("building manufacturer %s: %w", code, err))
 		return
 	}
-	if err := b.store.CreateManufacturer(b.ctx, domain.AdministratorPermit(Actor), m); err != nil {
+	if err := b.store.CreateManufacturer(b.ctx, Permit, m); err != nil {
 		b.fail(fmt.Errorf("seeding manufacturer %s: %w", code, err))
 		return
 	}
@@ -262,7 +262,7 @@ func (b *builder) model(maker, name, part string, u int, eol string) {
 		b.fail(fmt.Errorf("building device type %s: %w", name, err))
 		return
 	}
-	if err := b.store.CreateDeviceType(b.ctx, domain.AdministratorPermit(Actor), d); err != nil {
+	if err := b.store.CreateDeviceType(b.ctx, Permit, d); err != nil {
 		b.fail(fmt.Errorf("seeding device type %s: %w", name, err))
 		return
 	}
@@ -311,7 +311,7 @@ func (b *builder) assetCosts(lines []costLine) {
 			b.fail(fmt.Errorf("building the %s cost for %s: %w", line.kind, line.target, err))
 			return
 		}
-		if err := b.store.AddAssetCost(b.ctx, domain.AdministratorPermit(Actor), id, c); err != nil {
+		if err := b.store.AddAssetCost(b.ctx, Permit, id, c); err != nil {
 			b.fail(fmt.Errorf("pricing asset %s: %w", line.target, err))
 			return
 		}

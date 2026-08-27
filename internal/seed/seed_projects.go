@@ -106,7 +106,7 @@ func (b *builder) projects() {
 			b.fail(fmt.Errorf("building project %s: %w", spec.code, err))
 			return
 		}
-		if err := b.store.CreateProject(b.ctx, domain.AdministratorPermit(Actor), p); err != nil {
+		if err := b.store.CreateProject(b.ctx, Permit, p); err != nil {
 			b.fail(fmt.Errorf("seeding project %s: %w", spec.code, err))
 			return
 		}
@@ -134,7 +134,7 @@ func (b *builder) linkAssets(p *domain.Project, relation string, names []string)
 			b.fail(fmt.Errorf("building the %s link from %s to %s: %w", relation, p.Code, name, err))
 			return
 		}
-		if err := b.store.LinkProjectAsset(b.ctx, domain.AdministratorPermit(Actor), link); err != nil {
+		if err := b.store.LinkProjectAsset(b.ctx, Permit, link); err != nil {
 			b.fail(fmt.Errorf("linking %s to project %s: %w", name, p.Code, err))
 			return
 		}
@@ -156,7 +156,7 @@ func (b *builder) linkServices(p *domain.Project, relation string, codes []strin
 			b.fail(fmt.Errorf("building the %s link from %s to %s: %w", relation, p.Code, code, err))
 			return
 		}
-		if err := b.store.LinkProjectService(b.ctx, domain.AdministratorPermit(Actor), link); err != nil {
+		if err := b.store.LinkProjectService(b.ctx, Permit, link); err != nil {
 			b.fail(fmt.Errorf("linking %s to project %s: %w", code, p.Code, err))
 			return
 		}

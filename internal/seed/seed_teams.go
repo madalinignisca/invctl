@@ -64,7 +64,7 @@ func (b *builder) teams() {
 			b.fail(fmt.Errorf("building team %s: %w", spec.code, err))
 			return
 		}
-		if err := b.store.CreateTeam(b.ctx, domain.AdministratorPermit(Actor), t); err != nil {
+		if err := b.store.CreateTeam(b.ctx, Permit, t); err != nil {
 			b.fail(fmt.Errorf("seeding team %s: %w", spec.code, err))
 			return
 		}

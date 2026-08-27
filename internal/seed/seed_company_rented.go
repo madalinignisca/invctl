@@ -164,7 +164,7 @@ func (b *builder) rentedCluster() {
 	c.HAPolicy = domain.HARestart
 	c.Description = str("two rented boxes; losing one is survivable, which is why " +
 		"development lives here and production does not")
-	if err := b.store.CreateCluster(b.ctx, domain.AdministratorPermit(Actor), c); err != nil {
+	if err := b.store.CreateCluster(b.ctx, Permit, c); err != nil {
 		b.fail(fmt.Errorf("seeding the Hetzner cluster: %w", err))
 		return
 	}
@@ -177,7 +177,7 @@ func (b *builder) rentedCluster() {
 		}
 		members = append(members, domain.ClusterMember{ClusterID: c.ID, AssetID: id})
 	}
-	if err := b.store.SetClusterMembers(b.ctx, domain.AdministratorPermit(Actor), c.ID, members); err != nil {
+	if err := b.store.SetClusterMembers(b.ctx, Permit, c.ID, members); err != nil {
 		b.fail(fmt.Errorf("seeding the Hetzner cluster members: %w", err))
 	}
 }
@@ -223,7 +223,7 @@ func (b *builder) retireOnPremDev() {
 		if !ok {
 			continue // the compute layer may not have run; nothing to retire
 		}
-		if err := b.store.RetireAsset(b.ctx, domain.AdministratorPermit(Actor), id); err != nil {
+		if err := b.store.RetireAsset(b.ctx, Permit, id); err != nil {
 			b.fail(fmt.Errorf("retiring %s: %w", name, err))
 			return
 		}

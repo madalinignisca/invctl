@@ -106,7 +106,7 @@ func (b *builder) lifetimes() {
 		for i, e := range row.Environments {
 			envIDs[i] = e.ID
 		}
-		if err := b.store.UpdateAsset(b.ctx, domain.AdministratorPermit(Actor), &updated, envIDs); err != nil {
+		if err := b.store.UpdateAsset(b.ctx, Permit, &updated, envIDs); err != nil {
 			b.fail(fmt.Errorf("dating asset %s: %w", l.name, err))
 			return
 		}
@@ -129,7 +129,7 @@ func (b *builder) lifetimes() {
 		updated := row.Service
 		date := domain.FormatDate(b.now.AddDate(0, 0, l.days))
 		updated.EOLDate = &date
-		if err := b.store.UpdateService(b.ctx, domain.AdministratorPermit(Actor), &updated); err != nil {
+		if err := b.store.UpdateService(b.ctx, Permit, &updated); err != nil {
 			b.fail(fmt.Errorf("dating service %s: %w", l.name, err))
 			return
 		}

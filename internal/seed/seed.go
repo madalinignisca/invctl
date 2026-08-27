@@ -33,7 +33,7 @@ var Actor = domain.Actor{ID: "seed", Name: "seed", Kind: "system"}
 // Permit is what the handful of already-Permit-taking store methods this
 // package calls (CreateProvider, CreateCircuit, CreateCircuitTermination --
 // the pilot conversion WP-G1 Task 7 made ahead of Task 10's mass one) get
-// instead of domain.AdministratorPermit(Actor).
+// instead of Permit.
 //
 // WP-G1 Task 9. The seeder is not a signed-in operator and must not be a hole
 // by which the demo estate quietly proves that a system credential can mint
@@ -257,7 +257,7 @@ func (b *builder) environments() {
 			b.fail(fmt.Errorf("building environment %s: %w", e.code, err))
 			return
 		}
-		if err := b.store.CreateEnvironment(b.ctx, domain.AdministratorPermit(Actor), env); err != nil {
+		if err := b.store.CreateEnvironment(b.ctx, Permit, env); err != nil {
 			b.fail(fmt.Errorf("seeding environment %s: %w", e.code, err))
 			return
 		}
@@ -303,7 +303,7 @@ func (b *builder) asset(kind, name, parent string, envs []string, fields func(*d
 	for _, code := range envs {
 		envIDs = append(envIDs, b.env(code))
 	}
-	if err := b.store.CreateAsset(b.ctx, domain.AdministratorPermit(Actor), a, envIDs); err != nil {
+	if err := b.store.CreateAsset(b.ctx, Permit, a, envIDs); err != nil {
 		b.fail(fmt.Errorf("seeding asset %s: %w", name, err))
 		return
 	}
@@ -501,7 +501,7 @@ func (b *builder) storageClaim(asset, pool string, gb int, note string) {
 			return // already recorded, so a top-up neither rewrites nor fails
 		}
 	}
-	if err := b.store.SetStorageClaim(b.ctx, domain.AdministratorPermit(Actor), assetID, poolID, gb, &note); err != nil {
+	if err := b.store.SetStorageClaim(b.ctx, Permit, assetID, poolID, gb, &note); err != nil {
 		b.fail(fmt.Errorf("recording %s in %s: %w", asset, pool, err))
 	}
 }
@@ -586,7 +586,7 @@ func (b *builder) networking() {
 		if id := b.env(p.env); id != "" {
 			v.EnvironmentID = &id
 		}
-		if err := b.store.CreateVLAN(b.ctx, domain.AdministratorPermit(Actor), v); err != nil {
+		if err := b.store.CreateVLAN(b.ctx, Permit, v); err != nil {
 			b.fail(fmt.Errorf("seeding vlan %d: %w", p.vlan, err))
 			return
 		}
@@ -610,7 +610,7 @@ func (b *builder) networking() {
 		if id := b.env(p.env); id != "" {
 			prefix.EnvironmentID = &id
 		}
-		if err := b.store.CreatePrefix(b.ctx, domain.AdministratorPermit(Actor), prefix); err != nil {
+		if err := b.store.CreatePrefix(b.ctx, Permit, prefix); err != nil {
 			b.fail(fmt.Errorf("seeding prefix %s: %w", p.cidr, err))
 			return
 		}
@@ -765,7 +765,7 @@ func (b *builder) networking() {
 				return
 			}
 		}
-		if err := b.store.CreateInterface(b.ctx, domain.AdministratorPermit(Actor), iface); err != nil {
+		if err := b.store.CreateInterface(b.ctx, Permit, iface); err != nil {
 			b.fail(fmt.Errorf("seeding interface %s/%s: %w", i.asset, i.name, err))
 			return
 		}
@@ -777,7 +777,7 @@ func (b *builder) networking() {
 				b.fail(fmt.Errorf("building address %s: %w", i.addr, err))
 				return
 			}
-			if err := b.store.CreateIPAddress(b.ctx, domain.AdministratorPermit(Actor), addr); err != nil {
+			if err := b.store.CreateIPAddress(b.ctx, Permit, addr); err != nil {
 				b.fail(fmt.Errorf("seeding address %s: %w", i.addr, err))
 				return
 			}
@@ -846,7 +846,7 @@ func (b *builder) networking() {
 		}
 		link.Medium = str(c.medium)
 		link.LengthM = num(c.lengthM)
-		if err := b.store.CreateLink(b.ctx, domain.AdministratorPermit(Actor), link); err != nil {
+		if err := b.store.CreateLink(b.ctx, Permit, link); err != nil {
 			b.fail(fmt.Errorf("seeding link %s-%s: %w", c.a, c.b, err))
 			return
 		}
@@ -876,7 +876,7 @@ func (b *builder) identities() {
 		identity.SecretRef = str(i.secretRef)
 		identity.RotationDays = num(90)
 		identity.TeamID = b.team("platform")
-		if err := b.store.CreateIdentity(b.ctx, domain.AdministratorPermit(Actor), identity); err != nil {
+		if err := b.store.CreateIdentity(b.ctx, Permit, identity); err != nil {
 			b.fail(fmt.Errorf("seeding identity %s: %w", i.name, err))
 			return
 		}

@@ -1344,6 +1344,17 @@ func (b *syncBuffer) Reset() {
 // that a person did something. Three of the four views rendered the name
 // without the kind -- including the entity detail pages, which are what an
 // incident review actually opens.
+//
+// The fixture's actor identity and actor_kind are BOTH the literal string
+// "system" (WP-G1 Task 10's seed-attribution fix: the seeder mints
+// domain.SystemPermit("seed"), whose Actor() is domain.SystemActor --
+// id "system", not the "seed" id the seeder's own domain.Actor value
+// carries -- see internal/seed/seed.go's Permit/Actor split). A single
+// substring check for "system" can no longer tell "the actor's name
+// rendered" apart from "the actor's kind badge rendered", so this asserts
+// the actor_cell partial's two elements directly: the mono identity span
+// and the kind pill, which for a non-user actor also carries the
+// "a machine, not a person" title actor_cell only emits for that branch.
 func TestAuditTrailAlwaysShowsWhoAndWhatKind(t *testing.T) {
 	h := newHarness(t)
 	h.login("admin", "admin-password")
@@ -1351,8 +1362,8 @@ func TestAuditTrailAlwaysShowsWhoAndWhatKind(t *testing.T) {
 	assetID := h.refs.Assets["hv-01"]
 	serviceID := h.refs.Services["orders-api"]
 
-	// Every page that renders the change log. The fixture is seeded by a
-	// 'system' actor, so the kind is present to find.
+	// Every page that renders the change log. The fixture is seeded under a
+	// 'system' actor, so both the identity and the kind are "system".
 	for _, path := range []string{
 		"/",                      // dashboard recent-changes panel
 		"/changes",               // the global log
@@ -1360,11 +1371,11 @@ func TestAuditTrailAlwaysShowsWhoAndWhatKind(t *testing.T) {
 		"/services/" + serviceID, // service history
 	} {
 		page := body(t, h.get(path, false))
-		if !strings.Contains(page, "seed") {
-			t.Errorf("GET %s does not render the actor at all", path)
+		if !strings.Contains(page, `class="mono" style="font-size:12px">system<`) {
+			t.Errorf("GET %s does not render the actor's identity at all", path)
 			continue
 		}
-		if !strings.Contains(page, ">system<") {
+		if !strings.Contains(page, `title="a machine, not a person">system<`) {
 			t.Errorf("GET %s renders an actor without its actor_kind; "+
 				"a machine's entry is indistinguishable from a person's", path)
 		}

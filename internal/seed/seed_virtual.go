@@ -181,7 +181,7 @@ func (b *builder) virtualInterface(asset, name string, speed int) {
 		return
 	}
 	iface.SpeedMbps = num(speed)
-	if err := b.store.CreateInterface(b.ctx, domain.AdministratorPermit(Actor), iface); err != nil {
+	if err := b.store.CreateInterface(b.ctx, Permit, iface); err != nil {
 		b.fail(fmt.Errorf("seeding interface %s/%s: %w", asset, name, err))
 		return
 	}
@@ -232,7 +232,7 @@ func (b *builder) virtualLinks() {
 			b.fail(fmt.Errorf("building virtual link %s-%s: %w", l.a, l.b, err))
 			return
 		}
-		if err := b.store.CreateLink(b.ctx, domain.AdministratorPermit(Actor), link); err != nil {
+		if err := b.store.CreateLink(b.ctx, Permit, link); err != nil {
 			b.fail(fmt.Errorf("seeding virtual link %s-%s: %w", l.a, l.b, err))
 			return
 		}

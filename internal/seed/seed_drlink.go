@@ -90,7 +90,7 @@ func (b *builder) drAttachments() {
 		}
 		// No pins: sw-dr is a group of one, so naming the chassis says exactly
 		// as much as the group does and adds a row that can rot.
-		if err := b.store.CreateNetAttachment(b.ctx, domain.AdministratorPermit(Actor), att, nil); err != nil {
+		if err := b.store.CreateNetAttachment(b.ctx, Permit, att, nil); err != nil {
 			b.fail(fmt.Errorf("attaching %s to the DR switch: %w", host, err))
 			return
 		}
@@ -113,7 +113,7 @@ func (b *builder) drGroup() {
 		b.fail(fmt.Errorf("building the DR net group: %w", err))
 		return
 	}
-	if err := b.store.CreateNetGroup(b.ctx, domain.AdministratorPermit(Actor), g); err != nil {
+	if err := b.store.CreateNetGroup(b.ctx, Permit, g); err != nil {
 		b.fail(fmt.Errorf("seeding the DR net group: %w", err))
 		return
 	}
@@ -128,7 +128,7 @@ func (b *builder) drGroup() {
 		b.fail(fmt.Errorf("building the DR group member: %w", err))
 		return
 	}
-	if err := b.store.AddNetGroupMember(b.ctx, domain.AdministratorPermit(Actor), m); err != nil {
+	if err := b.store.AddNetGroupMember(b.ctx, Permit, m); err != nil {
 		b.fail(fmt.Errorf("seeding the DR group member: %w", err))
 	}
 }
@@ -180,7 +180,7 @@ func (b *builder) drInterfaces() {
 			b.fail(fmt.Errorf("building interface %s: %w", key, err))
 			return
 		}
-		if err := b.store.CreateInterface(b.ctx, domain.AdministratorPermit(Actor), iface); err != nil {
+		if err := b.store.CreateInterface(b.ctx, Permit, iface); err != nil {
 			b.fail(fmt.Errorf("seeding interface %s: %w", key, err))
 			return
 		}
@@ -272,7 +272,7 @@ func (b *builder) drCircuit() {
 		b.fail(fmt.Errorf("building the DR fibre cost: %w", err))
 		return
 	}
-	if err := b.store.AddCircuitCost(b.ctx, domain.AdministratorPermit(Actor), circuit.ID, cost); err != nil {
+	if err := b.store.AddCircuitCost(b.ctx, Permit, circuit.ID, cost); err != nil {
 		b.fail(fmt.Errorf("pricing the DR fibre: %w", err))
 	}
 }

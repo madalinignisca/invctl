@@ -179,7 +179,7 @@ func (b *builder) companyUplinks() {
 			b.fail(fmt.Errorf("building uplink %s: %w", u.name, err))
 			return
 		}
-		if err := b.store.CreateInterface(b.ctx, domain.AdministratorPermit(Actor), i); err != nil {
+		if err := b.store.CreateInterface(b.ctx, Permit, i); err != nil {
 			b.fail(fmt.Errorf("seeding uplink %s: %w", u.name, err))
 			return
 		}
@@ -193,7 +193,7 @@ func (b *builder) companyUplinks() {
 			b.fail(fmt.Errorf("building the colo uplink: %w", err))
 			return
 		}
-		if err := b.store.CreateInterface(b.ctx, domain.AdministratorPermit(Actor), i); err != nil {
+		if err := b.store.CreateInterface(b.ctx, Permit, i); err != nil {
 			b.fail(fmt.Errorf("seeding the colo uplink: %w", err))
 		}
 	}
@@ -231,7 +231,7 @@ func (b *builder) companyCertificates() {
 			return
 		}
 		cert.TeamID = b.team("platform")
-		if err := b.store.CreateCertificate(b.ctx, domain.AdministratorPermit(Actor), cert); err != nil {
+		if err := b.store.CreateCertificate(b.ctx, Permit, cert); err != nil {
 			b.fail(fmt.Errorf("seeding certificate %s: %w", c.cn, err))
 			return
 		}
@@ -240,7 +240,7 @@ func (b *builder) companyCertificates() {
 			if !ok {
 				continue // a service the base fixture does not have
 			}
-			if err := b.store.DeployCertificateToService(b.ctx, domain.AdministratorPermit(Actor), cert.ID, id, nil); err != nil {
+			if err := b.store.DeployCertificateToService(b.ctx, Permit, cert.ID, id, nil); err != nil {
 				b.fail(fmt.Errorf("deploying %s to %s: %w", c.cn, code, err))
 				return
 			}

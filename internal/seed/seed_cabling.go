@@ -65,7 +65,7 @@ func (b *builder) patchPanel() {
 		updated.Airflow = str(domain.AirflowPassive)
 		updated.PortFace = str(domain.PortFaceFront)
 		updated.FullDepth = false
-		if err := b.store.UpdateDeviceType(b.ctx, domain.AdministratorPermit(Actor), &updated); err != nil {
+		if err := b.store.UpdateDeviceType(b.ctx, Permit, &updated); err != nil {
 			b.fail(fmt.Errorf("measuring the patch panel model: %w", err))
 			return
 		}
@@ -131,7 +131,7 @@ func (b *builder) patchLeads() {
 			b.fail(fmt.Errorf("building %s: %w", key, err))
 			return
 		}
-		if err := b.store.CreateInterface(b.ctx, domain.AdministratorPermit(Actor), iface); err != nil {
+		if err := b.store.CreateInterface(b.ctx, Permit, iface); err != nil {
 			b.fail(fmt.Errorf("seeding %s: %w", key, err))
 			return
 		}
@@ -177,7 +177,7 @@ func (b *builder) patchLeads() {
 				b.fail(fmt.Errorf("building %s: %w", hostKey, err))
 				return
 			}
-			if err := b.store.CreateInterface(b.ctx, domain.AdministratorPermit(Actor), iface); err != nil {
+			if err := b.store.CreateInterface(b.ctx, Permit, iface); err != nil {
 				b.fail(fmt.Errorf("seeding %s: %w", hostKey, err))
 				return
 			}
@@ -195,7 +195,7 @@ func (b *builder) patchLeads() {
 		}
 		link.Medium = str("Cat6A")
 		link.LengthM = num(l.lengthM)
-		if err := b.store.CreateLink(b.ctx, domain.AdministratorPermit(Actor), link); err != nil {
+		if err := b.store.CreateLink(b.ctx, Permit, link); err != nil {
 			b.fail(fmt.Errorf("seeding patch lead %d: %w", i+1, err))
 			return
 		}

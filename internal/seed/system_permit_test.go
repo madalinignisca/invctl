@@ -211,3 +211,130 @@ func TestOnlyTheNamedCallersMintASystemPermit(t *testing.T) {
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------
+// TestOnlyTheNamedCallersMintAnAdministratorPermitInSeed -- lock the list.
+// ---------------------------------------------------------------------------
+
+// administratorPermitCallerFiles is exactly where the identifier
+// "AdministratorPermit" appears in internal/seed today.
+//
+// WP-G1 TASK 10 REGRESSION, FOUND AND FIXED BY THIS TEST'S FIRST VERSION: the
+// mechanical actor->permit conversion applied Task 7's stand-in pattern --
+// `domain.AdministratorPermit(actor)` -- to the seed package's 88 write call
+// sites instead of threading the package's own `seed.Permit`
+// (domain.SystemPermit("seed"), built by Task 9 for exactly this purpose).
+// TestTheSeederRunsUnderASystemPermitAndNotAnAdministratorOne did not catch
+// it: it reads one change_log row, for entity_type = 'provider', and the
+// provider path happened to still use seed.Permit. The other 88 sites did
+// not, and nothing was reading them. That is this test's whole reason to
+// exist -- an assertion that reads one row can prove a property holds
+// somewhere; it cannot prove a property holds everywhere, and "everywhere"
+// is what "the seed package is not a hole for administrator capability"
+// actually requires.
+//
+// The two production files below are NOT that regression -- they mint
+// AdministratorPermit around a real domain.UserActor(admin), not around the
+// seed package's own Actor, to attribute demo data (custom field
+// definitions, a health override) to an actual admin account already in the
+// database, the way StageCustomFields' own comments describe. That is a
+// deliberate, different design choice from "the seeder holds administrator
+// capability" -- it is "a named administrator is doing this, and the demo
+// data says so" -- and domain.SystemPermit cannot stand in for it: Covers
+// only ever returns SystemActor from Actor(), which would misattribute
+// these rows to "system" instead of to the admin they are meant to
+// describe. Widening this test to forbid AdministratorPermit outright would
+// have to break one of these two files to pass, which is exactly the
+// "fixing the test instead of the bug" failure mode this whole exercise is
+// about not repeating.
+//
+// The four test files are the mechanical testActor/seed.Actor -> permit
+// fixture updates Task 10 made across the store test suite, wrapping a bare
+// Actor value in AdministratorPermit at a handful of call sites so a test
+// helper keeps compiling against a signature that now takes a Permit. Test
+// fixtures are not the property this test protects; production code is.
+//
+// Same governance comment as systemPermitCallerFiles above: a new
+// production caller here is a security-relevant change. It requires
+// auth-reviewer and the repository owner's sign-off before it merges. If
+// you are editing this list or its budget, that is the conversation you are
+// meant to be having, not a map to satisfy CI with.
+var administratorPermitCallerFiles = map[string]int{
+	"internal/seed/seed_customfields.go":      7, // domain.AdministratorPermit(actor), actor a real admin user
+	"internal/seed/seed_customfields_demo.go": 8, // same, in the demo's own custom-field findings
+	"internal/seed/seed_observed.go":          1, // CreateHealthOverride, attributed to a real admin user
+
+	// Test fixtures -- see the doc comment above for why these are budgeted
+	// separately from the two production files.
+	"internal/seed/customfields_demo_test.go": 1,
+	"internal/seed/customfields_test.go":      2,
+	"internal/seed/fit_test.go":               1,
+	"internal/seed/topup_test.go":             3,
+}
+
+// TestOnlyTheNamedCallersMintAnAdministratorPermitInSeed walks internal/seed
+// for source text mentioning "AdministratorPermit" and asserts the exact,
+// budgeted set of files found is administratorPermitCallerFiles.
+//
+// AST rather than grep, same reasoning as
+// TestOnlyTheNamedCallersMintASystemPermit: only identifier occurrences
+// count, not a mention inside a string literal or comment.
+//
+// Mutation: put one domain.AdministratorPermit(Actor) call back in a
+// production seed file not already on this list (or raise an existing
+// production entry's count without raising its budget) -- this must fail.
+func TestOnlyTheNamedCallersMintAnAdministratorPermitInSeed(t *testing.T) {
+	root := repoRoot(t)
+	seedDir := filepath.Join(root, "internal", "seed")
+
+	entries, err := os.ReadDir(seedDir)
+	if err != nil {
+		t.Fatalf("reading internal/seed: %v", err)
+	}
+
+	found := map[string]int{}
+	fset := token.NewFileSet()
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".go") {
+			continue
+		}
+		path := filepath.Join(seedDir, name)
+		src, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("reading %s: %v", name, err)
+		}
+		file, err := parser.ParseFile(fset, path, src, parser.SkipObjectResolution)
+		if err != nil {
+			t.Fatalf("parsing %s: %v", name, err)
+		}
+		n := 0
+		ast.Inspect(file, func(node ast.Node) bool {
+			if ident, ok := node.(*ast.Ident); ok && ident.Name == "AdministratorPermit" {
+				n++
+			}
+			return true
+		})
+		if n > 0 {
+			found["internal/seed/"+name] = n
+		}
+	}
+
+	for file, n := range found {
+		if _, allowed := administratorPermitCallerFiles[file]; !allowed {
+			t.Errorf("%s mentions AdministratorPermit %d time(s) but is not in "+
+				"administratorPermitCallerFiles. The seed package writing under "+
+				"an administrator-flavoured permit instead of seed.Permit is the "+
+				"exact regression this test exists to catch -- see this test's "+
+				"doc comment before adding an entry.", file, n)
+		}
+	}
+	for file, want := range administratorPermitCallerFiles {
+		if got := found[file]; got != want {
+			t.Errorf("%s mentions AdministratorPermit %d time(s), want exactly %d. A NEW "+
+				"mention inherits this file's allowlist entry without anybody "+
+				"reading it; one that disappeared usually moved somewhere not on "+
+				"this list. Either way, say so here on purpose.", file, got, want)
+		}
+	}
+}

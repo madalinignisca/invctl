@@ -121,7 +121,7 @@ func (b *builder) services() {
 			b.fail(fmt.Errorf("building service %s: %w", spec.code, err))
 			return
 		}
-		if err := b.store.CreateService(b.ctx, domain.AdministratorPermit(Actor), svc); err != nil {
+		if err := b.store.CreateService(b.ctx, Permit, svc); err != nil {
 			b.fail(fmt.Errorf("seeding service %s: %w", spec.code, err))
 			return
 		}
@@ -206,7 +206,7 @@ func (b *builder) services() {
 		// and 8), and provenance fabricated in the demo data is the one thing
 		// this milestone exists to prevent. The panels honestly show that
 		// nothing has reported yet.
-		if err := b.store.CreateInstance(b.ctx, domain.AdministratorPermit(Actor), si); err != nil {
+		if err := b.store.CreateInstance(b.ctx, Permit, si); err != nil {
 			b.fail(fmt.Errorf("seeding instance of %s on %s: %w", spec.service, spec.host, err))
 			return
 		}
@@ -228,7 +228,7 @@ func (b *builder) runtimeDetail(si *domain.ServiceInstance, spec instSpec) {
 			UnitRequires: `[]`,
 			DropIns:      `{}`,
 		}
-		b.fail(b.store.SetRuntimeSystemd(b.ctx, domain.AdministratorPermit(Actor), rt))
+		b.fail(b.store.SetRuntimeSystemd(b.ctx, Permit, rt))
 	case domain.RuntimeContainer:
 		rt := &domain.RTContainer{
 			InstanceID: si.ID, Engine: str("docker"), ContainerName: str(spec.unit),
@@ -236,7 +236,7 @@ func (b *builder) runtimeDetail(si *domain.ServiceInstance, spec instSpec) {
 			ImageRepo: str("registry.internal/" + spec.service), ImageTag: str("1.4.2"),
 			RestartPolicy: str("unless-stopped"), NetworkMode: str("bridge"),
 		}
-		b.fail(b.store.SetRuntimeContainer(b.ctx, domain.AdministratorPermit(Actor), rt))
+		b.fail(b.store.SetRuntimeContainer(b.ctx, Permit, rt))
 	case domain.RuntimeK8sWorkload:
 		rt := &domain.RTK8s{
 			InstanceID: si.ID, Namespace: str("observability"),
@@ -246,7 +246,7 @@ func (b *builder) runtimeDetail(si *domain.ServiceInstance, spec instSpec) {
 		if clusterID, ok := b.refs.Assets[spec.host]; ok {
 			rt.ClusterAssetID = &clusterID
 		}
-		b.fail(b.store.SetRuntimeK8s(b.ctx, domain.AdministratorPermit(Actor), rt))
+		b.fail(b.store.SetRuntimeK8s(b.ctx, Permit, rt))
 	case domain.RuntimeWindowsService:
 		rt := &domain.RTWindows{
 			InstanceID: si.ID, ServiceName: spec.unit,
@@ -260,7 +260,7 @@ func (b *builder) runtimeDetail(si *domain.ServiceInstance, spec instSpec) {
 		if id, ok := b.identityIDs["svc-backup$"]; ok {
 			rt.LogonIdentityID = &id
 		}
-		b.fail(b.store.SetRuntimeWindows(b.ctx, domain.AdministratorPermit(Actor), rt))
+		b.fail(b.store.SetRuntimeWindows(b.ctx, Permit, rt))
 	}
 }
 
@@ -320,7 +320,7 @@ func (b *builder) endpoints() {
 			// does not model certificates as an entity.
 			e.CertificateID = str("vault-pki/" + spec.service)
 		}
-		if err := b.store.CreateEndpoint(b.ctx, domain.AdministratorPermit(Actor), e); err != nil {
+		if err := b.store.CreateEndpoint(b.ctx, Permit, e); err != nil {
 			b.fail(fmt.Errorf("seeding endpoint %s/%s: %w", spec.service, spec.name, err))
 			return
 		}
@@ -335,7 +335,7 @@ func (b *builder) endpoints() {
 			L4Proto: domain.ProtoUnix, UnixPath: str("/var/run/postgresql/.s.PGSQL.5432"),
 			BindScope: domain.BindUnix, TLSMode: "none", Exposure: "internal",
 		}
-		if err := b.store.CreateEndpoint(b.ctx, domain.AdministratorPermit(Actor), e); err != nil {
+		if err := b.store.CreateEndpoint(b.ctx, Permit, e); err != nil {
 			b.fail(fmt.Errorf("seeding unix endpoint: %w", err))
 			return
 		}
@@ -356,7 +356,7 @@ func (b *builder) routing() {
 		ID: store.NewID(), ServiceID: b.refs.Services["haproxy-edge"],
 		Name: "orders-pool", LBAlgorithm: str("roundrobin"),
 	}
-	if err := b.store.CreateBackendPool(b.ctx, domain.AdministratorPermit(Actor), pool); err != nil {
+	if err := b.store.CreateBackendPool(b.ctx, Permit, pool); err != nil {
 		b.fail(fmt.Errorf("seeding backend pool: %w", err))
 		return
 	}
@@ -369,7 +369,7 @@ func (b *builder) routing() {
 			return
 		}
 		member := &domain.BackendMember{PoolID: pool.ID, EndpointID: endpointID, Weight: 1}
-		if err := b.store.AddBackendMember(b.ctx, domain.AdministratorPermit(Actor), member); err != nil {
+		if err := b.store.AddBackendMember(b.ctx, Permit, member); err != nil {
 			b.fail(fmt.Errorf("seeding pool member %s: %w", endpointKey, err))
 			return
 		}
@@ -384,7 +384,7 @@ func (b *builder) routing() {
 	route.MatchValue = str("orders.example.com")
 	route.TLSTermination = str("terminate")
 	route.Priority = 10
-	if err := b.store.CreateRoute(b.ctx, domain.AdministratorPermit(Actor), route); err != nil {
+	if err := b.store.CreateRoute(b.ctx, Permit, route); err != nil {
 		b.fail(fmt.Errorf("seeding route: %w", err))
 		return
 	}
@@ -541,7 +541,7 @@ func (b *builder) dependencies() {
 				spec.consumer, spec.endpoint, spec.route, err))
 			return
 		}
-		if err := b.store.CreateDependency(b.ctx, domain.AdministratorPermit(Actor), d, spec.dataClasses); err != nil {
+		if err := b.store.CreateDependency(b.ctx, Permit, d, spec.dataClasses); err != nil {
 			b.fail(fmt.Errorf("seeding dependency %s -> %s%s: %w",
 				spec.consumer, spec.endpoint, spec.route, err))
 			return

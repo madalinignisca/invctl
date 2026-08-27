@@ -178,7 +178,7 @@ func (b *builder) addCosts(lines []costLine, refs map[string]string, what string
 			b.fail(fmt.Errorf("building the %s cost for %s: %w", line.kind, line.target, err))
 			return
 		}
-		if err := attach(b.ctx, domain.AdministratorPermit(Actor), id, c); err != nil {
+		if err := attach(b.ctx, Permit, id, c); err != nil {
 			b.fail(fmt.Errorf("pricing %s %s: %w", what, line.target, err))
 			return
 		}

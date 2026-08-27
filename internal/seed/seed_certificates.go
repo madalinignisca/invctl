@@ -145,7 +145,7 @@ func (b *builder) certificates() {
 			b.fail(fmt.Errorf("building certificate %s: %w", spec.subject, err))
 			return
 		}
-		if err := b.store.CreateCertificate(b.ctx, domain.AdministratorPermit(Actor), c); err != nil {
+		if err := b.store.CreateCertificate(b.ctx, Permit, c); err != nil {
 			b.fail(fmt.Errorf("seeding certificate %s: %w", spec.subject, err))
 			return
 		}
@@ -156,7 +156,7 @@ func (b *builder) certificates() {
 				b.fail(fmt.Errorf("deploying %s: unknown asset %s", spec.subject, name))
 				return
 			}
-			if err := b.store.DeployCertificateToAsset(b.ctx, domain.AdministratorPermit(Actor), c.ID, id, nil); err != nil {
+			if err := b.store.DeployCertificateToAsset(b.ctx, Permit, c.ID, id, nil); err != nil {
 				b.fail(fmt.Errorf("deploying %s to %s: %w", spec.subject, name, err))
 				return
 			}
@@ -167,7 +167,7 @@ func (b *builder) certificates() {
 				b.fail(fmt.Errorf("deploying %s: unknown service %s", spec.subject, code))
 				return
 			}
-			if err := b.store.DeployCertificateToService(b.ctx, domain.AdministratorPermit(Actor), c.ID, id, nil); err != nil {
+			if err := b.store.DeployCertificateToService(b.ctx, Permit, c.ID, id, nil); err != nil {
 				b.fail(fmt.Errorf("deploying %s to %s: %w", spec.subject, code, err))
 				return
 			}
