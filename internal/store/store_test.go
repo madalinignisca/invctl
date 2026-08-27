@@ -412,7 +412,7 @@ func TestChangeLogActorIsAnOpaqueID(t *testing.T) {
 			}
 			display := "Operator One"
 			user.DisplayName = &display
-			if err := s.CreateUser(ctx, domain.SystemActor, user); err != nil {
+			if err := s.CreateUser(ctx, domain.AdministratorPermit(domain.SystemActor), user); err != nil {
 				t.Fatalf("creating user: %v", err)
 			}
 
@@ -716,7 +716,7 @@ func TestUpsertLDAPUserRefusesToAdoptALocalAccount(t *testing.T) {
 				t.Fatalf("building user: %v", err)
 			}
 			local.PasswordHash = &hash
-			if err := s.CreateUser(ctx, testActor, local); err != nil {
+			if err := s.CreateUser(ctx, testPermit, local); err != nil {
 				t.Fatalf("creating local user: %v", err)
 			}
 
@@ -901,7 +901,7 @@ func TestPasswordHashNeverReachesTheAuditTrail(t *testing.T) {
 				t.Fatalf("building user: %v", err)
 			}
 			u.PasswordHash = strPtr(hash)
-			if err := s.CreateUser(ctx, testActor, u); err != nil {
+			if err := s.CreateUser(ctx, testPermit, u); err != nil {
 				t.Fatalf("creating user: %v", err)
 			}
 
@@ -1033,7 +1033,7 @@ func TestVerifiedByIsAnOpaqueID(t *testing.T) {
 			}
 			display := "Alice Example"
 			user.DisplayName = &display
-			if err := s.CreateUser(ctx, domain.SystemActor, user); err != nil {
+			if err := s.CreateUser(ctx, domain.AdministratorPermit(domain.SystemActor), user); err != nil {
 				t.Fatalf("creating user: %v", err)
 			}
 

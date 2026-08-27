@@ -1278,7 +1278,7 @@ func TestTheDriftQueueIsBoundedAndPrunable(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building operator: %v", err)
 			}
-			if err := f.store.CreateUser(f.ctx, testActor, operator); err != nil {
+			if err := f.store.CreateUser(f.ctx, testPermit, operator); err != nil {
 				t.Fatalf("creating operator: %v", err)
 			}
 			// Move time forward rather than asking the prune to reach into the
@@ -1286,7 +1286,7 @@ func TestTheDriftQueueIsBoundedAndPrunable(t *testing.T) {
 			// now is a truncate wearing a cutoff's clothes.
 			queuedAt := f.clock.Now()
 			f.clock.Advance(48 * time.Hour)
-			report, err := f.store.PruneUnmatchedObservations(f.ctx, domain.UserActor(operator), PruneOptions{
+			report, err := f.store.PruneUnmatchedObservations(f.ctx, domain.AdministratorPermit(domain.UserActor(operator)), PruneOptions{
 				Before: queuedAt.Add(time.Minute),
 			})
 			if err != nil {
@@ -1300,7 +1300,7 @@ func TestTheDriftQueueIsBoundedAndPrunable(t *testing.T) {
 			}
 
 			// An agent may not clear the record of what it named.
-			if _, err := f.store.PruneUnmatchedObservations(f.ctx, f.agent, PruneOptions{
+			if _, err := f.store.PruneUnmatchedObservations(f.ctx, domain.AdministratorPermit(f.agent), PruneOptions{
 				Before: f.clock.Now(),
 			}); err == nil {
 				t.Error("a machine credential pruned the drift queue; it could cover its own reconnaissance")

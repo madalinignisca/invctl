@@ -93,8 +93,8 @@ func (s *SQLStore) CountUsers(ctx context.Context) (int, error) {
 //
 // If you are widening what this function writes, that test is the one you will
 // have to argue with, and it is the conversation you should be having.
-func (s *SQLStore) CreateUser(ctx context.Context, actor domain.Actor, u *domain.AppUser) error {
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+func (s *SQLStore) CreateUser(ctx context.Context, p domain.Permit, u *domain.AppUser) error {
+	return s.write(ctx, p, func(t *tx) error {
 		// role and can_see_costs are named explicitly, not left to the
 		// column defaults migration 00058 set. NewAppUser already populates
 		// Role with domain.RoleObserver and CanSeeCosts with its safe
@@ -162,7 +162,7 @@ func (s *SQLStore) UpsertLDAPUser(ctx context.Context, username, displayName, em
 	}
 	// The directory is the actor here, not the person logging in: the account
 	// row exists because LDAP said so.
-	if err := s.CreateUser(ctx, domain.Actor{ID: "ldap", Name: "ldap", Kind: "system"}, u); err != nil {
+	if err := s.CreateUser(ctx, domain.AdministratorPermit(domain.Actor{ID: "ldap", Name: "ldap", Kind: "system"}), u); err != nil {
 		return nil, err
 	}
 	return u, nil

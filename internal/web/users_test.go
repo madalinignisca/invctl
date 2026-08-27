@@ -40,7 +40,7 @@ func mustWebUserWithRole(t *testing.T, h *harness, username, role string) *domai
 		t.Fatalf("building user %s: %v", username, err)
 	}
 	u.Role = role
-	if err := h.store.CreateUser(ctx, domain.SystemActor, u); err != nil {
+	if err := h.store.CreateUser(ctx, domain.AdministratorPermit(domain.SystemActor), u); err != nil {
 		t.Fatalf("creating user %s: %v", username, err)
 	}
 	return u
@@ -377,7 +377,7 @@ func TestAScrubbedUserResolvesToNoPersonalDataAnywhereItIsRendered(t *testing.T)
 	}
 	subject.DisplayName = strPtr("Priya Patel")
 	subject.Email = strPtr("priya@example.com")
-	if err := h.store.CreateUser(ctx, domain.SystemActor, subject); err != nil {
+	if err := h.store.CreateUser(ctx, domain.AdministratorPermit(domain.SystemActor), subject); err != nil {
 		t.Fatalf("creating user: %v", err)
 	}
 
@@ -430,7 +430,7 @@ func TestScrubbingIsItselfAudited(t *testing.T) {
 	}
 	subject.DisplayName = strPtr("Jamie Rivera")
 	subject.Email = strPtr("jamie@example.com")
-	if err := h.store.CreateUser(ctx, domain.SystemActor, subject); err != nil {
+	if err := h.store.CreateUser(ctx, domain.AdministratorPermit(domain.SystemActor), subject); err != nil {
 		t.Fatalf("creating user: %v", err)
 	}
 

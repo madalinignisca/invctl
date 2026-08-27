@@ -75,7 +75,7 @@ func newPruneFixture(t *testing.T, e Engine) *pruneFixture {
 	if err != nil {
 		t.Fatalf("building operator: %v", err)
 	}
-	if err := s.CreateUser(ctx, testActor, admin); err != nil {
+	if err := s.CreateUser(ctx, testPermit, admin); err != nil {
 		t.Fatalf("creating operator: %v", err)
 	}
 
@@ -198,7 +198,7 @@ func TestPruneRefusesAnInScopeEntityInsideAYear(t *testing.T) {
 			f.seedTransition(t, "out-place-recent", domain.ObservableServiceInstance, f.outPlace, recent)
 
 			// Thirty days of retention. Well inside the floor.
-			report, err := f.store.PruneObservedTransitions(f.ctx, f.actor, PruneOptions{
+			report, err := f.store.PruneObservedTransitions(f.ctx, domain.AdministratorPermit(f.actor), PruneOptions{
 				Before: f.now.AddDate(0, 0, -30),
 			})
 			if err != nil {
@@ -258,7 +258,7 @@ func TestPruneHonoursACutoffBeyondTheFloor(t *testing.T) {
 			f.seedTransition(t, "old", domain.ObservableAsset, f.inAsset, f.now.AddDate(0, 0, -400))
 
 			// Two years of retention: the floor never pulls a generous cutoff in.
-			report, err := f.store.PruneObservedTransitions(f.ctx, f.actor, PruneOptions{
+			report, err := f.store.PruneObservedTransitions(f.ctx, domain.AdministratorPermit(f.actor), PruneOptions{
 				Before: f.now.AddDate(0, 0, -730),
 			})
 			if err != nil {
@@ -324,7 +324,7 @@ func TestPruneNeverRemovesDeclaredEntries(t *testing.T) {
 			}
 
 			// Reach as far back as the prune is allowed to: everything.
-			if _, err := f.store.PruneObservedTransitions(f.ctx, f.actor, PruneOptions{
+			if _, err := f.store.PruneObservedTransitions(f.ctx, domain.AdministratorPermit(f.actor), PruneOptions{
 				Before: f.now,
 			}); err != nil {
 				t.Fatalf("pruning: %v", err)
@@ -403,7 +403,7 @@ func TestPruneWritesItsOwnAuditRow(t *testing.T) {
 			f.seedTransition(t, "old", domain.ObservableAsset, f.outAsset, f.now.AddDate(0, 0, -400))
 
 			before := f.now.AddDate(0, 0, -30)
-			report, err := f.store.PruneObservedTransitions(f.ctx, f.actor, PruneOptions{Before: before})
+			report, err := f.store.PruneObservedTransitions(f.ctx, domain.AdministratorPermit(f.actor), PruneOptions{Before: before})
 			if err != nil {
 				t.Fatalf("pruning: %v", err)
 			}
@@ -475,7 +475,7 @@ func TestPruneWritesItsOwnAuditRow(t *testing.T) {
 			// A second run that finds nothing still records that it ran. "The
 			// prune found nothing" and "the prune did not run" are different
 			// facts and the second is the one worth noticing.
-			if _, err := f.store.PruneObservedTransitions(f.ctx, f.actor, PruneOptions{Before: before}); err != nil {
+			if _, err := f.store.PruneObservedTransitions(f.ctx, domain.AdministratorPermit(f.actor), PruneOptions{Before: before}); err != nil {
 				t.Fatalf("second prune: %v", err)
 			}
 			if got := f.countChangeLog(t, `entity_type = ?`, "observed_transition"); got != 2 {
@@ -496,7 +496,7 @@ func TestPruneDryRunChangesNothing(t *testing.T) {
 			f.seedTransition(t, "in-recent", domain.ObservableAsset, f.inAsset, f.now.AddDate(0, 0, -100))
 
 			before := f.changeLogCount(t)
-			report, err := f.store.PruneObservedTransitions(f.ctx, f.actor, PruneOptions{
+			report, err := f.store.PruneObservedTransitions(f.ctx, domain.AdministratorPermit(f.actor), PruneOptions{
 				Before: f.now.AddDate(0, 0, -30),
 				DryRun: true,
 			})
@@ -516,7 +516,7 @@ func TestPruneDryRunChangesNothing(t *testing.T) {
 				t.Errorf("dry run reported deleted=%d protected=%d, want 1 and 1", report.Deleted, report.Protected)
 			}
 
-			real, err := f.store.PruneObservedTransitions(f.ctx, f.actor, PruneOptions{
+			real, err := f.store.PruneObservedTransitions(f.ctx, domain.AdministratorPermit(f.actor), PruneOptions{
 				Before: f.now.AddDate(0, 0, -30),
 			})
 			if err != nil {
@@ -559,7 +559,7 @@ func TestPruneRefusesANonUserActor(t *testing.T) {
 				t.Run(tc.name, func(t *testing.T) {
 					opts := tc.opts
 					opts.Before = f.now.AddDate(0, 0, -30)
-					_, err := f.store.PruneObservedTransitions(f.ctx, tc.actor, opts)
+					_, err := f.store.PruneObservedTransitions(f.ctx, domain.AdministratorPermit(tc.actor), opts)
 					if !errors.Is(err, domain.ErrInvalid) {
 						t.Errorf("error = %v, want a validation error", err)
 					}
@@ -568,14 +568,14 @@ func TestPruneRefusesANonUserActor(t *testing.T) {
 
 			// And a cutoff in the future, which would otherwise let a run reach
 			// rows that have not happened yet the moment the clock moves.
-			_, err := f.store.PruneObservedTransitions(f.ctx, f.actor, PruneOptions{
+			_, err := f.store.PruneObservedTransitions(f.ctx, domain.AdministratorPermit(f.actor), PruneOptions{
 				Before: f.now.Add(time.Hour),
 			})
 			if !errors.Is(err, domain.ErrInvalid) {
 				t.Errorf("a future cutoff was accepted: %v", err)
 			}
 			// A zero cutoff is a truncate wearing a prune's name.
-			_, err = f.store.PruneObservedTransitions(f.ctx, f.actor, PruneOptions{})
+			_, err = f.store.PruneObservedTransitions(f.ctx, domain.AdministratorPermit(f.actor), PruneOptions{})
 			if !errors.Is(err, domain.ErrInvalid) {
 				t.Errorf("an empty cutoff was accepted: %v", err)
 			}

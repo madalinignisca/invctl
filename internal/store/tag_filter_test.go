@@ -29,7 +29,7 @@ func mustTagFilterActor(t *testing.T, s *SQLStore, ctx context.Context, username
 	if err != nil {
 		t.Fatalf("building fixture user: %v", err)
 	}
-	if err := s.CreateUser(ctx, testActor, user); err != nil {
+	if err := s.CreateUser(ctx, testPermit, user); err != nil {
 		t.Fatalf("creating fixture user: %v", err)
 	}
 	return domain.UserActor(user)

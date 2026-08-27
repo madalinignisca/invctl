@@ -33,7 +33,7 @@ func TestTheDemoSpreadWidensCoverageWithoutMovingTheFixtureAssertion(t *testing.
 	if err != nil {
 		t.Fatalf("building admin: %v", err)
 	}
-	if err := f.store.CreateUser(f.ctx, domain.SystemActor, admin); err != nil {
+	if err := f.store.CreateUser(f.ctx, domain.AdministratorPermit(domain.SystemActor), admin); err != nil {
 		t.Fatalf("creating admin: %v", err)
 	}
 

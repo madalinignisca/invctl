@@ -496,7 +496,7 @@ func TestAPermitCapturedAtSubmitIsNotRefreshedMidRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewAppUser: %v", err)
 	}
-	if err := h.store.CreateUser(ctx, domain.UserActor(admin), subject); err != nil {
+	if err := h.store.CreateUser(ctx, domain.AdministratorPermit(domain.UserActor(admin)), subject); err != nil {
 		t.Fatalf("creating the subject user: %v", err)
 	}
 	// The seeded "admin" account is an Administrator by the INV_ADMIN_USERS

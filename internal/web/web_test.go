@@ -240,7 +240,7 @@ func webTemplate(t *testing.T) (string, *seed.Refs) {
 				return
 			}
 			user.PasswordHash = &hash
-			if err := st.CreateUser(ctx, domain.SystemActor, user); err != nil {
+			if err := st.CreateUser(ctx, domain.AdministratorPermit(domain.SystemActor), user); err != nil {
 				_ = db.Close()
 				webTemplateErr = fmt.Errorf("creating user: %w", err)
 				return

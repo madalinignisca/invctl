@@ -124,7 +124,7 @@ func TestASystemPermitCannotCreateAnAccount(t *testing.T) {
 				t.Fatalf("NewAppUser: %v", err)
 			}
 
-			err = s.CreateUser(ctx, domain.SystemActor, u)
+			err = s.CreateUser(ctx, domain.AdministratorPermit(domain.SystemActor), u)
 			// CreateUser still takes a bare domain.Actor and mints
 			// AdministratorPermit internally (see this file's comment), so this
 			// call succeeds -- it is not the shape being guarded against here.

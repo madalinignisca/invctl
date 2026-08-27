@@ -37,7 +37,7 @@ func newEntityTagFixture(t *testing.T, e Engine) *entityTagFixture {
 	if err != nil {
 		t.Fatalf("building fixture user: %v", err)
 	}
-	if err := s.CreateUser(ctx, testActor, user); err != nil {
+	if err := s.CreateUser(ctx, testPermit, user); err != nil {
 		t.Fatalf("creating fixture user: %v", err)
 	}
 	actor := domain.UserActor(user)

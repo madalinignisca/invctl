@@ -302,7 +302,7 @@ func pruneUnmatchedObservations(ctx context.Context, st *store.SQLStore, cfg *co
 	if err != nil {
 		return err
 	}
-	report, err := st.PruneUnmatchedObservations(ctx, domain.UserActor(user), store.PruneOptions{
+	report, err := st.PruneUnmatchedObservations(ctx, domain.AdministratorPermit(domain.UserActor(user)), store.PruneOptions{
 		Before: st.Now().AddDate(0, 0, -keepDays),
 		DryRun: dryRun,
 	})
@@ -379,7 +379,7 @@ func pruneObservedTransitions(ctx context.Context, st *store.SQLStore, cfg *conf
 	}
 
 	before := st.Now().AddDate(0, 0, -keepDays)
-	report, err := st.PruneObservedTransitions(ctx, domain.UserActor(user), store.PruneOptions{
+	report, err := st.PruneObservedTransitions(ctx, domain.AdministratorPermit(domain.UserActor(user)), store.PruneOptions{
 		Before: before,
 		DryRun: dryRun,
 	})
@@ -643,7 +643,7 @@ func ensureAdmin(ctx context.Context, st *store.SQLStore, cfg *config.Config) er
 	display := "Seeded administrator"
 	user.DisplayName = &display
 
-	if err := st.CreateUser(ctx, domain.SystemActor, user); err != nil {
+	if err := st.CreateUser(ctx, domain.AdministratorPermit(domain.SystemActor), user); err != nil {
 		return err
 	}
 

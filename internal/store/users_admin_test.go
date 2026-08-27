@@ -34,7 +34,7 @@ func mustUserWithRole(t *testing.T, s *SQLStore, ctx context.Context, username, 
 		t.Fatalf("building user %s: %v", username, err)
 	}
 	u.Role = role
-	if err := s.CreateUser(ctx, domain.SystemActor, u); err != nil {
+	if err := s.CreateUser(ctx, domain.AdministratorPermit(domain.SystemActor), u); err != nil {
 		t.Fatalf("creating user %s: %v", username, err)
 	}
 	return u
@@ -184,7 +184,7 @@ func TestARoleWriteNeverCarriesAPasswordHash(t *testing.T) {
 				t.Fatalf("building user: %v", err)
 			}
 			subject.PasswordHash = strPtr(hash)
-			if err := s.CreateUser(ctx, domain.SystemActor, subject); err != nil {
+			if err := s.CreateUser(ctx, domain.AdministratorPermit(domain.SystemActor), subject); err != nil {
 				t.Fatalf("creating user: %v", err)
 			}
 
@@ -201,7 +201,7 @@ func TestARoleWriteNeverCarriesAPasswordHash(t *testing.T) {
 				}
 			}
 
-			if err := s.ScrubUser(ctx, domain.UserActor(admin), subject.ID); err != nil {
+			if err := s.ScrubUser(ctx, domain.AdministratorPermit(domain.UserActor(admin)), subject.ID); err != nil {
 				t.Fatalf("scrubbing: %v", err)
 			}
 			afterScrub, err := s.ListChangesForEntity(ctx, "app_user", subject.ID, 10)
@@ -229,7 +229,7 @@ func TestDeactivatingTheLastActiveAdministratorIsRefused(t *testing.T) {
 			s, ctx := newStore(t, e)
 			admin := mustUserWithRole(t, s, ctx, "admin", domain.RoleAdministrator)
 
-			err := s.SetUserActive(ctx, domain.UserActor(admin), admin.ID, false)
+			err := s.SetUserActive(ctx, domain.AdministratorPermit(domain.UserActor(admin)), admin.ID, false)
 			if err == nil {
 				t.Fatal("deactivating the only administrator succeeded")
 			}
@@ -326,11 +326,11 @@ func TestTheLastAdministratorGuardCountsOnlyActiveAdministrators(t *testing.T) {
 			}
 			inactive.Role = domain.RoleAdministrator
 			inactive.IsActive = false
-			if err := s.CreateUser(ctx, domain.SystemActor, inactive); err != nil {
+			if err := s.CreateUser(ctx, domain.AdministratorPermit(domain.SystemActor), inactive); err != nil {
 				t.Fatalf("creating inactive administrator: %v", err)
 			}
 
-			err = s.SetUserActive(ctx, domain.UserActor(active), active.ID, false)
+			err = s.SetUserActive(ctx, domain.AdministratorPermit(domain.UserActor(active)), active.ID, false)
 			if err == nil {
 				t.Fatal("deactivating the only ACTIVE administrator succeeded; " +
 					"an inactive administrator row was miscounted as covering for it")
@@ -357,9 +357,9 @@ func TestTheLastAdministratorGuardCoversAllThreeVerbs(t *testing.T) {
 				case "demote":
 					err = s.SetUserRole(ctx, domain.AdministratorPermit(domain.UserActor(admin)), admin.ID, domain.RoleObserver)
 				case "deactivate":
-					err = s.SetUserActive(ctx, domain.UserActor(admin), admin.ID, false)
+					err = s.SetUserActive(ctx, domain.AdministratorPermit(domain.UserActor(admin)), admin.ID, false)
 				case "scrub":
-					err = s.ScrubUser(ctx, domain.UserActor(admin), admin.ID)
+					err = s.ScrubUser(ctx, domain.AdministratorPermit(domain.UserActor(admin)), admin.ID)
 				}
 				if err == nil {
 					t.Fatalf("%s of the only administrator succeeded", verb)
@@ -498,7 +498,7 @@ func TestScrubbingAUserLeavesEveryChangeLogRowIntactAndStillReferencingTheirId(t
 				t.Fatalf("listing changes before: %v", err)
 			}
 
-			if err := s.ScrubUser(ctx, domain.UserActor(admin), subject.ID); err != nil {
+			if err := s.ScrubUser(ctx, domain.AdministratorPermit(domain.UserActor(admin)), subject.ID); err != nil {
 				t.Fatalf("scrubbing: %v", err)
 			}
 
@@ -574,7 +574,7 @@ func TestAScrubbedLDAPAccountCannotAuthenticate(t *testing.T) {
 				t.Fatal("setup: an ldap user was given a password hash")
 			}
 
-			if err := s.ScrubUser(ctx, domain.UserActor(admin), ldapUser.ID); err != nil {
+			if err := s.ScrubUser(ctx, domain.AdministratorPermit(domain.UserActor(admin)), ldapUser.ID); err != nil {
 				t.Fatalf("scrubbing: %v", err)
 			}
 

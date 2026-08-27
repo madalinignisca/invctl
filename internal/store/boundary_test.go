@@ -819,7 +819,7 @@ func TestSnapshotRedactsSecretRef(t *testing.T) {
 					t.Fatalf("building user: %v", err)
 				}
 				u.PasswordHash = strPtr(hash)
-				if err := s.CreateUser(ctx, testActor, u); err != nil {
+				if err := s.CreateUser(ctx, testPermit, u); err != nil {
 					t.Fatalf("creating user: %v", err)
 				}
 				var all []string

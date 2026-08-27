@@ -177,7 +177,7 @@ func (s *SQLStore) SetUserRole(ctx context.Context, permit domain.Permit, id, ro
 // value of this column the way the last-administrator count does -- so a
 // plain write is enough; see writeSerializable's doc comment for the
 // distinction.
-func (s *SQLStore) SetUserCostVisibility(ctx context.Context, actor domain.Actor, id string, canSee bool) error {
+func (s *SQLStore) SetUserCostVisibility(ctx context.Context, p domain.Permit, id string, canSee bool) error {
 	current, err := s.GetUser(ctx, id)
 	if err != nil {
 		return err
@@ -185,7 +185,7 @@ func (s *SQLStore) SetUserCostVisibility(ctx context.Context, actor domain.Actor
 	if current.CanSeeCosts == canSee {
 		return nil
 	}
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, p, func(t *tx) error {
 		before, err := t.getUser(ctx, id)
 		if err != nil {
 			return err
@@ -204,7 +204,7 @@ func (s *SQLStore) SetUserCostVisibility(ctx context.Context, actor domain.Actor
 
 // SetUserActive activates or deactivates an account. Deactivating the last
 // active Administrator is spec §8's second guarded verb.
-func (s *SQLStore) SetUserActive(ctx context.Context, actor domain.Actor, id string, active bool) error {
+func (s *SQLStore) SetUserActive(ctx context.Context, p domain.Permit, id string, active bool) error {
 	current, err := s.GetUser(ctx, id)
 	if err != nil {
 		return err
@@ -212,7 +212,7 @@ func (s *SQLStore) SetUserActive(ctx context.Context, actor domain.Actor, id str
 	if current.IsActive == active {
 		return nil
 	}
-	return s.writeSerializable(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.writeSerializable(ctx, p, func(t *tx) error {
 		before, err := t.getUser(ctx, id)
 		if err != nil {
 			return err
@@ -277,8 +277,8 @@ func scrubbedUsername(id string) string { return "scrubbed-" + id }
 // ends their ability to act as one, regardless of what role still says.
 // Demote, deactivate and scrub all reach the same state -- no active
 // administrator -- and a guard on two of the three verbs is a guard on none.
-func (s *SQLStore) ScrubUser(ctx context.Context, actor domain.Actor, id string) error {
-	return s.writeSerializable(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+func (s *SQLStore) ScrubUser(ctx context.Context, p domain.Permit, id string) error {
+	return s.writeSerializable(ctx, p, func(t *tx) error {
 		before, err := t.getUser(ctx, id)
 		if err != nil {
 			return err

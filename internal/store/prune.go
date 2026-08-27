@@ -110,14 +110,14 @@ func (r PruneReport) FloorApplied() bool { return r.InScopeFloor.Before(r.Before
 // A machine credential is refused for the same reason it is refused everywhere
 // else: an agent that can prune the transition ledger can erase the record of
 // what it reported.
-func (s *SQLStore) PruneObservedTransitions(ctx context.Context, actor domain.Actor, opts PruneOptions) (*PruneReport, error) {
+func (s *SQLStore) PruneObservedTransitions(ctx context.Context, p domain.Permit, opts PruneOptions) (*PruneReport, error) {
 	now := s.Now()
 
 	ve := &domain.ValidationError{}
-	if actor.Kind != domain.ActorKindUser {
-		ve.Add("actor", "a prune is an operator's act and is recorded as one; a %s actor may not run it", actor.Kind)
+	if p.Actor().Kind != domain.ActorKindUser {
+		ve.Add("actor", "a prune is an operator's act and is recorded as one; a %s actor may not run it", p.Actor().Kind)
 	}
-	if actor.ID == "" {
+	if p.Actor().ID == "" {
 		ve.Add("actor", "is required: the run records who did it")
 	}
 	if opts.Before.IsZero() {
@@ -172,7 +172,7 @@ func (s *SQLStore) PruneObservedTransitions(ctx context.Context, actor domain.Ac
 		return report, nil
 	}
 
-	err := s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	err := s.write(ctx, p, func(t *tx) error {
 		for _, entityType := range domain.ObservableEntityTypes {
 			inScope, ok := inScopeSubquery[entityType]
 			if !ok {
@@ -358,14 +358,14 @@ const unmatchedTable = "unmatched_observation"
 //
 // Same actor rule: an operator only. An agent that can clear the record of
 // entities it named is an agent that can cover its own reconnaissance.
-func (s *SQLStore) PruneUnmatchedObservations(ctx context.Context, actor domain.Actor, opts PruneOptions) (*PruneReport, error) {
+func (s *SQLStore) PruneUnmatchedObservations(ctx context.Context, p domain.Permit, opts PruneOptions) (*PruneReport, error) {
 	now := s.Now()
 
 	ve := &domain.ValidationError{}
-	if actor.Kind != domain.ActorKindUser {
-		ve.Add("actor", "a prune is an operator's act and is recorded as one; a %s actor may not run it", actor.Kind)
+	if p.Actor().Kind != domain.ActorKindUser {
+		ve.Add("actor", "a prune is an operator's act and is recorded as one; a %s actor may not run it", p.Actor().Kind)
 	}
-	if actor.ID == "" {
+	if p.Actor().ID == "" {
 		ve.Add("actor", "is required: the run records who did it")
 	}
 	if opts.Before.IsZero() {
@@ -392,7 +392,7 @@ func (s *SQLStore) PruneUnmatchedObservations(ctx context.Context, actor domain.
 		return report, nil
 	}
 
-	err = s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	err = s.write(ctx, p, func(t *tx) error {
 		if _, err := t.exec(ctx,
 			`DELETE FROM unmatched_observation WHERE last_seen_at < ?`, cutoff); err != nil {
 			return translateWriteErr(err, "pruning "+unmatchedTable)

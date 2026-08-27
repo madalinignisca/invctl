@@ -870,7 +870,7 @@ func mustAuditActor(t *testing.T, s *SQLStore, ctx context.Context, username str
 	if err != nil {
 		t.Fatalf("building fixture user %s: %v", username, err)
 	}
-	if err := s.CreateUser(ctx, testActor, user); err != nil {
+	if err := s.CreateUser(ctx, testPermit, user); err != nil {
 		t.Fatalf("creating fixture user %s: %v", username, err)
 	}
 	return domain.UserActor(user)
