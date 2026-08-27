@@ -215,33 +215,42 @@ func TestPassingAnExistingAssetIdToTheCreatePathIsRefusedAndSeizesNothing(t *tes
 		}
 	}
 
-	// The two acceptable outcomes, told apart rather than any-non-200 being
-	// accepted: either the request failed outright, or it created a
-	// genuinely NEW asset with a DIFFERENT id -- the correct result when the
-	// submitted id is simply ignored (store.NewID() minted a fresh one).
-	switch resp.StatusCode {
-	case http.StatusSeeOther:
-		loc := resp.Header.Get("Location")
-		newID := strings.TrimPrefix(loc, "/assets/")
-		if newID == "" || newID == loc {
-			t.Fatalf("redirect %q does not name a new asset", loc)
-		}
-		if newID == dbProd {
-			t.Fatal("the created asset kept db-prod's id -- the submitted id was not ignored")
-		}
-		created, err := h.store.GetAsset(context.Background(), newID)
-		if err != nil {
-			t.Fatalf("the redirect named an asset that does not exist: %v", err)
-		}
-		if created.Name != "seized" {
-			t.Errorf("the new asset's name = %q, want %q", created.Name, "seized")
-		}
-	default:
-		if resp.StatusCode < 400 {
-			t.Fatalf("unexpected status %d with no redirect", resp.StatusCode)
-		}
-		// The request failed outright -- also acceptable, and already
-		// covered by the unchanged-db-prod assertions above.
+	// SUCCESS IS THE REQUIRED OUTCOME, and a failure here is a FAILURE of
+	// this test. The brief allowed either "the request failed" or "it
+	// created a new asset with a different id", but for THIS implementation
+	// only the second can happen: the handler calls store.NewID() and never
+	// reads an id from the request, so the submitted id is inert and the
+	// create must simply succeed with a fresh one.
+	//
+	// Accepting the failure branch is what made this test unable to fail.
+	// With it, the Step 5 mutation "handler takes the id from the form
+	// instead of store.NewID()" left this test GREEN: the INSERT hit
+	// db-prod's primary key, the request 500'd, and the failure branch
+	// called that acceptable. The seizure was refused by the schema rather
+	// than by the code this test exists to guard -- which is precisely the
+	// inference the brief said not to make, since a primary key is a fact
+	// about today's schema and the guarantee has to be about behaviour.
+	//
+	// So: the request MUST succeed, and it must have minted a different id.
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("status = %d, want %d -- the submitted id must be ignored, "+
+			"not refused; a refusal here means something read it",
+			resp.StatusCode, http.StatusSeeOther)
+	}
+	loc := resp.Header.Get("Location")
+	newID := strings.TrimPrefix(loc, "/assets/")
+	if newID == "" || newID == loc {
+		t.Fatalf("redirect %q does not name a new asset", loc)
+	}
+	if newID == dbProd {
+		t.Fatal("the created asset kept db-prod's id -- the submitted id was not ignored")
+	}
+	created, err := h.store.GetAsset(context.Background(), newID)
+	if err != nil {
+		t.Fatalf("the redirect named an asset that does not exist: %v", err)
+	}
+	if created.Name != "seized" {
+		t.Errorf("the new asset's name = %q, want %q", created.Name, "seized")
 	}
 }
 
