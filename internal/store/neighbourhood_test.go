@@ -65,7 +65,7 @@ func newNeighbourFixture(t *testing.T, e Engine) *neighbourFixture {
 			id := f.ports[master]
 			iface.LagParentID = &id
 		}
-		if err := s.CreateInterface(ctx, testActor, iface); err != nil {
+		if err := s.CreateInterface(ctx, testPermit, iface); err != nil {
 			t.Fatalf("creating %s/%s: %v", asset, name, err)
 		}
 		f.ports[asset+"/"+name] = iface.ID
@@ -76,7 +76,7 @@ func newNeighbourFixture(t *testing.T, e Engine) *neighbourFixture {
 		if err != nil {
 			t.Fatalf("building link %s-%s: %v", a, b, err)
 		}
-		if err := s.CreateLink(ctx, testActor, link); err != nil {
+		if err := s.CreateLink(ctx, testPermit, link); err != nil {
 			t.Fatalf("creating link %s-%s: %v", a, b, err)
 		}
 	}
@@ -395,7 +395,7 @@ func TestNeighbourhoodPinnedEndpointResolvesToAPort(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building address: %v", err)
 			}
-			if err := f.s.CreateIPAddress(f.ctx, testActor, addr); err != nil {
+			if err := f.s.CreateIPAddress(f.ctx, testPermit, addr); err != nil {
 				t.Fatalf("creating address: %v", err)
 			}
 			f.endpoint(t, "app", "pinned", 9443, domain.BindVIP, &addr.ID)

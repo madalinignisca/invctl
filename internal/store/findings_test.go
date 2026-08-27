@@ -211,7 +211,7 @@ func seedFindingFixture(t *testing.T, s *SQLStore, ctx context.Context) {
 	gid := mustFHRP(t, s, ctx, 10, "gw-single")
 	a1 := mustAsset(t, s, ctx, domain.KindFirewall, "fw-lonely", nil)
 	i1 := mustInterface(t, s, ctx, a1, "eth0")
-	if err := s.SetFHRPMembers(ctx, testActor, gid, []domain.FHRPMember{
+	if err := s.SetFHRPMembers(ctx, testPermit, gid, []domain.FHRPMember{
 		{GroupID: gid, InterfaceID: i1},
 	}); err != nil {
 		t.Fatalf("setting members: %v", err)
@@ -222,7 +222,7 @@ func seedFindingFixture(t *testing.T, s *SQLStore, ctx context.Context) {
 	if err != nil {
 		t.Fatalf("building overlay: %v", err)
 	}
-	if err := s.CreateL2VPN(ctx, testActor, vpn); err != nil {
+	if err := s.CreateL2VPN(ctx, testPermit, vpn); err != nil {
 		t.Fatalf("creating overlay: %v", err)
 	}
 

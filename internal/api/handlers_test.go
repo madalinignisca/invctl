@@ -149,14 +149,14 @@ func (f *apiHandlerFixture) mustInterfaceAndAddress(assetID, ifaceName, addr str
 	if err != nil {
 		f.t.Fatalf("building interface %s: %v", ifaceName, err)
 	}
-	if err := f.s.CreateInterface(f.ctx, domain.SystemActor, i); err != nil {
+	if err := f.s.CreateInterface(f.ctx, domain.AdministratorPermit(domain.SystemActor), i); err != nil {
 		f.t.Fatalf("creating interface %s: %v", ifaceName, err)
 	}
 	ip, err := domain.NewIPAddress(store.NewID(), addr, &i.ID, domain.IPRolePrimary)
 	if err != nil {
 		f.t.Fatalf("building address %s: %v", addr, err)
 	}
-	if err := f.s.CreateIPAddress(f.ctx, domain.SystemActor, ip); err != nil {
+	if err := f.s.CreateIPAddress(f.ctx, domain.AdministratorPermit(domain.SystemActor), ip); err != nil {
 		f.t.Fatalf("creating address %s: %v", addr, err)
 	}
 }

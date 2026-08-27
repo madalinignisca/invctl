@@ -162,7 +162,7 @@ func clearSeededTopology(t *testing.T, f *fixture) {
 			"every test that depends on it is now asserting against an unknown baseline")
 	}
 	for _, g := range groups {
-		if err := f.store.RetireNetGroup(f.ctx, domain.SystemActor, g.ID); err != nil {
+		if err := f.store.RetireNetGroup(f.ctx, domain.AdministratorPermit(domain.SystemActor), g.ID); err != nil {
 			t.Fatalf("retiring seeded net group %s: %v", g.Code, err)
 		}
 	}
@@ -310,14 +310,14 @@ func TestCyclicNetworkGraphTerminates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("building uplink A->B: %v", err)
 	}
-	if err := f.store.CreateNetUplink(f.ctx, domain.SystemActor, up1); err != nil {
+	if err := f.store.CreateNetUplink(f.ctx, domain.AdministratorPermit(domain.SystemActor), up1); err != nil {
 		t.Fatalf("creating uplink A->B: %v", err)
 	}
 	up2, err := domain.NewNetUplink(store.NewID(), groupB, groupA, domain.PlaneData, now)
 	if err != nil {
 		t.Fatalf("building uplink B->A: %v", err)
 	}
-	if err := f.store.CreateNetUplink(f.ctx, domain.SystemActor, up2); err != nil {
+	if err := f.store.CreateNetUplink(f.ctx, domain.AdministratorPermit(domain.SystemActor), up2); err != nil {
 		t.Fatalf("creating uplink B->A: %v", err)
 	}
 
@@ -396,7 +396,7 @@ func TestPairwiseSameSideStillReachable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("building uplink: %v", err)
 	}
-	if err := f.store.CreateNetUplink(f.ctx, domain.SystemActor, uplink); err != nil {
+	if err := f.store.CreateNetUplink(f.ctx, domain.AdministratorPermit(domain.SystemActor), uplink); err != nil {
 		t.Fatalf("creating uplink: %v", err)
 	}
 
@@ -460,13 +460,13 @@ func TestRetiredGroupMemberIsNotCapacity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("building standby member: %v", err)
 	}
-	if err := f.store.AddNetGroupMember(f.ctx, domain.SystemActor, standbyMember); err != nil {
+	if err := f.store.AddNetGroupMember(f.ctx, domain.AdministratorPermit(domain.SystemActor), standbyMember); err != nil {
 		t.Fatalf("adding standby member: %v", err)
 	}
 	// Retire the standby: it must no longer count as capacity, so losing the
 	// primary with only a retired standby left must report the group (and
 	// anything behind it) down, not degraded.
-	if err := f.store.RetireNetGroupMember(f.ctx, domain.SystemActor, group, standby); err != nil {
+	if err := f.store.RetireNetGroupMember(f.ctx, domain.AdministratorPermit(domain.SystemActor), group, standby); err != nil {
 		t.Fatalf("retiring standby member: %v", err)
 	}
 
@@ -522,7 +522,7 @@ func mustNetGroup(t *testing.T, f *fixture, code, role, availability string, min
 	if err != nil {
 		t.Fatalf("building net group %s: %v", code, err)
 	}
-	if err := f.store.CreateNetGroup(f.ctx, domain.SystemActor, g); err != nil {
+	if err := f.store.CreateNetGroup(f.ctx, domain.AdministratorPermit(domain.SystemActor), g); err != nil {
 		t.Fatalf("creating net group %s: %v", code, err)
 	}
 	return g.ID
@@ -539,7 +539,7 @@ func mustNetGroupMemberWithRole(t *testing.T, f *fixture, groupID, assetID, role
 	if err != nil {
 		t.Fatalf("building net group member: %v", err)
 	}
-	if err := f.store.AddNetGroupMember(f.ctx, domain.SystemActor, m); err != nil {
+	if err := f.store.AddNetGroupMember(f.ctx, domain.AdministratorPermit(domain.SystemActor), m); err != nil {
 		t.Fatalf("adding net group member: %v", err)
 	}
 }
@@ -550,7 +550,7 @@ func mustAttach(t *testing.T, f *fixture, assetID, groupID string) {
 	if err != nil {
 		t.Fatalf("building attachment: %v", err)
 	}
-	if err := f.store.CreateNetAttachment(f.ctx, domain.SystemActor, a, nil); err != nil {
+	if err := f.store.CreateNetAttachment(f.ctx, domain.AdministratorPermit(domain.SystemActor), a, nil); err != nil {
 		t.Fatalf("creating attachment: %v", err)
 	}
 }
@@ -755,14 +755,14 @@ func declareSplitTopology(t *testing.T, f *fixture, sideA, sideB []string) {
 		if err != nil {
 			t.Fatalf("building %s: %v", code, err)
 		}
-		if err := f.store.CreateNetGroup(f.ctx, domain.SystemActor, g); err != nil {
+		if err := f.store.CreateNetGroup(f.ctx, domain.AdministratorPermit(domain.SystemActor), g); err != nil {
 			t.Fatalf("creating %s: %v", code, err)
 		}
 		m, err := domain.NewNetGroupMember(g.ID, memberAsset, "member", now)
 		if err != nil {
 			t.Fatalf("building %s member: %v", code, err)
 		}
-		if err := f.store.AddNetGroupMember(f.ctx, domain.SystemActor, m); err != nil {
+		if err := f.store.AddNetGroupMember(f.ctx, domain.AdministratorPermit(domain.SystemActor), m); err != nil {
 			t.Fatalf("adding %s member: %v", code, err)
 		}
 		return g
@@ -777,7 +777,7 @@ func declareSplitTopology(t *testing.T, f *fixture, sideA, sideB []string) {
 		if err != nil {
 			t.Fatalf("building uplink: %v", err)
 		}
-		if err := f.store.CreateNetUplink(f.ctx, domain.SystemActor, up); err != nil {
+		if err := f.store.CreateNetUplink(f.ctx, domain.AdministratorPermit(domain.SystemActor), up); err != nil {
 			t.Fatalf("creating uplink: %v", err)
 		}
 	}
@@ -788,7 +788,7 @@ func declareSplitTopology(t *testing.T, f *fixture, sideA, sideB []string) {
 		if err != nil {
 			t.Fatalf("building attachment: %v", err)
 		}
-		if err := f.store.CreateNetAttachment(f.ctx, domain.SystemActor, att, nil); err != nil {
+		if err := f.store.CreateNetAttachment(f.ctx, domain.AdministratorPermit(domain.SystemActor), att, nil); err != nil {
 			t.Fatalf("creating attachment: %v", err)
 		}
 	}

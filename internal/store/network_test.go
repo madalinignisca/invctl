@@ -33,7 +33,7 @@ func TestInterfaceMACNormalisation(t *testing.T) {
 			if err := iface.SetMAC("AA-BB-CC-00-10-01"); err != nil {
 				t.Fatalf("setting mac: %v", err)
 			}
-			if err := s.CreateInterface(ctx, testActor, iface); err != nil {
+			if err := s.CreateInterface(ctx, testPermit, iface); err != nil {
 				t.Fatalf("creating interface: %v", err)
 			}
 
@@ -53,7 +53,7 @@ func TestInterfaceMACNormalisation(t *testing.T) {
 				if err != nil {
 					t.Fatalf("building duplicate interface: %v", err)
 				}
-				if err := s.CreateInterface(ctx, testActor, dup); !errors.Is(err, domain.ErrConflict) {
+				if err := s.CreateInterface(ctx, testPermit, dup); !errors.Is(err, domain.ErrConflict) {
 					t.Errorf("creating a duplicate (asset_id, name) = %v, want ErrConflict", err)
 				}
 			})
@@ -78,7 +78,7 @@ func TestLinkLifecycle(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building link: %v", err)
 			}
-			if err := s.CreateLink(ctx, testActor, link); err != nil {
+			if err := s.CreateLink(ctx, testPermit, link); err != nil {
 				t.Fatalf("creating link: %v", err)
 			}
 
@@ -102,13 +102,13 @@ func TestLinkLifecycle(t *testing.T) {
 				if err != nil {
 					t.Fatalf("building second link: %v", err)
 				}
-				if err := s.CreateLink(ctx, testActor, bad); !errors.Is(err, domain.ErrConflict) {
+				if err := s.CreateLink(ctx, testPermit, bad); !errors.Is(err, domain.ErrConflict) {
 					t.Errorf("cabling to an already-patched port = %v, want ErrConflict", err)
 				}
 			})
 
 			t.Run("retiring frees the port and hides the peer", func(t *testing.T) {
-				if err := s.RetireLink(ctx, testActor, link.ID); err != nil {
+				if err := s.RetireLink(ctx, testPermit, link.ID); err != nil {
 					t.Fatalf("retiring link: %v", err)
 				}
 
@@ -148,13 +148,13 @@ func TestLinkLifecycle(t *testing.T) {
 				if err != nil {
 					t.Fatalf("building link: %v", err)
 				}
-				if err := s.CreateLink(ctx, testActor, again); err != nil {
+				if err := s.CreateLink(ctx, testPermit, again); err != nil {
 					t.Errorf("re-patching a freed port failed: %v", err)
 				}
 			})
 
 			t.Run("retiring twice is a no-op, not an error", func(t *testing.T) {
-				if err := s.RetireLink(ctx, testActor, link.ID); err != nil {
+				if err := s.RetireLink(ctx, testPermit, link.ID); err != nil {
 					t.Errorf("retiring an already-retired link: %v", err)
 				}
 			})
@@ -180,7 +180,7 @@ func TestListAvailableInterfaces(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building link: %v", err)
 			}
-			if err := s.CreateLink(ctx, testActor, link); err != nil {
+			if err := s.CreateLink(ctx, testPermit, link); err != nil {
 				t.Fatalf("creating link: %v", err)
 			}
 
@@ -215,7 +215,7 @@ func TestListPrefixesUtilisation(t *testing.T) {
 				t.Fatalf("building prefix: %v", err)
 			}
 			prefix.EnvironmentID = &envID
-			if err := s.CreatePrefix(ctx, testActor, prefix); err != nil {
+			if err := s.CreatePrefix(ctx, testPermit, prefix); err != nil {
 				t.Fatalf("creating prefix: %v", err)
 			}
 
@@ -226,7 +226,7 @@ func TestListPrefixesUtilisation(t *testing.T) {
 				if err != nil {
 					t.Fatalf("building address %s: %v", ip, err)
 				}
-				if err := s.CreateIPAddress(ctx, testActor, addr); err != nil {
+				if err := s.CreateIPAddress(ctx, testPermit, addr); err != nil {
 					t.Fatalf("creating address %s: %v", ip, err)
 				}
 			}
@@ -261,7 +261,7 @@ func mustInterface(t *testing.T, s *SQLStore, ctx context.Context, assetID, name
 	if err != nil {
 		t.Fatalf("building interface %s: %v", name, err)
 	}
-	if err := s.CreateInterface(ctx, testActor, iface); err != nil {
+	if err := s.CreateInterface(ctx, testPermit, iface); err != nil {
 		t.Fatalf("creating interface %s: %v", name, err)
 	}
 	return iface.ID
@@ -285,14 +285,14 @@ func TestUpdateInterfaceCannotMoveOrRebondAPort(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building interface: %v", err)
 			}
-			if err := s.CreateInterface(ctx, testActor, iface); err != nil {
+			if err := s.CreateInterface(ctx, testPermit, iface); err != nil {
 				t.Fatalf("creating interface: %v", err)
 			}
 			bond, err := domain.NewInterface(NewID(), homeID, "bond0", domain.FFRJ45)
 			if err != nil {
 				t.Fatalf("building bond: %v", err)
 			}
-			if err := s.CreateInterface(ctx, testActor, bond); err != nil {
+			if err := s.CreateInterface(ctx, testPermit, bond); err != nil {
 				t.Fatalf("creating bond: %v", err)
 			}
 
@@ -301,7 +301,7 @@ func TestUpdateInterfaceCannotMoveOrRebondAPort(t *testing.T) {
 			tampered.Name = "eth0-renamed"
 			tampered.AssetID = awayID
 			tampered.LagParentID = &bond.ID
-			if err := s.UpdateInterface(ctx, testActor, &tampered); err != nil {
+			if err := s.UpdateInterface(ctx, testPermit, &tampered); err != nil {
 				t.Fatalf("updating interface: %v", err)
 			}
 
@@ -504,7 +504,7 @@ func TestListPrefixTreeDerivesFromTheRealRangeScan(t *testing.T) {
 				if err != nil {
 					t.Fatalf("building %s: %v", cidr, err)
 				}
-				if err := s.CreatePrefix(ctx, testActor, p); err != nil {
+				if err := s.CreatePrefix(ctx, testPermit, p); err != nil {
 					t.Fatalf("creating %s: %v", cidr, err)
 				}
 			}
@@ -517,7 +517,7 @@ func TestListPrefixTreeDerivesFromTheRealRangeScan(t *testing.T) {
 				if err != nil {
 					t.Fatalf("building %s: %v", ip, err)
 				}
-				if err := s.CreateIPAddress(ctx, testActor, addr); err != nil {
+				if err := s.CreateIPAddress(ctx, testPermit, addr); err != nil {
 					t.Fatalf("creating %s: %v", ip, err)
 				}
 			}

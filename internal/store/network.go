@@ -149,14 +149,14 @@ func (s *SQLStore) ListAvailableInterfaces(ctx context.Context, excludeInterface
 }
 
 // CreateInterface inserts a port.
-func (s *SQLStore) CreateInterface(ctx context.Context, actor domain.Actor, i *domain.Interface) error {
+func (s *SQLStore) CreateInterface(ctx context.Context, p domain.Permit, i *domain.Interface) error {
 	// The row the INSERT just wrote is version 1 (the column default).
 	// Without this a caller that creates and then updates the SAME struct
 	// compares 0 against 1 and gets a conflict against itself.
 	i.RowVersion = 1
 	at := domain.FormatTime(s.now())
 	i.CreatedAt, i.UpdatedAt = &at, &at
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, p, func(t *tx) error {
 		if err := t.requireVocabulary(ctx, vocabInterfaceFormFactor, "form_factor", i.FormFactor); err != nil {
 			return err
 		}
@@ -180,7 +180,7 @@ func (s *SQLStore) CreateInterface(ctx context.Context, actor domain.Actor, i *d
 // topology, the cable map and the reachability walk all read them. Correcting
 // a speed is a correction. Moving a port to another chassis is a rebuild, and
 // there is no honest way to make it look like the former.
-func (s *SQLStore) UpdateInterface(ctx context.Context, actor domain.Actor, i *domain.Interface) error {
+func (s *SQLStore) UpdateInterface(ctx context.Context, p domain.Permit, i *domain.Interface) error {
 	if err := i.Validate(); err != nil {
 		return err
 	}
@@ -195,7 +195,7 @@ func (s *SQLStore) UpdateInterface(ctx context.Context, actor domain.Actor, i *d
 	at := domain.FormatTime(s.now())
 	i.UpdatedAt = &at
 
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, p, func(t *tx) error {
 		if err := t.requireVocabulary(ctx, vocabInterfaceFormFactor, "form_factor", i.FormFactor); err != nil {
 			return err
 		}
@@ -217,14 +217,14 @@ func (s *SQLStore) UpdateInterface(ctx context.Context, actor domain.Actor, i *d
 }
 
 // CreateLink cables two interfaces together.
-func (s *SQLStore) CreateLink(ctx context.Context, actor domain.Actor, l *domain.Link) error {
+func (s *SQLStore) CreateLink(ctx context.Context, p domain.Permit, l *domain.Link) error {
 	if l.Lifecycle == "" {
 		l.Lifecycle = domain.LifecycleActive
 	}
 	// Serializable: the COUNT below asserts an invariant this transaction is
 	// about to break, and at read-committed two concurrent patches both see an
 	// unpatched port and both commit. See writeSerializable.
-	return s.writeSerializable(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.writeSerializable(ctx, p, func(t *tx) error {
 		// A port has one active cable. Catching the second one here gives a
 		// usable error instead of a silently duplicated topology. A retired
 		// link does not count -- unpatching a port is exactly what frees it up
@@ -266,7 +266,7 @@ func (s *SQLStore) GetLink(ctx context.Context, id string) (*domain.Link, error)
 // link is simply excluded from every far-end lookup (docs/DECISIONS.md,
 // 2026-07-28 decisions) -- soft-delete-only applies to a cable exactly as it
 // does to everything else, and cables get unpatched constantly.
-func (s *SQLStore) RetireLink(ctx context.Context, actor domain.Actor, id string) error {
+func (s *SQLStore) RetireLink(ctx context.Context, p domain.Permit, id string) error {
 	before, err := s.GetLink(ctx, id)
 	if err != nil {
 		return err
@@ -274,7 +274,7 @@ func (s *SQLStore) RetireLink(ctx context.Context, actor domain.Actor, id string
 	if before.Lifecycle == domain.LifecycleRetired {
 		return nil
 	}
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, p, func(t *tx) error {
 		if _, err := t.exec(ctx, `UPDATE link SET lifecycle = ? WHERE id = ?`,
 			domain.LifecycleRetired, id); err != nil {
 			return translateWriteErr(err, "retiring link")
@@ -287,14 +287,14 @@ func (s *SQLStore) RetireLink(ctx context.Context, actor domain.Actor, id string
 // ---------- addressing ----------
 
 // CreateIPAddress assigns an address.
-func (s *SQLStore) CreateIPAddress(ctx context.Context, actor domain.Actor, a *domain.IPAddress) error {
+func (s *SQLStore) CreateIPAddress(ctx context.Context, p domain.Permit, a *domain.IPAddress) error {
 	// The row the INSERT just wrote is version 1 (the column default).
 	// Without this a caller that creates and then updates the SAME struct
 	// compares 0 against 1 and gets a conflict against itself.
 	a.RowVersion = 1
 	at := domain.FormatTime(s.now())
 	a.CreatedAt, a.UpdatedAt = &at, &at
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, p, func(t *tx) error {
 		if err := t.requireVocabulary(ctx, vocabIPAddressRole, "role", a.Role); err != nil {
 			return err
 		}
@@ -327,7 +327,7 @@ func (s *SQLStore) GetIPAddress(ctx context.Context, id string) (*domain.IPAddre
 // would follow it silently. The address VALUE is editable -- a typo is the
 // commonest thing wrong with an inventory record -- and only through
 // SetAddress, which rewrites the derived columns with it.
-func (s *SQLStore) UpdateIPAddress(ctx context.Context, actor domain.Actor, a *domain.IPAddress) error {
+func (s *SQLStore) UpdateIPAddress(ctx context.Context, p domain.Permit, a *domain.IPAddress) error {
 	if err := a.Validate(); err != nil {
 		return err
 	}
@@ -339,7 +339,7 @@ func (s *SQLStore) UpdateIPAddress(ctx context.Context, actor domain.Actor, a *d
 	at := domain.FormatTime(s.now())
 	a.UpdatedAt = &at
 
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, p, func(t *tx) error {
 		if err := t.requireVocabulary(ctx, vocabIPAddressRole, "role", a.Role); err != nil {
 			return err
 		}
@@ -376,7 +376,7 @@ func (s *SQLStore) GetPrefix(ctx context.Context, id string) (*domain.Prefix, er
 // itself, including the environment: this codebase already treats an
 // environment as a classification a person assigns, editable on an asset for
 // exactly the same reason.
-func (s *SQLStore) UpdatePrefix(ctx context.Context, actor domain.Actor, p *domain.Prefix) error {
+func (s *SQLStore) UpdatePrefix(ctx context.Context, permit domain.Permit, p *domain.Prefix) error {
 	if err := p.Validate(); err != nil {
 		return err
 	}
@@ -387,7 +387,7 @@ func (s *SQLStore) UpdatePrefix(ctx context.Context, actor domain.Actor, p *doma
 	at := domain.FormatTime(s.now())
 	p.UpdatedAt = &at
 
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, permit, func(t *tx) error {
 		res, err := t.exec(ctx, `
 			UPDATE prefix SET cidr_text = ?, addr_family = ?, addr_start = ?, addr_end = ?,
 			                  vlan_ref_id = ?, environment_id = ?, role = ?,
@@ -412,14 +412,14 @@ func (s *SQLStore) UpdatePrefix(ctx context.Context, actor domain.Actor, p *doma
 }
 
 // CreatePrefix inserts a network.
-func (s *SQLStore) CreatePrefix(ctx context.Context, actor domain.Actor, p *domain.Prefix) error {
+func (s *SQLStore) CreatePrefix(ctx context.Context, permit domain.Permit, p *domain.Prefix) error {
 	// The row the INSERT just wrote is version 1 (the column default).
 	// Without this a caller that creates and then updates the SAME struct
 	// compares 0 against 1 and gets a conflict against itself.
 	p.RowVersion = 1
 	at := domain.FormatTime(s.now())
 	p.CreatedAt, p.UpdatedAt = &at, &at
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, permit, func(t *tx) error {
 		_, err := t.exec(ctx, `
 			INSERT INTO prefix (id, cidr_text, addr_family, addr_start, addr_end,
 			                    vlan_ref_id, environment_id, role, created_at, updated_at)

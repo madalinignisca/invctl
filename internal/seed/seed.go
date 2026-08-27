@@ -586,7 +586,7 @@ func (b *builder) networking() {
 		if id := b.env(p.env); id != "" {
 			v.EnvironmentID = &id
 		}
-		if err := b.store.CreateVLAN(b.ctx, Actor, v); err != nil {
+		if err := b.store.CreateVLAN(b.ctx, domain.AdministratorPermit(Actor), v); err != nil {
 			b.fail(fmt.Errorf("seeding vlan %d: %w", p.vlan, err))
 			return
 		}
@@ -610,7 +610,7 @@ func (b *builder) networking() {
 		if id := b.env(p.env); id != "" {
 			prefix.EnvironmentID = &id
 		}
-		if err := b.store.CreatePrefix(b.ctx, Actor, prefix); err != nil {
+		if err := b.store.CreatePrefix(b.ctx, domain.AdministratorPermit(Actor), prefix); err != nil {
 			b.fail(fmt.Errorf("seeding prefix %s: %w", p.cidr, err))
 			return
 		}
@@ -765,7 +765,7 @@ func (b *builder) networking() {
 				return
 			}
 		}
-		if err := b.store.CreateInterface(b.ctx, Actor, iface); err != nil {
+		if err := b.store.CreateInterface(b.ctx, domain.AdministratorPermit(Actor), iface); err != nil {
 			b.fail(fmt.Errorf("seeding interface %s/%s: %w", i.asset, i.name, err))
 			return
 		}
@@ -777,7 +777,7 @@ func (b *builder) networking() {
 				b.fail(fmt.Errorf("building address %s: %w", i.addr, err))
 				return
 			}
-			if err := b.store.CreateIPAddress(b.ctx, Actor, addr); err != nil {
+			if err := b.store.CreateIPAddress(b.ctx, domain.AdministratorPermit(Actor), addr); err != nil {
 				b.fail(fmt.Errorf("seeding address %s: %w", i.addr, err))
 				return
 			}
@@ -846,7 +846,7 @@ func (b *builder) networking() {
 		}
 		link.Medium = str(c.medium)
 		link.LengthM = num(c.lengthM)
-		if err := b.store.CreateLink(b.ctx, Actor, link); err != nil {
+		if err := b.store.CreateLink(b.ctx, domain.AdministratorPermit(Actor), link); err != nil {
 			b.fail(fmt.Errorf("seeding link %s-%s: %w", c.a, c.b, err))
 			return
 		}

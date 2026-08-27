@@ -136,7 +136,7 @@ func (b *builder) vlanMembership() {
 		current = append(current, domain.InterfaceVLAN{
 			InterfaceID: ifaceID, VLANID: vlanID, Mode: m.mode,
 		})
-		if err := b.store.SetInterfaceVLANs(b.ctx, Actor, ifaceID, current); err != nil {
+		if err := b.store.SetInterfaceVLANs(b.ctx, domain.AdministratorPermit(Actor), ifaceID, current); err != nil {
 			b.fail(fmt.Errorf("seeding VLAN membership for %s/%s: %w", m.asset, m.port, err))
 			return
 		}
@@ -167,7 +167,7 @@ func (b *builder) firstHopRedundancy() {
 			b.fail(fmt.Errorf("building %s: %w", g.name, err))
 			return
 		}
-		if err := b.store.CreateFHRPGroup(b.ctx, Actor, grp); err != nil {
+		if err := b.store.CreateFHRPGroup(b.ctx, domain.AdministratorPermit(Actor), grp); err != nil {
 			b.fail(fmt.Errorf("seeding %s: %w", g.name, err))
 			return
 		}
@@ -183,7 +183,7 @@ func (b *builder) firstHopRedundancy() {
 				GroupID: grp.ID, InterfaceID: ifaceID, Priority: &priority,
 			})
 		}
-		if err := b.store.SetFHRPMembers(b.ctx, Actor, grp.ID, members); err != nil {
+		if err := b.store.SetFHRPMembers(b.ctx, domain.AdministratorPermit(Actor), grp.ID, members); err != nil {
 			b.fail(fmt.Errorf("seeding %s members: %w", g.name, err))
 			return
 		}
@@ -207,7 +207,7 @@ func (b *builder) overlayAndCircuit() {
 	vni := int64(10030)
 	vpn.Identifier = &vni
 	vpn.Description = str("declared with one end; the far side was never built")
-	if err := b.store.CreateL2VPN(b.ctx, Actor, vpn); err != nil {
+	if err := b.store.CreateL2VPN(b.ctx, domain.AdministratorPermit(Actor), vpn); err != nil {
 		b.fail(fmt.Errorf("seeding overlay: %w", err))
 		return
 	}
@@ -217,7 +217,7 @@ func (b *builder) overlayAndCircuit() {
 			b.fail(fmt.Errorf("building termination: %w", err))
 			return
 		}
-		if err := b.store.CreateL2VPNTermination(b.ctx, Actor, t); err != nil {
+		if err := b.store.CreateL2VPNTermination(b.ctx, domain.AdministratorPermit(Actor), t); err != nil {
 			b.fail(fmt.Errorf("seeding termination: %w", err))
 			return
 		}

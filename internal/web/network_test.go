@@ -32,7 +32,7 @@ func mustNetGroupWeb(t *testing.T, h *harness, code, role, availability string) 
 	if err != nil {
 		t.Fatalf("building net group: %v", err)
 	}
-	if err := h.store.CreateNetGroup(context.Background(), domain.SystemActor, g); err != nil {
+	if err := h.store.CreateNetGroup(context.Background(), domain.AdministratorPermit(domain.SystemActor), g); err != nil {
 		t.Fatalf("creating net group: %v", err)
 	}
 	return g.ID
@@ -169,7 +169,7 @@ func TestNetworkDeriveProposesAndDoesNotWriteThroughUI(t *testing.T) {
 	if err != nil {
 		t.Fatalf("building link: %v", err)
 	}
-	if err := h.store.CreateLink(ctx, domain.SystemActor, link); err != nil {
+	if err := h.store.CreateLink(ctx, domain.AdministratorPermit(domain.SystemActor), link); err != nil {
 		t.Fatalf("creating link: %v", err)
 	}
 
@@ -223,7 +223,7 @@ func mustInterfaceWeb(t *testing.T, h *harness, assetID, name string) string {
 	if err != nil {
 		t.Fatalf("building interface %s: %v", name, err)
 	}
-	if err := h.store.CreateInterface(context.Background(), domain.SystemActor, i); err != nil {
+	if err := h.store.CreateInterface(context.Background(), domain.AdministratorPermit(domain.SystemActor), i); err != nil {
 		t.Fatalf("creating interface %s: %v", name, err)
 	}
 	return i.ID

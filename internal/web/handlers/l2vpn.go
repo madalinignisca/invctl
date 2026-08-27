@@ -114,7 +114,7 @@ func (a *App) L2VPNCreate(w http.ResponseWriter, r *http.Request) {
 		vpn.Description = optionalString(r, "description")
 		err = vpn.Validate()
 		if err == nil {
-			err = a.Store.CreateL2VPN(r.Context(), actor(r), vpn)
+			err = a.Store.CreateL2VPN(r.Context(), permit(r), vpn)
 		}
 	}
 	if err != nil {
@@ -146,7 +146,7 @@ func (a *App) L2VPNAttach(w http.ResponseWriter, r *http.Request) {
 	term, err := domain.NewL2VPNTermination(store.NewID(), id,
 		optionalString(r, "vlan_id"), optionalString(r, "interface_id"))
 	if err == nil {
-		err = a.Store.CreateL2VPNTermination(r.Context(), actor(r), term)
+		err = a.Store.CreateL2VPNTermination(r.Context(), permit(r), term)
 	}
 	if err != nil {
 		messages, ok := validationErrors(err)
@@ -169,7 +169,7 @@ func (a *App) L2VPNAttach(w http.ResponseWriter, r *http.Request) {
 // L2VPNDetach removes one attachment.
 func (a *App) L2VPNDetach(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if err := a.Store.RetireL2VPNTermination(r.Context(), actor(r), r.PathValue("termID")); err != nil {
+	if err := a.Store.RetireL2VPNTermination(r.Context(), permit(r), r.PathValue("termID")); err != nil {
 		a.handleStoreError(w, r, err)
 		return
 	}
@@ -179,7 +179,7 @@ func (a *App) L2VPNDetach(w http.ResponseWriter, r *http.Request) {
 
 // L2VPNRetire withdraws an overlay.
 func (a *App) L2VPNRetire(w http.ResponseWriter, r *http.Request) {
-	if err := a.Store.RetireL2VPN(r.Context(), actor(r), r.PathValue("id")); err != nil {
+	if err := a.Store.RetireL2VPN(r.Context(), permit(r), r.PathValue("id")); err != nil {
 		a.handleStoreError(w, r, err)
 		return
 	}

@@ -36,7 +36,7 @@ func TestEnvironmentMapIsMembershipNotAWalk(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building link: %v", err)
 			}
-			if err := s.CreateLink(ctx, testActor, link); err != nil {
+			if err := s.CreateLink(ctx, testPermit, link); err != nil {
 				t.Fatalf("creating link: %v", err)
 			}
 

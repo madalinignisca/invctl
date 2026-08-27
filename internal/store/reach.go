@@ -43,11 +43,11 @@ const netGroupSelect = `
 
 // CreateNetGroup inserts a forwarder group. Uniqueness of code is a real
 // UNIQUE constraint, so no check-then-act race exists here.
-func (s *SQLStore) CreateNetGroup(ctx context.Context, actor domain.Actor, g *domain.NetGroup) error {
+func (s *SQLStore) CreateNetGroup(ctx context.Context, p domain.Permit, g *domain.NetGroup) error {
 	if err := g.Validate(); err != nil {
 		return err
 	}
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, p, func(t *tx) error {
 		_, err := t.exec(ctx, `
 			INSERT INTO net_group (id, code, name, kind, role, availability, min_healthy,
 			                       failover_mode, environment_id, lifecycle, source, confidence,
@@ -101,7 +101,7 @@ func (s *SQLStore) ListNetGroups(ctx context.Context) ([]NetGroupRow, error) {
 // CreateNetUplink/CreateNetAttachment/CreateNetAnchor could otherwise insert a
 // fresh edge against this group between the retire and the cascade queries
 // below, which are themselves a read followed by a write.
-func (s *SQLStore) RetireNetGroup(ctx context.Context, actor domain.Actor, id string) error {
+func (s *SQLStore) RetireNetGroup(ctx context.Context, p domain.Permit, id string) error {
 	before, err := s.GetNetGroup(ctx, id)
 	if err != nil {
 		return err
@@ -110,7 +110,7 @@ func (s *SQLStore) RetireNetGroup(ctx context.Context, actor domain.Actor, id st
 		return nil
 	}
 	at := domain.FormatTime(s.now())
-	return s.writeSerializable(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.writeSerializable(ctx, p, func(t *tx) error {
 		if _, err := t.exec(ctx, `UPDATE net_group SET lifecycle = ?, updated_at = ? WHERE id = ?`,
 			domain.LifecycleRetired, at, id); err != nil {
 			return translateWriteErr(err, "retiring net group")
@@ -222,11 +222,11 @@ type NetGroupMemberRow struct {
 // membership (that violates idx_net_group_member_one, a different index, so
 // Postgres and SQLite both fall through to the ordinary constraint error),
 // which is exactly the case that must still be refused.
-func (s *SQLStore) AddNetGroupMember(ctx context.Context, actor domain.Actor, m *domain.NetGroupMember) error {
+func (s *SQLStore) AddNetGroupMember(ctx context.Context, p domain.Permit, m *domain.NetGroupMember) error {
 	if err := m.Validate(); err != nil {
 		return err
 	}
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, p, func(t *tx) error {
 		var before domain.NetGroupMember
 		hadRow := true
 		if err := t.get(ctx, &before,
@@ -270,9 +270,9 @@ func (s *SQLStore) ListNetGroupMembers(ctx context.Context, groupID string) ([]N
 
 // RetireNetGroupMember removes an asset from a forwarder group without losing
 // the record that it was once a member.
-func (s *SQLStore) RetireNetGroupMember(ctx context.Context, actor domain.Actor, groupID, assetID string) error {
+func (s *SQLStore) RetireNetGroupMember(ctx context.Context, p domain.Permit, groupID, assetID string) error {
 	at := domain.FormatTime(s.now())
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, p, func(t *tx) error {
 		res, err := t.exec(ctx, `
 			UPDATE net_group_member SET lifecycle = ?, updated_at = ?
 			WHERE group_id = ? AND asset_id = ? AND lifecycle = ?`,
@@ -317,11 +317,11 @@ const netUplinkSelect = `
 // the same reason CreateLink keeps its own check-then-act: a friendlier,
 // field-attributed error before the round trip to the database, with the
 // index as the backstop that holds regardless.
-func (s *SQLStore) CreateNetUplink(ctx context.Context, actor domain.Actor, u *domain.NetUplink) error {
+func (s *SQLStore) CreateNetUplink(ctx context.Context, p domain.Permit, u *domain.NetUplink) error {
 	if err := u.Validate(); err != nil {
 		return err
 	}
-	return s.writeSerializable(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.writeSerializable(ctx, p, func(t *tx) error {
 		var n int
 		err := t.get(ctx, &n, `
 			SELECT COUNT(*) FROM net_uplink
@@ -371,7 +371,7 @@ func (s *SQLStore) GetNetUplink(ctx context.Context, id string) (*domain.NetUpli
 }
 
 // RetireNetUplink withdraws an uplink edge.
-func (s *SQLStore) RetireNetUplink(ctx context.Context, actor domain.Actor, id string) error {
+func (s *SQLStore) RetireNetUplink(ctx context.Context, p domain.Permit, id string) error {
 	before, err := s.GetNetUplink(ctx, id)
 	if err != nil {
 		return err
@@ -380,7 +380,7 @@ func (s *SQLStore) RetireNetUplink(ctx context.Context, actor domain.Actor, id s
 		return nil
 	}
 	at := domain.FormatTime(s.now())
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, p, func(t *tx) error {
 		if _, err := t.exec(ctx, `UPDATE net_uplink SET lifecycle = ?, updated_at = ? WHERE id = ?`,
 			domain.LifecycleRetired, at, id); err != nil {
 			return translateWriteErr(err, "retiring net uplink")
@@ -453,11 +453,11 @@ func auditedNetAttachment(na *domain.NetAttachment, members []domain.NetAttachme
 	return &netAttachmentAudit{NetAttachment: *na, PinnedMembers: strings.Join(pins, ",")}
 }
 
-func (s *SQLStore) CreateNetAttachment(ctx context.Context, actor domain.Actor, na *domain.NetAttachment, members []domain.NetAttachmentMember) error {
+func (s *SQLStore) CreateNetAttachment(ctx context.Context, p domain.Permit, na *domain.NetAttachment, members []domain.NetAttachmentMember) error {
 	if err := na.Validate(); err != nil {
 		return err
 	}
-	return s.writeSerializable(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.writeSerializable(ctx, p, func(t *tx) error {
 		var assetKind string
 		if err := t.get(ctx, &assetKind, `SELECT kind FROM asset WHERE id = ?`, na.AssetID); err != nil {
 			return fmt.Errorf("looking up asset kind: %w", err)
@@ -594,7 +594,7 @@ func (s *SQLStore) GetNetAttachment(ctx context.Context, id string) (*domain.Net
 }
 
 // RetireNetAttachment withdraws a host's attachment to a group.
-func (s *SQLStore) RetireNetAttachment(ctx context.Context, actor domain.Actor, id string) error {
+func (s *SQLStore) RetireNetAttachment(ctx context.Context, p domain.Permit, id string) error {
 	before, err := s.GetNetAttachment(ctx, id)
 	if err != nil {
 		return err
@@ -603,7 +603,7 @@ func (s *SQLStore) RetireNetAttachment(ctx context.Context, actor domain.Actor, 
 		return nil
 	}
 	at := domain.FormatTime(s.now())
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, p, func(t *tx) error {
 		if _, err := t.exec(ctx, `UPDATE net_attachment SET lifecycle = ?, updated_at = ? WHERE id = ?`,
 			domain.LifecycleRetired, at, id); err != nil {
 			return translateWriteErr(err, "retiring net attachment")
@@ -628,11 +628,11 @@ const netAnchorSelect = `
 
 // CreateNetAnchor declares where a reachability scope enters the estate.
 // Uniqueness of code is a real UNIQUE constraint.
-func (s *SQLStore) CreateNetAnchor(ctx context.Context, actor domain.Actor, na *domain.NetAnchor) error {
+func (s *SQLStore) CreateNetAnchor(ctx context.Context, p domain.Permit, na *domain.NetAnchor) error {
 	if err := na.Validate(); err != nil {
 		return err
 	}
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, p, func(t *tx) error {
 		_, err := t.exec(ctx, `
 			INSERT INTO net_anchor (id, code, name, scope, group_id, environment_id, plane,
 			                        lifecycle, created_at, updated_at)
@@ -668,7 +668,7 @@ func (s *SQLStore) GetNetAnchor(ctx context.Context, id string) (*domain.NetAnch
 }
 
 // RetireNetAnchor withdraws an anchor.
-func (s *SQLStore) RetireNetAnchor(ctx context.Context, actor domain.Actor, id string) error {
+func (s *SQLStore) RetireNetAnchor(ctx context.Context, p domain.Permit, id string) error {
 	before, err := s.GetNetAnchor(ctx, id)
 	if err != nil {
 		return err
@@ -677,7 +677,7 @@ func (s *SQLStore) RetireNetAnchor(ctx context.Context, actor domain.Actor, id s
 		return nil
 	}
 	at := domain.FormatTime(s.now())
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, p, func(t *tx) error {
 		if _, err := t.exec(ctx, `UPDATE net_anchor SET lifecycle = ?, updated_at = ? WHERE id = ?`,
 			domain.LifecycleRetired, at, id); err != nil {
 			return translateWriteErr(err, "retiring net anchor")

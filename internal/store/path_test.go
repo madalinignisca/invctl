@@ -61,7 +61,7 @@ func newPathFixture(t *testing.T, e Engine) *pathFixture {
 			t.Fatalf("building %s/%s: %v", asset, name, err)
 		}
 		iface.IsMgmt = mgmt
-		if err := s.CreateInterface(ctx, testActor, iface); err != nil {
+		if err := s.CreateInterface(ctx, testPermit, iface); err != nil {
 			t.Fatalf("creating %s/%s: %v", asset, name, err)
 		}
 		f.ports[asset+"/"+name] = iface.ID
@@ -72,7 +72,7 @@ func newPathFixture(t *testing.T, e Engine) *pathFixture {
 		if err != nil {
 			t.Fatalf("building link %s-%s: %v", a, b, err)
 		}
-		if err := s.CreateLink(ctx, testActor, link); err != nil {
+		if err := s.CreateLink(ctx, testPermit, link); err != nil {
 			t.Fatalf("creating link %s-%s: %v", a, b, err)
 		}
 	}
@@ -284,7 +284,7 @@ func TestPathToItsOwnNetwork(t *testing.T) {
 				{AttachmentID: na.ID, AssetID: f.assets["sw-1"]},
 				{AttachmentID: na.ID, AssetID: f.assets["sw-2"]},
 			}
-			if err := s.CreateNetAttachment(ctx, testActor, na, members); err != nil {
+			if err := s.CreateNetAttachment(ctx, testPermit, na, members); err != nil {
 				t.Fatalf("creating attachment: %v", err)
 			}
 
@@ -456,7 +456,7 @@ func TestNeighbourhoodStopsAtTheConsoleSwitch(t *testing.T) {
 				t.Fatalf("building the port: %v", err)
 			}
 			iface.IsMgmt = true
-			if err := s.CreateInterface(ctx, testActor, iface); err != nil {
+			if err := s.CreateInterface(ctx, testPermit, iface); err != nil {
 				t.Fatalf("creating the port: %v", err)
 			}
 			oobPort, err := domain.NewInterface(NewID(), f.assets["oob"], "p9", domain.FFRJ45)
@@ -464,14 +464,14 @@ func TestNeighbourhoodStopsAtTheConsoleSwitch(t *testing.T) {
 				t.Fatalf("building the oob port: %v", err)
 			}
 			oobPort.IsMgmt = true
-			if err := s.CreateInterface(ctx, testActor, oobPort); err != nil {
+			if err := s.CreateInterface(ctx, testPermit, oobPort); err != nil {
 				t.Fatalf("creating the oob port: %v", err)
 			}
 			link, err := domain.NewLink(NewID(), iface.ID, oobPort.ID)
 			if err != nil {
 				t.Fatalf("building the console cable: %v", err)
 			}
-			if err := s.CreateLink(ctx, testActor, link); err != nil {
+			if err := s.CreateLink(ctx, testPermit, link); err != nil {
 				t.Fatalf("cabling to the console switch: %v", err)
 			}
 
@@ -569,7 +569,7 @@ func TestPathRefusesADisabledPortAndSaysSo(t *testing.T) {
 				t.Fatalf("building the port: %v", err)
 			}
 			port.Enabled = false
-			if err := s.CreateInterface(ctx, testActor, port); err != nil {
+			if err := s.CreateInterface(ctx, testPermit, port); err != nil {
 				t.Fatalf("creating the port: %v", err)
 			}
 			far := mustInterface(t, s, ctx, f.assets["sw-1"], "e9")
@@ -577,7 +577,7 @@ func TestPathRefusesADisabledPortAndSaysSo(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building the cable: %v", err)
 			}
-			if err := s.CreateLink(ctx, testActor, link); err != nil {
+			if err := s.CreateLink(ctx, testPermit, link); err != nil {
 				t.Fatalf("cabling: %v", err)
 			}
 
@@ -639,7 +639,7 @@ func TestPathToItsOwnNetworkExcludesItself(t *testing.T) {
 				{AttachmentID: na.ID, AssetID: f.assets["h-1"]},
 				{AttachmentID: na.ID, AssetID: f.assets["sw-1"]},
 			}
-			if err := s.CreateNetAttachment(ctx, testActor, na, members); err != nil {
+			if err := s.CreateNetAttachment(ctx, testPermit, na, members); err != nil {
 				t.Fatalf("creating attachment: %v", err)
 			}
 

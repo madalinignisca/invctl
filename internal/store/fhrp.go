@@ -88,14 +88,14 @@ func (s *SQLStore) GetFHRPGroup(ctx context.Context, id string) (*domain.FHRPGro
 }
 
 // CreateFHRPGroup declares a group.
-func (s *SQLStore) CreateFHRPGroup(ctx context.Context, actor domain.Actor, g *domain.FHRPGroup) error {
+func (s *SQLStore) CreateFHRPGroup(ctx context.Context, p domain.Permit, g *domain.FHRPGroup) error {
 	if err := g.Validate(); err != nil {
 		return err
 	}
 	g.RowVersion = 1
 	at := domain.FormatTime(s.now())
 	g.CreatedAt, g.UpdatedAt = &at, &at
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, p, func(t *tx) error {
 		_, err := t.exec(ctx, `
 			INSERT INTO fhrp_group (id, protocol, group_number, name, description,
 			                        lifecycle, created_at, updated_at)
@@ -122,7 +122,7 @@ func (s *SQLStore) CreateFHRPGroup(ctx context.Context, actor domain.Actor, g *d
 // A retired group holding a live address is a row saying "this does not exist"
 // beside one saying "and here is the gateway it answers for". Soft delete makes
 // that contradiction permanent rather than merely wrong.
-func (s *SQLStore) RetireFHRPGroup(ctx context.Context, actor domain.Actor, id string) error {
+func (s *SQLStore) RetireFHRPGroup(ctx context.Context, p domain.Permit, id string) error {
 	before, err := s.GetFHRPGroup(ctx, id)
 	if err != nil {
 		return err
@@ -135,7 +135,7 @@ func (s *SQLStore) RetireFHRPGroup(ctx context.Context, actor domain.Actor, id s
 	after.Lifecycle = domain.LifecycleRetired
 	after.UpdatedAt = &at
 
-	return s.writeSerializable(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.writeSerializable(ctx, p, func(t *tx) error {
 		var vips int
 		if err := t.get(ctx, &vips,
 			`SELECT COUNT(*) FROM ip_address WHERE fhrp_group_id = ?`, id); err != nil {
@@ -193,7 +193,7 @@ func (s *SQLStore) ListFHRPMembers(ctx context.Context, groupID string) ([]FHRPM
 // wholesale inside the parent's transaction, folded into the parent's audited
 // value so the replacement cannot produce an empty diff. A router leaving a
 // redundancy group is precisely the change somebody needs to find afterwards.
-func (s *SQLStore) SetFHRPMembers(ctx context.Context, actor domain.Actor,
+func (s *SQLStore) SetFHRPMembers(ctx context.Context, p domain.Permit,
 	groupID string, members []domain.FHRPMember) error {
 
 	if err := domain.ValidateFHRPMembers(members); err != nil {
@@ -210,7 +210,7 @@ func (s *SQLStore) SetFHRPMembers(ctx context.Context, actor domain.Actor,
 	before := auditedFHRPGroup(group, current)
 	at := domain.FormatTime(s.now())
 
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, p, func(t *tx) error {
 		if _, err := t.exec(ctx,
 			`DELETE FROM fhrp_member WHERE group_id = ?`, groupID); err != nil {
 			return translateWriteErr(err, "clearing fhrp membership")
@@ -278,7 +278,7 @@ func auditedFHRPGroup(g *domain.FHRPGroup, members []FHRPMemberRow) *fhrpGroupAu
 // counts towards utilisation and is excluded by the allocator. All this does is
 // say which group answers for it -- and clear the interface, because an address
 // answered for by a group is not held by one port.
-func (s *SQLStore) AssignVIP(ctx context.Context, actor domain.Actor, addressID, groupID string) error {
+func (s *SQLStore) AssignVIP(ctx context.Context, p domain.Permit, addressID, groupID string) error {
 	before, err := s.GetIPAddress(ctx, addressID)
 	if err != nil {
 		return err
@@ -289,7 +289,7 @@ func (s *SQLStore) AssignVIP(ctx context.Context, actor domain.Actor, addressID,
 	after.InterfaceID = nil
 	after.UpdatedAt = &at
 
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, p, func(t *tx) error {
 		res, err := t.exec(ctx, `
 			UPDATE ip_address SET fhrp_group_id = ?, interface_id = NULL, updated_at = ?,
 			                      row_version = row_version + 1

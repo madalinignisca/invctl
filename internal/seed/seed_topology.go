@@ -98,7 +98,7 @@ func (b *builder) netGroups() {
 			b.fail(fmt.Errorf("building net group %s: %w", spec.Code, err))
 			return
 		}
-		if err := b.store.CreateNetGroup(b.ctx, Actor, g); err != nil {
+		if err := b.store.CreateNetGroup(b.ctx, domain.AdministratorPermit(Actor), g); err != nil {
 			b.fail(fmt.Errorf("seeding net group %s: %w", spec.Code, err))
 			return
 		}
@@ -136,7 +136,7 @@ func (b *builder) netGroupMembers() {
 			b.fail(fmt.Errorf("building net group member %s/%s: %w", m.group, m.asset, err))
 			return
 		}
-		if err := b.store.AddNetGroupMember(b.ctx, Actor, member); err != nil {
+		if err := b.store.AddNetGroupMember(b.ctx, domain.AdministratorPermit(Actor), member); err != nil {
 			b.fail(fmt.Errorf("seeding net group member %s/%s: %w", m.group, m.asset, err))
 			return
 		}
@@ -174,7 +174,7 @@ func (b *builder) netUplinks() {
 			b.fail(fmt.Errorf("building uplink %s->%s: %w", u.from, u.to, err))
 			return
 		}
-		if err := b.store.CreateNetUplink(b.ctx, Actor, link); err != nil {
+		if err := b.store.CreateNetUplink(b.ctx, domain.AdministratorPermit(Actor), link); err != nil {
 			b.fail(fmt.Errorf("seeding uplink %s->%s: %w", u.from, u.to, err))
 			return
 		}
@@ -263,7 +263,7 @@ func (b *builder) netAttachments() {
 			members = append(members, *m)
 		}
 
-		if err := b.store.CreateNetAttachment(b.ctx, Actor, att, members); err != nil {
+		if err := b.store.CreateNetAttachment(b.ctx, domain.AdministratorPermit(Actor), att, members); err != nil {
 			b.fail(fmt.Errorf("seeding attachment %s->%s: %w", spec.host, spec.group, err))
 			return
 		}
@@ -306,7 +306,7 @@ func (b *builder) netAnchors() {
 			}
 			anchor.EnvironmentID = &envID
 		}
-		if err := b.store.CreateNetAnchor(b.ctx, Actor, anchor); err != nil {
+		if err := b.store.CreateNetAnchor(b.ctx, domain.AdministratorPermit(Actor), anchor); err != nil {
 			b.fail(fmt.Errorf("seeding anchor %s: %w", a.code, err))
 			return
 		}

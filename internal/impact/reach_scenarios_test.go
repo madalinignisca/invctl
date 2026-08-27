@@ -1235,7 +1235,7 @@ func designScenarios() []scenarioCase {
 				if err != nil {
 					t.Fatalf("building the reverse uplink: %v", err)
 				}
-				if err := f.store.CreateNetUplink(f.ctx, domain.SystemActor, up); err != nil {
+				if err := f.store.CreateNetUplink(f.ctx, domain.AdministratorPermit(domain.SystemActor), up); err != nil {
 					t.Fatalf("creating the reverse uplink: %v", err)
 				}
 				return nil
@@ -1399,7 +1399,7 @@ func rebuildM5Topology(t *testing.T, f *fixture, failoverMode string) {
 		if err != nil {
 			t.Fatalf("building net group %s: %v", spec.Code, err)
 		}
-		if err := f.store.CreateNetGroup(f.ctx, domain.SystemActor, g); err != nil {
+		if err := f.store.CreateNetGroup(f.ctx, domain.AdministratorPermit(domain.SystemActor), g); err != nil {
 			t.Fatalf("creating net group %s: %v", spec.Code, err)
 		}
 		return g.ID
@@ -1423,7 +1423,7 @@ func rebuildM5Topology(t *testing.T, f *fixture, failoverMode string) {
 		if err != nil {
 			t.Fatalf("building member %s: %v", m.asset, err)
 		}
-		if err := f.store.AddNetGroupMember(f.ctx, domain.SystemActor, member); err != nil {
+		if err := f.store.AddNetGroupMember(f.ctx, domain.AdministratorPermit(domain.SystemActor), member); err != nil {
 			t.Fatalf("adding member %s: %v", m.asset, err)
 		}
 	}
@@ -1432,7 +1432,7 @@ func rebuildM5Topology(t *testing.T, f *fixture, failoverMode string) {
 	if err != nil {
 		t.Fatalf("building uplink: %v", err)
 	}
-	if err := f.store.CreateNetUplink(f.ctx, domain.SystemActor, up); err != nil {
+	if err := f.store.CreateNetUplink(f.ctx, domain.AdministratorPermit(domain.SystemActor), up); err != nil {
 		t.Fatalf("creating uplink: %v", err)
 	}
 
@@ -1461,7 +1461,7 @@ func rebuildM5Topology(t *testing.T, f *fixture, failoverMode string) {
 			envID := f.refs.Environments[a.env]
 			anchor.EnvironmentID = &envID
 		}
-		if err := f.store.CreateNetAnchor(f.ctx, domain.SystemActor, anchor); err != nil {
+		if err := f.store.CreateNetAnchor(f.ctx, domain.AdministratorPermit(domain.SystemActor), anchor); err != nil {
 			t.Fatalf("creating anchor %s: %v", a.code, err)
 		}
 	}
@@ -1483,7 +1483,7 @@ func attachPinned(t *testing.T, f *fixture, assetID, groupID string, chassis ...
 		}
 		members = append(members, *m)
 	}
-	if err := f.store.CreateNetAttachment(f.ctx, domain.SystemActor, att, members); err != nil {
+	if err := f.store.CreateNetAttachment(f.ctx, domain.AdministratorPermit(domain.SystemActor), att, members); err != nil {
 		t.Fatalf("creating attachment: %v", err)
 	}
 	return att.ID
@@ -1521,7 +1521,7 @@ func buildLAGgedHost(t *testing.T, f *fixture) map[string]string {
 		}
 		twice = append(twice, *m)
 	}
-	if err := f.store.CreateNetAttachment(f.ctx, domain.SystemActor, doomed, twice); err == nil {
+	if err := f.store.CreateNetAttachment(f.ctx, domain.AdministratorPermit(domain.SystemActor), doomed, twice); err == nil {
 		t.Error("declaring two cables from one host into the same chassis was accepted as two member " +
 			"rows. PRIMARY KEY (attachment_id, asset_id) must collapse them into one, which is what " +
 			"makes a LAG to a single chassis correctly not count as redundancy")

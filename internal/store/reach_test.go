@@ -33,7 +33,7 @@ func mustNetGroup(t *testing.T, s *SQLStore, ctx context.Context, code, kind, ro
 	if err != nil {
 		t.Fatalf("building net group %s: %v", code, err)
 	}
-	if err := s.CreateNetGroup(ctx, testActor, g); err != nil {
+	if err := s.CreateNetGroup(ctx, testPermit, g); err != nil {
 		t.Fatalf("creating net group %s: %v", code, err)
 	}
 	return g.ID
@@ -45,7 +45,7 @@ func mustNetGroupMember(t *testing.T, s *SQLStore, ctx context.Context, groupID,
 	if err != nil {
 		t.Fatalf("building net group member: %v", err)
 	}
-	if err := s.AddNetGroupMember(ctx, testActor, m); err != nil {
+	if err := s.AddNetGroupMember(ctx, testPermit, m); err != nil {
 		t.Fatalf("adding net group member: %v", err)
 	}
 }
@@ -91,13 +91,13 @@ func TestNetGroupCRUD(t *testing.T) {
 				if err != nil {
 					t.Fatalf("building duplicate: %v", err)
 				}
-				if err := s.CreateNetGroup(ctx, testActor, dup); !errors.Is(err, domain.ErrConflict) {
+				if err := s.CreateNetGroup(ctx, testPermit, dup); !errors.Is(err, domain.ErrConflict) {
 					t.Errorf("error = %v, want ErrConflict", err)
 				}
 			})
 
 			t.Run("retiring is reflected and audited", func(t *testing.T) {
-				if err := s.RetireNetGroup(ctx, testActor, groupID); err != nil {
+				if err := s.RetireNetGroup(ctx, testPermit, groupID); err != nil {
 					t.Fatalf("retiring: %v", err)
 				}
 				rows, err := s.ListNetGroups(ctx)
@@ -137,21 +137,21 @@ func TestNetGroupMemberUniqueness(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building member: %v", err)
 			}
-			if err := s.AddNetGroupMember(ctx, testActor, m); !errors.Is(err, domain.ErrConflict) {
+			if err := s.AddNetGroupMember(ctx, testPermit, m); !errors.Is(err, domain.ErrConflict) {
 				t.Errorf("adding a second active membership = %v, want ErrConflict", err)
 			}
 
 			t.Run("retiring the first membership frees the asset up", func(t *testing.T) {
-				if err := s.RetireNetGroupMember(ctx, testActor, groupA, assetID); err != nil {
+				if err := s.RetireNetGroupMember(ctx, testPermit, groupA, assetID); err != nil {
 					t.Fatalf("retiring membership: %v", err)
 				}
-				if err := s.AddNetGroupMember(ctx, testActor, m); err != nil {
+				if err := s.AddNetGroupMember(ctx, testPermit, m); err != nil {
 					t.Errorf("re-joining after the first membership was retired: %v", err)
 				}
 			})
 
 			t.Run("retiring twice is a no-op", func(t *testing.T) {
-				if err := s.RetireNetGroupMember(ctx, testActor, groupA, assetID); err != nil {
+				if err := s.RetireNetGroupMember(ctx, testPermit, groupA, assetID); err != nil {
 					t.Errorf("retiring an already-retired membership: %v", err)
 				}
 			})
@@ -164,14 +164,14 @@ func TestNetGroupMemberUniqueness(t *testing.T) {
 			// a permanent, false "already belongs to a group" here; the
 			// re-entry must succeed.
 			t.Run("re-joining the SAME group after being retired from it succeeds", func(t *testing.T) {
-				if err := s.RetireNetGroupMember(ctx, testActor, groupB, assetID); err != nil {
+				if err := s.RetireNetGroupMember(ctx, testPermit, groupB, assetID); err != nil {
 					t.Fatalf("retiring membership in groupB: %v", err)
 				}
 				again, err := domain.NewNetGroupMember(groupB, assetID, "member", s.Now())
 				if err != nil {
 					t.Fatalf("building member: %v", err)
 				}
-				if err := s.AddNetGroupMember(ctx, testActor, again); err != nil {
+				if err := s.AddNetGroupMember(ctx, testPermit, again); err != nil {
 					t.Errorf("re-joining the same group after retirement = %v, want success", err)
 				}
 				rows, err := s.ListNetGroupMembers(ctx, groupB)
@@ -191,7 +191,7 @@ func TestNetGroupMemberUniqueness(t *testing.T) {
 				if err != nil {
 					t.Fatalf("building member: %v", err)
 				}
-				if err := s.AddNetGroupMember(ctx, testActor, elsewhere); !errors.Is(err, domain.ErrConflict) {
+				if err := s.AddNetGroupMember(ctx, testPermit, elsewhere); !errors.Is(err, domain.ErrConflict) {
 					t.Errorf("joining a second active group = %v, want ErrConflict", err)
 				}
 			})
@@ -213,7 +213,7 @@ func TestNetUplinkCRUD(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building uplink: %v", err)
 			}
-			if err := s.CreateNetUplink(ctx, testActor, u); err != nil {
+			if err := s.CreateNetUplink(ctx, testPermit, u); err != nil {
 				t.Fatalf("creating uplink: %v", err)
 			}
 
@@ -232,7 +232,7 @@ func TestNetUplinkCRUD(t *testing.T) {
 				if err != nil {
 					t.Fatalf("building duplicate uplink: %v", err)
 				}
-				if err := s.CreateNetUplink(ctx, testActor, dup); !errors.Is(err, domain.ErrConflict) {
+				if err := s.CreateNetUplink(ctx, testPermit, dup); !errors.Is(err, domain.ErrConflict) {
 					t.Errorf("error = %v, want ErrConflict", err)
 				}
 			})
@@ -243,7 +243,7 @@ func TestNetUplinkCRUD(t *testing.T) {
 				if err != nil {
 					t.Fatalf("building alternate uplink: %v", err)
 				}
-				if err := s.CreateNetUplink(ctx, testActor, alt); err != nil {
+				if err := s.CreateNetUplink(ctx, testPermit, alt); err != nil {
 					t.Errorf("creating an alternate-path uplink: %v", err)
 				}
 			})
@@ -257,20 +257,20 @@ func TestNetUplinkCRUD(t *testing.T) {
 				if err != nil {
 					t.Fatalf("building mgmt uplink: %v", err)
 				}
-				if err := s.CreateNetUplink(ctx, testActor, mgmt); err != nil {
+				if err := s.CreateNetUplink(ctx, testPermit, mgmt); err != nil {
 					t.Errorf("creating a second uplink on a different plane: %v", err)
 				}
 			})
 
 			t.Run("retiring frees the pair up for re-creation", func(t *testing.T) {
-				if err := s.RetireNetUplink(ctx, testActor, u.ID); err != nil {
+				if err := s.RetireNetUplink(ctx, testPermit, u.ID); err != nil {
 					t.Fatalf("retiring: %v", err)
 				}
 				again, err := domain.NewNetUplink(NewID(), core, edge, domain.PlaneData, s.Now())
 				if err != nil {
 					t.Fatalf("building: %v", err)
 				}
-				if err := s.CreateNetUplink(ctx, testActor, again); err != nil {
+				if err := s.CreateNetUplink(ctx, testPermit, again); err != nil {
 					t.Errorf("re-creating after retiring the old edge: %v", err)
 				}
 			})
@@ -298,7 +298,7 @@ func TestCreateNetUplinkIsSerialised(t *testing.T) {
 						done <- err
 						return
 					}
-					done <- s.CreateNetUplink(ctx, testActor, u)
+					done <- s.CreateNetUplink(ctx, testPermit, u)
 				}()
 			}
 			succeeded := 0
@@ -343,7 +343,7 @@ func TestNetAttachmentCRUD(t *testing.T) {
 				t.Fatalf("building attachment: %v", err)
 			}
 			members := []domain.NetAttachmentMember{{AttachmentID: na.ID, AssetID: chassis1}, {AttachmentID: na.ID, AssetID: chassis2}}
-			if err := s.CreateNetAttachment(ctx, testActor, na, members); err != nil {
+			if err := s.CreateNetAttachment(ctx, testPermit, na, members); err != nil {
 				t.Fatalf("creating attachment: %v", err)
 			}
 
@@ -366,7 +366,7 @@ func TestNetAttachmentCRUD(t *testing.T) {
 				if err != nil {
 					t.Fatalf("building: %v", err)
 				}
-				if err := s.CreateNetAttachment(ctx, testActor, bad, nil); !errors.Is(err, domain.ErrInvalid) {
+				if err := s.CreateNetAttachment(ctx, testPermit, bad, nil); !errors.Is(err, domain.ErrInvalid) {
 					t.Errorf("error = %v, want ErrInvalid", err)
 				}
 			})
@@ -378,7 +378,7 @@ func TestNetAttachmentCRUD(t *testing.T) {
 				if err != nil {
 					t.Fatalf("building: %v", err)
 				}
-				err = s.CreateNetAttachment(ctx, testActor, bad,
+				err = s.CreateNetAttachment(ctx, testPermit, bad,
 					[]domain.NetAttachmentMember{{AttachmentID: bad.ID, AssetID: stranger}})
 				if !errors.Is(err, domain.ErrInvalid) {
 					t.Errorf("pinning a non-member = %v, want ErrInvalid", err)
@@ -399,7 +399,7 @@ func TestNetAttachmentCRUD(t *testing.T) {
 				if err != nil {
 					t.Fatalf("building duplicate: %v", err)
 				}
-				if err := s.CreateNetAttachment(ctx, testActor, dup, nil); !errors.Is(err, domain.ErrConflict) {
+				if err := s.CreateNetAttachment(ctx, testPermit, dup, nil); !errors.Is(err, domain.ErrConflict) {
 					t.Errorf("error = %v, want ErrConflict", err)
 				}
 			})
@@ -409,20 +409,20 @@ func TestNetAttachmentCRUD(t *testing.T) {
 				if err != nil {
 					t.Fatalf("building: %v", err)
 				}
-				if err := s.CreateNetAttachment(ctx, testActor, mgmt, nil); err != nil {
+				if err := s.CreateNetAttachment(ctx, testPermit, mgmt, nil); err != nil {
 					t.Errorf("attaching on a second plane: %v", err)
 				}
 			})
 
 			t.Run("retiring frees the (asset, group, plane) up for re-creation", func(t *testing.T) {
-				if err := s.RetireNetAttachment(ctx, testActor, na.ID); err != nil {
+				if err := s.RetireNetAttachment(ctx, testPermit, na.ID); err != nil {
 					t.Fatalf("retiring: %v", err)
 				}
 				again, err := domain.NewNetAttachment(NewID(), hv, core, domain.PlaneData, s.Now())
 				if err != nil {
 					t.Fatalf("building: %v", err)
 				}
-				if err := s.CreateNetAttachment(ctx, testActor, again, nil); err != nil {
+				if err := s.CreateNetAttachment(ctx, testPermit, again, nil); err != nil {
 					t.Errorf("re-attaching after retiring the old row: %v", err)
 				}
 			})
@@ -449,7 +449,7 @@ func TestCreateNetAttachmentIsSerialised(t *testing.T) {
 						done <- err
 						return
 					}
-					done <- s.CreateNetAttachment(ctx, testActor, na, nil)
+					done <- s.CreateNetAttachment(ctx, testPermit, na, nil)
 				}()
 			}
 			succeeded := 0
@@ -483,7 +483,7 @@ func TestNetAnchorCRUD(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building anchor: %v", err)
 			}
-			if err := s.CreateNetAnchor(ctx, testActor, a); err != nil {
+			if err := s.CreateNetAnchor(ctx, testPermit, a); err != nil {
 				t.Fatalf("creating anchor: %v", err)
 			}
 
@@ -495,7 +495,7 @@ func TestNetAnchorCRUD(t *testing.T) {
 				t.Errorf("anchors = %+v, want one on fw-edge", rows)
 			}
 
-			if err := s.RetireNetAnchor(ctx, testActor, a.ID); err != nil {
+			if err := s.RetireNetAnchor(ctx, testPermit, a.ID); err != nil {
 				t.Fatalf("retiring anchor: %v", err)
 			}
 			after, err := s.ListNetAnchors(ctx)
@@ -528,7 +528,7 @@ func TestNetworkCoverage(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building attachment: %v", err)
 			}
-			if err := s.CreateNetAttachment(ctx, testActor, na, nil); err != nil {
+			if err := s.CreateNetAttachment(ctx, testPermit, na, nil); err != nil {
 				t.Fatalf("creating attachment: %v", err)
 			}
 
@@ -575,7 +575,7 @@ func TestRetireAssetRetiresTopology(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building attachment: %v", err)
 			}
-			if err := s.CreateNetAttachment(ctx, testActor, na, []domain.NetAttachmentMember{{AttachmentID: na.ID, AssetID: chassis}}); err != nil {
+			if err := s.CreateNetAttachment(ctx, testPermit, na, []domain.NetAttachmentMember{{AttachmentID: na.ID, AssetID: chassis}}); err != nil {
 				t.Fatalf("creating attachment: %v", err)
 			}
 
@@ -627,7 +627,7 @@ func TestRetireAssetRetiresTopology(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building attachment: %v", err)
 			}
-			if err := s.CreateNetAttachment(ctx, testActor, na2, nil); err != nil {
+			if err := s.CreateNetAttachment(ctx, testPermit, na2, nil); err != nil {
 				t.Fatalf("creating attachment: %v", err)
 			}
 			if err := s.RetireAsset(ctx, testPermit, hv2); err != nil {
@@ -678,7 +678,7 @@ func TestRetireAssetRetiresLinkRows(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building link: %v", err)
 			}
-			if err := s.CreateLink(ctx, testActor, link); err != nil {
+			if err := s.CreateLink(ctx, testPermit, link); err != nil {
 				t.Fatalf("creating link: %v", err)
 			}
 
@@ -723,7 +723,7 @@ func TestRetireNetGroupCascades(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building uplink: %v", err)
 			}
-			if err := s.CreateNetUplink(ctx, testActor, downlink); err != nil {
+			if err := s.CreateNetUplink(ctx, testPermit, downlink); err != nil {
 				t.Fatalf("creating uplink: %v", err)
 			}
 			access := mustNetGroup(t, s, ctx, "sw-access", domain.NetGroupStandalone, domain.NetRoleAccess, domain.AvailStandalone)
@@ -731,7 +731,7 @@ func TestRetireNetGroupCascades(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building uplink: %v", err)
 			}
-			if err := s.CreateNetUplink(ctx, testActor, uplink); err != nil {
+			if err := s.CreateNetUplink(ctx, testPermit, uplink); err != nil {
 				t.Fatalf("creating uplink: %v", err)
 			}
 
@@ -740,7 +740,7 @@ func TestRetireNetGroupCascades(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building attachment: %v", err)
 			}
-			if err := s.CreateNetAttachment(ctx, testActor, attachment, nil); err != nil {
+			if err := s.CreateNetAttachment(ctx, testPermit, attachment, nil); err != nil {
 				t.Fatalf("creating attachment: %v", err)
 			}
 
@@ -748,11 +748,11 @@ func TestRetireNetGroupCascades(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building anchor: %v", err)
 			}
-			if err := s.CreateNetAnchor(ctx, testActor, anchor); err != nil {
+			if err := s.CreateNetAnchor(ctx, testPermit, anchor); err != nil {
 				t.Fatalf("creating anchor: %v", err)
 			}
 
-			if err := s.RetireNetGroup(ctx, testActor, core); err != nil {
+			if err := s.RetireNetGroup(ctx, testPermit, core); err != nil {
 				t.Fatalf("retiring group: %v", err)
 			}
 
@@ -849,7 +849,7 @@ func TestDeriveNetworkProposalProposesAndDoesNotWrite(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building link: %v", err)
 			}
-			if err := s.CreateLink(ctx, testActor, link); err != nil {
+			if err := s.CreateLink(ctx, testPermit, link); err != nil {
 				t.Fatalf("creating link: %v", err)
 			}
 
@@ -882,7 +882,7 @@ func TestDeriveNetworkProposalProposesAndDoesNotWrite(t *testing.T) {
 				if err != nil {
 					t.Fatalf("building: %v", err)
 				}
-				if err := s.CreateNetAttachment(ctx, testActor, na, nil); err != nil {
+				if err := s.CreateNetAttachment(ctx, testPermit, na, nil); err != nil {
 					t.Fatalf("declaring the attachment: %v", err)
 				}
 
@@ -932,7 +932,7 @@ func TestDeriveOrientsForwarderToForwarderByRole(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building link: %v", err)
 			}
-			if err := s.CreateLink(ctx, testActor, link); err != nil {
+			if err := s.CreateLink(ctx, testPermit, link); err != nil {
 				t.Fatalf("creating link: %v", err)
 			}
 
@@ -978,7 +978,7 @@ func TestDeriveSetsUplinkPlaneFromMgmtFlag(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building link: %v", err)
 			}
-			if err := s.CreateLink(ctx, testActor, link); err != nil {
+			if err := s.CreateLink(ctx, testPermit, link); err != nil {
 				t.Fatalf("creating link: %v", err)
 			}
 
@@ -1014,14 +1014,14 @@ func TestDeriveSkipsDisabledPortsAndRetiredLinks(t *testing.T) {
 					t.Fatalf("building interface: %v", err)
 				}
 				hvPort.Enabled = false
-				if err := s.CreateInterface(ctx, testActor, hvPort); err != nil {
+				if err := s.CreateInterface(ctx, testPermit, hvPort); err != nil {
 					t.Fatalf("creating disabled interface: %v", err)
 				}
 				link, err := domain.NewLink(NewID(), swPort, hvPort.ID)
 				if err != nil {
 					t.Fatalf("building link: %v", err)
 				}
-				if err := s.CreateLink(ctx, testActor, link); err != nil {
+				if err := s.CreateLink(ctx, testPermit, link); err != nil {
 					t.Fatalf("creating link: %v", err)
 				}
 
@@ -1042,10 +1042,10 @@ func TestDeriveSkipsDisabledPortsAndRetiredLinks(t *testing.T) {
 				if err != nil {
 					t.Fatalf("building link: %v", err)
 				}
-				if err := s.CreateLink(ctx, testActor, link); err != nil {
+				if err := s.CreateLink(ctx, testPermit, link); err != nil {
 					t.Fatalf("creating link: %v", err)
 				}
-				if err := s.RetireLink(ctx, testActor, link.ID); err != nil {
+				if err := s.RetireLink(ctx, testPermit, link.ID); err != nil {
 					t.Fatalf("retiring link: %v", err)
 				}
 
@@ -1111,7 +1111,7 @@ func TestAttachmentPinsReachTheAuditTrail(t *testing.T) {
 				for _, p := range pins {
 					members = append(members, domain.NetAttachmentMember{AttachmentID: na.ID, AssetID: p})
 				}
-				if err := s.CreateNetAttachment(ctx, testActor, na, members); err != nil {
+				if err := s.CreateNetAttachment(ctx, testPermit, na, members); err != nil {
 					t.Fatalf("creating attachment for %s: %v", host, err)
 				}
 				return na.ID

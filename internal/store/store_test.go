@@ -1144,7 +1144,7 @@ func TestCreateLinkIsSerialised(t *testing.T) {
 				if err != nil {
 					t.Fatalf("building interface: %v", err)
 				}
-				if err := s.CreateInterface(ctx, testActor, i); err != nil {
+				if err := s.CreateInterface(ctx, testPermit, i); err != nil {
 					t.Fatalf("creating interface: %v", err)
 				}
 				return i.ID
@@ -1163,7 +1163,7 @@ func TestCreateLinkIsSerialised(t *testing.T) {
 						done <- err
 						return
 					}
-					done <- s.CreateLink(ctx, testActor, l)
+					done <- s.CreateLink(ctx, testPermit, l)
 				}(far)
 			}
 			succeeded := 0

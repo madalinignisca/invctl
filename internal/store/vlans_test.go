@@ -23,7 +23,7 @@ func mustVLAN(t *testing.T, s *SQLStore, ctx context.Context, vid int, name stri
 	if err != nil {
 		t.Fatalf("building VLAN %d: %v", vid, err)
 	}
-	if err := s.CreateVLAN(ctx, testActor, v); err != nil {
+	if err := s.CreateVLAN(ctx, testPermit, v); err != nil {
 		t.Fatalf("creating VLAN %d: %v", vid, err)
 	}
 	return v.ID
@@ -45,12 +45,12 @@ func TestAVIDIsUniqueWithinItsGroupAndTheUngroupedPoolIsOne(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building group: %v", err)
 			}
-			if err := s.CreateVLANGroup(ctx, testActor, oslo); err != nil {
+			if err := s.CreateVLANGroup(ctx, testPermit, oslo); err != nil {
 				t.Fatalf("creating group: %v", err)
 			}
 			site2 := mustAsset(t, s, ctx, domain.KindSite, "colo-fra1", nil)
 			fra, _ := domain.NewVLANGroup(NewID(), "colo-fra1", &site2)
-			if err := s.CreateVLANGroup(ctx, testActor, fra); err != nil {
+			if err := s.CreateVLANGroup(ctx, testPermit, fra); err != nil {
 				t.Fatalf("creating group: %v", err)
 			}
 
@@ -58,14 +58,14 @@ func TestAVIDIsUniqueWithinItsGroupAndTheUngroupedPoolIsOne(t *testing.T) {
 
 			t.Run("the same VID in another group is allowed", func(t *testing.T) {
 				v, _ := domain.NewVLAN(NewID(), 10, "management", &fra.ID)
-				if err := s.CreateVLAN(ctx, testActor, v); err != nil {
+				if err := s.CreateVLAN(ctx, testPermit, v); err != nil {
 					t.Errorf("VLAN 10 in a second site was refused: %v", err)
 				}
 			})
 
 			t.Run("the same VID twice in one group is refused", func(t *testing.T) {
 				v, _ := domain.NewVLAN(NewID(), 10, "duplicate", &oslo.ID)
-				if err := s.CreateVLAN(ctx, testActor, v); err == nil {
+				if err := s.CreateVLAN(ctx, testPermit, v); err == nil {
 					t.Error("VLAN 10 was declared twice in one group")
 				}
 			})
@@ -73,7 +73,7 @@ func TestAVIDIsUniqueWithinItsGroupAndTheUngroupedPoolIsOne(t *testing.T) {
 			mustVLAN(t, s, ctx, 99, "transit", nil)
 			t.Run("the same VID twice in the ungrouped pool is refused", func(t *testing.T) {
 				v, _ := domain.NewVLAN(NewID(), 99, "duplicate", nil)
-				if err := s.CreateVLAN(ctx, testActor, v); err == nil {
+				if err := s.CreateVLAN(ctx, testPermit, v); err == nil {
 					t.Error("VLAN 99 was declared twice with no group. NULLs are distinct " +
 						"in SQL, so a composite index over (group_id, vid) enforces nothing " +
 						"here -- and this is where every VLAN starts")
@@ -98,7 +98,7 @@ func TestChangingAPortsVLANsIsAuditedOnThePort(t *testing.T) {
 
 			set := func(members ...domain.InterfaceVLAN) {
 				t.Helper()
-				if err := s.SetInterfaceVLANs(ctx, testActor, ifaceID, members); err != nil {
+				if err := s.SetInterfaceVLANs(ctx, testPermit, ifaceID, members); err != nil {
 					t.Fatalf("setting membership: %v", err)
 				}
 			}
@@ -168,7 +168,7 @@ func TestAPortCannotHaveTwoUntaggedVLANs(t *testing.T) {
 			v10 := mustVLAN(t, s, ctx, 10, "management", nil)
 			v20 := mustVLAN(t, s, ctx, 20, "servers", nil)
 
-			err := s.SetInterfaceVLANs(ctx, testActor, ifaceID, []domain.InterfaceVLAN{
+			err := s.SetInterfaceVLANs(ctx, testPermit, ifaceID, []domain.InterfaceVLAN{
 				{InterfaceID: ifaceID, VLANID: v10, Mode: domain.VLANModeUntagged},
 				{InterfaceID: ifaceID, VLANID: v20, Mode: domain.VLANModeUntagged},
 			})
@@ -195,23 +195,23 @@ func TestAVLANInUseCannotBeRetired(t *testing.T) {
 			ifaceID := mustInterface(t, s, ctx, assetID, "eth0")
 			vid := mustVLAN(t, s, ctx, 30, "workloads", nil)
 
-			if err := s.SetInterfaceVLANs(ctx, testActor, ifaceID, []domain.InterfaceVLAN{
+			if err := s.SetInterfaceVLANs(ctx, testPermit, ifaceID, []domain.InterfaceVLAN{
 				{InterfaceID: ifaceID, VLANID: vid, Mode: domain.VLANModeUntagged},
 			}); err != nil {
 				t.Fatalf("setting membership: %v", err)
 			}
 
-			if err := s.RetireVLAN(ctx, testActor, vid); err == nil {
+			if err := s.RetireVLAN(ctx, testPermit, vid); err == nil {
 				t.Fatal("a VLAN with a port on it was retired")
 			} else if !errors.Is(err, domain.ErrConflict) {
 				t.Errorf("error = %v, want ErrConflict so the handler returns 409", err)
 			}
 
 			// Empty it, and the withdrawal is allowed.
-			if err := s.SetInterfaceVLANs(ctx, testActor, ifaceID, nil); err != nil {
+			if err := s.SetInterfaceVLANs(ctx, testPermit, ifaceID, nil); err != nil {
 				t.Fatalf("clearing membership: %v", err)
 			}
-			if err := s.RetireVLAN(ctx, testActor, vid); err != nil {
+			if err := s.RetireVLAN(ctx, testPermit, vid); err != nil {
 				t.Errorf("an empty VLAN could not be retired: %v", err)
 			}
 		})
@@ -237,7 +237,7 @@ func TestTwoPrefixesCanShareOneVLAN(t *testing.T) {
 					t.Fatalf("building %s: %v", cidr, err)
 				}
 				p.VLANRefID = &vlanID
-				if err := s.CreatePrefix(ctx, testActor, p); err != nil {
+				if err := s.CreatePrefix(ctx, testPermit, p); err != nil {
 					t.Fatalf("creating %s: %v", cidr, err)
 				}
 			}

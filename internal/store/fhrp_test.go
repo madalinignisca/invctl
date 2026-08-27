@@ -23,7 +23,7 @@ func mustFHRP(t *testing.T, s *SQLStore, ctx context.Context, num int, name stri
 	if err != nil {
 		t.Fatalf("building group: %v", err)
 	}
-	if err := s.CreateFHRPGroup(ctx, testActor, g); err != nil {
+	if err := s.CreateFHRPGroup(ctx, testPermit, g); err != nil {
 		t.Fatalf("creating group: %v", err)
 	}
 	return g.ID
@@ -65,7 +65,7 @@ func TestOneMemberIsNotRedundancy(t *testing.T) {
 			}
 
 			one := 200
-			if err := s.SetFHRPMembers(ctx, testActor, gid, []domain.FHRPMember{
+			if err := s.SetFHRPMembers(ctx, testPermit, gid, []domain.FHRPMember{
 				{GroupID: gid, InterfaceID: i1, Priority: &one},
 			}); err != nil {
 				t.Fatalf("setting one member: %v", err)
@@ -75,7 +75,7 @@ func TestOneMemberIsNotRedundancy(t *testing.T) {
 					"configured and buys nothing", got, domain.FHRPSingleMember)
 			}
 
-			if err := s.SetFHRPMembers(ctx, testActor, gid, []domain.FHRPMember{
+			if err := s.SetFHRPMembers(ctx, testPermit, gid, []domain.FHRPMember{
 				{GroupID: gid, InterfaceID: i1, Priority: &one},
 				{GroupID: gid, InterfaceID: i2},
 			}); err != nil {
@@ -100,7 +100,7 @@ func TestChangingMembershipIsAuditedOnTheGroup(t *testing.T) {
 			i1 := mustInterface(t, s, ctx, a1, "eth0")
 			i2 := mustInterface(t, s, ctx, a2, "eth0")
 
-			if err := s.SetFHRPMembers(ctx, testActor, gid, []domain.FHRPMember{
+			if err := s.SetFHRPMembers(ctx, testPermit, gid, []domain.FHRPMember{
 				{GroupID: gid, InterfaceID: i1},
 			}); err != nil {
 				t.Fatalf("setting members: %v", err)
@@ -108,7 +108,7 @@ func TestChangingMembershipIsAuditedOnTheGroup(t *testing.T) {
 			before, _ := s.ListChangesForEntity(ctx, "fhrp_group", gid, 50)
 
 			// The router that leaves is the change somebody has to find later.
-			if err := s.SetFHRPMembers(ctx, testActor, gid, []domain.FHRPMember{
+			if err := s.SetFHRPMembers(ctx, testPermit, gid, []domain.FHRPMember{
 				{GroupID: gid, InterfaceID: i2},
 			}); err != nil {
 				t.Fatalf("replacing members: %v", err)
@@ -161,10 +161,10 @@ func TestAVIPIsARealAddressAndTheAllocatorKnowsIt(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building the VIP: %v", err)
 			}
-			if err := s.CreateIPAddress(ctx, testActor, addr); err != nil {
+			if err := s.CreateIPAddress(ctx, testPermit, addr); err != nil {
 				t.Fatalf("creating the VIP: %v", err)
 			}
-			if err := s.AssignVIP(ctx, testActor, addr.ID, gid); err != nil {
+			if err := s.AssignVIP(ctx, testPermit, addr.ID, gid); err != nil {
 				t.Fatalf("assigning the VIP: %v", err)
 			}
 
@@ -203,14 +203,14 @@ func TestAGroupWithALiveVIPCannotBeRetired(t *testing.T) {
 
 			gid := mustFHRP(t, s, ctx, 40, "gw-retire")
 			addr, _ := domain.NewIPAddress(NewID(), "10.91.0.1", nil, domain.IPRolePrimary)
-			if err := s.CreateIPAddress(ctx, testActor, addr); err != nil {
+			if err := s.CreateIPAddress(ctx, testPermit, addr); err != nil {
 				t.Fatalf("creating the VIP: %v", err)
 			}
-			if err := s.AssignVIP(ctx, testActor, addr.ID, gid); err != nil {
+			if err := s.AssignVIP(ctx, testPermit, addr.ID, gid); err != nil {
 				t.Fatalf("assigning: %v", err)
 			}
 
-			if err := s.RetireFHRPGroup(ctx, testActor, gid); err == nil {
+			if err := s.RetireFHRPGroup(ctx, testPermit, gid); err == nil {
 				t.Fatal("a group still answering for an address was retired")
 			} else if !errors.Is(err, domain.ErrConflict) {
 				t.Errorf("error = %v, want ErrConflict so the handler returns 409", err)

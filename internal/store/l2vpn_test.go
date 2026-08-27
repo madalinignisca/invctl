@@ -60,7 +60,7 @@ func TestTheSchemaRefusesTwoEndsToo(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building overlay: %v", err)
 			}
-			if err := s.CreateL2VPN(ctx, testActor, vpn); err != nil {
+			if err := s.CreateL2VPN(ctx, testPermit, vpn); err != nil {
 				t.Fatalf("creating overlay: %v", err)
 			}
 			vlanID := mustVLAN(t, s, ctx, 30, "workloads", nil)
@@ -98,7 +98,7 @@ func TestOneTerminationStretchesNothing(t *testing.T) {
 			vpn, _ := domain.NewL2VPN(NewID(), "ovl-2", domain.L2VPNVXLAN)
 			vni := int64(10030)
 			vpn.Identifier = &vni
-			if err := s.CreateL2VPN(ctx, testActor, vpn); err != nil {
+			if err := s.CreateL2VPN(ctx, testPermit, vpn); err != nil {
 				t.Fatalf("creating overlay: %v", err)
 			}
 
@@ -124,7 +124,7 @@ func TestOneTerminationStretchesNothing(t *testing.T) {
 
 			v1 := mustVLAN(t, s, ctx, 30, "site-a", nil)
 			t1, _ := domain.NewL2VPNTermination(NewID(), vpn.ID, &v1, nil)
-			if err := s.CreateL2VPNTermination(ctx, testActor, t1); err != nil {
+			if err := s.CreateL2VPNTermination(ctx, testPermit, t1); err != nil {
 				t.Fatalf("attaching: %v", err)
 			}
 			if got := find().Reach(); got != domain.L2VPNOneEnd {
@@ -134,7 +134,7 @@ func TestOneTerminationStretchesNothing(t *testing.T) {
 
 			v2 := mustVLAN(t, s, ctx, 31, "site-b", nil)
 			t2, _ := domain.NewL2VPNTermination(NewID(), vpn.ID, &v2, nil)
-			if err := s.CreateL2VPNTermination(ctx, testActor, t2); err != nil {
+			if err := s.CreateL2VPNTermination(ctx, testPermit, t2); err != nil {
 				t.Fatalf("attaching: %v", err)
 			}
 			if got := find().Reach(); got != domain.L2VPNStretched {
@@ -142,7 +142,7 @@ func TestOneTerminationStretchesNothing(t *testing.T) {
 			}
 
 			// And it must refuse to be withdrawn while attached.
-			if err := s.RetireL2VPN(ctx, testActor, vpn.ID); err == nil {
+			if err := s.RetireL2VPN(ctx, testPermit, vpn.ID); err == nil {
 				t.Error("an overlay with live attachments was retired")
 			} else if !errors.Is(err, domain.ErrConflict) {
 				t.Errorf("error = %v, want ErrConflict so the handler returns 409", err)
@@ -150,7 +150,7 @@ func TestOneTerminationStretchesNothing(t *testing.T) {
 
 			// Detaching both lets it go, and a detached row stops counting.
 			for _, id := range []string{t1.ID, t2.ID} {
-				if err := s.RetireL2VPNTermination(ctx, testActor, id); err != nil {
+				if err := s.RetireL2VPNTermination(ctx, testPermit, id); err != nil {
 					t.Fatalf("detaching: %v", err)
 				}
 			}
@@ -158,7 +158,7 @@ func TestOneTerminationStretchesNothing(t *testing.T) {
 				t.Errorf("after detaching both, reach = %q, want %q -- a retired "+
 					"termination must stop counting", got, domain.L2VPNUnattached)
 			}
-			if err := s.RetireL2VPN(ctx, testActor, vpn.ID); err != nil {
+			if err := s.RetireL2VPN(ctx, testPermit, vpn.ID); err != nil {
 				t.Errorf("an unattached overlay could not be retired: %v", err)
 			}
 		})

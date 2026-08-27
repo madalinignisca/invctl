@@ -26,7 +26,7 @@ func mustPrefix(t *testing.T, s *SQLStore, ctx context.Context, cidr string) str
 	if err != nil {
 		t.Fatalf("building %s: %v", cidr, err)
 	}
-	if err := s.CreatePrefix(ctx, testActor, p); err != nil {
+	if err := s.CreatePrefix(ctx, testPermit, p); err != nil {
 		t.Fatalf("creating %s: %v", cidr, err)
 	}
 	return p.ID
@@ -38,7 +38,7 @@ func mustRange(t *testing.T, s *SQLStore, ctx context.Context, start, end string
 	if err != nil {
 		t.Fatalf("building %s-%s: %v", start, end, err)
 	}
-	if err := s.CreateIPRange(ctx, testActor, r); err != nil {
+	if err := s.CreateIPRange(ctx, testPermit, r); err != nil {
 		t.Fatalf("creating %s-%s: %v", start, end, err)
 	}
 	return r.ID
@@ -67,7 +67,7 @@ func TestNextFreeAddressExcludesAllThreeSources(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building address: %v", err)
 			}
-			if err := s.CreateIPAddress(ctx, testActor, addr); err != nil {
+			if err := s.CreateIPAddress(ctx, testPermit, addr); err != nil {
 				t.Fatalf("creating address: %v", err)
 			}
 			if got, _ = s.NextFreeAddress(ctx, id); got.Address != "10.60.0.2" {
@@ -91,7 +91,7 @@ func TestNextFreeAddressExcludesAllThreeSources(t *testing.T) {
 
 			// Retiring the reservation returns its space -- but .96/27 still
 			// covers .100, so the answer moves back only as far as that allows.
-			if err := s.RetireIPRange(ctx, testActor, rangeID); err != nil {
+			if err := s.RetireIPRange(ctx, testPermit, rangeID); err != nil {
 				t.Fatalf("retiring the range: %v", err)
 			}
 			if got, _ = s.NextFreeAddress(ctx, id); got.Address != "10.60.0.2" {
@@ -133,7 +133,7 @@ func TestRetiringAReservationIsAudited(t *testing.T) {
 			s, ctx := newStore(t, e)
 
 			rangeID := mustRange(t, s, ctx, "10.62.0.10", "10.62.0.20")
-			if err := s.RetireIPRange(ctx, testActor, rangeID); err != nil {
+			if err := s.RetireIPRange(ctx, testPermit, rangeID); err != nil {
 				t.Fatalf("retiring: %v", err)
 			}
 
@@ -197,7 +197,7 @@ func TestTheBulkAndPerPrefixAllocatorsAgree(t *testing.T) {
 				if err != nil {
 					t.Fatalf("building %s: %v", ip, err)
 				}
-				if err := s.CreateIPAddress(ctx, testActor, a); err != nil {
+				if err := s.CreateIPAddress(ctx, testPermit, a); err != nil {
 					t.Fatalf("creating %s: %v", ip, err)
 				}
 			}

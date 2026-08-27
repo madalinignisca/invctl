@@ -179,7 +179,7 @@ func (b *builder) companyUplinks() {
 			b.fail(fmt.Errorf("building uplink %s: %w", u.name, err))
 			return
 		}
-		if err := b.store.CreateInterface(b.ctx, Actor, i); err != nil {
+		if err := b.store.CreateInterface(b.ctx, domain.AdministratorPermit(Actor), i); err != nil {
 			b.fail(fmt.Errorf("seeding uplink %s: %w", u.name, err))
 			return
 		}
@@ -193,7 +193,7 @@ func (b *builder) companyUplinks() {
 			b.fail(fmt.Errorf("building the colo uplink: %w", err))
 			return
 		}
-		if err := b.store.CreateInterface(b.ctx, Actor, i); err != nil {
+		if err := b.store.CreateInterface(b.ctx, domain.AdministratorPermit(Actor), i); err != nil {
 			b.fail(fmt.Errorf("seeding the colo uplink: %w", err))
 		}
 	}

@@ -748,7 +748,7 @@ var auditMatrix = []auditCase{
 			if err != nil {
 				t.Fatalf("building interface: %v", err)
 			}
-			if err := s.CreateInterface(ctx, testActor, iface); err != nil {
+			if err := s.CreateInterface(ctx, testPermit, iface); err != nil {
 				t.Fatalf("creating interface: %v", err)
 			}
 			return iface.ID, domain.ActionCreate
@@ -771,7 +771,7 @@ var auditMatrix = []auditCase{
 			updated := *iface
 			mtu := 9000
 			updated.MTU = &mtu
-			if err := s.UpdateInterface(ctx, testActor, &updated); err != nil {
+			if err := s.UpdateInterface(ctx, testPermit, &updated); err != nil {
 				t.Fatalf("updating interface: %v", err)
 			}
 			return id, domain.ActionUpdate
@@ -795,7 +795,7 @@ var auditMatrix = []auditCase{
 			if err != nil {
 				t.Fatalf("building link: %v", err)
 			}
-			if err := s.CreateLink(ctx, testActor, l); err != nil {
+			if err := s.CreateLink(ctx, testPermit, l); err != nil {
 				t.Fatalf("creating link: %v", err)
 			}
 			return l.ID, domain.ActionCreate
@@ -814,7 +814,7 @@ var auditMatrix = []auditCase{
 			return mustCable(t, s, ctx, aPort, bPort)
 		},
 		mutate: func(t *testing.T, s *SQLStore, ctx context.Context, id string) (string, string) {
-			if err := s.RetireLink(ctx, testActor, id); err != nil {
+			if err := s.RetireLink(ctx, testPermit, id); err != nil {
 				t.Fatalf("retiring link: %v", err)
 			}
 			return id, domain.ActionRetire
@@ -831,7 +831,7 @@ var auditMatrix = []auditCase{
 			if err != nil {
 				t.Fatalf("building prefix: %v", err)
 			}
-			if err := s.CreatePrefix(ctx, testActor, p); err != nil {
+			if err := s.CreatePrefix(ctx, testPermit, p); err != nil {
 				t.Fatalf("creating prefix: %v", err)
 			}
 			return p.ID, domain.ActionCreate
@@ -852,7 +852,7 @@ var auditMatrix = []auditCase{
 			}
 			role := "audit-role"
 			p.Role = &role
-			if err := s.UpdatePrefix(ctx, testActor, p); err != nil {
+			if err := s.UpdatePrefix(ctx, testPermit, p); err != nil {
 				t.Fatalf("updating prefix: %v", err)
 			}
 			return id, domain.ActionUpdate

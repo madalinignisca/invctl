@@ -300,12 +300,12 @@ func (s *SQLStore) PassThroughsFor(ctx context.Context, assetID string) ([]PassT
 }
 
 // CreatePassThrough records what a panel does between two of its own ports.
-func (s *SQLStore) CreatePassThrough(ctx context.Context, actor domain.Actor, p *domain.PassThrough) error {
+func (s *SQLStore) CreatePassThrough(ctx context.Context, permit domain.Permit, p *domain.PassThrough) error {
 	p.RowVersion = 1
 	if err := p.Validate(); err != nil {
 		return err
 	}
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, permit, func(t *tx) error {
 		// BOTH ENDS ON ONE ASSET. A pass-through is what happens inside a panel;
 		// two ports on different boxes are joined by a cable, and letting this
 		// table express that would give the tracer two ways to cross a gap that
@@ -342,14 +342,14 @@ func (s *SQLStore) CreatePassThrough(ctx context.Context, actor domain.Actor, p 
 }
 
 // RetirePassThrough unpatches a port.
-func (s *SQLStore) RetirePassThrough(ctx context.Context, actor domain.Actor, id string) error {
+func (s *SQLStore) RetirePassThrough(ctx context.Context, p domain.Permit, id string) error {
 	var before domain.PassThrough
 	if err := s.readOne(ctx, &before,
 		`SELECT * FROM port_pass_through WHERE id = ?`, id); err != nil {
 		return fmt.Errorf("getting pass-through %s: %w", id, err)
 	}
 	at := domain.FormatTime(s.now())
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, p, func(t *tx) error {
 		_, err := t.exec(ctx,
 			`UPDATE port_pass_through SET lifecycle = ?, updated_at = ?,
 			                              row_version = row_version + 1

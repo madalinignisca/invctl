@@ -32,7 +32,7 @@ func mustPort(t *testing.T, s *SQLStore, ctx context.Context, assetID, name stri
 	if err != nil {
 		t.Fatalf("building port %s: %v", name, err)
 	}
-	if err := s.CreateInterface(ctx, testActor, i); err != nil {
+	if err := s.CreateInterface(ctx, testPermit, i); err != nil {
 		t.Fatalf("creating port %s: %v", name, err)
 	}
 	return i.ID
@@ -44,7 +44,7 @@ func mustCable(t *testing.T, s *SQLStore, ctx context.Context, a, b string) stri
 	if err != nil {
 		t.Fatalf("building cable: %v", err)
 	}
-	if err := s.CreateLink(ctx, testActor, l); err != nil {
+	if err := s.CreateLink(ctx, testPermit, l); err != nil {
 		t.Fatalf("creating cable: %v", err)
 	}
 	return l.ID
@@ -58,7 +58,7 @@ func mustPatch(t *testing.T, s *SQLStore, ctx context.Context, front, rear strin
 	if err != nil {
 		t.Fatalf("building pass-through: %v", err)
 	}
-	if err := s.CreatePassThrough(ctx, testActor, p); err != nil {
+	if err := s.CreatePassThrough(ctx, testPermit, p); err != nil {
 		t.Fatalf("creating pass-through: %v", err)
 	}
 	return p.ID
@@ -253,7 +253,7 @@ func TestAPassThroughMustStayInsideOnePanel(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building: %v", err)
 			}
-			err = s.CreatePassThrough(ctx, testActor, p)
+			err = s.CreatePassThrough(ctx, testPermit, p)
 			if err == nil {
 				t.Fatal("two ports on DIFFERENT boxes were joined by a pass-through. " +
 					"That is what a cable is, and allowing both would give the tracer " +
@@ -276,7 +276,7 @@ func TestUnpatchingAPanelBreaksTheRun(t *testing.T) {
 			if err != nil || len(patches) != 1 {
 				t.Fatalf("listing patches: %v (%d)", err, len(patches))
 			}
-			if err := s.RetirePassThrough(ctx, testActor, patches[0].ID); err != nil {
+			if err := s.RetirePassThrough(ctx, testPermit, patches[0].ID); err != nil {
 				t.Fatalf("unpatching: %v", err)
 			}
 

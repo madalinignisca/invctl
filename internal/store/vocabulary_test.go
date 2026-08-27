@@ -278,7 +278,7 @@ func TestUnknownVocabularyValueIsRejectedOnEveryColumn(t *testing.T) {
 						ID: NewID(), AssetID: assetID, Name: "eth9",
 						FormFactor: "osfp", Enabled: true,
 					}
-					return s.CreateInterface(ctx, testActor, i)
+					return s.CreateInterface(ctx, testPermit, i)
 				}},
 				{"ip_address.role", "role", func() error {
 					av, err := domain.ParseAddr("10.20.30.90")
@@ -289,7 +289,7 @@ func TestUnknownVocabularyValueIsRejectedOnEveryColumn(t *testing.T) {
 						ID: NewID(), AddrText: av.Text, AddrFamily: av.Family,
 						AddrStart: av.Start, InterfaceID: &ifaceID, Role: "anycast",
 					}
-					return s.CreateIPAddress(ctx, testActor, addr)
+					return s.CreateIPAddress(ctx, testPermit, addr)
 				}},
 				{"service.kind", "kind", func() error {
 					svc := &domain.Service{

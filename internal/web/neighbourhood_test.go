@@ -453,7 +453,7 @@ func TestNeighbourhoodSurvivesACableBetweenTwoPortsOfOneAsset(t *testing.T) {
 	if err != nil {
 		t.Fatalf("building the loop cable: %v", err)
 	}
-	if err := h.store.CreateLink(ctx, domain.SystemActor, self); err != nil {
+	if err := h.store.CreateLink(ctx, domain.AdministratorPermit(domain.SystemActor), self); err != nil {
 		t.Fatalf("cabling two ports of one asset -- if this is now refused, the "+
 			"defect moved rather than went away: %v", err)
 	}
@@ -467,7 +467,7 @@ func TestNeighbourhoodSurvivesACableBetweenTwoPortsOfOneAsset(t *testing.T) {
 	if err != nil {
 		t.Fatalf("building the cable to the neighbour: %v", err)
 	}
-	if err := h.store.CreateLink(ctx, domain.SystemActor, across); err != nil {
+	if err := h.store.CreateLink(ctx, domain.AdministratorPermit(domain.SystemActor), across); err != nil {
 		t.Fatalf("cabling to the neighbour: %v", err)
 	}
 
@@ -523,7 +523,7 @@ func TestParallelCablesAreEachDrawnAndLabelled(t *testing.T) {
 		if err != nil {
 			t.Fatalf("building cable %d: %v", i, err)
 		}
-		if err := h.store.CreateLink(ctx, domain.SystemActor, l); err != nil {
+		if err := h.store.CreateLink(ctx, domain.AdministratorPermit(domain.SystemActor), l); err != nil {
 			t.Fatalf("creating cable %d: %v", i, err)
 		}
 	}

@@ -55,14 +55,14 @@ func (s *SQLStore) GetL2VPN(ctx context.Context, id string) (*domain.L2VPN, erro
 }
 
 // CreateL2VPN declares an overlay.
-func (s *SQLStore) CreateL2VPN(ctx context.Context, actor domain.Actor, v *domain.L2VPN) error {
+func (s *SQLStore) CreateL2VPN(ctx context.Context, p domain.Permit, v *domain.L2VPN) error {
 	if err := v.Validate(); err != nil {
 		return err
 	}
 	v.RowVersion = 1
 	at := domain.FormatTime(s.now())
 	v.CreatedAt, v.UpdatedAt = &at, &at
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, p, func(t *tx) error {
 		_, err := t.exec(ctx, `
 			INSERT INTO l2vpn (id, name, kind, identifier, description, lifecycle,
 			                   created_at, updated_at)
@@ -84,7 +84,7 @@ func (s *SQLStore) CreateL2VPN(ctx context.Context, actor domain.Actor, v *domai
 
 // RetireL2VPN withdraws an overlay, refusing while anything still terminates
 // into it -- the same rule a VLAN with ports follows, for the same reason.
-func (s *SQLStore) RetireL2VPN(ctx context.Context, actor domain.Actor, id string) error {
+func (s *SQLStore) RetireL2VPN(ctx context.Context, p domain.Permit, id string) error {
 	before, err := s.GetL2VPN(ctx, id)
 	if err != nil {
 		return err
@@ -97,7 +97,7 @@ func (s *SQLStore) RetireL2VPN(ctx context.Context, actor domain.Actor, id strin
 	after.Lifecycle = domain.LifecycleRetired
 	after.UpdatedAt = &at
 
-	return s.writeSerializable(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.writeSerializable(ctx, p, func(t *tx) error {
 		var live int
 		if err := t.get(ctx, &live, `
 			SELECT COUNT(*) FROM l2vpn_termination
@@ -156,7 +156,7 @@ func (s *SQLStore) ListL2VPNTerminations(ctx context.Context, l2vpnID string) ([
 }
 
 // CreateL2VPNTermination attaches a VLAN or a port to an overlay.
-func (s *SQLStore) CreateL2VPNTermination(ctx context.Context, actor domain.Actor,
+func (s *SQLStore) CreateL2VPNTermination(ctx context.Context, p domain.Permit,
 	t *domain.L2VPNTermination) error {
 
 	if err := t.Validate(); err != nil {
@@ -165,7 +165,7 @@ func (s *SQLStore) CreateL2VPNTermination(ctx context.Context, actor domain.Acto
 	t.RowVersion = 1
 	at := domain.FormatTime(s.now())
 	t.CreatedAt, t.UpdatedAt = &at, &at
-	return s.write(ctx, domain.AdministratorPermit(actor), func(tx *tx) error {
+	return s.write(ctx, p, func(tx *tx) error {
 		_, err := tx.exec(ctx, `
 			INSERT INTO l2vpn_termination (id, l2vpn_id, vlan_id, interface_id,
 			                               lifecycle, created_at, updated_at)
@@ -179,7 +179,7 @@ func (s *SQLStore) CreateL2VPNTermination(ctx context.Context, actor domain.Acto
 }
 
 // RetireL2VPNTermination detaches, softly like everything else.
-func (s *SQLStore) RetireL2VPNTermination(ctx context.Context, actor domain.Actor, id string) error {
+func (s *SQLStore) RetireL2VPNTermination(ctx context.Context, p domain.Permit, id string) error {
 	var before domain.L2VPNTermination
 	if err := s.readOne(ctx, &before,
 		`SELECT * FROM l2vpn_termination WHERE id = ?`, id); err != nil {
@@ -192,7 +192,7 @@ func (s *SQLStore) RetireL2VPNTermination(ctx context.Context, actor domain.Acto
 	after := before
 	after.Lifecycle = domain.LifecycleRetired
 	after.UpdatedAt = &at
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, p, func(t *tx) error {
 		res, err := t.exec(ctx, `
 			UPDATE l2vpn_termination SET lifecycle = 'retired', updated_at = ?,
 			                             row_version = row_version + 1

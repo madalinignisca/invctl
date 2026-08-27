@@ -64,14 +64,14 @@ func (s *SQLStore) GetVLAN(ctx context.Context, id string) (*domain.VLAN, error)
 }
 
 // CreateVLAN declares a broadcast domain.
-func (s *SQLStore) CreateVLAN(ctx context.Context, actor domain.Actor, v *domain.VLAN) error {
+func (s *SQLStore) CreateVLAN(ctx context.Context, p domain.Permit, v *domain.VLAN) error {
 	if err := v.Validate(); err != nil {
 		return err
 	}
 	v.RowVersion = 1
 	at := domain.FormatTime(s.now())
 	v.CreatedAt, v.UpdatedAt = &at, &at
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, p, func(t *tx) error {
 		_, err := t.exec(ctx, `
 			INSERT INTO vlan (id, vid, name, group_id, role, environment_id,
 			                  description, lifecycle, created_at, updated_at)
@@ -94,7 +94,7 @@ func (s *SQLStore) CreateVLAN(ctx context.Context, actor domain.Actor, v *domain
 }
 
 // UpdateVLAN corrects a broadcast domain.
-func (s *SQLStore) UpdateVLAN(ctx context.Context, actor domain.Actor, v *domain.VLAN) error {
+func (s *SQLStore) UpdateVLAN(ctx context.Context, p domain.Permit, v *domain.VLAN) error {
 	if err := v.Validate(); err != nil {
 		return err
 	}
@@ -105,7 +105,7 @@ func (s *SQLStore) UpdateVLAN(ctx context.Context, actor domain.Actor, v *domain
 	at := domain.FormatTime(s.now())
 	v.UpdatedAt = &at
 
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, p, func(t *tx) error {
 		res, err := t.exec(ctx, `
 			UPDATE vlan SET vid = ?, name = ?, group_id = ?, role = ?,
 			                environment_id = ?, description = ?,
@@ -137,7 +137,7 @@ func (s *SQLStore) UpdateVLAN(ctx context.Context, actor domain.Actor, v *domain
 // addresses live networks is a record saying "this does not exist" beside
 // several saying "and here is what is on it" -- and soft delete means the
 // contradiction is permanent rather than merely wrong.
-func (s *SQLStore) RetireVLAN(ctx context.Context, actor domain.Actor, id string) error {
+func (s *SQLStore) RetireVLAN(ctx context.Context, p domain.Permit, id string) error {
 	before, err := s.GetVLAN(ctx, id)
 	if err != nil {
 		return err
@@ -150,7 +150,7 @@ func (s *SQLStore) RetireVLAN(ctx context.Context, actor domain.Actor, id string
 	after.Lifecycle = domain.LifecycleRetired
 	after.UpdatedAt = &at
 
-	return s.writeSerializable(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.writeSerializable(ctx, p, func(t *tx) error {
 		var users int
 		if err := t.get(ctx, &users, `
 			SELECT (SELECT COUNT(*) FROM prefix WHERE vlan_ref_id = ?)
@@ -202,14 +202,14 @@ func (s *SQLStore) ListVLANGroups(ctx context.Context) ([]VLANGroupRow, error) {
 }
 
 // CreateVLANGroup declares a numbering scope.
-func (s *SQLStore) CreateVLANGroup(ctx context.Context, actor domain.Actor, g *domain.VLANGroup) error {
+func (s *SQLStore) CreateVLANGroup(ctx context.Context, p domain.Permit, g *domain.VLANGroup) error {
 	if err := g.Validate(); err != nil {
 		return err
 	}
 	g.RowVersion = 1
 	at := domain.FormatTime(s.now())
 	g.CreatedAt, g.UpdatedAt = &at, &at
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, p, func(t *tx) error {
 		_, err := t.exec(ctx, `
 			INSERT INTO vlan_group (id, name, scope_asset_id, description, lifecycle,
 			                        created_at, updated_at)
@@ -270,7 +270,7 @@ func (s *SQLStore) ListInterfaceVLANMembers(ctx context.Context, interfaceID str
 // produces no diff at all: the failure CLAUDE.md names three times over as the
 // one set replacement keeps causing. It was made a fourth time here, and the
 // test caught it -- see interfaceVLANAudit for exactly how.
-func (s *SQLStore) SetInterfaceVLANs(ctx context.Context, actor domain.Actor,
+func (s *SQLStore) SetInterfaceVLANs(ctx context.Context, p domain.Permit,
 	interfaceID string, members []domain.InterfaceVLAN) error {
 
 	if err := domain.ValidateVLANMembership(members); err != nil {
@@ -287,7 +287,7 @@ func (s *SQLStore) SetInterfaceVLANs(ctx context.Context, actor domain.Actor,
 	before := auditedInterfaceVLANs(iface, beforeMembers)
 	at := domain.FormatTime(s.now())
 
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, p, func(t *tx) error {
 		if _, err := t.exec(ctx,
 			`DELETE FROM interface_vlan WHERE interface_id = ?`, interfaceID); err != nil {
 			return translateWriteErr(err, "clearing vlan membership")
@@ -422,7 +422,7 @@ func (s *SQLStore) ListPortOptions(ctx context.Context) ([]InterfaceOption, erro
 // goes through SetInterfaceVLANs rather than inserting directly. Doing the
 // INSERT here would skip the validation AND the audit fold, and the audit fold
 // is the thing this codebase has now got wrong four times.
-func (s *SQLStore) AddPortToVLAN(ctx context.Context, actor domain.Actor,
+func (s *SQLStore) AddPortToVLAN(ctx context.Context, p domain.Permit,
 	vlanID, interfaceID, mode string) error {
 
 	current, err := s.currentMembership(ctx, interfaceID)
@@ -432,7 +432,7 @@ func (s *SQLStore) AddPortToVLAN(ctx context.Context, actor domain.Actor,
 	for i, m := range current {
 		if m.VLANID == vlanID {
 			current[i].Mode = mode // already in it: this is a change of mode
-			return s.SetInterfaceVLANs(ctx, actor, interfaceID, current)
+			return s.SetInterfaceVLANs(ctx, p, interfaceID, current)
 		}
 	}
 	// An untagged VLAN replaces whatever untagged VLAN was there, because a
@@ -450,11 +450,11 @@ func (s *SQLStore) AddPortToVLAN(ctx context.Context, actor domain.Actor,
 	current = append(current, domain.InterfaceVLAN{
 		InterfaceID: interfaceID, VLANID: vlanID, Mode: mode,
 	})
-	return s.SetInterfaceVLANs(ctx, actor, interfaceID, current)
+	return s.SetInterfaceVLANs(ctx, p, interfaceID, current)
 }
 
 // RemovePortFromVLAN takes one port out of one VLAN, keeping the rest.
-func (s *SQLStore) RemovePortFromVLAN(ctx context.Context, actor domain.Actor,
+func (s *SQLStore) RemovePortFromVLAN(ctx context.Context, p domain.Permit,
 	vlanID, interfaceID string) error {
 
 	current, err := s.currentMembership(ctx, interfaceID)
@@ -470,7 +470,7 @@ func (s *SQLStore) RemovePortFromVLAN(ctx context.Context, actor domain.Actor,
 	if len(kept) == len(current) {
 		return nil // not in it; nothing to record
 	}
-	return s.SetInterfaceVLANs(ctx, actor, interfaceID, kept)
+	return s.SetInterfaceVLANs(ctx, p, interfaceID, kept)
 }
 
 func (s *SQLStore) currentMembership(ctx context.Context, interfaceID string) ([]domain.InterfaceVLAN, error) {

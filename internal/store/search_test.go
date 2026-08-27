@@ -44,7 +44,7 @@ func seedSearchable(t *testing.T, s *SQLStore, ctx context.Context) (assetID, se
 	if err := iface.SetMAC("AA:BB:CC:00:10:01"); err != nil {
 		t.Fatalf("setting mac: %v", err)
 	}
-	if err := s.CreateInterface(ctx, testActor, iface); err != nil {
+	if err := s.CreateInterface(ctx, testPermit, iface); err != nil {
 		t.Fatalf("creating interface: %v", err)
 	}
 
@@ -52,7 +52,7 @@ func seedSearchable(t *testing.T, s *SQLStore, ctx context.Context) (assetID, se
 	if err != nil {
 		t.Fatalf("building address: %v", err)
 	}
-	if err := s.CreateIPAddress(ctx, testActor, addr); err != nil {
+	if err := s.CreateIPAddress(ctx, testPermit, addr); err != nil {
 		t.Fatalf("creating address: %v", err)
 	}
 
@@ -61,14 +61,14 @@ func seedSearchable(t *testing.T, s *SQLStore, ctx context.Context) (assetID, se
 		t.Fatalf("building prefix: %v", err)
 	}
 	prefix.Role = strPtr("production-workloads")
-	if err := s.CreatePrefix(ctx, testActor, prefix); err != nil {
+	if err := s.CreatePrefix(ctx, testPermit, prefix); err != nil {
 		t.Fatalf("creating prefix: %v", err)
 	}
 	wider, err := domain.NewPrefix(NewID(), "10.20.0.0/16")
 	if err != nil {
 		t.Fatalf("building wider prefix: %v", err)
 	}
-	if err := s.CreatePrefix(ctx, testActor, wider); err != nil {
+	if err := s.CreatePrefix(ctx, testPermit, wider); err != nil {
 		t.Fatalf("creating wider prefix: %v", err)
 	}
 
@@ -242,7 +242,7 @@ func TestResolveAddress(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building v6 prefix: %v", err)
 			}
-			if err := s.CreatePrefix(ctx, testActor, v6); err != nil {
+			if err := s.CreatePrefix(ctx, testPermit, v6); err != nil {
 				t.Fatalf("creating v6 prefix: %v", err)
 			}
 
@@ -255,7 +255,7 @@ func TestResolveAddress(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building the aligned child: %v", err)
 			}
-			if err := s.CreatePrefix(ctx, testActor, aligned); err != nil {
+			if err := s.CreatePrefix(ctx, testPermit, aligned); err != nil {
 				t.Fatalf("creating the aligned child: %v", err)
 			}
 

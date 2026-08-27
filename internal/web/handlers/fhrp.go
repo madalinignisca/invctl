@@ -95,7 +95,7 @@ func (a *App) FHRPCreate(w http.ResponseWriter, r *http.Request) {
 	group, err := domain.NewFHRPGroup(store.NewID(), formValue(r, "protocol"), *num, formValue(r, "name"))
 	if err == nil {
 		group.Description = optionalString(r, "description")
-		err = a.Store.CreateFHRPGroup(r.Context(), actor(r), group)
+		err = a.Store.CreateFHRPGroup(r.Context(), permit(r), group)
 	}
 	if err != nil {
 		messages, ok := validationErrors(err)
@@ -136,7 +136,7 @@ func (a *App) FHRPMemberAdd(w http.ResponseWriter, r *http.Request) {
 	members = append(members, domain.FHRPMember{
 		GroupID: id, InterfaceID: formValue(r, "interface_id"), Priority: nums.opt("priority"),
 	})
-	if err := a.Store.SetFHRPMembers(r.Context(), actor(r), id, members); err != nil {
+	if err := a.Store.SetFHRPMembers(r.Context(), permit(r), id, members); err != nil {
 		a.handleStoreError(w, r, err)
 		return
 	}
@@ -161,7 +161,7 @@ func (a *App) FHRPMemberRemove(w http.ResponseWriter, r *http.Request) {
 			GroupID: id, InterfaceID: m.InterfaceID, Priority: m.Priority,
 		})
 	}
-	if err := a.Store.SetFHRPMembers(r.Context(), actor(r), id, members); err != nil {
+	if err := a.Store.SetFHRPMembers(r.Context(), permit(r), id, members); err != nil {
 		a.handleStoreError(w, r, err)
 		return
 	}
@@ -171,7 +171,7 @@ func (a *App) FHRPMemberRemove(w http.ResponseWriter, r *http.Request) {
 
 // FHRPRetire withdraws a group.
 func (a *App) FHRPRetire(w http.ResponseWriter, r *http.Request) {
-	if err := a.Store.RetireFHRPGroup(r.Context(), actor(r), r.PathValue("id")); err != nil {
+	if err := a.Store.RetireFHRPGroup(r.Context(), permit(r), r.PathValue("id")); err != nil {
 		a.handleStoreError(w, r, err)
 		return
 	}

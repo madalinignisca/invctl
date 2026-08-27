@@ -38,7 +38,7 @@ func (a *App) IPRangeCreate(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		rng.Role = optionalString(r, "role")
 		rng.Description = optionalString(r, "description")
-		err = a.Store.CreateIPRange(r.Context(), actor(r), rng)
+		err = a.Store.CreateIPRange(r.Context(), permit(r), rng)
 	}
 	if err != nil {
 		messages, ok := validationErrors(err)
@@ -63,7 +63,7 @@ func (a *App) IPRangeCreate(w http.ResponseWriter, r *http.Request) {
 
 // IPRangeRetire withdraws a reservation, returning its space to the allocator.
 func (a *App) IPRangeRetire(w http.ResponseWriter, r *http.Request) {
-	if err := a.Store.RetireIPRange(r.Context(), actor(r), r.PathValue("id")); err != nil {
+	if err := a.Store.RetireIPRange(r.Context(), permit(r), r.PathValue("id")); err != nil {
 		a.handleStoreError(w, r, err)
 		return
 	}

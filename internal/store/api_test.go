@@ -160,7 +160,7 @@ func newAPIFixture(t *testing.T, e Engine) *apiFixture {
 	if err != nil {
 		t.Fatalf("building the virtual address: %v", err)
 	}
-	if err := s.CreateIPAddress(ctx, testActor, vip); err != nil {
+	if err := s.CreateIPAddress(ctx, testPermit, vip); err != nil {
 		t.Fatalf("creating the virtual address: %v", err)
 	}
 	return f
@@ -263,14 +263,14 @@ func (f *apiFixture) address(t *testing.T, host, iface, addr string) string {
 	if err != nil {
 		t.Fatalf("building interface %s: %v", iface, err)
 	}
-	if err := f.s.CreateInterface(f.ctx, testActor, i); err != nil {
+	if err := f.s.CreateInterface(f.ctx, testPermit, i); err != nil {
 		t.Fatalf("creating interface %s: %v", iface, err)
 	}
 	a, err := domain.NewIPAddress(NewID(), addr, &i.ID, domain.IPRolePrimary)
 	if err != nil {
 		t.Fatalf("building address %s: %v", addr, err)
 	}
-	if err := f.s.CreateIPAddress(f.ctx, testActor, a); err != nil {
+	if err := f.s.CreateIPAddress(f.ctx, testPermit, a); err != nil {
 		t.Fatalf("creating address %s: %v", addr, err)
 	}
 	return a.ID
