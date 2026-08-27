@@ -130,6 +130,9 @@ POST /projects/{id}/retire | ProjectRetire | true
 POST /projects/{id}/services | ProjectServiceLink | true
 POST /projects/{id}/services/{serviceID}/retire | ProjectServiceRetire | true
 POST /projects/{id}/tags | ProjectTags | true
+POST /projects/{projectID}/assets/new | AssetCreateInProject | true
+POST /projects/{projectID}/circuits/new | CircuitCreateInProject | true
+POST /projects/{projectID}/services/new | ServiceCreateInProject | true
 POST /providers | ProviderCreate | true
 POST /redundancy | FHRPCreate | true
 POST /redundancy/{id}/journal | JournalCreate | true

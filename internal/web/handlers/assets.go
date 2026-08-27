@@ -16,6 +16,8 @@ import (
 	"net/url"
 	"strconv"
 
+	"github.com/justinas/nosurf"
+
 	"github.com/madalinignisca/invctl/internal/domain"
 	"github.com/madalinignisca/invctl/internal/impact"
 	"github.com/madalinignisca/invctl/internal/store"
@@ -816,6 +818,68 @@ func (a *App) AssetCreate(w http.ResponseWriter, r *http.Request) {
 
 	a.setFlash(r, "success", "Asset "+asset.Name+" created.")
 	render.Redirect(w, r, "/assets/"+asset.ID)
+}
+
+// AssetCreateInProject creates a new asset and links it to the project named
+// in the URL, in one transaction (WP-G1 Task 14, docs/rbac-design.md §4).
+//
+// This is a DIFFERENT route from AssetCreate above, on purpose -- see the
+// comment at the two routes' adjacent registration in routes.go. The project
+// being a PATH parameter rather than a form field is what makes the asset
+// new by construction: there is no id on this form for anything downstream
+// to trust, because store.NewID() below is the only place one is minted.
+func (a *App) AssetCreateInProject(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Could not read that form.", http.StatusBadRequest)
+		return
+	}
+	projectID := r.PathValue("projectID")
+	name := formValue(r, "name")
+	kind := formValue(r, "kind")
+
+	// store.NewID() is the id, unconditionally. Nothing on this form is ever
+	// consulted for one -- see TestNoCreateHandlerReadsAnIdFromTheRequest,
+	// which parses this method's source and fails if it ever names "id" in a
+	// formValue or PathValue call.
+	asset, err := domain.NewAsset(store.NewID(), kind, name, nil, a.Store.Now())
+	if err == nil {
+		asset.Serial = optionalString(r, "serial")
+		asset.AssetTag = optionalString(r, "asset_tag")
+		asset.Vendor = optionalString(r, "vendor")
+		asset.Model = optionalString(r, "model")
+		asset.TeamID = optionalString(r, "team_id")
+		asset.ManagerRole = optionalString(r, "manager_role")
+		asset.EOLDate = optionalString(r, "eol_date")
+		err = a.Store.CreateAssetInProject(r.Context(), a.permit(r), projectID, asset)
+	}
+	if err != nil {
+		messages, ok := validationErrors(err)
+		if !ok {
+			a.handleStoreError(w, r, err)
+			return
+		}
+		a.renderAssetCreateInProjectForm(w, r, projectID, http.StatusUnprocessableEntity, messages, name, kind)
+		return
+	}
+	a.setFlash(r, "success", "Asset "+asset.Name+" created and linked to this project.")
+	render.Redirect(w, r, "/assets/"+asset.ID)
+}
+
+// renderAssetCreateInProjectForm re-renders the create-in-project form
+// standalone, per this codebase's rule that a partial must work without its
+// parent page having rendered first.
+func (a *App) renderAssetCreateInProjectForm(w http.ResponseWriter, r *http.Request, projectID string,
+	status int, errs map[string]string, name, kind string) {
+
+	kinds, err := a.Store.AssetKinds(r.Context())
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
+	a.Render.Partial(w, status, "project_create_form", projectCreateForm{
+		Mode: "asset", ProjectID: projectID, CSRF: nosurf.Token(r),
+		Errors: orEmpty(errs), Kinds: kinds, Name: name, Kind: kind,
+	})
 }
 
 // AssetOccupants records who shares a machine (WP-J5).

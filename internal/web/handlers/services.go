@@ -12,6 +12,8 @@ import (
 	"net/http"
 	"net/url"
 
+	"github.com/justinas/nosurf"
+
 	"github.com/madalinignisca/invctl/internal/domain"
 	"github.com/madalinignisca/invctl/internal/store"
 	"github.com/madalinignisca/invctl/internal/web/render"
@@ -467,6 +469,65 @@ func (a *App) ServiceCreate(w http.ResponseWriter, r *http.Request) {
 
 	a.setFlash(r, "success", "Service "+svc.Code+" created.")
 	render.Redirect(w, r, "/services/"+svc.ID)
+}
+
+// ServiceCreateInProject creates a new service and links it to the project
+// named in the URL, in one transaction (WP-G1 Task 14, docs/rbac-design.md
+// §4). See AssetCreateInProject's comment (assets.go) -- the same shape, the
+// same reason: the project is a path parameter rather than a form field, so
+// the service is new by construction and store.NewID() below is the only
+// place an id is ever minted.
+func (a *App) ServiceCreateInProject(w http.ResponseWriter, r *http.Request) {
+	projectID := r.PathValue("projectID")
+	tier, tierNumeric := intValue(r, "tier", 3)
+	spec := domain.ServiceSpec{
+		Code:          formValue(r, "code"),
+		Name:          formValue(r, "name"),
+		Kind:          formValue(r, "kind"),
+		EnvironmentID: formValue(r, "environment_id"),
+		Availability:  formValue(r, "availability"),
+		Tier:          tier,
+	}
+	if !tierNumeric {
+		a.renderServiceCreateInProjectForm(w, r, projectID, http.StatusUnprocessableEntity,
+			map[string]string{"tier": "must be a whole number"}, spec)
+		return
+	}
+
+	// store.NewID() is the id, unconditionally -- nothing on this form is
+	// ever consulted for one. See TestNoCreateHandlerReadsAnIdFromTheRequest.
+	svc, err := domain.NewService(store.NewID(), spec, a.Store.Now())
+	if err == nil {
+		err = a.Store.CreateServiceInProject(r.Context(), a.permit(r), projectID, svc)
+	}
+	if err != nil {
+		messages, ok := validationErrors(err)
+		if !ok {
+			a.handleStoreError(w, r, err)
+			return
+		}
+		a.renderServiceCreateInProjectForm(w, r, projectID, http.StatusUnprocessableEntity, messages, spec)
+		return
+	}
+	a.setFlash(r, "success", "Service "+svc.Code+" created and linked to this project.")
+	render.Redirect(w, r, "/services/"+svc.ID)
+}
+
+// renderServiceCreateInProjectForm re-renders the create-in-project form
+// standalone, per this codebase's rule that a partial must work without its
+// parent page having rendered first.
+func (a *App) renderServiceCreateInProjectForm(w http.ResponseWriter, r *http.Request, projectID string,
+	status int, errs map[string]string, spec domain.ServiceSpec) {
+
+	kinds, err := a.Store.ServiceKinds(r.Context())
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
+	a.Render.Partial(w, status, "project_create_form", projectCreateForm{
+		Mode: "service", ProjectID: projectID, CSRF: nosurf.Token(r),
+		Errors: orEmpty(errs), Kinds: kinds, Name: spec.Name, Code: spec.Code, Kind: spec.Kind,
+	})
 }
 
 // ServiceUpdate saves field changes.

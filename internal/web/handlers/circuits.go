@@ -12,6 +12,8 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/justinas/nosurf"
+
 	"github.com/madalinignisca/invctl/internal/domain"
 	"github.com/madalinignisca/invctl/internal/store"
 	"github.com/madalinignisca/invctl/internal/web/render"
@@ -168,6 +170,75 @@ func (a *App) CircuitCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	a.setFlash(r, "success", "Circuit "+circuit.CID+" recorded.")
 	render.Redirect(w, r, "/circuits")
+}
+
+// CircuitCreateInProject declares a NEW circuit and links it to the project
+// named in the URL, in one transaction (WP-G1 Task 14, docs/rbac-design.md
+// §4). See AssetCreateInProject's comment (assets.go) -- the same shape, the
+// same reason: the project is a path parameter rather than a form field, so
+// the circuit is new by construction and store.NewID() below is the only
+// place an id is ever minted.
+//
+// Unlike CircuitCreate above, this route mints a real, project-owner-aware
+// permit (a.permit(r)) rather than domain.AdministratorPermit(actor(r)): a
+// project owner reaching this handler is the whole point, and the permit's
+// scope -- not this handler -- is what decides whether the project in the
+// URL is theirs.
+func (a *App) CircuitCreateInProject(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Could not read that form.", http.StatusBadRequest)
+		return
+	}
+	projectID := r.PathValue("projectID")
+	cid := formValue(r, "cid")
+	providerID := formValue(r, "provider_id")
+
+	// store.NewID() is the id, unconditionally. Nothing on this form is ever
+	// consulted for one -- see TestNoCreateHandlerReadsAnIdFromTheRequest.
+	circuit, err := domain.NewCircuit(store.NewID(), cid, providerID)
+	if err == nil {
+		circuit.ServiceType = optionalString(r, "service_type")
+		circuit.CommitMbps = optionalNumbers(r).opt("commit_mbps")
+		circuit.InstallDate = optionalString(r, "install_date")
+		circuit.ContractEnd = optionalString(r, "contract_end")
+		circuit.Description = optionalString(r, "description")
+		err = circuit.Validate()
+		if err == nil {
+			err = a.Store.CreateCircuitInProject(r.Context(), a.permit(r), projectID, circuit)
+		}
+	}
+	if err != nil {
+		messages, ok := validationErrors(err)
+		if !ok {
+			if isConflict(err) {
+				messages = map[string]string{"cid": "that provider already has a circuit with that identifier"}
+			} else {
+				a.handleStoreError(w, r, err)
+				return
+			}
+		}
+		a.renderCircuitCreateInProjectForm(w, r, projectID, http.StatusUnprocessableEntity, messages, cid, providerID)
+		return
+	}
+	a.setFlash(r, "success", "Circuit "+circuit.CID+" recorded and linked to this project.")
+	render.Redirect(w, r, "/circuits/"+circuit.ID)
+}
+
+// renderCircuitCreateInProjectForm re-renders the create-in-project form
+// standalone, per this codebase's rule that a partial must work without its
+// parent page having rendered first.
+func (a *App) renderCircuitCreateInProjectForm(w http.ResponseWriter, r *http.Request, projectID string,
+	status int, errs map[string]string, cid, providerID string) {
+
+	providers, err := a.Store.ListProviders(r.Context())
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
+	a.Render.Partial(w, status, "project_create_form", projectCreateForm{
+		Mode: "circuit", ProjectID: projectID, CSRF: nosurf.Token(r),
+		Errors: orEmpty(errs), Providers: providers, CID: cid, ProviderID: providerID,
+	})
 }
 
 // CircuitRetire ceases a circuit.

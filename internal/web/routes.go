@@ -301,14 +301,31 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	write("POST /projects", app.ProjectCreate)
 	write("POST /projects/{id}", app.ProjectUpdate)
 	write("POST /projects/{id}/retire", app.ProjectRetire)
+	// /assets, /services and /circuits LINK AN EXISTING entity into the
+	// project and stay Administrator-only: an Administrator decides what
+	// enters a project. /assets/new, /services/new and /circuits/new CREATE
+	// a new entity and link it in the same transaction, which is what a
+	// project owner may reach (WP-G1 Task 14, docs/rbac-design.md §4) --
+	// the project owner's ScopedPermit covers the create because the entity
+	// is new by construction of the route (the project is a path parameter,
+	// not a form field, so nothing on the request could name an existing
+	// row to seize). The two must never collide, which is why the create
+	// route carries the "/new" suffix rather than the two being told apart
+	// by who is signed in: an earlier design tried that with mutable
+	// per-transaction state (see domain.scopedPermit's doc comment) and it
+	// was replaced by this routing split precisely so the distinction is
+	// visible here rather than only provable at runtime.
 	write("POST /projects/{id}/assets", app.ProjectAssetLink)
+	write("POST /projects/{projectID}/assets/new", app.AssetCreateInProject)
 	write("POST /projects/{id}/assets/{assetID}/retire", app.ProjectAssetRetire)
 	write("POST /projects/{id}/services", app.ProjectServiceLink)
+	write("POST /projects/{projectID}/services/new", app.ServiceCreateInProject)
 	write("POST /projects/{id}/services/{serviceID}/retire", app.ProjectServiceRetire)
 	// Circuits belong to projects too (WP-I2). Without this the project cost
 	// rollup gathered assets and services and quietly understated every project
 	// that depends on connectivity.
 	write("POST /projects/{id}/circuits", app.ProjectCircuitLink)
+	write("POST /projects/{projectID}/circuits/new", app.CircuitCreateInProject)
 	write("POST /projects/{id}/circuits/{circuitID}/retire", app.ProjectCircuitRetire)
 	write("POST /projects/{id}/tags", app.ProjectTags)
 

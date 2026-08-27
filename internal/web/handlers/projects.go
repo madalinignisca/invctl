@@ -89,6 +89,14 @@ type projectPage struct {
 	AllCircuits []store.CircuitRow
 	Relations   []string
 
+	// Pickers for the create-in-project forms (WP-G1 Task 14). AssetKinds and
+	// ServiceKinds are the same vocabulary queries the plain create pages use;
+	// Providers is already loaded above for the cost panel and is reused here.
+	AssetKinds   []store.VocabularyTerm
+	ServiceKinds []store.VocabularyTerm
+	// CSRF for the create forms is Base.CSRF -- no separate field needed,
+	// the same way the link forms above read .CSRF off the embedded Base.
+
 	// Tags is this project's applied tag set (WP-G4a piece 2,
 	// docs/tags-design.md §4a), the same panel the asset and service pages
 	// render.
@@ -236,6 +244,18 @@ func (a *App) renderProjectWith(w http.ResponseWriter, r *http.Request, status i
 		a.serverError(w, r, err)
 		return
 	}
+	// For the create-in-project forms (WP-G1 Task 14), not the link forms
+	// above -- those pick from AllAssets/AllServices/AllCircuits instead.
+	assetKinds, err := a.Store.AssetKinds(r.Context())
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
+	serviceKinds, err := a.Store.ServiceKinds(r.Context())
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
 
 	base := a.base(r, "Project: "+project.Name, "projects")
 	teams, err := a.Store.TeamOptions(r.Context())
@@ -285,27 +305,29 @@ func (a *App) renderProjectWith(w http.ResponseWriter, r *http.Request, status i
 	}
 
 	a.Render.Respond(w, r, status, "project_detail", "project_panel", projectPage{
-		Providers:   providers,
-		Tags:        tags,
-		Base:        base,
-		Edit:        edit,
-		Teams:       teams,
-		Lifecycles:  domain.ProjectLifecycles,
-		Errors:      orEmpty(errs),
-		Project:     project,
-		Assets:      assets,
-		Services:    services,
-		Circuits:    circuits,
-		Footprint:   footprint,
-		Depends:     depends,
-		Costs:       costs,
-		CostLines:   costLines,
-		CostKinds:   costKinds,
-		CostPeriods: domain.CostPeriods,
-		AllAssets:   allAssets,
-		AllServices: allServices,
-		AllCircuits: allCircuits,
-		Relations:   domain.ProjectRelations,
+		Providers:    providers,
+		Tags:         tags,
+		Base:         base,
+		Edit:         edit,
+		Teams:        teams,
+		Lifecycles:   domain.ProjectLifecycles,
+		Errors:       orEmpty(errs),
+		Project:      project,
+		Assets:       assets,
+		Services:     services,
+		Circuits:     circuits,
+		Footprint:    footprint,
+		Depends:      depends,
+		Costs:        costs,
+		CostLines:    costLines,
+		CostKinds:    costKinds,
+		CostPeriods:  domain.CostPeriods,
+		AllAssets:    allAssets,
+		AllServices:  allServices,
+		AllCircuits:  allCircuits,
+		Relations:    domain.ProjectRelations,
+		AssetKinds:   assetKinds,
+		ServiceKinds: serviceKinds,
 	})
 }
 
