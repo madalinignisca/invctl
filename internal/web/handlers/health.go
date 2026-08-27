@@ -161,7 +161,7 @@ func (a *App) HealthOverrideCreate(w http.ResponseWriter, r *http.Request) {
 		ExpiresAt:     expires,
 	}, actor(r), a.Store.Now())
 	if err == nil {
-		err = a.Store.CreateHealthOverride(r.Context(), permit(r), o)
+		err = a.Store.CreateHealthOverride(r.Context(), a.permit(r), o)
 	}
 	if err != nil {
 		if messages, ok := validationErrors(err); ok {
@@ -205,7 +205,7 @@ func (a *App) HealthOverrideAmend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err = a.Store.AmendHealthOverride(r.Context(), permit(r), id, domain.HealthOverrideSpec{
+	_, err = a.Store.AmendHealthOverride(r.Context(), a.permit(r), id, domain.HealthOverrideSpec{
 		AssertedState: formValue(r, "asserted_state"),
 		Reason:        formValue(r, "reason"),
 		ExpiresAt:     expires,
@@ -236,7 +236,7 @@ func (a *App) HealthOverrideClear(w http.ResponseWriter, r *http.Request) {
 		a.handleStoreError(w, r, err)
 		return
 	}
-	if err := a.Store.ClearHealthOverride(r.Context(), permit(r), id); err != nil {
+	if err := a.Store.ClearHealthOverride(r.Context(), a.permit(r), id); err != nil {
 		if _, ok := validationErrors(err); ok {
 			a.setFlash(r, "error", firstMessage(err, "That override could not be cleared."))
 			render.Redirect(w, r, a.entityURL(r.Context(), existing.EntityType, existing.EntityID))

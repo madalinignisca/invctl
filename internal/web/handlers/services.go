@@ -458,7 +458,7 @@ func (a *App) ServiceCreate(w http.ResponseWriter, r *http.Request) {
 
 	svc, err := domain.NewService(store.NewID(), spec, a.Store.Now())
 	if err == nil {
-		err = a.Store.CreateService(r.Context(), permit(r), svc)
+		err = a.Store.CreateService(r.Context(), a.permit(r), svc)
 	}
 	if err != nil {
 		a.respondServiceFormError(w, r, err, spec)
@@ -510,7 +510,7 @@ func (a *App) ServiceUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := a.Store.UpdateService(r.Context(), permit(r), &updated); err != nil {
+	if err := a.Store.UpdateService(r.Context(), a.permit(r), &updated); err != nil {
 		messages, ok := validationErrors(err)
 		if !ok {
 			switch {
@@ -538,7 +538,7 @@ func (a *App) ServiceUpdate(w http.ResponseWriter, r *http.Request) {
 // ServiceRetire soft-deletes a service.
 func (a *App) ServiceRetire(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if err := a.Store.RetireService(r.Context(), permit(r), id); err != nil {
+	if err := a.Store.RetireService(r.Context(), a.permit(r), id); err != nil {
 		a.handleStoreError(w, r, err)
 		return
 	}
@@ -600,7 +600,7 @@ func (a *App) InstanceCreate(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		si.Role = optionalString(r, "role")
 		si.Shard = optionalString(r, "shard")
-		err = a.Store.CreateInstance(r.Context(), permit(r), si)
+		err = a.Store.CreateInstance(r.Context(), a.permit(r), si)
 	}
 	if err != nil {
 		a.respondInstanceError(w, r, serviceID, err)
@@ -644,7 +644,7 @@ func (a *App) InstanceUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := a.Store.UpdateInstance(r.Context(), permit(r), &updated); err != nil {
+	if err := a.Store.UpdateInstance(r.Context(), a.permit(r), &updated); err != nil {
 		messages, ok := validationErrors(err)
 		if !ok {
 			switch {
@@ -685,7 +685,7 @@ func (a *App) InstanceRetire(w http.ResponseWriter, r *http.Request) {
 		a.handleStoreError(w, r, err)
 		return
 	}
-	if err := a.Store.RetireInstance(r.Context(), permit(r), id); err != nil {
+	if err := a.Store.RetireInstance(r.Context(), a.permit(r), id); err != nil {
 		a.handleStoreError(w, r, err)
 		return
 	}
@@ -750,7 +750,7 @@ func (a *App) EndpointUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := a.Store.UpdateEndpoint(r.Context(), permit(r), &updated); err != nil {
+	if err := a.Store.UpdateEndpoint(r.Context(), a.permit(r), &updated); err != nil {
 		messages, ok := validationErrors(err)
 		if !ok {
 			switch {
@@ -794,7 +794,7 @@ func (a *App) EndpointRetire(w http.ResponseWriter, r *http.Request) {
 		a.handleStoreError(w, r, err)
 		return
 	}
-	if err := a.Store.RetireEndpoint(r.Context(), permit(r), existing.ID); err != nil {
+	if err := a.Store.RetireEndpoint(r.Context(), a.permit(r), existing.ID); err != nil {
 		if isConflict(err) && !isStale(err) {
 			a.setFlash(r, "error",
 				"That endpoint still has something depending on it. Retire the dependency first — "+
@@ -833,7 +833,7 @@ func (a *App) EndpointCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := a.Store.CreateEndpoint(r.Context(), permit(r), e); err != nil {
+	if err := a.Store.CreateEndpoint(r.Context(), a.permit(r), e); err != nil {
 		messages, ok := validationErrors(err)
 		if !ok {
 			if isConflict(err) {

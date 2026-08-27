@@ -77,7 +77,7 @@ var assetImport = importKind{
 		if len(problems) > 0 {
 			return nil, problems, nil
 		}
-		report, err := a.Store.ImportAssets(r.Context(), permit(r), rows, dry)
+		report, err := a.Store.ImportAssets(r.Context(), a.permit(r), rows, dry)
 		return report, nil, err
 	},
 }
@@ -100,7 +100,7 @@ var deviceTypeImport = importKind{
 		if len(problems) > 0 {
 			return nil, problems, nil
 		}
-		report, err := a.Store.ImportDeviceTypes(r.Context(), permit(r), rows, dry)
+		report, err := a.Store.ImportDeviceTypes(r.Context(), a.permit(r), rows, dry)
 		return report, nil, err
 	},
 }
@@ -205,7 +205,16 @@ func (a *App) runImport(w http.ResponseWriter, r *http.Request, kind importKind)
 	// Minted HERE, once, from whoever is signed in for this request -- see
 	// importWork.permit's doc comment for why the runner must not do this
 	// itself later, on context.Background(), with nothing to derive it from.
-	permit := a.Authz.Permit(middleware.UserFrom(r.Context()))
+	permit, err := a.Authz.Permit(r.Context(), middleware.UserFrom(r.Context()))
+	if err != nil {
+		// RequireAdmin has already refused anyone who cannot reach this
+		// handler, so this branch is unreachable today for the same reason
+		// a.permit(r) in app.go is -- see that function's own comment. Failing
+		// closed rather than assuming it cannot happen is the same
+		// discipline every other check in this package applies.
+		a.serverError(w, r, err)
+		return
+	}
 	job := store.ImportJob{
 		ID: store.NewID(), Kind: kind.Slug, Filename: header.Filename,
 		Actor: who.ID, ActorKind: who.Kind, Status: store.ImportQueued,

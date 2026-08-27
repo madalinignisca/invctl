@@ -150,10 +150,23 @@ func TestOnlyTheNamedFunctionsMintAPermit(t *testing.T) {
 			}
 			for _, decl := range f.Decls {
 				fn, ok := decl.(*ast.FuncDecl)
-				if !ok || fn.Type.Results == nil || len(fn.Type.Results.List) != 1 {
+				if !ok || fn.Type.Results == nil {
 					continue
 				}
-				if !returnsPermit(fn.Type.Results.List[0].Type, f.Name.Name) {
+				results := fn.Type.Results.List
+				// One result (every domain.* minter) or two -- a Permit and
+				// an error (auth.Authorizer.Permit, WP-G1 Task 12): a real
+				// derivation of a project owner's scope asks the store, and
+				// a store call that cannot fail is not a store call this
+				// codebase trusts (see CLAUDE.md's "wrap errors" rule).
+				// Anything else is not a minter this test recognises.
+				if len(results) < 1 || len(results) > 2 {
+					continue
+				}
+				if !returnsPermit(results[0].Type, f.Name.Name) {
+					continue
+				}
+				if len(results) == 2 && !isErrorType(results[1].Type) {
 					continue
 				}
 				mname := fn.Name.Name
@@ -217,6 +230,16 @@ func returnsPermit(typeExpr ast.Expr, pkgName string) bool {
 	default:
 		return false
 	}
+}
+
+// isErrorType reports whether typeExpr is the bare identifier "error" --
+// good enough here because the only two-result shape this scan accepts is
+// (domain.Permit, error), and a function returning (domain.Permit,
+// somethingElse) is not one already named in permitMinterNames, so it would
+// fail the "not in permitMinterNames" check below regardless.
+func isErrorType(typeExpr ast.Expr) bool {
+	ident, ok := typeExpr.(*ast.Ident)
+	return ok && ident.Name == "error"
 }
 
 // recvTypeName strips the pointer off a method receiver's type expression, so

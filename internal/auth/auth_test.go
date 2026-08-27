@@ -269,7 +269,7 @@ func TestLoginRecordingIsNotLoadBearing(t *testing.T) {
 }
 
 func TestAuthorizer(t *testing.T) {
-	authz := NewAuthorizer([]string{"gabriel", "Nikolaj", " ingrid "})
+	authz := NewAuthorizer([]string{"gabriel", "Nikolaj", " ingrid "}, nil)
 
 	active := func(name string) *domain.AppUser {
 		return &domain.AppUser{Username: name, IsActive: true}
@@ -304,7 +304,7 @@ func TestAuthorizer(t *testing.T) {
 // TestEmptyAdminListGrantsNothing: a deployment with no admins configured is
 // read-only, not open.
 func TestEmptyAdminListGrantsNothing(t *testing.T) {
-	authz := NewAuthorizer(nil)
+	authz := NewAuthorizer(nil, nil)
 	user := &domain.AppUser{Username: "anyone", IsActive: true}
 
 	if authz.CanWrite(user) {
@@ -320,7 +320,7 @@ func TestEmptyAdminListGrantsNothing(t *testing.T) {
 // becomes an Administrator (docs/rbac-design.md §5) -- the env list is the
 // bootstrap/break-glass, not the everyday mechanism.
 func TestAnAdministratorByRoleMayWriteWithoutBeingNamedInTheEnvironment(t *testing.T) {
-	authz := NewAuthorizer(nil)
+	authz := NewAuthorizer(nil, nil)
 	user := &domain.AppUser{Username: "priya", IsActive: true, Role: domain.RoleAdministrator}
 
 	if !authz.CanWrite(user) {
@@ -334,7 +334,7 @@ func TestAnAdministratorByRoleMayWriteWithoutBeingNamedInTheEnvironment(t *testi
 // if it only seeded the role, §8's recovery path would not work at the
 // moment it is needed.
 func TestAUserNamedInTheEnvironmentIsAnAdministratorWhateverTheirRoleColumnSays(t *testing.T) {
-	authz := NewAuthorizer([]string{"priya"})
+	authz := NewAuthorizer([]string{"priya"}, nil)
 	user := &domain.AppUser{Username: "priya", IsActive: true, Role: domain.RoleObserver}
 
 	if !authz.CanWrite(user) {
@@ -348,7 +348,7 @@ func TestAUserNamedInTheEnvironmentIsAnAdministratorWhateverTheirRoleColumnSays(
 // see the comment on isAdministrator for why the ordering of the two checks
 // is the whole point of this test.
 func TestADeactivatedAdministratorMayNotWriteEvenWhenNamedInTheEnvironment(t *testing.T) {
-	authz := NewAuthorizer([]string{"priya"})
+	authz := NewAuthorizer([]string{"priya"}, nil)
 	user := &domain.AppUser{Username: "priya", IsActive: false, Role: domain.RoleAdministrator}
 
 	if authz.CanWrite(user) {
@@ -359,7 +359,7 @@ func TestADeactivatedAdministratorMayNotWriteEvenWhenNamedInTheEnvironment(t *te
 // TestAnObserverMayReadEverythingAndWriteNothing is the plain baseline the
 // rest of this suite's project-owner tests are contrasted against.
 func TestAnObserverMayReadEverythingAndWriteNothing(t *testing.T) {
-	authz := NewAuthorizer(nil)
+	authz := NewAuthorizer(nil, nil)
 	user := &domain.AppUser{Username: "sam", IsActive: true, Role: domain.RoleObserver}
 
 	if !authz.CanRead(user) {
@@ -380,7 +380,7 @@ func TestAnObserverMayReadEverythingAndWriteNothing(t *testing.T) {
 // them outright. THIS IS NOT A BUG. Do not "fix" a red version of this test
 // by loosening CanWrite -- land Task 13's object-level check first.
 func TestAProjectOwnerCannotWriteAnythingUntilTheObjectGateIsLive(t *testing.T) {
-	authz := NewAuthorizer(nil)
+	authz := NewAuthorizer(nil, nil)
 	user := &domain.AppUser{Username: "priya", IsActive: true, Role: domain.RoleProjectOwner}
 
 	if authz.CanWrite(user) {
@@ -394,7 +394,7 @@ func TestAProjectOwnerCannotWriteAnythingUntilTheObjectGateIsLive(t *testing.T) 
 // owner is assigned to a project, on the shape of the data long before any
 // code consults it for a write decision.
 func TestAProjectOwnerAssignedToAProjectStillCannotWrite(t *testing.T) {
-	authz := NewAuthorizer(nil)
+	authz := NewAuthorizer(nil, nil)
 	user := &domain.AppUser{
 		Username: "priya", IsActive: true, Role: domain.RoleProjectOwner,
 	}
@@ -409,7 +409,7 @@ func TestAProjectOwnerAssignedToAProjectStillCannotWrite(t *testing.T) {
 
 // TestAProjectOwnerSeesCostsOnlyWhenGranted.
 func TestAProjectOwnerSeesCostsOnlyWhenGranted(t *testing.T) {
-	authz := NewAuthorizer(nil)
+	authz := NewAuthorizer(nil, nil)
 	ungranted := &domain.AppUser{Username: "priya", IsActive: true, Role: domain.RoleProjectOwner, CanSeeCosts: false}
 	granted := &domain.AppUser{Username: "priya", IsActive: true, Role: domain.RoleProjectOwner, CanSeeCosts: true}
 
@@ -424,7 +424,7 @@ func TestAProjectOwnerSeesCostsOnlyWhenGranted(t *testing.T) {
 // TestAnObserverSeesCostsOnlyWhenGranted is the corrected rule (spec §3): an
 // earlier draft gave Observers costs implicitly, which this test forbids.
 func TestAnObserverSeesCostsOnlyWhenGranted(t *testing.T) {
-	authz := NewAuthorizer(nil)
+	authz := NewAuthorizer(nil, nil)
 	ungranted := &domain.AppUser{Username: "sam", IsActive: true, Role: domain.RoleObserver, CanSeeCosts: false}
 	granted := &domain.AppUser{Username: "sam", IsActive: true, Role: domain.RoleObserver, CanSeeCosts: true}
 
@@ -443,7 +443,7 @@ func TestAnObserverSeesCostsOnlyWhenGranted(t *testing.T) {
 // exists to serve: a newly hired product owner who must not see costs for a
 // contractual period. A narrower role must never widen what someone can see.
 func TestDemotingAProjectOwnerToObserverNeverWidensTheirCostVisibility(t *testing.T) {
-	authz := NewAuthorizer(nil)
+	authz := NewAuthorizer(nil, nil)
 	asProjectOwner := &domain.AppUser{Username: "priya", IsActive: true, Role: domain.RoleProjectOwner, CanSeeCosts: false}
 	asObserver := &domain.AppUser{Username: "priya", IsActive: true, Role: domain.RoleObserver, CanSeeCosts: false}
 
@@ -458,7 +458,7 @@ func TestDemotingAProjectOwnerToObserverNeverWidensTheirCostVisibility(t *testin
 // TestAnAdministratorSeesCostsWithoutTheGrant: Administrator is the one role
 // that does not consult app_user.can_see_costs at all.
 func TestAnAdministratorSeesCostsWithoutTheGrant(t *testing.T) {
-	authz := NewAuthorizer(nil)
+	authz := NewAuthorizer(nil, nil)
 	user := &domain.AppUser{Username: "gabriel", IsActive: true, Role: domain.RoleAdministrator, CanSeeCosts: false}
 
 	if !authz.CanSeeCosts(user) {

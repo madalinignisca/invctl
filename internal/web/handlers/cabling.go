@@ -49,7 +49,7 @@ func (a *App) PassThroughCreate(w http.ResponseWriter, r *http.Request) {
 		Position:         position,
 	}, a.Store.Now())
 	if err == nil {
-		err = a.Store.CreatePassThrough(r.Context(), permit(r), p)
+		err = a.Store.CreatePassThrough(r.Context(), a.permit(r), p)
 	}
 	if err != nil {
 		if messages, ok := validationErrors(err); ok {
@@ -66,7 +66,7 @@ func (a *App) PassThroughCreate(w http.ResponseWriter, r *http.Request) {
 // PassThroughRetire unpatches a port.
 func (a *App) PassThroughRetire(w http.ResponseWriter, r *http.Request) {
 	assetID := r.PathValue("id")
-	if err := a.Store.RetirePassThrough(r.Context(), permit(r), r.PathValue("patchID")); err != nil {
+	if err := a.Store.RetirePassThrough(r.Context(), a.permit(r), r.PathValue("patchID")); err != nil {
 		a.handleStoreError(w, r, err)
 		return
 	}

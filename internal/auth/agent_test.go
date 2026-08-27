@@ -257,7 +257,7 @@ func TestBearerToken(t *testing.T) {
 // remembering. If a future change gives CanWrite a wider parameter, this
 // comment is where to argue about it.
 func TestAnAgentCannotReachCanWrite(t *testing.T) {
-	authz := NewAuthorizer([]string{"prom-a", "admin"})
+	authz := NewAuthorizer([]string{"prom-a", "admin"}, nil)
 	// Even with the credential id sitting in the admin list -- the exact
 	// misconfiguration rule 6 warns about, and which config refuses at startup
 	// -- there is no user for it, so nothing can be granted.

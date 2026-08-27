@@ -210,7 +210,7 @@ func (a *App) postEntityTags(w http.ResponseWriter, r *http.Request, entityType,
 		newTag, err := domain.NewTag(store.NewID(), newCode, formValue(r, "new_tag_label"),
 			formValue(r, "new_tag_description"), actor(r).ID, a.Store.Now())
 		if err == nil {
-			err = a.Store.CreateTag(r.Context(), permit(r), newTag)
+			err = a.Store.CreateTag(r.Context(), a.permit(r), newTag)
 		}
 		if err != nil {
 			var msgs map[string]string
@@ -241,7 +241,7 @@ func (a *App) postEntityTags(w http.ResponseWriter, r *http.Request, entityType,
 	}
 
 	expected := submittedVersion(r, currentVersion)
-	if err := a.Store.SetEntityTags(r.Context(), permit(r), entityType, entityID, expected, tagIDs); err != nil {
+	if err := a.Store.SetEntityTags(r.Context(), a.permit(r), entityType, entityID, expected, tagIDs); err != nil {
 		switch {
 		case isStale(err):
 			rerender(http.StatusConflict,

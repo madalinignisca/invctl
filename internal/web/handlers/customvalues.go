@@ -356,7 +356,7 @@ func (a *App) postCustomFields(w http.ResponseWriter, r *http.Request, entityTyp
 	// for a form that carried none at all, the same rule submittedVersion
 	// documents for every other editor.
 	expected := submittedVersion(r, currentVersion)
-	if err := a.Store.SetCustomValues(r.Context(), permit(r), entityType, entityID, expected, vals); err != nil {
+	if err := a.Store.SetCustomValues(r.Context(), a.permit(r), entityType, entityID, expected, vals); err != nil {
 		if isStale(err) {
 			rerender(http.StatusConflict, rejected(r, customFieldsEditID(entityID), staleMessage("_form"), fieldNames...))
 			return

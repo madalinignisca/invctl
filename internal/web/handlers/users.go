@@ -168,7 +168,7 @@ func (a *App) UserCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	u.PasswordHash = &hash
 
-	if err := a.Store.CreateUser(r.Context(), permit(r), u); err != nil {
+	if err := a.Store.CreateUser(r.Context(), a.permit(r), u); err != nil {
 		if isConflict(err) {
 			a.renderUserList(w, r, http.StatusUnprocessableEntity,
 				map[string]string{"username": "an account with that username already exists"}, username)
@@ -201,14 +201,14 @@ func (a *App) UserSetRole(w http.ResponseWriter, r *http.Request) {
 // OwnersAlike exists to keep it that way. POST /users/{id}/costs.
 func (a *App) UserSetCosts(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	err := a.Store.SetUserCostVisibility(r.Context(), permit(r), id, checkbox(r, "can_see_costs"))
+	err := a.Store.SetUserCostVisibility(r.Context(), a.permit(r), id, checkbox(r, "can_see_costs"))
 	a.respondUserMutation(w, r, id, err, "Cost visibility updated.")
 }
 
 // UserSetActive activates or deactivates an account. POST /users/{id}/active.
 func (a *App) UserSetActive(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	err := a.Store.SetUserActive(r.Context(), permit(r), id, checkbox(r, "active"))
+	err := a.Store.SetUserActive(r.Context(), a.permit(r), id, checkbox(r, "active"))
 	a.respondUserMutation(w, r, id, err, "Account state updated.")
 }
 
@@ -216,7 +216,7 @@ func (a *App) UserSetActive(w http.ResponseWriter, r *http.Request) {
 // doc comment for what it does and why id is kept. POST /users/{id}/scrub.
 func (a *App) UserScrub(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	err := a.Store.ScrubUser(r.Context(), permit(r), id)
+	err := a.Store.ScrubUser(r.Context(), a.permit(r), id)
 	a.respondUserMutation(w, r, id, err, "Account scrubbed. Its history stays; it no longer names anyone.")
 }
 

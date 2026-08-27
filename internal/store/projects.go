@@ -259,6 +259,62 @@ func (s *SQLStore) ProjectsForCircuits(ctx context.Context, circuitIDs []string)
 	return s.projectsFor(ctx, "project_circuit", "circuit_id", circuitIDs)
 }
 
+// AssetIDsForProjects returns the ids of every asset currently linked --
+// owned or used -- to any of projectIDs. This is the reverse of
+// ProjectsForAssets: that method starts from entity ids and finds their
+// projects for a pill on a page; this one starts from project ids and finds
+// their entities, which is what auth.Authorizer.Permit (WP-G1 Task 12) needs
+// to turn "these are my projects" into "these are the rows I may write".
+// Relation is not filtered to `owns` -- docs/rbac-design.md §4 scopes a
+// project owner's write to entities LINKED to their projects, not only the
+// ones they own outright.
+func (s *SQLStore) AssetIDsForProjects(ctx context.Context, projectIDs []string) ([]string, error) {
+	return s.entityIDsForProjects(ctx, "project_asset", "asset_id", projectIDs)
+}
+
+// ServiceIDsForProjects is the same for services.
+func (s *SQLStore) ServiceIDsForProjects(ctx context.Context, projectIDs []string) ([]string, error) {
+	return s.entityIDsForProjects(ctx, "project_service", "service_id", projectIDs)
+}
+
+// CircuitIDsForProjects is the same for circuits.
+func (s *SQLStore) CircuitIDsForProjects(ctx context.Context, projectIDs []string) ([]string, error) {
+	return s.entityIDsForProjects(ctx, "project_circuit", "circuit_id", projectIDs)
+}
+
+// entityIDsForProjects is shared by the three above -- the mirror image of
+// projectsFor. Lifecycle-filtered the same way: a retired link, or a link
+// into a retired project, must not keep granting write scope over the
+// entity it names. The table and column names are literals from the three
+// call sites, never from a request.
+func (s *SQLStore) entityIDsForProjects(ctx context.Context, table, column string, projectIDs []string) ([]string, error) {
+	if len(projectIDs) == 0 {
+		return nil, nil
+	}
+	seen := make(map[string]bool)
+	var out []string
+	for _, chunk := range chunkIDs(projectIDs) {
+		var ids []string
+		err := s.read(ctx, &ids, `
+			SELECT DISTINCT l.`+column+`
+			FROM `+table+` l
+			JOIN project p ON p.id = l.project_id
+			WHERE l.project_id IN (`+placeholders(len(chunk))+`)
+			  AND l.lifecycle = ? AND p.lifecycle <> ?`,
+			append(anySlice(chunk), domain.LifecycleActive, domain.LifecycleRetired)...)
+		if err != nil {
+			return nil, fmt.Errorf("loading %s ids for projects: %w", table, err)
+		}
+		for _, id := range ids {
+			if !seen[id] {
+				seen[id] = true
+				out = append(out, id)
+			}
+		}
+	}
+	return out, nil
+}
+
 // projectsFor is shared by the three above. The table and column names are
 // literals from the three call sites, never from a request.
 func (s *SQLStore) projectsFor(ctx context.Context, table, column string, ids []string) (map[string][]ProjectLinkRow, error) {

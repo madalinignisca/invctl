@@ -79,7 +79,7 @@ func (a *App) TeamCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	t, err := domain.NewTeam(store.NewID(), spec, a.Store.Now())
 	if err == nil {
-		err = a.Store.CreateTeam(r.Context(), permit(r), t)
+		err = a.Store.CreateTeam(r.Context(), a.permit(r), t)
 	}
 	if err != nil {
 		if errs, ok := validationErrors(err); ok {
@@ -153,7 +153,7 @@ func (a *App) TeamUpdate(w http.ResponseWriter, r *http.Request) {
 	updated.Lifecycle = formValue(r, "lifecycle")
 	updated.RowVersion = submittedVersion(r, updated.RowVersion)
 
-	if err := a.Store.UpdateTeam(r.Context(), permit(r), &updated); err != nil {
+	if err := a.Store.UpdateTeam(r.Context(), a.permit(r), &updated); err != nil {
 		if errs, ok := validationErrors(err); ok {
 			a.renderTeam(w, r, http.StatusUnprocessableEntity, errs)
 			return
@@ -177,7 +177,7 @@ func (a *App) TeamUpdate(w http.ResponseWriter, r *http.Request) {
 // nothing here reassigns anything: see team_reassignment.go's own comment on
 // why RetireTeam must never call it.
 func (a *App) TeamRetire(w http.ResponseWriter, r *http.Request) {
-	if err := a.Store.RetireTeam(r.Context(), permit(r), r.PathValue("id")); err != nil {
+	if err := a.Store.RetireTeam(r.Context(), a.permit(r), r.PathValue("id")); err != nil {
 		a.handleStoreError(w, r, err)
 		return
 	}
@@ -277,7 +277,7 @@ func (a *App) TeamReassignAndRetire(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	who := permit(r)
+	who := a.permit(r)
 	outcomes, err := a.Store.ReassignTeamOwnership(r.Context(), who, id, target)
 	if err != nil {
 		if errs, ok := validationErrors(err); ok {

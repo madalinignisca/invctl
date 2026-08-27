@@ -8,6 +8,8 @@
 
 package domain
 
+import "strings"
+
 // Roles a person is given, replacing "a comma-separated list of usernames in
 // an environment variable grants write to everything" (WP-G1, migration
 // 00058). Nothing in this package consults a role for authorization yet --
@@ -155,12 +157,14 @@ func (e ScopedEntities) covers(entityType, entityID string) bool {
 // Administrator-only regardless of what entities happens to contain, which
 // is what stops a caller from widening the scope by mis-populating the set.
 //
-// projects is kept alongside entities, unused by Covers today, because
-// Task 14's create-and-link routes need to check a NEW entity's declared
-// project against the list the permit was minted with -- a check that has
-// nothing to do with an existing row's id and so cannot be expressed through
-// Covers. Carrying it here now means Task 14 adds a call site, not a new
-// Permit constructor.
+// projects is kept alongside entities for two consumers. Covers itself
+// reads it for exactly one carve-out (see Covers below): the project_asset/
+// project_service/project_circuit link row a create-and-link route writes.
+// Task 14's create-and-link routes ALSO need to check a NEW entity's
+// declared project against this same list before that entity's id even
+// exists -- a check that has nothing to do with an existing row's id and so
+// cannot be expressed through Covers at all. Carrying projects here now
+// means Task 14 adds a call site, not a new Permit constructor.
 func ScopedPermit(a Actor, projects []string, entities ScopedEntities) Permit {
 	// Copied rather than aliased: the permit is immutable for the life of a
 	// request (see the note on scopedPermit below), and a caller holding the
@@ -230,10 +234,63 @@ func (p *scopedPermit) Actor() Actor { return p.actor }
 // names entityType regardless of which of these two reasons produced the
 // refusal.
 func (p *scopedPermit) Covers(entityType, entityID string) bool {
-	if ScopeClassOf(entityType) != ScopeProjectLinked {
-		return false
+	if ScopeClassOf(entityType) == ScopeProjectLinked {
+		return p.entities.covers(entityType, entityID)
 	}
-	return p.entities.covers(entityType, entityID)
+	// The Task 14 carve-out (WP-G1 Task 12, docs/rbac-design.md §4): a
+	// project owner may write the LINK ROW itself -- project_asset,
+	// project_service, project_circuit -- for a project they hold, even
+	// though those three entity types classify as ScopeEstateConfig for
+	// every OTHER write. This is safe only paired with a routing decision
+	// Task 14 owns and this file cannot enforce: Covers cannot tell a
+	// create-and-link from a link-an-existing-entity apart, because both
+	// write the identical "projectID/entityID" audit id (see
+	// internal/store/projects.go's LinkProjectAsset), so the "link an
+	// EXISTING entity into my project" route MUST stay Administrator-only
+	// and must never be reached with a project owner's ScopedPermit -- an
+	// Administrator's permit already Covers everything and needs no carve-out
+	// to reach it. Tested directly at this layer, independent of what any
+	// transaction did, by TestAPermitCoversAProjectLinkRowOnlyForProjectsItHolds.
+	if projectID, ok := projectFromLinkID(entityType, entityID); ok {
+		return p.holdsProject(projectID)
+	}
+	return false
+}
+
+// projectLinkTables are the three join tables whose own change_log id is
+// "projectID/entityID" -- see LinkProjectAsset, LinkProjectService and
+// LinkProjectCircuit in internal/store/projects.go, the only three writers
+// of this id shape.
+var projectLinkTables = map[string]bool{
+	"project_asset":   true,
+	"project_service": true,
+	"project_circuit": true,
+}
+
+// projectFromLinkID splits entityID into the project id half of a
+// project-link row's composite audit id, reporting ok=false for anything
+// that is not one of projectLinkTables or does not carry the "/" separator
+// every real link id has.
+func projectFromLinkID(entityType, entityID string) (projectID string, ok bool) {
+	if !projectLinkTables[entityType] {
+		return "", false
+	}
+	projectID, _, found := strings.Cut(entityID, "/")
+	if !found {
+		return "", false
+	}
+	return projectID, true
+}
+
+// holdsProject reports whether projectID is one this permit was minted
+// with.
+func (p *scopedPermit) holdsProject(projectID string) bool {
+	for _, id := range p.projects {
+		if id == projectID {
+			return true
+		}
+	}
+	return false
 }
 
 func (*scopedPermit) isPermit() {}

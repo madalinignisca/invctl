@@ -98,7 +98,7 @@ func (a *App) JournalCreate(w http.ResponseWriter, r *http.Request) {
 	entry, err := domain.NewJournalEntry(store.NewID(), entityType, entityID,
 		formValue(r, "kind"), formValue(r, "body"), user.ID, a.Store.Now())
 	if err == nil {
-		err = a.Store.CreateJournalEntry(r.Context(), permit(r), entry)
+		err = a.Store.CreateJournalEntry(r.Context(), a.permit(r), entry)
 	}
 	if err != nil {
 		if messages, ok := validationErrors(err); ok {
@@ -139,7 +139,7 @@ func (a *App) JournalUpdate(w http.ResponseWriter, r *http.Request) {
 	updated.Body = formValue(r, "body")
 	updated.RowVersion = submittedVersion(r, updated.RowVersion)
 
-	if err := a.Store.UpdateJournalEntry(r.Context(), permit(r), &updated); err != nil {
+	if err := a.Store.UpdateJournalEntry(r.Context(), a.permit(r), &updated); err != nil {
 		messages, ok := validationErrors(err)
 		if !ok {
 			switch {
@@ -173,7 +173,7 @@ func (a *App) JournalRetire(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	if err := a.Store.RetireJournalEntry(r.Context(), permit(r), existing.ID); err != nil {
+	if err := a.Store.RetireJournalEntry(r.Context(), a.permit(r), existing.ID); err != nil {
 		a.handleStoreError(w, r, err)
 		return
 	}

@@ -78,7 +78,7 @@ func (a *App) ManufacturerCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	m, err := domain.NewManufacturer(store.NewID(), spec, a.Store.Now())
 	if err == nil {
-		err = a.Store.CreateManufacturer(r.Context(), permit(r), m)
+		err = a.Store.CreateManufacturer(r.Context(), a.permit(r), m)
 	}
 	if err != nil {
 		if errs, ok := validationErrors(err); ok {
@@ -106,7 +106,7 @@ func (a *App) ManufacturerUpdate(w http.ResponseWriter, r *http.Request) {
 	updated.Lifecycle = formValue(r, "lifecycle")
 	updated.RowVersion = submittedVersion(r, updated.RowVersion)
 
-	if err := a.Store.UpdateManufacturer(r.Context(), permit(r), &updated); err != nil {
+	if err := a.Store.UpdateManufacturer(r.Context(), a.permit(r), &updated); err != nil {
 		if errs, ok := validationErrors(err); ok {
 			// Back to the row it refused, so a typo is one keystroke to fix
 			// rather than a hunt through the table.
@@ -121,7 +121,7 @@ func (a *App) ManufacturerUpdate(w http.ResponseWriter, r *http.Request) {
 
 // ManufacturerRetire takes a maker off the list.
 func (a *App) ManufacturerRetire(w http.ResponseWriter, r *http.Request) {
-	err := a.Store.RetireManufacturer(r.Context(), permit(r), r.PathValue("id"))
+	err := a.Store.RetireManufacturer(r.Context(), a.permit(r), r.PathValue("id"))
 	if err != nil {
 		// A maker with live models is refused, and the reason is worth saying
 		// out loud rather than as a bare 409: it names what is in the way.
@@ -163,7 +163,7 @@ func (a *App) DeviceTypeCreate(w http.ResponseWriter, r *http.Request) {
 
 	d, err := domain.NewDeviceType(store.NewID(), spec, a.Store.Now())
 	if err == nil {
-		err = a.Store.CreateDeviceType(r.Context(), permit(r), d)
+		err = a.Store.CreateDeviceType(r.Context(), a.permit(r), d)
 	}
 	if err != nil {
 		if errs, ok := validationErrors(err); ok {
@@ -211,7 +211,7 @@ func (a *App) DeviceTypeUpdate(w http.ResponseWriter, r *http.Request) {
 	updated.Lifecycle = formValue(r, "lifecycle")
 	updated.RowVersion = submittedVersion(r, updated.RowVersion)
 
-	if err := a.Store.UpdateDeviceType(r.Context(), permit(r), &updated); err != nil {
+	if err := a.Store.UpdateDeviceType(r.Context(), a.permit(r), &updated); err != nil {
 		if errs, ok := validationErrors(err); ok {
 			a.renderCatalogueEditing(w, r, errs, id)
 			return
@@ -229,7 +229,7 @@ func (a *App) DeviceTypeUpdate(w http.ResponseWriter, r *http.Request) {
 // somebody wanted to say so -- their inherited end-of-support date keeps
 // resolving, which is the point.
 func (a *App) DeviceTypeRetire(w http.ResponseWriter, r *http.Request) {
-	if err := a.Store.RetireDeviceType(r.Context(), permit(r), r.PathValue("id")); err != nil {
+	if err := a.Store.RetireDeviceType(r.Context(), a.permit(r), r.PathValue("id")); err != nil {
 		a.handleStoreError(w, r, err)
 		return
 	}

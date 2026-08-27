@@ -40,7 +40,7 @@ func (a *App) InterfaceCreate(w http.ResponseWriter, r *http.Request) {
 		if msgs := nums.messages(); msgs != nil {
 			err = domain.NewValidationFrom(msgs)
 		} else {
-			err = a.Store.CreateInterface(r.Context(), permit(r), iface)
+			err = a.Store.CreateInterface(r.Context(), a.permit(r), iface)
 		}
 	}
 	if err != nil {
@@ -87,7 +87,7 @@ func (a *App) IPAddressCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	addr, err := domain.NewIPAddress(store.NewID(), formValue(r, "addr_text"), &interfaceID, role)
 	if err == nil {
-		err = a.Store.CreateIPAddress(r.Context(), permit(r), addr)
+		err = a.Store.CreateIPAddress(r.Context(), a.permit(r), addr)
 	}
 	if err != nil {
 		messages, ok := validationErrors(err)
@@ -138,7 +138,7 @@ func (a *App) LinkCreate(w http.ResponseWriter, r *http.Request) {
 		if msgs := nums.messages(); msgs != nil {
 			err = domain.NewValidationFrom(msgs)
 		} else {
-			err = a.Store.CreateLink(r.Context(), permit(r), link)
+			err = a.Store.CreateLink(r.Context(), a.permit(r), link)
 		}
 	}
 	if err != nil {
@@ -181,7 +181,7 @@ func (a *App) LinkRetire(w http.ResponseWriter, r *http.Request) {
 		redirectAssetID = iface.AssetID
 	}
 
-	if err := a.Store.RetireLink(r.Context(), permit(r), id); err != nil {
+	if err := a.Store.RetireLink(r.Context(), a.permit(r), id); err != nil {
 		a.handleStoreError(w, r, err)
 		return
 	}
@@ -283,7 +283,7 @@ func (a *App) PrefixCreate(w http.ResponseWriter, r *http.Request) {
 		if msgs := nums.messages(); msgs != nil {
 			err = domain.NewValidationFrom(msgs)
 		} else {
-			err = a.Store.CreatePrefix(r.Context(), permit(r), prefix)
+			err = a.Store.CreatePrefix(r.Context(), a.permit(r), prefix)
 		}
 	}
 	if err != nil {
@@ -349,7 +349,7 @@ func (a *App) InterfaceUpdate(w http.ResponseWriter, r *http.Request) {
 		if msgs := nums.messages(); msgs != nil {
 			err = domain.NewValidationFrom(msgs)
 		} else {
-			err = a.Store.UpdateInterface(r.Context(), permit(r), &updated)
+			err = a.Store.UpdateInterface(r.Context(), a.permit(r), &updated)
 		}
 	}
 	if err != nil {
@@ -393,7 +393,7 @@ func (a *App) IPAddressUpdate(w http.ResponseWriter, r *http.Request) {
 	updated.RowVersion = submittedVersion(r, updated.RowVersion)
 	err = updated.SetAddress(formValue(r, "addr_text"))
 	if err == nil {
-		err = a.Store.UpdateIPAddress(r.Context(), permit(r), &updated)
+		err = a.Store.UpdateIPAddress(r.Context(), a.permit(r), &updated)
 	}
 	if err != nil {
 		a.refuseAssetEdit(w, r, err, assetID, existing.ID,
@@ -428,7 +428,7 @@ func (a *App) PrefixUpdate(w http.ResponseWriter, r *http.Request) {
 		if msgs := nums.messages(); msgs != nil {
 			err = domain.NewValidationFrom(msgs)
 		} else {
-			err = a.Store.UpdatePrefix(r.Context(), permit(r), &updated)
+			err = a.Store.UpdatePrefix(r.Context(), a.permit(r), &updated)
 		}
 	}
 	if err != nil {

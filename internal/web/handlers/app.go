@@ -684,16 +684,31 @@ func checkbox(r *http.Request, key string) bool {
 
 // permit mints the write authorization handed to store methods.
 //
-// TEMPORARY, per WP-G1 Task 10 (step 6): every route that reaches here already
-// sits behind RequireAdmin (internal/web/routes.go), so handing back an
-// administrator permit changes nothing about who can reach these handlers
-// today -- it only replaces the `domain.AdministratorPermit(actor(r))` that
-// used to be typed out at each of the 148 call sites Task 10 converted from
-// `domain.Actor` to `domain.Permit`. Task 12 is the one that changes this
-// function's body to mint a real, request-scoped, project-owner-aware
-// decision; nothing else about this file should change when it does.
-func permit(r *http.Request) domain.Permit {
-	return domain.AdministratorPermit(actor(r))
+// WP-G1 TASK 12: this is now the one seam every scoped write route goes
+// through. Every call site across this package still says `a.permit(r)` --
+// the same shape Task 10 left them in, `a.permit(r)` reached through the App
+// they already hold -- so wiring a real, request-scoped, project-owner-aware
+// decision in is a change to THIS function's body only. See
+// internal/auth/permit.go's Authorizer.Permit for what "real" means: it asks
+// a.Authz once per request, fresh, and never caches (see that method's own
+// comment for why).
+//
+// The error branch below is fail-closed rather than assumed unreachable: every
+// route that reaches here already sits behind RequireAdmin
+// (internal/web/routes.go), and until Task 13 flips CanWrite for a project
+// owner that means only an Administrator, whom Authorizer.Permit never
+// refuses, can reach this function at all -- so today this branch cannot
+// fire. It is written anyway, and fails to a permit that Covers nothing
+// rather than to domain.AdministratorPermit, because assuming "cannot happen"
+// stays true forever is exactly the assumption WP-G1 exists to stop making.
+func (a *App) permit(r *http.Request) domain.Permit {
+	p, err := a.Authz.Permit(r.Context(), middleware.UserFrom(r.Context()))
+	if err != nil {
+		slog.Error("permit refused for a request behind RequireAdmin",
+			"error", err, "path", r.URL.Path)
+		return domain.ScopedPermit(actor(r), nil, nil)
+	}
+	return p
 }
 
 // actor identifies the signed-in user for the audit trail.

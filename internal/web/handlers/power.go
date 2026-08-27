@@ -108,7 +108,7 @@ func (a *App) PowerPanelCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	p, err := domain.NewPowerPanel(store.NewID(), spec, a.Store.Now())
 	if err == nil {
-		err = a.Store.CreatePowerPanel(r.Context(), permit(r), p)
+		err = a.Store.CreatePowerPanel(r.Context(), a.permit(r), p)
 	}
 	if err != nil {
 		if errs, ok := validationErrors(err); ok {
@@ -156,7 +156,7 @@ func (a *App) PowerSourceCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	src, err := domain.NewPowerSource(store.NewID(), spec, a.Store.Now())
 	if err == nil {
-		err = a.Store.CreatePowerSource(r.Context(), permit(r), src)
+		err = a.Store.CreatePowerSource(r.Context(), a.permit(r), src)
 	}
 	if err != nil {
 		if errs, ok := validationErrors(err); ok {
@@ -197,7 +197,7 @@ func (a *App) PowerSourceImpact(w http.ResponseWriter, r *http.Request) {
 
 // PowerSourceRetire withdraws a supply.
 func (a *App) PowerSourceRetire(w http.ResponseWriter, r *http.Request) {
-	if err := a.Store.RetirePowerSource(r.Context(), permit(r), r.PathValue("id")); err != nil {
+	if err := a.Store.RetirePowerSource(r.Context(), a.permit(r), r.PathValue("id")); err != nil {
 		a.setFlash(r, "error", "That supply still feeds panels or other supplies. "+
 			"Move them first — otherwise the chain behind them could no longer be traced.")
 		render.Redirect(w, r, "/power")
@@ -279,7 +279,7 @@ func (a *App) PowerPanelUpdate(w http.ResponseWriter, r *http.Request) {
 	updated.Notes = optional(formValue(r, "notes"))
 	updated.RowVersion = submittedVersion(r, updated.RowVersion)
 
-	if err := a.Store.UpdatePowerPanel(r.Context(), permit(r), &updated); err != nil {
+	if err := a.Store.UpdatePowerPanel(r.Context(), a.permit(r), &updated); err != nil {
 		if messages, ok := validationErrors(err); ok {
 			a.setFlash(r, "error", "That panel was not accepted: "+joinMessages(messages))
 			render.Redirect(w, r, "/power")
@@ -293,7 +293,7 @@ func (a *App) PowerPanelUpdate(w http.ResponseWriter, r *http.Request) {
 
 // PowerPanelRetire takes a panel out of service.
 func (a *App) PowerPanelRetire(w http.ResponseWriter, r *http.Request) {
-	if err := a.Store.RetirePowerPanel(r.Context(), permit(r), r.PathValue("id")); err != nil {
+	if err := a.Store.RetirePowerPanel(r.Context(), a.permit(r), r.PathValue("id")); err != nil {
 		// A panel with live feeds is refused, and the reason is worth a sentence
 		// rather than a bare 409: it names what is in the way.
 		a.setFlash(r, "error", "That panel still carries feeds. Retire them first.")
@@ -331,7 +331,7 @@ func (a *App) PowerFeedCreate(w http.ResponseWriter, r *http.Request) {
 
 	f, err := domain.NewPowerFeed(store.NewID(), spec, a.Store.Now())
 	if err == nil {
-		err = a.Store.CreatePowerFeed(r.Context(), permit(r), f)
+		err = a.Store.CreatePowerFeed(r.Context(), a.permit(r), f)
 	}
 	if err != nil {
 		if errs, ok := validationErrors(err); ok {
@@ -346,7 +346,7 @@ func (a *App) PowerFeedCreate(w http.ResponseWriter, r *http.Request) {
 
 // PowerFeedRetire withdraws a circuit.
 func (a *App) PowerFeedRetire(w http.ResponseWriter, r *http.Request) {
-	if err := a.Store.RetirePowerFeed(r.Context(), permit(r), r.PathValue("id")); err != nil {
+	if err := a.Store.RetirePowerFeed(r.Context(), a.permit(r), r.PathValue("id")); err != nil {
 		a.setFlash(r, "error", "That feed still carries inputs. Disconnect them first — "+
 			"otherwise the assets on it would claim power from a circuit this model says is gone.")
 		render.Redirect(w, r, "/power")
@@ -407,7 +407,7 @@ func (a *App) PowerInputCreate(w http.ResponseWriter, r *http.Request) {
 		Notes:   optional(formValue(r, "notes")),
 	}, a.Store.Now())
 	if err == nil {
-		err = a.Store.CreatePowerInput(r.Context(), permit(r), i)
+		err = a.Store.CreatePowerInput(r.Context(), a.permit(r), i)
 	}
 	if err != nil {
 		if messages, ok := validationErrors(err); ok {
@@ -428,7 +428,7 @@ func (a *App) PowerInputCreate(w http.ResponseWriter, r *http.Request) {
 // PowerInputRetire unplugs one.
 func (a *App) PowerInputRetire(w http.ResponseWriter, r *http.Request) {
 	assetID := r.PathValue("id")
-	if err := a.Store.RetirePowerInput(r.Context(), permit(r), r.PathValue("inputID")); err != nil {
+	if err := a.Store.RetirePowerInput(r.Context(), a.permit(r), r.PathValue("inputID")); err != nil {
 		a.handleStoreError(w, r, err)
 		return
 	}

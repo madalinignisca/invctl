@@ -141,7 +141,7 @@ func (a *App) ClusterCreate(w http.ResponseWriter, r *http.Request) {
 		}
 		err = c.Validate()
 		if err == nil {
-			err = a.Store.CreateCluster(r.Context(), permit(r), c)
+			err = a.Store.CreateCluster(r.Context(), a.permit(r), c)
 		}
 	}
 	if err != nil {
@@ -210,7 +210,7 @@ func (a *App) ClusterUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	updated.RowVersion = submittedVersion(r, updated.RowVersion)
 
-	if err := a.Store.UpdateCluster(r.Context(), permit(r), &updated); err != nil {
+	if err := a.Store.UpdateCluster(r.Context(), a.permit(r), &updated); err != nil {
 		a.handleStoreError(w, r, err)
 		return
 	}
@@ -232,7 +232,7 @@ func (a *App) ClusterSetHosts(w http.ResponseWriter, r *http.Request) {
 		}
 		members = append(members, domain.ClusterMember{ClusterID: id, AssetID: assetID})
 	}
-	if err := a.Store.SetClusterMembers(r.Context(), permit(r), id, members); err != nil {
+	if err := a.Store.SetClusterMembers(r.Context(), a.permit(r), id, members); err != nil {
 		a.handleStoreError(w, r, err)
 		return
 	}
@@ -242,7 +242,7 @@ func (a *App) ClusterSetHosts(w http.ResponseWriter, r *http.Request) {
 
 // ClusterRetire withdraws a cluster.
 func (a *App) ClusterRetire(w http.ResponseWriter, r *http.Request) {
-	if err := a.Store.RetireCluster(r.Context(), permit(r), r.PathValue("id")); err != nil {
+	if err := a.Store.RetireCluster(r.Context(), a.permit(r), r.PathValue("id")); err != nil {
 		a.handleStoreError(w, r, err)
 		return
 	}

@@ -152,18 +152,52 @@ func (c *Chain) Authenticate(ctx context.Context, username, password string) (*d
 	return nil, lastCredentialErr
 }
 
-// Authorizer decides what a user may do.
-type Authorizer struct {
-	admins map[string]bool
+// ProjectResolver is the narrow slice of the store that Authorizer.Permit
+// needs (WP-G1 Task 12) to turn "this person is a project owner" into "these
+// are the rows they may write": the projects a user is assigned to, and the
+// entities each of the three project-linkable types (asset, service,
+// circuit -- docs/rbac-design.md §4) currently links to those projects.
+//
+// A NARROW INTERFACE, not *store.SQLStore, for the same reason UserStore
+// above is narrow: this package must not need to know the store's full
+// surface to authorize a request, and a fake satisfying four methods is what
+// keeps permit_test.go from needing a real database.
+type ProjectResolver interface {
+	// ProjectsForUser returns the ids of projects userID currently holds an
+	// active assignment to, in a project that is itself not retired --
+	// internal/store/user_projects.go's ProjectsForUser.
+	ProjectsForUser(ctx context.Context, userID string) ([]string, error)
+	// AssetIDsForProjects, ServiceIDsForProjects and CircuitIDsForProjects
+	// each return the ids of every entity of that type currently linked
+	// (owned or used) to any of projectIDs. Not filtered to `owns`:
+	// docs/rbac-design.md §4 scopes a project owner's write to entities
+	// LINKED to their projects, not only the ones they own outright.
+	AssetIDsForProjects(ctx context.Context, projectIDs []string) ([]string, error)
+	ServiceIDsForProjects(ctx context.Context, projectIDs []string) ([]string, error)
+	CircuitIDsForProjects(ctx context.Context, projectIDs []string) ([]string, error)
 }
 
-// NewAuthorizer builds the POC authorization model from a username list.
-func NewAuthorizer(adminUsers []string) *Authorizer {
+// Authorizer decides what a user may do.
+type Authorizer struct {
+	admins   map[string]bool
+	projects ProjectResolver
+}
+
+// NewAuthorizer builds the POC authorization model from a username list and
+// the store slice Permit needs to derive a project owner's scope.
+//
+// projects may be nil for a caller that never mints a Permit for a project
+// owner -- every existing call site before Task 12 only ever asked CanWrite/
+// CanSeeCosts/IsAdministrator, none of which touch it -- but a real deployment
+// wires the actual store here (cmd/invctl/main.go), because Permit calls
+// straight through to it with no caching (see that method's own comment for
+// why: a cached permission set is a stale permission set).
+func NewAuthorizer(adminUsers []string, projects ProjectResolver) *Authorizer {
 	admins := make(map[string]bool, len(adminUsers))
 	for _, u := range adminUsers {
 		admins[strings.ToLower(strings.TrimSpace(u))] = true
 	}
-	return &Authorizer{admins: admins}
+	return &Authorizer{admins: admins, projects: projects}
 }
 
 // isAdministrator reports whether user has full Administrator authority --

@@ -71,7 +71,7 @@ func (a *App) InflationSet(w http.ResponseWriter, r *http.Request) {
 	rate := &domain.InflationRate{
 		Year: year, BasisPoints: bp, Source: optional(formValue(r, "source")),
 	}
-	if err := a.Store.SetInflationRate(r.Context(), permit(r), rate); err != nil {
+	if err := a.Store.SetInflationRate(r.Context(), a.permit(r), rate); err != nil {
 		var ve *domain.ValidationError
 		if errors.As(err, &ve) {
 			a.renderInflation(w, r, http.StatusUnprocessableEntity, ve.Messages())

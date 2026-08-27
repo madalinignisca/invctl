@@ -320,7 +320,7 @@ func newHarnessSecure(t *testing.T, creds []config.AgentCredential, readerCreds 
 	}
 
 	cfg := &config.Config{AdminUsers: []string{"admin"}, AuthLocal: true, SecureCookies: secure}
-	authz := auth.NewAuthorizer(cfg.AdminUsers)
+	authz := auth.NewAuthorizer(cfg.AdminUsers, st)
 
 	app := &handlers.App{
 		Store:    st,

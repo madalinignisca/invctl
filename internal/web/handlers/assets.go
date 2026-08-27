@@ -84,7 +84,7 @@ func (a *App) EnvironmentCreate(w http.ResponseWriter, r *http.Request) {
 	env, err := domain.NewEnvironment(store.NewID(), form.Code, form.Name, form.Role,
 		form.InScope, form.Criticality, a.Store.Now())
 	if err == nil {
-		err = a.Store.CreateEnvironment(r.Context(), permit(r), env)
+		err = a.Store.CreateEnvironment(r.Context(), a.permit(r), env)
 	}
 	if err != nil {
 		// A validation failure re-renders the form with error state and
@@ -137,7 +137,7 @@ func (a *App) EnvironmentUpdate(w http.ResponseWriter, r *http.Request) {
 	updated.Criticality = criticality
 	updated.RowVersion = submittedVersion(r, updated.RowVersion)
 
-	if err := a.Store.UpdateEnvironment(r.Context(), permit(r), &updated); err != nil {
+	if err := a.Store.UpdateEnvironment(r.Context(), a.permit(r), &updated); err != nil {
 		messages, ok := validationErrors(err)
 		if !ok {
 			switch {
@@ -803,7 +803,7 @@ func (a *App) AssetCreate(w http.ResponseWriter, r *http.Request) {
 		asset.TeamID = optionalString(r, "team_id")
 		asset.ManagerRole = optionalString(r, "manager_role")
 		asset.EOLDate = optionalString(r, "eol_date")
-		err = a.Store.CreateAsset(r.Context(), permit(r), asset, submittedEnvironments(r))
+		err = a.Store.CreateAsset(r.Context(), a.permit(r), asset, submittedEnvironments(r))
 	}
 	if err != nil {
 		if messages, ok := validationErrors(err); ok {
@@ -846,7 +846,7 @@ func (a *App) AssetOccupants(w http.ResponseWriter, r *http.Request) {
 		render.Redirect(w, r, "/assets/"+id)
 		return
 	}
-	if err := a.Store.SetOccupants(r.Context(), permit(r), id, occupants); err != nil {
+	if err := a.Store.SetOccupants(r.Context(), a.permit(r), id, occupants); err != nil {
 		if _, ok := validationErrors(err); ok {
 			a.setFlash(r, "error", firstMessage(err,
 				"That set of shares was refused."))
@@ -880,7 +880,7 @@ func (a *App) AssetStorageClaim(w http.ResponseWriter, r *http.Request) {
 		render.Redirect(w, r, "/assets/"+id)
 		return
 	}
-	err := a.Store.SetStorageClaim(r.Context(), permit(r), id,
+	err := a.Store.SetStorageClaim(r.Context(), a.permit(r), id,
 		formValue(r, "pool_id"), *gb, optionalString(r, "note"))
 	if err != nil {
 		if errors.Is(err, domain.ErrInvalid) {
@@ -979,7 +979,7 @@ func (a *App) AssetUpdate(w http.ResponseWriter, r *http.Request) {
 	updated.EOLDate = optionalString(r, "eol_date")
 	updated.RowVersion = submittedVersion(r, updated.RowVersion)
 
-	if err := a.Store.UpdateAsset(r.Context(), permit(r), &updated, submittedEnvironments(r)); err != nil {
+	if err := a.Store.UpdateAsset(r.Context(), a.permit(r), &updated, submittedEnvironments(r)); err != nil {
 		messages, ok := validationErrors(err)
 		if !ok {
 			switch {
@@ -1010,7 +1010,7 @@ func (a *App) AssetUpdate(w http.ResponseWriter, r *http.Request) {
 // AssetRetire soft-deletes an asset. There is no hard delete anywhere.
 func (a *App) AssetRetire(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if err := a.Store.RetireAsset(r.Context(), permit(r), id); err != nil {
+	if err := a.Store.RetireAsset(r.Context(), a.permit(r), id); err != nil {
 		a.handleStoreError(w, r, err)
 		return
 	}
@@ -1024,7 +1024,7 @@ func (a *App) AssetReparent(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	parentID := optionalString(r, "parent_id")
 
-	if err := a.Store.ReparentAsset(r.Context(), permit(r), id, parentID); err != nil {
+	if err := a.Store.ReparentAsset(r.Context(), a.permit(r), id, parentID); err != nil {
 		if messages, ok := validationErrors(err); ok {
 			text := "That move is not allowed."
 			for _, m := range messages {

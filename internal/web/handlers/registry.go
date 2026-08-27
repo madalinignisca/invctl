@@ -66,7 +66,7 @@ func (a *App) AggregateCreate(w http.ResponseWriter, r *http.Request) {
 		agg.RIRID = optionalString(r, "rir_id")
 		agg.AllocatedOn = optionalString(r, "allocated_on")
 		agg.Description = optionalString(r, "description")
-		err = a.Store.CreateAggregate(r.Context(), permit(r), agg)
+		err = a.Store.CreateAggregate(r.Context(), a.permit(r), agg)
 	}
 	if err != nil {
 		messages, ok := validationErrors(err)
@@ -87,7 +87,7 @@ func (a *App) AggregateCreate(w http.ResponseWriter, r *http.Request) {
 
 // AggregateRetire withdraws a delegation.
 func (a *App) AggregateRetire(w http.ResponseWriter, r *http.Request) {
-	if err := a.Store.RetireAggregate(r.Context(), permit(r), r.PathValue("id")); err != nil {
+	if err := a.Store.RetireAggregate(r.Context(), a.permit(r), r.PathValue("id")); err != nil {
 		a.handleStoreError(w, r, err)
 		return
 	}
@@ -112,7 +112,7 @@ func (a *App) ASNCreate(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		asn.Name = optionalString(r, "name")
 		asn.RIRID = optionalString(r, "rir_id")
-		err = a.Store.CreateASN(r.Context(), permit(r), asn)
+		err = a.Store.CreateASN(r.Context(), a.permit(r), asn)
 	}
 	if err != nil {
 		messages, ok := validationErrors(err)
@@ -133,7 +133,7 @@ func (a *App) ASNCreate(w http.ResponseWriter, r *http.Request) {
 
 // ASNRetire withdraws an autonomous system number.
 func (a *App) ASNRetire(w http.ResponseWriter, r *http.Request) {
-	if err := a.Store.RetireASN(r.Context(), permit(r), r.PathValue("id")); err != nil {
+	if err := a.Store.RetireASN(r.Context(), a.permit(r), r.PathValue("id")); err != nil {
 		a.handleStoreError(w, r, err)
 		return
 	}

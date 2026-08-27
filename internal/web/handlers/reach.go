@@ -183,7 +183,7 @@ func (a *App) NetworkGroupCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	g, err := domain.NewNetGroup(store.NewID(), spec, a.Store.Now())
 	if err == nil {
-		err = a.Store.CreateNetGroup(r.Context(), permit(r), g)
+		err = a.Store.CreateNetGroup(r.Context(), a.permit(r), g)
 	}
 	if err != nil {
 		messages, ok := validationErrors(err)
@@ -211,7 +211,7 @@ func (a *App) NetworkGroupMemberCreate(w http.ResponseWriter, r *http.Request) {
 	groupID := r.PathValue("id")
 	m, err := domain.NewNetGroupMember(groupID, formValue(r, "asset_id"), formValue(r, "role"), a.Store.Now())
 	if err == nil {
-		err = a.Store.AddNetGroupMember(r.Context(), permit(r), m)
+		err = a.Store.AddNetGroupMember(r.Context(), a.permit(r), m)
 	}
 	if err != nil {
 		messages, ok := validationErrors(err)
@@ -240,7 +240,7 @@ func (a *App) NetworkUplinkCreate(w http.ResponseWriter, r *http.Request) {
 	u, err := domain.NewNetUplink(store.NewID(), groupID, formValue(r, "upstream_group_id"),
 		formValue(r, "plane"), a.Store.Now())
 	if err == nil {
-		err = a.Store.CreateNetUplink(r.Context(), permit(r), u)
+		err = a.Store.CreateNetUplink(r.Context(), a.permit(r), u)
 	}
 	if err != nil {
 		messages, ok := validationErrors(err)
@@ -274,7 +274,7 @@ func (a *App) NetworkAttachmentCreate(w http.ResponseWriter, r *http.Request) {
 	na, err := domain.NewNetAttachment(store.NewID(), formValue(r, "asset_id"), formValue(r, "group_id"),
 		formValue(r, "plane"), a.Store.Now())
 	if err == nil {
-		err = a.Store.CreateNetAttachment(r.Context(), permit(r), na, nil)
+		err = a.Store.CreateNetAttachment(r.Context(), a.permit(r), na, nil)
 	}
 	if err != nil {
 		messages, ok := validationErrors(err)
@@ -302,7 +302,7 @@ func (a *App) NetworkAnchorCreate(w http.ResponseWriter, r *http.Request) {
 	na, err := domain.NewNetAnchor(store.NewID(), formValue(r, "code"), formValue(r, "name"),
 		formValue(r, "scope"), formValue(r, "group_id"), a.Store.Now())
 	if err == nil {
-		err = a.Store.CreateNetAnchor(r.Context(), permit(r), na)
+		err = a.Store.CreateNetAnchor(r.Context(), a.permit(r), na)
 	}
 	if err != nil {
 		messages, ok := validationErrors(err)

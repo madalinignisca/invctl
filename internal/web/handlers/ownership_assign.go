@@ -136,7 +136,7 @@ func (a *App) OwnershipAssign(w http.ResponseWriter, r *http.Request) {
 	teamID := formValue(r, "team_id")
 	ids := r.PostForm["ids"]
 
-	outcomes, err := a.Store.BulkAssignOwnership(r.Context(), permit(r), entityType, ids, teamID)
+	outcomes, err := a.Store.BulkAssignOwnership(r.Context(), a.permit(r), entityType, ids, teamID)
 	if err != nil {
 		if errors.Is(err, domain.ErrInvalid) {
 			a.renderOwnershipAssignRefusal(w, r, entityType, refusalMessage(entityType, ids, teamID))

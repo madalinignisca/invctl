@@ -101,7 +101,7 @@ func (a *App) bulkApplyTag(w http.ResponseWriter, r *http.Request, entityType, e
 	tagID := formValue(r, "tag_id")
 	selections := parseTagSelections(r)
 
-	outcomes, err := a.Store.ApplyTagToSelection(r.Context(), permit(r), entityType, tagID, selections)
+	outcomes, err := a.Store.ApplyTagToSelection(r.Context(), a.permit(r), entityType, tagID, selections)
 	if err != nil {
 		if errors.Is(err, domain.ErrInvalid) {
 			// err.Error() is operator-safe here: every domain.ErrInvalid

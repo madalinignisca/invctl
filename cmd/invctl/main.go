@@ -230,7 +230,7 @@ func run() error {
 		Render:   renderer,
 		Sessions: sessions,
 		Auth:     authenticator,
-		Authz:    auth.NewAuthorizer(cfg.AdminUsers),
+		Authz:    auth.NewAuthorizer(cfg.AdminUsers, st),
 		Config:   cfg,
 	}
 
@@ -335,7 +335,7 @@ func resolvePruneOperator(ctx context.Context, st *store.SQLStore, cfg *config.C
 	if err != nil {
 		return nil, fmt.Errorf("pruning: %w", err)
 	}
-	if !auth.NewAuthorizer(cfg.AdminUsers).CanWrite(user) {
+	if !auth.NewAuthorizer(cfg.AdminUsers, st).CanWrite(user) {
 		return nil, fmt.Errorf("pruning: %s does not have write access, "+
 			"so the audit entry would name somebody who could not have done this", user.Username)
 	}
@@ -373,7 +373,7 @@ func pruneObservedTransitions(ctx context.Context, st *store.SQLStore, cfg *conf
 	if err != nil {
 		return fmt.Errorf("pruning observed transitions: %w", err)
 	}
-	if !auth.NewAuthorizer(cfg.AdminUsers).CanWrite(user) {
+	if !auth.NewAuthorizer(cfg.AdminUsers, st).CanWrite(user) {
 		return fmt.Errorf("pruning observed transitions: %s does not have write access, "+
 			"so the audit entry would name somebody who could not have done this", user.Username)
 	}

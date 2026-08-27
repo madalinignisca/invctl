@@ -145,7 +145,7 @@ func (a *App) ProjectCreate(w http.ResponseWriter, r *http.Request) {
 		a.serverError(w, r, err)
 		return
 	}
-	if err := a.Store.CreateProject(r.Context(), permit(r), p); err != nil {
+	if err := a.Store.CreateProject(r.Context(), a.permit(r), p); err != nil {
 		if errs, ok := validationErrors(err); ok {
 			a.renderProjectList(w, r, http.StatusUnprocessableEntity, errs, spec)
 			return
@@ -346,7 +346,7 @@ func (a *App) ProjectUpdate(w http.ResponseWriter, r *http.Request) {
 	// NewProject builds a fresh struct, so the version has to be restored
 	// explicitly -- a zero here would conflict with every row on earth.
 	updated.RowVersion = submittedVersion(r, existing.RowVersion)
-	if err := a.Store.UpdateProject(r.Context(), permit(r), updated); err != nil {
+	if err := a.Store.UpdateProject(r.Context(), a.permit(r), updated); err != nil {
 		messages, ok := validationErrors(err)
 		if !ok {
 			switch {
@@ -368,7 +368,7 @@ func (a *App) ProjectUpdate(w http.ResponseWriter, r *http.Request) {
 // ProjectRetire soft-deletes a project and releases its links.
 func (a *App) ProjectRetire(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if err := a.Store.RetireProject(r.Context(), permit(r), id); err != nil {
+	if err := a.Store.RetireProject(r.Context(), a.permit(r), id); err != nil {
 		a.handleStoreError(w, r, err)
 		return
 	}
@@ -389,7 +389,7 @@ func (a *App) ProjectAssetLink(w http.ResponseWriter, r *http.Request) {
 		a.linkFailed(w, r, err, "asset_id")
 		return
 	}
-	if err := a.Store.LinkProjectAsset(r.Context(), permit(r), link); err != nil {
+	if err := a.Store.LinkProjectAsset(r.Context(), a.permit(r), link); err != nil {
 		a.linkFailed(w, r, err, "asset_id")
 		return
 	}
@@ -405,7 +405,7 @@ func (a *App) ProjectServiceLink(w http.ResponseWriter, r *http.Request) {
 		a.linkFailed(w, r, err, "service_id")
 		return
 	}
-	if err := a.Store.LinkProjectService(r.Context(), permit(r), link); err != nil {
+	if err := a.Store.LinkProjectService(r.Context(), a.permit(r), link); err != nil {
 		a.linkFailed(w, r, err, "service_id")
 		return
 	}
@@ -431,7 +431,7 @@ func (a *App) linkFailed(w http.ResponseWriter, r *http.Request, err error, fiel
 // ProjectAssetRetire releases one asset link.
 func (a *App) ProjectAssetRetire(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if err := a.Store.RetireProjectAsset(r.Context(), permit(r), id, r.PathValue("assetID")); err != nil {
+	if err := a.Store.RetireProjectAsset(r.Context(), a.permit(r), id, r.PathValue("assetID")); err != nil {
 		a.handleStoreError(w, r, err)
 		return
 	}
@@ -447,7 +447,7 @@ func (a *App) ProjectCircuitLink(w http.ResponseWriter, r *http.Request) {
 		a.linkFailed(w, r, err, "circuit_id")
 		return
 	}
-	if err := a.Store.LinkProjectCircuit(r.Context(), permit(r), link); err != nil {
+	if err := a.Store.LinkProjectCircuit(r.Context(), a.permit(r), link); err != nil {
 		a.linkFailed(w, r, err, "circuit_id")
 		return
 	}
@@ -457,7 +457,7 @@ func (a *App) ProjectCircuitLink(w http.ResponseWriter, r *http.Request) {
 // ProjectCircuitRetire releases one circuit link.
 func (a *App) ProjectCircuitRetire(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if err := a.Store.RetireProjectCircuit(r.Context(), permit(r), id, r.PathValue("circuitID")); err != nil {
+	if err := a.Store.RetireProjectCircuit(r.Context(), a.permit(r), id, r.PathValue("circuitID")); err != nil {
 		a.handleStoreError(w, r, err)
 		return
 	}
@@ -467,7 +467,7 @@ func (a *App) ProjectCircuitRetire(w http.ResponseWriter, r *http.Request) {
 // ProjectServiceRetire releases one service link.
 func (a *App) ProjectServiceRetire(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if err := a.Store.RetireProjectService(r.Context(), permit(r), id, r.PathValue("serviceID")); err != nil {
+	if err := a.Store.RetireProjectService(r.Context(), a.permit(r), id, r.PathValue("serviceID")); err != nil {
 		a.handleStoreError(w, r, err)
 		return
 	}

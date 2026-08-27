@@ -138,7 +138,7 @@ func (a *App) VLANCreate(w http.ResponseWriter, r *http.Request) {
 		vlan.Role = optionalString(r, "role")
 		vlan.EnvironmentID = optionalString(r, "environment_id")
 		vlan.Description = optionalString(r, "description")
-		err = a.Store.CreateVLAN(r.Context(), permit(r), vlan)
+		err = a.Store.CreateVLAN(r.Context(), a.permit(r), vlan)
 	}
 	if err != nil {
 		messages, ok := validationErrors(err)
@@ -171,7 +171,7 @@ func (a *App) VLANPortAdd(w http.ResponseWriter, r *http.Request) {
 	if mode != domain.VLANModeTagged && mode != domain.VLANModeUntagged {
 		mode = domain.VLANModeUntagged
 	}
-	err := a.Store.AddPortToVLAN(r.Context(), permit(r), vlanID, formValue(r, "interface_id"), mode)
+	err := a.Store.AddPortToVLAN(r.Context(), a.permit(r), vlanID, formValue(r, "interface_id"), mode)
 	if err != nil {
 		a.handleStoreError(w, r, err)
 		return
@@ -183,7 +183,7 @@ func (a *App) VLANPortAdd(w http.ResponseWriter, r *http.Request) {
 // VLANPortRemove takes a port out of this VLAN.
 func (a *App) VLANPortRemove(w http.ResponseWriter, r *http.Request) {
 	vlanID := r.PathValue("id")
-	err := a.Store.RemovePortFromVLAN(r.Context(), permit(r), vlanID, r.PathValue("ifaceID"))
+	err := a.Store.RemovePortFromVLAN(r.Context(), a.permit(r), vlanID, r.PathValue("ifaceID"))
 	if err != nil {
 		a.handleStoreError(w, r, err)
 		return
@@ -194,7 +194,7 @@ func (a *App) VLANPortRemove(w http.ResponseWriter, r *http.Request) {
 
 // VLANRetire withdraws a broadcast domain, refusing while anything is on it.
 func (a *App) VLANRetire(w http.ResponseWriter, r *http.Request) {
-	if err := a.Store.RetireVLAN(r.Context(), permit(r), r.PathValue("id")); err != nil {
+	if err := a.Store.RetireVLAN(r.Context(), a.permit(r), r.PathValue("id")); err != nil {
 		a.handleStoreError(w, r, err)
 		return
 	}
