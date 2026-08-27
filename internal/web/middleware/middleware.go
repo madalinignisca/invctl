@@ -210,6 +210,41 @@ func RequireAdmin(authz *auth.Authorizer) func(http.Handler) http.Handler {
 	}
 }
 
+// RequireAdministrator rejects anyone who is not a full Administrator, even a
+// project owner for whom authz.CanWrite is true.
+//
+// WP-G1 Task 15, F2: import writes create every row fresh (ImportAssetsBatched
+// mints a new id per line -- internal/store/import_*.go), so a project owner's
+// ScopedPermit -- built from their EXISTING project_asset/project_service
+// membership, per auth.Authorizer.Permit -- cannot cover a single one of
+// them. Once CanWrite(RoleProjectOwner) is true (Task 13), RequireAdmin alone
+// would let a project owner open this form and watch every row it submits
+// come back refused: the seam fails closed, so nothing is created out of
+// scope, but the form itself is then a trap rather than a tool. Routing
+// keeps the import surface Administrator-only explicitly, the same way
+// docs/rbac-design.md §4 keeps "link an existing entity" Administrator-only
+// -- not because Covers cannot be trusted, but because there is no scope
+// under which this route could ever succeed for a project owner, and a
+// route that can never succeed for a role should not be reachable by it.
+func RequireAdministrator(authz *auth.Authorizer) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			user := UserFrom(r.Context())
+			if user == nil {
+				render.Redirect(w, r, "/login?next="+url.QueryEscape(r.URL.Path))
+				return
+			}
+			if !authz.IsAdministrator(user) {
+				auth.LogSecurityEvent(r.Context(), slog.LevelWarn, auth.EventWriteDenied,
+					"user", user.Username, "path", r.URL.Path, "method", r.Method)
+				http.Error(w, "This requires an Administrator.", http.StatusForbidden)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
 // ExactPath is a single URL path exempted from CSRF, and the type is the point.
 //
 // docs/AUDIT.md rule 6 requires the observed-state webhook's exemption to be

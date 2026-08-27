@@ -24,6 +24,7 @@ import (
 	"github.com/madalinignisca/invctl/internal/auth"
 	"github.com/madalinignisca/invctl/internal/domain"
 	"github.com/madalinignisca/invctl/internal/store"
+	"github.com/madalinignisca/invctl/internal/web/routescan"
 )
 
 // Create-and-link, WP-G1 Task 14 (docs/rbac-design.md §4). The store-level
@@ -95,12 +96,14 @@ func TestAProjectOwnerCannotReachThePlainCreateRouteAtAll(t *testing.T) {
 	// create-in-project handler, and never reads a project out of a form
 	// field for it.
 	//
-	// NOT routescan.WriteRoutes: that helper's own repoRoot resolves
-	// "../../.." relative to internal/web/routescan's package directory, so
-	// calling it from this package (one directory shallower) silently walks
-	// to the wrong root -- found while writing this test, not assumed.
-	// Reading routes.go directly, from THIS file's own repoRoot, avoids
-	// depending on another package's relative-path assumption.
+	// routescan.WriteRoutes, not a second hand-rolled AST walk: an earlier
+	// version of this test avoided that helper because its own repoRoot
+	// resolved "../../..." relative to internal/web/routescan's package
+	// directory, which silently walked to the wrong root when called from
+	// this package, one directory shallower. WP-G1 Task 15 fixed
+	// routescan.repoRoot to walk up to go.mod instead of counting
+	// directories, which makes it correct for any caller -- this workaround
+	// is retired now that the thing it was working around is fixed.
 	//
 	// Mutation (Step 5): route POST /assets to AssetCreateInProject with the
 	// project read from a form field -- this must go red.
@@ -363,53 +366,28 @@ func describe(isFormValue bool) string {
 	return "PathValue"
 }
 
-// writeRouteHandler reads routes.go and returns the handler name registered
-// against exactly one write("PATTERN", app.Handler) call -- a narrower,
-// self-contained version of routescan.WriteRoutes's walk (see the comment at
-// its one call site above for why this file does not reuse that helper
-// directly).
+// writeRouteHandler returns the handler name registered against pattern in
+// the write bucket, via routescan.WriteRoutes -- the same walk
+// routescan_test.go's committed inventory is checked against, rather than a
+// second, narrower copy of it. See this file's own comment at its call site
+// for why an earlier version avoided that helper and why WP-G1 Task 15
+// retired the avoidance instead of the duplication.
 func writeRouteHandler(t *testing.T, pattern string) string {
 	t.Helper()
-	root := repoRoot(t)
-	path := filepath.Join(root, "internal", "web", "routes.go")
-	fset := token.NewFileSet()
-	file, err := parser.ParseFile(fset, path, nil, 0)
-	if err != nil {
-		t.Fatalf("parsing routes.go: %v", err)
-	}
 	var found string
 	var count int
-	ast.Inspect(file, func(n ast.Node) bool {
-		call, ok := n.(*ast.CallExpr)
-		if !ok {
-			return true
+	for _, route := range routescan.WriteRoutes(t) {
+		if route.Pattern != pattern {
+			continue
 		}
-		fn, ok := call.Fun.(*ast.Ident)
-		if !ok || fn.Name != "write" || len(call.Args) != 2 {
-			return true
-		}
-		lit, ok := call.Args[0].(*ast.BasicLit)
-		if !ok || lit.Kind != token.STRING {
-			return true
-		}
-		unquoted := strings.Trim(lit.Value, `"`)
-		if unquoted != pattern {
-			return true
-		}
-		sel, ok := call.Args[1].(*ast.SelectorExpr)
-		if !ok {
-			t.Fatalf("write(%q, ...) at %s does not register a simple app.Handler value",
-				pattern, fset.Position(call.Pos()))
-		}
-		found = sel.Sel.Name
+		found = route.Handler
 		count++
-		return true
-	})
+	}
 	if count == 0 {
-		t.Fatalf("%q is not registered in routes.go at all", pattern)
+		t.Fatalf("%q is not registered in the write bucket at all", pattern)
 	}
 	if count > 1 {
-		t.Fatalf("%q is registered %d times in routes.go, want exactly once", pattern, count)
+		t.Fatalf("%q is registered %d times in the write bucket, want exactly once", pattern, count)
 	}
 	return found
 }

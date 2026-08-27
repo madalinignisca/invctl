@@ -215,12 +215,21 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	// The import page is admin-only on the GET as well as the POST. It is
 	// purely a write tool: rendering it to a read-only user offers a form whose
 	// only outcome is a 403.
-	write("GET /imports", app.ImportJobList)
-	write("GET /imports/{id}", app.ImportJobPage)
-	write("GET /import/assets", app.AssetImportForm)
-	write("POST /import/assets", app.AssetImportRun)
-	write("GET /import/device-types", app.DeviceTypeImportForm)
-	write("POST /import/device-types", app.DeviceTypeImportRun)
+	//
+	// requireAdministrator, NOT requireAdmin/write: WP-G1 Task 15 (F2). Every
+	// imported row mints a fresh id, so no project owner's ScopedPermit can
+	// ever cover one -- see middleware.RequireAdministrator's own comment for
+	// why that makes CanWrite alone the wrong gate for this specific surface.
+	requireAdministrator := middleware.RequireAdministrator(authz)
+	writeAdminOnly := func(pattern string, h http.HandlerFunc) {
+		mux.Handle(pattern, middleware.RequireAuth(requireAdministrator(h)))
+	}
+	writeAdminOnly("GET /imports", app.ImportJobList)
+	writeAdminOnly("GET /imports/{id}", app.ImportJobPage)
+	writeAdminOnly("GET /import/assets", app.AssetImportForm)
+	writeAdminOnly("POST /import/assets", app.AssetImportRun)
+	writeAdminOnly("GET /import/device-types", app.DeviceTypeImportForm)
+	writeAdminOnly("POST /import/device-types", app.DeviceTypeImportRun)
 
 	write("POST /environments", app.EnvironmentCreate)
 

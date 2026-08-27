@@ -126,6 +126,19 @@ type Route struct {
 // root.
 const routesFile = "internal/web/routes.go"
 
+// isRouteRegistrar reports whether name is one of routes.go's two write-bucket
+// registrar closures: write (behind RequireAdmin/CanWrite) and
+// writeAdminOnly (behind RequireAdministrator -- WP-G1 Task 15, F2: the
+// import surface, where no ScopedPermit can ever cover a freshly-minted row,
+// so it stays reachable by a full Administrator only). Both register a route
+// the same shape this package cares about -- pattern, handler, whether the
+// handler's call graph reaches actor( -- so the walk treats them identically;
+// which of the two gates a route sits behind is authz.CanWrite vs
+// authz.IsAdministrator, an orthogonal question this package does not answer.
+func isRouteRegistrar(name string) bool {
+	return name == "write" || name == "writeAdminOnly"
+}
+
 // handlersDir is where every write-bucket handler and the shared helpers it
 // calls are declared, relative to the repository root.
 const handlersDir = "internal/web/handlers"
@@ -169,7 +182,7 @@ func WriteRoutes(t *testing.T) []Route {
 			return true
 		}
 		fn, ok := call.Fun.(*ast.Ident)
-		if !ok || fn.Name != "write" || len(call.Args) != 2 {
+		if !ok || !isRouteRegistrar(fn.Name) || len(call.Args) != 2 {
 			return true
 		}
 		pattern, ok := literalString(call.Args[0])
@@ -224,7 +237,7 @@ func expandJournalRoutes(r *ast.RangeStmt, resources []string, funcs map[string]
 		if !ok {
 			return true
 		}
-		if fn, ok := call.Fun.(*ast.Ident); ok && fn.Name == "write" && len(call.Args) == 2 {
+		if fn, ok := call.Fun.(*ast.Ident); ok && isRouteRegistrar(fn.Name) && len(call.Args) == 2 {
 			calls = append(calls, call)
 		}
 		return true
@@ -447,15 +460,35 @@ func loadHandlerFuncs(t *testing.T, fset *token.FileSet, dir string) (map[string
 	return funcs, files
 }
 
-// repoRoot resolves the repository root from this package's location:
-// internal/web/routescan is three directories below it.
+// repoRoot resolves the repository root by walking up from the test binary's
+// working directory until it finds go.mod.
+//
+// WP-G1 Task 15: an earlier version resolved "../../..." against the test's
+// own working directory, which `go test` sets to the PACKAGE UNDER TEST's
+// directory -- correct only for a test that lives in
+// internal/web/routescan itself, and silently wrong by one level for any
+// caller one directory shallower (internal/web/project_create_test.go hit
+// this and worked around it locally with its own copy of this same walk,
+// rather than trusting this one -- see that file's repoRoot doc comment).
+// Walking up to go.mod instead of counting directories makes this function
+// correct for every caller regardless of which package invokes it, so that
+// local copy can be retired.
 func repoRoot(t *testing.T) string {
 	t.Helper()
-	root, err := filepath.Abs("../../..")
+	dir, err := filepath.Abs(".")
 	if err != nil {
-		t.Fatalf("resolving the repository root: %v", err)
+		t.Fatalf("resolving the working directory: %v", err)
 	}
-	return root
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			t.Fatal("go.mod not found above the test's working directory")
+		}
+		dir = parent
+	}
 }
 
 // Format renders a Route the way the committed inventory spells it: pattern,
