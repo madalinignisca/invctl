@@ -76,14 +76,14 @@ func (s *SQLStore) InflationSeries(ctx context.Context) (domain.InflationSeries,
 // date, another after it -- while a published index revised for 2024 was always
 // one figure that somebody had wrong. Amending it is the honest shape, and
 // change_log keeps what it was.
-func (s *SQLStore) SetInflationRate(ctx context.Context, actor domain.Actor, r *domain.InflationRate) error {
+func (s *SQLStore) SetInflationRate(ctx context.Context, p domain.Permit, r *domain.InflationRate) error {
 	if err := r.Validate(); err != nil {
 		return err
 	}
 	now := domain.FormatTime(s.now())
 	r.UpdatedAt = now
 
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, p, func(t *tx) error {
 		year := strconv.Itoa(r.Year)
 		var before domain.InflationRate
 		existed := true

@@ -180,21 +180,21 @@ func (s *SQLStore) costsFor(ctx context.Context, t costTable, ownerIDs []string)
 }
 
 // AddAssetCost attaches a cost line to an asset.
-func (s *SQLStore) AddAssetCost(ctx context.Context, actor domain.Actor, assetID string, c *domain.Cost) error {
-	return s.addCost(ctx, actor, costOnAsset, assetID, c)
+func (s *SQLStore) AddAssetCost(ctx context.Context, p domain.Permit, assetID string, c *domain.Cost) error {
+	return s.addCost(ctx, p, costOnAsset, assetID, c)
 }
 
 // AddServiceCost attaches a cost line to a service.
-func (s *SQLStore) AddServiceCost(ctx context.Context, actor domain.Actor, serviceID string, c *domain.Cost) error {
-	return s.addCost(ctx, actor, costOnService, serviceID, c)
+func (s *SQLStore) AddServiceCost(ctx context.Context, p domain.Permit, serviceID string, c *domain.Cost) error {
+	return s.addCost(ctx, p, costOnService, serviceID, c)
 }
 
 // AddProjectCost attaches a cost line to a project directly.
-func (s *SQLStore) AddProjectCost(ctx context.Context, actor domain.Actor, projectID string, c *domain.Cost) error {
-	return s.addCost(ctx, actor, costOnProject, projectID, c)
+func (s *SQLStore) AddProjectCost(ctx context.Context, p domain.Permit, projectID string, c *domain.Cost) error {
+	return s.addCost(ctx, p, costOnProject, projectID, c)
 }
 
-func (s *SQLStore) addCost(ctx context.Context, actor domain.Actor, t costTable, ownerID string, c *domain.Cost) error {
+func (s *SQLStore) addCost(ctx context.Context, p domain.Permit, t costTable, ownerID string, c *domain.Cost) error {
 	// The row the INSERT just wrote is version 1 (the column default).
 	// Without this a caller that creates and then updates the SAME struct
 	// compares 0 against 1 and gets a conflict against itself.
@@ -202,7 +202,7 @@ func (s *SQLStore) addCost(ctx context.Context, actor domain.Actor, t costTable,
 	if err := c.Validate(); err != nil {
 		return err
 	}
-	return s.write(ctx, domain.AdministratorPermit(actor), func(tx *tx) error {
+	return s.write(ctx, p, func(tx *tx) error {
 		if err := tx.requireVocabulary(ctx, vocabCostKind, "kind", c.Kind); err != nil {
 			return err
 		}
@@ -227,21 +227,21 @@ func (s *SQLStore) addCost(ctx context.Context, actor domain.Actor, t costTable,
 }
 
 // UpdateAssetCost edits a line on an asset.
-func (s *SQLStore) UpdateAssetCost(ctx context.Context, actor domain.Actor, c *domain.Cost) error {
-	return s.updateCost(ctx, actor, costOnAsset, c)
+func (s *SQLStore) UpdateAssetCost(ctx context.Context, p domain.Permit, c *domain.Cost) error {
+	return s.updateCost(ctx, p, costOnAsset, c)
 }
 
 // UpdateServiceCost edits a line on a service.
-func (s *SQLStore) UpdateServiceCost(ctx context.Context, actor domain.Actor, c *domain.Cost) error {
-	return s.updateCost(ctx, actor, costOnService, c)
+func (s *SQLStore) UpdateServiceCost(ctx context.Context, p domain.Permit, c *domain.Cost) error {
+	return s.updateCost(ctx, p, costOnService, c)
 }
 
 // UpdateProjectCost edits a line on a project.
-func (s *SQLStore) UpdateProjectCost(ctx context.Context, actor domain.Actor, c *domain.Cost) error {
-	return s.updateCost(ctx, actor, costOnProject, c)
+func (s *SQLStore) UpdateProjectCost(ctx context.Context, p domain.Permit, c *domain.Cost) error {
+	return s.updateCost(ctx, p, costOnProject, c)
 }
 
-func (s *SQLStore) updateCost(ctx context.Context, actor domain.Actor, t costTable, c *domain.Cost) error {
+func (s *SQLStore) updateCost(ctx context.Context, p domain.Permit, t costTable, c *domain.Cost) error {
 	if err := c.Validate(); err != nil {
 		return err
 	}
@@ -265,7 +265,7 @@ func (s *SQLStore) updateCost(ctx context.Context, actor domain.Actor, t costTab
 	c.CreatedAt = before.CreatedAt
 	c.UpdatedAt = domain.FormatTime(s.now())
 
-	return s.write(ctx, domain.AdministratorPermit(actor), func(tx *tx) error {
+	return s.write(ctx, p, func(tx *tx) error {
 		if err := tx.requireVocabulary(ctx, vocabCostKind, "kind", c.Kind); err != nil {
 			return err
 		}
@@ -295,18 +295,18 @@ func (s *SQLStore) updateCost(ctx context.Context, actor domain.Actor, t costTab
 
 // RetireAssetCost soft-deletes a line on an asset. ownerID is the asset the
 // caller believes it belongs to; a mismatch is a 404 rather than a retirement.
-func (s *SQLStore) RetireAssetCost(ctx context.Context, actor domain.Actor, ownerID, id string) error {
-	return s.retireCost(ctx, actor, costOnAsset, ownerID, id)
+func (s *SQLStore) RetireAssetCost(ctx context.Context, p domain.Permit, ownerID, id string) error {
+	return s.retireCost(ctx, p, costOnAsset, ownerID, id)
 }
 
 // RetireServiceCost soft-deletes a line on a service.
-func (s *SQLStore) RetireServiceCost(ctx context.Context, actor domain.Actor, ownerID, id string) error {
-	return s.retireCost(ctx, actor, costOnService, ownerID, id)
+func (s *SQLStore) RetireServiceCost(ctx context.Context, p domain.Permit, ownerID, id string) error {
+	return s.retireCost(ctx, p, costOnService, ownerID, id)
 }
 
 // RetireProjectCost soft-deletes a line on a project.
-func (s *SQLStore) RetireProjectCost(ctx context.Context, actor domain.Actor, ownerID, id string) error {
-	return s.retireCost(ctx, actor, costOnProject, ownerID, id)
+func (s *SQLStore) RetireProjectCost(ctx context.Context, p domain.Permit, ownerID, id string) error {
+	return s.retireCost(ctx, p, costOnProject, ownerID, id)
 }
 
 // The circuit surface. Identical wrappers to the other three, deliberately:
@@ -321,16 +321,16 @@ func (s *SQLStore) ListCircuitCosts(ctx context.Context, circuitID string) ([]Co
 	return s.listCosts(ctx, costOnCircuit, circuitID)
 }
 
-func (s *SQLStore) AddCircuitCost(ctx context.Context, actor domain.Actor, circuitID string, c *domain.Cost) error {
-	return s.addCost(ctx, actor, costOnCircuit, circuitID, c)
+func (s *SQLStore) AddCircuitCost(ctx context.Context, p domain.Permit, circuitID string, c *domain.Cost) error {
+	return s.addCost(ctx, p, costOnCircuit, circuitID, c)
 }
 
-func (s *SQLStore) UpdateCircuitCost(ctx context.Context, actor domain.Actor, c *domain.Cost) error {
-	return s.updateCost(ctx, actor, costOnCircuit, c)
+func (s *SQLStore) UpdateCircuitCost(ctx context.Context, p domain.Permit, c *domain.Cost) error {
+	return s.updateCost(ctx, p, costOnCircuit, c)
 }
 
-func (s *SQLStore) RetireCircuitCost(ctx context.Context, actor domain.Actor, ownerID, id string) error {
-	return s.retireCost(ctx, actor, costOnCircuit, ownerID, id)
+func (s *SQLStore) RetireCircuitCost(ctx context.Context, p domain.Permit, ownerID, id string) error {
+	return s.retireCost(ctx, p, costOnCircuit, ownerID, id)
 }
 
 // retireCost soft-deletes, like every other entity here.
@@ -346,7 +346,7 @@ func (s *SQLStore) RetireCircuitCost(ctx context.Context, actor domain.Actor, ow
 // retire a cost on one asset through a URL naming another -- the change_log
 // entry would be correct while the redirect and the operator's belief about
 // what they just did would not. Found by a security review.
-func (s *SQLStore) retireCost(ctx context.Context, actor domain.Actor, t costTable, ownerID, id string) error {
+func (s *SQLStore) retireCost(ctx context.Context, p domain.Permit, t costTable, ownerID, id string) error {
 	before, err := s.getCost(ctx, t, id)
 	if err != nil {
 		return err
@@ -358,7 +358,7 @@ func (s *SQLStore) retireCost(ctx context.Context, actor domain.Actor, t costTab
 		return nil
 	}
 	at := domain.FormatTime(s.now())
-	return s.write(ctx, domain.AdministratorPermit(actor), func(tx *tx) error {
+	return s.write(ctx, p, func(tx *tx) error {
 		if _, err := tx.exec(ctx,
 			`UPDATE `+t.name+` SET lifecycle = ?, updated_at = ?,
 			                       row_version = row_version + 1 WHERE id = ?`,
@@ -435,7 +435,7 @@ func (s *SQLStore) CostConsumers(ctx context.Context, costID string) ([]string, 
 }
 
 // SetCostConsumers replaces which assets a line applies to.
-func (s *SQLStore) SetCostConsumers(ctx context.Context, actor domain.Actor,
+func (s *SQLStore) SetCostConsumers(ctx context.Context, p domain.Permit,
 	costID string, assetIDs []string) error {
 
 	before, err := s.GetAssetCost(ctx, costID)
@@ -443,7 +443,7 @@ func (s *SQLStore) SetCostConsumers(ctx context.Context, actor domain.Actor,
 		return err
 	}
 	at := domain.FormatTime(s.Now())
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, p, func(t *tx) error {
 		beforeAudit, err := costScopeAudit(ctx, t, &before.Cost)
 		if err != nil {
 			return err

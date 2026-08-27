@@ -29,7 +29,7 @@ func TestARepriceKeepsBothFigures(t *testing.T) {
 			f := newProjectFixture(t, e)
 			id := f.priceAssetFrom(t, "hv-01", "support", domain.CostYearly, 94000, "2023-10-07")
 
-			opened, err := f.s.RepriceAssetCost(f.ctx, testActor, f.assets["hv-01"], RepriceSpec{
+			opened, err := f.s.RepriceAssetCost(f.ctx, testPermit, f.assets["hv-01"], RepriceSpec{
 				LineID: id, NewAmountMinor: 141000, EffectiveFrom: "2026-10-07",
 			})
 			if err != nil {
@@ -87,7 +87,7 @@ func TestARepriceCannotStartBeforeTheLineItReplaces(t *testing.T) {
 			id := f.priceAssetFrom(t, "hv-01", "support", domain.CostYearly, 94000, "2023-10-07")
 
 			for _, when := range []string{"2023-10-07", "2020-01-01"} {
-				_, err := f.s.RepriceAssetCost(f.ctx, testActor, f.assets["hv-01"], RepriceSpec{
+				_, err := f.s.RepriceAssetCost(f.ctx, testPermit, f.assets["hv-01"], RepriceSpec{
 					LineID: id, NewAmountMinor: 141000, EffectiveFrom: when,
 				})
 				if err == nil {
@@ -128,7 +128,7 @@ func TestAOneOffCannotBeRepriced(t *testing.T) {
 		t.Run(e.Name, func(t *testing.T) {
 			f := newProjectFixture(t, e)
 			id := f.priceAssetFrom(t, "hv-01", "acquisition", domain.CostOnce, 840000, "2023-10-07")
-			_, err := f.s.RepriceAssetCost(f.ctx, testActor, f.assets["hv-01"], RepriceSpec{
+			_, err := f.s.RepriceAssetCost(f.ctx, testPermit, f.assets["hv-01"], RepriceSpec{
 				LineID: id, NewAmountMinor: 900000, EffectiveFrom: "2026-01-01",
 			})
 			if err == nil {
@@ -149,7 +149,7 @@ func TestARepriceRefusesALineOnAnotherOwner(t *testing.T) {
 		t.Run(e.Name, func(t *testing.T) {
 			f := newProjectFixture(t, e)
 			id := f.priceAssetFrom(t, "hv-01", "support", domain.CostYearly, 94000, "2023-10-07")
-			_, err := f.s.RepriceAssetCost(f.ctx, testActor, f.assets["sw-core-1"], RepriceSpec{
+			_, err := f.s.RepriceAssetCost(f.ctx, testPermit, f.assets["sw-core-1"], RepriceSpec{
 				LineID: id, NewAmountMinor: 141000, EffectiveFrom: "2026-10-07",
 			})
 			if !errors.Is(err, domain.ErrNotFound) {
@@ -169,7 +169,7 @@ func TestARepriceWritesBothAuditRows(t *testing.T) {
 			id := f.priceAssetFrom(t, "hv-01", "support", domain.CostYearly, 94000, "2023-10-07")
 			before := f.changeRows(t, "asset_cost")
 
-			if _, err := f.s.RepriceAssetCost(f.ctx, testActor, f.assets["hv-01"], RepriceSpec{
+			if _, err := f.s.RepriceAssetCost(f.ctx, testPermit, f.assets["hv-01"], RepriceSpec{
 				LineID: id, NewAmountMinor: 141000, EffectiveFrom: "2026-10-07",
 			}); err != nil {
 				t.Fatalf("repricing: %v", err)
@@ -194,13 +194,13 @@ func TestPriceMovementReadsTheSeriesARepriceCreated(t *testing.T) {
 			// a price rise.
 			f.priceAssetFrom(t, "hv-01", "acquisition", domain.CostOnce, 840000, "2023-10-07")
 
-			second, err := f.s.RepriceAssetCost(f.ctx, testActor, f.assets["hv-01"], RepriceSpec{
+			second, err := f.s.RepriceAssetCost(f.ctx, testPermit, f.assets["hv-01"], RepriceSpec{
 				LineID: id, NewAmountMinor: 141000, EffectiveFrom: "2026-10-07",
 			})
 			if err != nil {
 				t.Fatalf("repricing: %v", err)
 			}
-			if _, err := f.s.RepriceAssetCost(f.ctx, testActor, f.assets["hv-01"], RepriceSpec{
+			if _, err := f.s.RepriceAssetCost(f.ctx, testPermit, f.assets["hv-01"], RepriceSpec{
 				LineID: second.ID, NewAmountMinor: 155000, EffectiveFrom: "2027-10-07",
 			}); err != nil {
 				t.Fatalf("repricing again: %v", err)

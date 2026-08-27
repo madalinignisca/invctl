@@ -22,21 +22,21 @@ var costNow = time.Date(2026, 7, 31, 12, 0, 0, 0, time.UTC)
 func (f *projectFixture) priceAsset(t *testing.T, name, kind, period string, minor int64) string {
 	t.Helper()
 	return f.price(t, func(c *domain.Cost) error {
-		return f.s.AddAssetCost(f.ctx, testActor, f.assets[name], c)
+		return f.s.AddAssetCost(f.ctx, testPermit, f.assets[name], c)
 	}, kind, period, minor)
 }
 
 func (f *projectFixture) priceService(t *testing.T, code, kind, period string, minor int64) string {
 	t.Helper()
 	return f.price(t, func(c *domain.Cost) error {
-		return f.s.AddServiceCost(f.ctx, testActor, f.services[code], c)
+		return f.s.AddServiceCost(f.ctx, testPermit, f.services[code], c)
 	}, kind, period, minor)
 }
 
 func (f *projectFixture) priceProject(t *testing.T, code, kind, period string, minor int64) string {
 	t.Helper()
 	return f.price(t, func(c *domain.Cost) error {
-		return f.s.AddProjectCost(f.ctx, testActor, f.projects[code], c)
+		return f.s.AddProjectCost(f.ctx, testPermit, f.projects[code], c)
 	}, kind, period, minor)
 }
 
@@ -69,7 +69,7 @@ func (f *projectFixture) priceAssetFrom(t *testing.T, name, kind, period string,
 	if err != nil {
 		t.Fatalf("building the cost: %v", err)
 	}
-	if err := f.s.AddAssetCost(f.ctx, testActor, f.assets[name], c); err != nil {
+	if err := f.s.AddAssetCost(f.ctx, testPermit, f.assets[name], c); err != nil {
 		t.Fatalf("attaching the cost: %v", err)
 	}
 	return c.ID
@@ -288,7 +288,7 @@ func TestRetiringACostLineRemovesItFromTotalsButNotFromTheList(t *testing.T) {
 				t.Fatalf("monthly before = %d, want 10500", got.MonthlyMinor)
 			}
 
-			if err := f.s.RetireAssetCost(f.ctx, testActor, f.assets["hv-01"], id); err != nil {
+			if err := f.s.RetireAssetCost(f.ctx, testPermit, f.assets["hv-01"], id); err != nil {
 				t.Fatalf("retiring: %v", err)
 			}
 			after, err := f.s.ListAssetCosts(f.ctx, f.assets["hv-01"])
@@ -321,7 +321,7 @@ func TestTotalsRespectTheValidityWindow(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building the closed line: %v", err)
 			}
-			if err := f.s.AddAssetCost(f.ctx, testActor, f.assets["hv-01"], old); err != nil {
+			if err := f.s.AddAssetCost(f.ctx, testPermit, f.assets["hv-01"], old); err != nil {
 				t.Fatalf("adding the closed line: %v", err)
 			}
 
@@ -333,7 +333,7 @@ func TestTotalsRespectTheValidityWindow(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building the renewal: %v", err)
 			}
-			if err := f.s.AddAssetCost(f.ctx, testActor, f.assets["hv-01"], next); err != nil {
+			if err := f.s.AddAssetCost(f.ctx, testPermit, f.assets["hv-01"], next); err != nil {
 				t.Fatalf("adding the renewal: %v", err)
 			}
 
@@ -374,14 +374,14 @@ func TestCostMutationsAreAudited(t *testing.T) {
 			}
 			updated := row.Cost
 			updated.AmountMinor = 110_00
-			if err := f.s.UpdateAssetCost(f.ctx, testActor, &updated); err != nil {
+			if err := f.s.UpdateAssetCost(f.ctx, testPermit, &updated); err != nil {
 				t.Fatalf("updating: %v", err)
 			}
 			if after := f.changeRows(t, "asset_cost"); after != before+2 {
 				t.Errorf("updating: change_log = %d, want %d", after, before+2)
 			}
 
-			if err := f.s.RetireAssetCost(f.ctx, testActor, f.assets["hv-01"], id); err != nil {
+			if err := f.s.RetireAssetCost(f.ctx, testPermit, f.assets["hv-01"], id); err != nil {
 				t.Fatalf("retiring: %v", err)
 			}
 			if after := f.changeRows(t, "asset_cost"); after != before+3 {
@@ -404,7 +404,7 @@ func TestACostKindMustExist(t *testing.T) {
 			if err != nil {
 				t.Fatalf("the constructor rejected the shape rather than the store rejecting the value: %v", err)
 			}
-			if err := f.s.AddAssetCost(f.ctx, testActor, f.assets["hv-01"], c); err == nil {
+			if err := f.s.AddAssetCost(f.ctx, testPermit, f.assets["hv-01"], c); err == nil {
 				t.Error("a cost kind that is not in the lookup table was accepted")
 			}
 		})
@@ -548,7 +548,7 @@ func TestRetiringACostRequiresTheRightOwner(t *testing.T) {
 			id := f.priceAsset(t, "hv-01", "support", domain.CostMonthly, 100_00)
 
 			// The same cost, reached through a different asset's URL.
-			err := f.s.RetireAssetCost(f.ctx, testActor, f.assets["sw-core-1"], id)
+			err := f.s.RetireAssetCost(f.ctx, testPermit, f.assets["sw-core-1"], id)
 			if !errors.Is(err, domain.ErrNotFound) {
 				t.Fatalf("retiring through the wrong owner returned %v, want ErrNotFound", err)
 			}
@@ -561,7 +561,7 @@ func TestRetiringACostRequiresTheRightOwner(t *testing.T) {
 			}
 
 			// The control: through its own owner it retires.
-			if err := f.s.RetireAssetCost(f.ctx, testActor, f.assets["hv-01"], id); err != nil {
+			if err := f.s.RetireAssetCost(f.ctx, testPermit, f.assets["hv-01"], id); err != nil {
 				t.Fatalf("retiring through the right owner: %v", err)
 			}
 		})
@@ -658,7 +658,7 @@ func TestAFootprintLargerThanTheDriverParameterLimit(t *testing.T) {
 func (f *projectFixture) priceCircuit(t *testing.T, cid, kind, period string, minor int64) string {
 	t.Helper()
 	return f.price(t, func(c *domain.Cost) error {
-		return f.s.AddCircuitCost(f.ctx, testActor, f.circuit(t, cid), c)
+		return f.s.AddCircuitCost(f.ctx, testPermit, f.circuit(t, cid), c)
 	}, kind, period, minor)
 }
 

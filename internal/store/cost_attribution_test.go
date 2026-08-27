@@ -208,11 +208,11 @@ func TestAConditionalLicenceReachesOnlyTheGuestsItCovers(t *testing.T) {
 			}
 			c := line.Cost
 			c.AppliesTo = domain.CostConditional
-			if err := f.s.UpdateAssetCost(f.ctx, testActor, &c); err != nil {
+			if err := f.s.UpdateAssetCost(f.ctx, testPermit, &c); err != nil {
 				t.Fatalf("scoping the licence: %v", err)
 			}
 			// It covers only platform's guest.
-			if err := f.s.SetCostConsumers(f.ctx, testActor, costID,
+			if err := f.s.SetCostConsumers(f.ctx, testPermit, costID,
 				[]string{f.assets["vm-app-1"]}); err != nil {
 				t.Fatalf("naming the consumers: %v", err)
 			}
@@ -260,7 +260,7 @@ func TestAScopedLineNamingNobodyIsReportedNotSpread(t *testing.T) {
 			line, _ := f.s.GetAssetCost(f.ctx, costID)
 			c := line.Cost
 			c.AppliesTo = domain.CostConditional
-			if err := f.s.UpdateAssetCost(f.ctx, testActor, &c); err != nil {
+			if err := f.s.UpdateAssetCost(f.ctx, testPermit, &c); err != nil {
 				t.Fatalf("scoping: %v", err)
 			}
 			// Deliberately naming nobody.

@@ -210,7 +210,7 @@ var auditMatrix = []auditCase{
 			if err != nil {
 				t.Fatalf("building cost: %v", err)
 			}
-			if err := s.AddAssetCost(ctx, testActor, assetID, c); err != nil {
+			if err := s.AddAssetCost(ctx, testPermit, assetID, c); err != nil {
 				t.Fatalf("adding asset cost: %v", err)
 			}
 			return c.ID, domain.ActionCreate

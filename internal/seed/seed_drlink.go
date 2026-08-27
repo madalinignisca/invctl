@@ -272,7 +272,7 @@ func (b *builder) drCircuit() {
 		b.fail(fmt.Errorf("building the DR fibre cost: %w", err))
 		return
 	}
-	if err := b.store.AddCircuitCost(b.ctx, Actor, circuit.ID, cost); err != nil {
+	if err := b.store.AddCircuitCost(b.ctx, domain.AdministratorPermit(Actor), circuit.ID, cost); err != nil {
 		b.fail(fmt.Errorf("pricing the DR fibre: %w", err))
 	}
 }

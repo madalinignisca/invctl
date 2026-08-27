@@ -353,7 +353,7 @@ func (b *builder) inflationSeries() {
 		r := &domain.InflationRate{Year: year, BasisPoints: bp, Source: &source}
 		// Idempotent by construction: SetInflationRate upserts on the year, so
 		// a second run rewrites the same figure rather than adding a row.
-		if err := b.store.SetInflationRate(b.ctx, Actor, r); err != nil {
+		if err := b.store.SetInflationRate(b.ctx, domain.AdministratorPermit(Actor), r); err != nil {
 			b.fail(fmt.Errorf("recording inflation for %d: %w", year, err))
 			return
 		}
@@ -451,7 +451,7 @@ func (b *builder) coloRentRenewals() {
 			continue
 		}
 		note := step.note
-		if _, err := b.store.RepriceAssetCost(b.ctx, Actor, id, store.RepriceSpec{
+		if _, err := b.store.RepriceAssetCost(b.ctx, domain.AdministratorPermit(Actor), id, store.RepriceSpec{
 			LineID:         line.ID,
 			NewAmountMinor: major(step.amount),
 			EffectiveFrom:  from,
@@ -617,7 +617,7 @@ func (b *builder) conditionalLicence() {
 		return
 	}
 	licence.AppliesTo = domain.CostConditional
-	if err := b.store.UpdateAssetCost(b.ctx, Actor, licence); err != nil {
+	if err := b.store.UpdateAssetCost(b.ctx, domain.AdministratorPermit(Actor), licence); err != nil {
 		b.fail(fmt.Errorf("scoping the licence: %w", err))
 		return
 	}
@@ -631,7 +631,7 @@ func (b *builder) conditionalLicence() {
 	if len(consumers) == 0 {
 		return
 	}
-	if err := b.store.SetCostConsumers(b.ctx, Actor, licence.ID, consumers); err != nil {
+	if err := b.store.SetCostConsumers(b.ctx, domain.AdministratorPermit(Actor), licence.ID, consumers); err != nil {
 		b.fail(fmt.Errorf("naming the licence consumers: %w", err))
 	}
 }
@@ -784,7 +784,7 @@ func (b *builder) attributeSuppliers() {
 			}
 			c := lines[i].Cost
 			c.ProviderID = &supplierID
-			if err := b.store.UpdateAssetCost(b.ctx, Actor, &c); err != nil {
+			if err := b.store.UpdateAssetCost(b.ctx, domain.AdministratorPermit(Actor), &c); err != nil {
 				b.fail(fmt.Errorf("attributing %s: %w", a.asset, err))
 				return
 			}
@@ -825,7 +825,7 @@ func (b *builder) attributeCircuitCosts(ids map[string]string) {
 			c := lines[i].Cost
 			provider := ci.ProviderID
 			c.ProviderID = &provider
-			if err := b.store.UpdateCircuitCost(b.ctx, Actor, &c); err != nil {
+			if err := b.store.UpdateCircuitCost(b.ctx, domain.AdministratorPermit(Actor), &c); err != nil {
 				b.fail(fmt.Errorf("attributing circuit %s: %w", ci.CID, err))
 				return
 			}

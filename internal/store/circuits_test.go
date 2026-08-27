@@ -132,7 +132,7 @@ func TestACircuitCostAmortisesToItsContractEnd(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building cost: %v", err)
 			}
-			if err := s.AddCircuitCost(ctx, testActor, cid, cost); err != nil {
+			if err := s.AddCircuitCost(ctx, testPermit, cid, cost); err != nil {
 				t.Fatalf("adding circuit cost: %v", err)
 			}
 

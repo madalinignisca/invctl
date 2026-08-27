@@ -37,7 +37,7 @@ func (a *App) CostAddToAsset(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	c, err := costFromForm(r, a.Store.Now())
 	if err == nil {
-		err = a.Store.AddAssetCost(r.Context(), actor(r), id, c)
+		err = a.Store.AddAssetCost(r.Context(), permit(r), id, c)
 	}
 	a.afterCostWrite(w, r, err, "/assets/"+id)
 }
@@ -54,7 +54,7 @@ func (a *App) CostConsumersOnAsset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id, costID := r.PathValue("id"), r.PathValue("costID")
-	err := a.Store.SetCostConsumers(r.Context(), actor(r), costID, r.PostForm["consumers"])
+	err := a.Store.SetCostConsumers(r.Context(), permit(r), costID, r.PostForm["consumers"])
 	if err != nil {
 		a.handleStoreError(w, r, err)
 		return
@@ -68,7 +68,7 @@ func (a *App) CostAddToService(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	c, err := costFromForm(r, a.Store.Now())
 	if err == nil {
-		err = a.Store.AddServiceCost(r.Context(), actor(r), id, c)
+		err = a.Store.AddServiceCost(r.Context(), permit(r), id, c)
 	}
 	a.afterCostWrite(w, r, err, "/services/"+id)
 }
@@ -79,7 +79,7 @@ func (a *App) CostAddToProject(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	c, err := costFromForm(r, a.Store.Now())
 	if err == nil {
-		err = a.Store.AddProjectCost(r.Context(), actor(r), id, c)
+		err = a.Store.AddProjectCost(r.Context(), permit(r), id, c)
 	}
 	a.afterCostWrite(w, r, err, "/projects/"+id)
 }
@@ -126,7 +126,7 @@ func (a *App) CostEditOnProject(w http.ResponseWriter, r *http.Request) {
 // happened.
 func (a *App) editCost(r *http.Request, costID string,
 	get func(context.Context, string) (*store.CostRow, error),
-	update func(context.Context, domain.Actor, *domain.Cost) error,
+	update func(context.Context, domain.Permit, *domain.Cost) error,
 	ownerID string) error {
 
 	existing, err := get(r.Context(), costID)
@@ -152,24 +152,24 @@ func (a *App) editCost(r *http.Request, costID string,
 	updated.ValidUntil = optionalString(r, "valid_until")
 	updated.RowVersion = submittedVersion(r, updated.RowVersion)
 
-	return update(r.Context(), actor(r), &updated)
+	return update(r.Context(), permit(r), &updated)
 }
 
 // CostRetireOnAsset soft-deletes a line on an asset.
 func (a *App) CostRetireOnAsset(w http.ResponseWriter, r *http.Request) {
-	err := a.Store.RetireAssetCost(r.Context(), actor(r), r.PathValue("id"), r.PathValue("costID"))
+	err := a.Store.RetireAssetCost(r.Context(), permit(r), r.PathValue("id"), r.PathValue("costID"))
 	a.afterCostWrite(w, r, err, "/assets/"+r.PathValue("id"))
 }
 
 // CostRetireOnService soft-deletes a line on a service.
 func (a *App) CostRetireOnService(w http.ResponseWriter, r *http.Request) {
-	err := a.Store.RetireServiceCost(r.Context(), actor(r), r.PathValue("id"), r.PathValue("costID"))
+	err := a.Store.RetireServiceCost(r.Context(), permit(r), r.PathValue("id"), r.PathValue("costID"))
 	a.afterCostWrite(w, r, err, "/services/"+r.PathValue("id"))
 }
 
 // CostRetireOnProject soft-deletes a line on a project.
 func (a *App) CostRetireOnProject(w http.ResponseWriter, r *http.Request) {
-	err := a.Store.RetireProjectCost(r.Context(), actor(r), r.PathValue("id"), r.PathValue("costID"))
+	err := a.Store.RetireProjectCost(r.Context(), permit(r), r.PathValue("id"), r.PathValue("costID"))
 	a.afterCostWrite(w, r, err, "/projects/"+r.PathValue("id"))
 }
 
@@ -188,7 +188,7 @@ func (a *App) CostRepriceOnAsset(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	spec, err := repriceFromForm(r)
 	if err == nil {
-		_, err = a.Store.RepriceAssetCost(r.Context(), actor(r), id, spec)
+		_, err = a.Store.RepriceAssetCost(r.Context(), permit(r), id, spec)
 	}
 	a.afterCostWrite(w, r, err, "/assets/"+id)
 }
@@ -198,7 +198,7 @@ func (a *App) CostRepriceOnService(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	spec, err := repriceFromForm(r)
 	if err == nil {
-		_, err = a.Store.RepriceServiceCost(r.Context(), actor(r), id, spec)
+		_, err = a.Store.RepriceServiceCost(r.Context(), permit(r), id, spec)
 	}
 	a.afterCostWrite(w, r, err, "/services/"+id)
 }
@@ -208,7 +208,7 @@ func (a *App) CostRepriceOnProject(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	spec, err := repriceFromForm(r)
 	if err == nil {
-		_, err = a.Store.RepriceProjectCost(r.Context(), actor(r), id, spec)
+		_, err = a.Store.RepriceProjectCost(r.Context(), permit(r), id, spec)
 	}
 	a.afterCostWrite(w, r, err, "/projects/"+id)
 }
@@ -219,7 +219,7 @@ func (a *App) CostRepriceOnCircuit(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	spec, err := repriceFromForm(r)
 	if err == nil {
-		_, err = a.Store.RepriceCircuitCost(r.Context(), actor(r), id, spec)
+		_, err = a.Store.RepriceCircuitCost(r.Context(), permit(r), id, spec)
 	}
 	a.afterCostWrite(w, r, err, "/circuits/"+id)
 }
@@ -399,7 +399,7 @@ func (a *App) CostAddToCircuit(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	c, err := costFromForm(r, a.Store.Now())
 	if err == nil {
-		err = a.Store.AddCircuitCost(r.Context(), actor(r), id, c)
+		err = a.Store.AddCircuitCost(r.Context(), permit(r), id, c)
 	}
 	a.afterCostWrite(w, r, err, "/circuits/"+id)
 }
@@ -413,6 +413,6 @@ func (a *App) CostEditOnCircuit(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) CostRetireOnCircuit(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	err := a.Store.RetireCircuitCost(r.Context(), actor(r), id, r.PathValue("costID"))
+	err := a.Store.RetireCircuitCost(r.Context(), permit(r), id, r.PathValue("costID"))
 	a.afterCostWrite(w, r, err, "/circuits/"+id)
 }

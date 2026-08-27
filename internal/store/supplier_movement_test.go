@@ -26,7 +26,7 @@ func (f *projectFixture) fromSupplier(t *testing.T, asset, kind, period string,
 	if err != nil {
 		t.Fatalf("building the cost: %v", err)
 	}
-	if err := f.s.AddAssetCost(f.ctx, testActor, f.assets[asset], c); err != nil {
+	if err := f.s.AddAssetCost(f.ctx, testPermit, f.assets[asset], c); err != nil {
 		t.Fatalf("attaching the cost: %v", err)
 	}
 	return c.ID
@@ -37,7 +37,7 @@ func (f *projectFixture) repriceTo(t *testing.T, asset, lineID string,
 	minor int64, from string) *domain.Cost {
 
 	t.Helper()
-	opened, err := f.s.RepriceAssetCost(f.ctx, testActor, f.assets[asset], RepriceSpec{
+	opened, err := f.s.RepriceAssetCost(f.ctx, testPermit, f.assets[asset], RepriceSpec{
 		LineID: lineID, NewAmountMinor: minor, EffectiveFrom: from,
 	})
 	if err != nil {
@@ -108,7 +108,7 @@ func TestASeriesThatChangedHandsIsNotARise(t *testing.T) {
 			opened := f.repriceTo(t, "hv-01", line, 20000, "2025-01-01") // +100%
 			// The renewal was taken from somebody else.
 			opened.ProviderID = &new
-			if err := f.s.UpdateAssetCost(f.ctx, testActor, opened); err != nil {
+			if err := f.s.UpdateAssetCost(f.ctx, testPermit, opened); err != nil {
 				t.Fatalf("switching supplier: %v", err)
 			}
 
@@ -227,7 +227,7 @@ func TestARenewalKeepsWhoInvoicesItAndWhoBenefits(t *testing.T) {
 			}
 			c := row.Cost
 			c.AppliesTo = domain.CostConditional
-			if err := f.s.UpdateAssetCost(f.ctx, testActor, &c); err != nil {
+			if err := f.s.UpdateAssetCost(f.ctx, testPermit, &c); err != nil {
 				t.Fatalf("scoping: %v", err)
 			}
 

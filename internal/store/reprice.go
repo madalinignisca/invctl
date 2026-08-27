@@ -51,27 +51,27 @@ type RepriceSpec struct {
 }
 
 // RepriceAssetCost supersedes a line on an asset with a new price.
-func (s *SQLStore) RepriceAssetCost(ctx context.Context, actor domain.Actor, ownerID string, spec RepriceSpec) (*domain.Cost, error) {
-	return s.reprice(ctx, actor, costOnAsset, ownerID, spec)
+func (s *SQLStore) RepriceAssetCost(ctx context.Context, p domain.Permit, ownerID string, spec RepriceSpec) (*domain.Cost, error) {
+	return s.reprice(ctx, p, costOnAsset, ownerID, spec)
 }
 
 // RepriceServiceCost supersedes a line on a service.
-func (s *SQLStore) RepriceServiceCost(ctx context.Context, actor domain.Actor, ownerID string, spec RepriceSpec) (*domain.Cost, error) {
-	return s.reprice(ctx, actor, costOnService, ownerID, spec)
+func (s *SQLStore) RepriceServiceCost(ctx context.Context, p domain.Permit, ownerID string, spec RepriceSpec) (*domain.Cost, error) {
+	return s.reprice(ctx, p, costOnService, ownerID, spec)
 }
 
 // RepriceCircuitCost supersedes a line on a circuit -- the case this was built
 // for, since a circuit is the thing most likely to be renewed at a new rate.
-func (s *SQLStore) RepriceCircuitCost(ctx context.Context, actor domain.Actor, ownerID string, spec RepriceSpec) (*domain.Cost, error) {
-	return s.reprice(ctx, actor, costOnCircuit, ownerID, spec)
+func (s *SQLStore) RepriceCircuitCost(ctx context.Context, p domain.Permit, ownerID string, spec RepriceSpec) (*domain.Cost, error) {
+	return s.reprice(ctx, p, costOnCircuit, ownerID, spec)
 }
 
 // RepriceProjectCost supersedes a line on a project.
-func (s *SQLStore) RepriceProjectCost(ctx context.Context, actor domain.Actor, ownerID string, spec RepriceSpec) (*domain.Cost, error) {
-	return s.reprice(ctx, actor, costOnProject, ownerID, spec)
+func (s *SQLStore) RepriceProjectCost(ctx context.Context, p domain.Permit, ownerID string, spec RepriceSpec) (*domain.Cost, error) {
+	return s.reprice(ctx, p, costOnProject, ownerID, spec)
 }
 
-func (s *SQLStore) reprice(ctx context.Context, actor domain.Actor, t costTable,
+func (s *SQLStore) reprice(ctx context.Context, p domain.Permit, t costTable,
 	ownerID string, spec RepriceSpec) (*domain.Cost, error) {
 
 	before, err := s.getCost(ctx, t, spec.LineID)
@@ -145,7 +145,7 @@ func (s *SQLStore) reprice(ctx context.Context, actor domain.Actor, t costTable,
 		return nil, err
 	}
 
-	err = s.write(ctx, domain.AdministratorPermit(actor), func(tx *tx) error {
+	err = s.write(ctx, p, func(tx *tx) error {
 		res, err := tx.exec(ctx,
 			`UPDATE `+t.name+` SET valid_until = ?, updated_at = ?,
 			                       row_version = row_version + 1

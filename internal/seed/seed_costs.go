@@ -150,7 +150,7 @@ func (b *builder) costs() {
 // addCosts is shared by the three surfaces. The attach function is passed in
 // rather than selected from the entity name, so no string decides a table.
 func (b *builder) addCosts(lines []costLine, refs map[string]string, what string,
-	attach func(ctx context.Context, actor domain.Actor, ownerID string, c *domain.Cost) error) {
+	attach func(ctx context.Context, permit domain.Permit, ownerID string, c *domain.Cost) error) {
 
 	for _, line := range lines {
 		if !b.ok() {
@@ -178,7 +178,7 @@ func (b *builder) addCosts(lines []costLine, refs map[string]string, what string
 			b.fail(fmt.Errorf("building the %s cost for %s: %w", line.kind, line.target, err))
 			return
 		}
-		if err := attach(b.ctx, Actor, id, c); err != nil {
+		if err := attach(b.ctx, domain.AdministratorPermit(Actor), id, c); err != nil {
 			b.fail(fmt.Errorf("pricing %s %s: %w", what, line.target, err))
 			return
 		}

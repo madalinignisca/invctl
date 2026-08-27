@@ -311,7 +311,7 @@ func (b *builder) assetCosts(lines []costLine) {
 			b.fail(fmt.Errorf("building the %s cost for %s: %w", line.kind, line.target, err))
 			return
 		}
-		if err := b.store.AddAssetCost(b.ctx, Actor, id, c); err != nil {
+		if err := b.store.AddAssetCost(b.ctx, domain.AdministratorPermit(Actor), id, c); err != nil {
 			b.fail(fmt.Errorf("pricing asset %s: %w", line.target, err))
 			return
 		}
