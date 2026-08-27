@@ -197,33 +197,107 @@ func (s *SQLStore) CreateService(ctx context.Context, p domain.Permit, svc *doma
 		return err
 	}
 	return s.write(ctx, p, func(t *tx) error {
-		if err := t.requireVocabulary(ctx, vocabServiceKind, "kind", svc.Kind); err != nil {
-			return err
-		}
-		if err := requireRole(ctx, t, svc.ManagerRole); err != nil {
-			return err
-		}
-		_, err := t.exec(ctx, `
-			INSERT INTO service (id, code, name, kind, environment_id, availability,
-			                     min_healthy, failover_mode, tier, rto_minutes, rpo_minutes,
-			                     team_id, manager_role, lifecycle, eol_date, attrs,
-			                     created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			svc.ID, svc.Code, svc.Name, svc.Kind, svc.EnvironmentID, svc.Availability,
-			svc.MinHealthy, svc.FailoverMode, svc.Tier, svc.RTOMinutes, svc.RPOMinutes,
-			svc.TeamID, svc.ManagerRole, svc.Lifecycle, svc.EOLDate, svc.Attrs,
-			svc.CreatedAt, svc.UpdatedAt)
-		if err != nil {
-			return translateWriteErr(err, "creating service")
-		}
-		// No custom value or tag can exist yet -- svc.ID was generated for
-		// this statement -- so the empty fold is the true one, not a
-		// forgotten argument. Same reasoning as insertAsset.
-		if err := t.logCreate(ctx, "service", svc.ID, auditedService(svc, "", "")); err != nil {
-			return err
-		}
-		return s.indexService(ctx, t, svc)
+		return s.insertService(ctx, t, svc)
 	})
+}
+
+// insertService writes one service row inside a transaction the CALLER owns.
+//
+// Split out of CreateService, the same reason insertAsset (assets.go) is
+// split out of CreateAsset: CreateServiceInProject (WP-G1 Task 14) needs the
+// identical entity INSERT inside a transaction that ALSO writes the
+// project_service link row, and a second copy of this statement would be a
+// second place for the two to drift.
+func (s *SQLStore) insertService(ctx context.Context, t *tx, svc *domain.Service) error {
+	if err := t.requireVocabulary(ctx, vocabServiceKind, "kind", svc.Kind); err != nil {
+		return err
+	}
+	if err := requireRole(ctx, t, svc.ManagerRole); err != nil {
+		return err
+	}
+	_, err := t.exec(ctx, `
+		INSERT INTO service (id, code, name, kind, environment_id, availability,
+		                     min_healthy, failover_mode, tier, rto_minutes, rpo_minutes,
+		                     team_id, manager_role, lifecycle, eol_date, attrs,
+		                     created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		svc.ID, svc.Code, svc.Name, svc.Kind, svc.EnvironmentID, svc.Availability,
+		svc.MinHealthy, svc.FailoverMode, svc.Tier, svc.RTOMinutes, svc.RPOMinutes,
+		svc.TeamID, svc.ManagerRole, svc.Lifecycle, svc.EOLDate, svc.Attrs,
+		svc.CreatedAt, svc.UpdatedAt)
+	if err != nil {
+		return translateWriteErr(err, "creating service")
+	}
+	// No custom value or tag can exist yet -- svc.ID was generated for
+	// this statement -- so the empty fold is the true one, not a
+	// forgotten argument. Same reasoning as insertAsset.
+	if err := t.logCreate(ctx, "service", svc.ID, auditedService(svc, "", "")); err != nil {
+		return err
+	}
+	return s.indexService(ctx, t, svc)
+}
+
+// CreateServiceInProject creates a NEW service and links it to projectID in
+// the SAME transaction -- the WP-G1 Task 14 shape (docs/rbac-design.md §4)
+// that is reachable by a project owner because the project is a path
+// parameter rather than a form field: the service is new by construction of
+// the route, so there is nothing a caller could seize by naming an existing
+// id (see domain.scopedPermit.Covers's carve-out comment for the other half
+// of this argument).
+//
+// The project_service INSERT is written out here rather than calling
+// LinkProjectService (internal/store/projects.go): that method's UPSERT
+// (ON CONFLICT ... DO UPDATE) is the right shape for correcting an existing
+// link, but wrong here, where the row is guaranteed not to exist yet -- a
+// plain INSERT that simply fails on conflict is the more precise statement
+// of "this must be new", and keeps this whole create path free of any
+// upsert shape (Step 3, TestNoCreatePathIsUpsertShaped).
+func (s *SQLStore) CreateServiceInProject(ctx context.Context, p domain.Permit, projectID string, svc *domain.Service) error {
+	svc.RowVersion = 1
+	if err := svc.Validate(); err != nil {
+		return err
+	}
+	// THE SECURITY CHECK, on the CALLER'S OWN permit, before anything else
+	// runs -- see CreateAssetInProject's identical comment (assets.go) and
+	// domain.PermitHoldsProject's doc comment for the full argument.
+	if !domain.PermitHoldsProject(p, projectID) {
+		return fmt.Errorf("creating a service in project %s: %w", projectID, domain.ErrForbidden)
+	}
+	// The transaction runs under a SECOND, narrower permit -- not p -- for
+	// the same reason CreateAssetInProject's does: Covers cannot authorize
+	// "service"/svc.ID against a scope resolved before svc.ID existed. Safe
+	// to mint only because the check above already proved p holds projectID.
+	txPermit := domain.ScopedPermit(p.Actor(), []string{projectID}, domain.ScopedEntities{
+		"service": {svc.ID: true},
+	})
+	return s.write(ctx, txPermit, func(t *tx) error {
+		if err := s.insertService(ctx, t, svc); err != nil {
+			return err
+		}
+		return s.insertProjectServiceLink(ctx, t, projectID, svc.ID)
+	})
+}
+
+// insertProjectServiceLink writes the `owns` link row for a service just
+// created in this same transaction. Never ON CONFLICT: the service id was
+// generated by s.insertService a moment ago, so no project_service row for
+// it can already exist, and a plain INSERT that fails loudly if that
+// assumption is ever wrong is a stronger statement than an upsert that would
+// paper over it.
+func (s *SQLStore) insertProjectServiceLink(ctx context.Context, t *tx, projectID, serviceID string) error {
+	now := domain.FormatTime(s.now())
+	link := &domain.ProjectServiceLink{
+		ProjectID: projectID, ServiceID: serviceID, Relation: domain.ProjectOwns,
+		Lifecycle: domain.LifecycleActive, CreatedAt: now, UpdatedAt: now,
+	}
+	_, err := t.exec(ctx, `
+		INSERT INTO project_service (project_id, service_id, relation, note, lifecycle, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		link.ProjectID, link.ServiceID, link.Relation, link.Note, link.Lifecycle, link.CreatedAt, link.UpdatedAt)
+	if err != nil {
+		return translateWriteErr(err, "linking new service to project")
+	}
+	return t.logCreate(ctx, "project_service", link.ProjectID+"/"+link.ServiceID, link)
 }
 
 // UpdateService persists field changes to a service.

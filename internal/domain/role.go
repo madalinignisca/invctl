@@ -295,6 +295,54 @@ func (p *scopedPermit) holdsProject(projectID string) bool {
 
 func (*scopedPermit) isPermit() {}
 
+// PermitHoldsProject is the "call site, not a new Permit constructor" that
+// ScopedPermit's own doc comment promises Task 14 would add.
+//
+// WHY COVERS CANNOT ANSWER THIS. CreateAssetInProject and its service/circuit
+// siblings (internal/store, WP-G1 Task 14) create a brand-new entity and link
+// it to a project in one transaction. The entity's OWN change_log write --
+// entity_type "asset", id a freshly minted one -- is authorized through
+// Covers's ScopeProjectLinked branch, which checks entities, a set resolved
+// from the caller's EXISTING project membership before this request began
+// (auth.Authorizer.Permit). A row that does not exist yet cannot be in that
+// set by construction, so Covers("asset", newID) is false for even the most
+// legitimate project owner acting inside their own project -- the row-link
+// carve-out (see Covers's comment) only ever widened project_asset/
+// project_service/project_circuit, never the entity types themselves. This
+// function is how a store method proves the OTHER half of that same fact --
+// "does this permit actually hold projectID" -- using something that is not
+// keyed by an id that cannot exist yet.
+//
+// HOW A CALLER USES IT SAFELY. The pattern (see CreateAssetInProject) is:
+// call this FIRST, on the caller's own permit, before minting anything; only
+// if it answers true does the store construct a second, narrower
+// ScopedPermit -- scoped to exactly projectID and the one freshly minted id
+// -- to run the transaction under. That narrower permit is built from
+// p.Actor() (exported) plus projectID (already known, from the URL, not
+// from anything this function reveals) -- so this function does not leak
+// the caller's full project list to anything that could widen a write; it
+// only ever answers yes/no for the one project the store already intends to
+// write into.
+//
+// AdministratorPermit and SystemPermit hold every project trivially, the
+// same as Covers treats them: an Administrator is not made to fail this
+// check merely because ScopedPermit is the only kind that carries an
+// explicit list. Anything else -- there is no fourth kind today, by
+// Permit's own three-method contract -- fails closed rather than being
+// guessed into either answer.
+func PermitHoldsProject(p Permit, projectID string) bool {
+	switch v := p.(type) {
+	case administratorPermit:
+		return true
+	case systemPermit:
+		return true
+	case *scopedPermit:
+		return v.holdsProject(projectID)
+	default:
+		return false
+	}
+}
+
 // ScopeClass groups an entity type into one of the three write-authorization
 // buckets docs/rbac-design.md §4 and §6 describe. It answers exactly one
 // question -- "may a project owner ever write this, subject to owning the
