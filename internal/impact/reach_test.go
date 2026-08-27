@@ -417,7 +417,7 @@ func TestPairwiseSameSideStillReachable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("building dependency: %v", err)
 	}
-	if err := f.store.CreateDependency(f.ctx, domain.SystemActor, dep, nil); err != nil {
+	if err := f.store.CreateDependency(f.ctx, domain.AdministratorPermit(domain.SystemActor), dep, nil); err != nil {
 		t.Fatalf("creating dependency: %v", err)
 	}
 
@@ -565,7 +565,7 @@ func mustSimpleService(t *testing.T, f *fixture, code, name string) string {
 	if err != nil {
 		t.Fatalf("building service %s: %v", code, err)
 	}
-	if err := f.store.CreateService(f.ctx, domain.SystemActor, svc); err != nil {
+	if err := f.store.CreateService(f.ctx, domain.AdministratorPermit(domain.SystemActor), svc); err != nil {
 		t.Fatalf("creating service %s: %v", code, err)
 	}
 	return svc.ID
@@ -577,7 +577,7 @@ func mustInstance(t *testing.T, f *fixture, serviceID, hostAssetID string) strin
 	if err != nil {
 		t.Fatalf("building instance: %v", err)
 	}
-	if err := f.store.CreateInstance(f.ctx, domain.SystemActor, inst); err != nil {
+	if err := f.store.CreateInstance(f.ctx, domain.AdministratorPermit(domain.SystemActor), inst); err != nil {
 		t.Fatalf("creating instance: %v", err)
 	}
 	return inst.ID
@@ -590,7 +590,7 @@ func mustEndpoint(t *testing.T, f *fixture, serviceID, name string) *string {
 	if err != nil {
 		t.Fatalf("building endpoint %s: %v", name, err)
 	}
-	if err := f.store.CreateEndpoint(f.ctx, domain.SystemActor, ep); err != nil {
+	if err := f.store.CreateEndpoint(f.ctx, domain.AdministratorPermit(domain.SystemActor), ep); err != nil {
 		t.Fatalf("creating endpoint %s: %v", name, err)
 	}
 	id := ep.ID

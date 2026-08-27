@@ -1580,7 +1580,7 @@ func splitEstateWithALocalSocket(t *testing.T, f *fixture) map[string]string {
 		L4Proto: domain.ProtoUnix, UnixPath: strPtr("/var/run/orders-web.sock"),
 		BindScope: domain.BindUnix, TLSMode: "none", Exposure: "internal",
 	}
-	if err := f.store.CreateEndpoint(f.ctx, domain.SystemActor, socket); err != nil {
+	if err := f.store.CreateEndpoint(f.ctx, domain.AdministratorPermit(domain.SystemActor), socket); err != nil {
 		t.Fatalf("creating the unix endpoint: %v", err)
 	}
 	dep, err := domain.NewDependency(store.NewID(), domain.DependencySpec{
@@ -1596,7 +1596,7 @@ func splitEstateWithALocalSocket(t *testing.T, f *fixture) map[string]string {
 	if err != nil {
 		t.Fatalf("building the unix dependency: %v", err)
 	}
-	if err := f.store.CreateDependency(f.ctx, domain.SystemActor, dep, nil); err != nil {
+	if err := f.store.CreateDependency(f.ctx, domain.AdministratorPermit(domain.SystemActor), dep, nil); err != nil {
 		t.Fatalf("creating the unix dependency: %v", err)
 	}
 	return nil

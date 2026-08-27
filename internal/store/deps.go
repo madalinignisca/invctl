@@ -66,7 +66,7 @@ func (s *SQLStore) GetEndpoint(ctx context.Context, id string) (*EndpointRow, er
 }
 
 // CreateEndpoint inserts a listening socket.
-func (s *SQLStore) CreateEndpoint(ctx context.Context, actor domain.Actor, e *domain.Endpoint) error {
+func (s *SQLStore) CreateEndpoint(ctx context.Context, p domain.Permit, e *domain.Endpoint) error {
 	// The row the INSERT just wrote is version 1 (the column default).
 	// Without this a caller that creates and then updates the SAME struct
 	// compares 0 against 1 and gets a conflict against itself.
@@ -76,7 +76,7 @@ func (s *SQLStore) CreateEndpoint(ctx context.Context, actor domain.Actor, e *do
 	}
 	at := domain.FormatTime(s.now())
 	e.CreatedAt, e.UpdatedAt = &at, &at
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, p, func(t *tx) error {
 		_, err := t.exec(ctx, `
 			INSERT INTO endpoint (id, service_id, name, l4_proto, port, unix_path, bind_scope,
 			                      ip_address_id, l7_proto, tls_mode, certificate_id, exposure,
@@ -93,7 +93,7 @@ func (s *SQLStore) CreateEndpoint(ctx context.Context, actor domain.Actor, e *do
 }
 
 // UpdateEndpoint persists field changes.
-func (s *SQLStore) UpdateEndpoint(ctx context.Context, actor domain.Actor, e *domain.Endpoint) error {
+func (s *SQLStore) UpdateEndpoint(ctx context.Context, p domain.Permit, e *domain.Endpoint) error {
 	if err := e.Validate(); err != nil {
 		return err
 	}
@@ -127,7 +127,7 @@ func (s *SQLStore) UpdateEndpoint(ctx context.Context, actor domain.Actor, e *do
 	}
 	at := domain.FormatTime(s.now())
 	e.UpdatedAt = &at
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, p, func(t *tx) error {
 		res, err := t.exec(ctx, `
 			UPDATE endpoint SET name = ?, l4_proto = ?, port = ?, unix_path = ?, bind_scope = ?,
 			                    ip_address_id = ?, l7_proto = ?, tls_mode = ?, certificate_id = ?,
@@ -190,7 +190,7 @@ func requireLiveProvider(ctx context.Context, t *tx, endpointID, routeID *string
 // Serializable, for the reason CreateLink is: the COUNT below asserts an
 // invariant this transaction is about to depend on, and at read-committed a
 // dependency created concurrently is invisible to it.
-func (s *SQLStore) RetireEndpoint(ctx context.Context, actor domain.Actor, id string) error {
+func (s *SQLStore) RetireEndpoint(ctx context.Context, p domain.Permit, id string) error {
 	before, err := s.GetEndpoint(ctx, id)
 	if err != nil {
 		return err
@@ -202,7 +202,7 @@ func (s *SQLStore) RetireEndpoint(ctx context.Context, actor domain.Actor, id st
 	}
 	at := domain.FormatTime(s.now())
 
-	return s.writeSerializable(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.writeSerializable(ctx, p, func(t *tx) error {
 		var live int
 		if err := t.get(ctx, &live, `
 			SELECT COUNT(*) FROM dependency d
@@ -267,8 +267,8 @@ func pluralDependencies(n int) string {
 // ---------- pools and routes ----------
 
 // CreateBackendPool inserts a pool.
-func (s *SQLStore) CreateBackendPool(ctx context.Context, actor domain.Actor, p *domain.BackendPool) error {
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+func (s *SQLStore) CreateBackendPool(ctx context.Context, permit domain.Permit, p *domain.BackendPool) error {
+	return s.write(ctx, permit, func(t *tx) error {
 		_, err := t.exec(ctx,
 			`INSERT INTO backend_pool (id, service_id, name, lb_algorithm) VALUES (?, ?, ?, ?)`,
 			p.ID, p.ServiceID, p.Name, p.LBAlgorithm)
@@ -280,8 +280,8 @@ func (s *SQLStore) CreateBackendPool(ctx context.Context, actor domain.Actor, p 
 }
 
 // AddBackendMember puts an endpoint into a pool.
-func (s *SQLStore) AddBackendMember(ctx context.Context, actor domain.Actor, m *domain.BackendMember) error {
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+func (s *SQLStore) AddBackendMember(ctx context.Context, p domain.Permit, m *domain.BackendMember) error {
+	return s.write(ctx, p, func(t *tx) error {
 		_, err := t.exec(ctx,
 			`INSERT INTO backend_member (pool_id, endpoint_id, weight, is_backup) VALUES (?, ?, ?, ?)`,
 			m.PoolID, m.EndpointID, m.Weight, m.IsBackup)
@@ -293,8 +293,8 @@ func (s *SQLStore) AddBackendMember(ctx context.Context, actor domain.Actor, m *
 }
 
 // CreateRoute inserts an L7 routing rule.
-func (s *SQLStore) CreateRoute(ctx context.Context, actor domain.Actor, r *domain.Route) error {
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+func (s *SQLStore) CreateRoute(ctx context.Context, p domain.Permit, r *domain.Route) error {
+	return s.write(ctx, p, func(t *tx) error {
 		_, err := t.exec(ctx, `
 			INSERT INTO route (id, frontend_endpoint_id, match_type, match_value,
 			                   backend_pool_id, tls_termination, priority)
@@ -475,7 +475,7 @@ func (s *SQLStore) GetDependency(ctx context.Context, id string) (*DependencyRow
 }
 
 // CreateDependency inserts an edge and its data classes.
-func (s *SQLStore) CreateDependency(ctx context.Context, actor domain.Actor, d *domain.Dependency, dataClasses []string) error {
+func (s *SQLStore) CreateDependency(ctx context.Context, p domain.Permit, d *domain.Dependency, dataClasses []string) error {
 	// The row the INSERT just wrote is version 1 (the column default).
 	// Without this a caller that creates and then updates the SAME struct
 	// compares 0 against 1 and gets a conflict against itself.
@@ -484,14 +484,14 @@ func (s *SQLStore) CreateDependency(ctx context.Context, actor domain.Actor, d *
 		return err
 	}
 	// Rule 7, enforced at the entry point rather than by every caller.
-	if err := domain.CheckProvenanceWrite(actor, d.Source); err != nil {
+	if err := domain.CheckProvenanceWrite(p.Actor(), d.Source); err != nil {
 		return err
 	}
-	d.Confidence = domain.ConfidenceFor(actor, d.Confidence)
+	d.Confidence = domain.ConfidenceFor(p.Actor(), d.Confidence)
 	// Serializable, as the retire guard is: the check below asserts an
 	// invariant this transaction depends on, and at read-committed a
 	// concurrent retirement is invisible to it.
-	return s.writeSerializable(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.writeSerializable(ctx, p, func(t *tx) error {
 		if err := requireLiveProvider(ctx, t, d.ProviderEndpointID, d.ProviderRouteID); err != nil {
 			return err
 		}
@@ -518,7 +518,7 @@ func (s *SQLStore) CreateDependency(ctx context.Context, actor domain.Actor, d *
 }
 
 // UpdateDependency persists field changes to an edge.
-func (s *SQLStore) UpdateDependency(ctx context.Context, actor domain.Actor, d *domain.Dependency, dataClasses []string) error {
+func (s *SQLStore) UpdateDependency(ctx context.Context, p domain.Permit, d *domain.Dependency, dataClasses []string) error {
 	if err := d.Validate(); err != nil {
 		return err
 	}
@@ -526,10 +526,10 @@ func (s *SQLStore) UpdateDependency(ctx context.Context, actor domain.Actor, d *
 	// declared and discovered_* is an operator act with a change_log row."
 	// Laundering an existing discovered edge is the cheaper attack of the two,
 	// because the edge already exists and looks established.
-	if err := domain.CheckProvenanceWrite(actor, d.Source); err != nil {
+	if err := domain.CheckProvenanceWrite(p.Actor(), d.Source); err != nil {
 		return err
 	}
-	d.Confidence = domain.ConfidenceFor(actor, d.Confidence)
+	d.Confidence = domain.ConfidenceFor(p.Actor(), d.Confidence)
 	before, err := s.GetDependency(ctx, d.ID)
 	if err != nil {
 		return err
@@ -543,7 +543,7 @@ func (s *SQLStore) UpdateDependency(ctx context.Context, actor domain.Actor, d *
 	d.CreatedAt = before.CreatedAt
 	d.UpdatedAt = domain.FormatTime(s.now())
 
-	return s.writeSerializable(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.writeSerializable(ctx, p, func(t *tx) error {
 		// Re-pointing an edge is declaring it, so it faces the same check. No
 		// route reaches this today; that is not a reason to leave the hole.
 		if err := requireLiveProvider(ctx, t, d.ProviderEndpointID, d.ProviderRouteID); err != nil {
@@ -583,7 +583,7 @@ func (s *SQLStore) UpdateDependency(ctx context.Context, actor domain.Actor, d *
 
 // RetireDependency withdraws an edge without losing the record that it once
 // existed -- which is exactly what an auditor asks about.
-func (s *SQLStore) RetireDependency(ctx context.Context, actor domain.Actor, id string) error {
+func (s *SQLStore) RetireDependency(ctx context.Context, p domain.Permit, id string) error {
 	before, err := s.GetDependency(ctx, id)
 	if err != nil {
 		return err
@@ -592,7 +592,7 @@ func (s *SQLStore) RetireDependency(ctx context.Context, actor domain.Actor, id 
 		return nil
 	}
 	at := domain.FormatTime(s.now())
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, p, func(t *tx) error {
 		if _, err := t.exec(ctx,
 			`UPDATE dependency SET lifecycle = 'retired', updated_at = ?,
 			                       row_version = row_version + 1 WHERE id = ?`, at, id); err != nil {
@@ -606,11 +606,11 @@ func (s *SQLStore) RetireDependency(ctx context.Context, actor domain.Actor, id 
 // VerifyDependency records that a human confirmed the edge is real. Declared
 // data is authoritative, but a verification date is what distinguishes
 // "someone wrote this down once" from "this is still true".
-func (s *SQLStore) VerifyDependency(ctx context.Context, actor domain.Actor, id string) error {
+func (s *SQLStore) VerifyDependency(ctx context.Context, p domain.Permit, id string) error {
 	// verified_by/verified_at are a person putting their name to an edge. A
 	// machine signing one off is a rubber stamp on an undocumented chd edge and
 	// on the firewall rule justified by it.
-	if err := domain.CheckAttestationWrite(actor); err != nil {
+	if err := domain.CheckAttestationWrite(p.Actor()); err != nil {
 		return err
 	}
 	before, err := s.GetDependency(ctx, id)
@@ -618,15 +618,16 @@ func (s *SQLStore) VerifyDependency(ctx context.Context, actor domain.Actor, id 
 		return err
 	}
 	at := domain.FormatTime(s.now())
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	verifiedBy := p.Actor().ID
+	return s.write(ctx, p, func(t *tx) error {
 		if _, err := t.exec(ctx,
 			`UPDATE dependency SET verified_by = ?, verified_at = ?, updated_at = ?,
 			                       row_version = row_version + 1 WHERE id = ?`,
-			actor.ID, at, at, id); err != nil {
+			verifiedBy, at, at, id); err != nil {
 			return translateWriteErr(err, "verifying dependency")
 		}
 		after := before.Dependency
-		after.VerifiedBy = &actor.ID
+		after.VerifiedBy = &verifiedBy
 		after.VerifiedAt = &at
 		return t.logUpdate(ctx, "dependency", id, &before.Dependency, &after)
 	})
@@ -700,8 +701,8 @@ func realmOrEmpty(realm *string) string {
 	return *realm
 }
 
-func (s *SQLStore) CreateIdentity(ctx context.Context, actor domain.Actor, i *domain.Identity) error {
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+func (s *SQLStore) CreateIdentity(ctx context.Context, p domain.Permit, i *domain.Identity) error {
+	return s.write(ctx, p, func(t *tx) error {
 		_, err := t.exec(ctx, `
 			INSERT INTO identity (id, kind, name, realm, secret_ref, rotation_days,
 			                      last_rotated, team_id, lifecycle)

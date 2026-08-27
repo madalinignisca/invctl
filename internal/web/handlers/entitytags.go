@@ -241,7 +241,7 @@ func (a *App) postEntityTags(w http.ResponseWriter, r *http.Request, entityType,
 	}
 
 	expected := submittedVersion(r, currentVersion)
-	if err := a.Store.SetEntityTags(r.Context(), actor(r), entityType, entityID, expected, tagIDs); err != nil {
+	if err := a.Store.SetEntityTags(r.Context(), permit(r), entityType, entityID, expected, tagIDs); err != nil {
 		switch {
 		case isStale(err):
 			rerender(http.StatusConflict,

@@ -208,7 +208,7 @@ func (f *apiFixture) service(t *testing.T, code, kind, envCode, host string) str
 	if err != nil {
 		t.Fatalf("building service %s: %v", code, err)
 	}
-	if err := f.s.CreateService(f.ctx, testActor, svc); err != nil {
+	if err := f.s.CreateService(f.ctx, testPermit, svc); err != nil {
 		t.Fatalf("creating service %s: %v", code, err)
 	}
 	f.services[code] = svc.ID
@@ -217,7 +217,7 @@ func (f *apiFixture) service(t *testing.T, code, kind, envCode, host string) str
 	if err != nil {
 		t.Fatalf("building the placement of %s: %v", code, err)
 	}
-	if err := f.s.CreateInstance(f.ctx, testActor, si); err != nil {
+	if err := f.s.CreateInstance(f.ctx, testPermit, si); err != nil {
 		t.Fatalf("placing %s: %v", code, err)
 	}
 	return svc.ID
@@ -235,7 +235,7 @@ func (f *apiFixture) bareService(t *testing.T, code, envCode string) string {
 	if err != nil {
 		t.Fatalf("building service %s: %v", code, err)
 	}
-	if err := f.s.CreateService(f.ctx, testActor, svc); err != nil {
+	if err := f.s.CreateService(f.ctx, testPermit, svc); err != nil {
 		t.Fatalf("creating service %s: %v", code, err)
 	}
 	f.services[code] = svc.ID
@@ -1408,7 +1408,7 @@ func TestASingleFetchStillReturnsARetiredEntity(t *testing.T) {
 			if err := f.s.RetireAsset(f.ctx, domain.AdministratorPermit(f.actor), assetID); err != nil {
 				t.Fatalf("retiring the asset: %v", err)
 			}
-			if err := f.s.RetireService(f.ctx, f.actor, svcID); err != nil {
+			if err := f.s.RetireService(f.ctx, domain.AdministratorPermit(f.actor), svcID); err != nil {
 				t.Fatalf("retiring the service: %v", err)
 			}
 
@@ -1501,7 +1501,7 @@ func TestDecoratedListsExcludeWhatWasRetired(t *testing.T) {
 		{
 			name: "a retired service",
 			retire: func(t *testing.T, f *apiFixture, hostID, svcID string) {
-				if err := f.s.RetireService(f.ctx, f.actor, svcID); err != nil {
+				if err := f.s.RetireService(f.ctx, domain.AdministratorPermit(f.actor), svcID); err != nil {
 					t.Fatalf("retiring the service: %v", err)
 				}
 			},
@@ -1515,7 +1515,7 @@ func TestDecoratedListsExcludeWhatWasRetired(t *testing.T) {
 		{
 			name: "a retired placement",
 			retire: func(t *testing.T, f *apiFixture, hostID, svcID string) {
-				if err := f.s.RetireInstance(f.ctx, f.actor, f.placementID(t, svcID)); err != nil {
+				if err := f.s.RetireInstance(f.ctx, domain.AdministratorPermit(f.actor), f.placementID(t, svcID)); err != nil {
 					t.Fatalf("retiring the placement: %v", err)
 				}
 			},

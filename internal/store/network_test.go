@@ -397,10 +397,10 @@ func TestADependencyCannotBeDeclaredThroughAWithdrawnEndpoint(t *testing.T) {
 			if err != nil || len(deps) == 0 {
 				t.Fatalf("reading the edge back: %v (%d)", err, len(deps))
 			}
-			if err := s.RetireDependency(ctx, testActor, deps[0].ID); err != nil {
+			if err := s.RetireDependency(ctx, testPermit, deps[0].ID); err != nil {
 				t.Fatalf("retiring the edge: %v", err)
 			}
-			if err := s.RetireEndpoint(ctx, testActor, epID); err != nil {
+			if err := s.RetireEndpoint(ctx, testPermit, epID); err != nil {
 				t.Fatalf("withdrawing the socket: %v", err)
 			}
 
@@ -428,15 +428,15 @@ func TestAPoolBackendCannotBeWithdrawn(t *testing.T) {
 			_, provider, epID := servicePairWithEndpoint(t, s, ctx, 8080)
 
 			pool := &domain.BackendPool{ID: NewID(), ServiceID: provider, Name: "web", LBAlgorithm: strPtr("roundrobin")}
-			if err := s.CreateBackendPool(ctx, testActor, pool); err != nil {
+			if err := s.CreateBackendPool(ctx, testPermit, pool); err != nil {
 				t.Fatalf("creating the pool: %v", err)
 			}
-			if err := s.AddBackendMember(ctx, testActor,
+			if err := s.AddBackendMember(ctx, testPermit,
 				&domain.BackendMember{PoolID: pool.ID, EndpointID: epID, Weight: 1}); err != nil {
 				t.Fatalf("adding the backend: %v", err)
 			}
 
-			err := s.RetireEndpoint(ctx, testActor, epID)
+			err := s.RetireEndpoint(ctx, testPermit, epID)
 			if err == nil {
 				t.Fatal("a socket still serving a pool was withdrawn")
 			}
@@ -460,7 +460,7 @@ func servicePairWithEndpoint(t *testing.T, s *SQLStore, ctx context.Context, por
 		if err != nil {
 			t.Fatalf("building %s: %v", code, err)
 		}
-		if err := s.CreateService(ctx, testActor, svc); err != nil {
+		if err := s.CreateService(ctx, testPermit, svc); err != nil {
 			t.Fatalf("creating %s: %v", code, err)
 		}
 		return svc.ID
@@ -471,7 +471,7 @@ func servicePairWithEndpoint(t *testing.T, s *SQLStore, ctx context.Context, por
 	if err != nil {
 		t.Fatalf("building the endpoint: %v", err)
 	}
-	if err := s.CreateEndpoint(ctx, testActor, ep); err != nil {
+	if err := s.CreateEndpoint(ctx, testPermit, ep); err != nil {
 		t.Fatalf("creating the endpoint: %v", err)
 	}
 	return consumer, provider, ep.ID
@@ -484,7 +484,7 @@ func declareDependency(s *SQLStore, ctx context.Context, consumer, endpointID st
 	if err != nil {
 		return err
 	}
-	return s.CreateDependency(ctx, testActor, d, nil)
+	return s.CreateDependency(ctx, testPermit, d, nil)
 }
 
 // TestListPrefixTreeDerivesFromTheRealRangeScan.

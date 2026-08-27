@@ -119,7 +119,7 @@ func (f *ownershipFixture) service(t *testing.T, code string, teamID *string, li
 	if lifecycle != "" {
 		svc.Lifecycle = lifecycle
 	}
-	if err := f.s.CreateService(f.ctx, testActor, svc); err != nil {
+	if err := f.s.CreateService(f.ctx, testPermit, svc); err != nil {
 		t.Fatalf("creating service %s: %v", code, err)
 	}
 	return svc.ID
@@ -155,7 +155,7 @@ func (f *ownershipFixture) identity(t *testing.T, name string, teamID *string, l
 	if lifecycle != "" {
 		id.Lifecycle = lifecycle
 	}
-	if err := f.s.CreateIdentity(f.ctx, testActor, id); err != nil {
+	if err := f.s.CreateIdentity(f.ctx, testPermit, id); err != nil {
 		t.Fatalf("creating identity %s: %v", name, err)
 	}
 	return id.ID

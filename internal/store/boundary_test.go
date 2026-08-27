@@ -737,7 +737,7 @@ func TestSnapshotRedactsSecretRef(t *testing.T) {
 				t.Fatalf("building identity: %v", err)
 			}
 			identity.SecretRef = strPtr(vaultPath)
-			if err := s.CreateIdentity(ctx, testActor, identity); err != nil {
+			if err := s.CreateIdentity(ctx, testPermit, identity); err != nil {
 				t.Fatalf("creating identity: %v", err)
 			}
 
@@ -748,7 +748,7 @@ func TestSnapshotRedactsSecretRef(t *testing.T) {
 				t.Fatalf("building identity: %v", err)
 			}
 			other.SecretRef = strPtr("kv/prod/billing/api-token")
-			if err := s.CreateIdentity(ctx, testActor, other); err != nil {
+			if err := s.CreateIdentity(ctx, testPermit, other); err != nil {
 				t.Fatalf("creating identity: %v", err)
 			}
 
@@ -872,7 +872,7 @@ func TestOnlyUserActorWritesDeclaredSource(t *testing.T) {
 
 			t.Run("an agent may not create a dependency claiming it was declared", func(t *testing.T) {
 				dep := f.dependency(t, domain.SourceDeclared)
-				err := f.store.CreateDependency(f.ctx, agent, dep, nil)
+				err := f.store.CreateDependency(f.ctx, domain.AdministratorPermit(agent), dep, nil)
 				if err == nil {
 					t.Errorf("a machine credential (%s actor) created a dependency with source = %q. "+
 						"No machine may assert that a fact was hand-declared: that laundering is "+
@@ -886,7 +886,7 @@ func TestOnlyUserActorWritesDeclaredSource(t *testing.T) {
 
 			t.Run("an agent may create a dependency it discovered", func(t *testing.T) {
 				dep := f.dependency(t, domain.SourceDiscoveredNetstat)
-				if err := f.store.CreateDependency(f.ctx, agent, dep, nil); err != nil {
+				if err := f.store.CreateDependency(f.ctx, domain.AdministratorPermit(agent), dep, nil); err != nil {
 					t.Errorf("a machine credential could not record what it discovered: %v. "+
 						"Rule 7 restricts the value, not the writer.", err)
 				}
@@ -894,14 +894,14 @@ func TestOnlyUserActorWritesDeclaredSource(t *testing.T) {
 
 			t.Run("an operator may declare", func(t *testing.T) {
 				dep := f.dependency(t, domain.SourceDeclared)
-				if err := f.store.CreateDependency(f.ctx, testActor, dep, nil); err != nil {
+				if err := f.store.CreateDependency(f.ctx, testPermit, dep, nil); err != nil {
 					t.Errorf("a signed-in operator could not declare a dependency: %v", err)
 				}
 			})
 
 			t.Run("an agent may not launder a discovered edge into a declared one", func(t *testing.T) {
 				dep := f.dependency(t, domain.SourceDiscoveredNetstat)
-				if err := f.store.CreateDependency(f.ctx, agent, dep, nil); err != nil {
+				if err := f.store.CreateDependency(f.ctx, domain.AdministratorPermit(agent), dep, nil); err != nil {
 					t.Fatalf("seeding a discovered edge: %v", err)
 				}
 				row, err := f.store.GetDependency(f.ctx, dep.ID)
@@ -910,7 +910,7 @@ func TestOnlyUserActorWritesDeclaredSource(t *testing.T) {
 				}
 				laundered := row.Dependency
 				laundered.Source = domain.SourceDeclared
-				if err := f.store.UpdateDependency(f.ctx, agent, &laundered, nil); err == nil {
+				if err := f.store.UpdateDependency(f.ctx, domain.AdministratorPermit(agent), &laundered, nil); err == nil {
 					t.Error("a machine flipped an edge from discovered to declared. Rule 7: " +
 						"\"Flipping an edge between declared and discovered_* is an operator " +
 						"act with a change_log row.\"")
@@ -930,7 +930,7 @@ func TestOnlyUserActorWritesDeclaredSource(t *testing.T) {
 					t.Fatalf("building placement: %v", err)
 				}
 				si.Source = domain.SourceDeclared
-				if err := f.store.CreateInstance(f.ctx, agent, si); err == nil {
+				if err := f.store.CreateInstance(f.ctx, domain.AdministratorPermit(agent), si); err == nil {
 					t.Errorf("a machine credential (%s actor) created a service_instance with "+
 						"source = %q. A fabricated workload inside an in_scope environment must "+
 						"not render to an operator as hand-asserted fact. The CHECK added by "+
@@ -942,10 +942,10 @@ func TestOnlyUserActorWritesDeclaredSource(t *testing.T) {
 
 			t.Run("an agent may not sign off an edge as verified", func(t *testing.T) {
 				dep := f.dependency(t, domain.SourceDiscoveredNetstat)
-				if err := f.store.CreateDependency(f.ctx, agent, dep, nil); err != nil {
+				if err := f.store.CreateDependency(f.ctx, domain.AdministratorPermit(agent), dep, nil); err != nil {
 					t.Fatalf("seeding a discovered edge: %v", err)
 				}
-				if err := f.store.VerifyDependency(f.ctx, agent, dep.ID); err == nil {
+				if err := f.store.VerifyDependency(f.ctx, domain.AdministratorPermit(agent), dep.ID); err == nil {
 					t.Error("a machine credential verified a dependency. verified_by/verified_at " +
 						"are a PERSON's attestation that an edge is legitimate; a machine " +
 						"writing them is a rubber stamp on an undocumented chd edge and on the " +
@@ -968,7 +968,7 @@ func TestOnlyUserActorWritesDeclaredSource(t *testing.T) {
 				dep := f.dependency(t, domain.SourceDiscoveredNetstat)
 				claimed := 1.0
 				dep.Confidence = &claimed
-				if err := f.store.CreateDependency(f.ctx, agent, dep, nil); err != nil {
+				if err := f.store.CreateDependency(f.ctx, domain.AdministratorPermit(agent), dep, nil); err != nil {
 					// Refusing the field outright also satisfies the rule.
 					return
 				}
@@ -1028,7 +1028,7 @@ func newProvenanceFixture(t *testing.T, e Engine) *provenanceFixture {
 		if err != nil {
 			t.Fatalf("building service %s: %v", code, err)
 		}
-		if err := s.CreateService(ctx, testActor, svc); err != nil {
+		if err := s.CreateService(ctx, testPermit, svc); err != nil {
 			t.Fatalf("creating service %s: %v", code, err)
 		}
 		return svc.ID
@@ -1040,7 +1040,7 @@ func newProvenanceFixture(t *testing.T, e Engine) *provenanceFixture {
 	if err != nil {
 		t.Fatalf("building endpoint: %v", err)
 	}
-	if err := s.CreateEndpoint(ctx, testActor, ep); err != nil {
+	if err := s.CreateEndpoint(ctx, testPermit, ep); err != nil {
 		t.Fatalf("creating endpoint: %v", err)
 	}
 

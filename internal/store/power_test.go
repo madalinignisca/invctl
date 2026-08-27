@@ -142,14 +142,14 @@ func TestSingleFedIsReportedOnlyWhereSomethingRidesOnIt(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building service: %v", err)
 			}
-			if err := s.CreateService(ctx, testActor, svc); err != nil {
+			if err := s.CreateService(ctx, testPermit, svc); err != nil {
 				t.Fatalf("creating service: %v", err)
 			}
 			si, err := domain.NewServiceInstance(NewID(), svc.ID, host, domain.RuntimeSystemd, 0, s.Now())
 			if err != nil {
 				t.Fatalf("building instance: %v", err)
 			}
-			if err := s.CreateInstance(ctx, testActor, si); err != nil {
+			if err := s.CreateInstance(ctx, testPermit, si); err != nil {
 				t.Fatalf("placing the service: %v", err)
 			}
 			mustInput(t, s, ctx, host, feed, "A", nil)

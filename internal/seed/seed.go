@@ -876,7 +876,7 @@ func (b *builder) identities() {
 		identity.SecretRef = str(i.secretRef)
 		identity.RotationDays = num(90)
 		identity.TeamID = b.team("platform")
-		if err := b.store.CreateIdentity(b.ctx, Actor, identity); err != nil {
+		if err := b.store.CreateIdentity(b.ctx, domain.AdministratorPermit(Actor), identity); err != nil {
 			b.fail(fmt.Errorf("seeding identity %s: %w", i.name, err))
 			return
 		}

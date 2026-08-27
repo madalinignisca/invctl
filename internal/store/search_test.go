@@ -79,7 +79,7 @@ func seedSearchable(t *testing.T, s *SQLStore, ctx context.Context) (assetID, se
 	if err != nil {
 		t.Fatalf("building service: %v", err)
 	}
-	if err := s.CreateService(ctx, testActor, svc); err != nil {
+	if err := s.CreateService(ctx, testPermit, svc); err != nil {
 		t.Fatalf("creating service: %v", err)
 	}
 
@@ -88,7 +88,7 @@ func seedSearchable(t *testing.T, s *SQLStore, ctx context.Context) (assetID, se
 	if err != nil {
 		t.Fatalf("building endpoint: %v", err)
 	}
-	if err := s.CreateEndpoint(ctx, testActor, ep); err != nil {
+	if err := s.CreateEndpoint(ctx, testPermit, ep); err != nil {
 		t.Fatalf("creating endpoint: %v", err)
 	}
 

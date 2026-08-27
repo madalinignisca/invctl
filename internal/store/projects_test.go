@@ -72,7 +72,7 @@ func newProjectFixture(t *testing.T, e Engine) *projectFixture {
 		if err != nil {
 			t.Fatalf("building service %s: %v", code, err)
 		}
-		if err := s.CreateService(ctx, testActor, svc); err != nil {
+		if err := s.CreateService(ctx, testPermit, svc); err != nil {
 			t.Fatalf("creating service %s: %v", code, err)
 		}
 		f.services[code] = svc.ID

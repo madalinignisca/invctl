@@ -138,14 +138,14 @@ func withinRange(innerStart, innerEnd, outerStart, outerEnd []byte) bool {
 }
 
 // CreateAggregate declares a delegation.
-func (s *SQLStore) CreateAggregate(ctx context.Context, actor domain.Actor, a *domain.Aggregate) error {
+func (s *SQLStore) CreateAggregate(ctx context.Context, p domain.Permit, a *domain.Aggregate) error {
 	if err := a.Validate(); err != nil {
 		return err
 	}
 	a.RowVersion = 1
 	at := domain.FormatTime(s.now())
 	a.CreatedAt, a.UpdatedAt = &at, &at
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, p, func(t *tx) error {
 		_, err := t.exec(ctx, `
 			INSERT INTO aggregate (id, cidr_text, addr_family, addr_start, addr_end,
 			                       rir_id, allocated_on, description, lifecycle,
@@ -167,7 +167,7 @@ func (s *SQLStore) CreateAggregate(ctx context.Context, actor domain.Actor, a *d
 }
 
 // RetireAggregate withdraws a delegation.
-func (s *SQLStore) RetireAggregate(ctx context.Context, actor domain.Actor, id string) error {
+func (s *SQLStore) RetireAggregate(ctx context.Context, p domain.Permit, id string) error {
 	var before domain.Aggregate
 	if err := s.readOne(ctx, &before, `SELECT * FROM aggregate WHERE id = ?`, id); err != nil {
 		return fmt.Errorf("getting aggregate %s: %w", id, err)
@@ -179,7 +179,7 @@ func (s *SQLStore) RetireAggregate(ctx context.Context, actor domain.Actor, id s
 	after := before
 	after.Lifecycle = domain.LifecycleRetired
 	after.UpdatedAt = &at
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, p, func(t *tx) error {
 		res, err := t.exec(ctx, `
 			UPDATE aggregate SET lifecycle = 'retired', updated_at = ?,
 			                     row_version = row_version + 1
@@ -208,14 +208,14 @@ func (s *SQLStore) ListRIRs(ctx context.Context) ([]domain.RIR, error) {
 }
 
 // CreateRIR declares a registry.
-func (s *SQLStore) CreateRIR(ctx context.Context, actor domain.Actor, r *domain.RIR) error {
+func (s *SQLStore) CreateRIR(ctx context.Context, p domain.Permit, r *domain.RIR) error {
 	if err := r.Validate(); err != nil {
 		return err
 	}
 	r.RowVersion = 1
 	at := domain.FormatTime(s.now())
 	r.CreatedAt, r.UpdatedAt = &at, &at
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, p, func(t *tx) error {
 		_, err := t.exec(ctx, `
 			INSERT INTO rir (id, name, is_private, description, lifecycle, created_at, updated_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -254,14 +254,14 @@ func (s *SQLStore) ListASNs(ctx context.Context) ([]ASNRow, error) {
 }
 
 // CreateASN declares an AS number.
-func (s *SQLStore) CreateASN(ctx context.Context, actor domain.Actor, a *domain.ASN) error {
+func (s *SQLStore) CreateASN(ctx context.Context, p domain.Permit, a *domain.ASN) error {
 	if err := a.Validate(); err != nil {
 		return err
 	}
 	a.RowVersion = 1
 	at := domain.FormatTime(s.now())
 	a.CreatedAt, a.UpdatedAt = &at, &at
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, p, func(t *tx) error {
 		_, err := t.exec(ctx, `
 			INSERT INTO asn (id, number, name, rir_id, description, lifecycle,
 			                 created_at, updated_at)
@@ -284,7 +284,7 @@ func (s *SQLStore) CreateASN(ctx context.Context, actor domain.Actor, a *domain.
 }
 
 // RetireASN withdraws an AS number.
-func (s *SQLStore) RetireASN(ctx context.Context, actor domain.Actor, id string) error {
+func (s *SQLStore) RetireASN(ctx context.Context, p domain.Permit, id string) error {
 	var before domain.ASN
 	if err := s.readOne(ctx, &before, `SELECT * FROM asn WHERE id = ?`, id); err != nil {
 		return fmt.Errorf("getting AS number %s: %w", id, err)
@@ -296,7 +296,7 @@ func (s *SQLStore) RetireASN(ctx context.Context, actor domain.Actor, id string)
 	after := before
 	after.Lifecycle = domain.LifecycleRetired
 	after.UpdatedAt = &at
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, p, func(t *tx) error {
 		res, err := t.exec(ctx, `
 			UPDATE asn SET lifecycle = 'retired', updated_at = ?, row_version = row_version + 1
 			WHERE id = ? AND row_version = ?`, at, id, before.RowVersion)

@@ -114,14 +114,14 @@ func (f *pruneFixture) placement(t *testing.T, code, envID, assetID string) stri
 	if err != nil {
 		t.Fatalf("building service %s: %v", code, err)
 	}
-	if err := f.store.CreateService(f.ctx, testActor, svc); err != nil {
+	if err := f.store.CreateService(f.ctx, testPermit, svc); err != nil {
 		t.Fatalf("creating service %s: %v", code, err)
 	}
 	si, err := domain.NewServiceInstance(NewID(), svc.ID, assetID, domain.RuntimeSystemd, 0, f.store.Now())
 	if err != nil {
 		t.Fatalf("building placement for %s: %v", code, err)
 	}
-	if err := f.store.CreateInstance(f.ctx, testActor, si); err != nil {
+	if err := f.store.CreateInstance(f.ctx, testPermit, si); err != nil {
 		t.Fatalf("creating placement for %s: %v", code, err)
 	}
 	return si.ID

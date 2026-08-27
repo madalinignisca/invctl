@@ -52,7 +52,7 @@ func newEntityTagFixture(t *testing.T, e Engine) *entityTagFixture {
 	if err != nil {
 		t.Fatalf("building fixture service: %v", err)
 	}
-	if err := s.CreateService(ctx, actor, svc); err != nil {
+	if err := s.CreateService(ctx, domain.AdministratorPermit(actor), svc); err != nil {
 		t.Fatalf("creating fixture service: %v", err)
 	}
 
@@ -167,7 +167,7 @@ func TestApplyingATagWritesExactlyOneChangeLogRowOnTheParent(t *testing.T) {
 			before := f.changeCount(t, domain.TagEntityAsset, f.assetID)
 
 			expected := f.rowVersion(t, domain.TagEntityAsset, f.assetID)
-			if err := f.s.SetEntityTags(f.ctx, f.actor, domain.TagEntityAsset, f.assetID, expected, []string{dr}); err != nil {
+			if err := f.s.SetEntityTags(f.ctx, domain.AdministratorPermit(f.actor), domain.TagEntityAsset, f.assetID, expected, []string{dr}); err != nil {
 				t.Fatalf("applying the tag: %v", err)
 			}
 
@@ -194,13 +194,13 @@ func TestRemovingATagWritesExactlyOneChangeLogRowOnTheParent(t *testing.T) {
 			f := newEntityTagFixture(t, e)
 			dr := f.tag(t, "dr")
 			expected := f.rowVersion(t, domain.TagEntityAsset, f.assetID)
-			if err := f.s.SetEntityTags(f.ctx, f.actor, domain.TagEntityAsset, f.assetID, expected, []string{dr}); err != nil {
+			if err := f.s.SetEntityTags(f.ctx, domain.AdministratorPermit(f.actor), domain.TagEntityAsset, f.assetID, expected, []string{dr}); err != nil {
 				t.Fatalf("applying the tag: %v", err)
 			}
 			before := f.changeCount(t, domain.TagEntityAsset, f.assetID)
 
 			expected = f.rowVersion(t, domain.TagEntityAsset, f.assetID)
-			if err := f.s.SetEntityTags(f.ctx, f.actor, domain.TagEntityAsset, f.assetID, expected, nil); err != nil {
+			if err := f.s.SetEntityTags(f.ctx, domain.AdministratorPermit(f.actor), domain.TagEntityAsset, f.assetID, expected, nil); err != nil {
 				t.Fatalf("removing the tag: %v", err)
 			}
 
@@ -233,14 +233,14 @@ func TestReorderingTagsIsNotAChange(t *testing.T) {
 			pci := f.tag(t, "pci")
 
 			expected := f.rowVersion(t, domain.TagEntityAsset, f.assetID)
-			if err := f.s.SetEntityTags(f.ctx, f.actor, domain.TagEntityAsset, f.assetID, expected, []string{dr, pci}); err != nil {
+			if err := f.s.SetEntityTags(f.ctx, domain.AdministratorPermit(f.actor), domain.TagEntityAsset, f.assetID, expected, []string{dr, pci}); err != nil {
 				t.Fatalf("applying both tags: %v", err)
 			}
 			before := f.changeCount(t, domain.TagEntityAsset, f.assetID)
 
 			// The identical set, submitted in the opposite order.
 			expected = f.rowVersion(t, domain.TagEntityAsset, f.assetID)
-			if err := f.s.SetEntityTags(f.ctx, f.actor, domain.TagEntityAsset, f.assetID, expected, []string{pci, dr}); err != nil {
+			if err := f.s.SetEntityTags(f.ctx, domain.AdministratorPermit(f.actor), domain.TagEntityAsset, f.assetID, expected, []string{pci, dr}); err != nil {
 				t.Fatalf("resubmitting the same set in a different order: %v", err)
 			}
 
@@ -269,7 +269,7 @@ func TestTheTagFoldIsStableAcrossARename(t *testing.T) {
 			f := newEntityTagFixture(t, e)
 			dr := f.tag(t, "dr")
 			expected := f.rowVersion(t, domain.TagEntityAsset, f.assetID)
-			if err := f.s.SetEntityTags(f.ctx, f.actor, domain.TagEntityAsset, f.assetID, expected, []string{dr}); err != nil {
+			if err := f.s.SetEntityTags(f.ctx, domain.AdministratorPermit(f.actor), domain.TagEntityAsset, f.assetID, expected, []string{dr}); err != nil {
 				t.Fatalf("applying the tag: %v", err)
 			}
 			before := f.tagsFold(t, domain.TagEntityAsset, f.assetID)
@@ -305,7 +305,7 @@ func TestRenamingATagDoesNotManufactureATagsDiffOnTheNextUnrelatedSave(t *testin
 			f := newEntityTagFixture(t, e)
 			dr := f.tag(t, "dr")
 			expected := f.rowVersion(t, domain.TagEntityAsset, f.assetID)
-			if err := f.s.SetEntityTags(f.ctx, f.actor, domain.TagEntityAsset, f.assetID, expected, []string{dr}); err != nil {
+			if err := f.s.SetEntityTags(f.ctx, domain.AdministratorPermit(f.actor), domain.TagEntityAsset, f.assetID, expected, []string{dr}); err != nil {
 				t.Fatalf("applying the tag: %v", err)
 			}
 
@@ -348,7 +348,7 @@ func TestARetiredTagStillDisplaysOnAnEntityThatCarriesIt(t *testing.T) {
 			f := newEntityTagFixture(t, e)
 			dr := f.tag(t, "dr")
 			expected := f.rowVersion(t, domain.TagEntityAsset, f.assetID)
-			if err := f.s.SetEntityTags(f.ctx, f.actor, domain.TagEntityAsset, f.assetID, expected, []string{dr}); err != nil {
+			if err := f.s.SetEntityTags(f.ctx, domain.AdministratorPermit(f.actor), domain.TagEntityAsset, f.assetID, expected, []string{dr}); err != nil {
 				t.Fatalf("applying the tag: %v", err)
 			}
 			f.retire(t, dr)
@@ -365,7 +365,7 @@ func TestARetiredTagStillDisplaysOnAnEntityThatCarriesIt(t *testing.T) {
 			// this tag's checkbox pre-ticked, so the operator's save posts
 			// it back) must not be refused, and must not drop it.
 			expected = f.rowVersion(t, domain.TagEntityAsset, f.assetID)
-			if err := f.s.SetEntityTags(f.ctx, f.actor, domain.TagEntityAsset, f.assetID, expected, []string{dr}); err != nil {
+			if err := f.s.SetEntityTags(f.ctx, domain.AdministratorPermit(f.actor), domain.TagEntityAsset, f.assetID, expected, []string{dr}); err != nil {
 				t.Fatalf("resubmitting a retired tag this entity already holds must be accepted: %v", err)
 			}
 			applied, err = f.s.EntityTagsFor(f.ctx, domain.TagEntityAsset, f.assetID)
@@ -390,7 +390,7 @@ func TestARetiredTagIsRefusedForNewApplication(t *testing.T) {
 			f.retire(t, dr)
 
 			expected := f.rowVersion(t, domain.TagEntityAsset, f.assetID)
-			err := f.s.SetEntityTags(f.ctx, f.actor, domain.TagEntityAsset, f.assetID, expected, []string{dr})
+			err := f.s.SetEntityTags(f.ctx, domain.AdministratorPermit(f.actor), domain.TagEntityAsset, f.assetID, expected, []string{dr})
 			if err == nil {
 				t.Fatal("applying a retired tag for the first time must be refused")
 			}
@@ -429,7 +429,7 @@ func TestAStaleParentRowVersionGets409(t *testing.T) {
 			}
 
 			// A tag submission still carrying the ORIGINAL token.
-			err = f.s.SetEntityTags(f.ctx, f.actor, domain.TagEntityAsset, f.assetID, stale, []string{dr})
+			err = f.s.SetEntityTags(f.ctx, domain.AdministratorPermit(f.actor), domain.TagEntityAsset, f.assetID, stale, []string{dr})
 			if err == nil {
 				t.Fatal("a stale parent row_version must be refused")
 			}
@@ -451,17 +451,17 @@ func TestATagAppliedToTwoEntityTypesIsIndependent(t *testing.T) {
 			dr := f.tag(t, "dr")
 
 			assetVersion := f.rowVersion(t, domain.TagEntityAsset, f.assetID)
-			if err := f.s.SetEntityTags(f.ctx, f.actor, domain.TagEntityAsset, f.assetID, assetVersion, []string{dr}); err != nil {
+			if err := f.s.SetEntityTags(f.ctx, domain.AdministratorPermit(f.actor), domain.TagEntityAsset, f.assetID, assetVersion, []string{dr}); err != nil {
 				t.Fatalf("applying to the asset: %v", err)
 			}
 			serviceVersion := f.rowVersion(t, domain.TagEntityService, f.serviceID)
-			if err := f.s.SetEntityTags(f.ctx, f.actor, domain.TagEntityService, f.serviceID, serviceVersion, []string{dr}); err != nil {
+			if err := f.s.SetEntityTags(f.ctx, domain.AdministratorPermit(f.actor), domain.TagEntityService, f.serviceID, serviceVersion, []string{dr}); err != nil {
 				t.Fatalf("applying to the service: %v", err)
 			}
 
 			// Removing it from the asset only.
 			assetVersion = f.rowVersion(t, domain.TagEntityAsset, f.assetID)
-			if err := f.s.SetEntityTags(f.ctx, f.actor, domain.TagEntityAsset, f.assetID, assetVersion, nil); err != nil {
+			if err := f.s.SetEntityTags(f.ctx, domain.AdministratorPermit(f.actor), domain.TagEntityAsset, f.assetID, assetVersion, nil); err != nil {
 				t.Fatalf("removing from the asset: %v", err)
 			}
 
@@ -490,7 +490,7 @@ func TestApplyingAnUnknownTagIsRefused(t *testing.T) {
 		t.Run(e.Name, func(t *testing.T) {
 			f := newEntityTagFixture(t, e)
 			expected := f.rowVersion(t, domain.TagEntityAsset, f.assetID)
-			err := f.s.SetEntityTags(f.ctx, f.actor, domain.TagEntityAsset, f.assetID, expected, []string{NewID()})
+			err := f.s.SetEntityTags(f.ctx, domain.AdministratorPermit(f.actor), domain.TagEntityAsset, f.assetID, expected, []string{NewID()})
 			if err == nil {
 				t.Fatal("applying an unknown tag id must be refused")
 			}
@@ -509,7 +509,7 @@ func TestSetEntityTagsRefusesAnUntaggableEntityType(t *testing.T) {
 		t.Run(e.Name, func(t *testing.T) {
 			f := newEntityTagFixture(t, e)
 			dr := f.tag(t, "dr")
-			err := f.s.SetEntityTags(f.ctx, f.actor, "circuit", f.assetID, 1, []string{dr})
+			err := f.s.SetEntityTags(f.ctx, domain.AdministratorPermit(f.actor), "circuit", f.assetID, 1, []string{dr})
 			if err == nil {
 				t.Fatal("an untaggable entity type must be refused")
 			}
@@ -532,7 +532,7 @@ func TestApplyingATagToAProjectWritesExactlyOneChangeLogRow(t *testing.T) {
 			before := f.changeCount(t, domain.TagEntityProject, f.projectID)
 
 			expected := f.rowVersion(t, domain.TagEntityProject, f.projectID)
-			if err := f.s.SetEntityTags(f.ctx, f.actor, domain.TagEntityProject, f.projectID, expected, []string{dr}); err != nil {
+			if err := f.s.SetEntityTags(f.ctx, domain.AdministratorPermit(f.actor), domain.TagEntityProject, f.projectID, expected, []string{dr}); err != nil {
 				t.Fatalf("applying the tag: %v", err)
 			}
 

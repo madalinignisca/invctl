@@ -117,7 +117,7 @@ func newNeighbourFixture(t *testing.T, e Engine) *neighbourFixture {
 		if err != nil {
 			t.Fatalf("building service %s: %v", code, err)
 		}
-		if err := s.CreateService(ctx, testActor, svc); err != nil {
+		if err := s.CreateService(ctx, testPermit, svc); err != nil {
 			t.Fatalf("creating service %s: %v", code, err)
 		}
 		f.svc[code] = svc.ID
@@ -129,7 +129,7 @@ func newNeighbourFixture(t *testing.T, e Engine) *neighbourFixture {
 		if err != nil {
 			t.Fatalf("building instance of %s: %v", code, err)
 		}
-		if err := s.CreateInstance(ctx, testActor, si); err != nil {
+		if err := s.CreateInstance(ctx, testPermit, si); err != nil {
 			t.Fatalf("placing %s on %s: %v", code, host, err)
 		}
 	}
@@ -156,7 +156,7 @@ func newNeighbourFixture(t *testing.T, e Engine) *neighbourFixture {
 		if err != nil {
 			t.Fatalf("building dependency: %v", err)
 		}
-		if err := s.CreateDependency(ctx, testActor, d, nil); err != nil {
+		if err := s.CreateDependency(ctx, testPermit, d, nil); err != nil {
 			t.Fatalf("creating dependency: %v", err)
 		}
 	}
@@ -174,7 +174,7 @@ func (f *neighbourFixture) endpoint(t *testing.T, code, name string, port int, s
 		t.Fatalf("building endpoint %s/%s: %v", code, name, err)
 	}
 	e.IPAddressID = addrID
-	if err := f.s.CreateEndpoint(f.ctx, testActor, e); err != nil {
+	if err := f.s.CreateEndpoint(f.ctx, testPermit, e); err != nil {
 		t.Fatalf("creating endpoint %s/%s: %v", code, name, err)
 	}
 	return e.ID

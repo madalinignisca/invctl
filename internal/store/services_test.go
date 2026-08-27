@@ -39,7 +39,7 @@ func TestAWithdrawnPlacementFreesItsSlot(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building service: %v", err)
 			}
-			if err := s.CreateService(ctx, testActor, svc); err != nil {
+			if err := s.CreateService(ctx, testPermit, svc); err != nil {
 				t.Fatalf("creating service: %v", err)
 			}
 			place := func() (*domain.ServiceInstance, error) {
@@ -47,7 +47,7 @@ func TestAWithdrawnPlacementFreesItsSlot(t *testing.T) {
 				if err != nil {
 					t.Fatalf("building instance: %v", err)
 				}
-				return si, s.CreateInstance(ctx, testActor, si)
+				return si, s.CreateInstance(ctx, testPermit, si)
 			}
 
 			first, err := place()
@@ -62,7 +62,7 @@ func TestAWithdrawnPlacementFreesItsSlot(t *testing.T) {
 					"the partial index no longer enforces anything")
 			}
 
-			if err := s.RetireInstance(ctx, testActor, first.ID); err != nil {
+			if err := s.RetireInstance(ctx, testPermit, first.ID); err != nil {
 				t.Fatalf("retiring: %v", err)
 			}
 

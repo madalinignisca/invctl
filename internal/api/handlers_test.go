@@ -170,14 +170,14 @@ func (f *apiHandlerFixture) mustService(code, envCode, hostAssetID string) strin
 	if err != nil {
 		f.t.Fatalf("building service %s: %v", code, err)
 	}
-	if err := f.s.CreateService(f.ctx, domain.SystemActor, svc); err != nil {
+	if err := f.s.CreateService(f.ctx, domain.AdministratorPermit(domain.SystemActor), svc); err != nil {
 		f.t.Fatalf("creating service %s: %v", code, err)
 	}
 	si, err := domain.NewServiceInstance(store.NewID(), svc.ID, hostAssetID, domain.RuntimeSystemd, 0, f.s.Now())
 	if err != nil {
 		f.t.Fatalf("building the placement of %s: %v", code, err)
 	}
-	if err := f.s.CreateInstance(f.ctx, domain.SystemActor, si); err != nil {
+	if err := f.s.CreateInstance(f.ctx, domain.AdministratorPermit(domain.SystemActor), si); err != nil {
 		f.t.Fatalf("placing %s: %v", code, err)
 	}
 	return svc.ID

@@ -85,7 +85,7 @@ func newObservedFixture(t *testing.T, e Engine) *observedFixture {
 	if err != nil {
 		t.Fatalf("building service: %v", err)
 	}
-	if err := s.CreateService(ctx, testActor, svc); err != nil {
+	if err := s.CreateService(ctx, testPermit, svc); err != nil {
 		t.Fatalf("creating service: %v", err)
 	}
 
@@ -93,7 +93,7 @@ func newObservedFixture(t *testing.T, e Engine) *observedFixture {
 	if err != nil {
 		t.Fatalf("building instance: %v", err)
 	}
-	if err := s.CreateInstance(ctx, testActor, si); err != nil {
+	if err := s.CreateInstance(ctx, testPermit, si); err != nil {
 		t.Fatalf("creating instance: %v", err)
 	}
 

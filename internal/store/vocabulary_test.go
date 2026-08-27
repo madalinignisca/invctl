@@ -301,7 +301,7 @@ func TestUnknownVocabularyValueIsRejectedOnEveryColumn(t *testing.T) {
 					// Validate would catch the kind's shape but not its
 					// existence, so reach the store directly the way an
 					// importer would.
-					return s.CreateService(ctx, testActor, svc)
+					return s.CreateService(ctx, testPermit, svc)
 				}},
 				{"dependency_data_class.data_class", "data_class", func() error {
 					return setDataClassesForTest(ctx, s, "does-not-matter", []string{"biometrics"})

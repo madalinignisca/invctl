@@ -485,7 +485,7 @@ func dependencyWithSecretRef(t *testing.T, h *harness, ref string) (serviceID, s
 		t.Fatalf("building identity: %v", err)
 	}
 	identity.SecretRef = strPtr(ref)
-	if err := h.store.CreateIdentity(ctx, domain.SystemActor, identity); err != nil {
+	if err := h.store.CreateIdentity(ctx, domain.AdministratorPermit(domain.SystemActor), identity); err != nil {
 		t.Fatalf("creating identity: %v", err)
 	}
 
@@ -501,7 +501,7 @@ func dependencyWithSecretRef(t *testing.T, h *harness, ref string) (serviceID, s
 	if err != nil {
 		t.Fatalf("building dependency: %v", err)
 	}
-	if err := h.store.CreateDependency(ctx, domain.SystemActor, dep, nil); err != nil {
+	if err := h.store.CreateDependency(ctx, domain.AdministratorPermit(domain.SystemActor), dep, nil); err != nil {
 		t.Fatalf("creating dependency: %v", err)
 	}
 	return consumerID, ref

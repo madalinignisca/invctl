@@ -103,7 +103,7 @@ func TestSearchFindsAServiceByItsExactCode(t *testing.T) {
 				if err != nil {
 					t.Fatalf("building %s: %v", spec.code, err)
 				}
-				if err := s.CreateService(ctx, testActor, svc); err != nil {
+				if err := s.CreateService(ctx, testPermit, svc); err != nil {
 					t.Fatalf("creating %s: %v", spec.code, err)
 				}
 			}
@@ -291,7 +291,7 @@ func TestServiceFilterRanksTheExactCodeFirst(t *testing.T) {
 				if err != nil {
 					t.Fatalf("building %s: %v", spec.code, err)
 				}
-				if err := s.CreateService(ctx, testActor, svc); err != nil {
+				if err := s.CreateService(ctx, testPermit, svc); err != nil {
 					t.Fatalf("creating %s: %v", spec.code, err)
 				}
 			}

@@ -616,7 +616,7 @@ func TestInstanceRejectsNonHostableAsset(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building service: %v", err)
 			}
-			if err := s.CreateService(ctx, testActor, svc); err != nil {
+			if err := s.CreateService(ctx, testPermit, svc); err != nil {
 				t.Fatalf("creating service: %v", err)
 			}
 
@@ -624,7 +624,7 @@ func TestInstanceRejectsNonHostableAsset(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building instance: %v", err)
 			}
-			err = s.CreateInstance(ctx, testActor, si)
+			err = s.CreateInstance(ctx, testPermit, si)
 			if err == nil {
 				t.Fatal("placing a service instance on a rack succeeded")
 			}
@@ -875,7 +875,7 @@ func TestSecretRefNeverReachesTheAuditTrail(t *testing.T) {
 				t.Fatalf("building identity: %v", err)
 			}
 			identity.SecretRef = strPtr(path)
-			if err := s.CreateIdentity(ctx, testActor, identity); err != nil {
+			if err := s.CreateIdentity(ctx, testPermit, identity); err != nil {
 				t.Fatalf("creating identity: %v", err)
 			}
 
@@ -955,7 +955,7 @@ func TestDataClassChangeIsAudited(t *testing.T) {
 				if err != nil {
 					t.Fatalf("building service: %v", err)
 				}
-				if err := s.CreateService(ctx, testActor, svc); err != nil {
+				if err := s.CreateService(ctx, testPermit, svc); err != nil {
 					t.Fatalf("creating service: %v", err)
 				}
 				return svc.ID
@@ -967,7 +967,7 @@ func TestDataClassChangeIsAudited(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building endpoint: %v", err)
 			}
-			if err := s.CreateEndpoint(ctx, testActor, ep); err != nil {
+			if err := s.CreateEndpoint(ctx, testPermit, ep); err != nil {
 				t.Fatalf("creating endpoint: %v", err)
 			}
 
@@ -978,7 +978,7 @@ func TestDataClassChangeIsAudited(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building dependency: %v", err)
 			}
-			if err := s.CreateDependency(ctx, testActor, dep, []string{"telemetry"}); err != nil {
+			if err := s.CreateDependency(ctx, testPermit, dep, []string{"telemetry"}); err != nil {
 				t.Fatalf("creating dependency: %v", err)
 			}
 
@@ -1001,7 +1001,7 @@ func TestDataClassChangeIsAudited(t *testing.T) {
 				}
 				updated := row.Dependency
 				// Change ONLY the data classes.
-				if err := s.UpdateDependency(ctx, testActor, &updated, []string{"chd", "pii"}); err != nil {
+				if err := s.UpdateDependency(ctx, testPermit, &updated, []string{"chd", "pii"}); err != nil {
 					t.Fatalf("updating dependency: %v", err)
 				}
 
@@ -1024,7 +1024,7 @@ func TestDataClassChangeIsAudited(t *testing.T) {
 				before, _ := s.ListChangesForEntity(ctx, "dependency", dep.ID, 50)
 				row, _ := s.GetDependency(ctx, dep.ID)
 				updated := row.Dependency
-				if err := s.UpdateDependency(ctx, testActor, &updated, []string{"pii", "chd"}); err != nil {
+				if err := s.UpdateDependency(ctx, testPermit, &updated, []string{"pii", "chd"}); err != nil {
 					t.Fatalf("updating dependency: %v", err)
 				}
 				after, _ := s.ListChangesForEntity(ctx, "dependency", dep.ID, 50)
@@ -1064,7 +1064,7 @@ func TestVerifiedByIsAnOpaqueID(t *testing.T) {
 				if err != nil {
 					t.Fatalf("building service: %v", err)
 				}
-				if err := s.CreateService(ctx, testActor, svc); err != nil {
+				if err := s.CreateService(ctx, testPermit, svc); err != nil {
 					t.Fatalf("creating service: %v", err)
 				}
 				return svc.ID
@@ -1076,7 +1076,7 @@ func TestVerifiedByIsAnOpaqueID(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building endpoint: %v", err)
 			}
-			if err := s.CreateEndpoint(ctx, testActor, ep); err != nil {
+			if err := s.CreateEndpoint(ctx, testPermit, ep); err != nil {
 				t.Fatalf("creating endpoint: %v", err)
 			}
 			epID := ep.ID
@@ -1086,11 +1086,11 @@ func TestVerifiedByIsAnOpaqueID(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building dependency: %v", err)
 			}
-			if err := s.CreateDependency(ctx, testActor, dep, nil); err != nil {
+			if err := s.CreateDependency(ctx, testPermit, dep, nil); err != nil {
 				t.Fatalf("creating dependency: %v", err)
 			}
 
-			if err := s.VerifyDependency(ctx, domain.UserActor(user), dep.ID); err != nil {
+			if err := s.VerifyDependency(ctx, domain.AdministratorPermit(domain.UserActor(user)), dep.ID); err != nil {
 				t.Fatalf("verifying: %v", err)
 			}
 
@@ -1297,7 +1297,7 @@ func TestAuditSnapshotIsComplete(t *testing.T) {
 					if err != nil {
 						t.Fatalf("building service: %v", err)
 					}
-					if err := s.CreateService(ctx, testActor, svc); err != nil {
+					if err := s.CreateService(ctx, testPermit, svc); err != nil {
 						t.Fatalf("creating service: %v", err)
 					}
 					return svc.ID
@@ -1308,7 +1308,7 @@ func TestAuditSnapshotIsComplete(t *testing.T) {
 				if err != nil {
 					t.Fatalf("building endpoint: %v", err)
 				}
-				if err := s.CreateEndpoint(ctx, testActor, ep); err != nil {
+				if err := s.CreateEndpoint(ctx, testPermit, ep); err != nil {
 					t.Fatalf("creating endpoint: %v", err)
 				}
 				epID := ep.ID
@@ -1318,7 +1318,7 @@ func TestAuditSnapshotIsComplete(t *testing.T) {
 				if err != nil {
 					t.Fatalf("building dependency: %v", err)
 				}
-				if err := s.CreateDependency(ctx, testActor, dep, []string{"chd"}); err != nil {
+				if err := s.CreateDependency(ctx, testPermit, dep, []string{"chd"}); err != nil {
 					t.Fatalf("creating dependency: %v", err)
 				}
 

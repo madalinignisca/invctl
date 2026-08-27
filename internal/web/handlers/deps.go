@@ -40,7 +40,7 @@ func (a *App) DependencyCreate(w http.ResponseWriter, r *http.Request) {
 
 	dep, err := domain.NewDependency(store.NewID(), spec, a.Store.Now())
 	if err == nil {
-		err = a.Store.CreateDependency(r.Context(), actor(r), dep, r.Form["data_class"])
+		err = a.Store.CreateDependency(r.Context(), permit(r), dep, r.Form["data_class"])
 	}
 	if err != nil {
 		messages, ok := validationErrors(err)
@@ -64,7 +64,7 @@ func (a *App) DependencyRetire(w http.ResponseWriter, r *http.Request) {
 		a.handleStoreError(w, r, err)
 		return
 	}
-	if err := a.Store.RetireDependency(r.Context(), actor(r), id); err != nil {
+	if err := a.Store.RetireDependency(r.Context(), permit(r), id); err != nil {
 		a.handleStoreError(w, r, err)
 		return
 	}
@@ -79,7 +79,7 @@ func (a *App) DependencyRetire(w http.ResponseWriter, r *http.Request) {
 // quietly rotting.
 func (a *App) DependencyVerify(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if err := a.Store.VerifyDependency(r.Context(), actor(r), id); err != nil {
+	if err := a.Store.VerifyDependency(r.Context(), permit(r), id); err != nil {
 		a.handleStoreError(w, r, err)
 		return
 	}

@@ -609,7 +609,7 @@ func TestExpiryCountsEveryPlaceACertificateIsDeployed(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building the service: %v", err)
 			}
-			if err := s.CreateService(ctx, testActor, svc); err != nil {
+			if err := s.CreateService(ctx, testPermit, svc); err != nil {
 				t.Fatalf("creating the service: %v", err)
 			}
 			if err := s.DeployCertificateToService(ctx, testActor, id, svc.ID, nil); err != nil {

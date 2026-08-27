@@ -262,7 +262,7 @@ func TestHiddenDependenciesAreClassified(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building: %v", err)
 			}
-			if err := s.CreateService(ctx, testActor, orphan); err != nil {
+			if err := s.CreateService(ctx, testPermit, orphan); err != nil {
 				t.Fatalf("creating: %v", err)
 			}
 			f.services["orphan"] = orphan.ID
@@ -276,7 +276,7 @@ func TestHiddenDependenciesAreClassified(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building: %v", err)
 			}
-			if err := s.CreateService(ctx, testActor, shared); err != nil {
+			if err := s.CreateService(ctx, testPermit, shared); err != nil {
 				t.Fatalf("creating: %v", err)
 			}
 			f.services["shared-bus"] = shared.ID
@@ -290,7 +290,7 @@ func TestHiddenDependenciesAreClassified(t *testing.T) {
 				if err != nil {
 					t.Fatalf("building endpoint: %v", err)
 				}
-				if err := s.CreateEndpoint(ctx, testActor, ep); err != nil {
+				if err := s.CreateEndpoint(ctx, testPermit, ep); err != nil {
 					t.Fatalf("creating endpoint: %v", err)
 				}
 				d, err := domain.NewDependency(NewID(), domain.DependencySpec{
@@ -302,7 +302,7 @@ func TestHiddenDependenciesAreClassified(t *testing.T) {
 				if err != nil {
 					t.Fatalf("building dependency: %v", err)
 				}
-				if err := s.CreateDependency(ctx, testActor, d, nil); err != nil {
+				if err := s.CreateDependency(ctx, testPermit, d, nil); err != nil {
 					t.Fatalf("creating dependency: %v", err)
 				}
 			}
@@ -357,7 +357,7 @@ func TestUsedServicesDoNotDragInTheirDependencies(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building endpoint: %v", err)
 			}
-			if err := s.CreateEndpoint(ctx, testActor, ep); err != nil {
+			if err := s.CreateEndpoint(ctx, testPermit, ep); err != nil {
 				t.Fatalf("creating endpoint: %v", err)
 			}
 			d, err := domain.NewDependency(NewID(), domain.DependencySpec{
@@ -369,7 +369,7 @@ func TestUsedServicesDoNotDragInTheirDependencies(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building dependency: %v", err)
 			}
-			if err := s.CreateDependency(ctx, testActor, d, nil); err != nil {
+			if err := s.CreateDependency(ctx, testPermit, d, nil); err != nil {
 				t.Fatalf("creating dependency: %v", err)
 			}
 

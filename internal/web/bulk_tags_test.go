@@ -105,7 +105,7 @@ func TestAssetListFiltersByTag(t *testing.T) {
 	dr := mustTagWeb(t, h, "http-dr")
 	tagged := mustAssetWeb(t, h, domain.KindVM, "http-filter-tagged")
 	mustAssetWeb(t, h, domain.KindVM, "http-filter-untagged")
-	if err := h.store.SetEntityTags(context.Background(), adminActorWeb(t, h), domain.TagEntityAsset,
+	if err := h.store.SetEntityTags(context.Background(), domain.AdministratorPermit(adminActorWeb(t, h)), domain.TagEntityAsset,
 		tagged, assetRowVersionWeb(t, h, tagged), []string{dr}); err != nil {
 		t.Fatalf("tagging: %v", err)
 	}

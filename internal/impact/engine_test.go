@@ -360,7 +360,7 @@ func TestDisabledInstanceIsNotCapacity(t *testing.T) {
 	if target == "" {
 		t.Fatal("fixture has no vault instance on vm-vault-3")
 	}
-	if err := f.store.RetireInstance(f.ctx, domain.SystemActor, target); err != nil {
+	if err := f.store.RetireInstance(f.ctx, domain.AdministratorPermit(domain.SystemActor), target); err != nil {
 		t.Fatalf("disabling instance: %v", err)
 	}
 
@@ -482,7 +482,7 @@ func TestRetiredPoolMemberIsNotCapacity(t *testing.T) {
 	f := newFixture(t)
 
 	// Retire one of the two backends behind the edge route.
-	if err := f.store.RetireService(f.ctx, domain.SystemActor, f.refs.Services["orders-web"]); err != nil {
+	if err := f.store.RetireService(f.ctx, domain.AdministratorPermit(domain.SystemActor), f.refs.Services["orders-web"]); err != nil {
 		t.Fatalf("retiring orders-web: %v", err)
 	}
 

@@ -118,7 +118,7 @@ func newPathFixture(t *testing.T, e Engine) *pathFixture {
 		if err != nil {
 			t.Fatalf("building service %s: %v", code, err)
 		}
-		if err := s.CreateService(ctx, testActor, svc); err != nil {
+		if err := s.CreateService(ctx, testPermit, svc); err != nil {
 			t.Fatalf("creating service %s: %v", code, err)
 		}
 		f.svc[code] = svc.ID
@@ -130,7 +130,7 @@ func newPathFixture(t *testing.T, e Engine) *pathFixture {
 		if err != nil {
 			t.Fatalf("building instance of %s: %v", code, err)
 		}
-		if err := s.CreateInstance(ctx, testActor, si); err != nil {
+		if err := s.CreateInstance(ctx, testPermit, si); err != nil {
 			t.Fatalf("placing %s on %s: %v", code, host, err)
 		}
 	}

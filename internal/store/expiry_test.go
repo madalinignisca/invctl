@@ -52,7 +52,7 @@ func (f *projectFixture) setServiceEOL(t *testing.T, code string, days int) {
 	svc := row.Service
 	d := expiryDate(days)
 	svc.EOLDate = &d
-	if err := f.s.UpdateService(f.ctx, testActor, &svc); err != nil {
+	if err := f.s.UpdateService(f.ctx, testPermit, &svc); err != nil {
 		t.Fatalf("dating %s: %v", code, err)
 	}
 }
@@ -65,7 +65,7 @@ func (f *projectFixture) place(t *testing.T, service, host string) {
 	if err != nil {
 		t.Fatalf("building the instance of %s: %v", service, err)
 	}
-	if err := f.s.CreateInstance(f.ctx, testActor, si); err != nil {
+	if err := f.s.CreateInstance(f.ctx, testPermit, si); err != nil {
 		t.Fatalf("placing %s on %s: %v", service, host, err)
 	}
 }
@@ -300,7 +300,7 @@ func TestExpiryIgnoresRetiredRows(t *testing.T) {
 			if err := f.s.RetireAsset(f.ctx, testPermit, f.assets["sw-core-1"]); err != nil {
 				t.Fatalf("retiring the asset: %v", err)
 			}
-			if err := f.s.RetireService(f.ctx, testActor, f.services["orders-api"]); err != nil {
+			if err := f.s.RetireService(f.ctx, testPermit, f.services["orders-api"]); err != nil {
 				t.Fatalf("retiring the service: %v", err)
 			}
 

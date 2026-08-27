@@ -129,7 +129,7 @@ func (b *builder) lifetimes() {
 		updated := row.Service
 		date := domain.FormatDate(b.now.AddDate(0, 0, l.days))
 		updated.EOLDate = &date
-		if err := b.store.UpdateService(b.ctx, Actor, &updated); err != nil {
+		if err := b.store.UpdateService(b.ctx, domain.AdministratorPermit(Actor), &updated); err != nil {
 			b.fail(fmt.Errorf("dating service %s: %w", l.name, err))
 			return
 		}

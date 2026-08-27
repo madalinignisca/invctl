@@ -112,8 +112,8 @@ func entityTagsAudit(ctx context.Context, t *tx, entityType, entityID string) (s
 // rule, so a retired tag an entity already holds survives an unrelated
 // resubmission of the same set -- the identical "an unchanged value is not a
 // new value" reasoning setCustomValues gives for a retired select option.
-func (s *SQLStore) SetEntityTags(ctx context.Context, actor domain.Actor, entityType, entityID string, expected int, tagIDs []string) error {
-	return s.setEntityTags(ctx, actor, entityType, entityID, expected, tagIDs, "")
+func (s *SQLStore) SetEntityTags(ctx context.Context, p domain.Permit, entityType, entityID string, expected int, tagIDs []string) error {
+	return s.setEntityTags(ctx, p, entityType, entityID, expected, tagIDs, "")
 }
 
 // setEntityTags is SetEntityTags plus a batch id, so that WP-G4a piece 3's
@@ -123,7 +123,7 @@ func (s *SQLStore) SetEntityTags(ctx context.Context, actor domain.Actor, entity
 // bulk_tags.go, exactly the way BulkAssignOwnership shares
 // assignOneEntity/requireActiveTeam with ReassignTeamOwnership rather than
 // inventing a second write path.
-func (s *SQLStore) setEntityTags(ctx context.Context, actor domain.Actor, entityType, entityID string, expected int, tagIDs []string, batchID string) error {
+func (s *SQLStore) setEntityTags(ctx context.Context, p domain.Permit, entityType, entityID string, expected int, tagIDs []string, batchID string) error {
 	switch entityType {
 	case domain.TagEntityAsset, domain.TagEntityService, domain.TagEntityProject:
 	default:
@@ -138,7 +138,7 @@ func (s *SQLStore) setEntityTags(ctx context.Context, actor domain.Actor, entity
 		}
 	}
 
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, p, func(t *tx) error {
 		existingIDs, err := entityTagIDs(ctx, t, entityType, entityID)
 		if err != nil {
 			return err
@@ -207,7 +207,7 @@ func (s *SQLStore) setEntityTags(ctx context.Context, actor domain.Actor, entity
 			if _, err := t.exec(ctx, `
 				INSERT INTO entity_tag (tag_id, entity_type, entity_id, created_at, created_by)
 				VALUES (?, ?, ?, ?, ?)`,
-				id, entityType, entityID, t.at, actor.ID); err != nil {
+				id, entityType, entityID, t.at, p.Actor().ID); err != nil {
 				return translateWriteErr(err, "applying tag")
 			}
 		}

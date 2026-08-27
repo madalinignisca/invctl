@@ -53,7 +53,7 @@ func TestApplyTagToSelectionTagsExactlyTheNamedEntities(t *testing.T) {
 			untagged := mustAsset(t, f.s, f.ctx, domain.KindServer, "left-out-of-the-selection", nil)
 			expected := f.rowVersion(t, domain.TagEntityAsset, f.assetID)
 
-			outcomes, err := f.s.ApplyTagToSelection(f.ctx, f.actor, domain.TagEntityAsset, dr,
+			outcomes, err := f.s.ApplyTagToSelection(f.ctx, domain.AdministratorPermit(f.actor), domain.TagEntityAsset, dr,
 				[]TagSelection{{ID: f.assetID, RowVersion: expected}})
 			if err != nil {
 				t.Fatalf("ApplyTagToSelection: %v", err)
@@ -95,7 +95,7 @@ func TestApplyTagToSelectionOneChangeLogRowPerEntitySharingOneBatch(t *testing.T
 			expected1 := f.rowVersion(t, domain.TagEntityAsset, f.assetID)
 			expected2 := f.rowVersion(t, domain.TagEntityAsset, second)
 
-			outcomes, err := f.s.ApplyTagToSelection(f.ctx, f.actor, domain.TagEntityAsset, dr, []TagSelection{
+			outcomes, err := f.s.ApplyTagToSelection(f.ctx, domain.AdministratorPermit(f.actor), domain.TagEntityAsset, dr, []TagSelection{
 				{ID: f.assetID, RowVersion: expected1},
 				{ID: second, RowVersion: expected2},
 			})
@@ -145,11 +145,11 @@ func TestApplyTagToSelectionSkipsAnEntityChangedSinceShown(t *testing.T) {
 			// before this bulk-apply request arrives.
 			pci := f.tag(t, "pci")
 			liveExpected := f.rowVersion(t, domain.TagEntityAsset, f.assetID)
-			if err := f.s.SetEntityTags(f.ctx, f.actor, domain.TagEntityAsset, f.assetID, liveExpected, []string{pci}); err != nil {
+			if err := f.s.SetEntityTags(f.ctx, domain.AdministratorPermit(f.actor), domain.TagEntityAsset, f.assetID, liveExpected, []string{pci}); err != nil {
 				t.Fatalf("simulating a race: %v", err)
 			}
 
-			outcomes, err := f.s.ApplyTagToSelection(f.ctx, f.actor, domain.TagEntityAsset, dr,
+			outcomes, err := f.s.ApplyTagToSelection(f.ctx, domain.AdministratorPermit(f.actor), domain.TagEntityAsset, dr,
 				[]TagSelection{{ID: f.assetID, RowVersion: shownVersion}})
 			if err != nil {
 				t.Fatalf("ApplyTagToSelection: %v", err)
@@ -181,7 +181,7 @@ func TestApplyTagToSelectionRefusesARetiredTag(t *testing.T) {
 			f.retire(t, dr)
 			expected := f.rowVersion(t, domain.TagEntityAsset, f.assetID)
 
-			_, err := f.s.ApplyTagToSelection(f.ctx, f.actor, domain.TagEntityAsset, dr,
+			_, err := f.s.ApplyTagToSelection(f.ctx, domain.AdministratorPermit(f.actor), domain.TagEntityAsset, dr,
 				[]TagSelection{{ID: f.assetID, RowVersion: expected}})
 			if !errors.Is(err, domain.ErrInvalid) {
 				t.Fatalf("err = %v, want domain.ErrInvalid", err)
@@ -206,7 +206,7 @@ func TestApplyTagToSelectionRefusesEmptySelection(t *testing.T) {
 			f := newEntityTagFixture(t, e)
 			dr := f.tag(t, "dr")
 
-			_, err := f.s.ApplyTagToSelection(f.ctx, f.actor, domain.TagEntityAsset, dr, nil)
+			_, err := f.s.ApplyTagToSelection(f.ctx, domain.AdministratorPermit(f.actor), domain.TagEntityAsset, dr, nil)
 			if !errors.Is(err, domain.ErrInvalid) {
 				t.Fatalf("err = %v, want domain.ErrInvalid", err)
 			}
@@ -223,7 +223,7 @@ func TestApplyTagToSelectionRefusesAnUnknownEntityType(t *testing.T) {
 			f := newEntityTagFixture(t, e)
 			dr := f.tag(t, "dr")
 
-			_, err := f.s.ApplyTagToSelection(f.ctx, f.actor, "not_a_real_entity_type", dr,
+			_, err := f.s.ApplyTagToSelection(f.ctx, domain.AdministratorPermit(f.actor), "not_a_real_entity_type", dr,
 				[]TagSelection{{ID: "whatever", RowVersion: 1}})
 			if !errors.Is(err, domain.ErrInvalid) {
 				t.Fatalf("err = %v, want domain.ErrInvalid", err)
@@ -241,12 +241,12 @@ func TestApplyTagToSelectionIsIdempotentOnAnAlreadyTaggedEntity(t *testing.T) {
 			f := newEntityTagFixture(t, e)
 			dr := f.tag(t, "dr")
 			expected := f.rowVersion(t, domain.TagEntityAsset, f.assetID)
-			if err := f.s.SetEntityTags(f.ctx, f.actor, domain.TagEntityAsset, f.assetID, expected, []string{dr}); err != nil {
+			if err := f.s.SetEntityTags(f.ctx, domain.AdministratorPermit(f.actor), domain.TagEntityAsset, f.assetID, expected, []string{dr}); err != nil {
 				t.Fatalf("applying dr directly: %v", err)
 			}
 
 			expected = f.rowVersion(t, domain.TagEntityAsset, f.assetID)
-			outcomes, err := f.s.ApplyTagToSelection(f.ctx, f.actor, domain.TagEntityAsset, dr,
+			outcomes, err := f.s.ApplyTagToSelection(f.ctx, domain.AdministratorPermit(f.actor), domain.TagEntityAsset, dr,
 				[]TagSelection{{ID: f.assetID, RowVersion: expected}})
 			if err != nil {
 				t.Fatalf("ApplyTagToSelection: %v", err)

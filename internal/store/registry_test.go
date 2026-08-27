@@ -29,7 +29,7 @@ func TestAnAggregateCountsWhatHasBeenCarvedOutOfIt(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building aggregate: %v", err)
 			}
-			if err := s.CreateAggregate(ctx, testActor, agg); err != nil {
+			if err := s.CreateAggregate(ctx, testPermit, agg); err != nil {
 				t.Fatalf("creating aggregate: %v", err)
 			}
 

@@ -77,7 +77,7 @@ func newTagFilterFixture(t *testing.T, e Engine) *tagFilterFixture {
 			t.Fatalf("reading row_version of %s: %v", name, err)
 		}
 		if len(tagIDs) > 0 {
-			if err := s.SetEntityTags(ctx, actor, domain.TagEntityAsset, id, version, tagIDs); err != nil {
+			if err := s.SetEntityTags(ctx, domain.AdministratorPermit(actor), domain.TagEntityAsset, id, version, tagIDs); err != nil {
 				t.Fatalf("tagging %s: %v", name, err)
 			}
 		}
@@ -265,11 +265,11 @@ func newServiceTagFilterFixture(t *testing.T, e Engine) *serviceTagFilterFixture
 		if err != nil {
 			t.Fatalf("building service %s: %v", code, err)
 		}
-		if err := s.CreateService(ctx, actor, svc); err != nil {
+		if err := s.CreateService(ctx, domain.AdministratorPermit(actor), svc); err != nil {
 			t.Fatalf("creating service %s: %v", code, err)
 		}
 		if len(tagIDs) > 0 {
-			if err := s.SetEntityTags(ctx, actor, domain.TagEntityService, svc.ID, svc.RowVersion, tagIDs); err != nil {
+			if err := s.SetEntityTags(ctx, domain.AdministratorPermit(actor), domain.TagEntityService, svc.ID, svc.RowVersion, tagIDs); err != nil {
 				t.Fatalf("tagging service %s: %v", code, err)
 			}
 		}

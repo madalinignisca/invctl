@@ -116,7 +116,7 @@ func dedupeSelections(selections []TagSelection) []TagSelection {
 // the loop; the tag cannot become retired mid-batch without a second write
 // this codebase serialises through the same row_version machinery every
 // other write goes through.
-func (s *SQLStore) ApplyTagToSelection(ctx context.Context, actor domain.Actor, entityType, tagID string, selections []TagSelection) ([]TagApplyOutcome, error) {
+func (s *SQLStore) ApplyTagToSelection(ctx context.Context, p domain.Permit, entityType, tagID string, selections []TagSelection) ([]TagApplyOutcome, error) {
 	switch entityType {
 	case domain.TagEntityAsset, domain.TagEntityService, domain.TagEntityProject:
 	default:
@@ -146,7 +146,7 @@ func (s *SQLStore) ApplyTagToSelection(ctx context.Context, actor domain.Actor, 
 	batchID := NewID()
 	outcomes := make([]TagApplyOutcome, 0, len(selections))
 	for _, sel := range selections {
-		outcomes = append(outcomes, s.applyTagToOne(ctx, actor, entityType, sel, tagID, batchID))
+		outcomes = append(outcomes, s.applyTagToOne(ctx, p, entityType, sel, tagID, batchID))
 	}
 	return outcomes, nil
 }
@@ -158,7 +158,7 @@ func (s *SQLStore) ApplyTagToSelection(ctx context.Context, actor domain.Actor, 
 // s.write, so a write failure partway through the batch cannot roll back an
 // entity that already succeeded -- the same reasoning
 // BulkAssignOwnership.assignOneEntity documents for the identical shape.
-func (s *SQLStore) applyTagToOne(ctx context.Context, actor domain.Actor, entityType string, sel TagSelection, tagID, batchID string) TagApplyOutcome {
+func (s *SQLStore) applyTagToOne(ctx context.Context, p domain.Permit, entityType string, sel TagSelection, tagID, batchID string) TagApplyOutcome {
 	name := s.bestEffortName(ctx, entityType, sel.ID)
 
 	existing, err := s.EntityTagsFor(ctx, entityType, sel.ID)
@@ -182,7 +182,7 @@ func (s *SQLStore) applyTagToOne(ctx context.Context, actor domain.Actor, entity
 	// check: sel.RowVersion is a snapshot of what the operator was shown, not
 	// what is true now, so a mismatch here means this exact entity changed
 	// under it between then and this request landing.
-	err = s.setEntityTags(ctx, actor, entityType, sel.ID, sel.RowVersion, desired, batchID)
+	err = s.setEntityTags(ctx, p, entityType, sel.ID, sel.RowVersion, desired, batchID)
 	switch {
 	case err == nil:
 		return TagApplyOutcome{EntityType: entityType, EntityID: sel.ID, Name: name, Result: TagApplyTagged}

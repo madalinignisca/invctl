@@ -236,7 +236,7 @@ var auditMatrix = []auditCase{
 			if err != nil {
 				t.Fatalf("building service: %v", err)
 			}
-			if err := s.CreateService(ctx, testActor, svc); err != nil {
+			if err := s.CreateService(ctx, testPermit, svc); err != nil {
 				t.Fatalf("creating service: %v", err)
 			}
 			return svc.ID, domain.ActionCreate
@@ -256,7 +256,7 @@ var auditMatrix = []auditCase{
 			if err != nil {
 				t.Fatalf("building service: %v", err)
 			}
-			if err := s.CreateService(ctx, testActor, svc); err != nil {
+			if err := s.CreateService(ctx, testPermit, svc); err != nil {
 				t.Fatalf("creating service: %v", err)
 			}
 			return svc.ID
@@ -268,7 +268,7 @@ var auditMatrix = []auditCase{
 			}
 			updated := svc.Service
 			updated.Name = "Audit Service Update Renamed"
-			if err := s.UpdateService(ctx, testActor, &updated); err != nil {
+			if err := s.UpdateService(ctx, testPermit, &updated); err != nil {
 				t.Fatalf("updating service: %v", err)
 			}
 			return id, domain.ActionUpdate
@@ -288,13 +288,13 @@ var auditMatrix = []auditCase{
 			if err != nil {
 				t.Fatalf("building service: %v", err)
 			}
-			if err := s.CreateService(ctx, testActor, svc); err != nil {
+			if err := s.CreateService(ctx, testPermit, svc); err != nil {
 				t.Fatalf("creating service: %v", err)
 			}
 			return svc.ID
 		},
 		mutate: func(t *testing.T, s *SQLStore, ctx context.Context, id string) (string, string) {
-			if err := s.RetireService(ctx, testActor, id); err != nil {
+			if err := s.RetireService(ctx, testPermit, id); err != nil {
 				t.Fatalf("retiring service: %v", err)
 			}
 			return id, domain.ActionRetire
@@ -315,7 +315,7 @@ var auditMatrix = []auditCase{
 			if err != nil {
 				t.Fatalf("building service: %v", err)
 			}
-			if err := s.CreateService(ctx, testActor, svc); err != nil {
+			if err := s.CreateService(ctx, testPermit, svc); err != nil {
 				t.Fatalf("creating service: %v", err)
 			}
 			return svc.ID + "|" + hostID
@@ -326,7 +326,7 @@ var auditMatrix = []auditCase{
 			if err != nil {
 				t.Fatalf("building instance: %v", err)
 			}
-			if err := s.CreateInstance(ctx, testActor, si); err != nil {
+			if err := s.CreateInstance(ctx, testPermit, si); err != nil {
 				t.Fatalf("creating instance: %v", err)
 			}
 			return si.ID, domain.ActionCreate
