@@ -168,6 +168,17 @@ func TestScopedPermitCannotLinkIntoAProjectItDoesNotHold(t *testing.T) {
 // transaction rolls back WHOLE: a committed asset with a refused link would
 // be an orphan only an Administrator could find and fix.
 //
+// Deliberately NOT a permission-shaped refusal: CreateAssetInProject checks
+// domain.PermitHoldsProject BEFORE any transaction opens (its own doc
+// comment explains why -- failing fast on an unheld project should not cost
+// a rack query or a write-pool connection), so a refusal for THAT reason
+// never reaches the code this test exists to pin. This uses
+// domain.AdministratorPermit -- which always holds every project, so the
+// early check never fires -- against a projectID that names no real project
+// row at all, so the LINK insert fails on project_asset's own foreign key
+// constraint while the ASSET insert has already, by construction of the
+// mutation below, had every chance to commit on its own.
+//
 // Mutation (Step 5): commit the asset insert in its own transaction before
 // the link -- this must fail, because the asset would then survive a
 // refused link.
@@ -175,19 +186,14 @@ func TestARefusedCreateAndLinkLeavesNeitherTheAssetNorTheLink(t *testing.T) {
 	for _, e := range Engines(t) {
 		t.Run(e.Name, func(t *testing.T) {
 			s, ctx := newStore(t, e)
-			frontend := mustProjectForAssignment(t, s, ctx, "frontend")
-			other := mustProjectForAssignment(t, s, ctx, "other")
-			permit := projectOwnerPermit("po-4", frontend)
+			noSuchProject := NewID()
 
 			a, err := domain.NewAsset(NewID(), domain.KindServer, "rolled-back", nil, s.Now())
 			if err != nil {
 				t.Fatalf("building asset: %v", err)
 			}
-			// other is not held by this permit, so PermitHoldsProject refuses
-			// before the transaction opens -- but the property under test is
-			// that NOTHING committed, whichever stage refuses.
-			if err := s.CreateAssetInProject(ctx, permit, other, a); err == nil {
-				t.Fatal("expected the create-and-link to be refused")
+			if err := s.CreateAssetInProject(ctx, testPermit, noSuchProject, a); err == nil {
+				t.Fatal("expected the create-and-link to be refused (no such project)")
 			}
 
 			if _, err := s.GetAsset(ctx, a.ID); !errors.Is(err, domain.ErrNotFound) {
