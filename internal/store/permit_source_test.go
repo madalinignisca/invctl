@@ -367,6 +367,16 @@ func TestAnUnclassifiedEntityTypeFailsLoudlyRatherThanBeingAllowed(t *testing.T)
 // auditedEntityTypes is every entity_type value internal/store writes to
 // change_log today.
 //
+// THIS LIST HAS ALREADY DRIFTED ONCE, which is worth knowing before trusting
+// it. WP-G1 Task 11 added AssignProject/ReleaseProject writing
+// entity_type "user_project" (internal/store/user_projects.go) and neither
+// this list nor entityScope gained it; an auth review found the gap. The
+// note at the end of this comment -- "add it here AND to entityScope in the
+// same commit" -- is the right instruction and it was simply not followed,
+// because nothing failed when it was not. A hand-maintained list is
+// exhaustive only until the next writer lands, so treat a passing census as
+// evidence about the types IN the list, never as proof the list is complete.
+//
 // COMPUTED BY READING THE SOURCE, NOT GUESSED, and kept as a literal list
 // here (rather than as a live AST walk in this test) for the same reason
 // dynamicTargetAllowlist is a hand-maintained map with per-entry comments
@@ -401,8 +411,8 @@ var auditedEntityTypes = []string{
 	"project_cost", "project_service", "provider", "responsibility_role",
 	"rir", "route", "rt_container", "rt_k8s", "rt_systemd", "rt_windows",
 	"service", "service_cost", "service_instance", "service_kind",
-	"storage_kind", "tag", "team", "unmatched_observation", "vlan",
-	"vlan_group",
+	"storage_kind", "tag", "team", "unmatched_observation", "user_project",
+	"vlan", "vlan_group",
 }
 
 // TestTheScopeClassificationCoversEveryAuditedEntityType is the positive

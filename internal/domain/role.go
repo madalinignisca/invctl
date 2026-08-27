@@ -426,20 +426,30 @@ var entityScope = map[string]ScopeClass{
 	// the catalogue/lookup tables and the project-linking tables themselves
 	// (linking an EXISTING entity to a project is Administrator-only; see
 	// §4's create-vs-link distinction).
-	"app_user":              ScopeEstateConfig,
-	"custom_field":          ScopeEstateConfig,
-	"device_type":           ScopeEstateConfig,
-	"environment":           ScopeEstateConfig,
-	"identity":              ScopeEstateConfig,
-	"inflation_rate":        ScopeEstateConfig,
-	"manufacturer":          ScopeEstateConfig,
-	"project":               ScopeEstateConfig,
-	"project_asset":         ScopeEstateConfig,
-	"project_circuit":       ScopeEstateConfig,
-	"project_service":       ScopeEstateConfig,
-	"provider":              ScopeEstateConfig,
-	"tag":                   ScopeEstateConfig,
-	"team":                  ScopeEstateConfig,
+	"app_user":        ScopeEstateConfig,
+	"custom_field":    ScopeEstateConfig,
+	"device_type":     ScopeEstateConfig,
+	"environment":     ScopeEstateConfig,
+	"identity":        ScopeEstateConfig,
+	"inflation_rate":  ScopeEstateConfig,
+	"manufacturer":    ScopeEstateConfig,
+	"project":         ScopeEstateConfig,
+	"project_asset":   ScopeEstateConfig,
+	"project_circuit": ScopeEstateConfig,
+	"project_service": ScopeEstateConfig,
+	"provider":        ScopeEstateConfig,
+	"tag":             ScopeEstateConfig,
+	"team":            ScopeEstateConfig,
+	// Who is assigned to which project (WP-G1 Task 11, migration 00059).
+	// ESTATE CONFIG, AND THIS ONE IS LOAD-BEARING: user_project is the table
+	// that decides a project owner's own scope, so a project owner able to
+	// write it could assign themselves every project and become an
+	// Administrator in all but name. Only an Administrator grants scope.
+	// It was previously absent from this map, which denied it too (an
+	// unrecognised type is refused -- see ScopeClassOf), but by accident
+	// rather than by decision; a silent default is not where a rule this
+	// sharp should live.
+	"user_project":          ScopeEstateConfig,
 	"asset_kind":            ScopeEstateConfig,
 	"service_kind":          ScopeEstateConfig,
 	"interface_form_factor": ScopeEstateConfig,

@@ -186,11 +186,15 @@ func (a *App) UserCreate(w http.ResponseWriter, r *http.Request) {
 func (a *App) UserSetRole(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	role := formValue(r, "role")
-	// This route is RequireAdmin-only (see routes.go), so the caller here is
-	// already known to be an Administrator; AdministratorPermit is the
-	// pre-Task-10 shim every not-yet-converted method still gets from its
-	// handler, matching circuits.go's pattern.
-	err := a.Store.SetUserRole(r.Context(), domain.AdministratorPermit(actor(r)), id, role)
+	// a.permit(r), never domain.AdministratorPermit: this previously minted
+	// an administrator permit on the reasoning that the route is
+	// RequireAdmin-only. Of every place that shim appeared, this was the
+	// worst -- SetUserRole is the route that GRANTS roles, so once Task 13
+	// makes auth.CanWrite true for a project owner, RequireAdmin would admit
+	// one here holding a permit that covers everything, and they could make
+	// themselves an Administrator. With the caller's own permit, app_user is
+	// estate configuration and tx.log refuses it. See circuits.go's comment.
+	err := a.Store.SetUserRole(r.Context(), a.permit(r), id, role)
 	a.respondUserMutation(w, r, id, err, "Role updated.")
 }
 
