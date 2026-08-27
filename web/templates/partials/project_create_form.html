@@ -1,0 +1,98 @@
+{{/*
+  invctl — infrastructure inventory
+  Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+
+  Licensed under the GNU Affero General Public License, version 3 only —
+  no later version applies. See LICENSE for the full text.
+
+  SPDX-License-Identifier: AGPL-3.0-only
+*/}}
+{{/* project_create_form -- WP-G1 Task 14 (docs/rbac-design.md §4).
+
+     ONE PARTIAL, THREE MODES: an asset, a service and a circuit form differ
+     in which fields they collect, not in what the form IS -- a project
+     owner declaring "this new thing belongs to my project", posted to the
+     project-scoped CREATE route (".../new"), never to the plain link route
+     next to it. That is the route a project owner may reach; the "Link an
+     existing ..." forms above stay Administrator-only, because linking
+     something that already exists is how a scope gets seized rather than
+     earned (see routes.go's comment where the two are registered next to
+     each other).
+
+     Renderable standalone: internal/web/handlers/{assets,services,
+     circuits}.go's renderXCreateInProjectForm helpers hand this template a
+     projectCreateForm struct directly on a refused submission (422), and
+     project_panel above embeds it via `dict` for the first paint of the
+     page -- both expose the same field names, so this template does not
+     care which one it was given. */}}
+{{define "project_create_form"}}
+<div class="panel" id="project-create-{{.Mode}}-form">
+  <div class="panel-head">
+    <h2>Create {{if eq .Mode "asset"}}an asset{{else if eq .Mode "service"}}a service{{else}}a circuit{{end}} for this project</h2>
+  </div>
+  <form class="panel-body" method="post"
+        action="/projects/{{.ProjectID}}/{{if eq .Mode "asset"}}assets{{else if eq .Mode "service"}}services{{else}}circuits{{end}}/new"
+        hx-post="/projects/{{.ProjectID}}/{{if eq .Mode "asset"}}assets{{else if eq .Mode "service"}}services{{else}}circuits{{end}}/new"
+        hx-target="#project-create-{{.Mode}}-form" hx-swap="outerHTML">
+    <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+
+    {{if eq .Mode "asset"}}
+    <div class="field">
+      <label for="c-asset-name">Name</label>
+      <input id="c-asset-name" name="name" value="{{.Name}}" class="{{if index .Errors "name"}}invalid{{end}}">
+      {{with index .Errors "name"}}<div class="field-error">{{.}}</div>{{end}}
+    </div>
+    <div class="field">
+      <label for="c-asset-kind">Kind</label>
+      <select id="c-asset-kind" name="kind" class="{{if index .Errors "kind"}}invalid{{end}}">
+        {{$kind := .Kind}}
+        {{range .Kinds}}<option value="{{.Code}}"{{if eq .Code $kind}} selected{{end}}>{{.Label}}</option>{{end}}
+      </select>
+      {{with index .Errors "kind"}}<div class="field-error">{{.}}</div>{{end}}
+    </div>
+    <div class="field-hint">
+      Created for this project directly — there is no separate step to link
+      an existing asset here, on purpose (only an Administrator may do that).
+    </div>
+    <button class="btn btn-primary" type="submit">Create asset</button>
+
+    {{else if eq .Mode "service"}}
+    <div class="field">
+      <label for="c-svc-code">Code</label>
+      <input id="c-svc-code" name="code" value="{{.Code}}" class="{{if index .Errors "code"}}invalid{{end}}">
+      {{with index .Errors "code"}}<div class="field-error">{{.}}</div>{{end}}
+    </div>
+    <div class="field">
+      <label for="c-svc-name">Name</label>
+      <input id="c-svc-name" name="name" value="{{.Name}}" class="{{if index .Errors "name"}}invalid{{end}}">
+      {{with index .Errors "name"}}<div class="field-error">{{.}}</div>{{end}}
+    </div>
+    <div class="field">
+      <label for="c-svc-kind">Kind</label>
+      <select id="c-svc-kind" name="kind" class="{{if index .Errors "kind"}}invalid{{end}}">
+        {{$kind := .Kind}}
+        {{range .Kinds}}<option value="{{.Code}}"{{if eq .Code $kind}} selected{{end}}>{{.Label}}</option>{{end}}
+      </select>
+      {{with index .Errors "kind"}}<div class="field-error">{{.}}</div>{{end}}
+    </div>
+    <button class="btn btn-primary" type="submit">Create service</button>
+
+    {{else}}
+    <div class="field">
+      <label for="c-cir-cid">Circuit ID</label>
+      <input id="c-cir-cid" name="cid" value="{{.CID}}" class="{{if index .Errors "cid"}}invalid{{end}}">
+      {{with index .Errors "cid"}}<div class="field-error">{{.}}</div>{{end}}
+    </div>
+    <div class="field">
+      <label for="c-cir-provider">Provider</label>
+      <select id="c-cir-provider" name="provider_id" class="{{if index .Errors "provider_id"}}invalid{{end}}">
+        {{$providerID := .ProviderID}}
+        {{range .Providers}}<option value="{{.ID}}"{{if eq .ID $providerID}} selected{{end}}>{{.Name}}</option>{{end}}
+      </select>
+      {{with index .Errors "provider_id"}}<div class="field-error">{{.}}</div>{{end}}
+    </div>
+    <button class="btn btn-primary" type="submit">Create circuit</button>
+    {{end}}
+  </form>
+</div>
+{{end}}

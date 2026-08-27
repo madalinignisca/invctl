@@ -345,6 +345,21 @@
     </div>
   </div>
 
+  {{/* 6. Creating. A project owner may create a NEW asset/service/circuit
+       and link it to this project in one transaction (WP-G1 Task 14,
+       docs/rbac-design.md §4), even though the "Link an existing ..." forms
+       above stay Administrator-only. Three separate forms, posted to three
+       separate ".../new" routes -- see routes.go's comment for why that is
+       a different route rather than a flag on the link forms above. */}}
+  <div class="grid-2">
+    {{template "project_create_form" dict "Mode" "asset" "ProjectID" .Project.ID
+        "CSRF" .CSRF "Errors" .Errors "Kinds" .AssetKinds "Name" "" "Kind" ""}}
+    {{template "project_create_form" dict "Mode" "service" "ProjectID" .Project.ID
+        "CSRF" .CSRF "Errors" .Errors "Kinds" .ServiceKinds "Name" "" "Code" "" "Kind" ""}}
+    {{template "project_create_form" dict "Mode" "circuit" "ProjectID" .Project.ID
+        "CSRF" .CSRF "Errors" .Errors "Providers" .Providers "CID" "" "ProviderID" ""}}
+  </div>
+
   {{/* Tags, WP-G4a piece 2 (docs/tags-design.md §4a). Its own panel, same
        reasoning as the asset and service detail pages. */}}
   {{template "entity_tags_show" .Tags}}
