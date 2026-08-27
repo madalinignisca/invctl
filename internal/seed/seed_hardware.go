@@ -129,7 +129,7 @@ func (b *builder) power() {
 			b.fail(fmt.Errorf("building supply %s: %w", s.name, err))
 			return
 		}
-		if err := b.store.CreatePowerSource(b.ctx, Actor, src); err != nil {
+		if err := b.store.CreatePowerSource(b.ctx, domain.AdministratorPermit(Actor), src); err != nil {
 			b.fail(fmt.Errorf("seeding supply %s: %w", s.name, err))
 			return
 		}
@@ -156,7 +156,7 @@ func (b *builder) power() {
 			b.fail(fmt.Errorf("building panel %s: %w", p.name, err))
 			return
 		}
-		if err := b.store.CreatePowerPanel(b.ctx, Actor, panel); err != nil {
+		if err := b.store.CreatePowerPanel(b.ctx, domain.AdministratorPermit(Actor), panel); err != nil {
 			b.fail(fmt.Errorf("seeding panel %s: %w", p.name, err))
 			return
 		}
@@ -185,7 +185,7 @@ func (b *builder) power() {
 			b.fail(fmt.Errorf("building feed %s: %w", f.name, err))
 			return
 		}
-		if err := b.store.CreatePowerFeed(b.ctx, Actor, feed); err != nil {
+		if err := b.store.CreatePowerFeed(b.ctx, domain.AdministratorPermit(Actor), feed); err != nil {
 			b.fail(fmt.Errorf("seeding feed %s: %w", f.name, err))
 			return
 		}
@@ -227,7 +227,7 @@ func (b *builder) power() {
 			b.fail(fmt.Errorf("building input %s on %s: %w", i.name, i.asset, err))
 			return
 		}
-		if err := b.store.CreatePowerInput(b.ctx, Actor, in); err != nil {
+		if err := b.store.CreatePowerInput(b.ctx, domain.AdministratorPermit(Actor), in); err != nil {
 			b.fail(fmt.Errorf("seeding input %s on %s: %w", i.name, i.asset, err))
 			return
 		}

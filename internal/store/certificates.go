@@ -234,7 +234,7 @@ func auditedCertificate(c *domain.Certificate, sans []string) *certificateAudit 
 }
 
 // CreateCertificate inserts a certificate and its names.
-func (s *SQLStore) CreateCertificate(ctx context.Context, actor domain.Actor, c *domain.Certificate) error {
+func (s *SQLStore) CreateCertificate(ctx context.Context, p domain.Permit, c *domain.Certificate) error {
 	// The row the INSERT just wrote is version 1 (the column default).
 	// Without this a caller that creates and then updates the SAME struct
 	// compares 0 against 1 and gets a conflict against itself.
@@ -247,7 +247,7 @@ func (s *SQLStore) CreateCertificate(ctx context.Context, actor domain.Actor, c 
 	// database. A security review demonstrated what gets in through that seam.
 	names := c.SANs
 
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, p, func(t *tx) error {
 		// The same check assets and services make. Without it an unknown role
 		// reaches the foreign key, and SQLite reports that as "FOREIGN KEY
 		// constraint failed" with no column in it -- a bare 422 with no field
@@ -278,7 +278,7 @@ func (s *SQLStore) CreateCertificate(ctx context.Context, actor domain.Actor, c 
 }
 
 // UpdateCertificate persists field and name changes.
-func (s *SQLStore) UpdateCertificate(ctx context.Context, actor domain.Actor, c *domain.Certificate) error {
+func (s *SQLStore) UpdateCertificate(ctx context.Context, p domain.Permit, c *domain.Certificate) error {
 	if err := c.Validate(); err != nil {
 		return err
 	}
@@ -290,7 +290,7 @@ func (s *SQLStore) UpdateCertificate(ctx context.Context, actor domain.Actor, c 
 	c.UpdatedAt = domain.FormatTime(s.now())
 	names := c.SANs
 
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, p, func(t *tx) error {
 		if err := requireRole(ctx, t, c.ManagerRole); err != nil {
 			return err
 		}
@@ -322,7 +322,7 @@ func (s *SQLStore) UpdateCertificate(ctx context.Context, actor domain.Actor, c 
 }
 
 // RetireCertificate soft-deletes a certificate.
-func (s *SQLStore) RetireCertificate(ctx context.Context, actor domain.Actor, id string) error {
+func (s *SQLStore) RetireCertificate(ctx context.Context, p domain.Permit, id string) error {
 	before, err := s.GetCertificate(ctx, id)
 	if err != nil {
 		return err
@@ -331,7 +331,7 @@ func (s *SQLStore) RetireCertificate(ctx context.Context, actor domain.Actor, id
 		return nil
 	}
 	at := domain.FormatTime(s.now())
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, p, func(t *tx) error {
 		if _, err := t.exec(ctx,
 			`UPDATE certificate SET lifecycle = ?, updated_at = ?, row_version = row_version + 1
 			 WHERE id = ?`,
@@ -492,24 +492,24 @@ func (s *SQLStore) certificatesOn(ctx context.Context, table, column, entityID s
 }
 
 // DeployCertificateToAsset records that a certificate is used on an asset.
-func (s *SQLStore) DeployCertificateToAsset(ctx context.Context, actor domain.Actor,
+func (s *SQLStore) DeployCertificateToAsset(ctx context.Context, p domain.Permit,
 	certificateID, assetID string, note *string) error {
-	return s.deployCertificate(ctx, actor, "certificate_asset", "asset_id", certificateID, assetID, note)
+	return s.deployCertificate(ctx, p, "certificate_asset", "asset_id", certificateID, assetID, note)
 }
 
 // DeployCertificateToService records that a certificate is used on a service.
-func (s *SQLStore) DeployCertificateToService(ctx context.Context, actor domain.Actor,
+func (s *SQLStore) DeployCertificateToService(ctx context.Context, p domain.Permit,
 	certificateID, serviceID string, note *string) error {
-	return s.deployCertificate(ctx, actor, "certificate_service", "service_id", certificateID, serviceID, note)
+	return s.deployCertificate(ctx, p, "certificate_service", "service_id", certificateID, serviceID, note)
 }
 
 // deployCertificate is shared by the two above. The table and column names come
 // from those two call sites and never from a request.
-func (s *SQLStore) deployCertificate(ctx context.Context, actor domain.Actor,
+func (s *SQLStore) deployCertificate(ctx context.Context, p domain.Permit,
 	table, column, certificateID, entityID string, note *string) error {
 
 	at := domain.FormatTime(s.now())
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, p, func(t *tx) error {
 		// What is there now, so a no-op can be recognised. An audit trail full
 		// of entries saying nothing changed is worse than one without them --
 		// the rule logUpdate enforces everywhere else, which a hand-built diff
@@ -553,22 +553,22 @@ func (s *SQLStore) deployCertificate(ctx context.Context, actor domain.Actor,
 }
 
 // UndeployCertificateFromAsset retires a deployment, never deleting it.
-func (s *SQLStore) UndeployCertificateFromAsset(ctx context.Context, actor domain.Actor,
+func (s *SQLStore) UndeployCertificateFromAsset(ctx context.Context, p domain.Permit,
 	certificateID, assetID string) error {
-	return s.undeployCertificate(ctx, actor, "certificate_asset", "asset_id", certificateID, assetID)
+	return s.undeployCertificate(ctx, p, "certificate_asset", "asset_id", certificateID, assetID)
 }
 
 // UndeployCertificateFromService retires a deployment.
-func (s *SQLStore) UndeployCertificateFromService(ctx context.Context, actor domain.Actor,
+func (s *SQLStore) UndeployCertificateFromService(ctx context.Context, p domain.Permit,
 	certificateID, serviceID string) error {
-	return s.undeployCertificate(ctx, actor, "certificate_service", "service_id", certificateID, serviceID)
+	return s.undeployCertificate(ctx, p, "certificate_service", "service_id", certificateID, serviceID)
 }
 
-func (s *SQLStore) undeployCertificate(ctx context.Context, actor domain.Actor,
+func (s *SQLStore) undeployCertificate(ctx context.Context, p domain.Permit,
 	table, column, certificateID, entityID string) error {
 
 	at := domain.FormatTime(s.now())
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, p, func(t *tx) error {
 		res, err := t.exec(ctx,
 			`UPDATE `+table+` SET lifecycle = ?, updated_at = ?
 			 WHERE certificate_id = ? AND `+column+` = ? AND lifecycle = ?`,

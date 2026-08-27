@@ -84,7 +84,7 @@ func (a *App) CertificateCreate(w http.ResponseWriter, r *http.Request) {
 	spec := certificateSpecFromForm(r)
 	c, err := domain.NewCertificate(store.NewID(), spec, a.Store.Now())
 	if err == nil {
-		err = a.Store.CreateCertificate(r.Context(), actor(r), c)
+		err = a.Store.CreateCertificate(r.Context(), permit(r), c)
 	}
 	if err != nil {
 		if errs, ok := validationErrors(err); ok {
@@ -172,7 +172,7 @@ func (a *App) CertificateUpdate(w http.ResponseWriter, r *http.Request) {
 	updated.SANs = spec.SANs
 	updated.RowVersion = submittedVersion(r, updated.RowVersion)
 
-	if err := a.Store.UpdateCertificate(r.Context(), actor(r), &updated); err != nil {
+	if err := a.Store.UpdateCertificate(r.Context(), permit(r), &updated); err != nil {
 		if errs, ok := validationErrors(err); ok {
 			a.renderCertificate(w, r, http.StatusUnprocessableEntity, errs)
 			return
@@ -185,7 +185,7 @@ func (a *App) CertificateUpdate(w http.ResponseWriter, r *http.Request) {
 
 // CertificateRetire soft-deletes a certificate.
 func (a *App) CertificateRetire(w http.ResponseWriter, r *http.Request) {
-	if err := a.Store.RetireCertificate(r.Context(), actor(r), r.PathValue("id")); err != nil {
+	if err := a.Store.RetireCertificate(r.Context(), permit(r), r.PathValue("id")); err != nil {
 		a.handleStoreError(w, r, err)
 		return
 	}
@@ -195,7 +195,7 @@ func (a *App) CertificateRetire(w http.ResponseWriter, r *http.Request) {
 // CertificateDeployAsset records that a certificate is used on an asset.
 func (a *App) CertificateDeployAsset(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	err := a.Store.DeployCertificateToAsset(r.Context(), actor(r), id,
+	err := a.Store.DeployCertificateToAsset(r.Context(), permit(r), id,
 		formValue(r, "asset_id"), optional(formValue(r, "note")))
 	a.afterCertificateWrite(w, r, err, id)
 }
@@ -203,7 +203,7 @@ func (a *App) CertificateDeployAsset(w http.ResponseWriter, r *http.Request) {
 // CertificateDeployService records that a certificate is used on a service.
 func (a *App) CertificateDeployService(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	err := a.Store.DeployCertificateToService(r.Context(), actor(r), id,
+	err := a.Store.DeployCertificateToService(r.Context(), permit(r), id,
 		formValue(r, "service_id"), optional(formValue(r, "note")))
 	a.afterCertificateWrite(w, r, err, id)
 }
@@ -211,14 +211,14 @@ func (a *App) CertificateDeployService(w http.ResponseWriter, r *http.Request) {
 // CertificateUndeployAsset retires a deployment.
 func (a *App) CertificateUndeployAsset(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	err := a.Store.UndeployCertificateFromAsset(r.Context(), actor(r), id, r.PathValue("assetID"))
+	err := a.Store.UndeployCertificateFromAsset(r.Context(), permit(r), id, r.PathValue("assetID"))
 	a.afterCertificateWrite(w, r, err, id)
 }
 
 // CertificateUndeployService retires a deployment.
 func (a *App) CertificateUndeployService(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	err := a.Store.UndeployCertificateFromService(r.Context(), actor(r), id, r.PathValue("serviceID"))
+	err := a.Store.UndeployCertificateFromService(r.Context(), permit(r), id, r.PathValue("serviceID"))
 	a.afterCertificateWrite(w, r, err, id)
 }
 

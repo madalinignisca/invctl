@@ -262,7 +262,7 @@ func seedFindingFixture(t *testing.T, s *SQLStore, ctx context.Context) {
 		if err != nil {
 			t.Fatalf("building panel %s: %v", name, err)
 		}
-		if err := s.CreatePowerPanel(ctx, testActor, p); err != nil {
+		if err := s.CreatePowerPanel(ctx, testPermit, p); err != nil {
 			t.Fatalf("creating panel %s: %v", name, err)
 		}
 		return p.ID

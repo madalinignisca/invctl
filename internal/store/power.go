@@ -37,12 +37,12 @@ const powerPanelSelect = `
 	LEFT JOIN power_source src ON src.id = p.source_id`
 
 // CreatePowerPanel inserts a panel and its audit row.
-func (s *SQLStore) CreatePowerPanel(ctx context.Context, actor domain.Actor, p *domain.PowerPanel) error {
+func (s *SQLStore) CreatePowerPanel(ctx context.Context, permit domain.Permit, p *domain.PowerPanel) error {
 	p.RowVersion = 1
 	if err := p.Validate(); err != nil {
 		return err
 	}
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, permit, func(t *tx) error {
 		if err := requireLiveAsset(ctx, t, "site_id", p.SiteID); err != nil {
 			return err
 		}
@@ -71,7 +71,7 @@ func (s *SQLStore) CreatePowerPanel(ctx context.Context, actor domain.Actor, p *
 // UpdatePowerPanel persists field changes. The site is not editable: moving a
 // panel between locations rewrites where every feed under it lands, which is a
 // different act from correcting its rating.
-func (s *SQLStore) UpdatePowerPanel(ctx context.Context, actor domain.Actor, p *domain.PowerPanel) error {
+func (s *SQLStore) UpdatePowerPanel(ctx context.Context, permit domain.Permit, p *domain.PowerPanel) error {
 	before, err := s.GetPowerPanel(ctx, p.ID)
 	if err != nil {
 		return err
@@ -83,7 +83,7 @@ func (s *SQLStore) UpdatePowerPanel(ctx context.Context, actor domain.Actor, p *
 	p.CreatedAt = before.CreatedAt
 	p.UpdatedAt = domain.FormatTime(s.now())
 
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, permit, func(t *tx) error {
 		if err := requireUniquePowerName(ctx, t,
 			`power_panel`, `site_id`, p.SiteID, p.Name, p.Lifecycle, p.ID); err != nil {
 			return err
@@ -141,7 +141,7 @@ func (s *SQLStore) ListPowerPanels(ctx context.Context, includeRetired bool) ([]
 // live models is: the feeds would be filed under a panel no list shows, and a
 // feed whose panel has vanished cannot be traced -- which is the one thing this
 // model exists to do.
-func (s *SQLStore) RetirePowerPanel(ctx context.Context, actor domain.Actor, id string) error {
+func (s *SQLStore) RetirePowerPanel(ctx context.Context, p domain.Permit, id string) error {
 	before, err := s.GetPowerPanel(ctx, id)
 	if err != nil {
 		return err
@@ -150,7 +150,7 @@ func (s *SQLStore) RetirePowerPanel(ctx context.Context, actor domain.Actor, id 
 		return fmt.Errorf("panel %s still carries %d live %s: %w",
 			before.Name, before.Feeds, pluralWord(before.Feeds, "feed", "feeds"), domain.ErrConflict)
 	}
-	return s.retirePanelRow(ctx, actor, &before.PowerPanel)
+	return s.retirePanelRow(ctx, p, &before.PowerPanel)
 }
 
 // ---------- feeds ----------
@@ -186,12 +186,12 @@ const powerFeedSelect = `
 	JOIN asset a ON a.id = p.site_id`
 
 // CreatePowerFeed inserts a feed and its audit row.
-func (s *SQLStore) CreatePowerFeed(ctx context.Context, actor domain.Actor, f *domain.PowerFeed) error {
+func (s *SQLStore) CreatePowerFeed(ctx context.Context, p domain.Permit, f *domain.PowerFeed) error {
 	f.RowVersion = 1
 	if err := f.Validate(); err != nil {
 		return err
 	}
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, p, func(t *tx) error {
 		if err := requireLivePanel(ctx, t, f.PanelID); err != nil {
 			return err
 		}
@@ -215,7 +215,7 @@ func (s *SQLStore) CreatePowerFeed(ctx context.Context, actor domain.Actor, f *d
 // UpdatePowerFeed persists field changes. The panel is not editable: which
 // panel a feed comes off IS the fact the redundancy finding reads, and moving it
 // silently re-answers that question for every asset on the feed.
-func (s *SQLStore) UpdatePowerFeed(ctx context.Context, actor domain.Actor, f *domain.PowerFeed) error {
+func (s *SQLStore) UpdatePowerFeed(ctx context.Context, p domain.Permit, f *domain.PowerFeed) error {
 	before, err := s.GetPowerFeed(ctx, f.ID)
 	if err != nil {
 		return err
@@ -227,7 +227,7 @@ func (s *SQLStore) UpdatePowerFeed(ctx context.Context, actor domain.Actor, f *d
 	f.CreatedAt = before.CreatedAt
 	f.UpdatedAt = domain.FormatTime(s.now())
 
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, p, func(t *tx) error {
 		if err := requireUniquePowerName(ctx, t,
 			`power_feed`, `panel_id`, f.PanelID, f.Name, f.Lifecycle, f.ID); err != nil {
 			return err
@@ -292,7 +292,7 @@ func (s *SQLStore) ListPowerFeeds(ctx context.Context, f PowerFeedFilter) ([]Pow
 // leave assets claiming power from a circuit the model says is gone, and the
 // redundancy finding would then read those assets as single-fed. Decommission
 // the inputs first; that is the real-world order too.
-func (s *SQLStore) RetirePowerFeed(ctx context.Context, actor domain.Actor, id string) error {
+func (s *SQLStore) RetirePowerFeed(ctx context.Context, p domain.Permit, id string) error {
 	before, err := s.GetPowerFeed(ctx, id)
 	if err != nil {
 		return err
@@ -301,7 +301,7 @@ func (s *SQLStore) RetirePowerFeed(ctx context.Context, actor domain.Actor, id s
 		return fmt.Errorf("feed %s still carries %d live %s: %w",
 			before.Name, before.Inputs, pluralWord(before.Inputs, "input", "inputs"), domain.ErrConflict)
 	}
-	return s.retireFeedRow(ctx, actor, &before.PowerFeed)
+	return s.retireFeedRow(ctx, p, &before.PowerFeed)
 }
 
 // ---------- inputs ----------
@@ -324,12 +324,12 @@ const powerInputSelect = `
 	JOIN power_panel p ON p.id = f.panel_id`
 
 // CreatePowerInput attaches an asset to a feed.
-func (s *SQLStore) CreatePowerInput(ctx context.Context, actor domain.Actor, i *domain.PowerInput) error {
+func (s *SQLStore) CreatePowerInput(ctx context.Context, p domain.Permit, i *domain.PowerInput) error {
 	i.RowVersion = 1
 	if err := i.Validate(); err != nil {
 		return err
 	}
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, p, func(t *tx) error {
 		if err := requireLiveAsset(ctx, t, "asset_id", i.AssetID); err != nil {
 			return err
 		}
@@ -359,7 +359,7 @@ func (s *SQLStore) CreatePowerInput(ctx context.Context, actor domain.Actor, i *
 // because re-patching a lead to another circuit is the commonest real change
 // here and it is exactly what somebody would come to fix after reading a false
 // redundancy finding.
-func (s *SQLStore) UpdatePowerInput(ctx context.Context, actor domain.Actor, i *domain.PowerInput) error {
+func (s *SQLStore) UpdatePowerInput(ctx context.Context, p domain.Permit, i *domain.PowerInput) error {
 	before, err := s.GetPowerInput(ctx, i.ID)
 	if err != nil {
 		return err
@@ -371,7 +371,7 @@ func (s *SQLStore) UpdatePowerInput(ctx context.Context, actor domain.Actor, i *
 	i.CreatedAt = before.CreatedAt
 	i.UpdatedAt = domain.FormatTime(s.now())
 
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, p, func(t *tx) error {
 		if err := requireLiveFeed(ctx, t, i.FeedID); err != nil {
 			return err
 		}
@@ -416,12 +416,12 @@ func (s *SQLStore) PowerInputsFor(ctx context.Context, assetID string) ([]PowerI
 }
 
 // RetirePowerInput soft-deletes an input.
-func (s *SQLStore) RetirePowerInput(ctx context.Context, actor domain.Actor, id string) error {
+func (s *SQLStore) RetirePowerInput(ctx context.Context, p domain.Permit, id string) error {
 	before, err := s.GetPowerInput(ctx, id)
 	if err != nil {
 		return err
 	}
-	return s.retireInputRow(ctx, actor, &before.PowerInput)
+	return s.retireInputRow(ctx, p, &before.PowerInput)
 }
 
 // ---------- shared guards ----------
@@ -440,9 +440,9 @@ func (s *SQLStore) RetirePowerInput(ctx context.Context, actor domain.Actor, id 
 // lines is the cheaper side of that trade.
 
 // RetirePowerPanelRow performs the panel soft delete.
-func (s *SQLStore) retirePanelRow(ctx context.Context, actor domain.Actor, before *domain.PowerPanel) error {
+func (s *SQLStore) retirePanelRow(ctx context.Context, p domain.Permit, before *domain.PowerPanel) error {
 	at := domain.FormatTime(s.now())
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, p, func(t *tx) error {
 		_, err := t.exec(ctx,
 			`UPDATE power_panel SET lifecycle = ?, updated_at = ?, row_version = row_version + 1
 			 WHERE id = ?`, domain.LifecycleRetired, at, before.ID)
@@ -455,9 +455,9 @@ func (s *SQLStore) retirePanelRow(ctx context.Context, actor domain.Actor, befor
 	})
 }
 
-func (s *SQLStore) retireFeedRow(ctx context.Context, actor domain.Actor, before *domain.PowerFeed) error {
+func (s *SQLStore) retireFeedRow(ctx context.Context, p domain.Permit, before *domain.PowerFeed) error {
 	at := domain.FormatTime(s.now())
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, p, func(t *tx) error {
 		_, err := t.exec(ctx,
 			`UPDATE power_feed SET lifecycle = ?, updated_at = ?, row_version = row_version + 1
 			 WHERE id = ?`, domain.LifecycleRetired, at, before.ID)
@@ -470,9 +470,9 @@ func (s *SQLStore) retireFeedRow(ctx context.Context, actor domain.Actor, before
 	})
 }
 
-func (s *SQLStore) retireInputRow(ctx context.Context, actor domain.Actor, before *domain.PowerInput) error {
+func (s *SQLStore) retireInputRow(ctx context.Context, p domain.Permit, before *domain.PowerInput) error {
 	at := domain.FormatTime(s.now())
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, p, func(t *tx) error {
 		_, err := t.exec(ctx,
 			`UPDATE power_input SET lifecycle = ?, updated_at = ?, row_version = row_version + 1
 			 WHERE id = ?`, domain.LifecycleRetired, at, before.ID)

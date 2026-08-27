@@ -29,7 +29,7 @@ func mustCertificate(t *testing.T, s *SQLStore, ctx context.Context, subject str
 	if err != nil {
 		t.Fatalf("building certificate %s: %v", subject, err)
 	}
-	if err := s.CreateCertificate(ctx, testActor, c); err != nil {
+	if err := s.CreateCertificate(ctx, testPermit, c); err != nil {
 		t.Fatalf("creating certificate %s: %v", subject, err)
 	}
 	return c.ID
@@ -142,7 +142,7 @@ func TestChangingTheNamesIsAudited(t *testing.T) {
 			// untouched. Without the fold this update produces an empty diff.
 			c := row.Certificate
 			c.SANs = []string{"orders.example.com", "www.example.com"}
-			if err := s.UpdateCertificate(ctx, testActor, &c); err != nil {
+			if err := s.UpdateCertificate(ctx, testPermit, &c); err != nil {
 				t.Fatalf("updating the names: %v", err)
 			}
 
@@ -184,7 +184,7 @@ func TestAKeyReferenceNeverReachesTheAuditTrail(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building: %v", err)
 			}
-			if err := s.CreateCertificate(ctx, testActor, c); err != nil {
+			if err := s.CreateCertificate(ctx, testPermit, c); err != nil {
 				t.Fatalf("creating: %v", err)
 			}
 
@@ -228,14 +228,14 @@ func TestDeploymentsAreRetiredAndCanComeBack(t *testing.T) {
 			asset := mustAsset(t, s, ctx, domain.KindServer, "lb-01", nil, env)
 			id := mustCertificate(t, s, ctx, "orders.example.com", nil, "2027-01-01")
 
-			if err := s.DeployCertificateToAsset(ctx, testActor, id, asset, nil); err != nil {
+			if err := s.DeployCertificateToAsset(ctx, testPermit, id, asset, nil); err != nil {
 				t.Fatalf("deploying: %v", err)
 			}
 			if got, _ := s.ListCertificateAssets(ctx, id); len(got) != 1 {
 				t.Fatalf("deployment not recorded")
 			}
 
-			if err := s.UndeployCertificateFromAsset(ctx, testActor, id, asset); err != nil {
+			if err := s.UndeployCertificateFromAsset(ctx, testPermit, id, asset); err != nil {
 				t.Fatalf("undeploying: %v", err)
 			}
 			if got, _ := s.ListCertificateAssets(ctx, id); len(got) != 0 {
@@ -252,7 +252,7 @@ func TestDeploymentsAreRetiredAndCanComeBack(t *testing.T) {
 			}
 
 			// And it can come back without tripping the primary key.
-			if err := s.DeployCertificateToAsset(ctx, testActor, id, asset, nil); err != nil {
+			if err := s.DeployCertificateToAsset(ctx, testPermit, id, asset, nil); err != nil {
 				t.Fatalf("re-deploying: %v", err)
 			}
 			if got, _ := s.ListCertificateAssets(ctx, id); len(got) != 1 {
@@ -278,7 +278,7 @@ func TestAFingerprintIsAnIdentity(t *testing.T) {
 				if err != nil {
 					t.Fatalf("building: %v", err)
 				}
-				err = s.CreateCertificate(ctx, testActor, c)
+				err = s.CreateCertificate(ctx, testPermit, c)
 				if i == 0 && err != nil {
 					t.Fatalf("the first certificate was refused: %v", err)
 				}
@@ -318,7 +318,7 @@ func TestTheCertificateSnapshotIsComplete(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building: %v", err)
 			}
-			if err := s.CreateCertificate(ctx, testActor, c); err != nil {
+			if err := s.CreateCertificate(ctx, testPermit, c); err != nil {
 				t.Fatalf("creating: %v", err)
 			}
 
@@ -408,7 +408,7 @@ func TestUndeployingSomethingThatWasNeverDeployed(t *testing.T) {
 				t.Fatalf("counting: %v", err)
 			}
 
-			err = s.UndeployCertificateFromAsset(ctx, testActor, id, asset)
+			err = s.UndeployCertificateFromAsset(ctx, testPermit, id, asset)
 			if !errors.Is(err, domain.ErrNotFound) {
 				t.Errorf("retiring a deployment that never existed returned %v, want ErrNotFound", err)
 			}
@@ -438,14 +438,14 @@ func TestRedeployingUnchangedWritesNoAuditEntry(t *testing.T) {
 			id := mustCertificate(t, s, ctx, "orders.example.com", nil, "2027-01-01")
 
 			note := "the https listener"
-			if err := s.DeployCertificateToAsset(ctx, testActor, id, asset, &note); err != nil {
+			if err := s.DeployCertificateToAsset(ctx, testPermit, id, asset, &note); err != nil {
 				t.Fatalf("deploying: %v", err)
 			}
 			before, _ := s.countOne(ctx,
 				`SELECT COUNT(*) FROM change_log WHERE entity_type = ?`, "certificate")
 
 			// The same deployment, the same note.
-			if err := s.DeployCertificateToAsset(ctx, testActor, id, asset, &note); err != nil {
+			if err := s.DeployCertificateToAsset(ctx, testPermit, id, asset, &note); err != nil {
 				t.Fatalf("re-deploying: %v", err)
 			}
 			same, _ := s.countOne(ctx,
@@ -457,7 +457,7 @@ func TestRedeployingUnchangedWritesNoAuditEntry(t *testing.T) {
 			// The control: a CHANGED note is a change and must be recorded, or
 			// the no-op check has become a silence.
 			other := "moved to the management listener"
-			if err := s.DeployCertificateToAsset(ctx, testActor, id, asset, &other); err != nil {
+			if err := s.DeployCertificateToAsset(ctx, testPermit, id, asset, &other); err != nil {
 				t.Fatalf("changing the note: %v", err)
 			}
 			changed, _ := s.countOne(ctx,
@@ -490,7 +490,7 @@ func TestAnUnknownRoleOnACertificateIsAFieldError(t *testing.T) {
 			if err != nil {
 				t.Fatalf("the constructor rejected the shape rather than the store rejecting the value: %v", err)
 			}
-			err = s.CreateCertificate(ctx, testActor, c)
+			err = s.CreateCertificate(ctx, testPermit, c)
 			if err == nil {
 				t.Fatal("a role that is not in the lookup table was accepted")
 			}
@@ -537,7 +537,7 @@ func TestTheCascadeOnCertificateNamesIsRealButUnreachable(t *testing.T) {
 			// estate actually uses.
 			used := mustCertificate(t, s, ctx, "used.example.com", nil, "2027-01-01")
 			asset := mustAsset(t, s, ctx, domain.KindServer, "lb-01", nil, env)
-			if err := s.DeployCertificateToAsset(ctx, testActor, used, asset, nil); err != nil {
+			if err := s.DeployCertificateToAsset(ctx, testPermit, used, asset, nil); err != nil {
 				t.Fatalf("deploying: %v", err)
 			}
 			if _, err := s.db.Writer.Exec(s.db.Writer.Rebind(
@@ -568,7 +568,7 @@ func TestSeveralCertificatesMayHaveNoFingerprint(t *testing.T) {
 					t.Fatalf("a blank fingerprint became %q rather than nothing; the second "+
 						"such certificate would be refused", *c.Fingerprint)
 				}
-				if err := s.CreateCertificate(ctx, testActor, c); err != nil {
+				if err := s.CreateCertificate(ctx, testPermit, c); err != nil {
 					t.Fatalf("creating %s with no fingerprint: %v", subject, err)
 				}
 			}
@@ -598,7 +598,7 @@ func TestExpiryCountsEveryPlaceACertificateIsDeployed(t *testing.T) {
 
 			for _, name := range []string{"lb-01", "lb-02"} {
 				asset := mustAsset(t, s, ctx, domain.KindServer, name, nil, env)
-				if err := s.DeployCertificateToAsset(ctx, testActor, id, asset, nil); err != nil {
+				if err := s.DeployCertificateToAsset(ctx, testPermit, id, asset, nil); err != nil {
 					t.Fatalf("deploying to %s: %v", name, err)
 				}
 			}
@@ -612,7 +612,7 @@ func TestExpiryCountsEveryPlaceACertificateIsDeployed(t *testing.T) {
 			if err := s.CreateService(ctx, testPermit, svc); err != nil {
 				t.Fatalf("creating the service: %v", err)
 			}
-			if err := s.DeployCertificateToService(ctx, testActor, id, svc.ID, nil); err != nil {
+			if err := s.DeployCertificateToService(ctx, testPermit, id, svc.ID, nil); err != nil {
 				t.Fatalf("deploying to the service: %v", err)
 			}
 
@@ -647,7 +647,7 @@ func TestExpiryCountsEveryPlaceACertificateIsDeployed(t *testing.T) {
 			if err != nil {
 				t.Fatalf("listing: %v", err)
 			}
-			if err := s.UndeployCertificateFromAsset(ctx, testActor, id, assets[0].EntityID); err != nil {
+			if err := s.UndeployCertificateFromAsset(ctx, testPermit, id, assets[0].EntityID); err != nil {
 				t.Fatalf("undeploying: %v", err)
 			}
 			after, err := s.Expiring(ctx, expiryNow, 12)

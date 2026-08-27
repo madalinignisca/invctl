@@ -231,7 +231,7 @@ func (b *builder) companyCertificates() {
 			return
 		}
 		cert.TeamID = b.team("platform")
-		if err := b.store.CreateCertificate(b.ctx, Actor, cert); err != nil {
+		if err := b.store.CreateCertificate(b.ctx, domain.AdministratorPermit(Actor), cert); err != nil {
 			b.fail(fmt.Errorf("seeding certificate %s: %w", c.cn, err))
 			return
 		}
@@ -240,7 +240,7 @@ func (b *builder) companyCertificates() {
 			if !ok {
 				continue // a service the base fixture does not have
 			}
-			if err := b.store.DeployCertificateToService(b.ctx, Actor, cert.ID, id, nil); err != nil {
+			if err := b.store.DeployCertificateToService(b.ctx, domain.AdministratorPermit(Actor), cert.ID, id, nil); err != nil {
 				b.fail(fmt.Errorf("deploying %s to %s: %w", c.cn, code, err))
 				return
 			}

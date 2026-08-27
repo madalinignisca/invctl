@@ -30,7 +30,7 @@ func mustPanel(t *testing.T, s *SQLStore, ctx context.Context, siteID, name stri
 	if err != nil {
 		t.Fatalf("building panel %s: %v", name, err)
 	}
-	if err := s.CreatePowerPanel(ctx, testActor, p); err != nil {
+	if err := s.CreatePowerPanel(ctx, testPermit, p); err != nil {
 		t.Fatalf("creating panel %s: %v", name, err)
 	}
 	return p.ID
@@ -46,7 +46,7 @@ func mustFeed(t *testing.T, s *SQLStore, ctx context.Context, panelID, name stri
 	if err != nil {
 		t.Fatalf("building feed %s: %v", name, err)
 	}
-	if err := s.CreatePowerFeed(ctx, testActor, f); err != nil {
+	if err := s.CreatePowerFeed(ctx, testPermit, f); err != nil {
 		t.Fatalf("creating feed %s: %v", name, err)
 	}
 	return f.ID
@@ -60,7 +60,7 @@ func mustInput(t *testing.T, s *SQLStore, ctx context.Context, assetID, feedID, 
 	if err != nil {
 		t.Fatalf("building input %s: %v", name, err)
 	}
-	if err := s.CreatePowerInput(ctx, testActor, i); err != nil {
+	if err := s.CreatePowerInput(ctx, testPermit, i); err != nil {
 		t.Fatalf("creating input %s: %v", name, err)
 	}
 	return i.ID
@@ -319,7 +319,7 @@ func TestRetiredPowerRowsLeaveTheFindings(t *testing.T) {
 			// Unplug B. The asset is now single-fed, not falsely redundant -- and
 			// a retired input that still counted would keep reporting a finding
 			// about a cable nobody has.
-			if err := s.RetirePowerInput(ctx, testActor, inputB); err != nil {
+			if err := s.RetirePowerInput(ctx, testPermit, inputB); err != nil {
 				t.Fatalf("retiring input: %v", err)
 			}
 			report, err = s.PowerFindings(ctx)
@@ -343,23 +343,23 @@ func TestThePowerChainRefusesWhatWouldStrandIt(t *testing.T) {
 			box := mustAsset(t, s, ctx, domain.KindServer, "srv-1", &site)
 			input := mustInput(t, s, ctx, box, feed, "A", nil)
 
-			if err := s.RetirePowerPanel(ctx, testActor, panel); !errors.Is(err, domain.ErrConflict) {
+			if err := s.RetirePowerPanel(ctx, testPermit, panel); !errors.Is(err, domain.ErrConflict) {
 				t.Errorf("retiring a panel with live feeds returned %v, want ErrConflict", err)
 			}
-			if err := s.RetirePowerFeed(ctx, testActor, feed); !errors.Is(err, domain.ErrConflict) {
+			if err := s.RetirePowerFeed(ctx, testPermit, feed); !errors.Is(err, domain.ErrConflict) {
 				t.Errorf("retiring a feed with live inputs returned %v, want ErrConflict.\n"+
 					"The assets on it would claim power from a circuit the model says is "+
 					"gone, and the redundancy finding would read them as single-fed.", err)
 			}
 
 			// The control: unwind it in the real-world order and each step works.
-			if err := s.RetirePowerInput(ctx, testActor, input); err != nil {
+			if err := s.RetirePowerInput(ctx, testPermit, input); err != nil {
 				t.Fatalf("retiring the input: %v", err)
 			}
-			if err := s.RetirePowerFeed(ctx, testActor, feed); err != nil {
+			if err := s.RetirePowerFeed(ctx, testPermit, feed); err != nil {
 				t.Fatalf("retiring the feed: %v", err)
 			}
-			if err := s.RetirePowerPanel(ctx, testActor, panel); err != nil {
+			if err := s.RetirePowerPanel(ctx, testPermit, panel); err != nil {
 				t.Fatalf("retiring the panel: %v", err)
 			}
 		})
@@ -416,7 +416,7 @@ func mustSource(t *testing.T, s *SQLStore, ctx context.Context, siteID, name, ki
 	if err != nil {
 		t.Fatalf("building supply %s: %v", name, err)
 	}
-	if err := s.CreatePowerSource(ctx, testActor, src); err != nil {
+	if err := s.CreatePowerSource(ctx, testPermit, src); err != nil {
 		t.Fatalf("creating supply %s: %v", name, err)
 	}
 	return src.ID
@@ -430,7 +430,7 @@ func panelOn(t *testing.T, s *SQLStore, ctx context.Context, siteID, name, sourc
 	if err != nil {
 		t.Fatalf("building panel %s: %v", name, err)
 	}
-	if err := s.CreatePowerPanel(ctx, testActor, p); err != nil {
+	if err := s.CreatePowerPanel(ctx, testPermit, p); err != nil {
 		t.Fatalf("creating panel %s: %v", name, err)
 	}
 	return p.ID
@@ -567,7 +567,7 @@ func TestASupplyChainCannotLoop(t *testing.T) {
 				t.Fatalf("reading back: %v", err)
 			}
 			row.ParentID = &ups
-			err = s.UpdatePowerSource(ctx, testActor, &row.PowerSource)
+			err = s.UpdatePowerSource(ctx, testPermit, &row.PowerSource)
 			if err == nil {
 				t.Fatal("a supply chain was allowed to loop; every walk up it would then " +
 					"depend on a depth guard rather than on the data being sane")
@@ -583,7 +583,7 @@ func TestASupplyChainCannotLoop(t *testing.T) {
 				t.Fatalf("reading back: %v", err)
 			}
 			row.ParentID = &util
-			if err := s.UpdatePowerSource(ctx, testActor, &row.PowerSource); err != nil {
+			if err := s.UpdatePowerSource(ctx, testPermit, &row.PowerSource); err != nil {
 				t.Errorf("a legitimate re-parent was refused: %v", err)
 			}
 		})

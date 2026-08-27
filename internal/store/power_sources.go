@@ -41,12 +41,12 @@ const powerSourceSelect = `
 	LEFT JOIN asset ast ON ast.id = s.asset_id`
 
 // CreatePowerSource inserts a supply and its audit row.
-func (s *SQLStore) CreatePowerSource(ctx context.Context, actor domain.Actor, p *domain.PowerSource) error {
+func (s *SQLStore) CreatePowerSource(ctx context.Context, permit domain.Permit, p *domain.PowerSource) error {
 	p.RowVersion = 1
 	if err := p.Validate(); err != nil {
 		return err
 	}
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, permit, func(t *tx) error {
 		if err := requireLiveAsset(ctx, t, "site_id", p.SiteID); err != nil {
 			return err
 		}
@@ -86,7 +86,7 @@ func (s *SQLStore) CreatePowerSource(ctx context.Context, actor domain.Actor, p 
 // is the commonest reason to be on this screen at all, and correcting it is
 // exactly what somebody does after reading a finding. The cycle guard is what
 // makes that safe.
-func (s *SQLStore) UpdatePowerSource(ctx context.Context, actor domain.Actor, p *domain.PowerSource) error {
+func (s *SQLStore) UpdatePowerSource(ctx context.Context, permit domain.Permit, p *domain.PowerSource) error {
 	before, err := s.GetPowerSource(ctx, p.ID)
 	if err != nil {
 		return err
@@ -98,7 +98,7 @@ func (s *SQLStore) UpdatePowerSource(ctx context.Context, actor domain.Actor, p 
 	p.CreatedAt = before.CreatedAt
 	p.UpdatedAt = domain.FormatTime(s.now())
 
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, permit, func(t *tx) error {
 		if p.ParentID != nil {
 			if err := requireLiveSource(ctx, t, *p.ParentID); err != nil {
 				return err
@@ -162,7 +162,7 @@ func (s *SQLStore) ListPowerSources(ctx context.Context, includeRetired bool) ([
 // Refused while panels or downstream supplies still hang off it: they would be
 // left pointing at something no list shows, and the chain behind them could no
 // longer be traced -- which is the one thing the supply layer exists to do.
-func (s *SQLStore) RetirePowerSource(ctx context.Context, actor domain.Actor, id string) error {
+func (s *SQLStore) RetirePowerSource(ctx context.Context, p domain.Permit, id string) error {
 	before, err := s.GetPowerSource(ctx, id)
 	if err != nil {
 		return err
@@ -173,7 +173,7 @@ func (s *SQLStore) RetirePowerSource(ctx context.Context, actor domain.Actor, id
 			before.Children, pluralWord(before.Children, "supply", "supplies"), domain.ErrConflict)
 	}
 	at := domain.FormatTime(s.now())
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, p, func(t *tx) error {
 		_, err := t.exec(ctx,
 			`UPDATE power_source SET lifecycle = ?, updated_at = ?, row_version = row_version + 1
 			 WHERE id = ?`, domain.LifecycleRetired, at, id)
