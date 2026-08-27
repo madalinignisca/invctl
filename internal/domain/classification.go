@@ -623,6 +623,18 @@ var DeclaredColumns = map[string][]string{
 		"project_id", "circuit_id", "relation", "note", "lifecycle",
 		"created_at", "updated_at",
 	},
+	// Which projects a person is assigned to (WP-G1 piece 3, task 11,
+	// migration 00059). Declared throughout: a person grants or releases
+	// scope, and nothing here is ever written by an observation. Shaped like
+	// custom_field rather than project_asset -- its own id and row_version,
+	// because a released-then-later-re-granted assignment is kept as two
+	// distinct rows rather than one row toggled twice, so "when did the
+	// first grant end" stays answerable. Nothing consults this table's
+	// values for authorization yet; that is Task 12/13.
+	"user_project": {
+		"id", "user_id", "project_id", "lifecycle",
+		"created_at", "updated_at", "row_version",
+	},
 	// A published statistic somebody typed. Declared: nothing observes it and
 	// invariant 7 forbids fetching it, so it can only ever arrive from a person.
 	"inflation_rate": {

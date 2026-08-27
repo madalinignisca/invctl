@@ -254,8 +254,13 @@ func (s *SQLStore) ProjectsForServices(ctx context.Context, serviceIDs []string)
 	return s.projectsFor(ctx, "project_service", "service_id", serviceIDs)
 }
 
-// projectsFor is shared by the two above. The table and column names are
-// literals from the two call sites, never from a request.
+// ProjectsForCircuits is the same for circuits.
+func (s *SQLStore) ProjectsForCircuits(ctx context.Context, circuitIDs []string) (map[string][]ProjectLinkRow, error) {
+	return s.projectsFor(ctx, "project_circuit", "circuit_id", circuitIDs)
+}
+
+// projectsFor is shared by the three above. The table and column names are
+// literals from the three call sites, never from a request.
 func (s *SQLStore) projectsFor(ctx context.Context, table, column string, ids []string) (map[string][]ProjectLinkRow, error) {
 	if len(ids) == 0 {
 		return map[string][]ProjectLinkRow{}, nil
