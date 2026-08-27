@@ -154,19 +154,15 @@ func TestOnlyTheNamedFunctionsMintAPermit(t *testing.T) {
 					continue
 				}
 				results := fn.Type.Results.List
-				// One result (every domain.* minter) or two -- a Permit and
-				// an error (auth.Authorizer.Permit, WP-G1 Task 12): a real
-				// derivation of a project owner's scope asks the store, and
-				// a store call that cannot fail is not a store call this
-				// codebase trusts (see CLAUDE.md's "wrap errors" rule).
-				// Anything else is not a minter this test recognises.
-				if len(results) < 1 || len(results) > 2 {
-					continue
-				}
-				if !returnsPermit(results[0].Type, f.Name.Name) {
-					continue
-				}
-				if len(results) == 2 && !isErrorType(results[1].Type) {
+				// Returning a Permit FIRST is the whole test for whether
+				// something mints one. Everything after that is shape, and
+				// an unrecognised shape must never be a way out of this
+				// scan: this test exists so that nothing outside the named
+				// list can mint a Permit, so a signature it does not
+				// recognise has to fail loudly rather than skip quietly.
+				// A `continue` here would have let func f() (Permit, string)
+				// mint permits with the lock still reporting green.
+				if len(results) == 0 || !returnsPermit(results[0].Type, f.Name.Name) {
 					continue
 				}
 				mname := fn.Name.Name
@@ -174,6 +170,17 @@ func TestOnlyTheNamedFunctionsMintAPermit(t *testing.T) {
 					mname = recvTypeName(fn.Recv.List[0].Type) + "." + mname
 				}
 				rel := dir + "/" + name
+				// One result (every domain.* minter) or two -- a Permit and
+				// an error (auth.Authorizer.Permit, WP-G1 Task 12): a real
+				// derivation of a project owner's scope asks the store, and
+				// a store call that cannot fail is not a store call this
+				// codebase trusts (see CLAUDE.md's "wrap errors" rule).
+				// Any other shape is still recorded as a minter above --
+				// it is only reported here, never skipped.
+				if len(results) > 2 || (len(results) == 2 && !isErrorType(results[1].Type)) {
+					t.Errorf("%s (%s) mints a Permit with an unrecognised signature; "+
+						"expected (Permit) or (Permit, error)", mname, rel)
+				}
 				found = append(found, permitMinter{name: mname, file: rel})
 				if !seen[mname] {
 					seen[mname] = true
