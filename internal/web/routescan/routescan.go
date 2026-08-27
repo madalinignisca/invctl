@@ -109,9 +109,22 @@ import (
 
 // Route is one route the write bucket in internal/web/routes.go registers.
 type Route struct {
-	Pattern      string // "POST /assets/{id}/retire"
-	Handler      string // "AssetRetire"
-	File         string // "internal/web/handlers/assets.go"
+	Pattern string // "POST /assets/{id}/retire"
+	Handler string // "AssetRetire"
+	File    string // "internal/web/handlers/assets.go"
+	// Gate is the registrar that declared this route: "write" (behind
+	// RequireAdmin/auth.CanWrite) or "writeAdminOnly" (behind
+	// RequireAdministrator/auth.IsAdministrator).
+	//
+	// IT IS IN THE COMMITTED INVENTORY DELIBERATELY. WP-G1 Task 13 makes
+	// CanWrite true for a project owner, so the two gates stop being
+	// equivalent on that day: a route silently moved from writeAdminOnly to
+	// write becomes reachable by a project owner, and without this field the
+	// census produced byte-identical output before and after such a move.
+	// Two privilege escalations in this work package came from a fact that
+	// was recorded nowhere and invalidated by a one-line change elsewhere;
+	// recording the gate makes that move a diff in a committed file.
+	Gate         string
 	ReachesActor bool
 	// StoreCalls is every a.Store.<Method> call name reachable from the
 	// handler through the same call graph ReachesActor walks. It is not part
@@ -198,13 +211,21 @@ func WriteRoutes(t *testing.T) []Route {
 			t.Fatalf("write() call at %s registers a handler this walker cannot resolve",
 				fset.Position(call.Pos()))
 		}
-		routes = append(routes, buildRoute(pattern, handlerName, funcs, files))
+		routes = append(routes, buildRoute(pattern, handlerName, fn.Name, funcs, files))
 		return true
 	}
 	ast.Inspect(routesAST, visit)
 
 	sort.Slice(routes, func(i, j int) bool { return routes[i].Pattern < routes[j].Pattern })
 	return routes
+}
+
+// gatedCall pairs a registrar call with WHICH registrar made it, so the
+// journal-route expansion below carries the gate through to Route.Gate the
+// same way the plain walk does.
+type gatedCall struct {
+	call *ast.CallExpr
+	gate string
 }
 
 // isJournalResourcesRange reports whether a range statement is
@@ -231,30 +252,30 @@ func expandJournalRoutes(r *ast.RangeStmt, resources []string, funcs map[string]
 		return nil
 	}
 
-	var calls []*ast.CallExpr
+	var calls []gatedCall
 	ast.Inspect(r.Body, func(n ast.Node) bool {
 		call, ok := n.(*ast.CallExpr)
 		if !ok {
 			return true
 		}
 		if fn, ok := call.Fun.(*ast.Ident); ok && isRouteRegistrar(fn.Name) && len(call.Args) == 2 {
-			calls = append(calls, call)
+			calls = append(calls, gatedCall{call: call, gate: fn.Name})
 		}
 		return true
 	})
 
 	var routes []Route
 	for _, res := range resources {
-		for _, call := range calls {
-			pattern, ok := evalPattern(call.Args[0], loopVar.Name, res)
+		for _, gc := range calls {
+			pattern, ok := evalPattern(gc.call.Args[0], loopVar.Name, res)
 			if !ok {
 				continue
 			}
-			handlerName, ok := handlerSelectorName(call.Args[1])
+			handlerName, ok := handlerSelectorName(gc.call.Args[1])
 			if !ok {
 				continue
 			}
-			routes = append(routes, buildRoute(pattern, handlerName, funcs, files))
+			routes = append(routes, buildRoute(pattern, handlerName, gc.gate, funcs, files))
 		}
 	}
 	return routes
@@ -317,7 +338,7 @@ func literalString(expr ast.Expr) (string, bool) {
 
 // buildRoute resolves one pattern/handler pair into a Route, walking the
 // handler's call graph for actor( and for a.Store.* calls.
-func buildRoute(pattern, handlerName string, funcs map[string]*ast.FuncDecl, files map[string]string) Route {
+func buildRoute(pattern, handlerName, gate string, funcs map[string]*ast.FuncDecl, files map[string]string) Route {
 	decl := funcs[handlerName]
 	visitedActor := map[string]bool{}
 	visitedStore := map[string]bool{}
@@ -335,6 +356,7 @@ func buildRoute(pattern, handlerName string, funcs map[string]*ast.FuncDecl, fil
 		Pattern:      pattern,
 		Handler:      handlerName,
 		File:         files[handlerName],
+		Gate:         gate,
 		ReachesActor: reaches,
 		StoreCalls:   names,
 	}
@@ -495,5 +517,5 @@ func repoRoot(t *testing.T) string {
 // handler, ReachesActor, pipe-separated so the file reads as a table without
 // needing fixed-width columns that would churn on every long handler name.
 func (r Route) Format() string {
-	return fmt.Sprintf("%s | %s | %t", r.Pattern, r.Handler, r.ReachesActor)
+	return fmt.Sprintf("%s | %s | %s | %t", r.Pattern, r.Handler, r.Gate, r.ReachesActor)
 }
