@@ -267,19 +267,19 @@ func TestAnUnclassifiedEntityTypeIsNeverCovered(t *testing.T) {
 	}
 }
 
-// TestAPermitCoversAProjectLinkRowOnlyForProjectsItHolds is the Task 14
-// carve-out (docs/rbac-design.md §4), tested at the gate rather than only
-// through the create route it protects: a project owner may write the LINK
-// ROW itself -- project_asset, project_service, project_circuit -- for a
-// project they hold, entirely independent of which specific asset the id
-// names. NO DEPENDENCE ON WHAT A TRANSACTION DID: that independence is
-// exactly what the project-scoped-create-route decision bought over the
-// earlier minted-id design (see domain.scopedPermit's own doc comment), and
-// testing it here rather than only through the route is what keeps it
-// honest.
-func TestAPermitCoversAProjectLinkRowOnlyForProjectsItHolds(t *testing.T) {
+// TestAPermitCoversAProjectLinkRowOnlyForItsOwnProjectAndItsOwnEntity pins
+// BOTH halves of the link-row carve-out. The project half alone was a
+// privilege escalation -- a project owner could link any asset in the estate
+// into a project they hold, and Authorizer.Permit would then hand them write
+// on it at the next request. See scopedPermit.Covers's comment in
+// internal/domain/role.go for the proof and the two hops.
+//
+// Tested at the gate, with no dependence on what a transaction did -- which
+// is the property the project-scoped-create-route decision bought.
+func TestAPermitCoversAProjectLinkRowOnlyForItsOwnProjectAndItsOwnEntity(t *testing.T) {
 	fp := newFakeProjects()
 	fp.byUser["id-iris"] = []string{"proj-mine"}
+	fp.assets["proj-mine"] = []string{"asset-mine"}
 
 	a := NewAuthorizer(nil, fp)
 	p, err := a.Permit(context.Background(), mustUser(t, "iris", domain.RoleProjectOwner, true))
@@ -287,11 +287,21 @@ func TestAPermitCoversAProjectLinkRowOnlyForProjectsItHolds(t *testing.T) {
 		t.Fatalf("Permit: %v", err)
 	}
 
-	if !p.Covers("project_asset", "proj-mine/any-asset-id") {
-		t.Error("Covers refused the link row for a project this owner holds")
+	tests := []struct {
+		name string
+		id   string
+		want bool
+	}{
+		{"own project, own entity", "proj-mine/asset-mine", true},
+		{"own project, foreign entity -- THE ESCALATION", "proj-mine/db-prod", false},
+		{"foreign project, own entity", "proj-other/asset-mine", false},
+		{"foreign project, foreign entity", "proj-other/db-prod", false},
+		{"no separator at all", "proj-mine", false},
 	}
-	if p.Covers("project_asset", "proj-other/any-asset-id") {
-		t.Error("Covers authorized the link row for a project this owner does not hold")
+	for _, tc := range tests {
+		if got := p.Covers("project_asset", tc.id); got != tc.want {
+			t.Errorf("%s: Covers(project_asset, %q) = %v, want %v", tc.name, tc.id, got, tc.want)
+		}
 	}
 }
 

@@ -10,7 +10,6 @@ package store
 
 import (
 	"errors"
-	"reflect"
 	"testing"
 
 	"github.com/madalinignisca/invctl/internal/domain"
@@ -211,13 +210,19 @@ func TestARefusedCreateAndLinkLeavesNeitherTheAssetNorTheLink(t *testing.T) {
 	}
 }
 
-// TestPermitHoldsProjectAgreesWithCoversForTheCarveOut pins
-// domain.PermitHoldsProject's contract against domain.scopedPermit.Covers's
-// existing project_asset carve-out (Task 12), so the two cannot silently
-// diverge: whichever project a scoped permit answers Covers("project_asset",
-// project+"/x") true for is exactly the project PermitHoldsProject answers
-// true for.
-func TestPermitHoldsProjectAgreesWithCoversForTheCarveOut(t *testing.T) {
+// TestPermitHoldsProjectAndCoversDeliberatelyDisagree pins the divergence
+// that closes the escalation. An earlier revision of this test asserted the
+// OPPOSITE -- that Covers's carve-out and PermitHoldsProject agreed for a
+// held project -- and that agreement was the bug: it meant the entity half
+// of a link id was never consulted, so holding one project authorized
+// linking anything in the estate into it.
+//
+// They answer different questions and must be allowed to differ.
+// PermitHoldsProject asks only "is this project yours", which is the right
+// question for a store method about to mint a narrow transaction permit for
+// a row that does not exist yet (see CreateAssetInProject). Covers asks
+// "may you write THIS row", and for a link row that needs the entity too.
+func TestPermitHoldsProjectAndCoversDeliberatelyDisagree(t *testing.T) {
 	permit := projectOwnerPermit("po-5", "frontend")
 	if got := domain.PermitHoldsProject(permit, "frontend"); !got {
 		t.Error("PermitHoldsProject(frontend) = false, want true")
@@ -225,9 +230,59 @@ func TestPermitHoldsProjectAgreesWithCoversForTheCarveOut(t *testing.T) {
 	if got := domain.PermitHoldsProject(permit, "other"); got {
 		t.Error("PermitHoldsProject(other) = true, want false")
 	}
-	if !reflect.DeepEqual(
-		permit.Covers("project_asset", "frontend/any-id"),
-		domain.PermitHoldsProject(permit, "frontend")) {
-		t.Error("PermitHoldsProject and Covers's carve-out disagree for a held project")
+	// Holds the project, does not cover the entity -- so the link is refused
+	// even though the project half matches.
+	if permit.Covers("project_asset", "frontend/db-prod") {
+		t.Error("Covers admitted a link row for an entity outside the permit's scope")
+	}
+}
+
+// TestAProjectOwnerCannotLinkAnExistingAssetToTheirProject is the escalation
+// docs/rbac-design.md §4 forbids, written as a test against the store.
+//
+// It is the SAME-project case, and it is the one that mattered: linking into
+// a project you do NOT hold was always refused, so a test covering only that
+// case passes with the bug fully present. Proven at runtime before the fix:
+// LinkProjectAsset returned nil here, and AssetIDsForProjects then reported
+// db-prod inside the owner's scope, which is hop two of the escalation.
+func TestAProjectOwnerCannotLinkAnExistingAssetToTheirProject(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			s, ctx := newStore(t, e)
+			frontend := mustProjectForAssignment(t, s, ctx, "frontend")
+			dbProd := mustAsset(t, s, ctx, domain.KindServer, "db-prod", nil)
+			// Holds frontend -- the project being linked INTO. Only the
+			// asset is out of scope.
+			permit := projectOwnerPermit("po-6", frontend)
+
+			link, err := domain.NewProjectAssetLink(frontend, dbProd, domain.ProjectOwns, nil, s.Now())
+			if err != nil {
+				t.Fatalf("building link: %v", err)
+			}
+			if err := s.LinkProjectAsset(ctx, permit, link); !errors.Is(err, domain.ErrForbidden) {
+				t.Fatalf("LinkProjectAsset = %v, want domain.ErrForbidden", err)
+			}
+
+			links, err := s.ListProjectAssets(ctx, frontend)
+			if err != nil {
+				t.Fatalf("listing project assets: %v", err)
+			}
+			for _, l := range links {
+				if l.AssetID == dbProd {
+					t.Error("db-prod was linked into the owner's project")
+				}
+			}
+			// Hop two: had the link landed, scope resolution would hand this
+			// owner write on db-prod at their next request.
+			ids, err := s.AssetIDsForProjects(ctx, []string{frontend})
+			if err != nil {
+				t.Fatalf("AssetIDsForProjects: %v", err)
+			}
+			for _, id := range ids {
+				if id == dbProd {
+					t.Error("db-prod entered the owner's write scope")
+				}
+			}
+		})
 	}
 }

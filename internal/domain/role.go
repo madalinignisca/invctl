@@ -237,22 +237,36 @@ func (p *scopedPermit) Covers(entityType, entityID string) bool {
 	if ScopeClassOf(entityType) == ScopeProjectLinked {
 		return p.entities.covers(entityType, entityID)
 	}
-	// The Task 14 carve-out (WP-G1 Task 12, docs/rbac-design.md §4): a
-	// project owner may write the LINK ROW itself -- project_asset,
-	// project_service, project_circuit -- for a project they hold, even
-	// though those three entity types classify as ScopeEstateConfig for
-	// every OTHER write. This is safe only paired with a routing decision
-	// Task 14 owns and this file cannot enforce: Covers cannot tell a
-	// create-and-link from a link-an-existing-entity apart, because both
-	// write the identical "projectID/entityID" audit id (see
-	// internal/store/projects.go's LinkProjectAsset), so the "link an
-	// EXISTING entity into my project" route MUST stay Administrator-only
-	// and must never be reached with a project owner's ScopedPermit -- an
-	// Administrator's permit already Covers everything and needs no carve-out
-	// to reach it. Tested directly at this layer, independent of what any
-	// transaction did, by TestAPermitCoversAProjectLinkRowOnlyForProjectsItHolds.
-	if projectID, ok := projectFromLinkID(entityType, entityID); ok {
-		return p.holdsProject(projectID)
+	// THE LINK-ROW CARVE-OUT, AND IT TAKES BOTH HALVES. A project owner may
+	// write the link row itself -- project_asset, project_service,
+	// project_circuit -- but only when the permit holds the project AND
+	// already covers the entity being linked. Those three types are
+	// ScopeEstateConfig for every other write.
+	//
+	// BOTH HALVES, because the project half alone is a privilege escalation
+	// and this was proved, not theorised: with only holdsProject, a project
+	// owner assigned to "frontend" could link ANY existing asset in the
+	// estate into frontend (the change_log id "frontend/db-prod" satisfies
+	// a project-only check), and auth.Authorizer.Permit resolves scope from
+	// project membership -- so on their very next request that asset is in
+	// their write bucket. Two hops from "owns one project" to "writes
+	// anything". docs/rbac-design.md §4 forbids exactly this.
+	//
+	// An earlier revision left the entity half to routing instead, keeping
+	// the "link an existing entity" route Administrator-only. That is not
+	// enough: RequireAdmin gates on auth.CanWrite, and WP-G1 Task 13 makes
+	// CanWrite true for a project owner -- which opens that route by a one-
+	// line change nowhere near this file. A guarantee that survives only
+	// while a routing table stays right is not a guarantee. Checking both
+	// halves here holds however the routes are later rewired.
+	//
+	// Create-and-link still works, and needs no exception: the store's
+	// CreateAssetInProject mints a narrow transaction permit carrying the
+	// freshly minted id (see domain.PermitHoldsProject), so that permit
+	// satisfies both halves. Link-an-existing does not, and is refused.
+	// Tested by TestAProjectOwnerCannotLinkAnExistingAssetToTheirProject.
+	if projectID, linkedType, linkedID, ok := linkedEntityFromID(entityType, entityID); ok {
+		return p.holdsProject(projectID) && p.entities.covers(linkedType, linkedID)
 	}
 	return false
 }
@@ -261,25 +275,28 @@ func (p *scopedPermit) Covers(entityType, entityID string) bool {
 // "projectID/entityID" -- see LinkProjectAsset, LinkProjectService and
 // LinkProjectCircuit in internal/store/projects.go, the only three writers
 // of this id shape.
-var projectLinkTables = map[string]bool{
-	"project_asset":   true,
-	"project_service": true,
-	"project_circuit": true,
+// The value is the entity type of the id's SECOND half, which Covers must
+// check as well as the project half -- see linkedEntityFromID.
+var projectLinkTables = map[string]string{
+	"project_asset":   "asset",
+	"project_service": "service",
+	"project_circuit": "circuit",
 }
 
 // projectFromLinkID splits entityID into the project id half of a
 // project-link row's composite audit id, reporting ok=false for anything
 // that is not one of projectLinkTables or does not carry the "/" separator
 // every real link id has.
-func projectFromLinkID(entityType, entityID string) (projectID string, ok bool) {
-	if !projectLinkTables[entityType] {
-		return "", false
+func linkedEntityFromID(entityType, entityID string) (projectID, linkedType, linkedID string, ok bool) {
+	linkedType, isLink := projectLinkTables[entityType]
+	if !isLink {
+		return "", "", "", false
 	}
-	projectID, _, found := strings.Cut(entityID, "/")
+	projectID, linkedID, found := strings.Cut(entityID, "/")
 	if !found {
-		return "", false
+		return "", "", "", false
 	}
-	return projectID, true
+	return projectID, linkedType, linkedID, true
 }
 
 // holdsProject reports whether projectID is one this permit was minted
