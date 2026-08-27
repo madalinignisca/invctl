@@ -120,7 +120,7 @@ func (s *SQLStore) GetTeam(ctx context.Context, id string) (*TeamRow, error) {
 }
 
 // CreateTeam inserts a team.
-func (s *SQLStore) CreateTeam(ctx context.Context, actor domain.Actor, t *domain.Team) error {
+func (s *SQLStore) CreateTeam(ctx context.Context, p domain.Permit, t *domain.Team) error {
 	// The row the INSERT just wrote is version 1 (the column default).
 	// Without this a caller that creates and then updates the SAME struct
 	// compares 0 against 1 and gets a conflict against itself.
@@ -128,7 +128,7 @@ func (s *SQLStore) CreateTeam(ctx context.Context, actor domain.Actor, t *domain
 	if err := t.Validate(); err != nil {
 		return err
 	}
-	return s.write(ctx, domain.AdministratorPermit(actor), func(tx *tx) error {
+	return s.write(ctx, p, func(tx *tx) error {
 		_, err := tx.exec(ctx, `
 			INSERT INTO team (id, code, name, description, contact_ref, lifecycle,
 			                  created_at, updated_at)
@@ -146,7 +146,7 @@ func (s *SQLStore) CreateTeam(ctx context.Context, actor domain.Actor, t *domain
 }
 
 // UpdateTeam persists field changes.
-func (s *SQLStore) UpdateTeam(ctx context.Context, actor domain.Actor, t *domain.Team) error {
+func (s *SQLStore) UpdateTeam(ctx context.Context, p domain.Permit, t *domain.Team) error {
 	if err := t.Validate(); err != nil {
 		return err
 	}
@@ -157,7 +157,7 @@ func (s *SQLStore) UpdateTeam(ctx context.Context, actor domain.Actor, t *domain
 	t.CreatedAt = before.CreatedAt
 	t.UpdatedAt = domain.FormatTime(s.now())
 
-	return s.write(ctx, domain.AdministratorPermit(actor), func(tx *tx) error {
+	return s.write(ctx, p, func(tx *tx) error {
 		res, err := tx.exec(ctx, `
 			UPDATE team SET code = ?, name = ?, description = ?, contact_ref = ?,
 			                lifecycle = ?, updated_at = ?, row_version = row_version + 1
@@ -183,7 +183,7 @@ func (s *SQLStore) UpdateTeam(ctx context.Context, actor domain.Actor, t *domain
 // the estate says "this used to be theirs and nobody has picked it up", which is
 // a finding; silently nulling the column would erase the question along with the
 // answer. The pages render a retired team plainly so the gap is visible.
-func (s *SQLStore) RetireTeam(ctx context.Context, actor domain.Actor, id string) error {
+func (s *SQLStore) RetireTeam(ctx context.Context, p domain.Permit, id string) error {
 	before, err := s.GetTeam(ctx, id)
 	if err != nil {
 		return err
@@ -192,7 +192,7 @@ func (s *SQLStore) RetireTeam(ctx context.Context, actor domain.Actor, id string
 		return nil
 	}
 	at := domain.FormatTime(s.now())
-	return s.write(ctx, domain.AdministratorPermit(actor), func(tx *tx) error {
+	return s.write(ctx, p, func(tx *tx) error {
 		if _, err := tx.exec(ctx,
 			`UPDATE team SET lifecycle = ?, updated_at = ?,
 			                 row_version = row_version + 1 WHERE id = ?`,

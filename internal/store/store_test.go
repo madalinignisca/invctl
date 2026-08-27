@@ -58,15 +58,12 @@ func mustAsset(t *testing.T, s *SQLStore, ctx context.Context, kind, name string
 // tx.logUpdateBatch (internal/store/store.go) holds for a second entity type
 // -- not just the file the bypass was found in.
 //
-// UpdateAsset itself still takes a domain.Actor and mints AdministratorPermit
-// internally (WP-G1 Task 10 has not converted it yet -- see that method's
-// call to domain.AdministratorPermit), so it cannot be driven through a
-// refused ScopedPermit today. This test exercises the shared mechanism
-// directly instead: it opens a write transaction with a ScopedPermit that
-// covers nothing for "asset", runs the same unconditional
-// version-bumping UPDATE the real store methods run, then calls t.logUpdate
-// with identical before/after values -- the no-op case. That must still be
-// refused, roll the UPDATE back, and leave no change_log row, exactly as
+// WP-G1 Task 10 converted UpdateAsset from a domain.Actor to a domain.Permit
+// parameter, so unlike when this test was first written it now drives the
+// real public method through a refused ScopedPermit directly, rather than
+// reaching for the shared s.write/tx.logUpdate mechanism by hand. The no-op
+// case -- submitting the row back unchanged -- must still be refused, roll
+// the physical UPDATE back, and leave no change_log row, exactly as
 // TestANoOpUpdateIsStillAuthorized proves for "circuit".
 func TestANoOpUpdateIsStillAuthorizedForANonCircuitType(t *testing.T) {
 	for _, e := range Engines(t) {
@@ -95,31 +92,14 @@ func TestANoOpUpdateIsStillAuthorizedForANonCircuitType(t *testing.T) {
 				domain.ScopedEntities{"asset": {}},
 			)
 
-			at := domain.FormatTime(s.Now())
-			snapshot := before.Asset
-			err = s.write(ctx, scoped, func(t *tx) error {
-				// The same unconditional, version-bumping UPDATE shape every
-				// real store method runs before ever reaching the audit
-				// helper -- see B1's report for why the physical write
-				// happening first is fine, provided a refusal still rolls
-				// it back.
-				res, execErr := t.exec(ctx,
-					`UPDATE asset SET updated_at = ?, row_version = row_version + 1 WHERE id = ?`,
-					at, site)
-				if execErr != nil {
-					return fmt.Errorf("bumping asset: %w", execErr)
-				}
-				bumped := snapshot
-				bumped.RowVersion++
-				if verErr := requireVersion(res, "asset", site, &bumped.RowVersion); verErr != nil {
-					return verErr
-				}
-				// before == after: the no-op case the bug depended on to
-				// skip authorization.
-				return t.logUpdate(ctx, "asset", site, &snapshot, &snapshot)
-			})
+			// Submitted back unchanged -- the no-op case the bypass depended
+			// on to skip authorization. nil environmentIDs means "not
+			// managing membership here", so it does not introduce a diff of
+			// its own.
+			unchanged := before.Asset
+			err = s.UpdateAsset(ctx, scoped, &unchanged, nil)
 			if !errors.Is(err, domain.ErrForbidden) {
-				t.Fatalf("write(no-op update) error = %v, want ErrForbidden", err)
+				t.Fatalf("UpdateAsset(no-op) error = %v, want ErrForbidden", err)
 			}
 
 			after, err := s.GetAsset(ctx, site)

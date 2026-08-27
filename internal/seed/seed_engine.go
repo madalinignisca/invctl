@@ -77,7 +77,7 @@ func (b *builder) virtualisationCluster() {
 	c.MinHosts = num(3)
 	c.Description = str("three hosts, three needed: HA is configured and cannot survive " +
 		"losing one")
-	if err := b.store.CreateCluster(b.ctx, Actor, c); err != nil {
+	if err := b.store.CreateCluster(b.ctx, domain.AdministratorPermit(Actor), c); err != nil {
 		b.fail(fmt.Errorf("seeding cluster: %w", err))
 		return
 	}
@@ -90,7 +90,7 @@ func (b *builder) virtualisationCluster() {
 		}
 		members = append(members, domain.ClusterMember{ClusterID: c.ID, AssetID: id})
 	}
-	if err := b.store.SetClusterMembers(b.ctx, Actor, c.ID, members); err != nil {
+	if err := b.store.SetClusterMembers(b.ctx, domain.AdministratorPermit(Actor), c.ID, members); err != nil {
 		b.fail(fmt.Errorf("seeding cluster members: %w", err))
 	}
 }

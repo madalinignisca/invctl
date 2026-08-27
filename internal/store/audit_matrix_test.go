@@ -443,7 +443,7 @@ var auditMatrix = []auditCase{
 			if err != nil {
 				t.Fatalf("building team: %v", err)
 			}
-			if err := s.CreateTeam(ctx, testActor, team); err != nil {
+			if err := s.CreateTeam(ctx, testPermit, team); err != nil {
 				t.Fatalf("creating team: %v", err)
 			}
 			return team.ID, domain.ActionCreate
@@ -464,7 +464,7 @@ var auditMatrix = []auditCase{
 			if err != nil {
 				t.Fatalf("building team: %v", err)
 			}
-			if err := s.CreateTeam(ctx, testActor, team); err != nil {
+			if err := s.CreateTeam(ctx, testPermit, team); err != nil {
 				t.Fatalf("creating team: %v", err)
 			}
 			return team.ID
@@ -476,7 +476,7 @@ var auditMatrix = []auditCase{
 			}
 			updated := row.Team
 			updated.Name = "Audit Team Update Renamed"
-			if err := s.UpdateTeam(ctx, testActor, &updated); err != nil {
+			if err := s.UpdateTeam(ctx, testPermit, &updated); err != nil {
 				t.Fatalf("updating team: %v", err)
 			}
 			return id, domain.ActionUpdate
@@ -494,13 +494,13 @@ var auditMatrix = []auditCase{
 			if err != nil {
 				t.Fatalf("building team: %v", err)
 			}
-			if err := s.CreateTeam(ctx, testActor, team); err != nil {
+			if err := s.CreateTeam(ctx, testPermit, team); err != nil {
 				t.Fatalf("creating team: %v", err)
 			}
 			return team.ID
 		},
 		mutate: func(t *testing.T, s *SQLStore, ctx context.Context, id string) (string, string) {
-			if err := s.RetireTeam(ctx, testActor, id); err != nil {
+			if err := s.RetireTeam(ctx, testPermit, id); err != nil {
 				t.Fatalf("retiring team: %v", err)
 			}
 			return id, domain.ActionRetire
@@ -884,7 +884,7 @@ func mustAuditOwnerTeam(t *testing.T, s *SQLStore, ctx context.Context, code str
 	if err != nil {
 		t.Fatalf("building owner team %s: %v", code, err)
 	}
-	if err := s.CreateTeam(ctx, testActor, team); err != nil {
+	if err := s.CreateTeam(ctx, testPermit, team); err != nil {
 		t.Fatalf("creating owner team %s: %v", code, err)
 	}
 	return team.ID

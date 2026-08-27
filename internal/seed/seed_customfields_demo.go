@@ -450,7 +450,7 @@ func assignAndDeprecateOwner(ctx context.Context, s *store.SQLStore, actor domai
 	if err != nil {
 		return fmt.Errorf("building the soon-to-deprecate team: %w", err)
 	}
-	if err := s.CreateTeam(ctx, actor, team); err != nil {
+	if err := s.CreateTeam(ctx, domain.AdministratorPermit(actor), team); err != nil {
 		return fmt.Errorf("creating the soon-to-deprecate team: %w", err)
 	}
 
@@ -464,7 +464,7 @@ func assignAndDeprecateOwner(ctx context.Context, s *store.SQLStore, actor domai
 	}
 
 	team.Lifecycle = domain.LifecycleDeprecated
-	if err := s.UpdateTeam(ctx, actor, team); err != nil {
+	if err := s.UpdateTeam(ctx, domain.AdministratorPermit(actor), team); err != nil {
 		return fmt.Errorf("deprecating team %s: %w", teamCode, err)
 	}
 	return nil
@@ -482,7 +482,7 @@ func assignToUnreachableOwner(ctx context.Context, s *store.SQLStore, actor doma
 	if err != nil {
 		return fmt.Errorf("building the contactless team: %w", err)
 	}
-	if err := s.CreateTeam(ctx, actor, team); err != nil {
+	if err := s.CreateTeam(ctx, domain.AdministratorPermit(actor), team); err != nil {
 		return fmt.Errorf("creating the contactless team: %w", err)
 	}
 

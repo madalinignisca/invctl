@@ -285,12 +285,12 @@ func (s *SQLStore) projectsFor(ctx context.Context, table, column string, ids []
 // Writes. Every one records a change_log row in the same transaction.
 
 // CreateProject stores a new project.
-func (s *SQLStore) CreateProject(ctx context.Context, actor domain.Actor, p *domain.Project) error {
+func (s *SQLStore) CreateProject(ctx context.Context, permit domain.Permit, p *domain.Project) error {
 	// The row the INSERT just wrote is version 1 (the column default).
 	// Without this a caller that creates and then updates the SAME struct
 	// compares 0 against 1 and gets a conflict against itself.
 	p.RowVersion = 1
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, permit, func(t *tx) error {
 		_, err := t.exec(ctx, `
 			INSERT INTO project (id, code, name, description, team_id,
 			                     priced_for_vcpu, priced_for_memory_mb,
@@ -326,8 +326,8 @@ func (s *SQLStore) CreateProject(ctx context.Context, actor domain.Actor, p *dom
 }
 
 // UpdateProject stores an edit.
-func (s *SQLStore) UpdateProject(ctx context.Context, actor domain.Actor, p *domain.Project) error {
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+func (s *SQLStore) UpdateProject(ctx context.Context, permit domain.Permit, p *domain.Project) error {
+	return s.write(ctx, permit, func(t *tx) error {
 		var before domain.Project
 		if err := t.get(ctx, &before, `SELECT * FROM project WHERE id = ?`, p.ID); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
@@ -384,8 +384,8 @@ func (s *SQLStore) UpdateProject(ctx context.Context, actor domain.Actor, p *dom
 // screen explains why -- the partial unique index does not care that the
 // project is retired, only that the link is active. RetireAsset does the same
 // thing for group memberships and attachments, and for the same reason.
-func (s *SQLStore) RetireProject(ctx context.Context, actor domain.Actor, id string) error {
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+func (s *SQLStore) RetireProject(ctx context.Context, p domain.Permit, id string) error {
+	return s.write(ctx, p, func(t *tx) error {
 		var before domain.Project
 		if err := t.get(ctx, &before, `SELECT * FROM project WHERE id = ?`, id); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
@@ -445,8 +445,8 @@ func (s *SQLStore) releaseLinks(ctx context.Context, t *tx, table, column, proje
 }
 
 // LinkProjectAsset links an asset to a project, or updates an existing link.
-func (s *SQLStore) LinkProjectAsset(ctx context.Context, actor domain.Actor, l *domain.ProjectAssetLink) error {
-	return s.writeSerializable(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+func (s *SQLStore) LinkProjectAsset(ctx context.Context, p domain.Permit, l *domain.ProjectAssetLink) error {
+	return s.writeSerializable(ctx, p, func(t *tx) error {
 		if l.Relation == domain.ProjectOwns {
 			if err := t.checkOwnerFree(ctx, "project_asset", "asset_id", l.AssetID, l.ProjectID); err != nil {
 				return err
@@ -480,8 +480,8 @@ func (s *SQLStore) LinkProjectAsset(ctx context.Context, actor domain.Actor, l *
 }
 
 // LinkProjectService links a service to a project, or updates an existing link.
-func (s *SQLStore) LinkProjectService(ctx context.Context, actor domain.Actor, l *domain.ProjectServiceLink) error {
-	return s.writeSerializable(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+func (s *SQLStore) LinkProjectService(ctx context.Context, p domain.Permit, l *domain.ProjectServiceLink) error {
+	return s.writeSerializable(ctx, p, func(t *tx) error {
 		if l.Relation == domain.ProjectOwns {
 			if err := t.checkOwnerFree(ctx, "project_service", "service_id", l.ServiceID, l.ProjectID); err != nil {
 				return err
@@ -543,8 +543,8 @@ func (t *tx) checkOwnerFree(ctx context.Context, table, column, entityID, projec
 }
 
 // RetireProjectAsset releases one asset link.
-func (s *SQLStore) RetireProjectAsset(ctx context.Context, actor domain.Actor, projectID, assetID string) error {
-	return s.retireLink(ctx, actor, "project_asset", "asset_id", projectID, assetID)
+func (s *SQLStore) RetireProjectAsset(ctx context.Context, p domain.Permit, projectID, assetID string) error {
+	return s.retireLink(ctx, p, "project_asset", "asset_id", projectID, assetID)
 }
 
 // ListProjectCircuits returns a project's linked circuits, owned first.
@@ -566,8 +566,8 @@ func (s *SQLStore) ListProjectCircuits(ctx context.Context, projectID string) ([
 }
 
 // LinkProjectCircuit links a circuit to a project, or updates an existing link.
-func (s *SQLStore) LinkProjectCircuit(ctx context.Context, actor domain.Actor, l *domain.ProjectCircuitLink) error {
-	return s.writeSerializable(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+func (s *SQLStore) LinkProjectCircuit(ctx context.Context, p domain.Permit, l *domain.ProjectCircuitLink) error {
+	return s.writeSerializable(ctx, p, func(t *tx) error {
 		if l.Relation == domain.ProjectOwns {
 			if err := t.checkOwnerFree(ctx, "project_circuit", "circuit_id", l.CircuitID, l.ProjectID); err != nil {
 				return err
@@ -601,17 +601,17 @@ func (s *SQLStore) LinkProjectCircuit(ctx context.Context, actor domain.Actor, l
 }
 
 // RetireProjectCircuit releases one circuit link.
-func (s *SQLStore) RetireProjectCircuit(ctx context.Context, actor domain.Actor, projectID, circuitID string) error {
-	return s.retireLink(ctx, actor, "project_circuit", "circuit_id", projectID, circuitID)
+func (s *SQLStore) RetireProjectCircuit(ctx context.Context, p domain.Permit, projectID, circuitID string) error {
+	return s.retireLink(ctx, p, "project_circuit", "circuit_id", projectID, circuitID)
 }
 
 // RetireProjectService releases one service link.
-func (s *SQLStore) RetireProjectService(ctx context.Context, actor domain.Actor, projectID, serviceID string) error {
-	return s.retireLink(ctx, actor, "project_service", "service_id", projectID, serviceID)
+func (s *SQLStore) RetireProjectService(ctx context.Context, p domain.Permit, projectID, serviceID string) error {
+	return s.retireLink(ctx, p, "project_service", "service_id", projectID, serviceID)
 }
 
-func (s *SQLStore) retireLink(ctx context.Context, actor domain.Actor, table, column, projectID, entityID string) error {
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+func (s *SQLStore) retireLink(ctx context.Context, p domain.Permit, table, column, projectID, entityID string) error {
+	return s.write(ctx, p, func(t *tx) error {
 		var lifecycle string
 		err := t.get(ctx, &lifecycle,
 			`SELECT lifecycle FROM `+table+` WHERE project_id = ? AND `+column+` = ?`,

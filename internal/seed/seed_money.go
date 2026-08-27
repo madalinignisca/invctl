@@ -91,7 +91,7 @@ func (b *builder) pricedFor() {
 		}
 		p := row.Project
 		p.PricedForVCPU, p.PricedForMemoryMB = num(q.vcpu), num(q.memoryMB)
-		if err := b.store.UpdateProject(b.ctx, Actor, &p); err != nil {
+		if err := b.store.UpdateProject(b.ctx, domain.AdministratorPermit(Actor), &p); err != nil {
 			b.fail(fmt.Errorf("pricing project %s: %w", q.code, err))
 			return
 		}
@@ -316,7 +316,7 @@ func (b *builder) declareClusterCapacity(name, anchorHost string, overcommit, mi
 	if minHosts > 0 && c.MinHosts == nil {
 		c.MinHosts = num(minHosts)
 	}
-	if err := b.store.UpdateCluster(b.ctx, Actor, c); err != nil {
+	if err := b.store.UpdateCluster(b.ctx, domain.AdministratorPermit(Actor), c); err != nil {
 		return fmt.Errorf("declaring capacity on %s: %w", name, err)
 	}
 	return nil

@@ -92,7 +92,7 @@ func mustCustomFieldTeam(t *testing.T, s *SQLStore, ctx context.Context, code st
 	if err != nil {
 		t.Fatalf("building fixture team %s: %v", code, err)
 	}
-	if err := s.CreateTeam(ctx, testActor, team); err != nil {
+	if err := s.CreateTeam(ctx, testPermit, team); err != nil {
 		t.Fatalf("creating fixture team %s: %v", code, err)
 	}
 	return team.ID
@@ -1009,7 +1009,7 @@ func TestCreateRefusesARetiredOwnerTeam(t *testing.T) {
 	for _, e := range Engines(t) {
 		t.Run(e.Name, func(t *testing.T) {
 			f := newCustomFieldFixture(t, e)
-			if err := f.s.RetireTeam(f.ctx, f.actor, f.retiredTeamID); err != nil {
+			if err := f.s.RetireTeam(f.ctx, domain.AdministratorPermit(f.actor), f.retiredTeamID); err != nil {
 				t.Fatalf("retiring the fixture team: %v", err)
 			}
 			cf, err := domain.NewCustomField(NewID(), "asset", "cost_centre", "Cost Centre",
@@ -1041,7 +1041,7 @@ func TestAFieldAlreadyOwnedByASinceRetiredTeamStillShowsThatTeam(t *testing.T) {
 				t.Fatalf("creating with an active owner: %v", err)
 			}
 
-			if err := f.s.RetireTeam(f.ctx, f.actor, f.retiredTeamID); err != nil {
+			if err := f.s.RetireTeam(f.ctx, domain.AdministratorPermit(f.actor), f.retiredTeamID); err != nil {
 				t.Fatalf("retiring the owner team: %v", err)
 			}
 
@@ -1082,7 +1082,7 @@ func TestUpdateRefusesAssigningANewlyRetiredTeamAsOwner(t *testing.T) {
 		t.Run(e.Name, func(t *testing.T) {
 			f := newCustomFieldFixture(t, e)
 			id := mustField(t, f, "asset", "cost_centre", domain.CustomFieldText)
-			if err := f.s.RetireTeam(f.ctx, f.actor, f.retiredTeamID); err != nil {
+			if err := f.s.RetireTeam(f.ctx, domain.AdministratorPermit(f.actor), f.retiredTeamID); err != nil {
 				t.Fatalf("retiring the fixture team: %v", err)
 			}
 

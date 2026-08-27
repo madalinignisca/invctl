@@ -30,7 +30,7 @@ func (f *projectFixture) costCluster(t *testing.T, splitCPU *int) string {
 		t.Fatalf("reading the cluster: %v", err)
 	}
 	c.CostSplitCPU = splitCPU
-	if err := f.s.UpdateCluster(f.ctx, testActor, c); err != nil {
+	if err := f.s.UpdateCluster(f.ctx, testPermit, c); err != nil {
 		t.Fatalf("declaring the split: %v", err)
 	}
 	return id

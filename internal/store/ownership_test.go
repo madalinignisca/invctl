@@ -64,7 +64,7 @@ func (f *ownershipFixture) team(t *testing.T, code, lifecycle string, contact *s
 	if err != nil {
 		t.Fatalf("building team %s: %v", code, err)
 	}
-	if err := f.s.CreateTeam(f.ctx, testActor, team); err != nil {
+	if err := f.s.CreateTeam(f.ctx, testPermit, team); err != nil {
 		t.Fatalf("creating team %s: %v", code, err)
 	}
 	if lifecycle != "" && lifecycle != domain.LifecycleActive {
@@ -73,12 +73,12 @@ func (f *ownershipFixture) team(t *testing.T, code, lifecycle string, contact *s
 		// step for the same reason retiring is: nothing in this codebase
 		// creates a team already in a non-active state.
 		if lifecycle == domain.LifecycleRetired {
-			if err := f.s.RetireTeam(f.ctx, testActor, team.ID); err != nil {
+			if err := f.s.RetireTeam(f.ctx, testPermit, team.ID); err != nil {
 				t.Fatalf("retiring team %s: %v", code, err)
 			}
 		} else {
 			team.Lifecycle = lifecycle
-			if err := f.s.UpdateTeam(f.ctx, testActor, team); err != nil {
+			if err := f.s.UpdateTeam(f.ctx, testPermit, team); err != nil {
 				t.Fatalf("moving team %s to %s: %v", code, lifecycle, err)
 			}
 		}
@@ -135,7 +135,7 @@ func (f *ownershipFixture) project(t *testing.T, code string, teamID *string, li
 	if err != nil {
 		t.Fatalf("building project %s: %v", code, err)
 	}
-	if err := f.s.CreateProject(f.ctx, testActor, p); err != nil {
+	if err := f.s.CreateProject(f.ctx, testPermit, p); err != nil {
 		t.Fatalf("creating project %s: %v", code, err)
 	}
 	return p.ID

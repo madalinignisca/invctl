@@ -321,7 +321,7 @@ func TestUnownedServiceCandidatesRespectsProjectFilter(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building project-service link: %v", err)
 			}
-			if err := f.s.LinkProjectService(f.ctx, testActor, link); err != nil {
+			if err := f.s.LinkProjectService(f.ctx, testPermit, link); err != nil {
 				t.Fatalf("linking service to project: %v", err)
 			}
 

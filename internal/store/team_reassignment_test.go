@@ -131,7 +131,7 @@ func TestReassignTeamOwnershipMovesEverythingAndSharesOneBatchID(t *testing.T) {
 			identityID := f.identity(t, "reassign-identity", &from, "")
 			fieldID := f.customField(t, "reassign_field", &from)
 
-			outcomes, err := f.s.ReassignTeamOwnership(f.ctx, testActor, from, to)
+			outcomes, err := f.s.ReassignTeamOwnership(f.ctx, testPermit, from, to)
 			if err != nil {
 				t.Fatalf("ReassignTeamOwnership: %v", err)
 			}
@@ -224,7 +224,7 @@ func TestReassignTeamOwnershipSkipsAStaleEntity(t *testing.T) {
 
 			assetID := f.asset(t, "raced-asset", &elsewhere, "")
 
-			outcome := f.s.reassignEntity(f.ctx, testActor, "asset", assetID, "raced-asset", from, to, "test-batch",
+			outcome := f.s.reassignEntity(f.ctx, testPermit, "asset", assetID, "raced-asset", from, to, "test-batch",
 				func(tx *tx) (sql.Result, error) {
 					return tx.exec(f.ctx,
 						`UPDATE asset SET team_id = ?, updated_at = ?, row_version = row_version + 1
@@ -274,7 +274,7 @@ func TestReassignTeamOwnershipRefusesARetiredTarget(t *testing.T) {
 
 			assetID := f.asset(t, "untouched-asset", &from, "")
 
-			_, err := f.s.ReassignTeamOwnership(f.ctx, testActor, from, to)
+			_, err := f.s.ReassignTeamOwnership(f.ctx, testPermit, from, to)
 			if !errors.Is(err, domain.ErrInvalid) {
 				t.Fatalf("err = %v, want domain.ErrInvalid", err)
 			}
@@ -298,7 +298,7 @@ func TestReassignTeamOwnershipRefusesTheSameTeam(t *testing.T) {
 			f := newOwnershipFixture(t, e)
 			teamID := f.team(t, "self-target", "", strp("a@example.com"))
 
-			_, err := f.s.ReassignTeamOwnership(f.ctx, testActor, teamID, teamID)
+			_, err := f.s.ReassignTeamOwnership(f.ctx, testPermit, teamID, teamID)
 			if !errors.Is(err, domain.ErrInvalid) {
 				t.Fatalf("err = %v, want domain.ErrInvalid", err)
 			}
@@ -316,7 +316,7 @@ func TestRetireAnywayLeavesOwnershipUntouched(t *testing.T) {
 			teamID := f.team(t, "retiring-anyway", "", strp("a@example.com"))
 			assetID := f.asset(t, "left-behind-asset", &teamID, "")
 
-			if err := f.s.RetireTeam(f.ctx, testActor, teamID); err != nil {
+			if err := f.s.RetireTeam(f.ctx, testPermit, teamID); err != nil {
 				t.Fatalf("RetireTeam: %v", err)
 			}
 
@@ -357,10 +357,10 @@ func TestRetireTeamStillWritesItsOwnRetireRowAfterReassignment(t *testing.T) {
 			to := f.team(t, "absorbs-it", "", strp("b@example.com"))
 			f.asset(t, "moving-asset", &from, "")
 
-			if _, err := f.s.ReassignTeamOwnership(f.ctx, testActor, from, to); err != nil {
+			if _, err := f.s.ReassignTeamOwnership(f.ctx, testPermit, from, to); err != nil {
 				t.Fatalf("ReassignTeamOwnership: %v", err)
 			}
-			if err := f.s.RetireTeam(f.ctx, testActor, from); err != nil {
+			if err := f.s.RetireTeam(f.ctx, testPermit, from); err != nil {
 				t.Fatalf("RetireTeam: %v", err)
 			}
 

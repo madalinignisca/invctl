@@ -89,7 +89,7 @@ func (f *projectFixture) priceProjectFor(t *testing.T, code string, vcpu, memory
 	}
 	p := row.Project
 	p.PricedForVCPU, p.PricedForMemoryMB = &vcpu, &memoryMB
-	if err := f.s.UpdateProject(f.ctx, testActor, &p); err != nil {
+	if err := f.s.UpdateProject(f.ctx, testPermit, &p); err != nil {
 		t.Fatalf("pricing %s: %v", code, err)
 	}
 }

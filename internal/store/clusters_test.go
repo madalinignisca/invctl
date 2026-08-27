@@ -30,14 +30,14 @@ func mustCluster(t *testing.T, s *SQLStore, ctx context.Context, name, policy st
 	}
 	c.HAPolicy = policy
 	c.MinHosts = minHosts
-	if err := s.CreateCluster(ctx, testActor, c); err != nil {
+	if err := s.CreateCluster(ctx, testPermit, c); err != nil {
 		t.Fatalf("creating cluster: %v", err)
 	}
 	members := make([]domain.ClusterMember, 0, len(hosts))
 	for _, h := range hosts {
 		members = append(members, domain.ClusterMember{ClusterID: c.ID, AssetID: h})
 	}
-	if err := s.SetClusterMembers(ctx, testActor, c.ID, members); err != nil {
+	if err := s.SetClusterMembers(ctx, testPermit, c.ID, members); err != nil {
 		t.Fatalf("setting members: %v", err)
 	}
 	return c.ID
@@ -100,7 +100,7 @@ func TestAClusterChangesWhatTheSimulationConcludes(t *testing.T) {
 				t.Fatalf("getting cluster: %v", err)
 			}
 			c.HAPolicy = domain.HARestart
-			if err := s.UpdateCluster(ctx, testActor, c); err != nil {
+			if err := s.UpdateCluster(ctx, testPermit, c); err != nil {
 				t.Fatalf("updating cluster: %v", err)
 			}
 			if guestsDown() {

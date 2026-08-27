@@ -333,7 +333,7 @@ func assignAndRetireOwner(ctx context.Context, s *store.SQLStore, actor domain.A
 	if err != nil {
 		return fmt.Errorf("building the soon-to-retire team: %w", err)
 	}
-	if err := s.CreateTeam(ctx, actor, team); err != nil {
+	if err := s.CreateTeam(ctx, domain.AdministratorPermit(actor), team); err != nil {
 		return fmt.Errorf("creating the soon-to-retire team: %w", err)
 	}
 
@@ -346,7 +346,7 @@ func assignAndRetireOwner(ctx context.Context, s *store.SQLStore, actor domain.A
 		return fmt.Errorf("reassigning field %s to the soon-to-retire team: %w", fieldID, err)
 	}
 
-	if err := s.RetireTeam(ctx, actor, team.ID); err != nil {
+	if err := s.RetireTeam(ctx, domain.AdministratorPermit(actor), team.ID); err != nil {
 		return fmt.Errorf("retiring team %s: %w", teamCode, err)
 	}
 	return nil

@@ -385,7 +385,7 @@ func TestATopUpCanResolveEveryRefItsPhasesRead(t *testing.T) {
 		for _, row := range projectsBefore {
 			p := row.Project
 			p.PricedForVCPU, p.PricedForMemoryMB = nil, nil
-			if err := f.store.UpdateProject(f.ctx, seed.Actor, &p); err != nil {
+			if err := f.store.UpdateProject(f.ctx, domain.AdministratorPermit(seed.Actor), &p); err != nil {
 				t.Fatalf("clearing priced-for: %v", err)
 			}
 		}
@@ -479,7 +479,7 @@ func TestTheCapacityPhaseFindsItsClusterAfterARename(t *testing.T) {
 		renamed := *target
 		renamed.Name = "prod-pve"
 		renamed.CPUOvercommit, renamed.CostSplitCPU = nil, nil
-		if err := f.store.UpdateCluster(f.ctx, seed.Actor, &renamed); err != nil {
+		if err := f.store.UpdateCluster(f.ctx, domain.AdministratorPermit(seed.Actor), &renamed); err != nil {
 			t.Fatalf("renaming: %v", err)
 		}
 

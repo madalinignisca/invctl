@@ -53,7 +53,7 @@ func newProjectFixture(t *testing.T, e Engine) *projectFixture {
 		if err != nil {
 			t.Fatalf("building project %s: %v", code, err)
 		}
-		if err := s.CreateProject(ctx, testActor, p); err != nil {
+		if err := s.CreateProject(ctx, testPermit, p); err != nil {
 			t.Fatalf("creating project %s: %v", code, err)
 		}
 		f.projects[code] = p.ID
@@ -86,7 +86,7 @@ func (f *projectFixture) link(t *testing.T, project, asset, relation string) err
 	if err != nil {
 		t.Fatalf("building link: %v", err)
 	}
-	return f.s.LinkProjectAsset(f.ctx, testActor, l)
+	return f.s.LinkProjectAsset(f.ctx, testPermit, l)
 }
 
 // linkService is the service half of link, added when the cost rollup needed
@@ -97,7 +97,7 @@ func (f *projectFixture) linkService(t *testing.T, project, service, relation st
 	if err != nil {
 		t.Fatalf("building service link: %v", err)
 	}
-	return f.s.LinkProjectService(f.ctx, testActor, l)
+	return f.s.LinkProjectService(f.ctx, testPermit, l)
 }
 
 // circuit creates one on demand, with its provider. Not built in
@@ -137,7 +137,7 @@ func (f *projectFixture) linkCircuit(t *testing.T, project, cid, relation string
 	if err != nil {
 		t.Fatalf("building the link: %v", err)
 	}
-	return f.s.LinkProjectCircuit(f.ctx, testActor, l)
+	return f.s.LinkProjectCircuit(f.ctx, testPermit, l)
 }
 
 func (f *projectFixture) changeRows(t *testing.T, entityType string) int64 {
@@ -193,7 +193,7 @@ func TestRetiringALinkFreesTheOwnerSlot(t *testing.T) {
 			if err := f.link(t, "orders", "hv-01", domain.ProjectOwns); err != nil {
 				t.Fatalf("first owner: %v", err)
 			}
-			if err := f.s.RetireProjectAsset(f.ctx, testActor,
+			if err := f.s.RetireProjectAsset(f.ctx, testPermit,
 				f.projects["orders"], f.assets["hv-01"]); err != nil {
 				t.Fatalf("retiring the link: %v", err)
 			}
@@ -221,12 +221,12 @@ func TestRetiringAProjectReleasesItsLinks(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building service link: %v", err)
 			}
-			if err := f.s.LinkProjectService(f.ctx, testActor, svc); err != nil {
+			if err := f.s.LinkProjectService(f.ctx, testPermit, svc); err != nil {
 				t.Fatalf("linking service: %v", err)
 			}
 
 			before := f.changeRows(t, "project_asset")
-			if err := f.s.RetireProject(f.ctx, testActor, f.projects["orders"]); err != nil {
+			if err := f.s.RetireProject(f.ctx, testPermit, f.projects["orders"]); err != nil {
 				t.Fatalf("retiring the project: %v", err)
 			}
 			// Counted HERE, before the re-link attempts below add rows of their
@@ -239,7 +239,7 @@ func TestRetiringAProjectReleasesItsLinks(t *testing.T) {
 			}
 			svc2, _ := domain.NewProjectServiceLink(
 				f.projects["platform"], f.services["orders-api"], domain.ProjectOwns, nil, f.s.Now())
-			if err := f.s.LinkProjectService(f.ctx, testActor, svc2); err != nil {
+			if err := f.s.LinkProjectService(f.ctx, testPermit, svc2); err != nil {
 				t.Errorf("the service's owner slot was not released: %v", err)
 			}
 
@@ -344,7 +344,7 @@ func TestProjectListCountsOwnedAndUsedSeparately(t *testing.T) {
 					orders.OwnedAssets, orders.UsedAssets)
 			}
 			// And a retired project drops out of the default list.
-			if err := f.s.RetireProject(f.ctx, testActor, f.projects["orders"]); err != nil {
+			if err := f.s.RetireProject(f.ctx, testPermit, f.projects["orders"]); err != nil {
 				t.Fatalf("retiring: %v", err)
 			}
 			after, err := f.s.ListProjects(f.ctx, ProjectFilter{})
@@ -378,7 +378,7 @@ func TestProjectRejectsWhatItShould(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building: %v", err)
 			}
-			if err := f.s.CreateProject(f.ctx, testActor, dup); !errors.Is(err, domain.ErrConflict) {
+			if err := f.s.CreateProject(f.ctx, testPermit, dup); !errors.Is(err, domain.ErrConflict) {
 				t.Errorf("a duplicate code: %v, want ErrConflict", err)
 			}
 
@@ -388,7 +388,7 @@ func TestProjectRejectsWhatItShould(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building: %v", err)
 			}
-			if err := f.s.LinkProjectAsset(f.ctx, testActor, bad); err == nil {
+			if err := f.s.LinkProjectAsset(f.ctx, testPermit, bad); err == nil {
 				t.Error("a link to a non-existent asset was stored")
 			}
 		})

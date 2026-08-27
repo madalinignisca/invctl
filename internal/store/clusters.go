@@ -71,14 +71,14 @@ func (s *SQLStore) GetCluster(ctx context.Context, id string) (*domain.Cluster, 
 }
 
 // CreateCluster declares a cluster.
-func (s *SQLStore) CreateCluster(ctx context.Context, actor domain.Actor, c *domain.Cluster) error {
+func (s *SQLStore) CreateCluster(ctx context.Context, p domain.Permit, c *domain.Cluster) error {
 	if err := c.Validate(); err != nil {
 		return err
 	}
 	c.RowVersion = 1
 	at := domain.FormatTime(s.now())
 	c.CreatedAt, c.UpdatedAt = &at, &at
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, p, func(t *tx) error {
 		_, err := t.exec(ctx, `
 			INSERT INTO cluster (id, name, kind, ha_policy, min_hosts, cpu_overcommit,
 			                     cost_split_cpu, description, lifecycle, created_at, updated_at)
@@ -99,7 +99,7 @@ func (s *SQLStore) CreateCluster(ctx context.Context, actor domain.Actor, c *dom
 }
 
 // UpdateCluster corrects a cluster, including the policy the engine reads.
-func (s *SQLStore) UpdateCluster(ctx context.Context, actor domain.Actor, c *domain.Cluster) error {
+func (s *SQLStore) UpdateCluster(ctx context.Context, p domain.Permit, c *domain.Cluster) error {
 	if err := c.Validate(); err != nil {
 		return err
 	}
@@ -109,7 +109,7 @@ func (s *SQLStore) UpdateCluster(ctx context.Context, actor domain.Actor, c *dom
 	}
 	at := domain.FormatTime(s.now())
 	c.UpdatedAt = &at
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, p, func(t *tx) error {
 		res, err := t.exec(ctx, `
 			UPDATE cluster SET name = ?, kind = ?, ha_policy = ?, min_hosts = ?,
 			                   cpu_overcommit = ?, cost_split_cpu = ?,
@@ -140,7 +140,7 @@ func (s *SQLStore) UpdateCluster(ctx context.Context, actor domain.Actor, c *dom
 // other" beside several saying they are in it -- and because the ENGINE reads
 // this, the contradiction would change what a simulation concludes rather than
 // only what a page shows.
-func (s *SQLStore) RetireCluster(ctx context.Context, actor domain.Actor, id string) error {
+func (s *SQLStore) RetireCluster(ctx context.Context, p domain.Permit, id string) error {
 	before, err := s.GetCluster(ctx, id)
 	if err != nil {
 		return err
@@ -153,7 +153,7 @@ func (s *SQLStore) RetireCluster(ctx context.Context, actor domain.Actor, id str
 	after.Lifecycle = domain.LifecycleRetired
 	after.UpdatedAt = &at
 
-	return s.writeSerializable(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.writeSerializable(ctx, p, func(t *tx) error {
 		var members int
 		if err := t.get(ctx, &members,
 			`SELECT COUNT(*) FROM cluster_member WHERE cluster_id = ?`, id); err != nil {
@@ -213,7 +213,7 @@ func (s *SQLStore) ListClusterHosts(ctx context.Context, clusterID string) ([]Cl
 // audited value. This one moves guests, so a host leaving with no diff on the
 // cluster is a change that alters what the engine concludes and that nobody can
 // find afterwards.
-func (s *SQLStore) SetClusterMembers(ctx context.Context, actor domain.Actor,
+func (s *SQLStore) SetClusterMembers(ctx context.Context, p domain.Permit,
 	clusterID string, members []domain.ClusterMember) error {
 
 	cluster, err := s.GetCluster(ctx, clusterID)
@@ -227,7 +227,7 @@ func (s *SQLStore) SetClusterMembers(ctx context.Context, actor domain.Actor,
 	before := auditedCluster(cluster, current)
 	at := domain.FormatTime(s.now())
 
-	return s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	return s.write(ctx, p, func(t *tx) error {
 		if _, err := t.exec(ctx,
 			`DELETE FROM cluster_member WHERE cluster_id = ?`, clusterID); err != nil {
 			return translateWriteErr(err, "clearing cluster membership")

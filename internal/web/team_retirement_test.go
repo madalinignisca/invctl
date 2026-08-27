@@ -29,7 +29,7 @@ func mustTeamWeb(t *testing.T, h *harness, code string) string {
 	if err != nil {
 		t.Fatalf("building team %s: %v", code, err)
 	}
-	if err := h.store.CreateTeam(context.Background(), domain.SystemActor, team); err != nil {
+	if err := h.store.CreateTeam(context.Background(), domain.AdministratorPermit(domain.SystemActor), team); err != nil {
 		t.Fatalf("creating team %s: %v", code, err)
 	}
 	return team.ID

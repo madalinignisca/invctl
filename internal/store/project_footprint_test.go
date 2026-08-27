@@ -72,7 +72,7 @@ func (f *footprintFixture) mustLinkService(t *testing.T, project, service, relat
 	if err != nil {
 		t.Fatalf("building service link: %v", err)
 	}
-	if err := f.s.LinkProjectService(f.ctx, testActor, l); err != nil {
+	if err := f.s.LinkProjectService(f.ctx, testPermit, l); err != nil {
 		t.Fatalf("linking %s %s %s: %v", project, relation, service, err)
 	}
 }

@@ -479,7 +479,7 @@ func TestAnUnknownRoleOnACertificateIsAFieldError(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building the team: %v", err)
 			}
-			if err := s.CreateTeam(ctx, testActor, team); err != nil {
+			if err := s.CreateTeam(ctx, testPermit, team); err != nil {
 				t.Fatalf("creating the team: %v", err)
 			}
 

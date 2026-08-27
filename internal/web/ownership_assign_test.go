@@ -237,7 +237,7 @@ func TestTheTargetPickerMarksATeamThatCannotFullyAct(t *testing.T) {
 		t.Fatalf("GetTeam: %v", err)
 	}
 	team.Lifecycle = domain.LifecycleDeprecated
-	if err := h.store.UpdateTeam(context.Background(), domain.SystemActor, &team.Team); err != nil {
+	if err := h.store.UpdateTeam(context.Background(), domain.AdministratorPermit(domain.SystemActor), &team.Team); err != nil {
 		t.Fatalf("deprecating team: %v", err)
 	}
 	mustUnownedAssetWeb(t, h, domain.KindVM, "http-asset-for-marked-picker")
@@ -259,7 +259,7 @@ func TestOwnershipAssignRefusesARetiredTarget(t *testing.T) {
 	h.login("admin", "admin-password")
 
 	gone := mustTeamWeb(t, h, "http-gone-bulk-target")
-	if err := h.store.RetireTeam(context.Background(), domain.SystemActor, gone); err != nil {
+	if err := h.store.RetireTeam(context.Background(), domain.AdministratorPermit(domain.SystemActor), gone); err != nil {
 		t.Fatalf("retiring team: %v", err)
 	}
 	assetID := mustUnownedAssetWeb(t, h, domain.KindVM, "http-untouched-refused-target")

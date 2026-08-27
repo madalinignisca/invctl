@@ -133,7 +133,7 @@ func (o ReassignOutcome) Assigned() bool { return o.Result == ReassignAssigned }
 // is not an audit trail, it is a receipt"). The batch id is generated once
 // per call, so the set this call produced can be reconstructed later even
 // though each row's transaction is independent.
-func (s *SQLStore) ReassignTeamOwnership(ctx context.Context, actor domain.Actor, fromTeamID, toTeamID string) ([]ReassignOutcome, error) {
+func (s *SQLStore) ReassignTeamOwnership(ctx context.Context, p domain.Permit, fromTeamID, toTeamID string) ([]ReassignOutcome, error) {
 	if fromTeamID == "" || toTeamID == "" {
 		return nil, fmt.Errorf("reassigning team ownership: %w", domain.ErrInvalid)
 	}
@@ -167,7 +167,7 @@ func (s *SQLStore) ReassignTeamOwnership(ctx context.Context, actor domain.Actor
 		return nil, fmt.Errorf("listing assets owned by team %s: %w", fromTeamID, err)
 	}
 	for _, c := range assets {
-		outcomes = append(outcomes, s.reassignEntity(ctx, actor, "asset", c.ID, c.Name, fromTeamID, toTeamID, batchID,
+		outcomes = append(outcomes, s.reassignEntity(ctx, p, "asset", c.ID, c.Name, fromTeamID, toTeamID, batchID,
 			func(t *tx) (sql.Result, error) {
 				return t.exec(ctx,
 					`UPDATE asset SET team_id = ?, updated_at = ?, row_version = row_version + 1
@@ -183,7 +183,7 @@ func (s *SQLStore) ReassignTeamOwnership(ctx context.Context, actor domain.Actor
 		return nil, fmt.Errorf("listing services owned by team %s: %w", fromTeamID, err)
 	}
 	for _, c := range services {
-		outcomes = append(outcomes, s.reassignEntity(ctx, actor, "service", c.ID, c.Name, fromTeamID, toTeamID, batchID,
+		outcomes = append(outcomes, s.reassignEntity(ctx, p, "service", c.ID, c.Name, fromTeamID, toTeamID, batchID,
 			func(t *tx) (sql.Result, error) {
 				return t.exec(ctx,
 					`UPDATE service SET team_id = ?, updated_at = ?, row_version = row_version + 1
@@ -199,7 +199,7 @@ func (s *SQLStore) ReassignTeamOwnership(ctx context.Context, actor domain.Actor
 		return nil, fmt.Errorf("listing projects owned by team %s: %w", fromTeamID, err)
 	}
 	for _, c := range projects {
-		outcomes = append(outcomes, s.reassignEntity(ctx, actor, "project", c.ID, c.Name, fromTeamID, toTeamID, batchID,
+		outcomes = append(outcomes, s.reassignEntity(ctx, p, "project", c.ID, c.Name, fromTeamID, toTeamID, batchID,
 			func(t *tx) (sql.Result, error) {
 				return t.exec(ctx,
 					`UPDATE project SET team_id = ?, updated_at = ?, row_version = row_version + 1
@@ -218,7 +218,7 @@ func (s *SQLStore) ReassignTeamOwnership(ctx context.Context, actor domain.Actor
 		return nil, fmt.Errorf("listing identities owned by team %s: %w", fromTeamID, err)
 	}
 	for _, c := range identities {
-		outcomes = append(outcomes, s.reassignEntity(ctx, actor, "identity", c.ID, c.Name, fromTeamID, toTeamID, batchID,
+		outcomes = append(outcomes, s.reassignEntity(ctx, p, "identity", c.ID, c.Name, fromTeamID, toTeamID, batchID,
 			func(t *tx) (sql.Result, error) {
 				return t.exec(ctx,
 					`UPDATE identity SET team_id = ? WHERE id = ? AND team_id = ?`,
@@ -240,7 +240,7 @@ func (s *SQLStore) ReassignTeamOwnership(ctx context.Context, actor domain.Actor
 		return nil, fmt.Errorf("listing custom fields owned by team %s: %w", fromTeamID, err)
 	}
 	for _, c := range fields {
-		outcomes = append(outcomes, s.reassignEntity(ctx, actor, "custom_field", c.ID, c.Label, fromTeamID, toTeamID, batchID,
+		outcomes = append(outcomes, s.reassignEntity(ctx, p, "custom_field", c.ID, c.Label, fromTeamID, toTeamID, batchID,
 			func(t *tx) (sql.Result, error) {
 				return t.exec(ctx,
 					`UPDATE custom_field SET owner_team_id = ?, row_version = row_version + 1
@@ -256,12 +256,12 @@ func (s *SQLStore) ReassignTeamOwnership(ctx context.Context, actor domain.Actor
 // its change_log entry, in one transaction -- see ReassignTeamOwnership's doc
 // for why this is one transaction PER ENTITY rather than one for the whole
 // call.
-func (s *SQLStore) reassignEntity(ctx context.Context, actor domain.Actor,
+func (s *SQLStore) reassignEntity(ctx context.Context, p domain.Permit,
 	entityType, entityID, name, fromTeamID, toTeamID, batchID string,
 	do func(t *tx) (sql.Result, error)) ReassignOutcome {
 
 	var affected int64
-	err := s.write(ctx, domain.AdministratorPermit(actor), func(t *tx) error {
+	err := s.write(ctx, p, func(t *tx) error {
 		res, err := do(t)
 		if err != nil {
 			return translateWriteErr(err, "reassigning "+entityType+" "+entityID)

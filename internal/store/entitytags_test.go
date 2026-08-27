@@ -60,7 +60,7 @@ func newEntityTagFixture(t *testing.T, e Engine) *entityTagFixture {
 	if err != nil {
 		t.Fatalf("building fixture project: %v", err)
 	}
-	if err := s.CreateProject(ctx, actor, proj); err != nil {
+	if err := s.CreateProject(ctx, domain.AdministratorPermit(actor), proj); err != nil {
 		t.Fatalf("creating fixture project: %v", err)
 	}
 

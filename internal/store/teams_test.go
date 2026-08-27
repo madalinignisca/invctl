@@ -31,7 +31,7 @@ func TestRetiringATeamLeavesWhatItLookedAfterPointingAtIt(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building the team: %v", err)
 			}
-			if err := s.CreateTeam(ctx, testActor, team); err != nil {
+			if err := s.CreateTeam(ctx, testPermit, team); err != nil {
 				t.Fatalf("creating the team: %v", err)
 			}
 
@@ -48,7 +48,7 @@ func TestRetiringATeamLeavesWhatItLookedAfterPointingAtIt(t *testing.T) {
 				t.Fatalf("assigning the team: %v", err)
 			}
 
-			if err := s.RetireTeam(ctx, testActor, team.ID); err != nil {
+			if err := s.RetireTeam(ctx, testPermit, team.ID); err != nil {
 				t.Fatalf("retiring the team: %v", err)
 			}
 
@@ -109,7 +109,7 @@ func TestAssigningATeamIsAudited(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building: %v", err)
 			}
-			if err := s.CreateTeam(ctx, testActor, team); err != nil {
+			if err := s.CreateTeam(ctx, testPermit, team); err != nil {
 				t.Fatalf("creating: %v", err)
 			}
 			id := mustAsset(t, s, ctx, domain.KindServer, "hv-01", nil, env)
@@ -176,7 +176,7 @@ func TestATeamsContactNeverReachesTheAuditTrail(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building: %v", err)
 			}
-			if err := s.CreateTeam(ctx, testActor, team); err != nil {
+			if err := s.CreateTeam(ctx, testPermit, team); err != nil {
 				t.Fatalf("creating: %v", err)
 			}
 
@@ -184,7 +184,7 @@ func TestATeamsContactNeverReachesTheAuditTrail(t *testing.T) {
 			corrected := *team
 			group := "platform@example.com"
 			corrected.ContactRef = &group
-			if err := s.UpdateTeam(ctx, testActor, &corrected); err != nil {
+			if err := s.UpdateTeam(ctx, testPermit, &corrected); err != nil {
 				t.Fatalf("correcting: %v", err)
 			}
 
@@ -234,7 +234,7 @@ func TestRetiringATeamDropsItsContactFromSearch(t *testing.T) {
 			if err != nil {
 				t.Fatalf("building: %v", err)
 			}
-			if err := s.CreateTeam(ctx, testActor, team); err != nil {
+			if err := s.CreateTeam(ctx, testPermit, team); err != nil {
 				t.Fatalf("creating: %v", err)
 			}
 
@@ -246,7 +246,7 @@ func TestRetiringATeamDropsItsContactFromSearch(t *testing.T) {
 				t.Fatal("a live team is not findable by its contact; the index is not doing its job")
 			}
 
-			if err := s.RetireTeam(ctx, testActor, team.ID); err != nil {
+			if err := s.RetireTeam(ctx, testPermit, team.ID); err != nil {
 				t.Fatalf("retiring: %v", err)
 			}
 			after, err := s.Search(ctx, contact, 10)
