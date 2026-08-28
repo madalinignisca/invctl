@@ -29,7 +29,9 @@
 
 <div style="margin-bottom:18px">
   <a class="btn" href="/paths?from=service:{{.Service.ID}}">Where does it sit — path diagram</a>
-  {{if .CanWrite}}<a class="btn" href="/services/{{.Service.ID}}?edit={{.Service.ID}}#edit">Edit</a>{{end}}
+  {{/* This service's own edit control -- entity-specific, see
+       asset_detail.html's identical comment and Base.CanWriteEntity. */}}
+  {{if .CanWriteEntity "service" .Service.ID}}<a class="btn" href="/services/{{.Service.ID}}?edit={{.Service.ID}}#edit">Edit</a>{{end}}
 </div>
 
 <div class="panel">

@@ -26,9 +26,27 @@
     <span class="panel-note">Soonest renewal first; undated last</span>
   </div>
   {{if .Circuits}}
+  {{/* Cease is this circuit's own retire control -- entity-specific, unlike
+       every other .CanWrite on this page (Record a circuit/provider below,
+       which creates something unlinked to any project and stays
+       Administrator-only). See Base.CanWriteEntity's doc comment.
+
+       THE COLUMN IS COMPUTED, NOT .CanWrite, because a project owner can
+       legitimately see a Cease button on ONE row and not another on the
+       SAME page -- a header gated on the page-wide .CanWrite would hide the
+       whole column even for a row they do own, and a header gated on the
+       first row checked would silently vary with which row happened to
+       render first. $anyCircuitWrite is true if .CanWrite is (an
+       Administrator, unconditionally) or if any row on THIS page is one the
+       viewer owns, so the column appears exactly when at least one row
+       needs it -- and each row below still renders its own cell empty
+       rather than omitted, so a mixed page keeps every row's column count
+       equal. */}}
+  {{$anyCircuitWrite := .CanWrite}}
+  {{range .Circuits}}{{if $.CanWriteEntity "circuit" .ID}}{{$anyCircuitWrite = true}}{{end}}{{end}}
   <div class="scroll-x">
     <table>
-      <thead><tr><th>Circuit ID</th><th>Provider</th><th>Service</th><th class="num">Commit</th><th>Contract ends</th><th>Ends recorded</th>{{if .CanWrite}}<th></th>{{end}}</tr></thead>
+      <thead><tr><th>Circuit ID</th><th>Provider</th><th>Service</th><th class="num">Commit</th><th>Contract ends</th><th>Ends recorded</th>{{if $anyCircuitWrite}}<th></th>{{end}}</tr></thead>
       <tbody>
         {{range .Circuits}}
         <tr>
@@ -46,12 +64,14 @@
             {{if .Landed}}<span class="pill pill-ok">both</span>
             {{else}}<span class="pill pill-degraded" title="Only one end is recorded, or neither">{{.Terminations}} of 2</span>{{end}}
           </td>
-          {{if $.CanWrite}}
+          {{if $anyCircuitWrite}}
           <td style="white-space:nowrap">
+            {{if $.CanWriteEntity "circuit" .ID}}
             <form method="post" action="/circuits/{{.ID}}/retire" style="display:inline">
               <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
               <button class="btn btn-sm btn-danger" type="submit">Cease</button>
             </form>
+            {{end}}
           </td>
           {{end}}
         </tr>

@@ -86,6 +86,14 @@ type Base struct {
 	NavGroups []NavGroup
 	User      *domain.AppUser
 	CanWrite  bool
+	// permit backs CanWriteEntity below -- the request's own write permit,
+	// resolved once by App.entityPermit and carried on Base rather than
+	// exposed directly, so a template can only ever reach it through the
+	// Covers-shaped method, never by type-asserting or otherwise widening
+	// what it authorizes. Unexported: html/template only ever needs the
+	// method, and an unexported field does not stop html/template calling
+	// an exported method on the value that holds it (see CanWriteEntity).
+	permit domain.Permit
 	// IsAdmin is narrower than CanWrite -- see Authorizer.IsAdministrator's
 	// doc comment for why the two must stay separate. Used wherever a page
 	// decides whether to show a value rather than whether to accept a write,
@@ -114,6 +122,43 @@ type Base struct {
 	// one field would make them mutually exclusive by accident rather than by
 	// decision -- opening "reprice" would silently close an edit in progress.
 	RepriceRow string
+}
+
+// CanWriteEntity answers "may THIS person write THIS row", for the three
+// entity types a project owner can ever own (docs/rbac-design.md §4): asset,
+// service, circuit. CanWrite keeps meaning "may this person write at all"
+// and is exactly right for an Administrator and an Observer; for a project
+// owner it is uniformly false today (WP-G1 Task 13 has not landed) even
+// though they DO own specific rows, so a template deciding whether to show
+// an asset's own Edit button must ask this instead -- see WP-G1 Task 17.
+// Every other control (estate config, topology) keeps asking .CanWrite
+// unchanged; converting a control that is not entity-specific to this
+// method would be wrong, not merely unnecessary, because CanWriteEntity
+// only ever recognises "asset", "service" and "circuit" -- anything else
+// asks the underlying permit's Covers, which denies every other entity type
+// for a project owner by construction (domain.ScopedPermit.Covers).
+//
+// A METHOD, NOT A FUNC-TYPED FIELD -- deliberately, and not a style choice.
+// html/template's field syntax never invokes a function-valued struct
+// field with arguments (`{{.Field "a" "b"}}` on a field, as opposed to a
+// method, fails to parse as a call at all -- proved the hard way, by every
+// page in this suite 500ing the first time this was tried as a field). A
+// method on the dot's type is the one shape text/template actually calls
+// with arguments.
+//
+// BACKED BY THE REQUEST'S OWN RESOLVED PERMIT, not a fresh lookup: b.permit
+// is set once by App.entityPermit when Base is built. Nothing here touches
+// the database -- resolving per call, from inside a list template's
+// {{range}}, would turn a 500-row list into 2000 queries
+// (auth.Authorizer.Permit runs up to four per call for a project owner). A
+// nil permit (Base built directly by a test rather than through a.base)
+// answers false rather than panicking, the same nil-safety every other
+// accessor on this page (e.g. editState's) already promises a template.
+func (b Base) CanWriteEntity(entityType, id string) bool {
+	if b.permit == nil {
+		return false
+	}
+	return b.permit.Covers(entityType, id)
 }
 
 // submittedVersion reads the optimistic-concurrency token out of a form.
@@ -283,6 +328,7 @@ func (a *App) base(r *http.Request, title, nav string) Base {
 		CanWrite:    a.Authz.CanWrite(user),
 		IsAdmin:     a.Authz.IsAdministrator(user),
 		CanSeeCosts: a.Authz.CanSeeCosts(user),
+		permit:      a.entityPermit(r),
 		CSRF:        nosurf.Token(r),
 		// Which row the operator asked to edit, if any. In the query string
 		// rather than in HTMX state so that an edit form is a plain link: the
@@ -707,6 +753,56 @@ func (a *App) permit(r *http.Request) domain.Permit {
 		slog.Error("permit refused for a request behind RequireAdmin",
 			"error", err, "path", r.URL.Path)
 		return domain.ScopedPermit(actor(r), nil, nil)
+	}
+	return p
+}
+
+// entityPermit resolves the request's write permit for Base.CanWriteEntity
+// (WP-G1 Task 17), and caches it on middleware.RequestState so a handler that
+// builds Base more than once for the same request -- the list-page-plus-
+// embedded-form shape a.takeFlash's own comment describes -- pays
+// auth.Authorizer.Permit's cost (up to four queries, for a project owner)
+// once, not per call.
+//
+// DELIBERATELY NOT a.permit(r). That function's error branch logs at
+// slog.Error because every caller of a.permit sits behind RequireAdmin, so
+// reaching the error branch there means something already went wrong. base()
+// runs on every GET, for every persona, including an Observer or an
+// unauthenticated visitor -- for whom auth.Authorizer.Permit returning
+// domain.ErrForbidden is the ORDINARY case, not a break-glass fallback.
+// Logging it here would turn every page an Observer opens into an error-log
+// entry. The failure value is the same permit-covering-nothing a.permit
+// falls back to, for the same reason: a template asking Covers on it must
+// get false, never a nil-pointer panic.
+//
+// ALSO DELIBERATELY NOT A CALL TO THE PACKAGE-LEVEL actor(r) HELPER, even
+// though the fallback below needs exactly what that helper returns.
+// internal/web/routescan's call-graph walker (WP-G1 Task 6) treats any
+// identifier literally named actor as the write path's actor resolution,
+// and follows every call reachable from a handler by NAME, one level deep,
+// with no static-type resolution -- so a call to actor( here would make
+// EVERY handler that calls a.base (which is all of them, including the
+// render-only write-bucket GETs routescan_test.go names by hand) appear to
+// "reach actor(", collapsing the exact distinction that package exists to
+// draw. The logic is duplicated inline instead -- three lines, not worth a
+// second named function for the walker to also have to special-case.
+func (a *App) entityPermit(r *http.Request) domain.Permit {
+	state := middleware.StateFrom(r.Context())
+	if state != nil && state.PermitLoaded {
+		return state.Permit
+	}
+	user := middleware.UserFrom(r.Context())
+	p, err := a.Authz.Permit(r.Context(), user)
+	if err != nil {
+		fallback := domain.SystemActor
+		if user != nil {
+			fallback = domain.UserActor(user)
+		}
+		p = domain.ScopedPermit(fallback, nil, nil)
+	}
+	if state != nil {
+		state.Permit = p
+		state.PermitLoaded = true
 	}
 	return p
 }

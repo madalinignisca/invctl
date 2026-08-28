@@ -317,8 +317,11 @@ func (a *App) renderServiceDetail(w http.ResponseWriter, r *http.Request, status
 		return
 	}
 
+	// Entity-specific, matching assets.go's identical reasoning -- WP-G1
+	// Task 17.
+	canWriteService := b.CanWriteEntity("service", service.ID)
 	var serviceEdit *serviceFormData
-	if b.CanWrite && b.EditRow == service.ID {
+	if canWriteService && b.EditRow == service.ID {
 		envs, kinds, listErr := a.serviceFormOptions(r)
 		if listErr != nil {
 			a.serverError(w, r, listErr)
@@ -348,7 +351,7 @@ func (a *App) renderServiceDetail(w http.ResponseWriter, r *http.Request, status
 		cfEdit = edit
 	}
 	customFields, err := a.loadCustomFieldsPanel(r, domain.CustomFieldEntityService, service.ID,
-		service.RowVersion, "/services/"+service.ID+"/custom-fields", b.CSRF, b.CanWrite, cfEdit)
+		service.RowVersion, "/services/"+service.ID+"/custom-fields", b.CSRF, canWriteService, cfEdit)
 	if err != nil {
 		a.serverError(w, r, err)
 		return
@@ -361,7 +364,7 @@ func (a *App) renderServiceDetail(w http.ResponseWriter, r *http.Request, status
 		tagsEdit = edit
 	}
 	tags, err := a.loadEntityTagsPanel(r, domain.TagEntityService, service.ID,
-		service.RowVersion, "/services/"+service.ID+"/tags", b.CSRF, b.CanWrite, tagsEdit)
+		service.RowVersion, "/services/"+service.ID+"/tags", b.CSRF, canWriteService, tagsEdit)
 	if err != nil {
 		a.serverError(w, r, err)
 		return

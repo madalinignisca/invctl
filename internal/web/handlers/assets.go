@@ -540,8 +540,15 @@ func (a *App) renderAssetDetail(w http.ResponseWriter, r *http.Request, status i
 		// The refused row opens, whatever the query string said.
 		assetBase.EditRow = edit.ID
 	}
+	// The inline edit form and the panels below it all authorize against
+	// THIS asset specifically, not against .CanWrite -- WP-G1 Task 17. A
+	// project owner who owns this asset must see the same form the "Edit"
+	// link on the page (asset_detail.html) opens; leaving this on .CanWrite
+	// would make that link a dead one, since .CanWrite alone is still false
+	// for every project owner today (Task 13 has not landed).
+	canWriteAsset := assetBase.CanWriteEntity("asset", asset.ID)
 	var assetEdit *assetFormData
-	if assetBase.CanWrite && assetBase.EditRow == asset.ID {
+	if canWriteAsset && assetBase.EditRow == asset.ID {
 		f := a.newAssetEditForm(r, asset, nil, envs, kinds, nil)
 		assetEdit = &f
 	}
@@ -559,7 +566,7 @@ func (a *App) renderAssetDetail(w http.ResponseWriter, r *http.Request, status i
 		cfEdit = edit
 	}
 	customFields, err := a.loadCustomFieldsPanel(r, domain.CustomFieldEntityAsset, asset.ID,
-		asset.RowVersion, "/assets/"+asset.ID+"/custom-fields", assetBase.CSRF, assetBase.CanWrite, cfEdit)
+		asset.RowVersion, "/assets/"+asset.ID+"/custom-fields", assetBase.CSRF, canWriteAsset, cfEdit)
 	if err != nil {
 		a.serverError(w, r, err)
 		return
@@ -571,7 +578,7 @@ func (a *App) renderAssetDetail(w http.ResponseWriter, r *http.Request, status i
 		tagsEdit = edit
 	}
 	tags, err := a.loadEntityTagsPanel(r, domain.TagEntityAsset, asset.ID,
-		asset.RowVersion, "/assets/"+asset.ID+"/tags", assetBase.CSRF, assetBase.CanWrite, tagsEdit)
+		asset.RowVersion, "/assets/"+asset.ID+"/tags", assetBase.CSRF, canWriteAsset, tagsEdit)
 	if err != nil {
 		a.serverError(w, r, err)
 		return

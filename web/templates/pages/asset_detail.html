@@ -27,7 +27,14 @@
 <div style="margin-bottom:18px">
   <a class="btn btn-primary" href="/assets/{{.Asset.ID}}/impact">Simulate losing this</a>
   <a class="btn" href="/assets/{{.Asset.ID}}/neighbourhood">See what it connects to</a>
-  {{if .CanWrite}}
+  {{/* Controls a single row: the asset's own edit and retire, not any
+       topology beneath it (ports, addresses, power, patching stay gated on
+       .CanWrite, unchanged -- see docs/rbac-design.md §4). A project owner
+       who owns THIS asset sees these; one who does not, does not, even
+       though .CanWrite itself is still false for every project owner today
+       (WP-G1 Task 13 has not landed). See Base.CanWriteEntity's doc
+       comment. */}}
+  {{if .CanWriteEntity "asset" .Asset.ID}}
     <a class="btn" href="/assets/{{.Asset.ID}}?edit={{.Asset.ID}}#edit">Edit</a>
     {{if ne .Asset.Lifecycle "retired"}}
     <form method="post" action="/assets/{{.Asset.ID}}/retire" style="display:inline"

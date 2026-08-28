@@ -44,6 +44,16 @@ type RequestState struct {
 	FlashLoaded bool
 	FlashKind   string
 	FlashText   string
+	// Permit and PermitLoaded cache the request's write permit for
+	// App.entityPermit (WP-G1 Task 17), for the same reason the flash fields
+	// above are cached: a handler that builds Base more than once for one
+	// request must not pay auth.Authorizer.Permit's cost -- up to four
+	// queries for a project owner -- a second time. See entityPermit's own
+	// comment for why an uncached resolution here would also be a
+	// correctness trap, not just a slow one: CanWriteEntity is called once
+	// per row in a list template.
+	Permit       domain.Permit
+	PermitLoaded bool
 }
 
 // StateFrom returns the per-request scratch space, or nil when the middleware
