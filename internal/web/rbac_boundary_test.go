@@ -832,17 +832,35 @@ func TestAProjectOwnerIsRefusedOnEveryNonProjectLinkableWriteRoute(t *testing.T)
 					"middleware on a route that should reach its handler now that CanWrite(project owner) is true",
 					adminGate)
 			}
-			if administratorGate != 6 {
-				t.Errorf("RequireAdministrator refusals = %d, want 6 (the writeAdminOnly bucket's "+
-					"six admin-only GETs and import POSTs)", administratorGate)
+			// 12, not 6: the six import routes plus the six /users routes.
+			// A whole-branch review found GET /users reachable by a project
+			// owner -- registered through write(), which stopped meaning
+			// "Administrator" at Task 13, and writing nothing, so the permit
+			// layer had nothing to refuse. The roster renders every
+			// username, role, cost grant and the note naming which accounts
+			// hold INV_ADMIN_USERS break-glass access. Only the nav rail hid
+			// it, which is not enforcement. All six moved to writeAdminOnly.
+			if administratorGate != 12 {
+				t.Errorf("RequireAdministrator refusals = %d, want 12 (six import routes "+
+					"and six /users routes)", administratorGate)
 			}
 			if permitGate != 8 {
 				t.Errorf("permit-layer refusals (generic body) = %d, want 8 -- see this test's own "+
 					"comment for the routes this pins", permitGate)
 			}
-			if userForbiddenGate != 2 {
-				t.Errorf("permit-layer refusals through respondUserMutation's raw-error path = %d, want 2 "+
-					"(/users/{id}/active and /users/{id}/scrub)", userForbiddenGate)
+			// 0, and the counter stays. It was 2 while /users/{id}/active and
+			// /users/{id}/scrub reached their handlers and were refused deep
+			// at tx.log, surfacing respondUserMutation's raw wrapped error.
+			// Those routes now refuse at the middleware instead, which is
+			// strictly earlier and better. The bucket is kept so that if any
+			// route ever surfaces that raw-error shape again -- the pattern
+			// spreading to a handler this test does not know about -- it is
+			// counted and fails here rather than landing silently in "other".
+			if userForbiddenGate != 0 {
+				t.Errorf("permit-layer refusals through respondUserMutation's raw-error path = %d, want 0 "+
+					"-- the /users routes moved behind RequireAdministrator, so nothing should now "+
+					"reach tx.log by that path; a nonzero count means the raw-error pattern has spread",
+					userForbiddenGate)
 			}
 			t.Logf("%d driven, %d refused with a status other than 403 (validation, no-op-looking "+
 				"redirects, 404s against random fallback ids, and similar -- see this test's own comment)",

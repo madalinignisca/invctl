@@ -1152,6 +1152,27 @@ func (s *SQLStore) ReparentAsset(ctx context.Context, p domain.Permit, id string
 	at := domain.FormatTime(s.now())
 	return s.write(ctx, p, func(t *tx) error {
 		if newParentID != nil {
+			// BOTH ENDPOINTS, for the same reason scopedPermit.Covers checks
+			// both halves of a link id (internal/domain/role.go).
+			//
+			// A reparent is a two-ended write that logs ONE change_log row,
+			// for the asset being moved. tx.log therefore authorizes only
+			// that end -- so without this check a project owner holding
+			// "vm-a" could post parent_id=<any asset in the estate> and have
+			// it succeed: the INSERT below writes asset_closure rows whose
+			// ancestor_id values are the NEW PARENT's ancestors, so the
+			// hypervisor's impact answer silently grows a descendant nobody
+			// authorized, and the only audit row names asset/vm-a.
+			//
+			// docs/rbac-design.md §4 says it outright: "a PO owning a VM
+			// does not thereby own its hypervisor, its rack or its site."
+			// The link-row case was made mechanical in 9d01318 and this one
+			// was left as a convention somebody had to remember. Proven at
+			// runtime before this fix: ReparentAsset returned nil.
+			if err := t.authorize("asset", *newParentID); err != nil {
+				return err
+			}
+
 			// Moving a node underneath its own descendant would detach the
 			// subtree into a cycle, and the closure table has no way to
 			// represent that.

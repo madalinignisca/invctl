@@ -346,8 +346,21 @@ func resolvePruneOperator(ctx context.Context, st *store.SQLStore, cfg *config.C
 	if err != nil {
 		return nil, fmt.Errorf("pruning: %w", err)
 	}
-	if !auth.NewAuthorizer(cfg.AdminUsers, st).CanWrite(user) {
-		return nil, fmt.Errorf("pruning: %s does not have write access, "+
+	// IsAdministrator, NOT CanWrite. This gate used to read CanWrite, which
+	// meant "is an Administrator" when it was written; WP-G1 Task 13 made it
+	// true for project owners too, and the permit minted below is an
+	// UNCONDITIONAL AdministratorPermit -- so the caller's own, correctly
+	// refusing permit never runs, and internal/store/prune.go only checks
+	// that the actor is a user, which a project owner is.
+	//
+	// A prune is the only DELETE of a fact in this codebase (CLAUDE.md). The
+	// exposure needs shell access on the host, so it was never reachable
+	// over HTTP -- what it would have produced is audit forgery: the log
+	// naming a project owner as the operator of an act no route would let
+	// them perform. That is precisely what the error message below promises
+	// cannot happen.
+	if !auth.NewAuthorizer(cfg.AdminUsers, st).IsAdministrator(user) {
+		return nil, fmt.Errorf("pruning: %s is not an Administrator, "+
 			"so the audit entry would name somebody who could not have done this", user.Username)
 	}
 	return user, nil
@@ -384,8 +397,10 @@ func pruneObservedTransitions(ctx context.Context, st *store.SQLStore, cfg *conf
 	if err != nil {
 		return fmt.Errorf("pruning observed transitions: %w", err)
 	}
-	if !auth.NewAuthorizer(cfg.AdminUsers, st).CanWrite(user) {
-		return fmt.Errorf("pruning observed transitions: %s does not have write access, "+
+	// IsAdministrator, not CanWrite -- see resolvePruneOperator's comment for
+	// why CanWrite stopped meaning "Administrator" at WP-G1 Task 13.
+	if !auth.NewAuthorizer(cfg.AdminUsers, st).IsAdministrator(user) {
+		return fmt.Errorf("pruning observed transitions: %s is not an Administrator, "+
 			"so the audit entry would name somebody who could not have done this", user.Username)
 	}
 

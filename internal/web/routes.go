@@ -239,12 +239,25 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	// GET is here too, deliberately, same reasoning as /imports: this view
 	// exists purely to feed the five mutations below and a read-only user
 	// has no use for it.
-	write("GET /users", app.UserList)
-	write("POST /users", app.UserCreate)
-	write("POST /users/{id}/role", app.UserSetRole)
-	write("POST /users/{id}/costs", app.UserSetCosts)
-	write("POST /users/{id}/active", app.UserSetActive)
-	write("POST /users/{id}/scrub", app.UserScrub)
+	// writeAdminOnly, NOT write. User administration is Administrator-only
+	// (docs/rbac-design.md §10a), and `write` stopped meaning that at WP-G1
+	// Task 13: it gates on auth.CanWrite, which now admits project owners.
+	//
+	// The five POSTs were still refused, at the permit layer, because
+	// app_user is ScopeEstateConfig -- but GET /users writes nothing, so
+	// nothing refused it. A project owner could read the whole roster: every
+	// username, role, active flag, can_see_costs grant, and the note naming
+	// which accounts hold INV_ADMIN_USERS break-glass access. That last one
+	// is a list of exactly which accounts to go after.
+	//
+	// The nav rail hid the link, which is not enforcement -- the thesis of
+	// this repo's own TestHidingAControlIsNotTheEnforcement.
+	writeAdminOnly("GET /users", app.UserList)
+	writeAdminOnly("POST /users", app.UserCreate)
+	writeAdminOnly("POST /users/{id}/role", app.UserSetRole)
+	writeAdminOnly("POST /users/{id}/costs", app.UserSetCosts)
+	writeAdminOnly("POST /users/{id}/active", app.UserSetActive)
+	writeAdminOnly("POST /users/{id}/scrub", app.UserScrub)
 
 	write("POST /assets", app.AssetCreate)
 	write("POST /assets/{id}", app.AssetUpdate)

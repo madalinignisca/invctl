@@ -4,7 +4,7 @@ GET /imports | ImportJobList | writeAdminOnly | false
 GET /imports/{id} | ImportJobPage | writeAdminOnly | false
 GET /reports/ownership/candidates | OwnershipCandidates | write | false
 GET /teams/{id}/retire | TeamRetireConfirm | write | false
-GET /users | UserList | write | false
+GET /users | UserList | writeAdminOnly | false
 POST /addresses | IPAddressCreate | write | true
 POST /addresses/{id} | IPAddressUpdate | write | true
 POST /allocations | AggregateCreate | write | true
@@ -169,11 +169,11 @@ POST /teams/{id}/journal/{noteID} | JournalUpdate | write | true
 POST /teams/{id}/journal/{noteID}/retire | JournalRetire | write | true
 POST /teams/{id}/reassign-retire | TeamReassignAndRetire | write | true
 POST /teams/{id}/retire | TeamRetire | write | true
-POST /users | UserCreate | write | true
-POST /users/{id}/active | UserSetActive | write | true
-POST /users/{id}/costs | UserSetCosts | write | true
-POST /users/{id}/role | UserSetRole | write | true
-POST /users/{id}/scrub | UserScrub | write | true
+POST /users | UserCreate | writeAdminOnly | true
+POST /users/{id}/active | UserSetActive | writeAdminOnly | true
+POST /users/{id}/costs | UserSetCosts | writeAdminOnly | true
+POST /users/{id}/role | UserSetRole | writeAdminOnly | true
+POST /users/{id}/scrub | UserScrub | writeAdminOnly | true
 POST /vlans | VLANCreate | write | true
 POST /vlans/{id}/journal | JournalCreate | write | true
 POST /vlans/{id}/journal/{noteID} | JournalUpdate | write | true

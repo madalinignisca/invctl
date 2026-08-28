@@ -53,9 +53,15 @@ type NavLink struct {
 	// request carries. See AssetListNav.
 	Nav string
 	// AdminOnly hides this link from a rendered rail for anyone who is not a
-	// full Administrator (WP-G1 Task 5's user-administration screen). The
-	// route itself is already behind RequireAdmin -- this only stops the rail
-	// from advertising a link that a click would answer with 403.
+	// full Administrator (WP-G1 Task 5's user-administration screen). This
+	// only stops the rail from advertising a link that a click would answer
+	// with 403; the enforcement is middleware.RequireAdministrator on the
+	// routes themselves (routes.go's writeAdminOnly).
+	//
+	// It used to say the route was "already behind RequireAdmin", which was
+	// true until WP-G1 Task 13 made RequireAdmin admit project owners --
+	// after which this hidden link was, for a while, the only thing standing
+	// in front of GET /users. Hiding is not enforcement.
 	AdminOnly bool
 }
 
