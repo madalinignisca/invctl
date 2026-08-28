@@ -9,6 +9,7 @@
 package seed_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/madalinignisca/invctl/internal/auth"
@@ -35,6 +36,37 @@ func mustAdminUser(t *testing.T, f *fixture) {
 	}
 }
 
+// testFixturePassword is this test's own throwaway value. It is NOT a
+// constant in internal/seed any more: seeding a login-capable account
+// requires an operator-chosen password precisely so that no working
+// credential is published in this repository. See
+// config.Config.SeedE2EProjectOwnerPassword.
+const testFixturePassword = "test-only-fixture-password" // #nosec G101 -- test-local, never shipped
+
+// TestStageE2EProjectOwnerRefusesWithoutAPassword pins the mechanism that
+// replaced a documented convention. Before this, INV_SEED_E2E_PROJECT_OWNER
+// alone produced an account whose password anybody could read out of the
+// source; now the flag on its own stages nothing at all.
+func TestStageE2EProjectOwnerRefusesWithoutAPassword(t *testing.T) {
+	f := newFixture(t)
+	// mustAdminUser, so the EMPTY PASSWORD is the only thing left that can
+	// make this fail. Without it the admin lookup fails first and the test
+	// passes on an unrelated error -- which it did, until reinstating a
+	// default password failed to turn it red and exposed that.
+	mustAdminUser(t, f)
+
+	err := seed.StageE2EProjectOwner(f.ctx, f.store, "admin", "")
+	if err == nil {
+		t.Fatal("StageE2EProjectOwner created an account with no password")
+	}
+	if !strings.Contains(err.Error(), "INV_E2E_PROJECT_OWNER_PASSWORD") {
+		t.Fatalf("refused for the wrong reason: %v", err)
+	}
+	if _, err := f.store.GetUserByUsername(f.ctx, seed.E2EProjectOwnerUsername); err == nil {
+		t.Error("the fixture account exists despite the refusal")
+	}
+}
+
 // TestStageE2EProjectOwnerCreatesAWorkingAccountScopedToPlatform proves that
 // the account tests/e2e's RBAC specs sign in as is real, not merely present:
 // the published username/password (seed.E2EProjectOwnerUsername/Password)
@@ -47,7 +79,7 @@ func TestStageE2EProjectOwnerCreatesAWorkingAccountScopedToPlatform(t *testing.T
 	f := newFixture(t)
 	mustAdminUser(t, f)
 
-	if err := seed.StageE2EProjectOwner(f.ctx, f.store, "admin"); err != nil {
+	if err := seed.StageE2EProjectOwner(f.ctx, f.store, "admin", testFixturePassword); err != nil {
 		t.Fatalf("staging the E2E project-owner fixture: %v", err)
 	}
 
@@ -68,7 +100,7 @@ func TestStageE2EProjectOwnerCreatesAWorkingAccountScopedToPlatform(t *testing.T
 	// fixture unable to sign in, which is the one thing a browser suite
 	// cannot recover from.
 	authenticator := auth.NewLocalAuthenticator(f.store)
-	authed, err := authenticator.Authenticate(f.ctx, seed.E2EProjectOwnerUsername, seed.E2EProjectOwnerPassword)
+	authed, err := authenticator.Authenticate(f.ctx, seed.E2EProjectOwnerUsername, testFixturePassword)
 	if err != nil {
 		t.Fatalf("authenticating as the fixture account: %v", err)
 	}
@@ -108,7 +140,7 @@ func TestStageE2EProjectOwnerIsIdempotent(t *testing.T) {
 	f := newFixture(t)
 	mustAdminUser(t, f)
 
-	if err := seed.StageE2EProjectOwner(f.ctx, f.store, "admin"); err != nil {
+	if err := seed.StageE2EProjectOwner(f.ctx, f.store, "admin", testFixturePassword); err != nil {
 		t.Fatalf("staging (first run): %v", err)
 	}
 	before, err := f.store.GetUserByUsername(f.ctx, seed.E2EProjectOwnerUsername)
@@ -116,7 +148,7 @@ func TestStageE2EProjectOwnerIsIdempotent(t *testing.T) {
 		t.Fatalf("looking up the fixture account after the first run: %v", err)
 	}
 
-	if err := seed.StageE2EProjectOwner(f.ctx, f.store, "admin"); err != nil {
+	if err := seed.StageE2EProjectOwner(f.ctx, f.store, "admin", testFixturePassword); err != nil {
 		t.Fatalf("staging (second run): %v", err)
 	}
 	after, err := f.store.GetUserByUsername(f.ctx, seed.E2EProjectOwnerUsername)

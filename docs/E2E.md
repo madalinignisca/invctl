@@ -128,22 +128,38 @@ directly against `*store.SQLStore`, which a browser cannot do). Start the
 target instance with the fixture opted in, in addition to the usual seed:
 
 ```
-INV_SEED=true INV_SEED_E2E_PROJECT_OWNER=true make dev
+INV_SEED=true INV_SEED_E2E_PROJECT_OWNER=true \
+  INV_E2E_PROJECT_OWNER_PASSWORD='<pick one>' make dev
+```
+
+Then run the specs with the **same** password in the environment:
+
+```
+INV_E2E_PROJECT_OWNER_PASSWORD='<the same one>' npm run e2e
 ```
 
 This stages `seed.StageE2EProjectOwner` (`internal/seed/seed_e2e_fixture.go`)
-after the seeded administrator exists: an account named
-`e2e-project-owner` / `e2e-project-owner-password` (overridable via
-`INV_E2E_PROJECT_OWNER_USERNAME`/`INV_E2E_PROJECT_OWNER_PASSWORD` the same way
-`global-setup.js` already lets the admin credentials be overridden), assigned
-to the "platform" project -- which owns `hv-01`/`hv-02`/`hv-03` in the BASE
-fixture, so `INV_SEED_COMPANY` is not required for these two specs
-specifically.
+after the seeded administrator exists: an account named `e2e-project-owner`
+(overridable via `INV_E2E_PROJECT_OWNER_USERNAME`), assigned to the
+"platform" project -- which owns `hv-01`/`hv-02`/`hv-03` in the BASE fixture,
+so `INV_SEED_COMPANY` is not required for these two specs specifically.
 
-**`INV_SEED_E2E_PROJECT_OWNER` MUST NEVER BE SET ON A SHARED OR PUBLIC
-DEPLOYMENT.** The credentials are fixed and published, on purpose, right
-here -- fine for a throwaway local instance, and a live write-capable
-account the moment WP-G1 Task 13 flips `CanWrite(project owner)` to true.
+**There is no default password, and setting the flag alone stages nothing.**
+`INV_E2E_PROJECT_OWNER_PASSWORD` has no fallback in the binary or in the
+specs: the seeder refuses to create a login-capable account without one, and
+the specs refuse to run without one. Pick a throwaway value per instance.
+
+That is deliberate. The password was a published constant until an auth
+review of WP-G1 Task 17 pointed out that the exposure is not only the write
+access Task 13 will add, but the **read** access the account has already: an
+authenticated session over the entire CMDB -- every asset, address, circuit,
+topology edge, `secret_ref` path and the change log. On a real deployment the
+administrator password is strong, and that one was in the repository.
+
+**`INV_SEED_E2E_PROJECT_OWNER` still must never be set on a shared or public
+deployment.** Note it is a one-way ratchet: unsetting it later does NOT
+remove an account it already created. The seeder logs a warning every time it
+stages or finds the fixture, which is the signal to look for.
 `config.Config.SeedE2EProjectOwner`'s own comment carries the same warning;
 nothing in the Makefile's `make dev`/`make demo` defaults sets it.
 

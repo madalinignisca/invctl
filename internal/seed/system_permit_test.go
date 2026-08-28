@@ -275,7 +275,7 @@ var administratorPermitCallerFiles = map[string]int{
 	"internal/seed/seed_customfields.go":      7, // domain.AdministratorPermit(actor), actor a real admin user
 	"internal/seed/seed_customfields_demo.go": 8, // same, in the demo's own custom-field findings
 	"internal/seed/seed_observed.go":          1, // CreateHealthOverride, attributed to a real admin user
-	"internal/seed/seed_e2e_fixture.go":       1, // CreateUser only, attributed to a real admin user
+	"internal/seed/seed_e2e_fixture.go":       1, // ONE mint, reused for CreateUser and AssignProject -- one grant, one actor
 
 	// Test fixtures -- see the doc comment above for why these are budgeted
 	// separately from the production files.

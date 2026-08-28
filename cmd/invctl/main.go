@@ -212,7 +212,7 @@ func run() error {
 	// Also after ensureAdmin: CreateUser needs a real permit, and this
 	// mirrors StageCustomFields' shape exactly.
 	if cfg.SeedOnStart && cfg.SeedE2EProjectOwner {
-		if err := seed.StageE2EProjectOwner(ctx, st, cfg.AdminUsername); err != nil {
+		if err := seed.StageE2EProjectOwner(ctx, st, cfg.AdminUsername, cfg.SeedE2EProjectOwnerPassword); err != nil {
 			slog.Warn("E2E project-owner fixture not staged", "error", err)
 		}
 	}

@@ -46,7 +46,17 @@ const looksLikeSharedDemo = BASE_URL && /invctl\.madalin\.me/.test(BASE_URL);
 const describeHere = looksLikeSharedDemo ? test.describe.skip : describe;
 
 const OWNER_USERNAME = process.env.INV_E2E_PROJECT_OWNER_USERNAME || 'e2e-project-owner';
-const OWNER_PASSWORD = process.env.INV_E2E_PROJECT_OWNER_PASSWORD || 'e2e-project-owner-password';
+// No fallback, deliberately: the seeder refuses to create this account
+// without an operator-chosen password, so a spec that quietly substituted a
+// published default would only ever be testing a login that cannot exist.
+// See internal/seed/seed_e2e_fixture.go.
+const OWNER_PASSWORD = process.env.INV_E2E_PROJECT_OWNER_PASSWORD;
+if (!OWNER_PASSWORD) {
+  throw new Error(
+    'INV_E2E_PROJECT_OWNER_PASSWORD is not set. Seed the fixture with the ' +
+    'same value the app was started with (INV_SEED_E2E_PROJECT_OWNER=true ' +
+    'plus that password) -- see docs/E2E.md.');
+}
 
 // "platform" is the project internal/seed/seed_e2e_fixture.go assigns this
 // owner account to.
