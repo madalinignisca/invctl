@@ -55,6 +55,21 @@ footnote.
   from a project takes effect on their next click rather than at the end of a
   session.
 
+- **A project owner can write journal notes on anything they can write.** A
+  note takes its scope from the entity it is *about*: it is writable exactly
+  when its subject is. Previously `journal_entry` was classified as topology
+  and so was Administrator-only, which meant a project owner could create a
+  server and then not record a single word about it -- the note being the
+  cheapest and most useful thing they had to contribute.
+
+  The subject is read from the stored row on edit and withdrawal, never from
+  the submitted form, so naming an asset you own does not let you edit a note
+  attached to one you do not.
+
+  The rest of the topology surface -- addresses, interfaces, dependencies,
+  cost lines, placements -- is still Administrator-only. That is a known
+  limitation rather than a decision that it should stay that way.
+
 - **A project owner creates entities from inside a project, not from the
   generic form.** `POST /projects/{id}/assets/new` and its service and
   circuit siblings create the entity and link it to the project in one

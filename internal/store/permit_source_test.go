@@ -434,9 +434,10 @@ func TestTheScopeClassificationCoversEveryAuditedEntityType(t *testing.T) {
 	}
 
 	validClass := map[domain.ScopeClass]bool{
-		domain.ScopeProjectLinked: true,
-		domain.ScopeEstateConfig:  true,
-		domain.ScopeTopology:      true,
+		domain.ScopeProjectLinked:  true,
+		domain.ScopeSubjectDerived: true,
+		domain.ScopeEstateConfig:   true,
+		domain.ScopeTopology:       true,
 	}
 
 	seen := map[string]bool{}
@@ -450,8 +451,8 @@ func TestTheScopeClassificationCoversEveryAuditedEntityType(t *testing.T) {
 		if !validClass[class] {
 			t.Errorf("%q has no scope classification in internal/domain/role.go's "+
 				"entityScope -- every entity_type this codebase writes to change_log "+
-				"must fall into exactly one of ScopeProjectLinked, ScopeEstateConfig "+
-				"or ScopeTopology", et)
+				"must fall into exactly one of ScopeProjectLinked, ScopeSubjectDerived, "+
+				"ScopeEstateConfig or ScopeTopology", et)
 		}
 		if !tables[et] {
 			t.Errorf("%q is audited but does not appear in domain.ClassifiedTables(); "+

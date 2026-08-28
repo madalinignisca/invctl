@@ -234,8 +234,17 @@ func (p *scopedPermit) Actor() Actor { return p.actor }
 // names entityType regardless of which of these two reasons produced the
 // refusal.
 func (p *scopedPermit) Covers(entityType, entityID string) bool {
-	if ScopeClassOf(entityType) == ScopeProjectLinked {
+	switch ScopeClassOf(entityType) {
+	case ScopeProjectLinked, ScopeSubjectDerived:
+		// Both consult entities. They differ in where the id in that set
+		// came from: a project-linked id was resolved from project
+		// membership when the permit was minted, a subject-derived one was
+		// put there by the store after it checked the subject.
 		return p.entities.covers(entityType, entityID)
+	case ScopeEstateConfig, ScopeTopology:
+		// Never coverable by a scoped permit -- except for the three link
+		// tables, which are ScopeEstateConfig and fall through to the
+		// carve-out below. Everything else here is Administrator territory.
 	}
 	// THE LINK-ROW CARVE-OUT, AND IT TAKES BOTH HALVES. A project owner may
 	// write the link row itself -- project_asset, project_service,
@@ -374,6 +383,25 @@ const (
 	// migrations, not assumed: no other table in this codebase has a column
 	// named project_id.
 	ScopeProjectLinked ScopeClass = "project_linked"
+	// ScopeSubjectDerived entities carry no project relationship of their
+	// own and take their scope from the entity they are ABOUT. A journal
+	// note on an asset is in scope exactly when that asset is; the note
+	// itself has no owner to consult.
+	//
+	// This is the first of the derivations ScopeTopology's comment below
+	// anticipates. It is deliberately a separate class rather than being
+	// folded into ScopeProjectLinked, because that class means something
+	// specific and checkable -- the entity carries a project_id relationship
+	// in the schema -- and journal_entry does not. Collapsing the two would
+	// make ScopeProjectLinked's own comment false, and that comment is what
+	// a reader relies on to know which tables to look at.
+	//
+	// Covers treats it identically to ScopeProjectLinked: it consults
+	// entities. The DERIVATION -- resolving a note to its subject and asking
+	// whether the caller may write THAT -- happens in the store, before the
+	// transaction opens, because only the store can read the subject. See
+	// internal/store/journal.go's authorizeJournalSubject.
+	ScopeSubjectDerived ScopeClass = "subject_derived"
 	// ScopeEstateConfig entities are estate-wide and apply to every project
 	// at once -- teams, vocabularies, custom-field definitions, tags, users,
 	// projects themselves (docs/rbac-design.md §4's explicit exclusion list),
@@ -484,7 +512,7 @@ var entityScope = map[string]ScopeClass{
 	"interface":           ScopeTopology,
 	"ip_address":          ScopeTopology,
 	"ip_range":            ScopeTopology,
-	"journal_entry":       ScopeTopology,
+	"journal_entry":       ScopeSubjectDerived,
 	"l2vpn":               ScopeTopology,
 	"l2vpn_termination":   ScopeTopology,
 	"link":                ScopeTopology,

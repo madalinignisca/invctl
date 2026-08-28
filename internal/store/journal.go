@@ -76,13 +76,45 @@ func (s *SQLStore) GetJournalEntry(ctx context.Context, id string) (*JournalRow,
 	return &row, nil
 }
 
+// authorizeJournalSubject is the whole of journal scope, in one place.
+//
+// A note carries no project of its own; it is in scope exactly when the thing
+// it is ABOUT is in scope (domain.ScopeSubjectDerived). So the caller's real
+// permit is asked about the SUBJECT -- Covers("asset", assetID) -- and only
+// if that passes does the transaction run, under a second permit scoped to
+// the one note it writes and nothing else.
+//
+// The narrow permit is necessary rather than belt-and-braces: tx.log
+// authorizes ("journal_entry", noteID), and a note's id can no more be in a
+// scope resolved before the request than a freshly created asset's can. Same
+// shape as CreateAssetInProject, same reason.
+//
+// It is also strictly narrower than what was proved: the caller demonstrated
+// write access to the subject, and receives authority over exactly one note
+// on it. An Administrator passes the subject check trivially and is narrowed
+// for the duration of the transaction, which costs nothing -- these methods
+// write one row.
+func authorizeJournalSubject(p domain.Permit, subjectType, subjectID, noteID string) (domain.Permit, error) {
+	if !p.Covers(subjectType, subjectID) {
+		return nil, fmt.Errorf("writing a journal note on %s %s: %w",
+			subjectType, subjectID, domain.ErrForbidden)
+	}
+	return domain.ScopedPermit(p.Actor(), nil, domain.ScopedEntities{
+		"journal_entry": {noteID: true},
+	}), nil
+}
+
 // CreateJournalEntry writes a note.
 func (s *SQLStore) CreateJournalEntry(ctx context.Context, p domain.Permit, e *domain.JournalEntry) error {
 	if err := e.Validate(); err != nil {
 		return err
 	}
 	e.RowVersion = 1
-	return s.write(ctx, p, func(t *tx) error {
+	notePermit, err := authorizeJournalSubject(p, e.EntityType, e.EntityID, e.ID)
+	if err != nil {
+		return err
+	}
+	return s.write(ctx, notePermit, func(t *tx) error {
 		_, err := t.exec(ctx, `
 			INSERT INTO journal_entry (id, entity_type, entity_id, kind, body, author,
 			                           lifecycle, created_at, updated_at)
@@ -109,7 +141,18 @@ func (s *SQLStore) UpdateJournalEntry(ctx context.Context, p domain.Permit, e *d
 		return err
 	}
 	e.UpdatedAt = domain.FormatTime(s.now())
-	return s.write(ctx, p, func(t *tx) error {
+	// The subject is read from the STORED row, never from the request: a
+	// caller who could name the subject could name one they own and edit a
+	// note on one they do not.
+	subject, err := s.GetJournalEntry(ctx, e.ID)
+	if err != nil {
+		return err
+	}
+	notePermit, err := authorizeJournalSubject(p, subject.EntityType, subject.EntityID, e.ID)
+	if err != nil {
+		return err
+	}
+	return s.write(ctx, notePermit, func(t *tx) error {
 		before, err := getJournalForUpdate(ctx, t, e.ID)
 		if err != nil {
 			return err
@@ -135,7 +178,15 @@ func (s *SQLStore) UpdateJournalEntry(ctx context.Context, p domain.Permit, e *d
 // said, and the change_log row recording the withdrawal refers to an entry that
 // has to still exist for the trail to mean anything.
 func (s *SQLStore) RetireJournalEntry(ctx context.Context, p domain.Permit, id string) error {
-	return s.write(ctx, p, func(t *tx) error {
+	subject, err := s.GetJournalEntry(ctx, id)
+	if err != nil {
+		return err
+	}
+	notePermit, err := authorizeJournalSubject(p, subject.EntityType, subject.EntityID, id)
+	if err != nil {
+		return err
+	}
+	return s.write(ctx, notePermit, func(t *tx) error {
 		before, err := getJournalForUpdate(ctx, t, id)
 		if err != nil {
 			return err
