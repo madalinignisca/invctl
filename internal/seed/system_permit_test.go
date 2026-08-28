@@ -233,26 +233,38 @@ func TestOnlyTheNamedCallersMintASystemPermit(t *testing.T) {
 // is what "the seed package is not a hole for administrator capability"
 // actually requires.
 //
-// The two production files below are NOT that regression -- they mint
+// The three production files below are NOT that regression -- they mint
 // AdministratorPermit around a real domain.UserActor(admin), not around the
 // seed package's own Actor, to attribute demo data (custom field
-// definitions, a health override) to an actual admin account already in the
-// database, the way StageCustomFields' own comments describe. That is a
-// deliberate, different design choice from "the seeder holds administrator
-// capability" -- it is "a named administrator is doing this, and the demo
-// data says so" -- and domain.SystemPermit cannot stand in for it: Covers
-// only ever returns SystemActor from Actor(), which would misattribute
-// these rows to "system" instead of to the admin they are meant to
-// describe. Widening this test to forbid AdministratorPermit outright would
-// have to break one of these two files to pass, which is exactly the
-// "fixing the test instead of the bug" failure mode this whole exercise is
-// about not repeating.
+// definitions, a health override, WP-G1 Task 17's E2E project-owner
+// fixture account) to an actual admin account already in the database, the
+// way StageCustomFields' own comments describe. That is a deliberate,
+// different design choice from "the seeder holds administrator capability"
+// -- it is "a named administrator is doing this, and the demo data says so"
+// -- and domain.SystemPermit cannot stand in for it: Covers only ever
+// returns SystemActor from Actor(), which would misattribute these rows to
+// "system" instead of to the admin they are meant to describe. Widening
+// this test to forbid AdministratorPermit outright would have to break one
+// of these three files to pass, which is exactly the "fixing the test
+// instead of the bug" failure mode this whole exercise is about not
+// repeating.
 //
-// The four test files are the mechanical testActor/seed.Actor -> permit
-// fixture updates Task 10 made across the store test suite, wrapping a bare
+// seed_e2e_fixture.go's ONE call is narrower than the pattern its two
+// siblings use, on purpose: only CreateUser needs AdministratorPermit here
+// (systemPermit.Covers refuses app_user unconditionally), so the sibling
+// AssignProject call in the same function runs under the package's own
+// seed.Permit instead -- user_project is NOT in systemPermit's exclusion
+// list, and reusing the wider permit for a write that does not need it
+// would be the opposite of what this budget exists to keep honest.
+//
+// The five test files are the mechanical testActor/seed.Actor -> permit
+// fixture updates Task 10 made across the store test suite (wrapping a bare
 // Actor value in AdministratorPermit at a handful of call sites so a test
-// helper keeps compiling against a signature that now takes a Permit. Test
-// fixtures are not the property this test protects; production code is.
+// helper keeps compiling against a signature that now takes a Permit), plus
+// e2e_fixture_test.go's own throwaway admin account -- built the same way
+// customfields_test.go already builds one, to attribute the fixture's
+// CreateUser call the exact way production does. Test fixtures are not the
+// property this test protects; production code is.
 //
 // Same governance comment as systemPermitCallerFiles above: a new
 // production caller here is a security-relevant change. It requires
@@ -263,11 +275,13 @@ var administratorPermitCallerFiles = map[string]int{
 	"internal/seed/seed_customfields.go":      7, // domain.AdministratorPermit(actor), actor a real admin user
 	"internal/seed/seed_customfields_demo.go": 8, // same, in the demo's own custom-field findings
 	"internal/seed/seed_observed.go":          1, // CreateHealthOverride, attributed to a real admin user
+	"internal/seed/seed_e2e_fixture.go":       1, // CreateUser only, attributed to a real admin user
 
 	// Test fixtures -- see the doc comment above for why these are budgeted
-	// separately from the two production files.
+	// separately from the production files.
 	"internal/seed/customfields_demo_test.go": 1,
 	"internal/seed/customfields_test.go":      2,
+	"internal/seed/e2e_fixture_test.go":       1,
 	"internal/seed/fit_test.go":               1,
 	"internal/seed/topup_test.go":             3,
 }

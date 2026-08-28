@@ -81,6 +81,20 @@ type Config struct {
 	// internal certificate per service. Off by default -- a fresh deployment
 	// gets the honest small fixture rather than somebody else's company.
 	SeedCompany bool
+	// SeedE2EProjectOwner stages a real, loggable-in project owner account
+	// (seed.StageE2EProjectOwner) for WP-G1 Task 17's browser suite --
+	// tests/e2e's RBAC specs need a project owner they can actually sign in
+	// as, and there is no HTTP route by which one could create that
+	// assignment itself (internal/store/user_projects.go's AssignProject has
+	// no handler in front of it yet). OFF BY DEFAULT AND MUST STAY THAT WAY
+	// ON ANY SHARED OR PUBLIC DEPLOYMENT: the account's credentials are
+	// fixed and published (see seed.E2EProjectOwnerUsername/Password), which
+	// is fine for a throwaway local instance and a live write-capable
+	// credential the moment WP-G1 Task 13 flips CanWrite(project owner) to
+	// true. Nothing in the Makefile's `make dev`/`make demo` defaults, nor
+	// docs/DEMO.md's deployment, sets this -- it exists purely for a local
+	// `INV_SEED_E2E_PROJECT_OWNER=true make dev` ahead of `make e2e`.
+	SeedE2EProjectOwner bool
 	// DevAdminPassword seeds the initial admin account. Empty means a random
 	// password is generated and logged once at startup.
 	DevAdminPassword string
@@ -116,21 +130,22 @@ func Load() (*Config, error) {
 	// learns about both on the first start rather than one per restart.
 	var badBools []string
 	cfg := &Config{
-		DBDriver:         envOr("INV_DB_DRIVER", "sqlite"),
-		DBDSN:            envOr("INV_DB_DSN", "file:invctl.db?_txlock=immediate"),
-		Listen:           envOr("INV_LISTEN", ":8080"),
-		SessionTimeout:   envDuration("INV_SESSION_TIMEOUT", 12*time.Hour),
-		AdminUsers:       splitList(os.Getenv("INV_ADMIN_USERS")),
-		Currency:         envOr("INV_CURRENCY", "EUR"),
-		AuthLocal:        envBool("INV_AUTH_LOCAL", true, &badBools),
-		AuthLDAP:         envBool("INV_AUTH_LDAP", false, &badBools),
-		SeedOnStart:      envBool("INV_SEED", false, &badBools),
-		DevAdminPassword: os.Getenv("INV_ADMIN_PASSWORD"),
-		AdminUsername:    envOr("INV_ADMIN_USERNAME", "admin"),
-		LogLevel:         envOr("INV_LOG_LEVEL", "info"),
-		SecureCookies:    envBool("INV_SECURE_COOKIES", false, &badBools),
-		SeedObservations: envBool("INV_SEED_OBSERVATIONS", false, &badBools),
-		SeedCompany:      envBool("INV_SEED_COMPANY", false, &badBools),
+		DBDriver:            envOr("INV_DB_DRIVER", "sqlite"),
+		DBDSN:               envOr("INV_DB_DSN", "file:invctl.db?_txlock=immediate"),
+		Listen:              envOr("INV_LISTEN", ":8080"),
+		SessionTimeout:      envDuration("INV_SESSION_TIMEOUT", 12*time.Hour),
+		AdminUsers:          splitList(os.Getenv("INV_ADMIN_USERS")),
+		Currency:            envOr("INV_CURRENCY", "EUR"),
+		AuthLocal:           envBool("INV_AUTH_LOCAL", true, &badBools),
+		AuthLDAP:            envBool("INV_AUTH_LDAP", false, &badBools),
+		SeedOnStart:         envBool("INV_SEED", false, &badBools),
+		DevAdminPassword:    os.Getenv("INV_ADMIN_PASSWORD"),
+		AdminUsername:       envOr("INV_ADMIN_USERNAME", "admin"),
+		LogLevel:            envOr("INV_LOG_LEVEL", "info"),
+		SecureCookies:       envBool("INV_SECURE_COOKIES", false, &badBools),
+		SeedObservations:    envBool("INV_SEED_OBSERVATIONS", false, &badBools),
+		SeedCompany:         envBool("INV_SEED_COMPANY", false, &badBools),
+		SeedE2EProjectOwner: envBool("INV_SEED_E2E_PROJECT_OWNER", false, &badBools),
 		LDAP: LDAPConfig{
 			URL:            os.Getenv("INV_LDAP_URL"),
 			BindDNTemplate: os.Getenv("INV_LDAP_BIND_DN"),

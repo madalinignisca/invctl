@@ -117,6 +117,52 @@ reached the database, which is the thing that matters for a mutation, and this
 spec asserts on what a browser actually rendered, which is the thing they
 cannot see.
 
+## The project-owner fixture (WP-G1 Task 17)
+
+`rbac-project-owner-edit-boundary.spec.js` and
+`rbac-project-owner-create-in-project.spec.js` need a real, loggable-in
+project owner assigned to a real project -- something no HTTP route in this
+codebase can create yet (`internal/store/user_projects.go`'s `AssignProject`
+has no handler in front of it; every Go test that needs one calls it
+directly against `*store.SQLStore`, which a browser cannot do). Start the
+target instance with the fixture opted in, in addition to the usual seed:
+
+```
+INV_SEED=true INV_SEED_E2E_PROJECT_OWNER=true make dev
+```
+
+This stages `seed.StageE2EProjectOwner` (`internal/seed/seed_e2e_fixture.go`)
+after the seeded administrator exists: an account named
+`e2e-project-owner` / `e2e-project-owner-password` (overridable via
+`INV_E2E_PROJECT_OWNER_USERNAME`/`INV_E2E_PROJECT_OWNER_PASSWORD` the same way
+`global-setup.js` already lets the admin credentials be overridden), assigned
+to the "platform" project -- which owns `hv-01`/`hv-02`/`hv-03` in the BASE
+fixture, so `INV_SEED_COMPANY` is not required for these two specs
+specifically.
+
+**`INV_SEED_E2E_PROJECT_OWNER` MUST NEVER BE SET ON A SHARED OR PUBLIC
+DEPLOYMENT.** The credentials are fixed and published, on purpose, right
+here -- fine for a throwaway local instance, and a live write-capable
+account the moment WP-G1 Task 13 flips `CanWrite(project owner)` to true.
+`config.Config.SeedE2EProjectOwner`'s own comment carries the same warning;
+nothing in the Makefile's `make dev`/`make demo` defaults sets it.
+
+Both specs write (their second test only), so both refuse to run against the
+shared public demo the same way `user-administration.spec.js` does, and
+neither touches the `name` field of a named fixture another spec resolves by
+name (`hv-01`, `sw-oob-1`) -- see each spec's own header.
+
+**Both specs' second test is a deliberate, declared failure until WP-G1 Task
+13 lands.** `auth.CanWrite(RoleProjectOwner)` is still `false`, so
+`middleware.RequireAdmin` refuses the write with 403 before the entity-scope
+check it guards is ever reached. Each uses Playwright's `test.fail()` rather
+than skipping: the test genuinely runs and genuinely fails today, for the
+right reason (403 from the role gate, not a missing selector or a 404), and
+the moment Task 13 flips `CanWrite` and the write starts succeeding,
+Playwright reports the test as an *error* -- an unexpected pass -- rather
+than silently going green. That is the trigger for whoever lands Task 13 to
+come back to these two files and remove the `test.fail()` calls.
+
 ## What each spec guards
 
 - **`login-and-version.spec.js`** -- the first thing a real person hits: can
@@ -155,6 +201,15 @@ cannot see.
   so the request URL is decorative and the router itself is never consulted
   (CLAUDE.md's evidence-gate note describes exactly this shape of bug
   shipping behind a fully green CI run).
+
+- **`rbac-project-owner-edit-boundary.spec.js`** and
+  **`rbac-project-owner-create-in-project.spec.js`** -- WP-G1 Task 17's two
+  critical role-aware-UI flows: a project owner's edit control surviving a
+  real signed-in session on their own project's asset and staying absent on
+  one outside it, with a direct write to the outside one refused
+  server-side; and creating an asset from their own project page through the
+  route only a project owner may reach. See "The project-owner fixture"
+  above -- both need `INV_SEED_E2E_PROJECT_OWNER=true` and both write.
 
 ## Adding a spec
 

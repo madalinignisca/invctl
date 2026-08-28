@@ -206,6 +206,17 @@ func run() error {
 		}
 	}
 
+	// tests/e2e's RBAC specs (WP-G1 Task 17), and ONLY when explicitly
+	// opted into -- see config.Config.SeedE2EProjectOwner's own comment
+	// for why this must never be set on a shared or public deployment.
+	// Also after ensureAdmin: CreateUser needs a real permit, and this
+	// mirrors StageCustomFields' shape exactly.
+	if cfg.SeedOnStart && cfg.SeedE2EProjectOwner {
+		if err := seed.StageE2EProjectOwner(ctx, st, cfg.AdminUsername); err != nil {
+			slog.Warn("E2E project-owner fixture not staged", "error", err)
+		}
+	}
+
 	sessions, err := newSessionManager(db, cfg)
 	if err != nil {
 		return err

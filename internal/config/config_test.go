@@ -36,7 +36,8 @@ func pristineEnv(t *testing.T) {
 		"INV_AUTH_LDAP", "INV_AUTH_LOCAL", "INV_DB_DRIVER", "INV_DB_DSN",
 		"INV_LDAP_BIND_DN", "INV_LDAP_SKIP_VERIFY", "INV_LDAP_STARTTLS",
 		"INV_LDAP_URL", "INV_LISTEN", "INV_LOG_LEVEL", "INV_SECURE_COOKIES",
-		"INV_SEED", "INV_SESSION_KEY", "INV_SESSION_TIMEOUT",
+		"INV_SEED", "INV_SEED_COMPANY", "INV_SEED_E2E_PROJECT_OWNER",
+		"INV_SESSION_KEY", "INV_SESSION_TIMEOUT",
 		"INV_AGENT_TOKENS", "INV_AGENT_SCOPES", "INV_AGENT_VOCAB",
 		"INV_API_TOKENS", "INV_API_SCOPES",
 	} {
@@ -74,6 +75,31 @@ func TestLoadDefaults(t *testing.T) {
 	// operator typed it.
 	if len(cfg.AdminUsers) != 2 || cfg.AdminUsers[1] != "nikolaj" {
 		t.Errorf("admins = %v, want them lowercased", cfg.AdminUsers)
+	}
+	// SeedE2EProjectOwner mints a real, loggable-in project owner with fixed,
+	// published credentials (seed.StageE2EProjectOwner) -- a live
+	// write-capable account the moment WP-G1 Task 13 lands. It must be off
+	// unless an operator asks for it by name, exactly like every other flag
+	// in this test.
+	if cfg.SeedE2EProjectOwner {
+		t.Error("SeedE2EProjectOwner is on by default; it must require an explicit opt-in")
+	}
+}
+
+// TestSeedE2EProjectOwnerOptIn proves the opt-in itself actually wires
+// through -- a default-off flag that silently ignored INV_SEED_E2E_PROJECT_OWNER=true
+// would be indistinguishable from a correct one in TestLoadDefaults alone.
+func TestSeedE2EProjectOwnerOptIn(t *testing.T) {
+	pristineEnv(t)
+	t.Setenv("INV_ADMIN_USERS", "gabriel")
+	t.Setenv("INV_SEED_E2E_PROJECT_OWNER", "true")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.SeedE2EProjectOwner {
+		t.Error("INV_SEED_E2E_PROJECT_OWNER=true did not set SeedE2EProjectOwner")
 	}
 }
 

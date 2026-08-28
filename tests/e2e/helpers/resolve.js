@@ -48,6 +48,33 @@ export async function resolveAssetPath(page, name) {
   return href;
 }
 
+/**
+ * Resolves a project's URL path by its CODE, never a hardcoded ID -- same
+ * reasoning as resolveAssetPath above: project ids are fresh UUIDv7s every
+ * seed run. web/templates/partials/projects.html's list table links each
+ * row's code, so this walks that link rather than guessing a path shape.
+ *
+ * @param {import('@playwright/test').Page} page
+ * @param {string} code
+ * @returns {Promise<string>} the project's overview path, e.g. "/projects/<id>"
+ */
+export async function resolveProjectPath(page, code) {
+  await page.goto('/projects', { waitUntil: 'networkidle' });
+  const link = page.locator('table td.mono a', { hasText: new RegExp(`^${escapeRegExp(code)}$`) }).first();
+  const count = await link.count();
+  if (count === 0) {
+    throw new Error(
+      `no project coded "${code}" was found on /projects -- this suite ` +
+        'expects the demo estate. See docs/E2E.md (INV_SEED=true).',
+    );
+  }
+  const href = await link.getAttribute('href');
+  if (!href) {
+    throw new Error(`project row for "${code}" has no href`);
+  }
+  return href;
+}
+
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
