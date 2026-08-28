@@ -198,11 +198,30 @@ func RequireAuth(next http.Handler) http.Handler {
 	})
 }
 
-// RequireAdmin rejects users without write access.
+// RequireWrite rejects users with no write access at all.
 //
-// Every non-GET route sits behind this. The check itself is one line in
-// authz.CanWrite, which is where LDAP group roles will land later.
-func RequireAdmin(authz *auth.Authorizer) func(http.Handler) http.Handler {
+// NOT "RequireWrite", which is what this was called until WP-G1 Task 13.
+// It gates on auth.CanWrite, and CanWrite stopped meaning "is an
+// Administrator" the moment a project owner became able to write: since the
+// flip it answers "may this person write ANYTHING", which for a project
+// owner is true while almost every individual object is still refused.
+//
+// The old name outlived its accuracy silently, and it cost real bugs before
+// anyone noticed -- six handlers minted an administrator permit reasoning
+// "this route is behind RequireWrite so the caller is an Administrator"
+// (584adad), and GET /users was left readable by a project owner on the same
+// reasoning (82ea6c5). Both were true when written. A name that encodes a
+// fact which a one-line change elsewhere can falsify is a comment with no
+// maintainer, and this one was load-bearing in six places.
+//
+// This middleware answers ONE question -- may you write at all -- and it is
+// the coarse gate, not the decision. Two things sit beyond it:
+//   - RequireAdministrator, for a surface that genuinely requires an
+//     Administrator (user administration, the import runner).
+//   - domain.Permit, checked per row in internal/store's tx.log, for whether
+//     THIS entity may be written. That is the real authorization boundary;
+//     this one only keeps read-only users out of handlers entirely.
+func RequireWrite(authz *auth.Authorizer) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			user := UserFrom(r.Context())
@@ -228,7 +247,7 @@ func RequireAdmin(authz *auth.Authorizer) func(http.Handler) http.Handler {
 // mints a new id per line -- internal/store/import_*.go), so a project owner's
 // ScopedPermit -- built from their EXISTING project_asset/project_service
 // membership, per auth.Authorizer.Permit -- cannot cover a single one of
-// them. Once CanWrite(RoleProjectOwner) is true (Task 13), RequireAdmin alone
+// them. Once CanWrite(RoleProjectOwner) is true (Task 13), RequireWrite alone
 // would let a project owner open this form and watch every row it submits
 // come back refused: the seam fails closed, so nothing is created out of
 // scope, but the form itself is then a trap rather than a tool. Routing

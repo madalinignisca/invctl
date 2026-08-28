@@ -178,13 +178,13 @@ Two authenticators behind one interface:
 1. **Local** — `app_user` with argon2id hash. Seeded admin on first run.
 2. **LDAP** — simple bind against `INV_LDAP_URL`. On successful bind, upsert an `app_user` row with `source='ldap'` and no password hash.
 
-**RBAC for the POC is deliberately trivial:** `INV_ADMIN_USERS` is a comma-separated list of usernames. Membership in that list grants write access; everyone else is read-only. Two middleware functions, `RequireAuth` and `RequireAdmin`. That's the whole authorization model.
+**RBAC for the POC is deliberately trivial:** `INV_ADMIN_USERS` is a comma-separated list of usernames. Membership in that list grants write access; everyone else is read-only. Two middleware functions, `RequireAuth` and `RequireWrite` (named `RequireAdmin` at the time). That was the whole authorization model; WP-G1 replaced it.
 
 Structure the check as `authz.CanWrite(user)`. **The claim that used to sit here — that richer roles "should only require changing that function's body, not touching every handler" — was wrong, and WP-G1 retired it by testing it.** `CanWrite` answers a question about a *session*: may this person write at all. Object-level permission is a question about a *row*: may this person write **this** one. No body of `CanWrite` can answer the second, because at the time it is called the row is not known.
 
 The seam that does work, and the one to extend: **`internal/store/store.go`'s `tx.log`.** Every declared mutation already had to pass through it to write its `change_log` row, so it is the one place that sees both the actor and the specific entity being written. `domain.Permit` is checked there. A new role therefore changes `auth.Authorizer.Permit` (what scope a person gets) and possibly `domain.entityScope` (which entity types are project-linked) — and no handler at all. That property is enforced, not hoped for: `internal/web/rbac_boundary_test.go` drives every generated write route, and `internal/store/permit_source_test.go` fails if a permit is minted anywhere outside the named functions.
 
-Note `middleware.RequireAdmin` gates on `CanWrite`, which since WP-G1 admits project owners as well as administrators; `middleware.RequireAdministrator` is the one that means what `RequireAdmin` sounds like.
+Note `middleware.RequireWrite` gates on `CanWrite`, which since WP-G1 admits project owners as well as administrators. It was called `RequireAdmin` until that stopped being true. `middleware.RequireAdministrator` is the one that requires an Administrator.
 
 Never log credentials, bind passwords, session tokens, or `identity.secret_ref` contents. `secret_ref` holds a *path*, never a secret; if a code path would put an actual secret in the database, stop and raise it.
 
@@ -218,7 +218,7 @@ A change is complete when all of these hold:
 - [ ] Domain constructor validates; DB `CHECK` matches the Go constant set
 - [ ] Handler branches correctly on `HX-Request`
 - [ ] Validation failure returns 422 with the form partial re-rendered
-- [ ] Non-GET route is behind CSRF and `RequireAdmin`
+- [ ] Non-GET route is behind CSRF and `RequireWrite` (or `RequireAdministrator`, for a surface that genuinely needs one)
 - [ ] Table-driven test added; `make test` green on both engines
 - [ ] `gofmt`, `go vet`, `staticcheck` clean
 - [ ] No new dependency, or it was agreed first

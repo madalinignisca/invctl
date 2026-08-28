@@ -27,7 +27,7 @@ import (
 // same precedent internal/store/project_create_test.go sets and for the
 // same reason -- CanWrite(RoleProjectOwner) is still false (Task 13 has not
 // landed), so an HTTP request from a project owner would be refused by
-// RequireAdmin before postEntityTags is ever reached, and a test that only
+// RequireWrite before postEntityTags is ever reached, and a test that only
 // proved that would prove nothing about the two-scope claim itself.
 //
 // Mutation (brief, step "Mutation"): make Covers allow "tag" -> the second

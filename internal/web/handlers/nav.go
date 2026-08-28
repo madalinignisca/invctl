@@ -58,8 +58,8 @@ type NavLink struct {
 	// with 403; the enforcement is middleware.RequireAdministrator on the
 	// routes themselves (routes.go's writeAdminOnly).
 	//
-	// It used to say the route was "already behind RequireAdmin", which was
-	// true until WP-G1 Task 13 made RequireAdmin admit project owners --
+	// It used to say the route was "already behind RequireWrite", which was
+	// true until WP-G1 Task 13 made RequireWrite admit project owners --
 	// after which this hidden link was, for a while, the only thing standing
 	// in front of GET /users. Hiding is not enforcement.
 	AdminOnly bool

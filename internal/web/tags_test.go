@@ -55,7 +55,7 @@ func TestTagRegistryIsReadableByAnyAuthenticatedUser(t *testing.T) {
 	}
 }
 
-// TestDefiningATagIsAdminOnly: the mutation sits behind RequireAdmin, the
+// TestDefiningATagIsAdminOnly: the mutation sits behind RequireWrite, the
 // same as CustomFieldCreate.
 func TestDefiningATagIsAdminOnly(t *testing.T) {
 	h := newHarness(t)

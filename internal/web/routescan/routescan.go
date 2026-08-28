@@ -113,7 +113,7 @@ type Route struct {
 	Handler string // "AssetRetire"
 	File    string // "internal/web/handlers/assets.go"
 	// Gate is the registrar that declared this route: "write" (behind
-	// RequireAdmin/auth.CanWrite) or "writeAdminOnly" (behind
+	// RequireWrite/auth.CanWrite) or "writeAdminOnly" (behind
 	// RequireAdministrator/auth.IsAdministrator).
 	//
 	// IT IS IN THE COMMITTED INVENTORY DELIBERATELY. WP-G1 Task 13 makes
@@ -140,7 +140,7 @@ type Route struct {
 const routesFile = "internal/web/routes.go"
 
 // isRouteRegistrar reports whether name is one of routes.go's two write-bucket
-// registrar closures: write (behind RequireAdmin/CanWrite) and
+// registrar closures: write (behind RequireWrite/CanWrite) and
 // writeAdminOnly (behind RequireAdministrator -- WP-G1 Task 15, F2: the
 // import surface, where no ScopedPermit can ever cover a freshly-minted row,
 // so it stays reachable by a full Administrator only). Both register a route

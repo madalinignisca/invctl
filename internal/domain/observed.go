@@ -643,7 +643,7 @@ const MaxOverrideDuration = 24 * time.Hour
 // HealthOverride is an operator's assertion that a reading is wrong.
 //
 // This is DECLARED state, not observed: a person decided it, so create, amend
-// and clear each write a change_log row and sit behind CSRF and RequireAdmin
+// and clear each write a change_log row and sit behind CSRF and RequireWrite
 // like any other declared mutation. It shadows the observation at read time and
 // never mutates it -- the reporter keeps recording the truth underneath,
 // because when the override lapses you need to know what actually happened

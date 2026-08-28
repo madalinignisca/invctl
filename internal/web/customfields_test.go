@@ -52,7 +52,7 @@ func TestTheRegistryShowsWhoDefinedAFieldAndWhy(t *testing.T) {
 // and is reachable by any authenticated user, viewer included -- see
 // TestTheRegistryIsReadableByAnyAuthenticatedUser below for the coverage
 // that actually was missing. Only the mutation this test exercises sits
-// behind RequireAdmin.
+// behind RequireWrite.
 func TestDefiningACustomFieldIsAdminOnly(t *testing.T) {
 	h := newHarness(t)
 	h.login("viewer", "viewer-password")
@@ -64,7 +64,7 @@ func TestDefiningACustomFieldIsAdminOnly(t *testing.T) {
 	resp := h.post("/custom-fields", form, false)
 	resp.Body.Close()
 	// Anything looser than 403 -- the old "not 200, not 303" shape -- would
-	// let a 500 from a broken RequireAdmin pass as "correctly refused".
+	// let a 500 from a broken RequireWrite pass as "correctly refused".
 	if resp.StatusCode != http.StatusForbidden {
 		t.Fatalf("a viewer must not be able to define a custom field: got %d, want 403", resp.StatusCode)
 	}
@@ -75,7 +75,7 @@ func TestDefiningACustomFieldIsAdminOnly(t *testing.T) {
 // corrected -- the support-burden goal this whole feature exists for is
 // served by a read-only user being able to open the registry and see who
 // defined a field and why, so only the mutating routes sit behind
-// RequireAdmin.
+// RequireWrite.
 func TestTheRegistryIsReadableByAnyAuthenticatedUser(t *testing.T) {
 	h := newHarness(t)
 	h.login("viewer", "viewer-password")
@@ -317,16 +317,16 @@ func firstFieldIDFor(t *testing.T, page, code string) string {
 	return firstEditID(t, page[i:])
 }
 
-// TestCustomFieldMutationsRequireAdmin is the auth review's finding made
+// TestCustomFieldMutationsRefuseAReadOnlyUser is the auth review's finding made
 // concrete: of the seven mutating custom-field routes, only POST
 // /custom-fields had a test that failed if its authorization were removed.
 // Change any ONE of the six routes below from write( to read( in routes.go
 // and this must go red -- see the mutation-testing note in the delivery
 // report for the six confirmed kills. Asserting anything looser than 403
-// (the old "not 200, not 303" shape TestTeamWritesRequireAdmin uses) would
-// let a 500 from a broken RequireAdmin pass silently, which is exactly the
+// (the old "not 200, not 303" shape TestTeamWritesRefuseAReadOnlyUser uses) would
+// let a 500 from a broken RequireWrite pass silently, which is exactly the
 // failure mode this test exists to close off.
-func TestCustomFieldMutationsRequireAdmin(t *testing.T) {
+func TestCustomFieldMutationsRefuseAReadOnlyUser(t *testing.T) {
 	h := newHarness(t)
 	h.login("admin", "admin-password")
 	fieldID := mustCreateCustomField(t, h, "asset", "admin-gate-text", "text")

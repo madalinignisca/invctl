@@ -159,7 +159,7 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	read("GET /assets/custom-fields.csv", app.AssetCustomFieldsCSV)
 	read("GET /assets/{id}", app.AssetDetail)
 	read("GET /assets/{id}/impact", app.AssetImpact)
-	// A view, and only a view: GET, no CSRF, no RequireAdmin, and nothing on
+	// A view, and only a view: GET, no CSRF, no RequireWrite, and nothing on
 	// the page it renders can change the estate or the model of it.
 	read("GET /assets/{id}/neighbourhood", app.AssetNeighbourhood)
 	read("GET /certificates", app.CertificateList)
@@ -206,17 +206,17 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	read("GET /vlans/{id}", app.VLANDetail)
 	read("GET /network", app.NetworkList)
 
-	// Authenticated writes. Every non-GET route goes through RequireAdmin,
+	// Authenticated writes. Every non-GET route goes through RequireWrite,
 	// and the whole mux is wrapped in CSRF below.
-	requireAdmin := middleware.RequireAdmin(authz)
+	requireWrite := middleware.RequireWrite(authz)
 	write := func(pattern string, h http.HandlerFunc) {
-		mux.Handle(pattern, middleware.RequireAuth(requireAdmin(h)))
+		mux.Handle(pattern, middleware.RequireAuth(requireWrite(h)))
 	}
 	// The import page is admin-only on the GET as well as the POST. It is
 	// purely a write tool: rendering it to a read-only user offers a form whose
 	// only outcome is a 403.
 	//
-	// requireAdministrator, NOT requireAdmin/write: WP-G1 Task 15 (F2). Every
+	// requireAdministrator, NOT requireWrite/write: WP-G1 Task 15 (F2). Every
 	// imported row mints a fresh id, so no project owner's ScopedPermit can
 	// ever cover one -- see middleware.RequireAdministrator's own comment for
 	// why that makes CanWrite alone the wrong gate for this specific surface.
@@ -398,7 +398,7 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 
 	// Operator overrides of an observation (docs/AUDIT.md rule 14). These are
 	// DECLARED mutations -- a person decided that a reading is wrong -- so they
-	// sit in the write group with everything else: CSRF, RequireAdmin, and a
+	// sit in the write group with everything else: CSRF, RequireWrite, and a
 	// change_log row in the same transaction. They are deliberately nowhere
 	// near the machine-facing route below: a monitoring credential that could
 	// write one could silence the estate it is reporting on.
@@ -468,7 +468,7 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	// The machine-facing route. One route, and this is it.
 	//
 	// It carries RequireAgent and nothing else: no RequireAuth, no
-	// RequireAdmin, and no session. A monitoring credential is a different
+	// RequireWrite, and no session. A monitoring credential is a different
 	// principal type from an operator (rule 6) -- it is not an app_user, it
 	// never appears in INV_ADMIN_USERS, and authz.CanWrite's signature takes a
 	// *domain.AppUser, so it could not reach it even if this line said so.

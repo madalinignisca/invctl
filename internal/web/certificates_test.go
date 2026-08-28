@@ -169,7 +169,7 @@ func TestCreatingACertificateAndItsValidation(t *testing.T) {
 	}
 }
 
-func TestCertificateWritesRequireAdmin(t *testing.T) {
+func TestCertificateWritesRefuseAReadOnlyUser(t *testing.T) {
 	viewer := newHarness(t)
 	viewer.login("viewer", "viewer-password")
 

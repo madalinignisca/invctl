@@ -18,7 +18,7 @@ import (
 // Create-and-link, WP-G1 Task 14 (docs/rbac-design.md §4).
 //
 // EVERY TEST HERE DRIVES THE PERMIT LAYER DIRECTLY, not through
-// middleware.RequireAdmin -- CanWrite(RoleProjectOwner) still returns false
+// middleware.RequireWrite -- CanWrite(RoleProjectOwner) still returns false
 // (Task 13 has not landed), so a real HTTP request from a project owner
 // would be refused by the gate before reaching any of the code this file
 // exercises, and a test that only proved that would prove nothing about
@@ -122,7 +122,7 @@ func TestAProjectOwnerCannotCreateAnAssetInSomebodyElsesProject(t *testing.T) {
 // stated reason the plain link route "must never be reached with a project
 // owner's ScopedPermit" at all. This repository's ROUTING is what is meant
 // to guarantee that (POST /projects/{id}/assets stays behind
-// middleware.RequireAdmin, and RequireAdmin currently equals
+// middleware.RequireWrite, and RequireWrite currently equals
 // authz.CanWrite, which is false for every RoleProjectOwner today). See this
 // task's report for why that guarantee has not actually been exercised
 // end-to-end yet, and TestAProjectOwnerCannotLinkAnExistingAssetToTheirProject

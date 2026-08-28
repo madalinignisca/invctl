@@ -254,7 +254,7 @@ func (p *scopedPermit) Covers(entityType, entityID string) bool {
 	//
 	// An earlier revision left the entity half to routing instead, keeping
 	// the "link an existing entity" route Administrator-only. That is not
-	// enough: RequireAdmin gates on auth.CanWrite, and WP-G1 Task 13 makes
+	// enough: RequireWrite gates on auth.CanWrite, and WP-G1 Task 13 makes
 	// CanWrite true for a project owner -- which opens that route by a one-
 	// line change nowhere near this file. A guarantee that survives only
 	// while a routing table stays right is not a guarantee. Checking both

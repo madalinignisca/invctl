@@ -25,7 +25,7 @@ import (
 // A person who knows a reading is wrong writes one of these rather than editing
 // an observed column, which the next poll would clobber thirty seconds later
 // and which would be unattributed besides. So it is a declared mutation and it
-// is treated as one: behind CSRF and RequireAdmin, audited in the same
+// is treated as one: behind CSRF and RequireWrite, audited in the same
 // transaction, soft-deleted rather than removed.
 //
 // None of this acts on the estate. An override changes what a person is shown;

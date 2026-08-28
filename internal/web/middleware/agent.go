@@ -9,7 +9,7 @@
 // The guard on the one route a machine credential can reach.
 //
 // docs/AUDIT.md rule 6: the observed-state webhook sits "on one route mounted
-// under middleware.RequireAgent only: no session, no RequireAdmin". Everything
+// under middleware.RequireAgent only: no session, no RequireWrite". Everything
 // here exists to keep those two principal types apart -- an operator's session
 // and a collector's bearer token are different things, and a request that looks
 // like both is the confusion the rule is written against.

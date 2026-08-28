@@ -411,10 +411,10 @@ document as well as an audit one. If every account ever loses write access,
 the documented way back in is still `docs/RECOVERY.md` (`INV_ADMIN_USERS`
 overrides the role column).
 
-Known follow-ups, neither security-affecting: `middleware.RequireAdmin` is
-misnamed now that it admits project owners, and 132 `.CanWrite` occurrences
-across 38 templates still render controls to a project owner that the server
-correctly refuses.
+Known follow-up, not security-affecting: 132 `.CanWrite` occurrences across
+38 templates still render controls to a project owner that the server
+correctly refuses. (The misnamed `middleware.RequireAdmin` was renamed to
+`RequireWrite`.)
 
 **WP-G2 · Webhooks and event rules** — M
 Fire on declared-state change. Outbound HTTP to a *user-configured* endpoint is

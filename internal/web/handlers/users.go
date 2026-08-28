@@ -23,7 +23,7 @@ import (
 // cost visibility, activates or deactivates an account, or scrubs one.
 //
 // EVERY ROUTE HERE SITS BEHIND THE SAME write(...) CLOSURE AS EVERYTHING ELSE
-// IN routes.go -- RequireAuth, RequireAdmin, and the mux-wide CSRF wrapper.
+// IN routes.go -- RequireAuth, RequireWrite, and the mux-wide CSRF wrapper.
 // There is no second admission check in this file, on purpose: a route added
 // here without going through write(...) would be a silent hole in exactly the
 // screen that grants privilege.
@@ -188,9 +188,9 @@ func (a *App) UserSetRole(w http.ResponseWriter, r *http.Request) {
 	role := formValue(r, "role")
 	// a.permit(r), never domain.AdministratorPermit: this previously minted
 	// an administrator permit on the reasoning that the route is
-	// RequireAdmin-only. Of every place that shim appeared, this was the
+	// RequireWrite-only. Of every place that shim appeared, this was the
 	// worst -- SetUserRole is the route that GRANTS roles, and since Task 13
-	// made auth.CanWrite true for a project owner, RequireAdmin now admits
+	// made auth.CanWrite true for a project owner, RequireWrite now admits
 	// one here. With the caller's own permit, app_user is estate
 	// configuration and tx.log refuses it, so a project owner reaching this
 	// handler still cannot make themselves an Administrator. See

@@ -55,7 +55,7 @@ import (
 // THE TRAP THIS FILE WAS BUILT AROUND, AND WHAT SPRUNG IT: before WP-G1 Task
 // 13, auth.CanWrite(RoleProjectOwner) was false, so the project-owner test
 // below (Step 4) passed for a reason that was always going to change -- every
-// write route refused a project owner at middleware.RequireAdmin, before any
+// write route refused a project owner at middleware.RequireWrite, before any
 // handler-level scope check ran at all. A test that only asserted "403" would
 // have kept passing, unchanged, the day Task 13 flipped CanWrite and the
 // object gate (auth.Authorizer.Permit / scopedPermit.Covers) became the thing
@@ -75,7 +75,7 @@ import (
 //
 // REFUSAL LAYERS, DISTINGUISHED BY RESPONSE BODY (verified against the
 // source at the call sites, not assumed):
-//   - middleware.RequireAdmin            -> "You have read-only access."
+//   - middleware.RequireWrite            -> "You have read-only access."
 //   - middleware.RequireAdministrator    -> "This requires an Administrator."
 //   - a permit refusal at tx.authorize,
 //     surfaced through handleStoreError  -> "You are not allowed to do that."
@@ -517,7 +517,7 @@ func boundaryCSRFToken(t *testing.T, h *harness) string {
 // catches a route that genuinely stops resolving). And for every persona this
 // file drives -- Observer and a project owner, with auth.CanWrite(Project-
 // Owner) still false (see this file's package comment) -- the request is
-// refused at middleware.RequireAdmin/RequireAdministrator BEFORE the mux's
+// refused at middleware.RequireWrite/RequireAdministrator BEFORE the mux's
 // chosen handler ever reads a path parameter, so no fallback id is ever
 // dereferenced against the store during this suite's runs. The day Task 13
 // lands and a project owner starts reaching handlers for real, the routes
@@ -708,7 +708,7 @@ func TestNoWriteRouteIsReachableWithoutGoingThroughTheRouter(t *testing.T) {
 // the layer shift, plus the number of routes that DO reach a distinguishable
 // permit refusal despite the empty body:
 //   - adminGate == 0: no "write"-gated route refuses a project owner at
-//     middleware.RequireAdmin anymore. This is the headline of the whole
+//     middleware.RequireWrite anymore. This is the headline of the whole
 //     task -- if this is ever nonzero again, CanWrite regressed.
 //   - administratorGate == 6: the writeAdminOnly import surface is
 //     untouched by this flip, because it gates on IsAdministrator, not
@@ -731,7 +731,7 @@ func TestNoWriteRouteIsReachableWithoutGoingThroughTheRouter(t *testing.T) {
 // this test does not yet know about.
 func TestAProjectOwnerIsRefusedOnEveryNonProjectLinkableWriteRoute(t *testing.T) {
 	const (
-		bodyRequireAdmin         = "You have read-only access.\n"
+		bodyRequireWrite         = "You have read-only access.\n"
 		bodyRequireAdministrator = "This requires an Administrator.\n"
 		bodyPermitRefused        = "You are not allowed to do that.\n"
 	)
@@ -755,7 +755,7 @@ func TestAProjectOwnerIsRefusedOnEveryNonProjectLinkableWriteRoute(t *testing.T)
 			// returns, the estate must be byte-identical afterwards.
 			//
 			// This exists because the status-code buckets stopped being
-			// sufficient at Task 13. Before the flip, RequireAdmin refused
+			// sufficient at Task 13. Before the flip, RequireWrite refused
 			// every route before it parsed a body, so an empty body was
 			// enough to prove refusal. After the flip a project owner
 			// passes the middleware and most handlers now fail on form
@@ -792,10 +792,10 @@ func TestAProjectOwnerIsRefusedOnEveryNonProjectLinkableWriteRoute(t *testing.T)
 					continue
 				}
 				switch {
-				case body == bodyRequireAdmin:
+				case body == bodyRequireWrite:
 					adminGate++
 					if route.Gate != "write" {
-						t.Errorf("%s refused by RequireAdmin's text but registered gate is %q", route.Pattern, route.Gate)
+						t.Errorf("%s refused by RequireWrite's text but registered gate is %q", route.Pattern, route.Gate)
 					}
 				case body == bodyRequireAdministrator:
 					administratorGate++
@@ -828,7 +828,7 @@ func TestAProjectOwnerIsRefusedOnEveryNonProjectLinkableWriteRoute(t *testing.T)
 					changeLogBefore, after, driven)
 			}
 			if adminGate != 0 {
-				t.Errorf("RequireAdmin refusals = %d, want 0 -- a project owner is being refused at "+
+				t.Errorf("RequireWrite refusals = %d, want 0 -- a project owner is being refused at "+
 					"middleware on a route that should reach its handler now that CanWrite(project owner) is true",
 					adminGate)
 			}

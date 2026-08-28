@@ -243,7 +243,7 @@ func TestCreatingATeamAndTheValidationPath(t *testing.T) {
 }
 
 // Read-only users see who looks after what; only admins can change it.
-func TestTeamWritesRequireAdmin(t *testing.T) {
+func TestTeamWritesRefuseAReadOnlyUser(t *testing.T) {
 	viewer := newHarness(t)
 	viewer.login("viewer", "viewer-password")
 

@@ -170,7 +170,7 @@ name (`hv-01`, `sw-oob-1`) -- see each spec's own header.
 
 **Both specs' second test is a deliberate, declared failure until WP-G1 Task
 13 lands.** `auth.CanWrite(RoleProjectOwner)` is still `false`, so
-`middleware.RequireAdmin` refuses the write with 403 before the entity-scope
+`middleware.RequireWrite` refuses the write with 403 before the entity-scope
 check it guards is ever reached. Each uses Playwright's `test.fail()` rather
 than skipping: the test genuinely runs and genuinely fails today, for the
 right reason (403 from the role gate, not a missing selector or a 404), and

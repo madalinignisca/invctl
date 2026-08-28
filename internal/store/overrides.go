@@ -11,7 +11,7 @@
 //
 // This file is deliberately NOT internal/store/observed.go. An override is a
 // person overruling a monitor: somebody decided it, so it writes a change_log
-// row in the same transaction, sits behind CSRF and RequireAdmin, and is
+// row in the same transaction, sits behind CSRF and RequireWrite, and is
 // soft-deleted rather than removed. Nothing here writes asset_health,
 // observed_transition or unmatched_observation, and nothing in observed.go
 // writes health_override -- the reporter keeps recording the truth underneath

@@ -161,7 +161,7 @@ func TestTheCatalogueIsAdminOnly(t *testing.T) {
 	//
 	// This test previously posted a model with no manufacturer_id. That is
 	// refused by VALIDATION, not by authorization, so it passed unchanged when
-	// the route was moved off RequireAdmin: nothing was created either way.
+	// the route was moved off RequireWrite: nothing was created either way.
 	// Caught by mutating the route and watching the test stay green.
 	resp = h.post("/catalogue/types", url.Values{
 		"csrf_token":      {h.csrfToken("/catalogue")},

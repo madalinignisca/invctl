@@ -27,9 +27,9 @@ import (
 // internal/store/circuits.go's write transactions to take a domain.Permit
 // rather than a domain.Actor, so these call sites had to supply one before
 // the gate existed; the shim minted an administrator permit and justified it
-// with "every route in this file already sits behind RequireAdmin, so the
+// with "every route in this file already sits behind RequireWrite, so the
 // caller is already an Administrator". That justification expires at Task
-// 13: RequireAdmin gates on auth.CanWrite, and Task 13 makes CanWrite true
+// 13: RequireWrite gates on auth.CanWrite, and Task 13 makes CanWrite true
 // for a project owner. A shim minting an ADMINISTRATOR permit would then
 // have handed a project owner authority over every circuit and provider in
 // the estate -- the permit covers everything, so tx.log has nothing left to

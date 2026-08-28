@@ -66,7 +66,7 @@ func mustWebProjectOwner(t *testing.T, h *harness, username, password, projectID
 // check.
 //
 // THIS PASSES TODAY FOR A REASON THAT WILL CHANGE: CanWrite(RoleProjectOwner)
-// still returns false (Task 13 has not landed), so middleware.RequireAdmin
+// still returns false (Task 13 has not landed), so middleware.RequireWrite
 // refuses this request before AssetCreate is ever reached, for ANY write
 // route, not because of anything specific to /assets. Task 13's own step 3
 // re-runs this claim once CanWrite is real for a project owner -- see that
@@ -119,7 +119,7 @@ func TestAProjectOwnerCannotReachThePlainCreateRouteAtAll(t *testing.T) {
 // plain link route, never .../assets/new) as a project owner assigned to
 // frontend.
 //
-// THIS ALSO PASSES TODAY VIA RequireAdmin, NOT VIA Covers: see
+// THIS ALSO PASSES TODAY VIA RequireWrite, NOT VIA Covers: see
 // internal/store/project_create_test.go's
 // TestScopedPermitCannotLinkIntoAProjectItDoesNotHold doc comment for the
 // documented, carried-forward gap this task's report flags -- Covers's Task

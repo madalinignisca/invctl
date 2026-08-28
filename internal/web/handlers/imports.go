@@ -207,7 +207,7 @@ func (a *App) runImport(w http.ResponseWriter, r *http.Request, kind importKind)
 	// itself later, on context.Background(), with nothing to derive it from.
 	permit, err := a.Authz.Permit(r.Context(), middleware.UserFrom(r.Context()))
 	if err != nil {
-		// RequireAdmin has already refused anyone who cannot reach this
+		// RequireWrite has already refused anyone who cannot reach this
 		// handler, so this branch is unreachable today for the same reason
 		// a.permit(r) in app.go is -- see that function's own comment. Failing
 		// closed rather than assuming it cannot happen is the same

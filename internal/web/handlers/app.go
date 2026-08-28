@@ -740,7 +740,7 @@ func checkbox(r *http.Request, key string) bool {
 // comment for why).
 //
 // The error branch below is fail-closed rather than assumed unreachable: every
-// route that reaches here already sits behind RequireAdmin
+// route that reaches here already sits behind RequireWrite
 // (internal/web/routes.go), and until Task 13 flips CanWrite for a project
 // owner that means only an Administrator, whom Authorizer.Permit never
 // refuses, can reach this function at all -- so today this branch cannot
@@ -750,7 +750,7 @@ func checkbox(r *http.Request, key string) bool {
 func (a *App) permit(r *http.Request) domain.Permit {
 	p, err := a.resolvePermit(r)
 	if err != nil {
-		slog.Error("permit refused for a request behind RequireAdmin",
+		slog.Error("permit refused for a request behind RequireWrite",
 			"error", err, "path", r.URL.Path)
 	}
 	return p
@@ -764,7 +764,7 @@ func (a *App) permit(r *http.Request) domain.Permit {
 // once, not per call.
 //
 // DELIBERATELY NOT a.permit(r). That function's error branch logs at
-// slog.Error because every caller of a.permit sits behind RequireAdmin, so
+// slog.Error because every caller of a.permit sits behind RequireWrite, so
 // reaching the error branch there means something already went wrong. base()
 // runs on every GET, for every persona, including an Observer or an
 // unauthenticated visitor -- for whom auth.Authorizer.Permit returning
@@ -797,7 +797,7 @@ func (a *App) entityPermit(r *http.Request) domain.Permit {
 //
 // It returns the error as well as the permit because its two callers react
 // to a refusal differently, and that difference is the only reason they are
-// separate functions. permit(r) runs on write routes behind RequireAdmin,
+// separate functions. permit(r) runs on write routes behind RequireWrite,
 // where a refusal is anomalous and worth an error log. entityPermit(r) runs
 // on read pages, where an Observer being refused a WRITE permit is the
 // ordinary case and logging it would be noise on every page view.

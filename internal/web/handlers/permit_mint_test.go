@@ -33,11 +33,11 @@ var widePermitMinters = map[string]bool{
 // WP-G1 Task 7 needed a domain.Permit at handler call sites before the
 // request-scoped gate existed, so it minted domain.AdministratorPermit(actor(r))
 // and justified it in a comment: every route in the file sits behind
-// RequireAdmin, so the caller is already an Administrator. That reasoning was
+// RequireWrite, so the caller is already an Administrator. That reasoning was
 // true when written and expires at Task 13, which makes auth.CanWrite true
 // for a project owner -- one line, in another package, nowhere near the
 // handlers relying on it. Six sites had it, including UserSetRole, where a
-// project owner admitted by RequireAdmin while holding an administrator
+// project owner admitted by RequireWrite while holding an administrator
 // permit could have granted themselves the Administrator role outright.
 //
 // The rule: a handler takes the caller's own permit from a.permit(r) and

@@ -18,7 +18,7 @@ import (
 // cannot act. docs/ownership-report-design.md.
 //
 // OwnershipReport ITSELF IS STILL READ-ONLY, like every other report in this
-// package -- no CSRF, no RequireAdmin, nothing this handler does can change
+// package -- no CSRF, no RequireWrite, nothing this handler does can change
 // the estate. The fix it now offers inline (WP-G7 piece 3, design §6) lives
 // in ownership_assign.go's two admin-only routes, wired separately in
 // routes.go under the write bucket -- exactly the split piece 2's retirement

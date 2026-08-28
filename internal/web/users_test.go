@@ -57,7 +57,7 @@ func TestAnObserverCannotReachAnyUserAdministrationRoute(t *testing.T) {
 	h.login("viewer", "viewer-password")
 	// A page the viewer CAN read, purely to harvest a valid CSRF token --
 	// without one every POST below would fail at the CSRF layer (400) and
-	// prove nothing about RequireAdmin, which is what this test is for.
+	// prove nothing about RequireWrite, which is what this test is for.
 	token := h.csrfToken("/")
 
 	cases := []struct {
