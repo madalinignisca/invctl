@@ -95,8 +95,15 @@ type auditCase struct {
 
 const (
 	verbCreate = "create"
-	verbUpdate = "update"
-	verbRetire = "retire"
+	// verbCreateInProject is a SEPARATE verb from verbCreate, not a second
+	// case for it. CreateAssetInProject and its siblings are a distinct code
+	// path from CreateAsset -- they run under a narrow transaction permit
+	// minted for the freshly created id rather than the caller's own -- so
+	// each needs its own case, and the one-case-per-(type, verb) rule below
+	// stays a real constraint rather than being relaxed to let two through.
+	verbCreateInProject = "create-in-project"
+	verbUpdate          = "update"
+	verbRetire          = "retire"
 )
 
 // entityTypeVerbs is the hand-maintained expected coverage for every entity
@@ -119,9 +126,18 @@ const (
 // above this type's own doc comment: one representative mutation each, not
 // full CRUD.
 var entityTypeVerbs = map[string][]string{
-	"asset":               {verbCreate, verbUpdate, verbRetire},
-	"service":             {verbCreate, verbUpdate, verbRetire},
-	"circuit":             {verbCreate, verbUpdate, verbRetire},
+	// The three project link tables. Their only writer today is the
+	// create-and-link path (LinkProjectAsset and friends log the same
+	// entity_type), and the link half is authorized differently from the
+	// entity half -- through scopedPermit.Covers's both-halves carve-out
+	// rather than the narrow transaction permit -- so it needs its own case.
+	"project_asset":   {verbCreate},
+	"project_service": {verbCreate},
+	"project_circuit": {verbCreate},
+
+	"asset":               {verbCreate, verbCreateInProject, verbUpdate, verbRetire},
+	"service":             {verbCreate, verbCreateInProject, verbUpdate, verbRetire},
+	"circuit":             {verbCreate, verbCreateInProject, verbUpdate, verbRetire},
 	"team":                {verbCreate, verbUpdate, verbRetire},
 	"tag":                 {verbCreate, verbUpdate, verbRetire},
 	"custom_field":        {verbCreate, verbUpdate, verbRetire},
@@ -138,6 +154,145 @@ var entityTypeVerbs = map[string][]string{
 // entries, permit_source_test.go) -- it is the representative coverage
 // task-8-brief.md asks for, expanded per entityTypeVerbs above.
 var auditMatrix = []auditCase{
+	// ---------------------------------------------------------------
+	// Create-and-link (WP-G1 Task 14). These three methods are the ONLY
+	// place a project owner creates anything, and each writes TWO
+	// change_log rows in one transaction: the entity itself, and the
+	// project_asset/project_service/project_circuit link.
+	//
+	// Both halves are pinned, because they are authorized differently.
+	// The entity row is covered by the narrow transaction permit
+	// CreateAssetInProject mints for the freshly minted id; the LINK row
+	// goes through scopedPermit.Covers's carve-out, which requires the
+	// permit to hold the project AND cover the entity. A whole-branch
+	// review found this matrix had no case for these methods at all --
+	// and this file is the only POSITIVE proof in the repo, so a half of
+	// one of these silently ceasing to log would pass every other test.
+	// ---------------------------------------------------------------
+	{
+		name:       "asset create-in-project, the asset row",
+		entityType: "asset",
+		verb:       verbCreateInProject,
+		scope:      domain.ScopeProjectLinked,
+		setup: func(t *testing.T, s *SQLStore, ctx context.Context) string {
+			return mustProjectForAssignment(t, s, ctx, "audit-cip-asset")
+		},
+		mutate: func(t *testing.T, s *SQLStore, ctx context.Context, projectID string) (string, string) {
+			a, err := domain.NewAsset(NewID(), domain.KindServer, "audit-asset-cip", nil, s.Now())
+			if err != nil {
+				t.Fatalf("building asset: %v", err)
+			}
+			if err := s.CreateAssetInProject(ctx, testPermit, projectID, a); err != nil {
+				t.Fatalf("creating asset in project: %v", err)
+			}
+			return a.ID, domain.ActionCreate
+		},
+	},
+	{
+		name:       "asset create-in-project, the project_asset link row",
+		entityType: "project_asset",
+		verb:       verbCreate,
+		scope:      domain.ScopeEstateConfig,
+		setup: func(t *testing.T, s *SQLStore, ctx context.Context) string {
+			return mustProjectForAssignment(t, s, ctx, "audit-cip-asset-link")
+		},
+		mutate: func(t *testing.T, s *SQLStore, ctx context.Context, projectID string) (string, string) {
+			a, err := domain.NewAsset(NewID(), domain.KindServer, "audit-asset-cip-link", nil, s.Now())
+			if err != nil {
+				t.Fatalf("building asset: %v", err)
+			}
+			if err := s.CreateAssetInProject(ctx, testPermit, projectID, a); err != nil {
+				t.Fatalf("creating asset in project: %v", err)
+			}
+			return projectID + "/" + a.ID, domain.ActionCreate
+		},
+	},
+	{
+		name:       "service create-in-project, the service row",
+		entityType: "service",
+		verb:       verbCreateInProject,
+		scope:      domain.ScopeProjectLinked,
+		setup: func(t *testing.T, s *SQLStore, ctx context.Context) string {
+			return mustProjectForAssignment(t, s, ctx, "audit-cip-svc")
+		},
+		mutate: func(t *testing.T, s *SQLStore, ctx context.Context, projectID string) (string, string) {
+			envID := mustEnvironment(t, s, ctx, "audit-cip-svc-env", domain.EnvRoleProduction)
+			svc, err := domain.NewService(NewID(), domain.ServiceSpec{
+				Code: "audit-svc-cip", Name: "Audit Service CIP", Kind: domain.SvcAPI,
+				EnvironmentID: envID, Availability: domain.AvailStandalone, Tier: 3,
+			}, s.Now())
+			if err != nil {
+				t.Fatalf("building service: %v", err)
+			}
+			if err := s.CreateServiceInProject(ctx, testPermit, projectID, svc); err != nil {
+				t.Fatalf("creating service in project: %v", err)
+			}
+			return svc.ID, domain.ActionCreate
+		},
+	},
+	{
+		name:       "service create-in-project, the project_service link row",
+		entityType: "project_service",
+		verb:       verbCreate,
+		scope:      domain.ScopeEstateConfig,
+		setup: func(t *testing.T, s *SQLStore, ctx context.Context) string {
+			return mustProjectForAssignment(t, s, ctx, "audit-cip-svc-link")
+		},
+		mutate: func(t *testing.T, s *SQLStore, ctx context.Context, projectID string) (string, string) {
+			envID := mustEnvironment(t, s, ctx, "audit-cip-svc-link-env", domain.EnvRoleProduction)
+			svc, err := domain.NewService(NewID(), domain.ServiceSpec{
+				Code: "audit-svc-cip-link", Name: "Audit Service CIP Link", Kind: domain.SvcAPI,
+				EnvironmentID: envID, Availability: domain.AvailStandalone, Tier: 3,
+			}, s.Now())
+			if err != nil {
+				t.Fatalf("building service: %v", err)
+			}
+			if err := s.CreateServiceInProject(ctx, testPermit, projectID, svc); err != nil {
+				t.Fatalf("creating service in project: %v", err)
+			}
+			return projectID + "/" + svc.ID, domain.ActionCreate
+		},
+	},
+	{
+		name:       "circuit create-in-project, the circuit row",
+		entityType: "circuit",
+		verb:       verbCreateInProject,
+		scope:      domain.ScopeProjectLinked,
+		setup: func(t *testing.T, s *SQLStore, ctx context.Context) string {
+			return mustProjectForAssignment(t, s, ctx, "audit-cip-circuit")
+		},
+		mutate: func(t *testing.T, s *SQLStore, ctx context.Context, projectID string) (string, string) {
+			providerID := mustProvider(t, s, ctx, "Audit Provider CIP")
+			c, err := domain.NewCircuit(NewID(), "audit-circuit-cip", providerID)
+			if err != nil {
+				t.Fatalf("building circuit: %v", err)
+			}
+			if err := s.CreateCircuitInProject(ctx, testPermit, projectID, c); err != nil {
+				t.Fatalf("creating circuit in project: %v", err)
+			}
+			return c.ID, domain.ActionCreate
+		},
+	},
+	{
+		name:       "circuit create-in-project, the project_circuit link row",
+		entityType: "project_circuit",
+		verb:       verbCreate,
+		scope:      domain.ScopeEstateConfig,
+		setup: func(t *testing.T, s *SQLStore, ctx context.Context) string {
+			return mustProjectForAssignment(t, s, ctx, "audit-cip-circuit-link")
+		},
+		mutate: func(t *testing.T, s *SQLStore, ctx context.Context, projectID string) (string, string) {
+			providerID := mustProvider(t, s, ctx, "Audit Provider CIP Link")
+			c, err := domain.NewCircuit(NewID(), "audit-circuit-cip-link", providerID)
+			if err != nil {
+				t.Fatalf("building circuit: %v", err)
+			}
+			if err := s.CreateCircuitInProject(ctx, testPermit, projectID, c); err != nil {
+				t.Fatalf("creating circuit in project: %v", err)
+			}
+			return projectID + "/" + c.ID, domain.ActionCreate
+		},
+	},
 	// ---------------------------------------------------------------
 	// Project-scoped: asset. A project owner may write these, so a
 	// missing log here is a direct bypass for the role Piece 3 introduces.

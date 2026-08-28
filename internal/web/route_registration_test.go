@@ -14,6 +14,8 @@ import (
 	"go/parser"
 	"go/printer"
 	"go/token"
+	"os"
+	"strings"
 	"testing"
 )
 
@@ -57,11 +59,49 @@ var allowedDirectRegistrations = map[string]string{
 // Adding a genuinely exceptional route is not forbidden -- it requires an
 // entry above saying why, which is a line a reviewer sees.
 func TestEveryRouteIsRegisteredThroughARegistrarOrAnAllowlistedException(t *testing.T) {
-	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, "routes.go", nil, 0)
+	// EVERY non-test file in this package, not the literal name "routes.go".
+	// A whole-branch review pointed out that pinning the filename reopens the
+	// gap this test exists to close: a registration in any other file of
+	// package web would evade both this scan and, through it, the census and
+	// the RBAC boundary suite. Only routes.go has any today; the point is
+	// that a second file cannot arrive unnoticed.
+	entries, err := os.ReadDir(".")
 	if err != nil {
-		t.Fatalf("parsing routes.go: %v", err)
+		t.Fatalf("reading the package directory: %v", err)
 	}
+	var files []string
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		files = append(files, name)
+	}
+	if len(files) == 0 {
+		t.Fatal("no non-test source files found -- this scan would pass vacuously")
+	}
+
+	fset := token.NewFileSet()
+	for _, name := range files {
+		f, err := parser.ParseFile(fset, name, nil, 0)
+		if err != nil {
+			t.Fatalf("parsing %s: %v", name, err)
+		}
+		scanRegistrations(t, fset, f)
+	}
+}
+
+// scanRegistrations flags any Handle/HandleFunc call whose pattern argument is
+// not allowlisted.
+//
+// It matches on the METHOD NAME ALONE, deliberately, and not on a receiver
+// named "mux". Keying on the receiver identifier meant `m := mux` -- or
+// http.Handle, which registers on DefaultServeMux and bypasses this mux
+// entirely -- walked straight past. A false positive here costs one
+// allowlist entry with a reason; a false negative costs a route that no
+// authorization test can see.
+func scanRegistrations(t *testing.T, fset *token.FileSet, f *ast.File) {
+	t.Helper()
 	ast.Inspect(f, func(n ast.Node) bool {
 		call, ok := n.(*ast.CallExpr)
 		if !ok || len(call.Args) == 0 {
@@ -69,10 +109,6 @@ func TestEveryRouteIsRegisteredThroughARegistrarOrAnAllowlistedException(t *test
 		}
 		sel, ok := call.Fun.(*ast.SelectorExpr)
 		if !ok {
-			return true
-		}
-		recv, ok := sel.X.(*ast.Ident)
-		if !ok || recv.Name != "mux" {
 			return true
 		}
 		if sel.Sel.Name != "Handle" && sel.Sel.Name != "HandleFunc" {
@@ -83,7 +119,7 @@ func TestEveryRouteIsRegisteredThroughARegistrarOrAnAllowlistedException(t *test
 			t.Fatalf("rendering pattern at %s: %v", fset.Position(call.Pos()), err)
 		}
 		if _, allowed := allowedDirectRegistrations[buf.String()]; !allowed {
-			t.Errorf("%s registers %s directly on the mux. Route it through "+
+			t.Errorf("%s registers %s directly on a mux. Route it through "+
 				"read/write/writeAdminOnly so the inventory and the RBAC "+
 				"boundary suite can see it, or add it to "+
 				"allowedDirectRegistrations with the reason it is exempt.",
