@@ -19,10 +19,25 @@
 -- writer. A default of `administrator` would silently promote every account
 -- that has ever logged in, including a first-time LDAP bind that upserts an
 -- app_user row from a route nobody reviewed. Anyone who actually needs write
--- access today is already named in INV_ADMIN_USERS, and Task 4 reconciles
--- that list into `role` at startup -- so choosing the safe default here costs
--- nothing an administrator cannot immediately restore, while the unsafe
--- default would need to be caught before it was ever deployed.
+-- access today is already named in INV_ADMIN_USERS -- so choosing the safe
+-- default here costs nothing an administrator cannot immediately restore,
+-- while the unsafe default would need to be caught before it was ever
+-- deployed.
+--
+-- CORRECTION, made after deploying this: an earlier version of this comment
+-- said Task 4 "reconciles that list into `role` at startup". It does not, and
+-- nothing does. INV_ADMIN_USERS is consulted live, on every check, and takes
+-- precedence over this column (auth.Authorizer.isAdministrator tests the
+-- env list FIRST, then the role) -- which is what makes it a break-glass
+-- path that works even when the column says otherwise. The roster shows the
+-- difference rather than hiding it, via Authorizer.EnvOverride and the
+-- "Administrator (from INV_ADMIN_USERS)" marker.
+--
+-- The operational consequence, which the reconciliation story would have
+-- hidden: on a deployment whose only writer is named in INV_ADMIN_USERS,
+-- that row's `role` column still reads `observer`, and removing the
+-- environment variable leaves the estate with no writer at all. Set the role
+-- properly as well as naming the account; see docs/RECOVERY.md.
 --
 -- can_see_costs DEFAULTS TO FALSE and is consulted for BOTH observer and
 -- project_owner (spec §3 as corrected) -- seeing what something costs is a
