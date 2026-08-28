@@ -263,13 +263,17 @@ func TestWriteRoutesCanFail(t *testing.T) {
 	// domain.Permit its store call carries -- WP-G1 Task 10 moved every
 	// write call site from actor(r) to permit(r) once the store methods
 	// stopped taking a bare domain.Actor, and Task 12 turned permit(r) into
-	// a method on App (a.permit(r)) so it could reach a.Authz -- and
-	// a.permit(r) itself calls actor(r) (see app.go), so the walk is still
-	// expected to reach actor( through that one extra hop. Deleting the
-	// a.permit(r) call and writing domain.SystemActor in its place removes
-	// that hop entirely, which is exactly the mutation the brief describes:
-	// a real handler, edited to stop reaching actor(r) at all, and the
-	// question is whether the walk still says it does.
+	// a method on App (a.permit(r)) so it could reach a.Authz.
+	//
+	// permit(r) is itself one of attributionSources (see routescan.go), so
+	// the walk reaches attribution AT that call rather than through it. It
+	// used to reach actor( one hop further on, because permit(r)'s
+	// fail-closed fallback named actor(r); Task 17 moved that fallback into
+	// the shared App.resolvePermit, so no such hop exists any more. Nothing
+	// about this fixture depends on which of the two it is -- the mutation
+	// below removes the a.permit(r) call outright, leaving the handler with
+	// no server-derived attribution at all, and the question is whether the
+	// walk still claims it has some.
 	const from = "a.Store.RetireAsset(r.Context(), a.permit(r), id)"
 	const to = "a.Store.RetireAsset(r.Context(), domain.SystemActor, id)"
 	if !strings.Contains(string(original), from) {

@@ -362,6 +362,35 @@ func buildRoute(pattern, handlerName, gate string, funcs map[string]*ast.FuncDec
 	}
 }
 
+// attributionSources are the helpers a handler can call to learn WHO is
+// making the request, derived from the server's own session state and never
+// from anything the request supplied.
+//
+// "actor" was the only one when Task 6 wrote this walker. WP-G1 moved write
+// attribution onto the permit: a.permit(r) and a.entityPermit(r) both go
+// through App.resolvePermit, which asks auth.Authorizer.Permit for a permit
+// built from the signed-in user, and domain.Permit carries Actor(). A
+// handler reaching any of these has derived its attribution server-side,
+// which is the property this walk exists to measure.
+//
+// Keeping only "actor" here would have made this walker measure a name
+// rather than a property: handlers that correctly took their attribution
+// from the permit would have been reported as reaching nothing, and the
+// pressure would have been to keep a vestigial actor(r) call alive purely to
+// satisfy a test. That is a test dictating code shape, which is how a check
+// quietly stops meaning anything.
+// entityPermit and resolvePermit are deliberately ABSENT. Base calls
+// entityPermit on every page render so CanWriteEntity can answer without a
+// query, which means including it -- or the shared resolvePermit it delegates
+// to -- would mark all 184 routes as reaching attribution, including the six
+// render-only GETs, and a check that everything passes measures nothing.
+// permit(r) is the write path specifically; entityPermit is the read-side UI
+// helper.
+var attributionSources = map[string]bool{
+	"actor":  true,
+	"permit": true,
+}
+
 // callGraphReachesActor walks decl's body and every function it calls within
 // the package (one level of name-based resolution -- see the package
 // comment), looking for a bare call to actor(. Along the way it also records
@@ -392,7 +421,7 @@ func callGraphReachesActor(decl *ast.FuncDecl, funcs map[string]*ast.FuncDecl, v
 		}
 		switch fn := call.Fun.(type) {
 		case *ast.Ident:
-			if fn.Name == "actor" {
+			if attributionSources[fn.Name] {
 				found = true
 				return false
 			}
@@ -407,7 +436,7 @@ func callGraphReachesActor(decl *ast.FuncDecl, funcs map[string]*ast.FuncDecl, v
 				storeCalls[fn.Sel.Name] = true
 			}
 			name := fn.Sel.Name
-			if name == "actor" {
+			if attributionSources[name] {
 				found = true
 				return false
 			}

@@ -53,6 +53,7 @@ type RequestState struct {
 	// correctness trap, not just a slow one: CanWriteEntity is called once
 	// per row in a list template.
 	Permit       domain.Permit
+	PermitErr    error
 	PermitLoaded bool
 }
 

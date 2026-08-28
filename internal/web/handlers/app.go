@@ -748,11 +748,10 @@ func checkbox(r *http.Request, key string) bool {
 // rather than to domain.AdministratorPermit, because assuming "cannot happen"
 // stays true forever is exactly the assumption WP-G1 exists to stop making.
 func (a *App) permit(r *http.Request) domain.Permit {
-	p, err := a.Authz.Permit(r.Context(), middleware.UserFrom(r.Context()))
+	p, err := a.resolvePermit(r)
 	if err != nil {
 		slog.Error("permit refused for a request behind RequireAdmin",
 			"error", err, "path", r.URL.Path)
-		return domain.ScopedPermit(actor(r), nil, nil)
 	}
 	return p
 }
@@ -787,9 +786,30 @@ func (a *App) permit(r *http.Request) domain.Permit {
 // draw. The logic is duplicated inline instead -- three lines, not worth a
 // second named function for the walker to also have to special-case.
 func (a *App) entityPermit(r *http.Request) domain.Permit {
+	p, _ := a.resolvePermit(r)
+	return p
+}
+
+// resolvePermit is the ONE place a request's permit is resolved, cached on
+// the request state so a handler that builds Base more than once -- or calls
+// both permit(r) and entityPermit(r) in the same request -- pays
+// auth.Authorizer.Permit's four queries once.
+//
+// It returns the error as well as the permit because its two callers react
+// to a refusal differently, and that difference is the only reason they are
+// separate functions. permit(r) runs on write routes behind RequireAdmin,
+// where a refusal is anomalous and worth an error log. entityPermit(r) runs
+// on read pages, where an Observer being refused a WRITE permit is the
+// ordinary case and logging it would be noise on every page view.
+//
+// Both get the same fail-closed fallback: a scoped permit covering nothing.
+// Keeping that fallback in one place matters -- two hand-written copies
+// would be two things to keep in step, and a fallback that drifts open is
+// the failure mode this whole work package exists to prevent.
+func (a *App) resolvePermit(r *http.Request) (domain.Permit, error) {
 	state := middleware.StateFrom(r.Context())
 	if state != nil && state.PermitLoaded {
-		return state.Permit
+		return state.Permit, state.PermitErr
 	}
 	user := middleware.UserFrom(r.Context())
 	p, err := a.Authz.Permit(r.Context(), user)
@@ -802,9 +822,10 @@ func (a *App) entityPermit(r *http.Request) domain.Permit {
 	}
 	if state != nil {
 		state.Permit = p
+		state.PermitErr = err
 		state.PermitLoaded = true
 	}
-	return p
+	return p, err
 }
 
 // actor identifies the signed-in user for the audit trail.
