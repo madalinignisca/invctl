@@ -74,6 +74,30 @@ A migration that adds a column classifies it in this table **and** in `domain`. 
 
 ## The rules
 
+> **Since WP-G1, this is an authorization document as well as an audit one.**
+> Object-level authorization is enforced inside `tx.log` — the permit check
+> and the `change_log` insert are the same code path, deliberately, because
+> the audit choke point was already the one place every declared mutation had
+> to pass through.
+>
+> The consequence, stated plainly so nobody has to infer it: **"every declared
+> mutation writes a `change_log` row in the same transaction" is now an
+> authorization invariant, not only an audit rule.** A declared mutation that
+> does not log is not merely an untraceable change — it is an *unauthorized
+> change that succeeded*. A second `INSERT INTO change_log` anywhere in this
+> codebase is a second authorization bypass.
+>
+> `internal/store/audit_matrix_test.go` is the **positive** proof: it asserts
+> that each declared mutation writes exactly one row. Every other boundary
+> test in this repo is negative — they assert that forbidden things are
+> refused, and a mutation that quietly stopped logging would sail past all of
+> them green, because a write that never reaches `tx.log` is never refused by
+> it either. That asymmetry is why the positive test exists and why it is not
+> redundant with the rest.
+>
+> If you are relaxing this rule, adding a second logging path, or moving the
+> permit check out of `tx.log`, this is the fact you have to meet first.
+
 **1. Separation is structural, and the mechanism is named.** Naming a column `observed_*` is not separation: a mixed row produces a mixed audit entry that no portable query can classify, because the only distinguishing information lands inside `change_log.diff` and querying inside JSON is banned. Migration `00006` moves `service_instance.observed_state`/`observed_at` into `asset_health (entity_type, entity_id, reporter, state, state_since, reported_at, last_report_at, PRIMARY KEY (entity_type, entity_id, reporter))`. Do it before the first webhook ships — the estate is a fixture today, and this is the only cheap moment. `UpdateInstance` currently writes `desired_state` and `observed_state` in one statement from a round-tripped struct, so a stale read silently reverts a concurrent operator edit and `logUpdate` attributes the revert to the human; that is the bug this rule exists to prevent and it is in the tree today. Enforcement is three things, not intent: observed writes live only in `internal/store/observed.go`; the webhook handler's store field is typed `store.ObservedStore` (`RecordObservation`, `GetObservedState`) and never `*store.SQLStore`, so overreach is a compile error; and `TestObservedPathTouchesNoDeclaredTable` parses that file and fails on any write naming a table or column off the observed allowlist. If a boundary can only be described as "must not call X", it is not implemented.
 
 **2. Observed state never becomes intent, and never decides alone.** Reported `down` does not become `lifecycle = 'retired'` — nor `'maintenance'`, nor `'deprecated'`; a missing unit does not delete its `service_instance` nor set `desired_state = 'stopped'`. That is an allowlist, not a blocklist: an observed write may write only the observed columns above. Beyond that, observed state must never be the sole input to an output that recommends or authorises a change to declared state, a firewall rule, a scope determination, or a reboot. **Today it does not feed `internal/impact` at all** (`Instance.Disabled` derives from `desired_state` only) and wiring it in is an architecture decision requiring sign-off, not an implementation detail. If that is ever agreed, every report consuming an observed input labels it as observed with its reporter and age — an operator reading a computed "ok" must be able to see the "ok" was asserted by a credential rather than established by configuration. `dependency.last_seen` is subject to this too: it justifies keeping or withdrawing a firewall rule, so a cleanup report may never act on it unattended.

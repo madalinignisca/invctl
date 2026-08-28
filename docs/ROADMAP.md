@@ -396,11 +396,25 @@ worth simulating.
 
 ### Group G — Operational surface
 
-**WP-G1 · Object-level permissions** — L
-Constraint-based RBAC ("this group may edit assets at these sites only"). The
-single biggest gap against NetBox for multi-team and MSP use. Design in
-`docs/rbac-design.md`; if every account ever loses write access, the
-documented way back in is `docs/RECOVERY.md`.
+**WP-G1 · Object-level permissions** — L — **DONE**
+Three roles — Administrator, Observer, project owner — with write scope
+resolved per object rather than per route. Delivered narrower than the
+original "this group may edit assets at these sites only" sketch and
+deliberately so: scope follows **project membership**, which is a fact the
+estate already records, instead of a constraint language nobody has to learn.
+Design in `docs/rbac-design.md`, plan in
+`docs/superpowers/plans/2026-08-26-rbac.md`.
+
+Enforcement lives in `internal/store/store.go`'s `tx.log`, alongside the
+`change_log` insert — see `docs/AUDIT.md`, which is now an authorization
+document as well as an audit one. If every account ever loses write access,
+the documented way back in is still `docs/RECOVERY.md` (`INV_ADMIN_USERS`
+overrides the role column).
+
+Known follow-ups, neither security-affecting: `middleware.RequireAdmin` is
+misnamed now that it admits project owners, and 132 `.CanWrite` occurrences
+across 38 templates still render controls to a project owner that the server
+correctly refuses.
 
 **WP-G2 · Webhooks and event rules** — M
 Fire on declared-state change. Outbound HTTP to a *user-configured* endpoint is

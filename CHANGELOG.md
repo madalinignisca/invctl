@@ -38,6 +38,46 @@ footnote.
 
 ### Action required
 
+- **Project owners can now write, and only within their projects.** This is
+  the change the rest of WP-G1 was building toward, and it is live: a user
+  whose `app_user.role` is `project_owner` may create, edit and retire the
+  assets, services and circuits linked to a project they are assigned to, and
+  is refused on everything else — every other entity type, and every
+  in-scope-looking object in a project they do not hold.
+
+  **Nobody gains access by upgrading.** The role is not assigned to anyone
+  automatically, and there is still no UI for assigning a person to a project
+  (`internal/store/user_projects.go`, no route in front of it yet). Until an
+  Administrator sets both a role and an assignment, every existing account
+  behaves exactly as it did before.
+
+  Scope is resolved fresh on every request, with no cache: removing somebody
+  from a project takes effect on their next click rather than at the end of a
+  session.
+
+- **A project owner creates entities from inside a project, not from the
+  generic form.** `POST /projects/{id}/assets/new` and its service and
+  circuit siblings create the entity and link it to the project in one
+  transaction. `POST /assets` — and the existing "link an entity that already
+  exists into this project" routes — stay Administrator-only. That split is
+  deliberate: it is what makes "may create in my project" and "may take over
+  any existing asset" two different URLs instead of one runtime check.
+
+- **The import surface is Administrator-only, explicitly.** `/imports` and
+  `/import/*` now sit behind a role check rather than the general write gate.
+  Every imported row is newly created, so a project owner's scope could never
+  cover one and the import would have refused every row — a form guaranteed
+  to fail is worse than one that is absent.
+
+- **The E2E fixture account now requires a password you choose.** If you run
+  the browser suite: `INV_SEED_E2E_PROJECT_OWNER=true` alone no longer creates
+  anything. Set `INV_E2E_PROJECT_OWNER_PASSWORD` as well — there is no default
+  in the binary or in the specs. The password used to be a constant published
+  in this repository, which would have been a working login on any deployment
+  where the flag was ever set. Note the flag is a one-way ratchet: unsetting
+  it does **not** remove an account it already created, and the seeder now
+  logs a warning whenever it stages or finds one.
+
 - **Cost figures are no longer visible to every reader by default.**
   `Authorizer.CanSeeCosts` used to return exactly what `CanRead` did, so every
   authenticated user saw acquisition prices, support contract values and
