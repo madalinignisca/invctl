@@ -749,6 +749,30 @@ func TestAProjectOwnerIsRefusedOnEveryNonProjectLinkableWriteRoute(t *testing.T)
 			linkable := routeScopedTypes(t, routes)
 			excluded := excludedFromStep4(routes, linkable)
 
+			// THE ASSERTION THAT CARRIES THE SECURITY CLAIM. Every route
+			// driven below is, by construction of excludedFromStep4, one a
+			// project owner may NOT write -- so whatever status each one
+			// returns, the estate must be byte-identical afterwards.
+			//
+			// This exists because the status-code buckets stopped being
+			// sufficient at Task 13. Before the flip, RequireAdmin refused
+			// every route before it parsed a body, so an empty body was
+			// enough to prove refusal. After the flip a project owner
+			// passes the middleware and most handlers now fail on form
+			// validation, a no-op redirect or a 404 BEFORE the permit is
+			// ever consulted -- 119 of 135 routes land in "other", and a
+			// 3xx from a handler that redirects on both success and no-op
+			// is indistinguishable from a write that worked.
+			//
+			// Counting change_log closes that hole without needing a valid
+			// payload for 135 routes: tx.log is the only INSERT INTO
+			// change_log in this codebase, so a declared-state write that
+			// committed leaves a row here and one that was refused or
+			// rolled back does not. It turns "119 routes returned
+			// something" into "119 routes wrote nothing", which is the
+			// property the test's name claims.
+			changeLogBefore := h.count(`SELECT COUNT(*) FROM change_log`)
+
 			var driven, adminGate, administratorGate, permitGate, userForbiddenGate, other int
 			for _, route := range routes {
 				if excluded[route.Pattern] {
@@ -795,6 +819,13 @@ func TestAProjectOwnerIsRefusedOnEveryNonProjectLinkableWriteRoute(t *testing.T)
 
 			if driven == 0 {
 				t.Fatal("no route was driven -- the exclusion filter ate the whole list")
+			}
+			if after := h.count(`SELECT COUNT(*) FROM change_log`); after != changeLogBefore {
+				t.Errorf("change_log grew from %d to %d while driving %d routes a project owner "+
+					"may not write. Whatever status those routes returned, at least one write "+
+					"COMMITTED -- that is the escalation this suite exists to catch, and a "+
+					"status-code bucket would not have shown it.",
+					changeLogBefore, after, driven)
 			}
 			if adminGate != 0 {
 				t.Errorf("RequireAdmin refusals = %d, want 0 -- a project owner is being refused at "+
