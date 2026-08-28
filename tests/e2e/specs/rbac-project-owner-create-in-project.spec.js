@@ -28,13 +28,14 @@
 // that file's header and internal/seed/seed_e2e_fixture.go for why
 // (INV_SEED_E2E_PROJECT_OWNER=true, never on a shared or public deployment).
 //
-// THE SECOND TEST IS A DELIBERATE, DECLARED FAILURE TODAY, for the identical
-// reason as the sibling spec: auth.CanWrite(RoleProjectOwner) is still false
-// ahead of WP-G1 Task 13, so middleware.RequireAdmin refuses the create POST
-// with 403 before AssetCreateInProject ever runs. test.fail() asserts
-// exactly that, so this test starts failing FOR Playwright (an unexpected
-// pass) the day Task 13 flips CanWrite -- see the sibling spec's header for
-// the full reasoning, not repeated twice.
+// THE SECOND TEST WAS A DELIBERATE, DECLARED FAILURE, for the identical
+// reason as the sibling spec: auth.CanWrite(RoleProjectOwner) used to be
+// unconditionally false, so middleware.RequireAdmin refused the create POST
+// with 403 before AssetCreateInProject ever ran. It carried a test.fail()
+// asserting exactly that -- see the sibling spec's header for the full
+// reasoning, not repeated twice. WP-G1 Task 13 has now landed and this test
+// asserts the create genuinely succeeds and links the new asset to the
+// owner's own project.
 import { test, expect } from '@playwright/test';
 import { resolveProjectPath, resolveAssetPath } from '../helpers/resolve.js';
 import { signInAsFreshUser } from '../helpers/login.js';
@@ -75,24 +76,34 @@ describeHere(
       }
     });
 
-    test('has no generic "New asset" entry point, but does have their own project\'s create-in-project form', async ({
+    test('shows the generic "New asset" form (a known, deferred UX gap) but also their own project\'s create-in-project form', async ({
       browser,
     }) => {
       const { context, page } = await signInAsFreshUser(browser, BASE_URL, OWNER_USERNAME, OWNER_PASSWORD);
       try {
         // The generic entry point: web/templates/pages/asset_list.html gates
         // its embedded "Add an asset" form (action="/assets", the plain
-        // Administrator-only create route) on `.CanWrite`, page-wide -- still
-        // false for every project owner today. This passes today for that
-        // reason; it is a page-wide control, never converted to
-        // CanWriteEntity (WP-G1 Task 17 Step 1 only converts entity-specific
-        // controls on the asset/service/circuit list, detail and row
-        // templates -- this is neither).
+        // Administrator-only create route) on `.CanWrite`, page-wide. Before
+        // WP-G1 Task 13 that was unconditionally false for a project owner,
+        // so this control was correctly hidden; Task 13 made CanWrite true
+        // for a project owner (it now means "may reach a write-gated route",
+        // not "may write everything" -- see auth.CanWrite's own comment),
+        // and this template was never converted to the entity-scoped
+        // CanWriteEntity check the same task's Step 1 gave the asset/
+        // service/circuit list, detail and row templates. Task 17 counted
+        // 132 `.CanWrite` occurrences across 38 template files with this
+        // same property; widening all of them is EXPLICITLY DEFERRED
+        // (WP-G1 Task 13's own brief: "a UX defect, not a security one" --
+        // the server refuses every one, see the second test below and
+        // internal/domain/role.go's ScopeClassOf/Covers). This assertion
+        // therefore pins the control being VISIBLE, not absent -- flip it
+        // back to toHaveCount(0) the day that template sweep lands, not
+        // before.
         await page.goto('/assets', { waitUntil: 'networkidle' });
         await expect(
           page.locator('form[action="/assets"]'),
-          'a project owner should see no generic "New asset" form on the asset list page',
-        ).toHaveCount(0);
+          'a project owner sees the generic "New asset" form today -- see this test\'s own comment',
+        ).toHaveCount(1);
 
         // Their own project's page DOES offer a way in: the create-in-project
         // form (web/templates/partials/project_create_form.html), posted to
@@ -115,10 +126,9 @@ describeHere(
       }
     });
 
-    test('creating an asset from their project page succeeds and links it there -- TRIPWIRE, see this file\'s header', async ({
+    test('creating an asset from their project page succeeds and links it there', async ({
       browser,
     }) => {
-      test.fail();
       const { context, page } = await signInAsFreshUser(browser, BASE_URL, OWNER_USERNAME, OWNER_PASSWORD);
       try {
         const projectPath = await resolveProjectPath(page, PROJECT_CODE);
@@ -136,8 +146,8 @@ describeHere(
           ),
           page.locator('#project-create-asset-form button[type="submit"]').click(),
         ]);
-        // THE PART THAT FAILS TODAY: RequireAdmin answers 403 before
-        // AssetCreateInProject is ever reached. On success, this route
+        // The object gate covers the owner's own project, so the write
+        // reaches AssetCreateInProject and succeeds. On success, this route
         // answers via internal/web/render.Redirect for an HTMX request:
         // 204 with an HX-Redirect header, not a 3xx Location -- see that
         // function and CLAUDE.md's HTTP conventions.
@@ -145,8 +155,7 @@ describeHere(
         const redirectTo = response.headers()['hx-redirect'];
         expect(redirectTo, 'the create response should redirect to the new asset').toMatch(/^\/assets\//);
 
-        // Reached only once the assertions above actually pass (post-Task
-        // 13): HTMX follows HX-Redirect itself, so the browser should have
+        // HTMX follows HX-Redirect itself, so the browser should have
         // already landed on the new asset.
         await page.waitForURL(/\/assets\//);
         await expect(page.locator('h1')).toHaveText(newName);

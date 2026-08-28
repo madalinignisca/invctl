@@ -66,16 +66,6 @@
       </select>
       <button class="btn btn-sm" type="submit">Save</button>
     </form>
-    {{/* The fail-closed state, visible: object-level write for a project
-         owner is not live until WP-G1 Task 13, and Task 13 must remove this
-         badge along with TestTheRosterMarksAProjectOwnerAsPendingWhileTheGate
-         IsNotLive -- a "pending" badge that outlives the gate is a lie. */}}
-    {{if eq .User.Role "project_owner"}}
-    <div class="pill pill-muted" style="margin-top:4px"
-         title="Object-level write for project owners lands with project scoping">
-      pending — takes effect when project scoping ships
-    </div>
-    {{end}}
   </td>
   <td>
     {{/* The single cost-grant control (spec §3): the same route and the same

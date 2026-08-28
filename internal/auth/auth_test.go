@@ -370,40 +370,21 @@ func TestAnObserverMayReadEverythingAndWriteNothing(t *testing.T) {
 	}
 }
 
-// TestAProjectOwnerCannotWriteAnythingUntilTheObjectGateIsLive is the
-// fail-closed ruling from docs/rbac-design.md §6/§8, asserted directly:
-// CanWrite(project owner) == false, exactly, full stop. Object-level scope
-// ("may write entities linked to their own project") is decided per-handler
-// against the object and does not exist yet -- it is WP-G1 Task 13. Until
-// that lands, treating a project owner as writable here would hand them
-// unrestricted write over the entire estate, which is worse than refusing
-// them outright. THIS IS NOT A BUG. Do not "fix" a red version of this test
-// by loosening CanWrite -- land Task 13's object-level check first.
-func TestAProjectOwnerCannotWriteAnythingUntilTheObjectGateIsLive(t *testing.T) {
+// TestAProjectOwnerCanReachTheWriteGateNowThatTheObjectGateIsLive replaces
+// the two fail-closed tests this task deliberately deleted
+// (TestAProjectOwnerCannotWriteAnythingUntilTheObjectGateIsLive and
+// TestAProjectOwnerAssignedToAProjectStillCannotWrite): CanWrite(project
+// owner) == true is the whole point of WP-G1 Task 13. What used to be
+// enforced here -- "a project owner may not touch anything outside their
+// project" -- is now the object gate's job (Authorizer.Permit /
+// scopedPermit.Covers), not CanWrite's, and is covered by permit_test.go and
+// the Task 14-17 handler suites, not this package.
+func TestAProjectOwnerCanReachTheWriteGateNowThatTheObjectGateIsLive(t *testing.T) {
 	authz := NewAuthorizer(nil, nil)
 	user := &domain.AppUser{Username: "priya", IsActive: true, Role: domain.RoleProjectOwner}
 
-	if authz.CanWrite(user) {
-		t.Error("a project owner could write before the object-level gate (Task 13) exists")
-	}
-}
-
-// TestAProjectOwnerAssignedToAProjectStillCannotWrite is the same ruling,
-// with a project assignment recorded, because that is the state an
-// Administrator will actually create during WP-G1 Pieces 1-2: a project
-// owner is assigned to a project, on the shape of the data long before any
-// code consults it for a write decision.
-func TestAProjectOwnerAssignedToAProjectStillCannotWrite(t *testing.T) {
-	authz := NewAuthorizer(nil, nil)
-	user := &domain.AppUser{
-		Username: "priya", IsActive: true, Role: domain.RoleProjectOwner,
-	}
-	// CanWrite takes no project/assignment argument at all today -- there is
-	// nothing yet for an assignment to change. That absence is exactly what
-	// this test is pinning down: assignment data existing must not, by
-	// itself, alter the answer until Task 13 wires an object check in.
-	if authz.CanWrite(user) {
-		t.Error("an assigned project owner could write before the object-level gate exists")
+	if !authz.CanWrite(user) {
+		t.Error("a project owner could not reach the write gate even though the object gate is live")
 	}
 }
 

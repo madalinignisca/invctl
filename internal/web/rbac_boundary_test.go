@@ -52,24 +52,36 @@ import (
 // file's one enumeration (Step 2/3/4 below) is GENERATED from the router via
 // routescan.WriteRoutes, not maintained by hand.
 //
-// THE TRAP THIS FILE IS BUILT AROUND: auth.CanWrite(RoleProjectOwner) is
-// still false -- WP-G1 Task 13 has not landed. That means the project-owner
-// test below (Step 4) passes TODAY for a reason that will change: every
-// write route refuses a project owner at middleware.RequireAdmin, before any
-// handler-level scope check runs at all. A test that only asserted "403"
-// would keep passing, unchanged, the day Task 13 flips CanWrite and the
-// scope check becomes the thing actually doing the refusing -- which is
-// exactly the kind of test that was never watching. So Step 4 asserts WHICH
-// LAYER refused, not merely that one did, and records today's distribution
-// as a comment BELOW that the assertion enforces: when Task 13 lands, this
-// file goes red until it is updated for the post-flip world.
+// THE TRAP THIS FILE WAS BUILT AROUND, AND WHAT SPRUNG IT: before WP-G1 Task
+// 13, auth.CanWrite(RoleProjectOwner) was false, so the project-owner test
+// below (Step 4) passed for a reason that was always going to change -- every
+// write route refused a project owner at middleware.RequireAdmin, before any
+// handler-level scope check ran at all. A test that only asserted "403" would
+// have kept passing, unchanged, the day Task 13 flipped CanWrite and the
+// object gate (auth.Authorizer.Permit / scopedPermit.Covers) became the thing
+// actually doing the refusing. It did not keep passing: Step 4 went red the
+// moment the flip landed, exactly as designed, because it asserts WHICH LAYER
+// refused, not merely that one did. See Step 4's own comment below for the
+// post-flip distribution this file now enforces, and the two things reading
+// that distribution back out of raw HTTP responses turned out to require
+// understanding rather than assuming: a form-driven handler that redirects
+// with a flash message on EVERY outcome (success, validation refusal, and an
+// authorization refusal all look identical over HTTP -- see
+// ManufacturerRetire and JournalCreate/journalRefused for two examples), and
+// one handler (respondUserMutation) that deliberately renders a raw
+// domain.ErrForbidden message instead of the generic one, for a reason
+// unrelated to this flip (the last-active-Administrator guard) that this
+// flip made reachable by a project owner for the first time.
 //
-// THREE REFUSAL LAYERS, DISTINGUISHED BY RESPONSE BODY (verified against the
+// REFUSAL LAYERS, DISTINGUISHED BY RESPONSE BODY (verified against the
 // source at the call sites, not assumed):
 //   - middleware.RequireAdmin            -> "You have read-only access."
 //   - middleware.RequireAdministrator    -> "This requires an Administrator."
 //   - a permit refusal at tx.authorize,
 //     surfaced through handleStoreError  -> "You are not allowed to do that."
+//   - a permit refusal at tx.authorize, surfaced through respondUserMutation
+//     specifically (see that function's own comment) -> the raw wrapped
+//     error, "writing change log for app_user <id>: forbidden".
 
 // ---------------------------------------------------------------------------
 // Engines. store.Engines lives in an internal/store _test.go file and is not
@@ -662,30 +674,71 @@ func TestNoWriteRouteIsReachableWithoutGoingThroughTheRouter(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Step 4: a project owner is refused on every non-project-linkable write
-// route, and the refusing LAYER is asserted, not merely the status code.
+// Step 4: a project owner reaches every non-project-linkable write handler
+// (WP-G1 Task 13 flipped auth.CanWrite(RoleProjectOwner) to true), and this
+// asserts WHICH LAYER, if any, refuses each one -- not merely a status code.
 //
-// TODAY'S DISTRIBUTION, asserted below rather than merely described:
-// auth.CanWrite(RoleProjectOwner) is still false (WP-G1 Task 13 has not
-// landed), so EVERY route in the non-excluded set refuses at middleware --
-// "write"-gated routes at middleware.RequireAdmin ("You have read-only
-// access."), "writeAdminOnly"-gated routes at middleware.RequireAdministrator
-// ("This requires an Administrator."). Zero routes are refused by the permit
-// layer (tx.authorize, surfaced as "You are not allowed to do that.") because
-// no request in this test ever reaches a handler at all.
+// WHY THIS CANNOT BE "every driven route is refused at 403", THE WAY IT WAS
+// BEFORE TASK 13: driveRoute submits an empty form body (this suite's own
+// design -- see driveRoute's comment -- because building valid payloads for
+// ~130 distinct handlers is Tasks 14-17's job, done with real fixtures,
+// against real scope logic, not this enumeration's). Reaching a real handler
+// with no form data hits THREE different outcomes ahead of the permit check,
+// all legitimate and none of them a security gap:
+//   - Required-field validation refuses first (422), the object's scope is
+//     never consulted.
+//   - A handful of GETs in the write bucket are render-only forms/listings
+//     (routescan's own doc comment names them) -- CanRead is unscoped for
+//     every authenticated user (rbac-design.md §2), so these now render 200,
+//     which is not a new disclosure.
+//   - Several handlers (ManufacturerRetire and friends, JournalCreate via
+//     journalRefused) render the SAME redirect-with-flash-message on every
+//     outcome -- success, a business conflict, AND a permit refusal are all
+//     a 303 with an empty body over HTTP, because the reason lives in a
+//     flash cookie this suite does not decode. That looked, on first read of
+//     this task, like an authorization bypass; it is not. Every write in
+//     this codebase runs inside writeTx (store.go), which rolls back the
+//     WHOLE transaction -- including an already-executed UPDATE -- the
+//     moment t.log's authorize() call returns an error (verified by reading
+//     RetireManufacturer: the exec runs before the logUpdate that can still
+//     refuse and unwind it). A misleading flash message is a UX defect
+//     worth a separate ticket, not a write that reached the database.
 //
-// THIS MUST CHANGE THE DAY TASK 13 LANDS: a project owner will then reach
-// every non-project-linkable handler and be refused there instead, by the
-// permit. Leaving this test asserting today's distribution unchanged is
-// exactly the trap this file's package comment describes -- so when that
-// day comes, this test goes RED until its assertions are updated for the
-// post-flip world, which is the point.
+// So Step 4 pins the two numbers that ARE a clean, falsifiable claim about
+// the layer shift, plus the number of routes that DO reach a distinguishable
+// permit refusal despite the empty body:
+//   - adminGate == 0: no "write"-gated route refuses a project owner at
+//     middleware.RequireAdmin anymore. This is the headline of the whole
+//     task -- if this is ever nonzero again, CanWrite regressed.
+//   - administratorGate == 6: the writeAdminOnly import surface is
+//     untouched by this flip, because it gates on IsAdministrator, not
+//     CanWrite, and a project owner is never an Administrator.
+//   - permitGate == 8: routes whose handler's error path preserves
+//     handleStoreError's generic "You are not allowed to do that." text
+//     for a plain domain.ErrForbidden, reached with an empty body.
+//   - userForbiddenGate == 2: the two /users/* mutation routes, which go
+//     through respondUserMutation's own deliberate exception (see that
+//     function's comment) and therefore surface the raw wrapped error
+//     instead of the generic text.
+//   - every other driven route must return a status under 500 -- this suite
+//     cannot know the semantic outcome of each one without real payloads,
+//     but a project owner request must never crash a handler.
+//
+// If a future change makes any of these four counts drift, THAT IS THE
+// SIGNAL to look, the same way the original three-body switch was -- a
+// route quietly moving from admin-only to a wide-open write, or a new
+// handler adopting respondUserMutation's raw-error pattern for a route
+// this test does not yet know about.
 func TestAProjectOwnerIsRefusedOnEveryNonProjectLinkableWriteRoute(t *testing.T) {
 	const (
 		bodyRequireAdmin         = "You have read-only access.\n"
 		bodyRequireAdministrator = "This requires an Administrator.\n"
 		bodyPermitRefused        = "You are not allowed to do that.\n"
 	)
+	isUserForbiddenBody := func(body string) bool {
+		return strings.HasPrefix(body, "writing change log for app_user ") &&
+			strings.HasSuffix(body, ": forbidden\n")
+	}
 
 	for _, eng := range boundaryEngines(t) {
 		t.Run(eng.name, func(t *testing.T) {
@@ -696,7 +749,7 @@ func TestAProjectOwnerIsRefusedOnEveryNonProjectLinkableWriteRoute(t *testing.T)
 			linkable := routeScopedTypes(t, routes)
 			excluded := excludedFromStep4(routes, linkable)
 
-			var driven, adminGate, administratorGate, permitGate int
+			var driven, adminGate, administratorGate, permitGate, userForbiddenGate, other int
 			for _, route := range routes {
 				if excluded[route.Pattern] {
 					continue
@@ -704,26 +757,38 @@ func TestAProjectOwnerIsRefusedOnEveryNonProjectLinkableWriteRoute(t *testing.T)
 				driven++
 				resp := driveRoute(t, h, route, fx)
 				body := drainedBody(t, resp)
-				if resp.StatusCode != http.StatusForbidden {
-					t.Errorf("%s as a project owner returned %d (body %q), want 403",
+
+				if resp.StatusCode >= http.StatusInternalServerError {
+					t.Errorf("%s as a project owner returned %d (body %q) -- a project owner's request must never crash a handler",
 						route.Pattern, resp.StatusCode, truncate(body))
 					continue
 				}
-				switch body {
-				case bodyRequireAdmin:
+				if resp.StatusCode != http.StatusForbidden {
+					other++
+					continue
+				}
+				switch {
+				case body == bodyRequireAdmin:
 					adminGate++
 					if route.Gate != "write" {
 						t.Errorf("%s refused by RequireAdmin's text but registered gate is %q", route.Pattern, route.Gate)
 					}
-				case bodyRequireAdministrator:
+				case body == bodyRequireAdministrator:
 					administratorGate++
 					if route.Gate != "writeAdminOnly" {
 						t.Errorf("%s refused by RequireAdministrator's text but registered gate is %q", route.Pattern, route.Gate)
 					}
-				case bodyPermitRefused:
+				case body == bodyPermitRefused:
 					permitGate++
+				case isUserForbiddenBody(body):
+					userForbiddenGate++
+					if !strings.HasPrefix(route.Pattern, "POST /users/") {
+						t.Errorf("%s refused with the app_user-forbidden text, but is not a /users/ route -- "+
+							"respondUserMutation's raw-error exception has spread somewhere this test does not expect",
+							route.Pattern)
+					}
 				default:
-					t.Errorf("%s refused with an unrecognised body %q -- update this test's three known refusal texts",
+					t.Errorf("%s refused with an unrecognised body %q -- update this test's known refusal texts",
 						route.Pattern, truncate(body))
 				}
 			}
@@ -731,20 +796,26 @@ func TestAProjectOwnerIsRefusedOnEveryNonProjectLinkableWriteRoute(t *testing.T)
 			if driven == 0 {
 				t.Fatal("no route was driven -- the exclusion filter ate the whole list")
 			}
-			// The assertion this test exists for: today's distribution is
-			// entirely middleware, and it is checked, not merely commented.
-			if permitGate != 0 {
-				t.Errorf("permit-layer refusals = %d, want 0 -- if Task 13 has landed, "+
-					"this whole test needs its post-flip update, not a quiet pass", permitGate)
+			if adminGate != 0 {
+				t.Errorf("RequireAdmin refusals = %d, want 0 -- a project owner is being refused at "+
+					"middleware on a route that should reach its handler now that CanWrite(project owner) is true",
+					adminGate)
 			}
 			if administratorGate != 6 {
 				t.Errorf("RequireAdministrator refusals = %d, want 6 (the writeAdminOnly bucket's "+
 					"six admin-only GETs and import POSTs)", administratorGate)
 			}
-			if adminGate != driven-administratorGate {
-				t.Errorf("RequireAdmin refusals = %d, want %d (every driven route minus the "+
-					"writeAdminOnly ones)", adminGate, driven-administratorGate)
+			if permitGate != 8 {
+				t.Errorf("permit-layer refusals (generic body) = %d, want 8 -- see this test's own "+
+					"comment for the routes this pins", permitGate)
 			}
+			if userForbiddenGate != 2 {
+				t.Errorf("permit-layer refusals through respondUserMutation's raw-error path = %d, want 2 "+
+					"(/users/{id}/active and /users/{id}/scrub)", userForbiddenGate)
+			}
+			t.Logf("%d driven, %d refused with a status other than 403 (validation, no-op-looking "+
+				"redirects, 404s against random fallback ids, and similar -- see this test's own comment)",
+				driven, other)
 		})
 	}
 }

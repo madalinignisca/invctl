@@ -244,31 +244,6 @@ func TestTheCostGrantIsOneControlForObserversAndProjectOwnersAlike(t *testing.T)
 	}
 }
 
-// TestTheRosterMarksAProjectOwnerAsPendingWhileTheGateIsNotLive.
-//
-// CanWrite(project owner) == false unconditionally until WP-G1 Task 13 (see
-// Authorizer.CanWrite's own comment). An administrator who assigns the role
-// and sees nothing else change on the estate files a bug unless the roster
-// says so itself.
-//
-// DELETE THIS TEST IN TASK 13, along with the badge it pins -- a "pending"
-// label that outlives the gate it describes is a lie.
-func TestTheRosterMarksAProjectOwnerAsPendingWhileTheGateIsNotLive(t *testing.T) {
-	h := newHarness(t)
-	mustWebUserWithRole(t, h, "pending-owner", domain.RoleProjectOwner)
-	mustWebUserWithRole(t, h, "real-admin", domain.RoleAdministrator)
-	h.login("admin", "admin-password")
-
-	page := body(t, h.get("/users", false))
-	const badge = "pending — takes effect when project scoping ships"
-	if !strings.Contains(page, badge) {
-		t.Fatal("the roster does not mark a project owner as pending")
-	}
-	if n := strings.Count(page, badge); n != 1 {
-		t.Errorf("the pending badge appears %d times, want exactly 1 (only the project owner)", n)
-	}
-}
-
 // TestTheRosterShowsEffectiveAdminAccessGrantedByEnvOverride.
 //
 // The seeded "admin" account is exactly the case that motivates this: its

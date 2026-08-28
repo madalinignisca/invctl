@@ -222,15 +222,13 @@ func (a *Authorizer) isAdministrator(user *domain.AppUser) bool {
 // IsAdministrator reports whether user holds full Administrator authority --
 // by role, or by the INV_ADMIN_USERS break-glass override -- and is active.
 //
-// DELIBERATELY SEPARATE FROM CanWrite, even though the two agree on every
-// input today: CanWrite is "may mutate anything", which happens to equal "is
-// an Administrator" only because RoleProjectOwner is fail-closed until Task
-// 13 (see CanWrite's own comment). A caller asking "is this specifically an
-// Administrator" -- the secret-reference redaction on the service page is
-// exactly that caller -- must not borrow CanWrite for it: the day a project
-// owner's scoped write lands, CanWrite(project owner) starts returning true
-// for their own objects, and a check that meant "administrator" would start
-// handing them every other identity's credential path along with it.
+// DELIBERATELY SEPARATE FROM CanWrite: since WP-G1 Task 13, CanWrite(project
+// owner) returns true too -- it now means "may reach a write-gated route",
+// with the object gate (Authorizer.Permit) deciding the rest. A caller asking
+// "is this specifically an Administrator" -- the secret-reference redaction
+// on the service page is exactly that caller -- must not borrow CanWrite for
+// it: doing so would hand a project owner every other identity's credential
+// path along with their own scoped objects.
 func (a *Authorizer) IsAdministrator(user *domain.AppUser) bool {
 	if user == nil || !user.IsActive {
 		return false
@@ -258,25 +256,27 @@ func (a *Authorizer) EnvOverride(user *domain.AppUser) bool {
 	return a.admins[strings.ToLower(user.Username)]
 }
 
-// CanWrite reports whether a user may mutate anything.
+// CanWrite reports whether a user may reach a write-gated route at all.
 //
 // Administrator (by role, or by the INV_ADMIN_USERS override) may write
 // everything. Observer may write nothing.
 //
-// RoleProjectOwner deliberately returns false here, unconditionally, even
-// once they are assigned to a project. Object-level scope -- "may write
-// entities linked to their own project" -- is a per-handler check against the
-// object, decided by WP-G1 Task 13, and does not exist yet. Treating a
-// project owner as writable before that check lands would grant them
-// unrestricted write over the whole estate, which is worse than today's
-// model. This is the deliberate fail-closed state, not a bug -- see
-// TestAProjectOwnerCannotWriteAnythingUntilTheObjectGateIsLive. Do not "fix"
-// it without Task 13 also landing.
+// RoleProjectOwner now returns true here (WP-G1 Task 13): the object gate --
+// Authorizer.Permit / scopedPermit.Covers, live and tested since Task 12 --
+// is what actually decides whether a specific write reaches a specific
+// object. CanWrite therefore stopped meaning "may mutate anything" the
+// moment this line flipped; it means "may reach the handler", and the
+// per-object decision happens downstream. A caller that needs "is this
+// specifically an Administrator" must use IsAdministrator, never this --
+// see IsAdministrator's own comment, which predicted this exact change.
 func (a *Authorizer) CanWrite(user *domain.AppUser) bool {
 	if user == nil || !user.IsActive {
 		return false
 	}
-	return a.isAdministrator(user)
+	if a.isAdministrator(user) {
+		return true
+	}
+	return user.Role == domain.RoleProjectOwner
 }
 
 // CanRead reports whether a user may see anything. Every authenticated user

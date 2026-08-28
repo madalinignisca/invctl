@@ -189,11 +189,12 @@ func (a *App) UserSetRole(w http.ResponseWriter, r *http.Request) {
 	// a.permit(r), never domain.AdministratorPermit: this previously minted
 	// an administrator permit on the reasoning that the route is
 	// RequireAdmin-only. Of every place that shim appeared, this was the
-	// worst -- SetUserRole is the route that GRANTS roles, so once Task 13
-	// makes auth.CanWrite true for a project owner, RequireAdmin would admit
-	// one here holding a permit that covers everything, and they could make
-	// themselves an Administrator. With the caller's own permit, app_user is
-	// estate configuration and tx.log refuses it. See circuits.go's comment.
+	// worst -- SetUserRole is the route that GRANTS roles, and since Task 13
+	// made auth.CanWrite true for a project owner, RequireAdmin now admits
+	// one here. With the caller's own permit, app_user is estate
+	// configuration and tx.log refuses it, so a project owner reaching this
+	// handler still cannot make themselves an Administrator. See
+	// circuits.go's comment.
 	err := a.Store.SetUserRole(r.Context(), a.permit(r), id, role)
 	a.respondUserMutation(w, r, id, err, "Role updated.")
 }

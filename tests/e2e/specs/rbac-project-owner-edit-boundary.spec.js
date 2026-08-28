@@ -29,17 +29,17 @@
 // addition to INV_SEED=true) before pointing this spec at it -- never on a
 // shared or public deployment.
 //
-// THE SECOND TEST IS A DELIBERATE, DECLARED FAILURE TODAY, AND MUST STAY
-// THAT WAY UNTIL WP-G1 TASK 13 LANDS. auth.CanWrite(RoleProjectOwner) is
-// still false (Task 13 flips it, deliberately last, once every entity-scope
-// check has been proven ahead of it going live) -- so middleware.RequireAdmin
-// refuses the save POST with 403 before AssetUpdate ever runs, regardless of
-// which asset or which fields. test.fail() asserts exactly that: this test
-// currently fails, and Playwright reports it as an ERROR the day it starts
-// passing -- which is the day CanWrite(project owner) goes live. That is the
-// point: it forces whoever lands Task 13 to come back here and remove the
-// test.fail() call, rather than this suite quietly reporting the same green
-// or red across the flip and nobody noticing either way.
+// THE SECOND TEST WAS A DELIBERATE, DECLARED FAILURE UNTIL WP-G1 TASK 13
+// LANDED. auth.CanWrite(RoleProjectOwner) used to be unconditionally false,
+// so middleware.RequireAdmin refused the save POST with 403 before
+// AssetUpdate ever ran, regardless of which asset or which fields. It carried
+// a test.fail() that asserted exactly that -- Playwright would have reported
+// an ERROR the day it started passing unexpectedly, which forced whoever
+// landed Task 13 to come back here and remove it rather than the flip's
+// effect on this spec going unnoticed either way. Task 13 has now landed:
+// CanWrite(project owner) is true, the object gate decides the rest, and this
+// test asserts the save actually succeeds and sticks -- run for real against
+// a local instance with the fixture staged, not merely inspected.
 import { test, expect } from '@playwright/test';
 import { resolveAssetPath } from '../helpers/resolve.js';
 import { signInAsFreshUser, csrfTokenFrom } from '../helpers/login.js';
@@ -132,18 +132,64 @@ describeHere(
         // --- The server refusal itself: a direct POST, bypassing the
         // missing form entirely. THIS is the boundary CLAUDE.md's own rule
         // names -- "hiding a control is not the enforcement" -- and it is
-        // asserted independently of whatever the UI drew above. Minimal,
-        // deliberately: with the entity-scope check unreachable today (see
-        // this file's header), nothing past RequireAdmin's role check is
-        // exercised, so this payload does not carry a real row_version --
-        // whoever revisits this alongside Task 13 will need to fetch one for
-        // the assertion to mean anything past the role gate.
+        // asserted independently of whatever the UI drew above.
+        //
+        // REAL row_version/lifecycle/environments VALUES ARE REQUIRED for
+        // this to mean anything, exactly as this comment warned before
+        // WP-G1 Task 13 landed: AssetUpdate checks the optimistic-lock
+        // version and re-validates lifecycle before it ever reaches the
+        // permit (internal/web/handlers/assets.go's AssetUpdate ->
+        // internal/store's UpdateAsset), so an empty payload gets refused as
+        // STALE or "not a valid lifecycle" (422, either way) without the
+        // object gate ever being consulted -- a true 403-shaped expectation
+        // failing for the wrong reason. The project owner themselves cannot
+        // read any of this for an out-of-scope asset (its edit form
+        // correctly does not render for them, asserted above), so a second,
+        // throwaway admin session fetches it purely as fixture setup -- this
+        // context asserts nothing and never touches the shared admin session
+        // playwright.config.js authenticates globally, the same isolation
+        // user-administration.spec.js's own admin/colleague split uses.
+        const adminUsername = process.env.INV_E2E_USERNAME || 'admin';
+        const adminPassword = process.env.INV_E2E_PASSWORD || 'demo-password';
+        const adminContext = await browser.newContext({ baseURL: BASE_URL, storageState: { cookies: [], origins: [] } });
+        const adminPage = await adminContext.newPage();
+        await adminPage.goto('/login');
+        await adminPage.locator('#username').fill(adminUsername);
+        await adminPage.locator('#password').fill(adminPassword);
+        await Promise.all([
+          adminPage.waitForLoadState('networkidle'),
+          adminPage.locator('button[type="submit"]').click(),
+        ]);
+        await expect(adminPage.locator('.rail-foot .id')).toBeVisible();
+        await adminPage.goto(`${outPath}?edit=${outID}#edit`, { waitUntil: 'networkidle' });
+        const outRowVersion = await adminPage.locator('#edit input[name="row_version"]').inputValue();
+        // lifecycle and environments are two more fields AssetUpdate treats
+        // as REPLACED BY WHATEVER THE FORM CARRIES, never "unchanged if
+        // absent" the way vendor/model/serial are (submittedString vs plain
+        // formValue -- see AssetUpdate's own body): an empty payload would
+        // fail validation on lifecycle ("" is not a valid AssetLifecycle)
+        // before ever reaching the permit, the same wrong-reason-403 trap
+        // row_version's own comment above describes. Carrying the asset's
+        // real current values keeps this request refused for the ONE reason
+        // this test exists to prove -- the object gate -- not an incidental
+        // validation failure that would pass just as well against ANY
+        // asset, in or out of scope.
+        const outLifecycle = await adminPage.locator('#edit select[name="lifecycle"]').inputValue();
+        const outEnvironments = await adminPage.locator('#edit input[name="environments"]:checked').evaluateAll(
+          (els) => els.map((el) => el.value),
+        );
+        await adminContext.close();
+        expect(outRowVersion, `${ASSET_OUT} should have a real row_version to test the permit boundary with`).not.toBe('');
+
         const csrfToken = await csrfTokenFrom(page);
         const directPost = await page.request.post(outPath, {
           form: {
             csrf_token: csrfToken,
             name: currentName ?? '',
             kind: currentKind ?? '',
+            lifecycle: outLifecycle,
+            environments: outEnvironments,
+            row_version: outRowVersion,
             vendor: 'sneaky-e2e-vendor',
           },
           // nosurf requires one of Sec-Fetch-Site, Origin or Referer on every
@@ -164,10 +210,9 @@ describeHere(
       }
     });
 
-    test('saving their own asset\'s edit form succeeds -- TRIPWIRE, see this file\'s header', async ({
+    test('saving their own asset\'s edit form succeeds', async ({
       browser,
     }) => {
-      test.fail();
       const { context, page } = await signInAsFreshUser(browser, BASE_URL, OWNER_USERNAME, OWNER_PASSWORD);
       try {
         const inPath = await resolveAssetPath(page, ASSET_IN);
@@ -183,12 +228,17 @@ describeHere(
           page.waitForResponse((r) => r.request().method() === 'POST' && r.url().includes(`/assets/${inID}`)),
           page.locator('#edit form button[type="submit"]').click(),
         ]);
-        // THE PART THAT FAILS TODAY: RequireAdmin answers 403 before
-        // AssetUpdate is ever reached, for any project owner, on any asset.
-        expect(response.status(), `saving ${ASSET_IN} as its owning project's owner`).toBe(200);
+        // The object gate (auth.Authorizer.Permit / scopedPermit.Covers) now
+        // covers hv-01, so the write reaches AssetUpdate and succeeds. On
+        // success AssetUpdate answers via internal/web/render.Redirect, and
+        // for an HTMX request (this form submit) that is 204 with an
+        // HX-Redirect header, not a 3xx Location or a 200 -- see that
+        // function and CLAUDE.md's HTTP conventions (also asserted this way
+        // by the sibling create-in-project spec).
+        expect(response.status(), `saving ${ASSET_IN} as its owning project's owner`).toBe(204);
+        expect(response.headers()['hx-redirect'], 'the save response should redirect back to the asset').toBe(inPath);
 
-        // Reached only once the line above actually passes (post-Task 13):
-        // the save stuck, read back through a fresh page load rather than
+        // The save stuck, read back through a fresh page load rather than
         // trusted from the HTMX swap alone.
         await page.goto(`${inPath}?edit=${inID}#edit`, { waitUntil: 'networkidle' });
         await expect(page.locator('#edit input[name="vendor"]')).toHaveValue(newVendor);
