@@ -25,7 +25,7 @@
       <thead>
         <tr>
           <th>Username</th><th>Name</th><th>Source</th><th>Role</th>
-          <th>Sees costs</th><th>State</th><th></th>
+          <th>Sees costs</th><th>Projects</th><th>State</th><th></th>
         </tr>
       </thead>
       <tbody id="user-rows">
@@ -40,8 +40,9 @@
 {{end}}
 
 {{/* One account. THE SWAP TARGET IS THIS ROW, id="user-row-{id}", declared
-     here rather than chosen by the handler -- every one of the four mutating
-     routes (role, costs, active, scrub) targets exactly this element. */}}
+     here rather than chosen by the handler -- every one of the mutating
+     routes (role, costs, active, scrub, project assign/release) targets
+     exactly this element. */}}
 {{define "user_row"}}
 <tr id="user-row-{{.User.ID}}">
   <td class="mono">{{.User.Username}}</td>
@@ -81,6 +82,40 @@
         sees costs
       </label>
     </form>
+  </td>
+  <td>
+    {{/* Project assignment (WP-G1 Task 19): the projects this user already
+         holds, each with its own release form, plus a picker for one more.
+         Both slices are computed in the handler (a.userRow) from
+         store.ProjectsForUser against the active project list -- never
+         inferred here, the same reasoning EffectiveAdmin's comment gives. */}}
+    <div style="display:flex;flex-direction:column;gap:4px">
+      {{range .Projects}}
+      <form hx-post="/users/{{$.User.ID}}/projects/{{.ID}}/release"
+            hx-target="#user-row-{{$.User.ID}}" hx-swap="outerHTML"
+            method="post" action="/users/{{$.User.ID}}/projects/{{.ID}}/release"
+            style="display:flex;gap:4px;align-items:center">
+        <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+        <span class="pill pill-muted">{{.Code}}</span>
+        <button class="btn btn-sm" type="submit" title="Release {{.Code}}">&times;</button>
+      </form>
+      {{else}}
+      <span class="panel-note">none</span>
+      {{end}}
+      {{if .AvailableProjects}}
+      <form hx-post="/users/{{.User.ID}}/projects" hx-target="#user-row-{{.User.ID}}" hx-swap="outerHTML"
+            method="post" action="/users/{{.User.ID}}/projects" style="display:flex;gap:4px;align-items:center">
+        <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+        <select name="project_id" aria-label="Assign a project to {{.User.Username}}">
+          <option value="">assign…</option>
+          {{range .AvailableProjects}}
+          <option value="{{.ID}}">{{.Code}}</option>
+          {{end}}
+        </select>
+        <button class="btn btn-sm" type="submit">Add</button>
+      </form>
+      {{end}}
+    </div>
   </td>
   <td>
     {{if .User.IsActive}}
