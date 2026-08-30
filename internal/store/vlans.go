@@ -285,9 +285,24 @@ func (s *SQLStore) SetInterfaceVLANs(ctx context.Context, p domain.Permit,
 		return err
 	}
 	before := auditedInterfaceVLANs(iface, beforeMembers)
+
+	// VLAN membership is a write to the INTERFACE -- the audited value folds
+	// the member list into the interface row (auditedInterfaceVLANs above),
+	// and the change_log entry below names entity_type "interface". So it
+	// takes the same subject derivation every other interface write takes,
+	// or a project owner could edit an interface on their own asset and then
+	// be refused when setting its VLANs, which is the same permission
+	// expressed two ways.
+	//
+	// Reached from HTTP through AddPortToVLAN and RemovePortFromVLAN, which
+	// both delegate here -- POST /vlans/{id}/ports and its remove sibling.
+	ifacePermit, err := authorizeInterfaceSubject(p, iface.AssetID, interfaceID)
+	if err != nil {
+		return err
+	}
 	at := domain.FormatTime(s.now())
 
-	return s.write(ctx, p, func(t *tx) error {
+	return s.write(ctx, ifacePermit, func(t *tx) error {
 		if _, err := t.exec(ctx,
 			`DELETE FROM interface_vlan WHERE interface_id = ?`, interfaceID); err != nil {
 			return translateWriteErr(err, "clearing vlan membership")

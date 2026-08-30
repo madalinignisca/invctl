@@ -584,3 +584,59 @@ func TestAProjectOwnerCannotRetireAServiceInstanceOnAnOutOfScopeHost(t *testing.
 		})
 	}
 }
+
+// TestAProjectOwnerCanSetVLANsOnTheirOwnInterface closes the gap between two
+// ways of saying the same permission.
+//
+// VLAN membership is audited as a write to the INTERFACE -- the member list
+// folds into the interface's audited value and the change_log row names
+// entity_type "interface" -- so it must take the same subject derivation
+// every other interface write takes. Before this, a project owner could
+// create and edit an interface on their own asset and then be refused when
+// setting its VLANs.
+//
+// It reaches HTTP through AddPortToVLAN and RemovePortFromVLAN, which both
+// delegate to SetInterfaceVLANs: POST /vlans/{id}/ports and its remove
+// sibling. An earlier note claimed no route reached this method; the
+// delegation is why that was wrong.
+func TestAProjectOwnerCanSetVLANsOnTheirOwnInterface(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			s, ctx := newStore(t, e)
+			frontend := mustProjectForAssignment(t, s, ctx, "frontend")
+			mine := mustAsset(t, s, ctx, domain.KindServer, "vm-mine", nil)
+			iface := mustInterface(t, s, ctx, mine, "eth0")
+
+			po := domain.ScopedPermit(
+				domain.Actor{ID: "po-vlan", Name: "po-vlan", Kind: domain.ActorKindUser},
+				[]string{frontend},
+				domain.ScopedEntities{"asset": {mine: true}})
+
+			if err := s.SetInterfaceVLANs(ctx, po, iface, nil); err != nil {
+				t.Fatalf("SetInterfaceVLANs on their own asset's interface = %v, want nil", err)
+			}
+		})
+	}
+}
+
+// TestAProjectOwnerCannotSetVLANsOnSomebodyElsesInterface is the other half.
+func TestAProjectOwnerCannotSetVLANsOnSomebodyElsesInterface(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			s, ctx := newStore(t, e)
+			frontend := mustProjectForAssignment(t, s, ctx, "frontend")
+			mine := mustAsset(t, s, ctx, domain.KindServer, "vm-mine", nil)
+			theirs := mustAsset(t, s, ctx, domain.KindServer, "db-prod", nil)
+			theirIface := mustInterface(t, s, ctx, theirs, "eth0")
+
+			po := domain.ScopedPermit(
+				domain.Actor{ID: "po-vlan", Name: "po-vlan", Kind: domain.ActorKindUser},
+				[]string{frontend},
+				domain.ScopedEntities{"asset": {mine: true}})
+
+			if err := s.SetInterfaceVLANs(ctx, po, theirIface, nil); !errors.Is(err, domain.ErrForbidden) {
+				t.Fatalf("SetInterfaceVLANs on an out-of-scope interface = %v, want domain.ErrForbidden", err)
+			}
+		})
+	}
+}
