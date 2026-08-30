@@ -3,6 +3,20 @@
 `make demo` throws away the database, reseeds, and serves on `0.0.0.0:8088`.
 Sign in as `admin` / `demo-password`.
 
+**The public instance also carries a second account, `owner` /
+`demo-owner-password`, to show the project-owner role** (WP-G1; see
+`docs/ROLES.md`). It is assigned to the **Platform & Core Services** project
+and nothing else, so signing in as it demonstrates the boundary directly:
+every page still reads, because invctl has no read restrictions at all, but a
+write outside that project is refused. Try a journal note on `hv-01`, which is
+in the project, and then on `dc-oslo`, which is not — the second answers *"You
+are not allowed to do that."*
+
+`make demo` does not create that account: it is a fixture of the public
+instance, added through the user-administration screen the same way an
+operator would. A local demo shows the role by creating a user, setting the
+role, and assigning a project on `/users`.
+
 Everything below is real output from the seeded estate. Nothing on screen is a
 mock-up, and none of the telemetry is written directly into a table — the demo
 observations go through `RecordObservation`, the same function the webhook
