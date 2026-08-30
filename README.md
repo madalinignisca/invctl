@@ -103,6 +103,10 @@ make seed           # load the demo estate and exit
 
 ## Configuration
 
+Deploying on your own server — database, systemd unit, TLS, and the settings
+that are wrong by default in production — is `docs/INSTALL.md`. Upgrading an
+instance that already exists is `docs/UPGRADE.md`.
+
 ```bash
 INV_DB_DRIVER=sqlite              # or postgres
 INV_DB_DSN=file:invctl.db?_txlock=immediate
