@@ -241,17 +241,48 @@ func TestAProjectOwnersPermitNeverCoversEstateConfiguration(t *testing.T) {
 
 // TestAProjectOwnersPermitNeverCoversTopology is the topology half of the
 // same exclusion: docs/rbac-design.md §6 defaults every entity type not
-// proven project-linked to Administrator-only, and this is the negative
-// space that default protects.
+// proven project-linked (or, as of 1.0 item 1, subject-derived) to
+// Administrator-only, and this is the negative space that default
+// protects.
+//
+// interface, ip_address and service_instance are DELIBERATELY ABSENT from
+// this list -- 1.0 item 1 moved them to domain.ScopeSubjectDerived, so
+// unlike everything still listed here, a permit that legitimately holds
+// one of them in its entities DOES cover it (that is the entire point of
+// the reclassification; see subject_derived_scope_test.go in
+// internal/store for the derivation that puts a real id there). Leaving
+// them in this table would have this test assert the opposite of what
+// Task 1 was built to do, exactly the way a mutation-testing pass would be
+// expected to catch a class moved the wrong way.
 func TestAProjectOwnersPermitNeverCoversTopology(t *testing.T) {
 	types := []string{
-		"interface", "link", "power_feed", "prefix", "ip_address",
-		"vlan", "cluster", "dependency", "service_instance", "endpoint",
+		"link", "power_feed", "prefix",
+		"vlan", "cluster", "dependency", "endpoint",
 	}
 	p := permitCoveringEveryType(types...)
 	for _, entityType := range types {
 		if p.Covers(entityType, "shared-id") {
 			t.Errorf("a project owner's permit covered topology type %q", entityType)
+		}
+	}
+}
+
+// TestAProjectOwnersPermitCoversASubjectDerivedTypeItActuallyHolds is the
+// positive half moved out of the table above: interface, ip_address and
+// service_instance behave exactly like a domain.ScopeProjectLinked type
+// once their id is in entities -- Covers treats the two classes
+// identically (internal/domain/role.go's scopedPermit.Covers), and the
+// DERIVATION that decides which ids legitimately belong there is the
+// store's job, not this permit's (authorizeInterfaceSubject,
+// authorizeAddressSubject, authorizeInstanceSubjects in
+// internal/store/network.go and services.go).
+func TestAProjectOwnersPermitCoversASubjectDerivedTypeItActuallyHolds(t *testing.T) {
+	types := []string{"interface", "ip_address", "service_instance"}
+	p := permitCoveringEveryType(types...)
+	for _, entityType := range types {
+		if !p.Covers(entityType, "shared-id") {
+			t.Errorf("a project owner's permit did not cover subject-derived type %q "+
+				"for an id its entities set actually holds", entityType)
 		}
 	}
 }

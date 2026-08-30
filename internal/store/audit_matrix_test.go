@@ -136,14 +136,17 @@ var entityTypeVerbs = map[string][]string{
 	"project_service": {verbCreate},
 	"project_circuit": {verbCreate},
 
-	"asset":               {verbCreate, verbCreateInProject, verbUpdate, verbRetire},
-	"service":             {verbCreate, verbCreateInProject, verbUpdate, verbRetire},
-	"circuit":             {verbCreate, verbCreateInProject, verbUpdate, verbRetire},
-	"team":                {verbCreate, verbUpdate, verbRetire},
-	"tag":                 {verbCreate, verbUpdate, verbRetire},
-	"custom_field":        {verbCreate, verbUpdate, verbRetire},
-	"asset_kind":          {verbCreate, verbUpdate},
-	"interface":           {verbCreate, verbUpdate},
+	"asset":        {verbCreate, verbCreateInProject, verbUpdate, verbRetire},
+	"service":      {verbCreate, verbCreateInProject, verbUpdate, verbRetire},
+	"circuit":      {verbCreate, verbCreateInProject, verbUpdate, verbRetire},
+	"team":         {verbCreate, verbUpdate, verbRetire},
+	"tag":          {verbCreate, verbUpdate, verbRetire},
+	"custom_field": {verbCreate, verbUpdate, verbRetire},
+	"asset_kind":   {verbCreate, verbUpdate},
+	"interface":    {verbCreate, verbUpdate},
+	// ip_address (WP-1.0 item 1): no RetireIPAddress exists, same shape as
+	// interface -- only create and update.
+	"ip_address":          {verbCreate, verbUpdate},
 	"link":                {verbCreate, verbRetire},
 	"prefix":              {verbCreate, verbUpdate},
 	"asset_cost":          {verbCreate},
@@ -467,7 +470,7 @@ var auditMatrix = []auditCase{
 		name:       "service instance (child row)",
 		entityType: "service_instance",
 		verb:       verbCreate,
-		scope:      domain.ScopeTopology,
+		scope:      domain.ScopeSubjectDerived,
 		setup: func(t *testing.T, s *SQLStore, ctx context.Context) string {
 			envID := mustEnvironment(t, s, ctx, "audit-svc-instance-env", domain.EnvRoleProduction)
 			hostID := mustAsset(t, s, ctx, domain.KindServer, "audit-svc-instance-host", nil, envID)
@@ -902,7 +905,7 @@ var auditMatrix = []auditCase{
 		name:       "interface create",
 		entityType: "interface",
 		verb:       verbCreate,
-		scope:      domain.ScopeTopology,
+		scope:      domain.ScopeSubjectDerived,
 		setup: func(t *testing.T, s *SQLStore, ctx context.Context) string {
 			return mustAsset(t, s, ctx, domain.KindServer, "audit-interface-host", nil)
 		},
@@ -921,7 +924,7 @@ var auditMatrix = []auditCase{
 		name:       "interface update",
 		entityType: "interface",
 		verb:       verbUpdate,
-		scope:      domain.ScopeTopology,
+		scope:      domain.ScopeSubjectDerived,
 		setup: func(t *testing.T, s *SQLStore, ctx context.Context) string {
 			assetID := mustAsset(t, s, ctx, domain.KindServer, "audit-interface-update-host", nil)
 			return mustInterface(t, s, ctx, assetID, "eth-audit-update")
@@ -936,6 +939,56 @@ var auditMatrix = []auditCase{
 			updated.MTU = &mtu
 			if err := s.UpdateInterface(ctx, testPermit, &updated); err != nil {
 				t.Fatalf("updating interface: %v", err)
+			}
+			return id, domain.ActionUpdate
+		},
+	},
+	{
+		name:       "ip address create",
+		entityType: "ip_address",
+		verb:       verbCreate,
+		scope:      domain.ScopeSubjectDerived,
+		setup: func(t *testing.T, s *SQLStore, ctx context.Context) string {
+			assetID := mustAsset(t, s, ctx, domain.KindServer, "audit-address-host", nil)
+			return mustInterface(t, s, ctx, assetID, "eth-audit-address")
+		},
+		mutate: func(t *testing.T, s *SQLStore, ctx context.Context, ifaceID string) (string, string) {
+			addr, err := domain.NewIPAddress(NewID(), "10.99.0.1", &ifaceID, domain.IPRolePrimary)
+			if err != nil {
+				t.Fatalf("building ip address: %v", err)
+			}
+			if err := s.CreateIPAddress(ctx, testPermit, addr); err != nil {
+				t.Fatalf("creating ip address: %v", err)
+			}
+			return addr.ID, domain.ActionCreate
+		},
+	},
+	{
+		name:       "ip address update",
+		entityType: "ip_address",
+		verb:       verbUpdate,
+		scope:      domain.ScopeSubjectDerived,
+		setup: func(t *testing.T, s *SQLStore, ctx context.Context) string {
+			assetID := mustAsset(t, s, ctx, domain.KindServer, "audit-address-update-host", nil)
+			ifaceID := mustInterface(t, s, ctx, assetID, "eth-audit-address-update")
+			addr, err := domain.NewIPAddress(NewID(), "10.99.0.2", &ifaceID, domain.IPRolePrimary)
+			if err != nil {
+				t.Fatalf("building ip address: %v", err)
+			}
+			if err := s.CreateIPAddress(ctx, testPermit, addr); err != nil {
+				t.Fatalf("creating ip address: %v", err)
+			}
+			return addr.ID
+		},
+		mutate: func(t *testing.T, s *SQLStore, ctx context.Context, id string) (string, string) {
+			addr, err := s.GetIPAddress(ctx, id)
+			if err != nil {
+				t.Fatalf("getting ip address: %v", err)
+			}
+			updated := *addr
+			updated.Role = domain.IPRoleSecondary
+			if err := s.UpdateIPAddress(ctx, testPermit, &updated); err != nil {
+				t.Fatalf("updating ip address: %v", err)
 			}
 			return id, domain.ActionUpdate
 		},
