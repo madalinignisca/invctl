@@ -45,11 +45,11 @@ footnote.
   is refused on everything else — every other entity type, and every
   in-scope-looking object in a project they do not hold.
 
-  **Nobody gains access by upgrading.** The role is not assigned to anyone
-  automatically, and there is still no UI for assigning a person to a project
-  (`internal/store/user_projects.go`, no route in front of it yet). Until an
-  Administrator sets both a role and an assignment, every existing account
-  behaves exactly as it did before.
+  **Nobody gains access by upgrading.** Neither the role nor any project
+  assignment is granted automatically. Until an Administrator sets both — the
+  role and at least one project, on `/users` — every existing account behaves
+  exactly as it did before. A project owner with no assignments can write
+  nothing at all, by design.
 
   Scope is resolved fresh on every request, with no cache: removing somebody
   from a project takes effect on their next click rather than at the end of a
