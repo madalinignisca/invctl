@@ -109,6 +109,7 @@ INV_DB_DSN=file:invctl.db?_txlock=immediate
 INV_LISTEN=0.0.0.0:8088           # what `make demo` uses; :8080 if unset
 INV_SESSION_KEY=<32 random bytes, base64>   # generated if unset
 INV_ADMIN_USERS=gabriel,nikolaj   # comma-separated break-glass override — see docs/RECOVERY.md
+                                 # roles and what each may do: docs/ROLES.md
 INV_AUTH_LOCAL=true
 INV_AUTH_LDAP=false
 INV_SEED=false                    # load the demo estate when the database is empty
