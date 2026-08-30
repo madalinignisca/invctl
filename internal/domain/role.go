@@ -388,19 +388,29 @@ const (
 	// note on an asset is in scope exactly when that asset is; the note
 	// itself has no owner to consult.
 	//
-	// This is the first of the derivations ScopeTopology's comment below
-	// anticipates. It is deliberately a separate class rather than being
-	// folded into ScopeProjectLinked, because that class means something
-	// specific and checkable -- the entity carries a project_id relationship
-	// in the schema -- and journal_entry does not. Collapsing the two would
-	// make ScopeProjectLinked's own comment false, and that comment is what
-	// a reader relies on to know which tables to look at.
+	// It is deliberately a separate class rather than being folded into
+	// ScopeProjectLinked, because that class means something specific and
+	// checkable -- the entity carries a project_id relationship in the
+	// schema -- and none of this class's members do. Collapsing the two
+	// would make ScopeProjectLinked's own comment false, and that comment
+	// is what a reader relies on to know which tables to look at.
 	//
 	// Covers treats it identically to ScopeProjectLinked: it consults
-	// entities. The DERIVATION -- resolving a note to its subject and asking
-	// whether the caller may write THAT -- happens in the store, before the
-	// transaction opens, because only the store can read the subject. See
-	// internal/store/journal.go's authorizeJournalSubject.
+	// entities. The DERIVATION -- resolving the row to its subject(s) and
+	// asking whether the caller may write THOSE -- happens in the store,
+	// before the transaction opens, because only the store can read the
+	// row being edited. See internal/store/journal.go's
+	// authorizeJournalSubject for the one-subject shape (journal_entry),
+	// internal/store/network.go's authorizeInterfaceSubject and
+	// authorizeAddressSubject for a subject reached through one or two
+	// hops (interface -> asset; ip_address -> interface -> asset, refused
+	// outright when the address is unattached), and
+	// internal/store/services.go's authorizeInstanceSubjects for the
+	// two-ended case (service_instance: BOTH the service and the host
+	// asset must be covered, or a project owner who owns only one of the
+	// two could place or move a workload onto or off of hardware or a
+	// service they do not own -- the ReparentAsset trap, 9d01318/82ea6c5,
+	// one level down).
 	ScopeSubjectDerived ScopeClass = "subject_derived"
 	// ScopeEstateConfig entities are estate-wide and apply to every project
 	// at once -- teams, vocabularies, custom-field definitions, tags, users,
@@ -412,17 +422,19 @@ const (
 	ScopeEstateConfig ScopeClass = "estate_config"
 	// ScopeTopology entities are the physical and logical structure between
 	// project-linked entities, or facts about entities not yet reachable
-	// through a project at all: interfaces, cabling, network groups, power,
-	// dependencies, runtime placements. docs/rbac-design.md's route survey
-	// counts roughly forty writes that plausibly WILL derive their scope from
-	// an owning asset/service/circuit once Task 13/14 builds that derivation
-	// -- but "nothing else carries project_id anywhere in any migration" is
-	// a fact about today's schema, and this classification defaults every
-	// entity type not already proven project-linked to Administrator-only
-	// rather than guessing which of the forty a project owner should reach.
-	// Widening this bucket into ScopeProjectLinked for a specific type is a
-	// design decision for whichever task builds that derivation, not a
-	// classification fix.
+	// through a project at all: cabling, network groups, power, dependencies.
+	// docs/rbac-design.md's route survey counted roughly forty writes that
+	// plausibly WILL derive their scope from an owning asset/service/circuit
+	// once a task builds that derivation -- interface, ip_address and
+	// service_instance were three of those forty and moved to
+	// ScopeSubjectDerived once 1.0 item 1 built it (docs/rbac-design.md §4;
+	// the shape journal_entry proved first) -- but "nothing else carries
+	// project_id anywhere in any migration" is a fact about today's schema,
+	// and this classification defaults every entity type not already proven
+	// project-linked or subject-derived to Administrator-only rather than
+	// guessing which of the remainder a project owner should reach. Widening
+	// this bucket for a specific type is a design decision for whichever
+	// task builds that derivation, not a classification fix.
 	ScopeTopology ScopeClass = "topology"
 )
 
@@ -509,8 +521,8 @@ var entityScope = map[string]ScopeClass{
 	"endpoint":            ScopeTopology,
 	"fhrp_group":          ScopeTopology,
 	"health_override":     ScopeTopology,
-	"interface":           ScopeTopology,
-	"ip_address":          ScopeTopology,
+	"interface":           ScopeSubjectDerived,
+	"ip_address":          ScopeSubjectDerived,
 	"ip_range":            ScopeTopology,
 	"journal_entry":       ScopeSubjectDerived,
 	"l2vpn":               ScopeTopology,
@@ -535,7 +547,7 @@ var entityScope = map[string]ScopeClass{
 	"rt_systemd":          ScopeTopology,
 	"rt_windows":          ScopeTopology,
 	"service_cost":        ScopeTopology,
-	"service_instance":    ScopeTopology,
+	"service_instance":    ScopeSubjectDerived,
 	"vlan":                ScopeTopology,
 	"vlan_group":          ScopeTopology,
 }

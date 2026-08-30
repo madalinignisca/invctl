@@ -148,6 +148,28 @@ func (s *SQLStore) ListAvailableInterfaces(ctx context.Context, excludeInterface
 	return opts, nil
 }
 
+// authorizeInterfaceSubject derives an interface's subject -- the asset it
+// belongs to -- and asks the caller's real permit whether it covers that
+// asset. An interface carries no project of its own (docs/rbac-design.md
+// §4; domain.ScopeSubjectDerived), so its scope is entirely the owning
+// asset's, one hop away: interface.asset_id -> asset.
+//
+// Same shape as authorizeJournalSubject (internal/store/journal.go), and
+// for the same reason: the caller demonstrated write access to the SUBJECT,
+// not to interfaces in general, so the transaction that follows runs under
+// a permit narrowed to exactly the one row being written -- never the
+// caller's own, wider permit, which does not (and must not) list
+// "interface" as a type it can name directly.
+func authorizeInterfaceSubject(p domain.Permit, assetID, interfaceID string) (domain.Permit, error) {
+	if !p.Covers("asset", assetID) {
+		return nil, fmt.Errorf("writing interface %s on asset %s: %w",
+			interfaceID, assetID, domain.ErrForbidden)
+	}
+	return domain.ScopedPermit(p.Actor(), nil, domain.ScopedEntities{
+		"interface": {interfaceID: true},
+	}), nil
+}
+
 // CreateInterface inserts a port.
 func (s *SQLStore) CreateInterface(ctx context.Context, p domain.Permit, i *domain.Interface) error {
 	// The row the INSERT just wrote is version 1 (the column default).
@@ -156,7 +178,16 @@ func (s *SQLStore) CreateInterface(ctx context.Context, p domain.Permit, i *doma
 	i.RowVersion = 1
 	at := domain.FormatTime(s.now())
 	i.CreatedAt, i.UpdatedAt = &at, &at
-	return s.write(ctx, p, func(t *tx) error {
+	// The subject is read from the SUBMITTED struct here, by necessity: the
+	// row does not exist yet, so there is no stored one to read, and the
+	// submitted asset_id is exactly what the caller is asserting they may
+	// create a port on (see authorizeJournalSubject's doc comment on
+	// CreateJournalEntry for the same rule stated once already).
+	ifacePermit, err := authorizeInterfaceSubject(p, i.AssetID, i.ID)
+	if err != nil {
+		return err
+	}
+	return s.write(ctx, ifacePermit, func(t *tx) error {
 		if err := t.requireVocabulary(ctx, vocabInterfaceFormFactor, "form_factor", i.FormFactor); err != nil {
 			return err
 		}
@@ -195,7 +226,17 @@ func (s *SQLStore) UpdateInterface(ctx context.Context, p domain.Permit, i *doma
 	at := domain.FormatTime(s.now())
 	i.UpdatedAt = &at
 
-	return s.write(ctx, p, func(t *tx) error {
+	// The subject is read from the STORED row (before.AssetID), never from
+	// the submitted struct -- consistent with the line above it: asset_id
+	// cannot move through this method at all, so before.AssetID and
+	// i.AssetID are the same value by the time this runs, but reading it
+	// from before is what makes that true by construction rather than by
+	// coincidence of the two lines above staying in sync.
+	ifacePermit, err := authorizeInterfaceSubject(p, before.AssetID, i.ID)
+	if err != nil {
+		return err
+	}
+	return s.write(ctx, ifacePermit, func(t *tx) error {
 		if err := t.requireVocabulary(ctx, vocabInterfaceFormFactor, "form_factor", i.FormFactor); err != nil {
 			return err
 		}
@@ -286,6 +327,47 @@ func (s *SQLStore) RetireLink(ctx context.Context, p domain.Permit, id string) e
 
 // ---------- addressing ----------
 
+// authorizeAddressSubject derives an ip_address's subject through its
+// interface -- two hops, ip_address.interface_id -> interface.asset_id --
+// and asks the caller's real permit whether it covers that asset.
+//
+// interfaceID is NULLABLE, and that is the case this function exists to get
+// right: an UNATTACHED address (interface_id IS NULL) has no subject at
+// all. It belongs to no asset, so there is nothing for THIS function to
+// derive a narrower permit from -- it returns the caller's permit
+// UNCHANGED, deliberately not minting a "ip_address": {addressID: true}
+// grant nobody's ownership of anything justified. tx.log's own authorize
+// call, immediately before the change_log insert, is what then decides:
+// domain.AdministratorPermit and domain.SystemPermit cover unconditionally,
+// exactly as they did before ip_address moved to
+// domain.ScopeSubjectDerived, so an unattached address stays writable by
+// them; a project owner's domain.ScopedPermit never carries "ip_address" in
+// its entities (auth.Authorizer.Permit only ever populates
+// asset/service/circuit), so Covers answers false and the write is REFUSED
+// -- FAIL CLOSED, and TestAProjectOwnerCannotCreateAnUnattachedAddress /
+// TestAProjectOwnerCannotUpdateAnUnattachedAddress pin exactly that. An
+// address free-floating outside any interface is estate territory until it
+// is attached to something a project owner owns. fhrp_group_id is
+// deliberately not consulted either way: it is not an ownership edge (see
+// AssignVIP's own comment), so a VIP address is unattached exactly like any
+// other and refused the same way.
+func (s *SQLStore) authorizeAddressSubject(ctx context.Context, p domain.Permit, interfaceID *string, addressID string) (domain.Permit, error) {
+	if interfaceID == nil {
+		return p, nil
+	}
+	iface, err := s.GetInterface(ctx, *interfaceID)
+	if err != nil {
+		return nil, err
+	}
+	if !p.Covers("asset", iface.AssetID) {
+		return nil, fmt.Errorf("writing ip address %s on asset %s: %w",
+			addressID, iface.AssetID, domain.ErrForbidden)
+	}
+	return domain.ScopedPermit(p.Actor(), nil, domain.ScopedEntities{
+		"ip_address": {addressID: true},
+	}), nil
+}
+
 // CreateIPAddress assigns an address.
 func (s *SQLStore) CreateIPAddress(ctx context.Context, p domain.Permit, a *domain.IPAddress) error {
 	// The row the INSERT just wrote is version 1 (the column default).
@@ -294,7 +376,15 @@ func (s *SQLStore) CreateIPAddress(ctx context.Context, p domain.Permit, a *doma
 	a.RowVersion = 1
 	at := domain.FormatTime(s.now())
 	a.CreatedAt, a.UpdatedAt = &at, &at
-	return s.write(ctx, p, func(t *tx) error {
+	// The subject is read from the SUBMITTED struct, by necessity: the row
+	// does not exist yet. A project owner creating an unattached address
+	// (a.InterfaceID == nil) is refused here exactly as an update to one
+	// would be -- see authorizeAddressSubject.
+	addrPermit, err := s.authorizeAddressSubject(ctx, p, a.InterfaceID, a.ID)
+	if err != nil {
+		return err
+	}
+	return s.write(ctx, addrPermit, func(t *tx) error {
 		if err := t.requireVocabulary(ctx, vocabIPAddressRole, "role", a.Role); err != nil {
 			return err
 		}
@@ -339,7 +429,16 @@ func (s *SQLStore) UpdateIPAddress(ctx context.Context, p domain.Permit, a *doma
 	at := domain.FormatTime(s.now())
 	a.UpdatedAt = &at
 
-	return s.write(ctx, p, func(t *tx) error {
+	// The subject is read from the STORED row (before.InterfaceID), never
+	// the submitted struct -- interface_id cannot move through this method
+	// (see the doc comment above), so before.InterfaceID and a.InterfaceID
+	// are the same value by construction, the same reasoning as
+	// UpdateInterface's own authorization step.
+	addrPermit, err := s.authorizeAddressSubject(ctx, p, before.InterfaceID, a.ID)
+	if err != nil {
+		return err
+	}
+	return s.write(ctx, addrPermit, func(t *tx) error {
 		if err := t.requireVocabulary(ctx, vocabIPAddressRole, "role", a.Role); err != nil {
 			return err
 		}

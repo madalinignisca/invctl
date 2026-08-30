@@ -434,6 +434,34 @@ func (s *SQLStore) GetInstance(ctx context.Context, id string) (*InstanceRow, er
 	return &row, nil
 }
 
+// authorizeInstanceSubjects derives a service_instance's TWO subjects --
+// the service it belongs to and the asset that hosts it -- and requires
+// the caller's real permit to cover BOTH before the write is allowed.
+//
+// TWO-ENDED, DELIBERATELY, and this is the ReparentAsset trap (9d01318,
+// 82ea6c5) one level down: a placement is a fact about a service AND a
+// host, tx.log's own authorize call only ever checks the id of the ONE row
+// being written (service_instance/<id>), and that id carries no
+// information about either endpoint. Checking only the service would let a
+// project owner who owns a service place or move it onto ANY host in the
+// estate, including hardware that belongs to somebody else's project;
+// checking only the host would let them plant an arbitrary, unowned
+// service's workload on their own hardware. docs/rbac-design.md §4: "both
+// endpoints of a relationship must be in scope."
+func authorizeInstanceSubjects(p domain.Permit, serviceID, hostAssetID, instanceID string) (domain.Permit, error) {
+	if !p.Covers("service", serviceID) {
+		return nil, fmt.Errorf("placing instance %s on service %s: %w",
+			instanceID, serviceID, domain.ErrForbidden)
+	}
+	if !p.Covers("asset", hostAssetID) {
+		return nil, fmt.Errorf("placing instance %s on host %s: %w",
+			instanceID, hostAssetID, domain.ErrForbidden)
+	}
+	return domain.ScopedPermit(p.Actor(), nil, domain.ScopedEntities{
+		"service_instance": {instanceID: true},
+	}), nil
+}
+
 // CreateInstance places a service on a host.
 func (s *SQLStore) CreateInstance(ctx context.Context, p domain.Permit, si *domain.ServiceInstance) error {
 	// The row the INSERT just wrote is version 1 (the column default).
@@ -447,6 +475,13 @@ func (s *SQLStore) CreateInstance(ctx context.Context, p domain.Permit, si *doma
 	// able to render to an operator as hand-asserted fact; the 00008 CHECK
 	// constrains the value, this constrains the writer.
 	if err := domain.CheckProvenanceWrite(p.Actor(), si.Source); err != nil {
+		return err
+	}
+	// Both subjects come from the SUBMITTED struct, by necessity: the row
+	// does not exist yet, and si.ServiceID/si.HostAssetID are exactly what
+	// the caller is asserting they may place a workload on.
+	instancePermit, err := authorizeInstanceSubjects(p, si.ServiceID, si.HostAssetID, si.ID)
+	if err != nil {
 		return err
 	}
 	// A workload on a patch panel is a data-entry mistake, and the impact
@@ -465,7 +500,7 @@ func (s *SQLStore) CreateInstance(ctx context.Context, p domain.Permit, si *doma
 		return ve
 	}
 
-	return s.write(ctx, p, func(t *tx) error {
+	return s.write(ctx, instancePermit, func(t *tx) error {
 		_, err := t.exec(ctx, `
 			INSERT INTO service_instance (id, service_id, host_asset_id, runtime_type, role, shard,
 			                              ordinal, desired_state, source, created_at, updated_at)
@@ -518,10 +553,33 @@ func (s *SQLStore) UpdateInstance(ctx context.Context, p domain.Permit, si *doma
 		return fmt.Errorf("placement %s belongs to a retired service and cannot be amended: %w",
 			si.ID, domain.ErrConflict)
 	}
+	// NOT service_id and NOT host_asset_id -- carried over, never taken from
+	// the caller, the same rule UpdateInterface applies to asset_id. This
+	// method has no handler that ever submits either as changed (see
+	// InstanceUpdate's own comment: "the HOST is not a field... moving a
+	// service to another box is a migration"), but the STORE is the layer
+	// that has to make that true rather than trust the one caller today to
+	// keep it true. Without this, a caller free to submit a different
+	// host_asset_id could move a workload it owns onto hardware it does
+	// not: exactly authorizeInstanceSubjects's two-ended check, defeated by
+	// deriving its subjects from a value the caller controls instead of the
+	// stored row.
+	si.ServiceID = before.ServiceID
+	si.HostAssetID = before.HostAssetID
 	si.CreatedAt = before.CreatedAt
 	si.UpdatedAt = domain.FormatTime(s.now())
 
-	return s.write(ctx, p, func(t *tx) error {
+	// Both subjects are read from the STORED row, never the submitted
+	// struct -- see the carry-over above and authorizeJournalSubject's doc
+	// comment for why that distinction matters: a caller who could name
+	// either subject could claim ones it owns while editing a row attached
+	// to ones it does not.
+	instancePermit, err := authorizeInstanceSubjects(p, before.ServiceID, before.HostAssetID, si.ID)
+	if err != nil {
+		return err
+	}
+
+	return s.write(ctx, instancePermit, func(t *tx) error {
 		res, err := t.exec(ctx, `
 			UPDATE service_instance
 			SET host_asset_id = ?, runtime_type = ?, role = ?, shard = ?, ordinal = ?,
@@ -560,8 +618,14 @@ func (s *SQLStore) RetireInstance(ctx context.Context, p domain.Permit, id strin
 	if before.Lifecycle == domain.LifecycleRetired {
 		return nil
 	}
+	// Both subjects come from the stored row -- a retire touches neither
+	// endpoint, it withdraws the fact as it stands.
+	instancePermit, err := authorizeInstanceSubjects(p, before.ServiceID, before.HostAssetID, id)
+	if err != nil {
+		return err
+	}
 	at := domain.FormatTime(s.now())
-	return s.write(ctx, p, func(t *tx) error {
+	return s.write(ctx, instancePermit, func(t *tx) error {
 		if _, err := t.exec(ctx,
 			`UPDATE service_instance SET lifecycle = ?, updated_at = ?,
 			                             row_version = row_version + 1 WHERE id = ?`,
