@@ -258,6 +258,16 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	writeAdminOnly("POST /users/{id}/costs", app.UserSetCosts)
 	writeAdminOnly("POST /users/{id}/active", app.UserSetActive)
 	writeAdminOnly("POST /users/{id}/scrub", app.UserScrub)
+	// Project assignment (WP-G1 Task 19, closing the gap Task 11 left open):
+	// AssignProject/ReleaseProject shipped audited and tested with no route
+	// reaching them at all, so a project owner could be granted the role and
+	// then had no project to own it with. writeAdminOnly for the same reason
+	// as every other route in this block: user_project is
+	// domain.ScopeEstateConfig, the table that decides a project owner's OWN
+	// scope, so the route gate and the permit layer both refuse a project
+	// owner writing it -- see TestAProjectOwnerCannotAssignThemselvesAProject.
+	writeAdminOnly("POST /users/{id}/projects", app.UserAssignProject)
+	writeAdminOnly("POST /users/{id}/projects/{projectID}/release", app.UserReleaseProject)
 
 	write("POST /assets", app.AssetCreate)
 	write("POST /assets/{id}", app.AssetUpdate)

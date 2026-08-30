@@ -9,7 +9,9 @@
 package handlers
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/madalinignisca/invctl/internal/auth"
@@ -67,6 +69,23 @@ type userRowView struct {
 	// comment for why that distinction is the whole point of this screen.
 	EffectiveAdmin bool
 	OverrideNote   string
+	// Projects is what makes RoleProjectOwner do anything at all (WP-G1 Task
+	// 19). AssignProject/ReleaseProject existed since Task 11 with no route,
+	// no template and no way for an Administrator to reach them -- a project
+	// owner could be granted the role and then had no project to own it
+	// with. Both slices are built here, not in the template, for the same
+	// reason userRow itself computes EffectiveAdmin: an available-projects
+	// list built by comparing "every active project" against "this user's
+	// assignments" inside a template is one stray {{if}} away from offering
+	// a project that is already assigned twice.
+	Projects          []projectAssignmentView
+	AvailableProjects []projectAssignmentView
+}
+
+// projectAssignmentView names one project for the assignment picker or the
+// list of what a user already holds -- ID for the form, Code for the human.
+type projectAssignmentView struct {
+	ID, Code string
 }
 
 // userRow builds one row's view model, computing effective access from
@@ -84,7 +103,15 @@ type userRowView struct {
 //
 // Mutation: render User.Role alone again (drop this function's callers) --
 // TestTheRosterShowsEffectiveAdminAccessGrantedByEnvOverride must go red.
-func (a *App) userRow(u *domain.AppUser, csrf string) userRowView {
+//
+// Takes ctx to load this user's project assignments (store.ProjectsForUser)
+// and split allProjects into what they hold and what is left to offer --
+// the same "compute it here, not in the template" reasoning as
+// EffectiveAdmin above. Returns an error rather than swallowing one: a
+// failed read here must not silently render an empty assignment picker,
+// which would look like "this user has no projects" when the truth is
+// "the query failed".
+func (a *App) userRow(ctx context.Context, u *domain.AppUser, csrf string, allProjects []store.ProjectRow) (userRowView, error) {
 	v := userRowView{User: u, CSRF: csrf, Roles: domain.Roles}
 	v.EffectiveAdmin = a.Authz.IsAdministrator(u)
 	// The note is only useful when it explains a DIVERGENCE: an active
@@ -94,7 +121,24 @@ func (a *App) userRow(u *domain.AppUser, csrf string) userRowView {
 	if v.EffectiveAdmin && u.Role != domain.RoleAdministrator && a.Authz.EnvOverride(u) {
 		v.OverrideNote = "Administrator (from INV_ADMIN_USERS) — overrides the role picker below. See docs/RECOVERY.md."
 	}
-	return v
+
+	assigned, err := a.Store.ProjectsForUser(ctx, u.ID)
+	if err != nil {
+		return userRowView{}, fmt.Errorf("loading project assignments for %s: %w", u.ID, err)
+	}
+	assignedSet := make(map[string]bool, len(assigned))
+	for _, id := range assigned {
+		assignedSet[id] = true
+	}
+	for _, p := range allProjects {
+		view := projectAssignmentView{ID: p.ID, Code: p.Code}
+		if assignedSet[p.ID] {
+			v.Projects = append(v.Projects, view)
+		} else {
+			v.AvailableProjects = append(v.AvailableProjects, view)
+		}
+	}
+	return v, nil
 }
 
 // UserList renders the roster.
@@ -116,10 +160,24 @@ func (a *App) renderUserList(w http.ResponseWriter, r *http.Request, status int,
 		return
 	}
 
+	// Loaded once for the whole roster, not per row: allProjects is the same
+	// list every row's picker draws from, and a project-count small enough
+	// for this admin screen does not need the query issued twenty times.
+	activeProjects, err := a.Store.ListProjects(r.Context(), store.ProjectFilter{})
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
+
 	b := a.base(r, "Users", "users")
 	rows := make([]userRowView, len(users))
 	for i := range users {
-		rows[i] = a.userRow(&users[i], b.CSRF)
+		row, err := a.userRow(r.Context(), &users[i], b.CSRF, activeProjects)
+		if err != nil {
+			a.serverError(w, r, err)
+			return
+		}
+		rows[i] = row
 	}
 
 	a.Render.Respond(w, r, status, "user_list", "user_list_panel", userListPage{
@@ -225,6 +283,44 @@ func (a *App) UserScrub(w http.ResponseWriter, r *http.Request) {
 	a.respondUserMutation(w, r, id, err, "Account scrubbed. Its history stays; it no longer names anyone.")
 }
 
+// UserAssignProject grants userID scope over a project (WP-G1 Task 19).
+// POST /users/{id}/projects.
+//
+// This route, not the role picker, is what makes RoleProjectOwner do
+// anything: store.AssignProject/ReleaseProject shipped audited and tested
+// with no route reaching them at all, so an Administrator could set
+// someone's role to project_owner and then had no screen to give them a
+// single project.
+//
+// writeAdminOnly, not write -- see routes.go's registration comment. A
+// project owner reaching this handler with THEIR OWN permit still cannot
+// self-assign: app_user's sibling user_project is domain.ScopeEstateConfig
+// (internal/domain/role.go), and tx.log refuses it independently of the
+// route gate. See TestAProjectOwnerCannotAssignThemselvesAProject, which
+// proves both layers rather than assuming the route gate is the only one
+// standing.
+func (a *App) UserAssignProject(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	projectID := formValue(r, "project_id")
+	if projectID == "" {
+		a.renderUserRowError(w, r, id, errors.New("choose a project to assign"))
+		return
+	}
+	err := a.Store.AssignProject(r.Context(), a.permit(r), id, projectID)
+	a.respondUserMutation(w, r, id, err, "Project assigned.")
+}
+
+// UserReleaseProject retires one assignment. Idempotent -- releasing a pair
+// that is not currently active is a no-op at the store, not a 404: the
+// operator's intent ("this person should not hold this project") is already
+// satisfied. POST /users/{id}/projects/{projectID}/release.
+func (a *App) UserReleaseProject(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	projectID := r.PathValue("projectID")
+	err := a.Store.ReleaseProject(r.Context(), a.permit(r), id, projectID)
+	a.respondUserMutation(w, r, id, err, "Project assignment released.")
+}
+
 // respondUserMutation is the one place all four mutating user routes decide
 // how to answer, so the shape is enforced once rather than four times.
 //
@@ -269,9 +365,13 @@ func (a *App) renderUserRowError(w http.ResponseWriter, r *http.Request, id stri
 	}
 	if render.IsHTMX(r) {
 		b := a.base(r, "", "")
+		row, rerr := a.singleUserRow(r, u, b.CSRF)
+		if rerr != nil {
+			a.serverError(w, r, rerr)
+			return
+		}
 		a.Render.PartialWithOOB(w, http.StatusUnprocessableEntity, "user_row",
-			a.userRow(u, b.CSRF),
-			oobFlash("error", err.Error()))
+			row, oobFlash("error", err.Error()))
 		return
 	}
 	a.setFlash(r, "error", err.Error())
@@ -286,11 +386,27 @@ func (a *App) renderUserRowError(w http.ResponseWriter, r *http.Request, id stri
 func (a *App) respondUserRow(w http.ResponseWriter, r *http.Request, u *domain.AppUser, flashKind, flashText string) {
 	if render.IsHTMX(r) {
 		b := a.base(r, "", "")
+		row, err := a.singleUserRow(r, u, b.CSRF)
+		if err != nil {
+			a.serverError(w, r, err)
+			return
+		}
 		a.Render.PartialWithOOB(w, http.StatusOK, "user_row",
-			a.userRow(u, b.CSRF),
-			oobFlash(flashKind, flashText))
+			row, oobFlash(flashKind, flashText))
 		return
 	}
 	a.setFlash(r, flashKind, flashText)
 	render.Redirect(w, r, "/users")
+}
+
+// singleUserRow loads the active project list and builds one row's view --
+// the shared path for the two places that swap a single row rather than the
+// whole roster (renderUserList already has allProjects loaded once for
+// every row it builds).
+func (a *App) singleUserRow(r *http.Request, u *domain.AppUser, csrf string) (userRowView, error) {
+	projects, err := a.Store.ListProjects(r.Context(), store.ProjectFilter{})
+	if err != nil {
+		return userRowView{}, fmt.Errorf("loading projects for the assignment picker: %w", err)
+	}
+	return a.userRow(r.Context(), u, csrf, projects)
 }

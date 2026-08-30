@@ -172,6 +172,8 @@ POST /teams/{id}/retire | TeamRetire | write | true
 POST /users | UserCreate | writeAdminOnly | true
 POST /users/{id}/active | UserSetActive | writeAdminOnly | true
 POST /users/{id}/costs | UserSetCosts | writeAdminOnly | true
+POST /users/{id}/projects | UserAssignProject | writeAdminOnly | true
+POST /users/{id}/projects/{projectID}/release | UserReleaseProject | writeAdminOnly | true
 POST /users/{id}/role | UserSetRole | writeAdminOnly | true
 POST /users/{id}/scrub | UserScrub | writeAdminOnly | true
 POST /vlans | VLANCreate | write | true

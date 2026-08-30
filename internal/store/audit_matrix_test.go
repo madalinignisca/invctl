@@ -10,6 +10,7 @@ package store
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/madalinignisca/invctl/internal/domain"
@@ -148,6 +149,13 @@ var entityTypeVerbs = map[string][]string{
 	"asset_cost":          {verbCreate},
 	"service_instance":    {verbCreate},
 	"circuit_termination": {verbCreate},
+
+	// user_project (WP-G1 Task 19): the table that decides a project
+	// owner's OWN scope, ScopeEstateConfig like app_user beside it. Its only
+	// writers are AssignProject and ReleaseProject -- there is no update, an
+	// assignment is either active or retired -- so create and retire are
+	// its whole applicable-verb set.
+	"user_project": {verbCreate, verbRetire},
 }
 
 // auditMatrix is deliberately not exhaustive against auditedEntityTypes (71
@@ -1013,6 +1021,91 @@ var auditMatrix = []auditCase{
 			return id, domain.ActionUpdate
 		},
 	},
+	{
+		name:       "user_project assign",
+		entityType: "user_project",
+		verb:       verbCreate,
+		scope:      domain.ScopeEstateConfig,
+		setup: func(t *testing.T, s *SQLStore, ctx context.Context) string {
+			userID := mustAuditUserID(t, s, ctx, "audit-up-assign")
+			projectID := mustAuditProject(t, s, ctx, "audit-up-assign")
+			// Packed with "/", NOT splitPair's "|" -- AssignProject/
+			// ReleaseProject write change_log under entity_id
+			// userID+"/"+projectID (see user_projects.go's t.log calls), and
+			// this string must equal that exact id for the release case
+			// below's baseline comparison to find the row this case's own
+			// assign just wrote.
+			return userID + "/" + projectID
+		},
+		mutate: func(t *testing.T, s *SQLStore, ctx context.Context, setupID string) (string, string) {
+			userID, projectID, ok := strings.Cut(setupID, "/")
+			if !ok {
+				t.Fatalf("setupID %q has no '/' separator", setupID)
+			}
+			if err := s.AssignProject(ctx, testPermit, userID, projectID); err != nil {
+				t.Fatalf("assigning project: %v", err)
+			}
+			return setupID, domain.ActionCreate
+		},
+	},
+	{
+		name:       "user_project release",
+		entityType: "user_project",
+		verb:       verbRetire,
+		scope:      domain.ScopeEstateConfig,
+		setup: func(t *testing.T, s *SQLStore, ctx context.Context) string {
+			userID := mustAuditUserID(t, s, ctx, "audit-up-release")
+			projectID := mustAuditProject(t, s, ctx, "audit-up-release")
+			if err := s.AssignProject(ctx, testPermit, userID, projectID); err != nil {
+				t.Fatalf("assigning project ahead of release: %v", err)
+			}
+			// Same userID+"/"+projectID packing as the assign case above, and
+			// for the same reason: entityID == setupID below, so the
+			// baseline read picks up the assign's own change_log row before
+			// mutate runs, and "grew by exactly one" measures the release
+			// alone rather than being thrown off by the fixture's setup.
+			return userID + "/" + projectID
+		},
+		mutate: func(t *testing.T, s *SQLStore, ctx context.Context, setupID string) (string, string) {
+			userID, projectID, ok := strings.Cut(setupID, "/")
+			if !ok {
+				t.Fatalf("setupID %q has no '/' separator", setupID)
+			}
+			if err := s.ReleaseProject(ctx, testPermit, userID, projectID); err != nil {
+				t.Fatalf("releasing project: %v", err)
+			}
+			return setupID, domain.ActionRetire
+		},
+	},
+}
+
+// mustAuditUserID creates a real app_user row and returns its id, for the
+// user_project cases above -- AssignProject/ReleaseProject take a real
+// user_id, not a bare actor.
+func mustAuditUserID(t *testing.T, s *SQLStore, ctx context.Context, username string) string {
+	t.Helper()
+	user, err := domain.NewAppUser(NewID(), username, domain.UserSourceLocal, s.Now())
+	if err != nil {
+		t.Fatalf("building fixture user %s: %v", username, err)
+	}
+	if err := s.CreateUser(ctx, testPermit, user); err != nil {
+		t.Fatalf("creating fixture user %s: %v", username, err)
+	}
+	return user.ID
+}
+
+// mustAuditProject creates a real project row and returns its id, for the
+// user_project cases above.
+func mustAuditProject(t *testing.T, s *SQLStore, ctx context.Context, code string) string {
+	t.Helper()
+	p, err := domain.NewProject(NewID(), domain.ProjectSpec{Code: code, Name: code}, s.Now())
+	if err != nil {
+		t.Fatalf("building fixture project %s: %v", code, err)
+	}
+	if err := s.CreateProject(ctx, testPermit, p); err != nil {
+		t.Fatalf("creating fixture project %s: %v", code, err)
+	}
+	return p.ID
 }
 
 // mustAuditActor creates a real app_user row and returns the domain.Actor

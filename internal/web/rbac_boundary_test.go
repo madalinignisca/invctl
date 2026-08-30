@@ -832,7 +832,7 @@ func TestAProjectOwnerIsRefusedOnEveryNonProjectLinkableWriteRoute(t *testing.T)
 					"middleware on a route that should reach its handler now that CanWrite(project owner) is true",
 					adminGate)
 			}
-			// 12, not 6: the six import routes plus the six /users routes.
+			// 14, not 6: the six import routes plus the eight /users routes.
 			// A whole-branch review found GET /users reachable by a project
 			// owner -- registered through write(), which stopped meaning
 			// "Administrator" at Task 13, and writing nothing, so the permit
@@ -840,9 +840,13 @@ func TestAProjectOwnerIsRefusedOnEveryNonProjectLinkableWriteRoute(t *testing.T)
 			// username, role, cost grant and the note naming which accounts
 			// hold INV_ADMIN_USERS break-glass access. Only the nav rail hid
 			// it, which is not enforcement. All six moved to writeAdminOnly.
-			if administratorGate != 12 {
-				t.Errorf("RequireAdministrator refusals = %d, want 12 (six import routes "+
-					"and six /users routes)", administratorGate)
+			// Task 19 added the two project-assignment routes to the same
+			// bucket, for the same reason -- user_project is the table that
+			// decides a project owner's own scope, so it stays
+			// Administrator-only alongside the rest of user administration.
+			if administratorGate != 14 {
+				t.Errorf("RequireAdministrator refusals = %d, want 14 (six import routes "+
+					"and eight /users routes)", administratorGate)
 			}
 			if permitGate != 8 {
 				t.Errorf("permit-layer refusals (generic body) = %d, want 8 -- see this test's own "+
