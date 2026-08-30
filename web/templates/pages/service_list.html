@@ -71,7 +71,10 @@
 
 {{template "service_table" .}}
 
-{{if .CanWrite}}
+{{/* Creating an unlinked service is Administrator-only, the same reasoning
+     as asset_list.html's identical block -- a project owner adds a service
+     INTO their own project instead. */}}
+{{if .IsAdmin}}
   {{template "service_form" dict
       "CSRF" .CSRF "Errors" (dict) "Spec" (dict)
       "Environments" .Environments

@@ -35,7 +35,11 @@
   {{if .Terminations}}
   <div class="scroll-x">
     <table>
-      <thead><tr><th>Side</th><th>Lands on</th>{{if .CanWrite}}<th></th>{{end}}</tr></thead>
+      {{/* circuit_termination is ScopeTopology (domain/role.go's
+           entityScope) -- not extended by 1.0 item 1, so it stays
+           Administrator-only even though the circuit itself is
+           project-linked. */}}
+      <thead><tr><th>Side</th><th>Lands on</th>{{if .IsAdmin}}<th></th>{{end}}</tr></thead>
       <tbody>
         {{range .Terminations}}
         <tr>
@@ -44,7 +48,7 @@
             {{if .AssetID}}<a href="/assets/{{deref .AssetID}}">{{.AssetName}}</a> <span class="pill pill-muted">site</span>
             {{else}}<a href="/assets/{{.PortAssetID}}">{{.PortAssetName}}</a> · <span class="mono">{{.InterfaceName}}</span> <span class="pill pill-ok">port</span>{{end}}
           </td>
-          {{if $.CanWrite}}
+          {{if $.IsAdmin}}
           <td style="white-space:nowrap">
             <form method="post" action="/circuits/{{$.Circuit.ID}}/terminations/{{.ID}}/retire" style="display:inline">
               <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
@@ -61,7 +65,7 @@
   <div class="empty"><strong>Neither end recorded.</strong>The contract exists and nothing says where it arrives.</div>
   {{end}}
 
-  {{if .CanWrite}}
+  {{if .IsAdmin}}
   <form class="panel-body" method="post" action="/circuits/{{.Circuit.ID}}/terminations">
     <input type="hidden" name="csrf_token" value="{{.CSRF}}">
     <div class="field-row">
@@ -98,7 +102,7 @@
     "Action" (printf "/circuits/%s/costs" .Circuit.ID) "Slug" "circuit"
     "Return" (printf "/circuits/%s" .Circuit.ID) "EditID" .EditRow "RepriceID" .RepriceRow
     "Costs" .Costs "Totals" .CostTotals "Kinds" .CostKinds "Periods" .Periods
-    "CSRF" .CSRF "CanWrite" .CanWrite "CanSeeCosts" .CanSeeCosts
+    "CSRF" .CSRF "CanWrite" .IsAdmin "CanSeeCosts" .CanSeeCosts
     "Providers" .Providers
     "Heading" "What it costs"
     "Note" "A one-off spreads to the contract end, because that is the honest horizon for money spent getting a circuit working."}}

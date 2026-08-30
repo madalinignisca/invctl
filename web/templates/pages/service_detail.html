@@ -77,7 +77,9 @@
            cell always carries its reporter and its age, and shows `unknown` once
            a reading is older than three of that reporter's intervals -- never
            its last value, because silence is not health (rule 8). */}}
-      <thead><tr><th>Host</th><th>Runtime</th><th>Role</th><th>Shard</th><th>Ordinal</th><th>Desired</th><th>Observed</th>{{if .CanWrite}}
+      {{/* service_instance is ScopeSubjectDerived (1.0 item 1): a project
+           owner who owns this service may write its instances. */}}
+      <thead><tr><th>Host</th><th>Runtime</th><th>Role</th><th>Shard</th><th>Ordinal</th><th>Desired</th><th>Observed</th>{{if $.CanWriteEntity "service" $.Service.ID}}
 <th></th>{{end}}</tr></thead>
       <tbody>
         {{range .Instances}}
@@ -85,7 +87,7 @@
         {{/* Correcting a placement in the row, because here the fields ARE the
              columns. The host is not among them: moving a service to another
              box is a migration, and both placements are facts worth keeping. */}}
-        {{if and $.CanWrite (not .Retired) (eq .ID $.EditRow)}}
+        {{if and ($.CanWriteEntity "service" $.Service.ID) (not .Retired) (eq .ID $.EditRow)}}
         <tr class="row-editing">
           <td><a class="id" href="/assets/{{.HostAssetID}}">{{.HostName}}</a>
               <div class="mono" style="color:var(--faint);font-size:11.5px">host is fixed</div></td>
@@ -133,7 +135,7 @@
             {{if .Retired}}<div class="mono" style="color:var(--faint);font-size:11.5px">withdrawn</div>{{end}}
           </td>
           <td>{{template "health_cell" (index $.InstanceHealth .ID)}}</td>
-          {{if $.CanWrite}}
+          {{if $.CanWriteEntity "service" $.Service.ID}}
           <td style="white-space:nowrap">
             {{if not .Retired}}
             <a class="btn btn-sm" href="/services/{{$.Service.ID}}?edit={{.ID}}#instances">Edit</a>
@@ -154,7 +156,7 @@
   {{else}}
   <div class="empty"><strong>Not placed anywhere yet.</strong>Without an instance, no outage can reach this service.</div>
   {{end}}
-  {{if .CanWrite}}
+  {{if .CanWriteEntity "service" .Service.ID}}
   <div class="panel-body" style="border-top:1px solid var(--line-soft)">
     {{template "instance_form" .InstanceForm}}
   </div>
@@ -171,7 +173,10 @@
   {{if .Endpoints}}
   <div class="scroll-x">
     <table>
-      <thead><tr><th>Name</th><th>Address</th><th>Bind scope</th><th>TLS</th><th>Exposure</th>{{if .CanWrite}}<th></th>{{end}}</tr></thead>
+      {{/* endpoint is ScopeTopology (domain/role.go's entityScope) -- unlike
+           service_instance it was NOT extended to a project owner by 1.0
+           item 1, so this stays Administrator-only. */}}
+      <thead><tr><th>Name</th><th>Address</th><th>Bind scope</th><th>TLS</th><th>Exposure</th>{{if .IsAdmin}}<th></th>{{end}}</tr></thead>
       <tbody>
         {{range .Endpoints}}
         <tr {{if and $.EndpointEdit (eq .ID $.EndpointEdit.Endpoint.ID)}}class="row-editing"{{end}}
@@ -184,7 +189,7 @@
           <td>
             <span class="pill {{if eq .Exposure "external"}}pill-down{{else if eq .Exposure "cross_env"}}pill-degraded{{else}}pill-muted{{end}}">{{.Exposure}}</span>
           </td>
-          {{if $.CanWrite}}
+          {{if $.IsAdmin}}
           <td style="white-space:nowrap">
             {{/* A withdrawn socket is history: readable, not amendable. */}}
             {{if not .Retired}}
@@ -206,7 +211,7 @@
   {{else}}
   <div class="empty"><strong>No endpoints.</strong>Nothing can depend on this service until it has one.</div>
   {{end}}
-  {{if .CanWrite}}
+  {{if .IsAdmin}}
   <div class="panel-body" style="border-top:1px solid var(--line-soft)">
     {{/* One form, one purpose at a time: correcting a socket replaces the add
          form rather than sitting beside it, so there is never a question about
@@ -260,7 +265,7 @@
   {{if .Upstream}}
   <div class="scroll-x">
     <table>
-      <thead><tr><th>Provider</th><th>Nature</th><th>What breaks</th><th>Identity</th><th>Verified</th>{{if .CanWrite}}<th></th>{{end}}</tr></thead>
+      <thead><tr><th>Provider</th><th>Nature</th><th>What breaks</th><th>Identity</th><th>Verified</th>{{if .IsAdmin}}<th></th>{{end}}</tr></thead>
       <tbody>
         {{range .Upstream}}{{template "dependency_row" .}}{{end}}
       </tbody>
@@ -269,7 +274,10 @@
   {{else}}
   <div class="empty"><strong>No recorded dependencies.</strong>Almost nothing genuinely has none — this usually means nobody has written them down.</div>
   {{end}}
-  {{if .CanWrite}}
+  {{/* dependency is ScopeTopology (still Administrator-only; explicitly
+       deferred by 1.0 item 1's DEFER list -- the ReparentAsset two-ended
+       trap). */}}
+  {{if .IsAdmin}}
   <div class="panel-body" style="border-top:1px solid var(--line-soft)">
     {{/* Behind a disclosure: the panel is a RECORD by default and a form on
          request. Sitting open between the table and the next panel, the form
@@ -293,7 +301,7 @@
   {{if .Downstream}}
   <div class="scroll-x">
     <table>
-      <thead><tr><th>Consumer</th><th>Nature</th><th>What breaks</th><th>Identity</th><th>Verified</th>{{if .CanWrite}}<th></th>{{end}}</tr></thead>
+      <thead><tr><th>Consumer</th><th>Nature</th><th>What breaks</th><th>Identity</th><th>Verified</th>{{if .IsAdmin}}<th></th>{{end}}</tr></thead>
       <tbody>
         {{range .Downstream}}{{template "dependency_row" .}}{{end}}
       </tbody>
@@ -310,7 +318,7 @@
     "Action" (printf "/services/%s/costs" .Service.ID) "Slug" "service"
     "Return" (printf "/services/%s" .Service.ID) "EditID" .EditRow "RepriceID" .RepriceRow
     "Costs" .Costs "Totals" .CostTotals "Kinds" .CostKinds "Periods" .CostPeriods
-    "CSRF" .CSRF "CanWrite" .CanWrite "CanSeeCosts" .CanSeeCosts
+    "CSRF" .CSRF "CanWrite" .IsAdmin "CanSeeCosts" .CanSeeCosts
     "Providers" .Providers
     "Heading" "What it costs"
     "Note" "Attached to this service: a licence, a support contract, a hosted plan."}}

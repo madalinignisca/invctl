@@ -610,6 +610,15 @@ func hostableAssets(assets []store.AssetRow) []store.AssetRow {
 // depRowData is one dependency row. The row partial is rendered both inside
 // the service page and on its own after a verify, so it gets a real type
 // rather than a map assembled in the template.
+//
+// CanWrite HERE MEANS ADMINISTRATOR, NOT Base.CanWrite. "dependency" is
+// ScopeTopology (domain/role.go's entityScope) -- explicitly deferred by 1.0
+// item 1's DEFER list (the ReparentAsset two-ended trap) -- so it stays
+// Administrator-only regardless of which service either end belongs to.
+// Every caller passes isAdmin for this field; see depRows and
+// DependencyVerify. Named CanWrite rather than IsAdmin only because the
+// partial (rows.html's dependency_row) is shared with no other caller that
+// would need to tell the two apart.
 type depRowData struct {
 	Dep         *store.DependencyRow
 	CanWrite    bool
@@ -627,15 +636,17 @@ type depRowData struct {
 	SecretRef string
 }
 
-// depRows decorates dependency rows for rendering. isAdmin gates SecretRef --
-// see IsAdmin's doc comment on why this is deliberately narrower than
-// canWrite and must not be derived from it.
-func depRows(deps []store.DependencyRow, classes map[string][]string, direction, csrf string, canWrite, isAdmin bool) []depRowData {
+// depRows decorates dependency rows for rendering. isAdmin gates both
+// SecretRef (see IsAdmin's doc comment on why this is deliberately narrower
+// than CanWrite) and the row's own CanWrite field -- see depRowData's doc
+// comment for why a dependency write is Administrator-only regardless of
+// the caller's ordinary write permit.
+func depRows(deps []store.DependencyRow, classes map[string][]string, direction, csrf string, isAdmin bool) []depRowData {
 	out := make([]depRowData, len(deps))
 	for i := range deps {
 		out[i] = depRowData{
 			Dep:         &deps[i],
-			CanWrite:    canWrite,
+			CanWrite:    isAdmin,
 			CSRF:        csrf,
 			Direction:   direction,
 			DataClasses: classes[deps[i].ID],

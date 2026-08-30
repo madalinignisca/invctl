@@ -27,22 +27,24 @@
   </div>
   {{if .Circuits}}
   {{/* Cease is this circuit's own retire control -- entity-specific, unlike
-       every other .CanWrite on this page (Record a circuit/provider below,
-       which creates something unlinked to any project and stays
-       Administrator-only). See Base.CanWriteEntity's doc comment.
+       "Record a circuit/provider" below (which creates something unlinked
+       to any project and stays Administrator-only). See
+       Base.CanWriteEntity's doc comment.
 
-       THE COLUMN IS COMPUTED, NOT .CanWrite, because a project owner can
+       THE COLUMN IS COMPUTED, NOT .CanWrite (which since WP-G1 Task 13 means
+       "may write something", true for a project owner too, not just an
+       Administrator -- 1.0 item 2's own sweep), because a project owner can
        legitimately see a Cease button on ONE row and not another on the
        SAME page -- a header gated on the page-wide .CanWrite would hide the
        whole column even for a row they do own, and a header gated on the
        first row checked would silently vary with which row happened to
-       render first. $anyCircuitWrite is true if .CanWrite is (an
+       render first. $anyCircuitWrite is true if .IsAdmin is (an
        Administrator, unconditionally) or if any row on THIS page is one the
        viewer owns, so the column appears exactly when at least one row
        needs it -- and each row below still renders its own cell empty
        rather than omitted, so a mixed page keeps every row's column count
        equal. */}}
-  {{$anyCircuitWrite := .CanWrite}}
+  {{$anyCircuitWrite := .IsAdmin}}
   {{range .Circuits}}{{if $.CanWriteEntity "circuit" .ID}}{{$anyCircuitWrite = true}}{{end}}{{end}}
   <div class="scroll-x">
     <table>
@@ -107,7 +109,13 @@
   {{end}}
 </div>
 
-{{if .CanWrite}}
+{{/* Creating an unlinked circuit or a provider is Administrator-only --
+     both are ScopeProjectLinked/ScopeEstateConfig with no owning project at
+     creation time (see domain.PermitHoldsProject's doc comment on why a
+     brand-new id can never satisfy a project owner's existing scope). A
+     project owner records a circuit INTO their own project instead, from
+     the project page (CircuitCreateInProject). */}}
+{{if .IsAdmin}}
 <div class="grid-2">
   <form id="circuit-form" class="panel" method="post" action="/circuits"
         hx-post="/circuits" hx-target="#circuit-form" hx-swap="outerHTML">

@@ -27,13 +27,13 @@
 <div style="margin-bottom:18px">
   <a class="btn btn-primary" href="/assets/{{.Asset.ID}}/impact">Simulate losing this</a>
   <a class="btn" href="/assets/{{.Asset.ID}}/neighbourhood">See what it connects to</a>
-  {{/* Controls a single row: the asset's own edit and retire, not any
-       topology beneath it (ports, addresses, power, patching stay gated on
-       .CanWrite, unchanged -- see docs/rbac-design.md §4). A project owner
-       who owns THIS asset sees these; one who does not, does not, even
-       though .CanWrite itself is still false for every project owner today
-       (WP-G1 Task 13 has not landed). See Base.CanWriteEntity's doc
-       comment. */}}
+  {{/* Controls a single row: the asset's own edit and retire, gated on
+       CanWriteEntity so a project owner sees this exactly when they own
+       THIS asset. 1.0 item 2 swept every other control below (ports,
+       addresses, occupants, storage) onto the same asset-scoped gate;
+       power, patching and links stay Administrator-only (ScopeTopology,
+       domain/role.go's entityScope) and gate on .IsAdmin instead -- see
+       Base.CanWriteEntity's doc comment. */}}
   {{if .CanWriteEntity "asset" .Asset.ID}}
     <a class="btn" href="/assets/{{.Asset.ID}}?edit={{.Asset.ID}}#edit">Edit</a>
     {{if ne .Asset.Lifecycle "retired"}}
@@ -155,14 +155,18 @@
   {{if .Interfaces}}
   <div class="scroll-x">
     <table>
-      <thead><tr><th>Port</th><th>Form factor</th><th>Speed</th><th>MAC</th><th>Addresses</th><th>Patched to</th>{{if $.CanWrite}}<th></th>{{end}}</tr></thead>
+      {{/* interface/ip_address are ScopeSubjectDerived through the asset
+           (WP-G1 item 1); a project owner who owns THIS asset may write its
+           ports and addresses, so the header (and every control below) is
+           gated on the asset, never on the page-wide .CanWrite -- 1.0 item 2. */}}
+      <thead><tr><th>Port</th><th>Form factor</th><th>Speed</th><th>MAC</th><th>Addresses</th><th>Patched to</th>{{if $.CanWriteEntity "asset" $.Asset.ID}}<th></th>{{end}}</tr></thead>
       <tbody>
         {{range .Interfaces}}
         {{$if := .}}
         {{/* Correcting a port. Not its chassis and not its bond: the topology
              and the reachability walk read both, and the store carries them
              over regardless of what a form sends. */}}
-        {{if and $.CanWrite (eq .ID $.EditRow)}}
+        {{if and ($.CanWriteEntity "asset" $.Asset.ID) (eq .ID $.EditRow)}}
         <tr class="row-editing">
           <td><input form="if-{{.ID}}" class="mono {{if $.Edit.Err "name"}}invalid{{end}}" type="text" name="name"
                      value="{{$.Edit.Value "name" .Name}}" aria-label="Port name" required style="width:8em">
@@ -212,7 +216,7 @@
           <td class="mono" style="font-size:12px">
             {{range .Addresses}}
               {{$addr := .}}
-              {{if and $.CanWrite (eq .ID $.EditRow)}}
+              {{if and ($.CanWriteEntity "asset" $.Asset.ID) (eq .ID $.EditRow)}}
               <form method="post" action="/addresses/{{.ID}}" style="display:flex;gap:4px;align-items:center;margin:2px 0">
                 <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
                 <input type="hidden" name="row_version" value="{{$.Edit.Value "row_version" (itoa .RowVersion)}}">
@@ -228,7 +232,7 @@
               </form>
               {{else}}
               <div>{{.AddrText}} <span class="pill pill-muted">{{.Role}}</span>
-                {{if $.CanWrite}}<a class="id" href="/assets/{{$.Asset.ID}}?edit={{.ID}}#ports" title="Correct this address">edit</a>{{end}}
+                {{if $.CanWriteEntity "asset" $.Asset.ID}}<a class="id" href="/assets/{{$.Asset.ID}}?edit={{.ID}}#ports" title="Correct this address">edit</a>{{end}}
               </div>
               {{end}}
             {{end}}
@@ -236,10 +240,17 @@
           <td class="mono" style="font-size:12px;color:var(--muted)">
             {{if .PeerAsset}}{{.PeerAsset}} · {{.PeerPort}}{{else}}—{{end}}
           </td>
-          {{if $.CanWrite}}
+          {{/* Editing the port itself is asset-scoped (subject-derived);
+               unpatching is a "link" write, which is ScopeTopology and stays
+               Administrator-only (1.0 item 1's DEFER list) -- so the two
+               controls in this cell are gated separately, not on one shared
+               .CanWrite the way this cell used to be. */}}
+          {{if or ($.CanWriteEntity "asset" $.Asset.ID) (and .IsPatched $.IsAdmin)}}
           <td style="white-space:nowrap">
+            {{if $.CanWriteEntity "asset" $.Asset.ID}}
             <a class="btn btn-sm" href="/assets/{{$.Asset.ID}}?edit={{.ID}}#ports">Edit</a>
-            {{if .IsPatched}}
+            {{end}}
+            {{if and .IsPatched $.IsAdmin}}
             <form method="post" action="/links/{{.LinkID}}/retire" style="display:inline"
                   hx-post="/links/{{.LinkID}}/retire"
                   hx-confirm="Unpatch {{.Name}}? The record is kept.">
@@ -260,15 +271,23 @@
   <div class="empty"><strong>No interfaces recorded.</strong></div>
   {{end}}
 
-  {{if .CanWrite}}
+  {{/* interface/ip_address are asset-scoped (see the table header comment
+       above); "link" is a patch cable and stays Administrator-only -- a
+       shared panel gated on one .CanWrite would show a project owner a form
+       (LinkForm) the server refuses. Split, not shared. */}}
+  {{if or ($.CanWriteEntity "asset" .Asset.ID) .IsAdmin}}
   <div class="panel-body" style="border-top:1px solid var(--border)">
+    {{if $.CanWriteEntity "asset" .Asset.ID}}
     <div class="grid-2">
       {{template "interface_form" .InterfaceForm}}
       {{template "ip_address_form" .IPAddressForm}}
     </div>
+    {{end}}
+    {{if .IsAdmin}}
     <div style="margin-top:12px">
       {{template "link_form" .LinkForm}}
     </div>
+    {{end}}
   </div>
   {{end}}
 </div>
@@ -283,7 +302,7 @@
     "Action" (printf "/assets/%s/costs" .Asset.ID) "Slug" "asset"
     "Return" (printf "/assets/%s" .Asset.ID) "EditID" .EditRow "RepriceID" .RepriceRow
     "Costs" .Costs "Totals" .CostTotals "Kinds" .CostKinds "Periods" .CostPeriods
-    "CSRF" .CSRF "CanWrite" .CanWrite "CanSeeCosts" .CanSeeCosts
+    "CSRF" .CSRF "CanWrite" .IsAdmin "CanSeeCosts" .CanSeeCosts
     "Providers" .Providers
     "Heading" "What it costs"
     "Scoped" true "Guests" .Guests "Consumers" .CostConsumers
@@ -291,7 +310,14 @@
 
 {{template "price_movement_panel" .}}
 
-{{template "journal_panel" .}}
+{{/* journal_entry is ScopeSubjectDerived (the shape 1.0 item 1 built its
+     other three derivations from) -- asset-scoped, not the page-wide
+     .CanWrite. journal_panel is a standalone partial that takes a dict
+     rather than the whole page, so this is where that scoping is supplied,
+     once, rather than guessed inside the partial. */}}
+{{template "journal_panel" dict
+    "Journal" .Journal "JournalResource" .JournalResource "JournalID" .JournalID
+    "CanWrite" (.CanWriteEntity "asset" .Asset.ID) "CSRF" .CSRF "EditRow" .EditRow}}
 
 {{template "timeline_panel" .Timeline}}
 
@@ -352,7 +378,11 @@
     {{end}}
     {{end}}
 
-    {{if .CanWrite}}
+    {{/* Occupant shares are a SET folded into the asset's own audited value
+         (SetOccupants logs "asset", CLAUDE.md's fold rule), so a project
+         owner who owns this asset may write it -- asset-scoped, not the
+         page-wide .CanWrite. */}}
+    {{if $.CanWriteEntity "asset" .Asset.ID}}
     <form method="post" action="/assets/{{.Asset.ID}}/occupants" style="margin-top:12px">
       <input type="hidden" name="csrf_token" value="{{.CSRF}}">
       <p class="field-hint">
@@ -481,7 +511,9 @@
     <div class="empty"><strong>Nothing recorded</strong>
       Storage held here cannot be attributed to a project until somebody says how much.</div>
     {{end}}
-    {{if .CanWrite}}
+    {{/* Storage claims are also folded into the asset's own audited value
+         (SetStorageClaim logs "asset") -- asset-scoped. */}}
+    {{if $.CanWriteEntity "asset" .Asset.ID}}
     <form class="toolbar" method="post" action="/assets/{{.Asset.ID}}/storage"
           hx-post="/assets/{{.Asset.ID}}/storage">
       <input type="hidden" name="csrf_token" value="{{.CSRF}}">
@@ -529,7 +561,9 @@
           <td class="mono">{{.PanelName}}</td>
           <td class="mono">{{if .DrawVA}}{{derefInt .DrawVA}} VA{{else}}<span class="muted">not recorded</span>{{end}}</td>
           <td class="row-actions">
-            {{if $.CanWrite}}
+            {{/* power_input is ScopeTopology, not extended to a project owner
+                 (1.0 item 1's scope) -- Administrator-only. */}}
+            {{if $.IsAdmin}}
             <form method="post" action="/assets/{{$.Asset.ID}}/power/{{.ID}}/retire" style="display:inline">
               <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
               <button class="btn btn-sm" type="submit">Disconnect</button>
@@ -544,7 +578,7 @@
     <p class="empty">No power inputs recorded.</p>
     {{end}}
 
-    {{if .CanWrite}}
+    {{if .IsAdmin}}
     <form method="post" action="/assets/{{.Asset.ID}}/power" style="margin-top:12px">
       <input type="hidden" name="csrf_token" value="{{.CSRF}}">
       <div class="field-row">
@@ -794,7 +828,9 @@
           <td class="mono">{{.RearName}}</td>
           <td class="row-actions">
             <a class="btn btn-sm" href="/interfaces/{{.FrontInterfaceID}}/trace">Trace</a>
-            {{if $.CanWrite}}
+            {{/* port_pass_through is ScopeTopology -- Administrator-only, the
+                 same as power_input above. */}}
+            {{if $.IsAdmin}}
             <form method="post" action="/assets/{{$.Asset.ID}}/patch/{{.ID}}/retire" style="display:inline">
               <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
               <button class="btn btn-sm" type="submit">Unpatch</button>
@@ -812,7 +848,7 @@
     </p>
     {{end}}
 
-    {{if .CanWrite}}
+    {{if .IsAdmin}}
     <form method="post" action="/assets/{{.Asset.ID}}/patch" style="margin-top:12px">
       <input type="hidden" name="csrf_token" value="{{.CSRF}}">
       <div class="field-row">

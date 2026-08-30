@@ -210,3 +210,104 @@ func TestHidingAControlIsNotTheEnforcement(t *testing.T) {
 		})
 	}
 }
+
+// ---------------------------------------------------------------------------
+// 1.0 item 2: the targeted .CanWrite sweep on the asset/service/circuit pages
+// and their topology sub-panels. Since WP-G1 Task 13, .CanWrite means "may
+// write SOMETHING" and is true for a project owner too, so a template that
+// gated a per-entity control on it (rather than on Base.CanWriteEntity, or
+// on .IsAdmin for a type this codebase still refuses a project owner) shows
+// a button the server refuses. TestHidingAControlIsNotTheEnforcement above
+// already proves the server side; these prove the template side actually
+// reads the row it is drawing, not just the session.
+
+// TestAProjectOwnerSeesTheAssetScopedTopologyControlsOnTheirOwnAssetOnly is
+// the case a naive fix gets wrong in the OTHER direction from
+// TestHidingAControlIsNotTheEnforcement: interface, ip_address and
+// journal_entry are ScopeSubjectDerived (1.0 item 1), so a project owner who
+// owns the asset may write them -- gating the "add an interface" and "add a
+// note" panels on `{{if $.CanWriteEntity "interface" .ID}}` (an entity type
+// CanWriteEntity does not recognise, see its own doc comment) would be
+// always false and hide a control the server WOULD accept. The correct gate
+// is the owning asset's id, and this asserts both halves: present on the
+// asset the owner holds, absent on the one they do not.
+func TestAProjectOwnerSeesTheAssetScopedTopologyControlsOnTheirOwnAssetOnly(t *testing.T) {
+	for _, eng := range boundaryEngines(t) {
+		t.Run(eng.name, func(t *testing.T) {
+			h, fx := setupBoundary(t, eng)
+			h.login(boundaryOwnerUser, boundaryOwnerPassword)
+
+			inBody := body(t, h.get("/assets/"+fx.assetIn, false))
+			if !strings.Contains(inBody, `id="interface-form"`) {
+				t.Error("owned asset page missing the interface-creation form " +
+					"(interface is asset-scoped, ScopeSubjectDerived -- see domain/role.go)")
+			}
+			wantNote := fmt.Sprintf(`action="/assets/%s/journal"`, fx.assetIn)
+			if !strings.Contains(inBody, wantNote) {
+				t.Errorf("owned asset page missing the add-a-note form (action %q) -- "+
+					"journal_entry is asset-scoped, ScopeSubjectDerived", wantNote)
+			}
+
+			outBody := body(t, h.get("/assets/"+fx.assetOut, false))
+			if strings.Contains(outBody, `id="interface-form"`) {
+				t.Error("out-of-scope asset page unexpectedly offers the interface-creation form")
+			}
+			dontWantNote := fmt.Sprintf(`action="/assets/%s/journal"`, fx.assetOut)
+			if strings.Contains(outBody, dontWantNote) {
+				t.Errorf("out-of-scope asset page unexpectedly carries the add-a-note form (action %q)", dontWantNote)
+			}
+		})
+	}
+}
+
+// TestNeitherAssetPageOffersTheCostLineControlToAProjectOwner is the mirror
+// case: asset_cost is ScopeTopology (domain/role.go's entityScope), never
+// extended to a project owner regardless of which asset it is attached to,
+// so cost_panel's dict must be built from .IsAdmin, not from
+// Base.CanWriteEntity or Base.CanWrite. A project owner gets it on neither
+// page, including their own asset -- the one case a same-entity-type
+// intuition (interface behaves like this, so cost should too) gets wrong.
+// TestAnAdministratorGetsTheCostLineControlOnBothAssetPages is the other
+// half: an Administrator gets it regardless of project ownership.
+//
+// Two personas, two tests -- each `h` in this suite carries one session's
+// cookie jar, and setupBoundary is the fixture, not a login switch; see
+// user_project_assignment_test.go for the same one-persona-per-test shape.
+func TestNeitherAssetPageOffersTheCostLineControlToAProjectOwner(t *testing.T) {
+	const costForm = `id="cost-kind-asset"`
+	for _, eng := range boundaryEngines(t) {
+		t.Run(eng.name, func(t *testing.T) {
+			h, fx := setupBoundary(t, eng)
+			h.login(boundaryOwnerUser, boundaryOwnerPassword)
+
+			inBody := body(t, h.get("/assets/"+fx.assetIn, false))
+			if strings.Contains(inBody, costForm) {
+				t.Error("a project owner's OWN asset page offers the add-a-cost form; " +
+					"asset_cost is ScopeTopology and stays Administrator-only")
+			}
+			outBody := body(t, h.get("/assets/"+fx.assetOut, false))
+			if strings.Contains(outBody, costForm) {
+				t.Error("an out-of-scope asset page offers a project owner the add-a-cost form")
+			}
+		})
+	}
+}
+
+func TestAnAdministratorGetsTheCostLineControlOnBothAssetPages(t *testing.T) {
+	const costForm = `id="cost-kind-asset"`
+	for _, eng := range boundaryEngines(t) {
+		t.Run(eng.name, func(t *testing.T) {
+			h, fx := setupBoundary(t, eng)
+			h.login(boundaryAdminUser, boundaryAdminPassword)
+
+			inBody := body(t, h.get("/assets/"+fx.assetIn, false))
+			if !strings.Contains(inBody, costForm) {
+				t.Error("an Administrator is missing the add-a-cost form on an asset page")
+			}
+			outBody := body(t, h.get("/assets/"+fx.assetOut, false))
+			if !strings.Contains(outBody, costForm) {
+				t.Error("an Administrator is missing the add-a-cost form on a second asset page")
+			}
+		})
+	}
+}

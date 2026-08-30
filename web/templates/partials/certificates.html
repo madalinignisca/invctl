@@ -189,14 +189,16 @@
     {{if or .Assets .Services}}
     <div class="scroll-x">
       <table>
-        <thead><tr><th>What</th><th>Kind</th><th>Note</th>{{if .CanWrite}}<th></th>{{end}}</tr></thead>
+        {{/* certificate is ScopeTopology (domain/role.go's entityScope) --
+         explicitly deferred by 1.0 item 1, Administrator-only. */}}
+        <thead><tr><th>What</th><th>Kind</th><th>Note</th>{{if .IsAdmin}}<th></th>{{end}}</tr></thead>
         <tbody>
           {{range .Assets}}
           <tr>
             <td><a class="id" href="/assets/{{.EntityID}}">{{.EntityName}}</a></td>
             <td><span class="pill pill-muted">asset</span></td>
             <td style="color:var(--muted);font-size:12.5px">{{if .Note}}{{deref .Note}}{{end}}</td>
-            {{if $.CanWrite}}
+            {{if $.IsAdmin}}
             <td>
               <form method="post" action="/certificates/{{$.Certificate.ID}}/assets/{{.EntityID}}/retire"
                     hx-post="/certificates/{{$.Certificate.ID}}/assets/{{.EntityID}}/retire" style="display:inline">
@@ -212,7 +214,7 @@
             <td><a class="id" href="/services/{{.EntityID}}">{{.EntityName}}</a></td>
             <td><span class="pill pill-info">service</span></td>
             <td style="color:var(--muted);font-size:12.5px">{{if .Note}}{{deref .Note}}{{end}}</td>
-            {{if $.CanWrite}}
+            {{if $.IsAdmin}}
             <td>
               <form method="post" action="/certificates/{{$.Certificate.ID}}/services/{{.EntityID}}/retire"
                     hx-post="/certificates/{{$.Certificate.ID}}/services/{{.EntityID}}/retire" style="display:inline">
@@ -235,7 +237,7 @@
     {{end}}
   </div>
 
-  {{if .CanWrite}}
+  {{if .IsAdmin}}
   <div class="grid-2">
     <div class="panel">
       <div class="panel-head"><h2>Deploy to an asset</h2></div>

@@ -127,7 +127,10 @@
 
 
 {{/* Amend and clear, for one active override. Both are declared mutations:
-     POST, CSRF, RequireAdmin, and a change_log row in the same transaction. */}}
+     POST, CSRF, RequireAdmin, and a change_log row in the same transaction.
+     health_override is ScopeTopology (domain/role.go's entityScope) --
+     Administrator-only, so callers pass .IsAdmin as this dict's "CanWrite"
+     key, not the page-wide .CanWrite. */}}
 {{define "override_card"}}
 <div class="callout callout-warn" id="override-{{.Override.ID}}">
   <div style="font-size:12.5px;color:var(--muted);margin-bottom:8px">{{.Label}}</div>
@@ -241,11 +244,11 @@
   {{range .Targets}}
     {{if .Overridden}}
       {{template "override_card" dict "Override" .Override "Label" .Label
-                                      "CanWrite" $.CanWrite "CSRF" $.CSRF
+                                      "CanWrite" $.IsAdmin "CSRF" $.CSRF
                                       "States" $.States "Durations" $.Durations}}
     {{end}}
   {{end}}
-  {{if .CanWrite}}{{template "override_form" .}}{{end}}
+  {{if .IsAdmin}}{{template "override_form" .}}{{end}}
 </div>
 {{end}}
 

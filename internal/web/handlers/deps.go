@@ -99,7 +99,7 @@ func (a *App) DependencyVerify(w http.ResponseWriter, r *http.Request) {
 	b := a.base(r, "", "")
 	a.Render.PartialWithOOB(w, http.StatusOK, "dependency_row", depRowData{
 		Dep:         dep,
-		CanWrite:    b.CanWrite,
+		CanWrite:    b.IsAdmin,
 		CSRF:        b.CSRF,
 		Direction:   directionOf(r),
 		DataClasses: classes[id],

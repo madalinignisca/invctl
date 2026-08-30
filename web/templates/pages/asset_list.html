@@ -87,7 +87,11 @@
   — a separate file, keyed by asset path; not accepted by the importer.
 </p>
 
-{{if .CanWrite}}
+{{/* Creating an unlinked asset (or importing a CSV of them) is
+     Administrator-only -- a brand-new id cannot satisfy a project owner's
+     existing scope (domain.PermitHoldsProject's doc comment). A project
+     owner adds an asset INTO their own project instead. */}}
+{{if .IsAdmin}}
   <p class="hint" style="margin-top:12px">
     Adding many at once? <a href="/import/assets">Import a CSV</a> — it creates
     the whole file or none of it, and previews first if you ask.
