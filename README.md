@@ -17,7 +17,22 @@ decisions taken during this build.
 
 ## Status
 
-Proof of concept, milestones M0–M5 complete.
+**Release candidate for 1.0.** Thirty work packages are complete —
+physical estate (racks, power chains, cables, path tracing, physical fit),
+networking (VRFs, prefixes, VLANs, FHRP, L2VPN, ASNs), virtualisation and
+clusters, cost attribution and capacity modelling, bulk import, custom
+fields, the read-only JSON API, and role-based access control.
+
+The gate for 1.0 is deliberately narrow: **a company should be able to
+deploy this on their own estate and run it.** From 1.0 the database schema,
+the URLs and the `INV_*` environment variables are stable, and a breaking
+change to any of them means 2.0. `/api/v1` is covered by that promise —
+fields may be added, never removed or renamed.
+
+To run it: `docs/INSTALL.md`. To upgrade it: `docs/UPGRADE.md`. What each
+role may do: `docs/ROLES.md`.
+
+The original milestones, which are the foundation everything above sits on:
 
 | Milestone | What it covers | State |
 |---|---|---|
@@ -28,8 +43,17 @@ Proof of concept, milestones M0–M5 complete.
 | M4 | Impact engine, simulate-outage on every asset | done |
 | M5 | Global search (IP / MAC / serial / hostname / code / port), LDAP | done |
 
-Post-POC work — discovery agents, the lint engine, firewall reconciliation,
-the Ansible inventory endpoint — is deliberately not started.
+**Not started, and not planned for 1.0:** discovery agents, the lint engine,
+and firewall reconciliation. Each would let invctl reach out and act on the
+estate, which is a different product with a different risk profile — see
+`HANDOVER.md` §1 on configuration management as a non-goal.
+
+An earlier version of this section also listed the Ansible inventory
+endpoint as unstarted. It shipped: `GET /api/v1/ansible`, off until
+`INV_API_TOKENS` is set. See `docs/API.md`.
+
+Remaining before 1.0, and tracked in `docs/ROADMAP.md`: documentation
+finishing, and marking the roadmap itself honest.
 
 ## Try the demo
 
