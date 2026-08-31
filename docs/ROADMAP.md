@@ -7,6 +7,87 @@ package here is intended to be built. Nothing is gated on a client asking for it
 plus 9 shared, 30 read views, 65 write actions, 581 tests on SQLite and
 PostgreSQL.
 
+**Since then (2026-08-31):** 30 work packages complete, 1,428 test functions,
+184 write routes behind a generated inventory. See "The 1.0 line" below for
+what ships and what is deliberately held back.
+
+---
+
+## The 1.0 line
+
+**1.0 means a company can deploy invctl on their own estate and run it.**
+Not feature parity with NetBox, not every work package below — those keep
+their own order, and the release does not wait for them.
+
+From 1.0 the **database schema, the URLs and the `INV_*` environment
+variables are stable**. `/api/v1` is covered too: fields may be added, never
+removed or renamed, and a consumer must tolerate fields it does not
+recognise. Anything breaking becomes 2.0, or `/api/v2` alongside v1. The
+wire shape is enforced by `TestTheV1WireShapeIsUnchanged`, not just promised
+in `docs/API.md`.
+
+### Deferred to 1.1, deliberately
+
+These are decided, not forgotten. Each is recorded here rather than in a
+scratch file, because the scratch directory is git-ignored and a plan nobody
+else can read is not a plan.
+
+**Project-owner write scope, the rest of it.** WP-G1 extended a project
+owner to their projects' assets, services and circuits, plus the types
+scoped by one owning entity: `interface`, `ip_address`, `service_instance`
+and `journal_entry` (`domain.ScopeSubjectDerived`). Still Administrator-only:
+
+- `dependency` and `link` — **two-ended writes.** Each connects two entities
+  and logs one `change_log` row, so `tx.log` authorizes one end and the
+  other needs its own check. This is the shape that produced the
+  `ReparentAsset` escalation; do both ends, and test each end independently,
+  or the bug passes half-present.
+- `asset_cost` — crosses the cost-visibility axis. Writing a cost line while
+  `can_see_costs` may be false needs thinking about before building.
+- `certificate`, `cluster` — no argument against, just not needed for 1.0.
+
+Widening scope is never a breaking change, so 1.1 can take these freely.
+
+**WP-A4 follow-ups**, filed at that work package's merge and re-verified
+2026-08-31:
+
+- `custom_fields_show.html` renders a select's raw stored value (`high`)
+  rather than its option label (`High`), though the design gives options a
+  label as "what a reader sees".
+- `internal/csvsafe` ships with no test file — a package holding the one
+  security control on the CSV boundary, extracted from a package that had
+  coverage. It is exercised indirectly; the idempotency property its doc
+  comment leans on is asserted nowhere.
+- `SetCustomFieldOptions` folds `value=Label` joined on `,` for its audit
+  entry. An option value containing `=` or `,` can make a label rename fold
+  identically, and `checkVocabulary` permits any printable non-space rune,
+  so `a=b,c` is a legal code.
+- `SetCustomFieldOptions` rewrites the caller's `opts` slice in place. No
+  caller is harmed today and the behaviour is now commented, so this is
+  documented rather than surprising.
+- A duplicate-option message rendered to the browser carries the field UUID.
+  Not a leak; store phrasing reaching a user.
+- A refused `+42` echoes back into a `type="number"` widget that blanks it,
+  so the operator's rejected text vanishes — contradicting this repo's own
+  "your text is still here" principle. Refusal path only.
+- `loadCustomFieldsPanel` issues one extra `GetCustomField` per select field
+  per detail-page render, on the hottest page.
+- `docs/custom-fields-design.md` §9's test-name list has drifted from what
+  shipped: the coverage exists under different names, so the list is a false
+  index.
+
+One further entry on that list — number and date fields defended only at the
+input gate while `select` was defended at render — **is closed**, in
+`adce20e`. It was still listed as open when 1.0 scope was set and became a
+release item before anyone checked. A list like this is a claim about the
+past.
+
+**The other quality-of-life items:** WP-G4b and WP-G4c above, and the 132
+`.CanWrite` template occurrences on estate-configuration pages, which show a
+project owner controls the server refuses. Confirmed cosmetic — every one
+gates a control, none gates data — and the asset, service and circuit pages
+a project owner actually uses were swept for 1.0.
+
 ---
 
 ## 0. Ground rules
@@ -429,9 +510,26 @@ explicit rather than blocking it. Read the appendix before starting.*
 Free-text operational notes on entities. Distinct from audit: audit is what
 changed, journal is what a human observed. Cheap, and heavily used in practice.
 
-**WP-G4 · Tags, saved filters, table configs** — M
+**WP-G4 · Tags, saved filters, table configs** — M — **G4a DONE, G4b/G4c 1.1**
 Makes large estates usable. Pure quality of life, and users notice its absence
 immediately.
+
+The roadmap bundled three features as one M and they are not one feature —
+see `docs/tags-design.md` §0.
+
+- **G4a · Tags — DONE.** Estate-level declared state, applied from an
+  entity's own page, filterable, with bulk apply from a filtered view.
+- **G4b · Saved filters — 1.1.** Per-user, decided. Deferred because filters
+  need their own design, not for the GDPR reason an early draft gave: a saved
+  filter is attributed to its creator exactly as every other row here is, so
+  sharing redistributes access rather than erasing an obligation.
+- **G4c · Table configs — 1.1, and now unblocked.** It was deferred until
+  WP-G1 because per-user state is close to meaningless while authorization is
+  a comma-separated list of usernames, and it also needed a user scrub to
+  exist. Both conditions are met: WP-G1 shipped and `ScrubUser` is
+  implemented and routed. It would be the first table in this product whose
+  SUBJECT is a person rather than its author, which is why it gets its own
+  design pass rather than being rushed in before a schema-stability promise.
 
 **WP-G5 · CSV export** — S — **DONE**
 *Renamed 2026-08-12. It was "export templates", meaning the NetBox feature:
@@ -496,14 +594,14 @@ carrying real traffic.** Every part of the value depends on the observed side
 working, and building the collector first would produce a second inventory with
 nowhere to put its disagreements.
 
-**WP-G7 · Ownership report** — S
+**WP-G7 · Ownership report** — S — **DONE**
 `RetireTeam` states the philosophy already: a retired team still owning things
 is "how the estate says *this used to be theirs and nobody has picked it up*,
 which is a finding; silently nulling the column would erase the question along
-with the answer." Correct — and the promise it makes next, that "the pages
-render a retired team plainly so the gap is visible", is only half kept. The
-gap is visible one entity at a time. Nothing answers "what has no owner?"
-across the estate, and none of the five existing reports looks.
+with the answer." The gap used to be visible one entity at a time and nothing
+answered "what has no owner?" across the estate. `GET /reports/ownership` now
+does, with a "no contact" finding and bulk reassignment from the report
+itself (`POST /reports/ownership/assign`).
 
 Two distinct findings, deliberately not collapsed: **unowned** (`team_id IS
 NULL` — nobody ever said) and **owner retired** (somebody said and the answer
