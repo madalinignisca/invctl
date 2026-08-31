@@ -176,6 +176,27 @@ func openBoundaryPostgres(t *testing.T) *store.DB {
 	}
 	admin.Close()
 
+	// DROP REGISTERED HERE, immediately after the CREATE succeeds, and not
+	// after the store.Open below.
+	//
+	// The schema name is t.Name() lowercased, mapped and TRUNCATED TO 40
+	// CHARACTERS, so two tests whose names agree that far apart share it.
+	// That is survivable while every run drops what it made; it stops being
+	// survivable the moment one leaks, because the leftover then fails every
+	// later run with "schema already exists" -- a failure that looks like a
+	// logic bug in whichever test happens to draw the name, reproduces only
+	// on Postgres, and survives `git stash`. It cost a diagnosis here: the
+	// leak came from an earlier failure between the CREATE and the Cleanup
+	// registration, where this function had two more fallible calls.
+	t.Cleanup(func() {
+		cleanup, err := store.Open(store.DriverPostgres, baseDSN)
+		if err != nil {
+			return
+		}
+		defer cleanup.Close()
+		_, _ = cleanup.Writer.Exec(`DROP SCHEMA IF EXISTS ` + schema + ` CASCADE`)
+	})
+
 	sep := "?"
 	if strings.Contains(baseDSN, "?") {
 		sep = "&"
