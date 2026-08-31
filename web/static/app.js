@@ -394,6 +394,89 @@ document.addEventListener('alpine:init', () => {
       return 'Apply ' + tag + ' to ' + this.selected + ' ' + this.entityLabel + '?';
     },
   }));
+
+  // Column visibility for a wide list table, remembered per browser.
+  //
+  // STORES THE HIDDEN KEYS, NOT THE VISIBLE ONES, and that is the whole
+  // design (docs/table-configs-design.md §3). If it stored what to show, a
+  // release that adds a column would hide it from everyone who had ever
+  // touched this menu -- they would never see the new field and would have no
+  // reason to suspect one existed. Storing what to hide makes a new column
+  // visible by default and makes a stale key naming a removed column inert.
+  //
+  // The table key comes from x-data's argument, so one component serves all
+  // four tables without knowing anything about them.
+  Alpine.data('columnPicker', (table = '') => ({
+    table: table,
+    hidden: [],
+    open: false,
+
+    init() {
+      this.hidden = this.read();
+      this.apply();
+    },
+
+    // localStorage throws in some privacy modes rather than returning null,
+    // so every access is guarded. A browser that refuses to store simply
+    // shows every column, which is the correct degraded state.
+    read() {
+      try {
+        const raw = window.localStorage.getItem('invctl.cols.' + this.table);
+        const parsed = raw ? JSON.parse(raw) : [];
+        return Array.isArray(parsed) ? parsed.filter((k) => typeof k === 'string') : [];
+      } catch (e) {
+        return [];
+      }
+    },
+
+    save() {
+      try {
+        window.localStorage.setItem('invctl.cols.' + this.table, JSON.stringify(this.hidden));
+      } catch (e) {
+        // Nothing to do: the preference is a convenience, not state anything
+        // depends on.
+      }
+    },
+
+    apply() {
+      const root = this.$root;
+      root.querySelectorAll('[data-col]').forEach((cell) => {
+        cell.classList.toggle('col-hidden', this.hidden.indexOf(cell.dataset.col) !== -1);
+      });
+    },
+
+    toggleMenu() {
+      this.open = !this.open;
+    },
+
+    // x-on hands the event to the method; the key rides on the checkbox as
+    // data-col, because the CSP build cannot pass an argument from an
+    // attribute expression.
+    toggleColumn(event) {
+      const key = event.target.dataset.col;
+      if (!key) {
+        return;
+      }
+      const at = this.hidden.indexOf(key);
+      if (at === -1) {
+        this.hidden.push(key);
+      } else {
+        this.hidden.splice(at, 1);
+      }
+      this.save();
+      this.apply();
+    },
+
+    isVisible(key) {
+      return this.hidden.indexOf(key) === -1;
+    },
+
+    showAll() {
+      this.hidden = [];
+      this.save();
+      this.apply();
+    },
+  }));
 });
 
 // A 422 carries a re-rendered form and must be swapped in.

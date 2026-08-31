@@ -1127,3 +1127,10 @@ form.htmx-request .btn-primary { opacity: 0.6; pointer-events: none; }
 @media (prefers-reduced-motion: reduce) { .rail-caret { transition: none; } }
 /* Indented under their heading, so the hierarchy reads without a rule. */
 .rail-group-links .rail-link { padding-left: 22px; }
+
+/* Column visibility (WP-G4c). The class is toggled by the columnPicker
+   Alpine component; the server always renders every column it is willing to
+   show this reader, and hiding is purely local. */
+.col-hidden {
+  display: none;
+}
