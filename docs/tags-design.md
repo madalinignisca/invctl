@@ -42,6 +42,13 @@ has a PERSON as its subject.
   only write to `app_user` outside a test is `last_login_at`. Anything storing
   data whose SUBJECT is a person needs that operation to exist first.
 
+  **Resolved 2026-08-31 — see `docs/table-configs-design.md`.** Both
+  conditions were met (WP-G1 shipped, `ScrubUser` exists and is routed) and
+  the feature then turned out to need neither: a column preference is a
+  display preference about one browser, so it lives in `localStorage` and the
+  database never learns it exists. The deferral was sized against a schema
+  change the design removes.
+
 ## 1. Is this a third estate-defined metadata mechanism?
 
 It has to be asked, because a senior review of WP-A4 found that feature had
