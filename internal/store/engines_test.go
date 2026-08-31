@@ -85,6 +85,10 @@ func openTestSQLite(t *testing.T) *DB {
 	if err != nil {
 		t.Fatalf("opening sqlite: %v", err)
 	}
+	// Registered AFTER the drop, and t.Cleanup runs last-in-first-out, so the
+	// connection closes before the schema it is using is dropped. Splitting
+	// them is what lets the drop be registered early without also closing a
+	// db that does not exist yet.
 	t.Cleanup(func() { db.Close() })
 	return db
 }
@@ -213,19 +217,35 @@ func openTestPostgresRaw(t *testing.T) *DB {
 	}
 	admin.Close()
 
-	db, err := Open(DriverPostgres, withSearchPath(baseDSN, schema))
-	if err != nil {
-		t.Fatalf("opening postgres on schema %s: %v", schema, err)
-	}
+	// DROP REGISTERED HERE, immediately after the CREATE succeeds, and before
+	// the Open below that can t.Fatalf.
+	//
+	// The schema name is t.Name() truncated, so two tests whose names agree
+	// that far share it. That is survivable while every run drops what it
+	// made, and stops being survivable the moment one leaks: the leftover
+	// then fails every later run with "schema already exists", on Postgres
+	// only, presenting as a logic bug in whichever test draws the name, and
+	// surviving `git stash` because it lives in the database rather than the
+	// tree.
+	//
+	// This is the second copy of this bug. internal/web/rbac_boundary_test.go
+	// had the identical window and was fixed first; this one then leaked
+	// t_testreassignteamownershiprefusesthesamet_583 and failed the suite for
+	// a run that had changed nothing but comments and documentation.
 	t.Cleanup(func() {
-		db.Close()
 		cleanup, err := Open(DriverPostgres, baseDSN)
 		if err != nil {
 			return
 		}
 		defer cleanup.Close()
-		cleanup.Writer.Exec(`DROP SCHEMA IF EXISTS ` + schema + ` CASCADE`)
+		_, _ = cleanup.Writer.Exec(`DROP SCHEMA IF EXISTS ` + schema + ` CASCADE`)
 	})
+
+	db, err := Open(DriverPostgres, withSearchPath(baseDSN, schema))
+	if err != nil {
+		t.Fatalf("opening postgres on schema %s: %v", schema, err)
+	}
+	t.Cleanup(func() { db.Close() })
 	return db
 }
 
