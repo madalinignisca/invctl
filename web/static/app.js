@@ -443,6 +443,10 @@ document.addEventListener('alpine:init', () => {
       root.querySelectorAll('[data-col]').forEach((cell) => {
         cell.classList.toggle('col-hidden', this.hidden.indexOf(cell.dataset.col) !== -1);
       });
+      document.querySelectorAll('.column-picker[data-columns="' + this.table +
+        '"] input[data-col]').forEach((box) => {
+        box.checked = this.hidden.indexOf(box.dataset.col) === -1;
+      });
     },
 
     toggleMenu() {

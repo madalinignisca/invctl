@@ -1,0 +1,30 @@
+<!--
+invctl — infrastructure inventory
+Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+
+Licensed under the GNU Affero General Public License, version 3 only —
+no later version applies. See LICENSE for the full text.
+
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+{{define "column_picker"}}
+{{/* Renderable standalone: it needs only .Table and .Columns, and the
+     component it drives finds its cells through $root, so this partial
+     never needs to know what the table contains. */}}
+{{/* No x-data here. The component is declared on a wrapper that contains
+     BOTH this picker and the table, so $root reaches the cells -- see the
+     plan's Task 4. A second x-data here would create a second, empty
+     component instance and the picker would toggle nothing. */}}
+<div class="column-picker" data-columns="{{.Table}}">
+  <button type="button" class="btn btn-sm" x-on:click="toggleMenu">Columns</button>
+  <div class="column-picker-menu" x-show="open" x-cloak>
+    {{range .Columns}}
+    <label>
+      <input type="checkbox" data-col="{{.Key}}" x-on:change="toggleColumn" checked>
+      {{.Label}}
+    </label>
+    {{end}}
+    <button type="button" class="btn btn-sm" x-on:click="showAll">Show all</button>
+  </div>
+</div>
+{{end}}

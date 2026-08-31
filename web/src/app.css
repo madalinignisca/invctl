@@ -1134,3 +1134,11 @@ form.htmx-request .btn-primary { opacity: 0.6; pointer-events: none; }
 .col-hidden {
   display: none;
 }
+
+.column-picker { position: relative; display: inline-block; }
+.column-picker-menu {
+  position: absolute; z-index: 20; right: 0; min-width: 12rem;
+  padding: 8px; border: 1px solid var(--line);
+  background: var(--raised); border-radius: 6px;
+}
+.column-picker-menu label { display: block; padding: 2px 0; }
