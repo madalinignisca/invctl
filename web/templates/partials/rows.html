@@ -131,12 +131,12 @@
         x-data="bulkTagApply" data-entity-label="services"{{end}}>
     {{if $bulkTag}}<input type="hidden" name="csrf_token" value="{{.CSRF}}">{{end}}
     <div class="scroll-x">
-      <table>
+      <table data-table="service">
         <thead>
           <tr>
             {{if $bulkTag}}<th></th>{{end}}
-            <th>Code</th><th>Name</th><th>Kind</th><th>Environment</th>
-            <th>Project</th><th>Availability</th><th>Instances</th><th>Tier</th>
+            <th>Code</th><th data-col="name">Name</th><th data-col="kind">Kind</th><th data-col="environment">Environment</th>
+            <th data-col="project">Project</th><th data-col="availability">Availability</th><th data-col="instances">Instances</th><th data-col="tier">Tier</th>
           </tr>
         </thead>
         <tbody>
@@ -146,23 +146,23 @@
             <td><input type="checkbox" name="entity" value="{{.ID}}:{{.RowVersion}}" x-on:change="updateSelected"></td>
             {{end}}
             <td><a class="id" href="/services/{{.ID}}">{{.Code}}</a></td>
-            <td>{{.Name}}</td>
-            <td><span class="pill pill-muted">{{.Kind}}</span></td>
-            <td><span class="pill pill-info">{{.EnvironmentCode}}</span></td>
-            <td>
+            <td data-col="name">{{.Name}}</td>
+            <td data-col="kind"><span class="pill pill-muted">{{.Kind}}</span></td>
+            <td data-col="environment"><span class="pill pill-info">{{.EnvironmentCode}}</span></td>
+            <td data-col="project">
               {{if .OwningProjectID}}
                 <a class="id" href="/projects/{{.OwningProjectID}}">{{.OwningProjectName}}</a>
               {{else}}
                 <span class="pill pill-degraded" title="No project owns this service">unowned</span>
               {{end}}
             </td>
-            <td>
+            <td data-col="availability">
               <span class="mono" style="font-size:12px">{{.Availability}}</span>
               {{if .MinHealthy}}<span class="mono" style="color:var(--faint)"> min {{.MinHealthy}}</span>{{end}}
               {{if .FailoverMode}}<div class="mono" style="color:var(--faint);font-size:11.5px">failover: {{deref .FailoverMode}}</div>{{end}}
             </td>
-            <td class="num">{{.InstanceCount}}</td>
-            <td><span class="{{tierClass .Tier}}">tier {{.Tier}}</span></td>
+            <td data-col="instances" class="num">{{.InstanceCount}}</td>
+            <td data-col="tier"><span class="{{tierClass .Tier}}">tier {{.Tier}}</span></td>
           </tr>
           {{end}}
         </tbody>

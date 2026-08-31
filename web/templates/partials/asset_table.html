@@ -25,16 +25,16 @@
         x-data="bulkTagApply" data-entity-label="assets"{{end}}>
     {{if $bulkTag}}<input type="hidden" name="csrf_token" value="{{.CSRF}}">{{end}}
     <div class="scroll-x">
-      <table>
+      <table data-table="asset">
         <thead>
           <tr>
             {{if $bulkTag}}<th></th>{{end}}
             <th>Name</th>
-            <th>Kind</th>
-            <th>Contained by</th>
-            <th>Environments</th>
-            <th>Serial</th>
-            <th>Lifecycle</th>
+            <th data-col="kind">Kind</th>
+            <th data-col="contained_by">Contained by</th>
+            <th data-col="environments">Environments</th>
+            <th data-col="serial">Serial</th>
+            <th data-col="lifecycle">Lifecycle</th>
           </tr>
         </thead>
         <tbody>
@@ -44,9 +44,9 @@
             <td><input type="checkbox" name="entity" value="{{.ID}}:{{.RowVersion}}" x-on:change="updateSelected"></td>
             {{end}}
             <td><a class="id" href="/assets/{{.ID}}">{{.Name}}</a></td>
-            <td><span class="pill pill-muted">{{.Kind}}</span></td>
-            <td class="id" style="color:var(--muted)">{{if .ParentName}}{{.ParentName}}{{else}}—{{end}}</td>
-            <td>
+            <td data-col="kind"><span class="pill pill-muted">{{.Kind}}</span></td>
+            <td data-col="contained_by" class="id" style="color:var(--muted)">{{if .ParentName}}{{.ParentName}}{{else}}—{{end}}</td>
+            <td data-col="environments">
               <div class="tag-list">
                 {{range .Environments}}<span class="pill pill-info">{{.Code}}</span>{{end}}
                 {{if .SpansEnvironments}}
@@ -54,8 +54,8 @@
                 {{end}}
               </div>
             </td>
-            <td class="mono" style="color:var(--muted)">{{deref .Serial}}</td>
-            <td><span class="{{lifecycleClass .Lifecycle}}">{{.Lifecycle}}</span></td>
+            <td data-col="serial" class="mono" style="color:var(--muted)">{{deref .Serial}}</td>
+            <td data-col="lifecycle"><span class="{{lifecycleClass .Lifecycle}}">{{.Lifecycle}}</span></td>
           </tr>
           {{end}}
         </tbody>

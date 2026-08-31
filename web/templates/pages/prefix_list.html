@@ -23,8 +23,8 @@
   <div class="panel-head"><h2>{{pluralise (len .Prefixes) "network" "networks"}}</h2></div>
   {{if .Prefixes}}
   <div class="scroll-x">
-    <table>
-      <thead><tr><th>CIDR</th><th>VLAN</th><th>Environment</th><th>Role</th><th class="num">Addresses</th><th>Allocated</th><th>Next free</th>{{if .CanWrite}}<th></th>{{end}}</tr></thead>
+    <table data-table="prefix">
+      <thead><tr><th>CIDR</th><th data-col="vlan">VLAN</th><th data-col="environment">Environment</th><th data-col="role">Role</th><th data-col="addresses" class="num">Addresses</th><th data-col="allocated">Allocated</th><th data-col="next_free">Next free</th>{{if .CanWrite}}<th></th>{{end}}</tr></thead>
       <tbody>
         {{range .Prefixes}}
         {{$p := .}}
@@ -36,7 +36,7 @@
           <td><input form="pfx-{{.ID}}" class="mono {{if $.Edit.Err "cidr_text"}}invalid{{end}}" type="text" name="cidr_text"
                      value="{{$.Edit.Value "cidr_text" .CIDRText}}" aria-label="Network" required style="width:12em">
               {{with $.Edit.Err "cidr_text"}}<div class="field-error">{{.}}</div>{{end}}</td>
-          <td>
+          <td data-col="vlan">
             {{$vl := $.Edit.Value "vlan_ref_id" (deref $p.VLANRefID)}}
             <select form="pfx-{{.ID}}" name="vlan_ref_id" aria-label="VLAN">
               <option value="">—</option>
@@ -44,18 +44,18 @@
             </select>
             {{with $.Edit.Err "vlan_ref_id"}}<div class="field-error">{{.}}</div>{{end}}
           </td>
-          <td>
+          <td data-col="environment">
             {{$env := $.Edit.Value "environment_id" (deref $p.EnvironmentID)}}
             <select form="pfx-{{.ID}}" name="environment_id" aria-label="Environment">
               <option value="">—</option>
               {{range $.FormData.Environments}}<option value="{{.ID}}" {{if eq .ID $env}}selected{{end}}>{{.Code}}</option>{{end}}
             </select>
           </td>
-          <td><input form="pfx-{{.ID}}" type="text" name="role" value="{{$.Edit.Value "role" (deref .Role)}}"
+          <td data-col="role"><input form="pfx-{{.ID}}" type="text" name="role" value="{{$.Edit.Value "role" (deref .Role)}}"
                      aria-label="Role" style="width:8em"></td>
-          <td class="num">{{.Addresses}}</td>
-          <td class="util-cell"><span class="util-pct">{{printf "%.0f" .UtilPercent}}%</span></td>
-          <td class="mono">—</td>
+          <td data-col="addresses" class="num">{{.Addresses}}</td>
+          <td data-col="allocated" class="util-cell"><span class="util-pct">{{printf "%.0f" .UtilPercent}}%</span></td>
+          <td data-col="next_free" class="mono">—</td>
           <td style="white-space:nowrap">
             <form id="pfx-{{.ID}}" method="post" action="/prefixes/{{.ID}}" style="display:inline">
               <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
@@ -75,18 +75,18 @@
             {{.CIDRText}}
             {{if .VRFName}}<span class="pill pill-muted" title="Route table">{{.VRFName}}</span>{{end}}
           </td>
-          <td class="num">
+          <td data-col="vlan" class="num">
             {{if .VLANRefID}}<a href="/vlans/{{deref .VLANRefID}}" title="{{.VLANName}}">{{derefInt .VLANVID}}</a>
             {{else}}—{{end}}
           </td>
-          <td>{{if .EnvironmentCode}}<span class="pill pill-info">{{.EnvironmentCode}}</span>{{else}}—{{end}}</td>
-          <td>{{if .Role}}{{deref .Role}}{{else}}—{{end}}</td>
-          <td class="num" title="Addresses recorded directly here, not in a child network">{{.Addresses}}</td>
-          <td class="util-cell">
+          <td data-col="environment">{{if .EnvironmentCode}}<span class="pill pill-info">{{.EnvironmentCode}}</span>{{else}}—{{end}}</td>
+          <td data-col="role">{{if .Role}}{{deref .Role}}{{else}}—{{end}}</td>
+          <td data-col="addresses" class="num" title="Addresses recorded directly here, not in a child network">{{.Addresses}}</td>
+          <td data-col="allocated" class="util-cell">
             <span class="util-pct{{if .IsFull}} util-full{{end}}">{{printf "%.0f" .UtilPercent}}%</span>
             {{if .Children}}<span class="util-note">{{pluralise .Children "child" "children"}}</span>{{end}}
           </td>
-          <td class="mono">
+          <td data-col="next_free" class="mono">
             {{if .HasNextFree}}{{.NextFree}}
             {{else}}<span class="util-full" title="Every usable address is assigned, reserved or inside a child network">none</span>{{end}}
           </td>

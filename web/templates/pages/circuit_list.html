@@ -47,20 +47,20 @@
   {{$anyCircuitWrite := .IsAdmin}}
   {{range .Circuits}}{{if $.CanWriteEntity "circuit" .ID}}{{$anyCircuitWrite = true}}{{end}}{{end}}
   <div class="scroll-x">
-    <table>
-      <thead><tr><th>Circuit ID</th><th>Provider</th><th>Service</th><th class="num">Commit</th><th>Contract ends</th><th>Ends recorded</th>{{if $anyCircuitWrite}}<th></th>{{end}}</tr></thead>
+    <table data-table="circuit">
+      <thead><tr><th>Circuit ID</th><th data-col="provider">Provider</th><th data-col="service">Service</th><th data-col="commit" class="num">Commit</th><th data-col="contract_ends">Contract ends</th><th data-col="ends_recorded">Ends recorded</th>{{if $anyCircuitWrite}}<th></th>{{end}}</tr></thead>
       <tbody>
         {{range .Circuits}}
         <tr>
           <td class="mono"><a href="/circuits/{{.ID}}">{{.CID}}</a></td>
-          <td>{{.ProviderName}}</td>
-          <td>{{if .ServiceType}}{{deref .ServiceType}}{{else}}—{{end}}</td>
-          <td class="num">{{if .CommitMbps}}{{derefInt .CommitMbps}} Mb{{else}}—{{end}}</td>
-          <td class="mono">
+          <td data-col="provider">{{.ProviderName}}</td>
+          <td data-col="service">{{if .ServiceType}}{{deref .ServiceType}}{{else}}—{{end}}</td>
+          <td data-col="commit" class="num">{{if .CommitMbps}}{{derefInt .CommitMbps}} Mb{{else}}—{{end}}</td>
+          <td data-col="contract_ends" class="mono">
             {{if .ContractEnd}}{{deref .ContractEnd}}
             {{else}}<span class="util-note">not recorded</span>{{end}}
           </td>
-          <td>
+          <td data-col="ends_recorded">
             {{/* One end is half a fact: somebody knows where it arrives and not
                  where it comes from, and the renewal conversation needs both. */}}
             {{if .Landed}}<span class="pill pill-ok">both</span>
