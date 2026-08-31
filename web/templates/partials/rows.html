@@ -130,7 +130,7 @@
   <form {{if $bulkTag}}hx-post="/services/tags/apply" hx-target="#services-bulk-tag-result" hx-swap="outerHTML"
         x-data="bulkTagApply" data-entity-label="services"{{end}}>
     {{if $bulkTag}}<input type="hidden" name="csrf_token" value="{{.CSRF}}">{{end}}
-    <div x-data="columnPicker">
+    <div x-data="columnPicker" data-table-key="service">
       {{template "column_picker" dict "Table" "service" "Columns" .ColumnOptions}}
       <div class="scroll-x">
       <table data-table="service">

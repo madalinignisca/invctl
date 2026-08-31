@@ -1136,8 +1136,20 @@ form.htmx-request .btn-primary { opacity: 0.6; pointer-events: none; }
 }
 
 .column-picker { position: relative; display: inline-block; }
+/* Opens LEFTWARD-ANCHORED (left:0), not right:0. The picker button sits at
+   the left edge of the table panel, right next to the 216px .rail column;
+   a right-anchored 12rem menu grew leftward off the button and extended
+   INTO the rail's own column, where document.elementFromPoint() resolved
+   the checkboxes to <nav class="rail"> instead -- a real click there hit
+   the nav, not the control. Opening rightward keeps the whole menu inside
+   the content column. z-index 30 (above .topbar's 20) is defence in depth
+   for vertical overlap only -- .rail is position:sticky and therefore its
+   OWN stacking context, so z-index alone could never have fixed the
+   horizontal overlap; a higher z-index on a menu that still sits
+   geometrically over the rail would only have made it visibly on top while
+   remaining just as unclickable. Do not revert to right:0. */
 .column-picker-menu {
-  position: absolute; z-index: 20; right: 0; min-width: 12rem;
+  position: absolute; z-index: 30; left: 0; right: auto; min-width: 12rem;
   padding: 8px; border: 1px solid var(--line);
   background: var(--raised); border-radius: 6px;
 }

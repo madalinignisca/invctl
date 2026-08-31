@@ -406,12 +406,18 @@ document.addEventListener('alpine:init', () => {
   //
   // The table key comes from x-data's argument, so one component serves all
   // four tables without knowing anything about them.
-  Alpine.data('columnPicker', (table = '') => ({
-    table: table,
+  Alpine.data('columnPicker', () => ({
+    table: '',
     hidden: [],
     open: false,
 
     init() {
+      // The table key arrives as a data attribute, not an x-data argument:
+      // this is Alpine's CSP build, where x-data is a component NAME and is
+      // never evaluated, so `columnPicker('asset')` would silently leave
+      // this empty -- same pattern as bulkTagApply's data-entity-label.
+      // Must run before read()/apply(), which both depend on this.table.
+      this.table = this.$el.dataset.tableKey || '';
       this.hidden = this.read();
       this.apply();
     },

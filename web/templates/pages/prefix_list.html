@@ -22,7 +22,7 @@
 <div class="panel">
   <div class="panel-head"><h2>{{pluralise (len .Prefixes) "network" "networks"}}</h2></div>
   {{if .Prefixes}}
-  <div x-data="columnPicker">
+  <div x-data="columnPicker" data-table-key="prefix">
     {{template "column_picker" dict "Table" "prefix" "Columns" .ColumnOptions}}
     <div class="scroll-x">
     <table data-table="prefix">

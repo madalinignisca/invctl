@@ -46,7 +46,7 @@
        equal. */}}
   {{$anyCircuitWrite := .IsAdmin}}
   {{range .Circuits}}{{if $.CanWriteEntity "circuit" .ID}}{{$anyCircuitWrite = true}}{{end}}{{end}}
-  <div x-data="columnPicker">
+  <div x-data="columnPicker" data-table-key="circuit">
     {{template "column_picker" dict "Table" "circuit" "Columns" .ColumnOptions}}
     <div class="scroll-x">
     <table data-table="circuit">
