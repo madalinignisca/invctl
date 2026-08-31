@@ -66,15 +66,19 @@
 
 {{template "asset_table" .}}
 
-{{/* The same rows, as a file. The link carries the CURRENT query, so what
-     downloads is what is on screen -- an export button that quietly ignored
-     the filters would be the worst kind of wrong, since the file looks right.
-     The columns are the importer's own, so this round-trips: export, edit in
-     a spreadsheet, import again. */}}
+{{/* The same rows, as a file. The link carries the CURRENT query, so the
+     rows exported match the filters currently applied -- an export button
+     that quietly ignored them would be the worst kind of wrong, since the
+     file looks right. The COLUMNS do not follow the on-screen picker,
+     though (docs/table-configs-design.md §4): the file always carries every
+     importable field regardless of what the Columns menu has hidden, so it
+     stays a fixed, importer-compatible artifact rather than a snapshot of
+     one browser's display preference. */}}
 <p class="hint" style="margin-top:12px">
   <a href="{{.CSVLink}}">Download this list as CSV</a> — the columns are the
   ones <a href="/import/assets">the importer</a> reads, so an exported file can
-  be edited and loaded back.
+  be edited and loaded back; hiding a column on screen does not remove it
+  from the file.
 </p>
 
 {{/* Custom-field values are a SEPARATE download, deliberately not a column

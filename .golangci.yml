@@ -134,7 +134,17 @@ linters:
       # gosec does not track the literal's length, so there is no code change
       # that would satisfy it short of a guard asserting something the
       # compiler can already see.
-      - linters:
+      #
+      # Path-scoped to the two files this justification names, unlike an
+      # earlier version of this rule which had no `path:` and so silenced
+      # G602 across the whole estate, handler code included -- the WP-G4c
+      # whole-branch review caught it.
+      - path: internal/seed/seed_cabling\.go
+        linters:
+          - gosec
+        text: "G602"
+      - path: internal/api/dto_mapping_test\.go
+        linters:
           - gosec
         text: "G602"
 

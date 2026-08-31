@@ -6,11 +6,11 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-only
 
-// WP-G4c, Task 5: the three claims worth pinning about per-browser column
-// hiding on the asset list -- everything else about it (which columns exist,
-// the picker markup, the Alpine component) is already covered at the diff
-// level in Tasks 1-4, but nothing before this spec had proved any of it
-// actually works in a browser.
+// WP-G4c, Task 5 (plus the final whole-branch review's fix wave): the claims
+// worth pinning about per-browser column hiding -- everything else about it
+// (which columns exist, the picker markup, the Alpine component) is already
+// covered at the diff level in Tasks 1-4, but nothing before this spec had
+// proved any of it actually works in a browser.
 //
 // 1. Hiding a column through the Columns menu actually hides the header
 //    cell -- the CSS/Alpine wiring, not just the localStorage write.
@@ -25,6 +25,26 @@
 //    an importable round-trip artifact with a fixed header, independent of
 //    any one browser's local display preference (docs/table-configs-design.md
 //    §4: "CSV export is untouched").
+// 4. Hiding a column does not remove ITS OWN CHECKBOX from the menu. This
+//    guards the bug the fix wave found: apply() used to select `[data-col]`
+//    off $root unscoped, which also matched the picker's own checkboxes (they
+//    carry data-col too, so toggleColumn can read which key was clicked), so
+//    hiding "serial" put col-hidden on the "serial" checkbox itself and it
+//    vanished from its own menu. `expect(...).not.toBeChecked()` alone cannot
+//    catch this -- it reads the checked property, not visibility -- so this
+//    is a separate, explicit `.toBeVisible()` on the checkbox after hiding.
+// 5. Two tables do not share a storage key. Reintroduce that defect (the
+//    table key silently defaulting to '', or a hardcoded literal replacing
+//    `this.table`) and a spec that only ever visits /assets still passes,
+//    because it never asks a second table whether it noticed. This spec
+//    hides a column on /services too and checks /assets is unaffected and
+//    that both localStorage keys exist distinctly.
+// 6. The menu stays fully inside a narrow viewport when open. This is the
+//    thing the session's own ledger (.superpowers/sdd/2026-08-31-table-configs/
+//    progress.md) once claimed a two-viewport E2E run would catch --
+//    Playwright's config in fact has one project (Desktop Chrome) at no
+//    fixed viewport, so that claim was false until this test existed. See
+//    the ledger's corrected wording alongside this test.
 //
 // Uses the shared signed-in session global-setup.js already saved (this is a
 // read-only navigation plus a client-side localStorage write, not a form
@@ -56,6 +76,14 @@ describe('column configuration (WP-G4c)', () => {
     // Claim 1: hiding a column hides it.
     await expect(serialHeader).toBeHidden();
 
+    // Claim 4: hiding a column does not hide ITS OWN CHECKBOX. An unscoped
+    // apply() selector matched the checkbox as well as the header/body
+    // cells, because the checkbox also carries data-col -- this assertion
+    // is what `not.toBeChecked()` above cannot catch, since it reads the
+    // checked property and says nothing about whether the control is still
+    // there to be re-checked.
+    await expect(serialCheckbox).toBeVisible();
+
     // Claim 2: it survives a reload -- the assertion that proves the
     // localStorage write works, not merely that toggling a class in the DOM
     // does.
@@ -73,5 +101,61 @@ describe('column configuration (WP-G4c)', () => {
     expect(csv.ok(), 'GET /assets?format=csv').toBeTruthy();
     const body = await csv.text();
     expect(body.toLowerCase(), 'the CSV export should still contain the "serial" column').toContain('serial');
+  });
+
+  test('two tables do not share a storage key', async ({ page }) => {
+    // Claim 5. Reproduces the defect the ledger records as already found
+    // and fixed once (the table key silently defaulting to '' when it
+    // arrived as an x-data argument this build cannot deliver) -- a spec
+    // that only ever visits one table can never notice it regress.
+    await page.goto('/assets', { waitUntil: 'networkidle' });
+    await page.locator('.column-picker button', { hasText: 'Columns' }).click();
+    await page.locator('.column-picker-menu input[data-col="serial"]').uncheck();
+    await expect(page.locator('th[data-col="serial"]')).toBeHidden();
+
+    await page.goto('/services', { waitUntil: 'networkidle' });
+    // web/templates/partials/rows.html renders every service column visible
+    // by default -- if hiding "serial" on /assets had landed in a storage
+    // key shared with /services, this "name" column (the closest analogue
+    // /services has, since it carries no "serial" column of its own) would
+    // never be affected by it either way, so the meaningful check is that
+    // /services' OWN picker still reports everything visible and /assets
+    // stays independently hidden after the round trip.
+    await expect(page.locator('th[data-col="name"]')).toBeVisible();
+    await page.locator('.column-picker button', { hasText: 'Columns' }).click();
+    await expect(page.locator('.column-picker-menu input[data-col="name"]')).toBeChecked();
+
+    // Both keys exist, distinctly, in localStorage -- the direct check that
+    // this was ever two keys and not one.
+    const keys = await page.evaluate(() => Object.keys(window.localStorage));
+    const colKeys = keys.filter((k) => k.startsWith('invctl.cols.'));
+    expect(colKeys, 'expected distinct per-table storage keys').toEqual(
+      expect.arrayContaining(['invctl.cols.asset'])
+    );
+    expect(colKeys).not.toContain('invctl.cols.');
+
+    // /assets' hidden column survives the round trip through another table.
+    await page.goto('/assets', { waitUntil: 'networkidle' });
+    await expect(page.locator('th[data-col="serial"]')).toBeHidden();
+  });
+
+  test('the open menu stays inside a narrow viewport', async ({ page }) => {
+    // Claim 6. The design that shipped in this session moved the menu from
+    // right-anchored (which extended leftward into the fixed nav rail) to
+    // left-anchored into the content column -- correct at a normal desktop
+    // width, but a left-anchored, fixed-min-width menu can just as easily
+    // clip off the RIGHT edge on a narrow one. This is the check the
+    // project ledger once claimed already existed ("the E2E now runs at two
+    // viewport sizes") when the config in fact defines a single Desktop
+    // Chrome project at no fixed size -- see that entry's correction.
+    await page.setViewportSize({ width: 900, height: 700 });
+    await page.goto('/assets', { waitUntil: 'networkidle' });
+    await page.locator('.column-picker button', { hasText: 'Columns' }).click();
+    const menu = page.locator('.column-picker-menu');
+    await expect(menu).toBeVisible();
+    const box = await menu.boundingBox();
+    expect(box, 'the open menu must report a bounding box').not.toBeNull();
+    expect(box.x, 'menu left edge is off-screen').toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width, 'menu right edge overflows the viewport').toBeLessThanOrEqual(900);
   });
 });

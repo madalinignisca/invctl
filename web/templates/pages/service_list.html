@@ -82,10 +82,12 @@
       "Teams" .FormData.Teams "Roles" .FormData.Roles}}
 {{end}}
 
-{{/* The same rows as a file, carrying the current query so what downloads is
-     what is on screen. */}}
+{{/* The same rows as a file, carrying the current query so the rows match
+     the current filters -- but not the current Columns picker
+     (docs/table-configs-design.md §4): every column is always in the file. */}}
 <p class="hint" style="margin-top:12px">
-  <a href="{{.CSVLink}}">Download this list as CSV</a>
+  <a href="{{.CSVLink}}">Download this list as CSV</a> — includes every
+  column, even one hidden here.
 </p>
 
 {{/* Custom-field values are a separate download -- no importer accepts a

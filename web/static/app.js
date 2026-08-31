@@ -446,7 +446,18 @@ document.addEventListener('alpine:init', () => {
 
     apply() {
       const root = this.$root;
-      root.querySelectorAll('[data-col]').forEach((cell) => {
+      // Scoped to `table [data-col]`, not `[data-col]` alone: $root is the
+      // wrapper div that contains BOTH the <table> and this component's own
+      // picker partial, and the picker's checkboxes also carry data-col (so
+      // their own value can travel to toggleColumn without an argument --
+      // see that method's comment). An unscoped selector put col-hidden on
+      // the checkbox itself, not just its table cell: unchecking "serial"
+      // made the "serial" checkbox disappear from the menu along with the
+      // column, leaving an orphan label and no way back except "Show all".
+      // Chose the table-tag selector over `[data-table] [data-col]` because
+      // it says directly what it excludes (the picker) rather than relying
+      // on data-table being present and correctly placed on every table.
+      root.querySelectorAll('table [data-col]').forEach((cell) => {
         cell.classList.toggle('col-hidden', this.hidden.indexOf(cell.dataset.col) !== -1);
       });
       document.querySelectorAll('.column-picker[data-columns="' + this.table +
