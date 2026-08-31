@@ -126,6 +126,18 @@ linters:
           - gosec
         text: "G404"
 
+      # gosec's G602 (slice index out of range) where the slice is a LITERAL
+      # declared in view of the index. Both current sites are that shape:
+      # seed_cabling.go indexes `hosts[i%len(hosts)]` two lines below
+      # `hosts := []string{...}` with three entries, and dto_mapping_test.go
+      # reads want[0] from a one-element literal declared in the same `if`.
+      # gosec does not track the literal's length, so there is no code change
+      # that would satisfy it short of a guard asserting something the
+      # compiler can already see.
+      - linters:
+          - gosec
+        text: "G602"
+
       # gosec's G124 (cookie attributes) in tests: a test builds a request
       # cookie to send, not a response cookie to set, so Secure/HttpOnly have
       # no meaning on it.
