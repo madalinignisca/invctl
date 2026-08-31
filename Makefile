@@ -229,7 +229,14 @@ lint: ## gofmt, go vet, golangci-lint and govulncheck
 
 .PHONY: tools
 tools: ## Install the linters `make lint` requires
-	go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
+	# PINNED, not @latest. `make lint` is the project gate, and an unpinned
+	# linter means the gate's meaning drifts under you: during the 1.0 work a
+	# commit that linted clean in the morning failed in the afternoon on the
+	# same tree, because a new gosec rule (G124) had shipped in between. Six
+	# findings appeared out of a `go install` nobody ran deliberately. Bump
+	# this on purpose, in a commit that also handles whatever the new version
+	# finds.
+	go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.6.2
 	go install golang.org/x/vuln/cmd/govulncheck@latest
 
 .PHONY: tidy

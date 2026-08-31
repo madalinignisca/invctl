@@ -126,6 +126,27 @@ linters:
           - gosec
         text: "G404"
 
+      # gosec's G124 (cookie attributes) in tests: a test builds a request
+      # cookie to send, not a response cookie to set, so Secure/HttpOnly have
+      # no meaning on it.
+      - path: _test\.go
+        linters:
+          - gosec
+        text: "G124"
+
+      # gosec's G124 on the session cookie template in middleware.go. FALSE
+      # POSITIVE, checked rather than assumed: the literal three lines below
+      # the flagged one sets `Secure: secure`, where secure is
+      # INV_SECURE_COOKIES. gosec sees a bool variable rather than a `true`
+      # and cannot tell the difference between "conditionally correct" and
+      # "missing". Setting it unconditionally would be WRONG -- a Secure
+      # cookie is never sent over plain HTTP, so a development instance on
+      # http://localhost could not hold a session at all.
+      - path: internal/web/middleware/middleware\.go
+        linters:
+          - gosec
+        text: "G124"
+
       # gosec's G703 (path traversal via taint) in tests. Every variable path in
       # a test here is built by the test process itself -- os.MkdirTemp or
       # t.TempDir joined with a literal filename -- and there is no request, no

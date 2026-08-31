@@ -62,7 +62,7 @@ func auditFields(v reflect.Value, out map[string]auditField) {
 			// error in a struct literal that only ever appears at compile time
 			// in this package -- and the failure it replaces is the worst kind:
 			// an audit trail that looks complete and is empty. Embed by value.
-			if field.Type.Kind() == reflect.Ptr {
+			if field.Type.Kind() == reflect.Pointer {
 				panic(fmt.Sprintf(
 					"audit struct %s embeds *%s by pointer: embed it by value, or "+
 						"its columns are silently absent from every change_log entry",
@@ -162,7 +162,7 @@ func snapshotJSON(entity any) (string, error) {
 // rather than as an address, and so that two equal values behind different
 // pointers compare equal.
 func deref(v reflect.Value) any {
-	if v.Kind() == reflect.Ptr {
+	if v.Kind() == reflect.Pointer {
 		if v.IsNil() {
 			return nil
 		}

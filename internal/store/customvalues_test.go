@@ -179,7 +179,7 @@ func TestAnAuditShapeEmbedsByValue(t *testing.T) {
 			if !field.Anonymous {
 				t.Fatalf("%s must embed domain.%s anonymously", c.name, c.inner)
 			}
-			if field.Type.Kind() == reflect.Ptr {
+			if field.Type.Kind() == reflect.Pointer {
 				t.Fatalf("%s embeds domain.%s by POINTER; embed by value, or every "+
 					"column is silently absent from every change_log entry", c.name, c.inner)
 			}
