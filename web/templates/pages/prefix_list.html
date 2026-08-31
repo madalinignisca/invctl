@@ -22,7 +22,9 @@
 <div class="panel">
   <div class="panel-head"><h2>{{pluralise (len .Prefixes) "network" "networks"}}</h2></div>
   {{if .Prefixes}}
-  <div class="scroll-x">
+  <div x-data="columnPicker">
+    {{template "column_picker" dict "Table" "prefix" "Columns" .ColumnOptions}}
+    <div class="scroll-x">
     <table data-table="prefix">
       <thead><tr><th>CIDR</th><th data-col="vlan">VLAN</th><th data-col="environment">Environment</th><th data-col="role">Role</th><th data-col="addresses" class="num">Addresses</th><th data-col="allocated">Allocated</th><th data-col="next_free">Next free</th>{{if .CanWrite}}<th></th>{{end}}</tr></thead>
       <tbody>
@@ -96,6 +98,7 @@
         {{end}}
       </tbody>
     </table>
+    </div>
   </div>
   {{else}}
   <div class="empty"><strong>No networks declared yet.</strong>Enough here to resolve an address to an asset.</div>

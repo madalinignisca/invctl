@@ -218,6 +218,20 @@ type prefixListPage struct {
 	RangeForm rangeFormData
 }
 
+// ColumnOptions lists the prefixes table's configurable columns, in header
+// order. CIDR is the identity column and is deliberately absent. The ranges
+// table below it is out of scope -- see the plan's Task 4.
+func (prefixListPage) ColumnOptions() []ColumnOption {
+	return []ColumnOption{
+		{Key: "vlan", Label: "VLAN"},
+		{Key: "environment", Label: "Environment"},
+		{Key: "role", Label: "Role"},
+		{Key: "addresses", Label: "Addresses"},
+		{Key: "allocated", Label: "Allocated"},
+		{Key: "next_free", Label: "Next free"},
+	}
+}
+
 // PrefixList renders every network, with its environment, VLAN and how many
 // addresses in it are actually assigned.
 func (a *App) PrefixList(w http.ResponseWriter, r *http.Request) {

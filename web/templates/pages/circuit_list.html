@@ -46,7 +46,9 @@
        equal. */}}
   {{$anyCircuitWrite := .IsAdmin}}
   {{range .Circuits}}{{if $.CanWriteEntity "circuit" .ID}}{{$anyCircuitWrite = true}}{{end}}{{end}}
-  <div class="scroll-x">
+  <div x-data="columnPicker">
+    {{template "column_picker" dict "Table" "circuit" "Columns" .ColumnOptions}}
+    <div class="scroll-x">
     <table data-table="circuit">
       <thead><tr><th>Circuit ID</th><th data-col="provider">Provider</th><th data-col="service">Service</th><th data-col="commit" class="num">Commit</th><th data-col="contract_ends">Contract ends</th><th data-col="ends_recorded">Ends recorded</th>{{if $anyCircuitWrite}}<th></th>{{end}}</tr></thead>
       <tbody>
@@ -80,6 +82,7 @@
         {{end}}
       </tbody>
     </table>
+    </div>
   </div>
   {{else}}
   <div class="empty"><strong>No circuits recorded.</strong>A WAN port with no circuit behind it cannot say what it costs or when it renews.</div>

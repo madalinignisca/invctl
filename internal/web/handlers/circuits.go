@@ -46,6 +46,19 @@ type circuitListPage struct {
 	Errors    map[string]string
 }
 
+// ColumnOptions lists the circuits table's configurable columns, in header
+// order. Circuit ID is the identity column and is deliberately absent. The
+// providers table below it is out of scope -- see the plan's Task 4.
+func (circuitListPage) ColumnOptions() []ColumnOption {
+	return []ColumnOption{
+		{Key: "provider", Label: "Provider"},
+		{Key: "service", Label: "Service"},
+		{Key: "commit", Label: "Commit"},
+		{Key: "contract_ends", Label: "Contract ends"},
+		{Key: "ends_recorded", Label: "Ends recorded"},
+	}
+}
+
 // CircuitList renders every contracted connection.
 func (a *App) CircuitList(w http.ResponseWriter, r *http.Request) {
 	a.renderCircuits(w, r, http.StatusOK, nil)

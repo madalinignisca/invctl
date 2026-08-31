@@ -24,7 +24,9 @@
   <form {{if $bulkTag}}hx-post="/assets/tags/apply" hx-target="#assets-bulk-tag-result" hx-swap="outerHTML"
         x-data="bulkTagApply" data-entity-label="assets"{{end}}>
     {{if $bulkTag}}<input type="hidden" name="csrf_token" value="{{.CSRF}}">{{end}}
-    <div class="scroll-x">
+    <div x-data="columnPicker">
+      {{template "column_picker" dict "Table" "asset" "Columns" .ColumnOptions}}
+      <div class="scroll-x">
       <table data-table="asset">
         <thead>
           <tr>
@@ -60,6 +62,7 @@
           {{end}}
         </tbody>
       </table>
+    </div>
     </div>
     {{if $bulkTag}}{{template "bulk_tag_panel" .}}{{end}}
   </form>

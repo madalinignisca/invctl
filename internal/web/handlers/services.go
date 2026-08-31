@@ -38,6 +38,20 @@ type serviceListPage struct {
 	ApplyTags  []domain.Tag
 }
 
+// ColumnOptions lists the service table's configurable columns, in header
+// order. Code is the identity column and is deliberately absent.
+func (serviceListPage) ColumnOptions() []ColumnOption {
+	return []ColumnOption{
+		{Key: "name", Label: "Name"},
+		{Key: "kind", Label: "Kind"},
+		{Key: "environment", Label: "Environment"},
+		{Key: "project", Label: "Project"},
+		{Key: "availability", Label: "Availability"},
+		{Key: "instances", Label: "Instances"},
+		{Key: "tier", Label: "Tier"},
+	}
+}
+
 // serviceFilterFrom builds the service list filter from a request's query
 // string. Extracted for the same reason assetFilterFrom is: ServiceCustom
 // FieldsCSV, its own route, has to read exactly the same filter ServiceList

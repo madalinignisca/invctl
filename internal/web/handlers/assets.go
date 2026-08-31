@@ -230,6 +230,20 @@ type assetListPage struct {
 	ApplyTags  []domain.Tag
 }
 
+// ColumnOptions lists the asset table's configurable columns, in header
+// order. Name is the identity column and is deliberately absent -- see
+// Task 1's table in the WP-G4c plan for why hiding it is refused at the
+// markup level, not just left off this menu.
+func (assetListPage) ColumnOptions() []ColumnOption {
+	return []ColumnOption{
+		{Key: "kind", Label: "Kind"},
+		{Key: "contained_by", Label: "Contained by"},
+		{Key: "environments", Label: "Environments"},
+		{Key: "serial", Label: "Serial"},
+		{Key: "lifecycle", Label: "Lifecycle"},
+	}
+}
+
 // assetFilterFrom builds the asset list filter from a request's query
 // string.
 //

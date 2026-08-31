@@ -63,6 +63,17 @@ type Flash struct {
 	Text string
 }
 
+// ColumnOption is one entry in a table's column picker: the `data-col` key
+// the template attributes carry, and the label shown in the picker menu.
+// Built in Go, next to the handler that renders the table, rather than
+// inline in the template -- `list` does not exist as a template function
+// here (only `dict` does), so a slice literal cannot be assembled in the
+// template itself.
+type ColumnOption struct {
+	Key   string
+	Label string
+}
+
 // Base is the data every page needs. Page structs embed it.
 type Base struct {
 	Title string
