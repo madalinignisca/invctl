@@ -36,6 +36,17 @@ footnote.
 
 ## [Unreleased]
 
+### Added
+
+- **Hide columns you do not use** on the asset, service, circuit and prefix
+  lists. The choice is remembered in your browser, per table. It does not
+  follow you to another device, and clearing site data resets it — this is a
+  display preference, not account state, and invctl deliberately stores
+  nothing about it.
+
+  A CSV export still contains every column, whatever the screen shows: the
+  export is an importable table, not a picture of the page.
+
 ## [1.0.0] — 2026-08-31
 
 **The version number is a promise, and this is the release where it starts

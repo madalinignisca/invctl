@@ -82,7 +82,7 @@ input gate while `select` was defended at render — **is closed**, in
 release item before anyone checked. A list like this is a claim about the
 past.
 
-**The other quality-of-life items:** WP-G4b and WP-G4c above, and the 132
+**The other quality-of-life items:** WP-G4b (saved filters) and the 132
 `.CanWrite` template occurrences on estate-configuration pages, which show a
 project owner controls the server refuses. Confirmed cosmetic — every one
 gates a control, none gates data — and the asset, service and circuit pages
@@ -510,7 +510,7 @@ explicit rather than blocking it. Read the appendix before starting.*
 Free-text operational notes on entities. Distinct from audit: audit is what
 changed, journal is what a human observed. Cheap, and heavily used in practice.
 
-**WP-G4 · Tags, saved filters, table configs** — M — **G4a DONE, G4b/G4c 1.1**
+**WP-G4 · Tags, saved filters, table configs** — M — **G4a DONE, G4b 1.1, G4c DONE**
 Makes large estates usable. Pure quality of life, and users notice its absence
 immediately.
 
@@ -523,13 +523,11 @@ see `docs/tags-design.md` §0.
   need their own design, not for the GDPR reason an early draft gave: a saved
   filter is attributed to its creator exactly as every other row here is, so
   sharing redistributes access rather than erasing an obligation.
-- **G4c · Table configs — 1.1, and now unblocked.** It was deferred until
-  WP-G1 because per-user state is close to meaningless while authorization is
-  a comma-separated list of usernames, and it also needed a user scrub to
-  exist. Both conditions are met: WP-G1 shipped and `ScrubUser` is
-  implemented and routed. It would be the first table in this product whose
-  SUBJECT is a person rather than its author, which is why it gets its own
-  design pass rather than being rushed in before a schema-stability promise.
+- **G4c · Table configs — DONE.** Column visibility per table, remembered in
+  the browser (`localStorage`), not in the database — the whole design decision
+  was that a column preference is a display preference about one browser, so
+  `localStorage` holds it and the database never learns it exists. Design in
+  `docs/table-configs-design.md`.
 
 **WP-G5 · CSV export** — S — **DONE**
 *Renamed 2026-08-12. It was "export templates", meaning the NetBox feature:

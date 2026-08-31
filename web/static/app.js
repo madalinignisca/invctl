@@ -404,8 +404,8 @@ document.addEventListener('alpine:init', () => {
   // reason to suspect one existed. Storing what to hide makes a new column
   // visible by default and makes a stale key naming a removed column inert.
   //
-  // The table key comes from x-data's argument, so one component serves all
-  // four tables without knowing anything about them.
+  // The table key arrives as data-table-key and is read via this.$el.dataset.tableKey
+  // in init(), so one component serves all four tables without knowing anything about them.
   Alpine.data('columnPicker', () => ({
     table: '',
     hidden: [],
