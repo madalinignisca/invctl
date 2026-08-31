@@ -12,6 +12,56 @@ supplier, no actor, no team contact.
 
 ---
 
+## Compatibility
+
+**`/api/v1` is stable from invctl 1.0.** This is the one surface other
+people's automation is built on — an Ansible dynamic inventory that runs
+unattended, a dashboard that joins a metric label to a name — and the point
+of a version in the path is that those keep working.
+
+### What will not change within v1
+
+- **The routes.** The seven paths below, their methods, and their meanings.
+- **Field names, types and nesting** in every DTO. A field that is a string
+  stays a string; a field never disappears and is never renamed.
+- **The response envelope.** `{"data": [...], "next": ...}` for collections,
+  `data` always an array — `[]` and never `null` — and `next` an id or
+  `null` on the last page.
+- **Keyset pagination on `id`, ascending**, driven by `?after=`, with `limit`
+  defaulting to 100 and clamped rather than refused above 500.
+- **`Authorization: Bearer <token>`**, and the refusal order behind it.
+- **The status codes for the documented cases**, including the two that look
+  like bugs and are not: an id outside your scope answers 404 exactly as a
+  nonexistent id does, and an unknown `?env=` is 400 rather than an empty
+  list. Both are described under "The five things that will surprise you"
+  and both are load-bearing — the first is what stops the API confirming the
+  existence of things a credential may not see.
+- **404 when the API is switched off.** With no `INV_API_TOKENS` set, every
+  route under `/api/v1` answers 404, indistinguishable from a path that was
+  never defined.
+
+### What may change within v1
+
+- **New fields may be added** to any response. **Your client must tolerate
+  fields it does not recognise** — this is the one obligation v1 places on a
+  consumer, and it is what makes additive change possible at all.
+- **New routes may be added** under `/api/v1`.
+- Which *entities* a given credential can see, since that follows the estate
+  and the credential's scopes rather than the contract.
+
+### If something has to break
+
+It becomes `/api/v2`, served alongside `/api/v1`. A breaking change is never
+made to v1 in place — not for a rename, not for a type change, not for a
+field that turned out to be wrong. If you are reading this because you want
+to change a field here, that is the decision in front of you.
+
+The same promise covers the `INV_API_TOKENS` and `INV_API_SCOPES`
+configuration shape, so an upgrade does not silently disable a working
+integration.
+
+---
+
 ## Configuration
 
 Two environment variables. There is no third: unlike the monitoring
