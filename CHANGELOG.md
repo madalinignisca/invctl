@@ -36,6 +36,38 @@ footnote.
 
 ## [Unreleased]
 
+## [1.0.0] — 2026-08-31
+
+**The version number is a promise, and this is the release where it starts
+meaning something.**
+
+From 1.0 the **database schema, the URLs and the `INV_*` environment
+variables are stable**. `/api/v1` is covered too: fields may be added, never
+removed or renamed, and a client must tolerate fields it does not recognise.
+Anything that has to break becomes 2.0, or `/api/v2` served alongside v1.
+The wire shape is enforced by a test, not only asserted in a document.
+
+**What 1.0 means here:** a company can deploy invctl on their own estate and
+run it. It does not mean feature parity with NetBox — `docs/ROADMAP.md` has
+what is still to come, and "The 1.0 line" in that file records what was
+deliberately held back and why.
+
+Everything below under **Action required**, **Changed** and **Added** is part
+of this release. Read **Action required** before deploying: two entries there
+change who can see what.
+
+New in the release itself, beyond the entries below:
+
+- `docs/INSTALL.md` — deploying on your own server, both engines, a systemd
+  unit that works, TLS in front, and the settings that are wrong by default
+  in production.
+- `docs/UPGRADE.md` — backing up, how migrations run, what to do when one
+  fails. **There is no rollback command; the backup is the procedure.**
+- `docs/ROLES.md` — the three roles, what each may do, and the break-glass
+  path.
+- `docs/API.md` gains a Compatibility section stating exactly what v1 freezes.
+
+
 ### Action required
 
 - **Project owners can now write, and only within their projects.** This is
