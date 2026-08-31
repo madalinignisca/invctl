@@ -125,8 +125,11 @@ must be gated server-side like the others — never by this mechanism.
 
 ## 6. Shape
 
-- `web/static/columns.js` — one Alpine component, registered the way
-  `app.js` already registers behaviour. No inline script beyond `x-data`.
+- `web/static/app.js` — one more Alpine component, registered under
+  `alpine:init` beside the existing ones. **Not a new file:** Alpine here is
+  the CSP build, `x-data` names a registered component rather than carrying
+  an expression, and every component is already registered in this one place.
+  A second file would need a second `<script>` in `base.html` for no gain.
 - `web/templates/partials/column_picker.html` — the dropdown, one checkbox
   per column, renderable standalone.
 - The four table templates gain a stable per-column class on each `<th>` and
