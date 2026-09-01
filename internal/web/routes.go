@@ -231,6 +231,21 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	writeAdminOnly("GET /import/device-types", app.DeviceTypeImportForm)
 	writeAdminOnly("POST /import/device-types", app.DeviceTypeImportRun)
 
+	// self is for a mutation whose SUBJECT is the signed-in person, not the
+	// estate -- authentication is the whole gate here, and the per-object
+	// decision (is this row actually mine) happens downstream in the store.
+	//
+	// It is NOT a general "any signed-in user may write" door. Adding a
+	// route to this registrar requires the store method it calls to enforce
+	// ownership itself, the way internal/store/savedviews.go's
+	// authorizeSavedViewOwner does -- read the actor off the permit
+	// resolvePermit(r) hands it (never a submitted field) and refuse unless
+	// the row's owner matches. Get that wrong and self stops being "write
+	// your own things" and starts being "write anything".
+	self := func(pattern string, h http.HandlerFunc) {
+		mux.Handle(pattern, middleware.RequireAuth(h))
+	}
+
 	write("POST /environments", app.EnvironmentCreate)
 
 	// User administration (WP-G1 Task 5). The only screen that grants a
@@ -475,12 +490,20 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	write("POST /network/anchors", app.NetworkAnchorCreate)
 	write("POST /network/derive", app.NetworkDerive)
 
-	// Saved views (WP-G4b). `write`, not writeAdminOnly: everyone manages
-	// their OWN views, and ownership is enforced in the store rather than by
-	// the route -- see internal/store/savedviews.go.
-	write("POST /views", app.SavedViewCreate)
-	write("POST /views/{id}", app.SavedViewUpdate)
-	write("POST /views/{id}/retire", app.SavedViewRetire)
+	// Saved views (WP-G4b). `self`, not `write`: a view's subject is a
+	// person, not the estate (docs/saved-views-design.md §2-3), and there is
+	// nothing in a view an Observer cannot already read (docs/ROLES.md) --
+	// so gating it behind CanWrite refused an Observer for a permission the
+	// feature never actually needed. Ownership is enforced in the store, not
+	// by the route -- see internal/store/savedviews.go's
+	// authorizeSavedViewOwner.
+	//
+	// POST /views/{id} (rename) is deliberately absent: nothing posts to it
+	// (see SavedViewUpdate's removed-handler comment in
+	// internal/web/handlers/savedviews.go), and docs/ROADMAP.md's "Deferred
+	// to 1.1" records the decision.
+	self("POST /views", app.SavedViewCreate)
+	self("POST /views/{id}/retire", app.SavedViewRetire)
 
 	// The machine-facing route. One route, and this is it.
 	//

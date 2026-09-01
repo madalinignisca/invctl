@@ -113,8 +113,11 @@ type Route struct {
 	Handler string // "AssetRetire"
 	File    string // "internal/web/handlers/assets.go"
 	// Gate is the registrar that declared this route: "write" (behind
-	// RequireWrite/auth.CanWrite) or "writeAdminOnly" (behind
-	// RequireAdministrator/auth.IsAdministrator).
+	// RequireWrite/auth.CanWrite), "writeAdminOnly" (behind
+	// RequireAdministrator/auth.IsAdministrator), or "self" (behind
+	// RequireAuth alone -- a mutation whose subject is the signed-in person,
+	// never the estate, with the per-object decision made downstream in the
+	// store; see routes.go's own comment on the self registrar).
 	//
 	// IT IS IN THE COMMITTED INVENTORY DELIBERATELY. WP-G1 Task 13 makes
 	// CanWrite true for a project owner, so the two gates stop being
@@ -123,7 +126,11 @@ type Route struct {
 	// census produced byte-identical output before and after such a move.
 	// Two privilege escalations in this work package came from a fact that
 	// was recorded nowhere and invalidated by a one-line change elsewhere;
-	// recording the gate makes that move a diff in a committed file.
+	// recording the gate makes that move a diff in a committed file. The
+	// same reasoning is why "self" (WP-G4b Wave B) is recorded rather than
+	// folded into "write": a route silently moved onto self would start
+	// admitting an Observer, which is exactly the kind of move this field
+	// exists to make visible as a diff.
 	Gate         string
 	ReachesActor bool
 	// StoreCalls is every a.Store.<Method> call name reachable from the
@@ -139,17 +146,21 @@ type Route struct {
 // root.
 const routesFile = "internal/web/routes.go"
 
-// isRouteRegistrar reports whether name is one of routes.go's two write-bucket
-// registrar closures: write (behind RequireWrite/CanWrite) and
+// isRouteRegistrar reports whether name is one of routes.go's three
+// write-bucket registrar closures: write (behind RequireWrite/CanWrite),
 // writeAdminOnly (behind RequireAdministrator -- WP-G1 Task 15, F2: the
 // import surface, where no ScopedPermit can ever cover a freshly-minted row,
-// so it stays reachable by a full Administrator only). Both register a route
-// the same shape this package cares about -- pattern, handler, whether the
-// handler's call graph reaches actor( -- so the walk treats them identically;
-// which of the two gates a route sits behind is authz.CanWrite vs
-// authz.IsAdministrator, an orthogonal question this package does not answer.
+// so it stays reachable by a full Administrator only), and self (behind
+// RequireAuth alone -- WP-G4b Wave B: a mutation whose subject is the
+// signed-in person, not the estate, with per-object ownership enforced in
+// the store rather than by the route). All three register a route the same
+// shape this package cares about -- pattern, handler, whether the handler's
+// call graph reaches actor( -- so the walk treats them identically; WHICH of
+// the three gates a route sits behind is authz.CanWrite vs
+// authz.IsAdministrator vs "merely signed in", an orthogonal question this
+// package does not answer, only records on Route.Gate.
 func isRouteRegistrar(name string) bool {
-	return name == "write" || name == "writeAdminOnly"
+	return name == "write" || name == "writeAdminOnly" || name == "self"
 }
 
 // handlersDir is where every write-bucket handler and the shared helpers it

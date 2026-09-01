@@ -302,6 +302,17 @@ type boundaryFixtures struct {
 	powerSourceID, powerPanelID, powerFeedID          string
 	vlanID, networkGroupID, endpointID, environmentID string
 	certificateID, tagID, customFieldID               string
+	// savedViewID names a saved view owned by boundaryAdminUser -- neither
+	// the Observer nor the project owner this suite drives, so
+	// POST /views/{id}/retire resolves a REAL row and gets refused by
+	// authorizeSavedViewOwner (403), not by GetSavedView (404). Without a
+	// real id here the {id} placeholder falls back to store.NewID() (see
+	// paramsFor), which is a self-gated route's ordinary case: it reaches
+	// its handler (self only requires RequireAuth) and 404s at
+	// GetSavedView -- exactly the false failure
+	// TestNoWriteRouteIsReachableWithoutGoingThroughTheRouter exists to
+	// catch, for a route that in fact resolves fine.
+	savedViewID string
 }
 
 // anyRef returns an arbitrary value from a seed.Refs map, t.Fatal if empty --
@@ -422,6 +433,16 @@ func setupBoundary(t *testing.T, eng boundaryEngine) (*harness, *boundaryFixture
 		certificateID = certs[0].ID
 	}
 
+	view, err := domain.NewSavedView(store.NewID(), adminRow.ID, domain.SavedViewAsset,
+		"t-boundary-view", `{"kind":["server"]}`, st.Now())
+	if err != nil {
+		t.Fatalf("building saved view: %v", err)
+	}
+	adminUserPermit := domain.ScopedPermit(domain.UserActor(adminRow), nil, nil)
+	if err := h.store.CreateSavedView(ctx, adminUserPermit, view); err != nil {
+		t.Fatalf("creating saved view: %v", err)
+	}
+
 	fx := &boundaryFixtures{
 		projectAlpha: alpha.ID, projectOther: projectOther,
 		assetIn: assetIn, assetOut: assetOut,
@@ -440,6 +461,7 @@ func setupBoundary(t *testing.T, eng boundaryEngine) (*harness, *boundaryFixture
 		certificateID:  certificateID,
 		tagID:          tag.ID,
 		customFieldID:  cf.ID,
+		savedViewID:    view.ID,
 	}
 	return h, fx
 }
@@ -572,6 +594,7 @@ func paramsFor(pattern string, fx *boundaryFixtures) string {
 		"circuits":      func() string { return fx.circuitOut },
 		"vlans":         func() string { return fx.vlanID },
 		"groups":        func() string { return fx.networkGroupID },
+		"views":         func() string { return fx.savedViewID },
 	}
 	resolveByName := map[string]func() string{
 		"assetID":   func() string { return fx.assetOut },
@@ -649,13 +672,30 @@ func TestEveryRegisteredWriteRouteRefusesAnObserver(t *testing.T) {
 			if len(routes) == 0 {
 				t.Fatal("routescan.WriteRoutes returned no routes -- this suite would pass vacuously")
 			}
+			driven := 0
 			for _, route := range routes {
+				if route.Gate == "self" {
+					// self routes are deliberately reachable by an Observer
+					// -- their subject is the signed-in person, not the
+					// estate (routes.go's own comment on the self
+					// registrar) -- so "refuses an Observer" is the wrong
+					// claim to make about them. Their own coverage lives in
+					// savedviews_observer_test.go: an Observer CAN manage
+					// their own saved view and CANNOT reach another
+					// person's, which is the actual boundary a self route
+					// has to hold.
+					continue
+				}
+				driven++
 				resp := driveRoute(t, h, route, fx)
 				body := drainedBody(t, resp)
 				if resp.StatusCode != http.StatusForbidden {
 					t.Errorf("%s as an observer returned %d (body %q), want 403",
 						route.Pattern, resp.StatusCode, truncate(body))
 				}
+			}
+			if driven == 0 {
+				t.Fatal("every route was excluded as self-gated -- this suite would pass vacuously")
 			}
 		})
 	}
@@ -734,9 +774,18 @@ func TestNoWriteRouteIsReachableWithoutGoingThroughTheRouter(t *testing.T) {
 //   - administratorGate == 6: the writeAdminOnly import surface is
 //     untouched by this flip, because it gates on IsAdministrator, not
 //     CanWrite, and a project owner is never an Administrator.
-//   - permitGate == 8: routes whose handler's error path preserves
+//   - permitGate == 9: routes whose handler's error path preserves
 //     handleStoreError's generic "You are not allowed to do that." text
-//     for a plain domain.ErrForbidden, reached with an empty body.
+//     for a plain domain.ErrForbidden, reached with an empty body. 9, not
+//     8: WP-G4b Wave B moved POST /views/{id}/retire off `write` onto
+//     `self`, and gave this suite a real saved-view fixture row to drive it
+//     against (savedViewID, owned by boundaryAdminUser) instead of a
+//     random fallback id -- so it now resolves to a real row a project
+//     owner does not own and is refused at authorizeSavedViewOwner, one
+//     more permit-layer 403 than before. Previously it fell back to
+//     store.NewID() and 404'd at GetSavedView instead, landing in "other"
+//     -- a real row was never in scope to prove the refusal, so the old 8
+//     undercounted what this route actually does.
 //   - userForbiddenGate == 2: the two /users/* mutation routes, which go
 //     through respondUserMutation's own deliberate exception (see that
 //     function's comment) and therefore surface the raw wrapped error
@@ -869,8 +918,8 @@ func TestAProjectOwnerIsRefusedOnEveryNonProjectLinkableWriteRoute(t *testing.T)
 				t.Errorf("RequireAdministrator refusals = %d, want 14 (six import routes "+
 					"and eight /users routes)", administratorGate)
 			}
-			if permitGate != 8 {
-				t.Errorf("permit-layer refusals (generic body) = %d, want 8 -- see this test's own "+
+			if permitGate != 9 {
+				t.Errorf("permit-layer refusals (generic body) = %d, want 9 -- see this test's own "+
 					"comment for the routes this pins", permitGate)
 			}
 			// 0, and the counter stays. It was 2 while /users/{id}/active and
