@@ -388,6 +388,14 @@ const (
 	// note on an asset is in scope exactly when that asset is; the note
 	// itself has no owner to consult.
 	//
+	// The subject is not always an estate entity -- saved_view's subject is
+	// the PERSON who owns it (WP-G4b, internal/store/savedviews.go). The
+	// derivation is the same shape either way: the store resolves the row
+	// to whoever or whatever it is about and asks whether the caller may
+	// write that, before minting the narrow permit the transaction runs
+	// under. "The entity it is about" in the rest of this comment should be
+	// read as "the subject it is about", person or entity alike.
+	//
 	// It is deliberately a separate class rather than being folded into
 	// ScopeProjectLinked, because that class means something specific and
 	// checkable -- the entity carries a project_id relationship in the
@@ -491,13 +499,19 @@ var entityScope = map[string]ScopeClass{
 	// sharp should live.
 	"user_project": ScopeEstateConfig,
 	// One person's saved list filters (WP-G4b, migration 00060).
-	// ScopeEstateConfig so no ScopedPermit can ever cover it -- but that is
-	// only half the rule. A person MAY write their own views, which is
-	// enforced in internal/store/savedviews.go by comparing the row's owner
-	// to the caller before minting a narrow permit, the same shape
-	// journal_entry uses. Estate-config here means "not reachable by
-	// project scope", not "Administrator only".
-	"saved_view":            ScopeEstateConfig,
+	//
+	// ScopeSubjectDerived, NOT ScopeEstateConfig. EstateConfig would have
+	// been the intuitive choice -- no project scope may reach this table --
+	// and it is wrong: Covers returns false unconditionally for that class,
+	// so the narrow permit minted for a row's OWNER could never satisfy
+	// tx.log and a person would be refused their own view.
+	//
+	// Subject-derived is safe here for the same reason it is safe for
+	// journal_entry: auth.Authorizer.Permit builds buckets only for asset,
+	// service and circuit, so an ordinary permit has no saved_view bucket
+	// and covers nothing. Only the permit minted after
+	// internal/store/savedviews.go's ownership check can cover a row.
+	"saved_view":            ScopeSubjectDerived,
 	"asset_kind":            ScopeEstateConfig,
 	"service_kind":          ScopeEstateConfig,
 	"interface_form_factor": ScopeEstateConfig,
