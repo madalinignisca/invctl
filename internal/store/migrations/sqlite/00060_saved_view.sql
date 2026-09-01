@@ -11,9 +11,12 @@
 CREATE TABLE saved_view (
   id          TEXT PRIMARY KEY NOT NULL,
   -- ON DELETE CASCADE is a backstop for rows removed by other means. The
-  -- actual erasure mechanism for a scrub is the explicit DELETE in ScrubUser,
-  -- which runs inside the scrub's transaction to ensure the audit trail covers
-  -- the deletion. Do not remove this cascade thinking the explicit DELETE makes it redundant.
+  -- erasure mechanism for a scrub is the explicit DELETE in ScrubUser, which
+  -- runs in the scrub's own transaction so the erasure is atomic: a scrub
+  -- either removes the person's views along with their details, or does not
+  -- happen. The deletion itself writes no change_log row -- the scrub's audit
+  -- entry is the app_user update. Do not remove either this cascade or that
+  -- DELETE believing the other makes it redundant.
   user_id     TEXT NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
   entity      TEXT NOT NULL
                 CONSTRAINT saved_view_entity_check
