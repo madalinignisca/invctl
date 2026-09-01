@@ -82,11 +82,21 @@ func (s *SQLStore) CreateSavedView(ctx context.Context, p domain.Permit, v *doma
 // Authorize BEFORE validating. This is the one place in this file that used
 // to deviate from authorize-first, and the deviation was observable: posting
 // an empty name (a Validate failure) against someone else's view id used to
-// return 422, which tells a caller their guessed id was real -- a fabricated
-// id would 404 at GetSavedView instead. Checking ownership first means every
-// wrong-owner request gets the same 403 regardless of what else is wrong
-// with the submitted fields, so a caller learns nothing about whether an id
-// exists from the status code alone.
+// return 422 for a wrong-owner request with a bad field and 403 for a
+// wrong-owner request with a valid one -- two different answers to "may I?"
+// depending on something the caller does not control. Checking ownership
+// first collapses that: every wrong-owner request now gets the same 403
+// regardless of what else is wrong with the submitted fields.
+//
+// THIS DOES NOT MAKE A 403 AND A 404 INDISTINGUISHABLE, and nothing here
+// should be read as claiming it does. A fabricated id still 404s at
+// GetSavedView above; a real id belonging to somebody else still 403s here.
+// That pair is accepted, not a defect this reorder was meant to close: the
+// ids are UUIDv7 and unguessable, no saved-view content is disclosed by
+// either status, and 403 is the honest answer to "may I write this row" once
+// GetSavedView has already established the row exists. Do not "fix" the
+// codes to make the two indistinguishable -- that is a ruled-on decision,
+// not an oversight (WP-G4b Wave C, auth review).
 func (s *SQLStore) UpdateSavedView(ctx context.Context, p domain.Permit, v *domain.SavedView) error {
 	stored, err := s.GetSavedView(ctx, v.ID)
 	if err != nil {
