@@ -55,9 +55,12 @@ func NewSavedView(id, userID, entity, name, params string, now time.Time) (*Save
 		ve.Add("user_id", "is required")
 	}
 	// params must be a JSON OBJECT. It is stored opaque and never queried,
-	// so this constructor is the only place its shape is checked.
+	// so this constructor is the only place its shape is checked. The
+	// literal `null` unmarshals into a nil map with err == nil, which is
+	// the one shape json.Unmarshal alone will not catch -- probe == nil
+	// after a successful unmarshal means the input was exactly `null`.
 	var probe map[string]any
-	if err := json.Unmarshal([]byte(params), &probe); err != nil {
+	if err := json.Unmarshal([]byte(params), &probe); err != nil || probe == nil {
 		ve.Add("params", "must be a JSON object")
 	}
 	if err := ve.OrNil(); err != nil {
@@ -83,7 +86,7 @@ func (v *SavedView) Validate() error {
 		ve.Add("user_id", "is required")
 	}
 	var probe map[string]any
-	if err := json.Unmarshal([]byte(v.Params), &probe); err != nil {
+	if err := json.Unmarshal([]byte(v.Params), &probe); err != nil || probe == nil {
 		ve.Add("params", "must be a JSON object")
 	}
 	return ve.OrNil()

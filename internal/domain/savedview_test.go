@@ -34,9 +34,27 @@ func TestNewSavedViewRejectsParamsThatAreNotAJSONObject(t *testing.T) {
 	// constructor is the only place its shape is enforced. A bare array or
 	// scalar would round-trip through TEXT and fail later, further from the
 	// cause.
-	for _, bad := range []string{"", "[]", `"a string"`, "not json"} {
+	for _, bad := range []string{"", "[]", `"a string"`, "not json", "null"} {
 		if _, err := domain.NewSavedView("id-1", "user-1", domain.SavedViewAsset, "My view", bad, time.Now()); err == nil {
 			t.Errorf("NewSavedView accepted params %q", bad)
+		}
+	}
+}
+
+func TestSavedViewValidateRejectsParamsThatAreNotAJSONObject(t *testing.T) {
+	// Validate is the path Task 3's update flow calls on a struct that was
+	// mutated by hand, so it must refuse the same shapes NewSavedView does --
+	// in particular the literal `null`, which unmarshals into a nil map with
+	// err == nil and is therefore the one input the constructor's own bug
+	// let through undetected (see the failing test this guards against).
+	for _, bad := range []string{"", "[]", `"a string"`, "not json", "null"} {
+		v, err := domain.NewSavedView("id-1", "user-1", domain.SavedViewAsset, "My view", `{}`, time.Now())
+		if err != nil {
+			t.Fatalf("NewSavedView: %v", err)
+		}
+		v.Params = bad
+		if err := v.Validate(); err == nil {
+			t.Errorf("Validate accepted params %q", bad)
 		}
 	}
 }
