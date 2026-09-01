@@ -729,6 +729,17 @@ var DeclaredColumns = map[string][]string{
 	"entity_tag": {
 		"tag_id", "entity_type", "entity_id", "created_at", "created_by",
 	},
+	// One person's saved list filters (WP-G4b, migration 00060). DECLARED:
+	// a person asserting "this view exists, and here is what it filters on"
+	// is a declaration, the same as journal_entry above -- nothing observes
+	// or derives it. params is opaque JSON, never queried in SQL, and is
+	// redacted out of the audit trail (see RedactedFieldsByEntity["SavedView"]
+	// in errors.go) because it can encode what someone repeatedly searches
+	// the estate for, which change_log has no business keeping forever.
+	"saved_view": {
+		"id", "user_id", "entity", "name", "params",
+		"lifecycle", "created_at", "updated_at", "row_version",
+	},
 }
 
 // ClassifyColumn returns the class of a column. ok is false when the column is

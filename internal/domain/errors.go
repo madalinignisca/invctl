@@ -315,6 +315,13 @@ var RedactedFieldsByEntity = map[string]map[string]bool{
 		"display_name": true,
 		"email":        true,
 	},
+	"SavedView": {
+		// The audit trail records that a view was saved and what it is
+		// called. It does not record what a person repeatedly searches the
+		// estate for -- change_log is kept forever, and nothing needs a
+		// behavioural profile in it. docs/saved-views-design.md §4.
+		"params": true,
+	},
 }
 
 // IsRedacted reports whether a column must be masked in the audit trail.

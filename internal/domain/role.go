@@ -489,7 +489,15 @@ var entityScope = map[string]ScopeClass{
 	// unrecognised type is refused -- see ScopeClassOf), but by accident
 	// rather than by decision; a silent default is not where a rule this
 	// sharp should live.
-	"user_project":          ScopeEstateConfig,
+	"user_project": ScopeEstateConfig,
+	// One person's saved list filters (WP-G4b, migration 00060).
+	// ScopeEstateConfig so no ScopedPermit can ever cover it -- but that is
+	// only half the rule. A person MAY write their own views, which is
+	// enforced in internal/store/savedviews.go by comparing the row's owner
+	// to the caller before minting a narrow permit, the same shape
+	// journal_entry uses. Estate-config here means "not reachable by
+	// project scope", not "Administrator only".
+	"saved_view":            ScopeEstateConfig,
 	"asset_kind":            ScopeEstateConfig,
 	"service_kind":          ScopeEstateConfig,
 	"interface_form_factor": ScopeEstateConfig,
