@@ -82,28 +82,29 @@ describeHere(
       const { context, page } = await signInAsFreshUser(browser, BASE_URL, OWNER_USERNAME, OWNER_PASSWORD);
       try {
         // The generic entry point: web/templates/pages/asset_list.html gates
-        // its embedded "Add an asset" form (action="/assets", the plain
-        // Administrator-only create route) on `.CanWrite`, page-wide. Before
-        // WP-G1 Task 13 that was unconditionally false for a project owner,
-        // so this control was correctly hidden; Task 13 made CanWrite true
-        // for a project owner (it now means "may reach a write-gated route",
-        // not "may write everything" -- see auth.CanWrite's own comment),
-        // and this template was never converted to the entity-scoped
-        // CanWriteEntity check the same task's Step 1 gave the asset/
-        // service/circuit list, detail and row templates. Task 17 counted
-        // 132 `.CanWrite` occurrences across 38 template files with this
-        // same property; widening all of them is EXPLICITLY DEFERRED
-        // (WP-G1 Task 13's own brief: "a UX defect, not a security one" --
-        // the server refuses every one, see the second test below and
-        // internal/domain/role.go's ScopeClassOf/Covers). This assertion
-        // therefore pins the control being VISIBLE, not absent -- flip it
-        // back to toHaveCount(0) the day that template sweep lands, not
-        // before.
+        // its embedded "Add an asset" form -- the plain Administrator-only
+        // create route -- and a project owner must NOT see it. A brand-new
+        // id cannot satisfy their existing scope, so the server refuses the
+        // post; offering the form is a dead end dressed up as an action.
+        //
+        // This assertion used to pin the opposite. WP-G1 Task 13 made
+        // CanWrite true for a project owner (it means "may reach a
+        // write-gated route", not "may write everything"), which left this
+        // template offering a control the server refuses, and the assertion
+        // pinned that visible with an instruction to flip it "the day that
+        // template sweep lands". It landed: commit 9d80c55 converted this
+        // form's gate from `.CanWrite` to `.IsAdmin`. Flipped accordingly.
+        //
+        // The wider sweep is still outstanding -- Task 17 counted 132
+        // `.CanWrite` occurrences across 38 template files with the same
+        // property, deferred as "a UX defect, not a security one" because
+        // the server refuses every one. This page is simply no longer among
+        // them.
         await page.goto('/assets', { waitUntil: 'networkidle' });
         await expect(
           page.locator('form[action="/assets"]'),
-          'a project owner sees the generic "New asset" form today -- see this test\'s own comment',
-        ).toHaveCount(1);
+          'a project owner must not be offered the Administrator-only "New asset" form (gated on .IsAdmin since 9d80c55)',
+        ).toHaveCount(0);
 
         // Their own project's page DOES offer a way in: the create-in-project
         // form (web/templates/partials/project_create_form.html), posted to
