@@ -21,7 +21,8 @@ SPDX-License-Identifier: AGPL-3.0-only
      hx-swap: a validation failure re-renders exactly this partial at 422,
      nothing outside it, and it must have something addressable to land in.
      */}}
-<div id="saved-views-{{.Entity}}" class="saved-views" data-views="{{.Entity}}">
+<div id="saved-views-{{.Entity}}" class="saved-views" data-views="{{.Entity}}"
+     x-on:click.outside="close">
   <button type="button" class="btn btn-sm" x-on:click="toggleMenu">Views</button>
   <div class="saved-views-menu" x-show="open" x-cloak>
     {{range .Views}}

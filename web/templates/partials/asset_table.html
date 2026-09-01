@@ -27,9 +27,6 @@
        adjacent line. See CurrentFiltersFor's own comment for why the
        hidden inputs the Views form renders must match the request that just
        ran; that property does not depend on any row existing. */}}
-  <div x-data="savedViews">
-    {{template "saved_views" dict "Entity" "asset" "Views" .SavedViews "CurrentFilters" .CurrentFilters "CSRF" .CSRF}}
-  </div>
   {{/* Because the WHOLE #asset-table fragment (this menu included) is
        swapped on every filter change (hx-trigger="change, keyup changed
        delay:300ms from:input[name='q']" in asset_list.html), an open Views
@@ -38,7 +35,26 @@
        trade, not a bug: the alternative is a menu that silently drifts from
        the filters it is about to save. */}}
   <div x-data="columnPicker" data-table-key="asset">
+  {{/* Views and Columns share one flex row. They used to be two sibling
+       block-level x-data wrappers, so each took a full line and Columns sat
+       UNDER Views -- and once Views was open its menu covered the Columns
+       button entirely. Reported from the demo.
+
+       The savedViews wrapper is nested INSIDE the columnPicker one on
+       purpose. columnPicker's element has to enclose the table as well,
+       because apply() finds its cells through $root; savedViews encloses
+       nothing but its own button and menu. Both components happen to expose
+       `open` and `toggleMenu`, and Alpine resolves those in the nearest
+       scope -- so inside the savedViews div they are savedViews', and
+       everywhere else in this fragment they are columnPicker's. Do not give
+       either component a member the other lacks and expect it to resolve
+       from the wrong side of this boundary. */}}
+  <div class="table-tools">
+    <div x-data="savedViews">
+      {{template "saved_views" dict "Entity" "asset" "Views" .SavedViews "CurrentFilters" .CurrentFilters "CSRF" .CSRF}}
+    </div>
     {{template "column_picker" dict "Table" "asset" "Columns" .ColumnOptions}}
+  </div>
     {{if .Assets}}
     {{/* WP-G4a piece 3 (docs/tags-design.md §4a): bulk-tagging this exact
          filtered view. The checkbox column and its footer only render for a

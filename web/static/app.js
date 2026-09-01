@@ -19,6 +19,40 @@
 // Everything here is local UI state: disclosure, selection, submit feedback.
 // Nothing fetches, and nothing holds domain state -- that is HTMX's job.
 
+// Only one disclosure menu in a toolbar may be open at a time.
+//
+// The Views menu (WP-G4b) and the Columns menu (WP-G4c) sit side by side and
+// both anchor to the same left edge, so with independent `open` flags opening
+// the second drew it straight over the first: two menus visible, overlapping,
+// with the second's contents on top of the first's. Reported from the demo.
+//
+// Module scope rather than an Alpine store because it is not state any
+// template renders -- no x-show or x-text reads it. It is a latch between two
+// components, and a store would invite a template to bind to it.
+let openDisclosure = null;
+
+// claimDisclosure closes whatever else was open and records the new holder.
+// The isConnected check matters because the whole #asset-table fragment is
+// replaced on every filter keystroke: without it this would keep a reference
+// to a component whose element is long gone, and the first menu opened after
+// a filter change would "close" a corpse instead of the menu actually on
+// screen.
+function claimDisclosure(c) {
+  if (openDisclosure && openDisclosure !== c) {
+    const el = openDisclosure.$el;
+    if (!el || el.isConnected) {
+      openDisclosure.open = false;
+    }
+  }
+  openDisclosure = c;
+}
+
+function releaseDisclosure(c) {
+  if (openDisclosure === c) {
+    openDisclosure = null;
+  }
+}
+
 document.addEventListener('alpine:init', () => {
   // A collapsible section. `open` starts from the x-data argument so a panel
   // can render expanded on a page where it is the point.
@@ -468,6 +502,22 @@ document.addEventListener('alpine:init', () => {
 
     toggleMenu() {
       this.open = !this.open;
+      if (this.open) {
+        claimDisclosure(this);
+      } else {
+        releaseDisclosure(this);
+      }
+    },
+
+    // Called by x-on:click.outside on .column-picker -- deliberately that
+    // element and not $root. $root here is the wrapper that also contains the
+    // whole table, so a click on any row would count as "inside" and the menu
+    // would never close.
+    close() {
+      if (this.open) {
+        this.open = false;
+        releaseDisclosure(this);
+      }
     },
 
     // x-on hands the event to the method; the key rides on the checkbox as
@@ -508,6 +558,20 @@ document.addEventListener('alpine:init', () => {
     open: false,
     toggleMenu() {
       this.open = !this.open;
+      if (this.open) {
+        claimDisclosure(this);
+      } else {
+        releaseDisclosure(this);
+      }
+    },
+    // Called by x-on:click.outside on the partial's root, which wraps the
+    // button as well as the menu -- so clicking the button itself is NOT
+    // outside, and does not fight the toggle above.
+    close() {
+      if (this.open) {
+        this.open = false;
+        releaseDisclosure(this);
+      }
     },
   }));
 });

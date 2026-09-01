@@ -15,7 +15,7 @@ SPDX-License-Identifier: AGPL-3.0-only
      BOTH this picker and the table, so $root reaches the cells -- see the
      plan's Task 4. A second x-data here would create a second, empty
      component instance and the picker would toggle nothing. */}}
-<div class="column-picker" data-columns="{{.Table}}">
+<div class="column-picker" data-columns="{{.Table}}" x-on:click.outside="close">
   <button type="button" class="btn btn-sm" x-on:click="toggleMenu">Columns</button>
   <div class="column-picker-menu" x-show="open" x-cloak>
     {{range .Columns}}

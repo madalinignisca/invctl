@@ -1135,6 +1135,14 @@ form.htmx-request .btn-primary { opacity: 0.6; pointer-events: none; }
   display: none;
 }
 
+/* The Views and Columns menus sit in one row rather than stacking.
+   Their x-data wrappers are plain divs -- block-level -- so before this the
+   inline-block on .saved-views and .column-picker never got a chance: each
+   wrapper claimed a full line and Columns landed under Views, where an open
+   Views menu covered it. Flex on the shared parent is what actually decides
+   the layout here; the inline-block on the children is now belt and braces. */
+.table-tools { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+
 .column-picker { position: relative; display: inline-block; }
 /* Opens LEFTWARD-ANCHORED (left:0), not right:0. The picker button sits at
    the left edge of the table panel, right next to the 216px .rail column;

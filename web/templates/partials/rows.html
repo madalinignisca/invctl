@@ -127,11 +127,17 @@
        asset_table.html's identical comment for the design §6 reasoning and
        the disclosure-reset trade-off. Still INSIDE #service-table, which is
        the swap-boundary fix and is unchanged. */}}
-  <div x-data="savedViews">
-    {{template "saved_views" dict "Entity" "service" "Views" .SavedViews "CurrentFilters" .CurrentFilters "CSRF" .CSRF}}
-  </div>
   <div x-data="columnPicker" data-table-key="service">
+  {{/* Views and Columns share one flex row -- see asset_table.html for why
+       the savedViews wrapper is nested inside this one rather than beside
+       it, and what that means for `open` and `toggleMenu` resolving in the
+       nearest Alpine scope. */}}
+  <div class="table-tools">
+    <div x-data="savedViews">
+      {{template "saved_views" dict "Entity" "service" "Views" .SavedViews "CurrentFilters" .CurrentFilters "CSRF" .CSRF}}
+    </div>
     {{template "column_picker" dict "Table" "service" "Columns" .ColumnOptions}}
+  </div>
     {{if .Services}}
     {{/* WP-G4a piece 3 (docs/tags-design.md §4a): see asset_table.html's
          identical block for the reasoning. */}}
