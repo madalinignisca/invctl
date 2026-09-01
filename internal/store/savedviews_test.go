@@ -268,6 +268,52 @@ func TestTheAuditRowForASavedViewRedactsTheParams(t *testing.T) {
 	}
 }
 
+// TestUpdateSavedViewAuthorizesBeforeValidating pins the fix for the
+// review's finding that UpdateSavedView ran v.Validate() before the
+// ownership check. An empty name against SOMEBODY ELSE's view id used to
+// come back 422 (a validation failure), which tells a caller their guessed
+// id names a real row -- a genuinely fabricated id would 404 at GetSavedView
+// instead. Reordering means bob's request against alice's view is refused
+// as ErrForbidden regardless of what else is wrong with what he submitted,
+// so the status code stops leaking whether the id is real.
+func TestUpdateSavedViewAuthorizesBeforeValidating(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			s, ctx := newStore(t, e)
+			alice := mustUserForSavedView(t, s, ctx, "alice")
+			bob := mustUserForSavedView(t, s, ctx, "bob")
+
+			v, err := domain.NewSavedView(NewID(), alice, domain.SavedViewAsset,
+				"Production servers", `{"kind":"server"}`, s.Now())
+			if err != nil {
+				t.Fatalf("building view: %v", err)
+			}
+			if err := s.CreateSavedView(ctx, savedViewPermit(alice), v); err != nil {
+				t.Fatalf("creating alice's view: %v", err)
+			}
+
+			// bob submits BOTH problems at once: he does not own the row, and
+			// the name he posted is invalid (empty). If validation ran first,
+			// this would return a ValidationError (domain.ErrInvalid), not
+			// ErrForbidden -- and the two are distinguishable at the HTTP
+			// layer (422 vs 403).
+			forged := *v
+			forged.Name = ""
+			if err := s.UpdateSavedView(ctx, savedViewPermit(bob), &forged); !errors.Is(err, domain.ErrForbidden) {
+				t.Fatalf("UpdateSavedView (wrong owner + invalid name) = %v, want domain.ErrForbidden", err)
+			}
+
+			after, err := s.GetSavedView(ctx, v.ID)
+			if err != nil {
+				t.Fatalf("re-reading: %v", err)
+			}
+			if after.Name != "Production servers" {
+				t.Errorf("name = %q; the refused update still landed", after.Name)
+			}
+		})
+	}
+}
+
 // TestScrubbingAPersonDeletesTheirSavedViews. A saved view exists only for
 // the person who made it; once they are erased it belongs to nobody and
 // serves nothing, so retaining it is holding personal data with no purpose.

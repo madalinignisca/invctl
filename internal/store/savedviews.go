@@ -78,16 +78,25 @@ func (s *SQLStore) CreateSavedView(ctx context.Context, p domain.Permit, v *doma
 // carries a UserID field, and trusting it would let anybody name themselves
 // as owner and edit anybody's view. Same seizure shape as
 // TestEditingAJournalNoteChecksTheStoredSubjectNotTheSubmittedOne.
+//
+// Authorize BEFORE validating. This is the one place in this file that used
+// to deviate from authorize-first, and the deviation was observable: posting
+// an empty name (a Validate failure) against someone else's view id used to
+// return 422, which tells a caller their guessed id was real -- a fabricated
+// id would 404 at GetSavedView instead. Checking ownership first means every
+// wrong-owner request gets the same 403 regardless of what else is wrong
+// with the submitted fields, so a caller learns nothing about whether an id
+// exists from the status code alone.
 func (s *SQLStore) UpdateSavedView(ctx context.Context, p domain.Permit, v *domain.SavedView) error {
-	if err := v.Validate(); err != nil {
-		return err
-	}
 	stored, err := s.GetSavedView(ctx, v.ID)
 	if err != nil {
 		return err
 	}
 	viewPermit, err := authorizeSavedViewOwner(p, stored.UserID, v.ID)
 	if err != nil {
+		return err
+	}
+	if err := v.Validate(); err != nil {
 		return err
 	}
 	v.UpdatedAt = domain.FormatTime(s.now())
