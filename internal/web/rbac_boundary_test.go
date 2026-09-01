@@ -1080,3 +1080,110 @@ func truncate(s string) string {
 	}
 	return s[:max] + "..."
 }
+
+// ---------------------------------------------------------------------------
+// Step 7: no write route is reachable with no session at all.
+//
+// Steps 2-5 all drive an AUTHENTICATED caller -- Observer or project owner --
+// and prove object-level permission holds once someone is signed in. None of
+// them prove middleware.RequireAuth is actually in the chain; that was
+// verified only by reading routes.go. It became worth writing down at WP-G4b,
+// which added a fourth registrar, self, whose ENTIRE gate is RequireAuth: for
+// POST /views and POST /views/{id}/retire, an unnoticed break in that
+// middleware is the whole authorization story, not one layer of it.
+//
+// Every non-GET route from the write, writeAdminOnly and self registrars is
+// driven here -- the full census routescan.WriteRoutes returns, not a
+// hand-picked subset, so a route registered under a new gate this file has
+// never heard of is swept automatically rather than requiring this test to
+// be told about it.
+//
+// WHY "REDIRECT TO /login OR A 4xx", NOT A SINGLE STATUS: CSRF wraps the
+// WHOLE mux, outside every registrar (routes.go's own comment on Routes says
+// so), so for a POST with no CSRF cookie at all nosurf can refuse first,
+// before RequireAuth is ever reached. This sweep does not let that hide the
+// gap: it fetches a genuine CSRF token from the public /login page before
+// driving each route (driveUnauthenticated below), the same way a browser
+// would carry one from any page it has loaded, so the request that reaches
+// the mux is refused by RequireAuth specifically wherever CSRF was not the
+// reason -- and the "or a 4xx" branch stays only for whatever this walk has
+// not anticipated, rather than being the only thing distinguishing a pass.
+func TestNoWriteRouteIsReachableWithNoSessionAtAll(t *testing.T) {
+	// pinnedNoSessionRouteCount is every non-GET route the write,
+	// writeAdminOnly and self registrars register today. Pinned rather than
+	// merely asserted nonzero, the same way Step 4 pins permitGate == 9 -- a
+	// sweep that drives zero routes passes trivially, and asserting only
+	// "> 0" would not catch the census quietly shrinking by one route that
+	// stopped being walked. Update this deliberately if the route count
+	// genuinely changes; do not let it drift unnoticed.
+	const pinnedNoSessionRouteCount = 181
+
+	for _, eng := range boundaryEngines(t) {
+		t.Run(eng.name, func(t *testing.T) {
+			h, fx := setupBoundary(t, eng)
+			// Deliberately no h.login call anywhere in this test: the whole
+			// point is a caller with no session at all.
+
+			routes := routescan.WriteRoutes(t)
+
+			// The change_log-unchanged invariant Step 4 established: tx.log
+			// is the only INSERT INTO change_log in this codebase, so a
+			// declared-state write that committed leaves a row here and one
+			// that was refused does not, regardless of which status code the
+			// handler happened to return.
+			changeLogBefore := h.count(`SELECT COUNT(*) FROM change_log`)
+
+			driven := 0
+			for _, route := range routes {
+				method := strings.SplitN(route.Pattern, " ", 2)[0]
+				if method == http.MethodGet {
+					continue
+				}
+				driven++
+
+				resp := driveUnauthenticated(t, h, route, fx)
+				body := drainedBody(t, resp)
+
+				loginRedirect := resp.StatusCode == http.StatusSeeOther &&
+					strings.Contains(resp.Header.Get("Location"), "/login")
+				refusalStatus := resp.StatusCode >= 400 && resp.StatusCode < 500
+				if !loginRedirect && !refusalStatus {
+					t.Errorf("%s with no session returned %d (body %q), want a redirect to "+
+						"/login (middleware.RequireAuth) or a 4xx refusal", route.Pattern, resp.StatusCode, truncate(body))
+				}
+			}
+
+			if driven == 0 {
+				t.Fatal("no non-GET route was driven -- this suite would pass vacuously")
+			}
+			if driven != pinnedNoSessionRouteCount {
+				t.Errorf("drove %d non-GET write-bucket routes, want %d -- either the pin is stale "+
+					"(update it deliberately) or the census just silently lost a route", driven, pinnedNoSessionRouteCount)
+			}
+
+			if after := h.count(`SELECT COUNT(*) FROM change_log`); after != changeLogBefore {
+				t.Errorf("change_log grew from %d to %d while driving %d routes with no session "+
+					"at all -- an unauthenticated caller wrote something",
+					changeLogBefore, after, driven)
+			}
+		})
+	}
+}
+
+// driveUnauthenticated drives one write-bucket route through the real
+// router as a caller with no session cookie whatsoever, carrying a genuine
+// CSRF token fetched from the public /login page -- the same one a browser
+// that had merely loaded that page would carry -- so that a refusal is
+// attributable to RequireAuth rather than to the CSRF layer running first.
+func driveUnauthenticated(t *testing.T, h *harness, route routescan.Route, fx *boundaryFixtures) *http.Response {
+	t.Helper()
+	parts := strings.SplitN(route.Pattern, " ", 2)
+	method, path := parts[0], paramsFor(route.Pattern, fx)
+
+	token := h.csrfToken("/login")
+	form := url.Values{"csrf_token": {token}}
+	req := h.request(method, path, strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Origin", h.server.URL)
+	return h.do(req)
+}
