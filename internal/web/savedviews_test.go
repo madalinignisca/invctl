@@ -17,7 +17,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/madalinignisca/invctl/internal/auth"
 	"github.com/madalinignisca/invctl/internal/domain"
 	"github.com/madalinignisca/invctl/internal/store"
 )
@@ -64,32 +63,6 @@ func secondClientOn(t *testing.T, h *harness) *harness {
 		},
 	}
 	return &harness{t: t, server: h.server, client: client, store: h.store}
-}
-
-// mustWebOwner creates a real, loggable-in project-owner account with no
-// project assignments at all. Saved-view authorization is per-row against
-// the actor's own id (internal/store/savedviews.go's authorizeSavedViewOwner)
-// and never consults a permit's scoped entities, so a second writer for
-// these tests needs to be able to reach a write route (CanWrite) and nothing
-// more -- unlike mustWebProjectOwner in project_create_test.go, this account
-// is deliberately assigned to no project.
-func mustWebOwner(t *testing.T, h *harness, username, password string) string {
-	t.Helper()
-	ctx := context.Background()
-	hash, err := auth.HashPassword(password)
-	if err != nil {
-		t.Fatalf("hashing password: %v", err)
-	}
-	u, err := domain.NewAppUser(store.NewID(), username, domain.UserSourceLocal, h.store.Now())
-	if err != nil {
-		t.Fatalf("building user %s: %v", username, err)
-	}
-	u.Role = domain.RoleProjectOwner
-	u.PasswordHash = &hash
-	if err := h.store.CreateUser(ctx, domain.AdministratorPermit(domain.SystemActor), u); err != nil {
-		t.Fatalf("creating user %s: %v", username, err)
-	}
-	return u.ID
 }
 
 // TestSavedViewCreateTakesTheOwnerFromTheSessionNotTheForm: a form-supplied
@@ -379,87 +352,15 @@ func TestSavedViewOnARetiredProjectStaysStaleBecauseRetirementCascades(t *testin
 	}
 }
 
-// TestSavedViewUpdateRefusesSomebodyElsesView proves the property the whole
-// work package exists for: the handler never re-checks ownership itself, so
-// this is really a test that internal/store/savedviews.go's
-// authorizeSavedViewOwner is actually wired in behind the route, not just
-// unit-tested in isolation. A regression here would mean one person can
-// rename or repoint another person's saved filters.
-func TestSavedViewUpdateRefusesSomebodyElsesView(t *testing.T) {
-	h := newHarness(t)
-	h.login("admin", "admin-password")
-	resp := h.post("/views", url.Values{
-		"csrf_token": {h.csrfToken("/assets")},
-		"entity":     {"asset"},
-		"name":       {"Admin's view"},
-		"kind":       {"server"},
-	}, false)
-	resp.Body.Close()
-	viewID := h.lookup(`SELECT id FROM saved_view WHERE name = ?`, "Admin's view")
-
-	mustWebOwner(t, h, "po-someone-else", "po-someone-else-password")
-	h2 := secondClientOn(t, h)
-	h2.login("po-someone-else", "po-someone-else-password")
-
-	resp = h2.post("/views/"+viewID, url.Values{
-		"csrf_token":  {h2.csrfToken("/assets")},
-		"name":        {"Stolen"},
-		"entity":      {"asset"},
-		"kind":        {"server"},
-		"row_version": {"1"},
-	}, false)
-	resp.Body.Close()
-
-	if resp.StatusCode != http.StatusForbidden {
-		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusForbidden)
-	}
-	name := h.lookup(`SELECT name FROM saved_view WHERE id = ?`, viewID)
-	if name != "Admin's view" {
-		t.Fatalf("the view was renamed by a non-owner: now %q", name)
-	}
-}
-
-// TestSavedViewUpdateIgnoresASubmittedEntity pins the fix for the finding
-// that a form-supplied entity could pick which allowlist gates what gets
-// written into an existing view's params. entity is not editable -- the
-// stored row's own entity must be what savedViewParamsFrom is called with,
-// never the posted one -- so posting entity=service against an asset view,
-// together with a service-only key (availability), must not let that key
-// into the stored params at all.
-func TestSavedViewUpdateIgnoresASubmittedEntity(t *testing.T) {
-	h := newHarness(t)
-	h.login("admin", "admin-password")
-	resp := h.post("/views", url.Values{
-		"csrf_token": {h.csrfToken("/assets")},
-		"entity":     {"asset"},
-		"name":       {"Asset view"},
-		"kind":       {"server"},
-	}, false)
-	resp.Body.Close()
-	viewID := h.lookup(`SELECT id FROM saved_view WHERE name = ?`, "Asset view")
-
-	resp = h.post("/views/"+viewID, url.Values{
-		"csrf_token":   {h.csrfToken("/assets")},
-		"name":         {"Asset view"},
-		"entity":       {"service"}, // THE ATTACK: not honoured, entity isn't editable
-		"kind":         {"server"},
-		"availability": {"up"}, // service-only key; must not land in an asset view's params
-		"row_version":  {"1"},
-	}, false)
-	resp.Body.Close()
-
-	if resp.StatusCode >= 400 {
-		t.Fatalf("status = %d; the update should succeed and ignore entity", resp.StatusCode)
-	}
-	entity := h.lookup(`SELECT entity FROM saved_view WHERE id = ?`, viewID)
-	if entity != "asset" {
-		t.Fatalf("entity = %q, want %q -- entity must not be editable", entity, "asset")
-	}
-	params := h.lookup(`SELECT params FROM saved_view WHERE id = ?`, viewID)
-	if strings.Contains(params, "availability") {
-		t.Fatalf("params picked up a service-only key via the submitted entity: %s", params)
-	}
-}
+// TestSavedViewUpdateRefusesSomebodyElsesView and
+// TestSavedViewUpdateIgnoresASubmittedEntity, which used to live here and
+// drove POST /views/{id}, were removed alongside that route (WP-G4b Wave B:
+// nothing posts to it -- see SavedViewUpdate's removed-handler comment in
+// internal/web/handlers/savedviews.go). The ownership and
+// entity-not-editable properties they pinned are still covered, at the
+// store level where UpdateSavedView itself lives:
+// internal/store/savedviews_test.go's TestAPersonCannotUpdateSomebodyElses-
+// SavedView and TestUpdateSavedViewReadsTheOwnerFromTheStoredRow.
 
 // TestSavedViewRetireIsIdempotentAndSoftDelete: like every entity in this
 // product, retiring a saved view sets lifecycle rather than removing the

@@ -364,66 +364,14 @@ func (a *App) SavedViewCreate(w http.ResponseWriter, r *http.Request) {
 	render.Redirect(w, r, savedViewListPath(v.Entity, v.Params))
 }
 
-// SavedViewUpdate renames a view or changes what filters it captures.
-//
-// The row is loaded first so UpdateSavedView can authorize against the
-// STORED owner, never a submitted one -- see that function's own comment in
-// internal/store/savedviews.go. This handler does not repeat the ownership
-// check: the store is where that decision lives, and a second copy here
-// would only give the two a chance to disagree.
-func (a *App) SavedViewUpdate(w http.ResponseWriter, r *http.Request) {
-	user := middleware.UserFrom(r.Context())
-	if user == nil {
-		a.serverError(w, r, errors.New("saved view update reached without a user"))
-		return
-	}
-	if err := r.ParseForm(); err != nil {
-		http.Error(w, "Could not read that form.", http.StatusBadRequest)
-		return
-	}
-	id := r.PathValue("id")
-	existing, err := a.Store.GetSavedView(r.Context(), id)
-	if err != nil {
-		a.savedViewFailed(w, r, err)
-		return
-	}
-	// entity is not editable (UpdateSavedView never writes it), so the
-	// allowlist that decides which keys are read is always the row's own,
-	// never a submitted one. Reading a form-supplied entity here would let a
-	// caller pick which allowlist gates the write -- e.g. post entity=service
-	// while editing an asset view to smuggle a service-only key into that
-	// view's stored params. Those keys are inert today only because
-	// savedViewListPath replays on the STORED entity; savedViewKeys' own doc
-	// comment exists precisely to stop an unreviewed key from sitting there
-	// waiting for a future release to start honouring it. The stored value is
-	// authoritative, full stop -- no fallback needed either, since it can
-	// never be empty for an existing row.
-	name := formValue(r, "name")
-	currentFilters := CurrentFiltersFor(r.PostForm, existing.Entity)
-	params, err := savedViewParamsFrom(r, existing.Entity)
-	if err != nil {
-		if errors.Is(err, domain.ErrInvalid) {
-			a.renderSavedViewsInvalid(w, r, existing.Entity, currentFilters, name, err)
-			return
-		}
-		a.savedViewFailed(w, r, err)
-		return
-	}
-	updated := *existing
-	updated.Name = name
-	updated.Params = params
-	updated.RowVersion = submittedVersion(r, updated.RowVersion)
-
-	if err := a.Store.UpdateSavedView(r.Context(), a.permit(r), &updated); err != nil {
-		if errors.Is(err, domain.ErrInvalid) {
-			a.renderSavedViewsInvalid(w, r, existing.Entity, currentFilters, name, err)
-			return
-		}
-		a.savedViewFailed(w, r, err)
-		return
-	}
-	render.Redirect(w, r, savedViewListPath(updated.Entity, updated.Params))
-}
+// SavedViewUpdate (renaming or changing what filters a view captures) does
+// not exist as an HTTP route. internal/store.UpdateSavedView is real, tested
+// store-level work a future rename control (docs/ROADMAP.md, "Deferred to
+// 1.1") will call from a handler like this one -- but nothing posts to
+// POST /views/{id} today (checked against web/templates, web/static/app.js
+// and the E2E suite), so a mutating route with no caller was unreviewed
+// surface and was removed rather than kept "just in case". See routes.go's
+// saved-views comment for where this used to be registered.
 
 // SavedViewRetire soft-deletes a view. Like every entity here, a saved view
 // is never hard-deleted -- see RetireSavedView.

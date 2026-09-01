@@ -128,10 +128,13 @@ The cost is noise: `/changes` gains "saved a view" entries.
 
 **The params are redacted.** `domain.RedactedFieldsByEntity` — which is keyed
 by Go type name, e.g. `"AppUser"` — gains a `"SavedView"` entry covering
-`params`. The log records that a view called "Production servers" was created
-and later renamed; it never records what a person repeatedly searches the
-estate for. A permanent, append-only record of somebody's search patterns is
-a behavioural profile, nothing needs it, and `change_log` is kept forever.
+`params`. The log records that a view called "Production servers" was
+created; it never records what a person repeatedly searches the estate for.
+A permanent, append-only record of somebody's search patterns is a
+behavioural profile, nothing needs it, and `change_log` is kept forever.
+(`UpdateSavedView`, which would log a rename, exists at the store level and
+is tested there — see `internal/store/savedviews_test.go` — but has no HTTP
+route in front of it yet; `docs/ROADMAP.md`'s "Deferred to 1.1" records why.)
 
 The view's **name** is logged. It is user-authored text and could in
 principle carry something personal, but a name is what makes the audit entry

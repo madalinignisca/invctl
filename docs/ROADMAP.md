@@ -48,6 +48,14 @@ and `journal_entry` (`domain.ScopeSubjectDerived`). Still Administrator-only:
 
 Widening scope is never a breaking change, so 1.1 can take these freely.
 
+**Saved-view rename.** `internal/store.UpdateSavedView` is real, tested
+store-level work (`internal/store/savedviews_test.go`), but WP-G4b Wave B
+removed the `POST /views/{id}` route and its `SavedViewUpdate` handler:
+nothing posted to it — checked against `web/templates`, `web/static/app.js`
+and the E2E suite — and a mutating route with no caller is unreviewed
+surface. A rename control in 1.1 wires a new handler to the existing store
+method; the store side needs no further work.
+
 **WP-A4 follow-ups**, filed at that work package's merge and re-verified
 2026-08-31:
 
