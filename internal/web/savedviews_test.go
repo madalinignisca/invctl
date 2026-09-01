@@ -21,6 +21,27 @@ import (
 	"github.com/madalinignisca/invctl/internal/store"
 )
 
+// mustSavedViewService creates a real, live service with a known kind, so a
+// list request filtered to that kind is guaranteed at least one row -- both
+// asset_table.html and rows.html wrap the Views menu (and the Columns picker
+// beside it) in {{if .Assets}}/{{if .Services}}, so a filter that happened to
+// match nothing would hide the very form these regression tests assert on,
+// and a green test would not actually be exercising it.
+func mustSavedViewService(t *testing.T, h *harness, code string) string {
+	t.Helper()
+	svc, err := domain.NewService(store.NewID(), domain.ServiceSpec{
+		Code: code, Name: code, Kind: domain.SvcAPI,
+		EnvironmentID: h.refs.Environments["prod"], Availability: domain.AvailStandalone, Tier: 2,
+	}, h.store.Now())
+	if err != nil {
+		t.Fatalf("building service %s: %v", code, err)
+	}
+	if err := h.store.CreateService(context.Background(), domain.AdministratorPermit(domain.SystemActor), svc); err != nil {
+		t.Fatalf("creating service %s: %v", code, err)
+	}
+	return svc.ID
+}
+
 // secondClientOn returns a *harness that talks to the SAME running server
 // and the SAME database as h, but through a fresh cookie jar -- so a second
 // login does not clobber h's session. Same technique
@@ -289,5 +310,106 @@ func TestSavedViewRetireIsIdempotentAndSoftDelete(t *testing.T) {
 	rowVersion := h.lookup(`SELECT row_version FROM saved_view WHERE id = ?`, viewID)
 	if rowVersion != "2" {
 		t.Fatalf("row_version = %s, want 2 (a second retire must not re-run the UPDATE)", rowVersion)
+	}
+}
+
+// TestAssetListHTMXFragmentCarriesTheAppliedFilterIntoTheSaveViewForm pins
+// the fix for a defect a whole-branch review caught before it shipped: the
+// filter toolbar's hx-get swaps ONLY #asset-table (hx-target="#asset-table"
+// hx-swap="outerHTML" in asset_list.html), so if the Views menu lived
+// outside that element -- as it did in an earlier draft of this task, on the
+// page template rather than inside asset_table.html -- filtering never
+// touched it. Its "Save this view" form kept whatever CurrentFilters were on
+// the page at the LAST FULL LOAD, so filtering to kind=firewall and clicking
+// "Save this view" saved a view with no filters at all: the feature's most
+// common action, silently wrong.
+//
+// This requests exactly what the real toolbar requests -- GET with
+// HX-Request true, the fragment HTMX itself would receive -- and asserts the
+// hidden input the save form would submit already carries kind=firewall.
+// Move the menu back onto the page template and this goes red.
+func TestAssetListHTMXFragmentCarriesTheAppliedFilterIntoTheSaveViewForm(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+	mustAssetWeb(t, h, domain.KindFirewall, "sv-fixture-firewall")
+
+	resp := h.get("/assets?kind=firewall", true)
+	b := body(t, resp)
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if !strings.Contains(b, `id="asset-table"`) {
+		t.Fatalf("the HTMX response is not the #asset-table fragment: %s", b)
+	}
+	if !strings.Contains(b, `id="saved-views-asset"`) {
+		t.Fatalf("the Views menu did not come back inside the swapped fragment: %s", b)
+	}
+	if !strings.Contains(b, `name="kind" value="firewall"`) {
+		t.Fatalf("the save-view form did not carry the applied kind=firewall filter: %s", b)
+	}
+}
+
+// TestServiceListHTMXFragmentCarriesTheAppliedFilterIntoTheSaveViewForm is
+// TestAssetListHTMXFragmentCarriesTheAppliedFilterIntoTheSaveViewForm's
+// service-list twin: #service-table is rows.html's swap target for the
+// service filter toolbar, and the same defect (menu outside the swap
+// target) would have frozen this one's filters too.
+func TestServiceListHTMXFragmentCarriesTheAppliedFilterIntoTheSaveViewForm(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+	mustSavedViewService(t, h, "sv-fixture-api")
+
+	resp := h.get("/services?kind="+domain.SvcAPI, true)
+	b := body(t, resp)
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if !strings.Contains(b, `id="service-table"`) {
+		t.Fatalf("the HTMX response is not the #service-table fragment: %s", b)
+	}
+	if !strings.Contains(b, `id="saved-views-service"`) {
+		t.Fatalf("the Views menu did not come back inside the swapped fragment: %s", b)
+	}
+	if !strings.Contains(b, `name="kind" value="`+domain.SvcAPI+`"`) {
+		t.Fatalf("the save-view form did not carry the applied kind filter: %s", b)
+	}
+}
+
+// TestSavedViewCreateValidationFailureRerendersTheMenuAt422 pins the second
+// review fix: SavedViewCreate used to fall through to handleStoreError's
+// plain-text 422 on a validation failure (domain.NewSavedView rejects an
+// empty name), which this project's own rule refuses -- "Validation errors
+// re-render the form partial with error state and return HTTP 422"
+// (CLAUDE.md). Posted with HX-Request true, the way the menu's own hx-post
+// form actually submits it (see saved_views.html), so this exercises the
+// real swap path, not a hypothetical one.
+func TestSavedViewCreateValidationFailureRerendersTheMenuAt422(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	resp := h.post("/views", url.Values{
+		"csrf_token": {h.csrfToken("/assets")},
+		"entity":     {"asset"},
+		"name":       {""}, // THE FAILURE: NewSavedView rejects an empty name
+		"kind":       {"server"},
+	}, true)
+	b := body(t, resp)
+
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusUnprocessableEntity)
+	}
+	if strings.Contains(b, "That request was not valid.") {
+		t.Fatalf("body is handleStoreError's bare text, not the re-rendered menu: %s", b)
+	}
+	if !strings.Contains(b, `id="saved-views-asset"`) {
+		t.Fatalf("body is not the re-rendered saved_views partial: %s", b)
+	}
+	// The filter being saved must survive the round trip too -- otherwise
+	// fixing the name and resubmitting silently saves a view with no
+	// filters, the same failure mode fix 1 above pins from a different angle.
+	if !strings.Contains(b, `name="kind" value="server"`) {
+		t.Fatalf("re-rendered menu lost the filter that was being saved: %s", b)
 	}
 }

@@ -130,6 +130,13 @@
   <form {{if $bulkTag}}hx-post="/services/tags/apply" hx-target="#services-bulk-tag-result" hx-swap="outerHTML"
         x-data="bulkTagApply" data-entity-label="services"{{end}}>
     {{if $bulkTag}}<input type="hidden" name="csrf_token" value="{{.CSRF}}">{{end}}
+    {{/* INSIDE the swap target deliberately -- see asset_table.html's
+         identical comment. #service-table is the hx-target for the filter
+         toolbar's hx-get; a menu outside it would freeze CurrentFilters at
+         the last full page load. */}}
+    <div x-data="savedViews">
+      {{template "saved_views" dict "Entity" "service" "Views" .SavedViews "CurrentFilters" .CurrentFilters "CSRF" .CSRF}}
+    </div>
     <div x-data="columnPicker" data-table-key="service">
       {{template "column_picker" dict "Table" "service" "Columns" .ColumnOptions}}
       <div class="scroll-x">

@@ -24,6 +24,18 @@
   <form {{if $bulkTag}}hx-post="/assets/tags/apply" hx-target="#assets-bulk-tag-result" hx-swap="outerHTML"
         x-data="bulkTagApply" data-entity-label="assets"{{end}}>
     {{if $bulkTag}}<input type="hidden" name="csrf_token" value="{{.CSRF}}">{{end}}
+    {{/* INSIDE the swap target deliberately, not on the page template around
+         it: the filter toolbar's hx-get swaps only #asset-table
+         (hx-target="#asset-table" hx-swap="outerHTML"), so a menu living
+         outside it would never see a changed filter and "Save this view"
+         would silently capture whatever was applied at the last full page
+         load, not what is on screen. See CurrentFiltersFor's own comment for
+         why the hidden inputs it renders must match the request that just
+         ran -- this placement is what makes that request the one just made,
+         not an earlier one. */}}
+    <div x-data="savedViews">
+      {{template "saved_views" dict "Entity" "asset" "Views" .SavedViews "CurrentFilters" .CurrentFilters "CSRF" .CSRF}}
+    </div>
     <div x-data="columnPicker" data-table-key="asset">
       {{template "column_picker" dict "Table" "asset" "Columns" .ColumnOptions}}
       <div class="scroll-x">

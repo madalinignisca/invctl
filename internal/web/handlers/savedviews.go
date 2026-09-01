@@ -16,6 +16,8 @@ import (
 	"net/http"
 	"net/url"
 
+	"github.com/justinas/nosurf"
+
 	"github.com/madalinignisca/invctl/internal/domain"
 	"github.com/madalinignisca/invctl/internal/store"
 	"github.com/madalinignisca/invctl/internal/web/middleware"
@@ -92,15 +94,104 @@ func savedViewListPath(entity, params string) string {
 
 // savedViewFailed answers a refused or invalid saved-view write.
 //
-// This is a thin, intentionally redundant wrapper around handleStoreError:
-// domain.ErrForbidden already maps to an identical 403 with an identical
-// message there, so there is no special case to carve out here (contrast
-// users.go, which legitimately overrides handleStoreError's message with the
-// store's own). It exists as its own function only so every saved-view
-// handler has one name to call, in case a saved-view-specific response is
-// ever needed later -- not because one is needed today.
+// domain.ErrForbidden (and ErrConflict, ErrNotFound) go through
+// handleStoreError unchanged -- that 403/409/404 is already correct and
+// nothing here overrides it. domain.ErrInvalid is the one case this project's
+// own rule ("Validation errors re-render the form partial with error state
+// and return HTTP 422", CLAUDE.md) actually requires more than
+// handleStoreError gives: a bare "That request was not valid." text body,
+// returned to a plain (non-hx-post) form post, would navigate the whole tab
+// away and silently drop the filters the operator had open. See
+// SavedViewCreate/SavedViewUpdate for the entity/currentFilters/name each
+// passes so the re-render can put the operator back where they were.
 func (a *App) savedViewFailed(w http.ResponseWriter, r *http.Request, err error) {
 	a.handleStoreError(w, r, err)
+}
+
+// savedViewsMenuData is what the "saved_views" partial renders -- the same
+// shape the list-page dict calls pass it, plus Name/Error for the one case
+// list pages never need: reporting back a rejected "save this view" attempt
+// without losing what the operator typed.
+type savedViewsMenuData struct {
+	Entity         string
+	Views          []SavedViewOption
+	CurrentFilters []FilterPair
+	CSRF           string
+	// Name is echoed back into the name field so a rejected submission does
+	// not make the operator retype it.
+	Name string
+	// Error is "" on every ordinary render. Set only when this IS the
+	// re-render of a rejected create/update, so the template can show it
+	// beside the save form without a second partial to maintain.
+	Error string
+}
+
+// renderSavedViewsInvalid re-renders the Views menu at 422, with the
+// validation message(s) attached and the filters/name that were just
+// submitted still in place -- the HTMX+422 convention this project uses
+// everywhere else (CLAUDE.md, "HTTP and HTMX conventions"; see
+// renderAssetFormError for the identical pattern on the asset form).
+//
+// entity/currentFilters/name are read from the FAILED request, not looked up
+// again, so what comes back is exactly what the operator submitted, with the
+// existing saved views listed alongside it unchanged.
+func (a *App) renderSavedViewsInvalid(w http.ResponseWriter, r *http.Request, entity string, currentFilters []FilterPair, name string, err error) {
+	messages, _ := validationErrors(err)
+	msg := ""
+	for _, m := range messages {
+		if msg != "" {
+			msg += "; "
+		}
+		msg += m
+	}
+	var views []SavedViewOption
+	if user := middleware.UserFrom(r.Context()); user != nil {
+		envs, kinds, vocabErr := a.savedViewVocabularyFor(r.Context(), entity)
+		if vocabErr != nil {
+			a.serverError(w, r, vocabErr)
+			return
+		}
+		views, vocabErr = SavedViewOptionsFor(r.Context(), a.Store, user.ID, entity, envs, kinds)
+		if vocabErr != nil {
+			a.serverError(w, r, vocabErr)
+			return
+		}
+	}
+	a.Render.Partial(w, http.StatusUnprocessableEntity, "saved_views", savedViewsMenuData{
+		Entity:         entity,
+		Views:          views,
+		CurrentFilters: currentFilters,
+		CSRF:           nosurf.Token(r),
+		Name:           name,
+		Error:          msg,
+	})
+}
+
+// savedViewVocabularyFor loads the same environment/kind lists the asset and
+// service list pages already carry, so a validation-failure re-render can
+// compute Stale (via SavedViewOptionsFor) the same way an ordinary page load
+// does -- see savedViewStaleness's doc comment for why those two lists.
+func (a *App) savedViewVocabularyFor(ctx context.Context, entity string) ([]domain.Environment, []store.VocabularyTerm, error) {
+	envs, err := a.Store.ListEnvironments(ctx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("listing environments for the views menu: %w", err)
+	}
+	var kinds []store.VocabularyTerm
+	switch entity {
+	case domain.SavedViewAsset:
+		kinds, err = a.Store.AssetKinds(ctx)
+	case domain.SavedViewService:
+		kinds, err = a.Store.ServiceKinds(ctx)
+	default:
+		// An unknown entity has no kind vocabulary to check against; the
+		// caller's own validation already refuses this before staleness
+		// would matter.
+		return envs, nil, nil
+	}
+	if err != nil {
+		return nil, nil, fmt.Errorf("listing kinds for the views menu: %w", err)
+	}
+	return envs, kinds, nil
 }
 
 // SavedViewCreate saves the filters currently applied, under a name.
@@ -123,18 +214,37 @@ func (a *App) SavedViewCreate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Could not read that form.", http.StatusBadRequest)
 		return
 	}
-	params, err := savedViewParamsFrom(r, formValue(r, "entity"))
+	entity := formValue(r, "entity")
+	name := formValue(r, "name")
+	// Reconstructed from the SAME posted form the create attempt itself is
+	// read from (r.PostForm, populated by ParseForm above), through the same
+	// allowlist as CurrentFiltersFor -- so a rejected submission's re-render
+	// carries the filters the operator was actually looking at, not the ones
+	// on an unrelated request.
+	currentFilters := CurrentFiltersFor(r.PostForm, entity)
+	params, err := savedViewParamsFrom(r, entity)
 	if err != nil {
+		if errors.Is(err, domain.ErrInvalid) {
+			a.renderSavedViewsInvalid(w, r, entity, currentFilters, name, err)
+			return
+		}
 		a.savedViewFailed(w, r, err)
 		return
 	}
-	v, err := domain.NewSavedView(store.NewID(), user.ID, formValue(r, "entity"),
-		formValue(r, "name"), params, a.Store.Now())
+	v, err := domain.NewSavedView(store.NewID(), user.ID, entity, name, params, a.Store.Now())
 	if err != nil {
+		if errors.Is(err, domain.ErrInvalid) {
+			a.renderSavedViewsInvalid(w, r, entity, currentFilters, name, err)
+			return
+		}
 		a.savedViewFailed(w, r, err)
 		return
 	}
 	if err := a.Store.CreateSavedView(r.Context(), a.permit(r), v); err != nil {
+		if errors.Is(err, domain.ErrInvalid) {
+			a.renderSavedViewsInvalid(w, r, entity, currentFilters, name, err)
+			return
+		}
 		a.savedViewFailed(w, r, err)
 		return
 	}
@@ -175,17 +285,27 @@ func (a *App) SavedViewUpdate(w http.ResponseWriter, r *http.Request) {
 	// waiting for a future release to start honouring it. The stored value is
 	// authoritative, full stop -- no fallback needed either, since it can
 	// never be empty for an existing row.
+	name := formValue(r, "name")
+	currentFilters := CurrentFiltersFor(r.PostForm, existing.Entity)
 	params, err := savedViewParamsFrom(r, existing.Entity)
 	if err != nil {
+		if errors.Is(err, domain.ErrInvalid) {
+			a.renderSavedViewsInvalid(w, r, existing.Entity, currentFilters, name, err)
+			return
+		}
 		a.savedViewFailed(w, r, err)
 		return
 	}
 	updated := *existing
-	updated.Name = formValue(r, "name")
+	updated.Name = name
 	updated.Params = params
 	updated.RowVersion = submittedVersion(r, updated.RowVersion)
 
 	if err := a.Store.UpdateSavedView(r.Context(), a.permit(r), &updated); err != nil {
+		if errors.Is(err, domain.ErrInvalid) {
+			a.renderSavedViewsInvalid(w, r, existing.Entity, currentFilters, name, err)
+			return
+		}
 		a.savedViewFailed(w, r, err)
 		return
 	}

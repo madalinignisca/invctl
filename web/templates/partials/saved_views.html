@@ -16,7 +16,12 @@ SPDX-License-Identifier: AGPL-3.0-only
      menu's own toggle button and its two forms. A second x-data here would
      create a second, empty component instance and the menu would toggle
      nothing. */}}
-<div class="saved-views" data-views="{{.Entity}}">
+{{/* id is stable per entity ("saved-views-asset" / "saved-views-service")
+     so the save form below can target this whole element as its own
+     hx-swap: a validation failure re-renders exactly this partial at 422,
+     nothing outside it, and it must have something addressable to land in.
+     */}}
+<div id="saved-views-{{.Entity}}" class="saved-views" data-views="{{.Entity}}">
   <button type="button" class="btn btn-sm" x-on:click="toggleMenu">Views</button>
   <div class="saved-views-menu" x-show="open" x-cloak>
     {{range .Views}}
@@ -35,7 +40,16 @@ SPDX-License-Identifier: AGPL-3.0-only
     {{else}}
     <div class="field-hint">No saved views yet.</div>
     {{end}}
-    <form method="post" action="/views" class="saved-view-save">
+    {{/* hx-post, not a plain form post: a rejected save (empty name, an
+         unknown entity) must re-render this menu at 422 with the error
+         attached, per CLAUDE.md's "Validation errors re-render the form
+         partial with error state and return HTTP 422" -- a plain post would
+         navigate the whole tab to a bare text response and drop the filters
+         below. hx-target is this element's own id, hx-swap outerHTML, so a
+         successful create's HX-Redirect (see SavedViewCreate) still takes
+         over the whole page; only the 422 path actually lands here. */}}
+    <form method="post" action="/views" class="saved-view-save"
+          hx-post="/views" hx-target="#saved-views-{{.Entity}}" hx-swap="outerHTML">
       <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
       <input type="hidden" name="entity" value="{{.Entity}}">
       {{/* One hidden input per currently-applied filter, built in the
@@ -44,7 +58,12 @@ SPDX-License-Identifier: AGPL-3.0-only
            what makes "save this view" capture exactly what the operator is
            looking at right now. */}}
       {{range .CurrentFilters}}<input type="hidden" name="{{.Key}}" value="{{.Value}}">{{end}}
-      <input type="text" name="name" placeholder="Name this view" required>
+      {{/* .Error and .Name are "" on every ordinary render -- set only when
+           this IS the 422 re-render of a rejected submission (see
+           renderSavedViewsInvalid), so a fresh menu never shows stale error
+           state left over from nothing. */}}
+      {{if .Error}}<div class="field-hint" style="color:var(--crimson)">{{.Error}}</div>{{end}}
+      <input type="text" name="name" placeholder="Name this view" value="{{.Name}}" required>
       <button type="submit" class="btn btn-sm">Save this view</button>
     </form>
   </div>
