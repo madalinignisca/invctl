@@ -56,6 +56,27 @@ and the E2E suite — and a mutating route with no caller is unreviewed
 surface. A rename control in 1.1 wires a new handler to the existing store
 method; the store side needs no further work.
 
+**Tighten the fact-deleting allowlist to the table, not the file.**
+`TestTheOnlyFactDeletingStatementIsThePrune` (`internal/store/prune_test.go`)
+maps a **file path** to a reason, so allowlisting a file exempts every
+`DELETE FROM` in it. WP-G4b added `internal/store/users_admin.go` for the
+scrub's erasure of saved views — and that is precisely the file where a
+future `DELETE FROM app_user` would plausibly be written, hard-deleting a
+person instead of scrubbing them. It would pass silently. The map's values
+already name the table each entry is for, so the check can compare the
+deleted table against the reason string; eleven existing entries share this
+coarseness, which is why this is its own small piece of work rather than a
+line in someone else's.
+
+**No test drives a write route unauthenticated.** The boundary sweep proves
+object-level permission holds for an authenticated caller, and
+`route_registration_test.go` proves nothing registers around the registrars.
+Neither proves `middleware.RequireAuth` is actually in the chain — that is
+verified by reading. It became worth writing down in WP-G4b, which added a
+fourth registrar (`self`) whose *entire* gate is `RequireAuth`: for those two
+routes, an unnoticed break in that middleware is the whole authorization
+story, not one layer of it.
+
 **WP-A4 follow-ups**, filed at that work package's merge and re-verified
 2026-08-31:
 
