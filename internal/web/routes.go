@@ -475,6 +475,13 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	write("POST /network/anchors", app.NetworkAnchorCreate)
 	write("POST /network/derive", app.NetworkDerive)
 
+	// Saved views (WP-G4b). `write`, not writeAdminOnly: everyone manages
+	// their OWN views, and ownership is enforced in the store rather than by
+	// the route -- see internal/store/savedviews.go.
+	write("POST /views", app.SavedViewCreate)
+	write("POST /views/{id}", app.SavedViewUpdate)
+	write("POST /views/{id}/retire", app.SavedViewRetire)
+
 	// The machine-facing route. One route, and this is it.
 	//
 	// It carries RequireAgent and nothing else: no RequireAuth, no
