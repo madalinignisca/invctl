@@ -92,16 +92,14 @@ func savedViewListPath(entity, params string) string {
 
 // savedViewFailed answers a refused or invalid saved-view write.
 //
-// domain.ErrForbidden is 403 and NOT 409: a refusal is not a version
-// conflict, and an operator who retries a save they will never be allowed to
-// make learns nothing. Everything else goes through the package's usual
-// validation path -- 422 with the form re-rendered, never 200 with an error
-// buried in the body.
+// This is a thin, intentionally redundant wrapper around handleStoreError:
+// domain.ErrForbidden already maps to an identical 403 with an identical
+// message there, so there is no special case to carve out here (contrast
+// users.go, which legitimately overrides handleStoreError's message with the
+// store's own). It exists as its own function only so every saved-view
+// handler has one name to call, in case a saved-view-specific response is
+// ever needed later -- not because one is needed today.
 func (a *App) savedViewFailed(w http.ResponseWriter, r *http.Request, err error) {
-	if errors.Is(err, domain.ErrForbidden) {
-		http.Error(w, "You are not allowed to do that.", http.StatusForbidden)
-		return
-	}
 	a.handleStoreError(w, r, err)
 }
 
@@ -166,16 +164,18 @@ func (a *App) SavedViewUpdate(w http.ResponseWriter, r *http.Request) {
 		a.savedViewFailed(w, r, err)
 		return
 	}
-	entity := formValue(r, "entity")
-	if entity == "" {
-		// entity is not editable (UpdateSavedView never writes it), but the
-		// allowlist that decides which keys are read still needs one to
-		// consult -- fall back to the row's own, so a form that only posts
-		// name/filters/row_version still resolves the same list it was
-		// rendered from.
-		entity = existing.Entity
-	}
-	params, err := savedViewParamsFrom(r, entity)
+	// entity is not editable (UpdateSavedView never writes it), so the
+	// allowlist that decides which keys are read is always the row's own,
+	// never a submitted one. Reading a form-supplied entity here would let a
+	// caller pick which allowlist gates the write -- e.g. post entity=service
+	// while editing an asset view to smuggle a service-only key into that
+	// view's stored params. Those keys are inert today only because
+	// savedViewListPath replays on the STORED entity; savedViewKeys' own doc
+	// comment exists precisely to stop an unreviewed key from sitting there
+	// waiting for a future release to start honouring it. The stored value is
+	// authoritative, full stop -- no fallback needed either, since it can
+	// never be empty for an existing row.
+	params, err := savedViewParamsFrom(r, existing.Entity)
 	if err != nil {
 		a.savedViewFailed(w, r, err)
 		return
