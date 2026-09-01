@@ -750,18 +750,36 @@ func checkbox(r *http.Request, key string) bool {
 // a.Authz once per request, fresh, and never caches (see that method's own
 // comment for why).
 //
-// The error branch below is fail-closed rather than assumed unreachable: every
-// route that reaches here already sits behind RequireWrite
-// (internal/web/routes.go), and until Task 13 flips CanWrite for a project
-// owner that means only an Administrator, whom Authorizer.Permit never
-// refuses, can reach this function at all -- so today this branch cannot
-// fire. It is written anyway, and fails to a permit that Covers nothing
-// rather than to domain.AdministratorPermit, because assuming "cannot happen"
-// stays true forever is exactly the assumption WP-G1 exists to stop making.
+// The error branch is fail-closed either way -- the fallback below always
+// covers nothing -- but WHETHER it also logs is gate-aware, and has to be
+// (WP-G4b Wave C, auth review). This function is no longer reached only from
+// behind RequireWrite: WP-G4b Wave B put the `self` registrar
+// (internal/web/routes.go) behind RequireAuth alone, and SavedViewCreate and
+// SavedViewRetire call a.permit(r) exactly like every write-bucket handler
+// does. For an Observer on one of those routes, a.Authz.Permit refusing them
+// a write permit is the ORDINARY case -- authorizeSavedViewOwner
+// (internal/store/savedviews.go) authorizes off the fallback permit's
+// Actor(), which resolvePermit still sets correctly, not off Covers -- so
+// logging every one of those refusals at error level would fire on every
+// Observer save or retire that then succeeds. That is worse than no log: it
+// spends the attention this line exists to hold on traffic that is not an
+// anomaly, exactly the way entityPermit's own comment already reasons about
+// resolvePermit's error branch for GETs.
+//
+// So the log is conditioned on a.Authz.CanWrite(user), computed fresh here
+// against the same *domain.AppUser the request already carries -- cheap,
+// role-only, no store round trip (see Authorizer.CanWrite). A write-bucket
+// route only reaches this function after middleware.RequireWrite has already
+// confirmed CanWrite is true, so CanWrite true and resolvePermit failing
+// together IS the anomaly worth an error line: Authorizer.Permit disagreeing
+// with the gate that admitted the request in the first place. CanWrite false
+// covers both the self-route Observer (expected, silent) and, if it were
+// ever possible, a route unexpectedly reaching here without RequireWrite
+// (also not worth an error, since the fallback already fails closed).
 func (a *App) permit(r *http.Request) domain.Permit {
 	p, err := a.resolvePermit(r)
-	if err != nil {
-		slog.Error("permit refused for a request behind RequireWrite",
+	if err != nil && a.Authz.CanWrite(middleware.UserFrom(r.Context())) {
+		slog.Error("permit resolution disagreed with the CanWrite check that admitted this request",
 			"error", err, "path", r.URL.Path)
 	}
 	return p
@@ -774,16 +792,20 @@ func (a *App) permit(r *http.Request) domain.Permit {
 // auth.Authorizer.Permit's cost (up to four queries, for a project owner)
 // once, not per call.
 //
-// DELIBERATELY NOT a.permit(r). That function's error branch logs at
-// slog.Error because every caller of a.permit sits behind RequireWrite, so
-// reaching the error branch there means something already went wrong. base()
-// runs on every GET, for every persona, including an Observer or an
-// unauthenticated visitor -- for whom auth.Authorizer.Permit returning
-// domain.ErrForbidden is the ORDINARY case, not a break-glass fallback.
-// Logging it here would turn every page an Observer opens into an error-log
-// entry. The failure value is the same permit-covering-nothing a.permit
-// falls back to, for the same reason: a template asking Covers on it must
-// get false, never a nil-pointer panic.
+// DELIBERATELY NOT a.permit(r). That function's error branch is gate-aware
+// (WP-G4b Wave C) and only logs when a.Authz.CanWrite(user) is true -- see
+// its own comment -- but base() runs on every GET, for every persona,
+// including an Observer or an unauthenticated visitor, for whom CanWrite is
+// false and auth.Authorizer.Permit returning domain.ErrForbidden is the
+// ORDINARY case, not a break-glass fallback. Reusing a.permit here would
+// still be silent for that case today, but it would also fold this
+// function's own reasoning into a.permit's, which exists to answer a
+// different question (is this write-bucket request's refusal anomalous) --
+// keeping them separate is what let Wave C narrow a.permit's log condition
+// without having to re-derive this function's "GETs are never anomalous"
+// argument at the same time. The failure value is the same
+// permit-covering-nothing a.permit falls back to, for the same reason: a
+// template asking Covers on it must get false, never a nil-pointer panic.
 //
 // ALSO DELIBERATELY NOT A CALL TO THE PACKAGE-LEVEL actor(r) HELPER, even
 // though the fallback below needs exactly what that helper returns.
@@ -808,10 +830,13 @@ func (a *App) entityPermit(r *http.Request) domain.Permit {
 //
 // It returns the error as well as the permit because its two callers react
 // to a refusal differently, and that difference is the only reason they are
-// separate functions. permit(r) runs on write routes behind RequireWrite,
-// where a refusal is anomalous and worth an error log. entityPermit(r) runs
-// on read pages, where an Observer being refused a WRITE permit is the
-// ordinary case and logging it would be noise on every page view.
+// separate functions. permit(r) runs on write-bucket routes -- behind
+// RequireWrite for `write`/`writeAdminOnly`, behind RequireAuth alone for
+// `self` (WP-G4b Wave B) -- and logs a refusal only when it disagrees with
+// a.Authz.CanWrite(user), its own gate-aware condition (WP-G4b Wave C; see
+// that function's comment). entityPermit(r) runs on read pages, where an
+// Observer being refused a WRITE permit is the ordinary case and logging it
+// would be noise on every page view, so it never logs at all.
 //
 // Both get the same fail-closed fallback: a scoped permit covering nothing.
 // Keeping that fallback in one place matters -- two hand-written copies

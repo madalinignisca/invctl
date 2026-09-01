@@ -9,10 +9,12 @@
 package web_test
 
 import (
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/madalinignisca/invctl/internal/domain"
 )
@@ -183,5 +185,84 @@ func TestCSRFStillRejectsAnUntokenedPostToViewsFromAnObserver(t *testing.T) {
 	}
 	if count := h.count(`SELECT COUNT(*) FROM saved_view WHERE name = ?`, "Should never exist"); count != 0 {
 		t.Fatalf("a saved view was created despite the missing CSRF token: %d rows", count)
+	}
+}
+
+// TestAnObserverSavingAViewLogsNoError is WP-G4b Wave C's regression guard
+// for the auth review's first hardening item: handlers.App.permit used to
+// log at slog.Error whenever a.Authz.Permit refused the caller, with no
+// regard for WHY -- and since Wave B put SavedViewCreate/SavedViewRetire on
+// the `self` registrar (RequireAuth alone, no RequireWrite), an Observer's
+// resolvePermit call is refused on every single save or retire, because
+// they are not an Administrator or a project owner. authorizeSavedViewOwner
+// (internal/store/savedviews.go) still authorizes the write correctly off
+// the fallback permit's Actor(), so the request succeeds -- but the old,
+// unconditional log line fired anyway, on request after request that did
+// nothing wrong. That is the exact case the fix narrows: see app.go's
+// permit() comment for the CanWrite-gated condition this test is pinning.
+//
+// This drives the real router with a real Observer rather than asserting
+// against app.permit directly, because the point being proved is what a
+// signed-in Observer's ordinary traffic writes to the process log, not what
+// one function returns in isolation -- same reasoning as
+// TestAccessLogRecordsTheUser, whose syncBuffer/slog.SetDefault harness this
+// test reuses rather than inventing a second logging fixture.
+func TestAnObserverSavingAViewLogsNoError(t *testing.T) {
+	buf := &syncBuffer{}
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	h := newHarness(t)
+	h.login("viewer", "viewer-password")
+
+	buf.Reset()
+	resp := h.post("/views", url.Values{
+		"csrf_token": {h.csrfToken("/assets")},
+		"entity":     {"asset"},
+		"name":       {"Viewer-view-no-error-log"},
+		"kind":       {"server"},
+	}, false)
+	resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		t.Fatalf("an Observer saving their own view: status = %d, want a redirect", resp.StatusCode)
+	}
+
+	viewID := h.lookup(`SELECT id FROM saved_view WHERE name = ?`, "Viewer-view-no-error-log")
+	if viewID == "" {
+		t.Fatal("no saved_view row was created for the Observer's own view")
+	}
+
+	// Retire too -- the second self-route handler that calls a.permit(r).
+	// Deliberately NOT buf.Reset() here: the assertion below covers both
+	// requests, so the create's own access line (and any error alongside
+	// it) stays in scope.
+	resp = h.post("/views/"+viewID+"/retire", url.Values{
+		"csrf_token": {h.csrfToken("/assets")},
+	}, false)
+	resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		t.Fatalf("an Observer retiring their own view: status = %d, want a redirect", resp.StatusCode)
+	}
+
+	// WAITED FOR, NOT READ IMMEDIATELY -- same reasoning as
+	// TestAccessLogRecordsTheUser: the access line (which this handler set
+	// always logs, successful or not) is written from the server's own
+	// goroutine after the response is flushed, so its presence is what
+	// proves the buffer has caught up before asserting an ERROR line is
+	// absent from it.
+	logged := ""
+	for i := 0; i < 100; i++ {
+		logged = buf.String()
+		if strings.Contains(logged, "path=/views/"+viewID+"/retire") {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !strings.Contains(logged, "path=/views/"+viewID+"/retire") {
+		t.Fatalf("the retire request was not logged after waiting: %s", logged)
+	}
+	if strings.Contains(logged, "level=ERROR") {
+		t.Errorf("an Observer's own successful view retirement logged an error: %s", logged)
 	}
 }
