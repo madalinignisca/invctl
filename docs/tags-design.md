@@ -28,6 +28,13 @@ has a PERSON as its subject.
   namespace cannot hold two "production review" filters meaning different
   things. The honest reason to defer is that filters need their own design,
   not that one storage choice dodges GDPR.
+
+  **That design now exists — `docs/saved-views-design.md`.** Per-user, in a
+  real table, and the first in this product whose SUBJECT is a person. Note
+  it reaches the OPPOSITE storage conclusion to G4c
+  (`docs/table-configs-design.md`), deliberately: a column preference is
+  incidental and one browser's business, while a saved view is a named
+  artifact somebody built and sharing is a stated future requirement.
 - **Table configs** are genuinely per-user, and would be the first table in
   this product whose SUBJECT is a person rather than its author. **Deferred
   until WP-G1**, because per-user state is close to meaningless while
