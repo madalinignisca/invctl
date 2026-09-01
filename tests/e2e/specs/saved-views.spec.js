@@ -207,4 +207,149 @@ describe(describeTitle, () => {
     await page.locator('.saved-views button', { hasText: 'Views' }).click();
     await expect(page.locator('.saved-view-row', { hasText: viewName })).toHaveCount(0);
   });
+
+  // The test above only ever posts kind=firewall -- one value under one key
+  // -- so it cannot catch the highest-value defect the whole-branch review
+  // found: params used to be stored as map[string]string, which silently
+  // KEPT ONLY THE FIRST value posted under a repeating key. "tag" is exactly
+  // such a key (asset_list.html's #f-tag is a <select multiple>), and losing
+  // all but the first tag turns an AND-combined filter into a far wider one
+  // on reopen -- a populated, plausible, WRONG result, not an empty one
+  // somebody would double-check.
+  //
+  // This proves the round trip at both ends: the stored params carry every
+  // tag posted, and the reopened view's own query string carries every tag
+  // as a SEPARATE ?tag= parameter (not the first only), and narrows the
+  // table to exactly the asset that carries every one of them.
+  test('a view saved with more than one tag reopens with every tag, not just the first', async ({
+    page,
+  }) => {
+    const tagACode = `e2e-tag-a-${Date.now()}`;
+    const tagBCode = `e2e-tag-b-${Date.now()}`;
+    const viewName = `e2e-two-tags-${Date.now()}`;
+
+    // --- Create tag A and apply it to fw-dev-1, via the asset detail page's
+    // "create and apply" fields (docs/tags-design.md §4a) -- one tag per
+    // submission, since that fieldset offers only one code/label/description
+    // triple at a time. ---
+    await page.goto('/assets', { waitUntil: 'networkidle' });
+    await page.locator('#asset-table a.id', { hasText: /^fw-dev-1$/ }).click();
+    await page.waitForLoadState('networkidle');
+    const fwAssetPath = new URL(page.url()).pathname; // "/assets/<fw-dev-1's id>"
+
+    await page.locator('input[name="new_tag_code"]').fill(tagACode);
+    await page.locator('input[name="new_tag_label"]').fill(tagACode);
+    await page.locator('input[name="new_tag_description"]').fill('e2e fixture tag A for the multi-tag saved-view spec');
+    await Promise.all([
+      page.waitForURL((url) => url.pathname === fwAssetPath),
+      page.locator('button[type="submit"]', { hasText: 'Save tags' }).click(),
+    ]);
+    await page.waitForLoadState('networkidle');
+    // The tag's real id, read back from its own (now ticked, Applied)
+    // checkbox -- needed below to select it in the list filter and to
+    // assert on the saved view's query string without guessing at ordering.
+    const tagAId = await page
+      .locator('label.check', { hasText: tagACode })
+      .locator('input[name="tag_id"]')
+      .getAttribute('value');
+
+    // --- Create tag B, applied to the SAME asset (fw-dev-1), a second
+    // submission against the same fixed set of checkboxes -- tag A stays
+    // ticked since Applied already carries it. ---
+    await page.locator('input[name="new_tag_code"]').fill(tagBCode);
+    await page.locator('input[name="new_tag_label"]').fill(tagBCode);
+    await page.locator('input[name="new_tag_description"]').fill('e2e fixture tag B for the multi-tag saved-view spec');
+    await Promise.all([
+      page.waitForURL((url) => url.pathname === fwAssetPath),
+      page.locator('button[type="submit"]', { hasText: 'Save tags' }).click(),
+    ]);
+    await page.waitForLoadState('networkidle');
+    const tagBId = await page
+      .locator('label.check', { hasText: tagBCode })
+      .locator('input[name="tag_id"]')
+      .getAttribute('value');
+
+    // --- Apply ONLY tag A to hv-01, so it matches tag A alone and NOT
+    // "carries every tag in the filter" -- the asset that proves AND
+    // semantics survived the round trip, not just that a tag round-tripped
+    // at all. ---
+    await page.goto('/assets', { waitUntil: 'networkidle' });
+    await page.locator('#asset-table a.id', { hasText: /^hv-01$/ }).click();
+    await page.waitForLoadState('networkidle');
+    const hvAssetPath = new URL(page.url()).pathname;
+    await page.locator(`input[name="tag_id"][value="${tagAId}"]`).check();
+    await Promise.all([
+      page.waitForURL((url) => url.pathname === hvAssetPath),
+      page.locator('button[type="submit"]', { hasText: 'Save tags' }).click(),
+    ]);
+    await page.waitForLoadState('networkidle');
+
+    // --- Filter /assets by BOTH tags at once (the multi-select, not two
+    // separate filters) -- AND-combined (docs/tags-design.md §5), so only
+    // fw-dev-1 (both tags) should remain; hv-01 (tag A only) should not. ---
+    await page.goto('/assets', { waitUntil: 'networkidle' });
+    await Promise.all([
+      page.waitForResponse(
+        (r) =>
+          r.request().method() === 'GET' &&
+          r.url().includes('/assets?') &&
+          r.url().includes(`tag=${tagAId}`) &&
+          r.url().includes(`tag=${tagBId}`),
+      ),
+      page.locator('#f-tag').selectOption([tagAId, tagBId]),
+    ]);
+    await expect(page.locator('#asset-table a.id', { hasText: /^fw-dev-1$/ })).toBeVisible();
+    await expect(page.locator('#asset-table a.id', { hasText: /^hv-01$/ })).toHaveCount(0);
+
+    // --- Save this two-tag filter under a name, then reopen after a clean,
+    // unfiltered navigation -- same "prove it survives a real reload"
+    // shape as the single-filter test above. ---
+    await page.locator('.saved-views button', { hasText: 'Views' }).click();
+    await expect(page.locator('.saved-views-menu')).toBeVisible();
+    await page.locator('.saved-views-menu input[name="name"]').fill(viewName);
+    await Promise.all([
+      page.waitForEvent(
+        'framenavigated',
+        (frame) => frame === page.mainFrame() && frame.url().includes(`tag=${tagAId}`) && frame.url().includes(`tag=${tagBId}`),
+      ),
+      page.locator('.saved-view-save button[type="submit"]').click(),
+    ]);
+    await page.waitForLoadState('networkidle');
+
+    await page.goto('/assets', { waitUntil: 'networkidle' });
+    expect(page.url()).not.toContain('tag=');
+
+    await page.locator('.saved-views button', { hasText: 'Views' }).click();
+    const savedRow = page.locator('.saved-view-row', { hasText: viewName });
+    await expect(savedRow).toBeVisible();
+    const href = await savedRow.locator('a').getAttribute('href');
+    // THE ASSERTION FIX 1 EXISTS FOR: both tags present as separate ?tag=
+    // parameters. Before the fix, this link would carry only whichever tag
+    // happened to be read as "the" single value -- exactly the silent
+    // widening the review flagged.
+    expect(href).toContain(`tag=${tagAId}`);
+    expect(href).toContain(`tag=${tagBId}`);
+    expect((href.match(/tag=/g) || []).length).toBe(2);
+
+    await Promise.all([
+      page.waitForURL((url) => url.searchParams.getAll('tag').length === 2),
+      savedRow.locator('a').click(),
+    ]);
+    await expect(page.locator('#asset-table a.id', { hasText: /^fw-dev-1$/ })).toBeVisible();
+    await expect(page.locator('#asset-table a.id', { hasText: /^hv-01$/ })).toHaveCount(0);
+
+    // --- Clean up the saved view, like the single-filter test does. The
+    // tags and the tag applications on fw-dev-1/hv-01 are left in place,
+    // the same permanent-artefact tradeoff this whole spec's header already
+    // accepts for the view row itself -- disposable-instance-only, never a
+    // shared target. ---
+    await page.locator('.saved-views button', { hasText: 'Views' }).click();
+    const rowToRemoveTwoTags = page.locator('.saved-view-row', { hasText: viewName });
+    await Promise.all([
+      page.waitForURL((url) => url.pathname === '/assets' && url.search === ''),
+      rowToRemoveTwoTags.locator('button', { hasText: 'Remove' }).click(),
+    ]);
+    await page.locator('.saved-views button', { hasText: 'Views' }).click();
+    await expect(page.locator('.saved-view-row', { hasText: viewName })).toHaveCount(0);
+  });
 });
