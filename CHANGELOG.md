@@ -38,6 +38,19 @@ footnote.
 
 ### Added
 
+- **Save a filtered list under a name.** On the asset and service lists, the
+  Views menu remembers the filters you have applied so you can come back to
+  them. Views are yours: nobody else can see or edit them, including
+  Administrators.
+
+  A view stores the filter's parts, not a link, so it survives a change to
+  how URLs are built. If a view refers to something that no longer exists —
+  an environment that was retired, say — it opens and tells you what is
+  missing rather than quietly showing nothing.
+
+  Scrubbing an account deletes that person's views along with their personal
+  data.
+
 - **Hide columns you do not use** on the asset, service, circuit and prefix
   lists. The choice is remembered in your browser, per table. It does not
   follow you to another device, and clearing site data resets it — this is a

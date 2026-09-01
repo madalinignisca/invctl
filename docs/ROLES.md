@@ -15,9 +15,10 @@ Nothing else sets them — not LDAP, not a deploy, not a job title.
 
 ## The three roles
 
-**Administrator** — reads and writes everything, sees costs, and is the only
-role that can administer accounts, run imports, or change estate-wide
-configuration.
+**Administrator** — reads and writes everything except one thing, sees costs,
+and is the only role that can administer accounts, run imports, or change
+estate-wide configuration. The exception is another person's saved views; see
+"Saved views are private, including from Administrators" below.
 
 **Observer** — reads everything, writes nothing.
 
@@ -100,6 +101,35 @@ it will be your first support question after going live.
 Assigning or releasing a project takes effect on that person's next request.
 There is no cache, so removing somebody from a project removes their access to
 it immediately rather than at the end of their session.
+
+## Saved views are private, including from Administrators
+
+A saved view is one person's shortcut: a set of list filters they named and
+can come back to. Nobody else can read one, open one, rename one or remove
+one — and that includes Administrators.
+
+This is deliberate and it is the one place in invctl where being an
+Administrator does not help. It is worth stating plainly because the
+alternative is somebody reporting it as a bug: an Administrator looking at
+another account will not find their views, and there is no screen that lists
+them.
+
+The reason is that a view is not estate data. Everything else here describes
+the estate, which is why an Administrator can see all of it. A view describes
+how one person prefers to look at the estate, which is about them, not about
+the infrastructure. Making it readable would mean an Administrator could see
+what a colleague has been watching, and nothing in running an inventory
+requires that.
+
+Two consequences follow, and both are intended:
+
+- **Nobody can share a view.** Passing the URL works — a view is just filters
+  and the link carries them — but the saved entry itself stays with its owner.
+- **Scrubbing an account deletes that person's views.** They exist only for
+  them, so after an erasure request they belong to nobody and serve nothing.
+  This is the one place in invctl where a row is genuinely deleted rather than
+  retired; `docs/AUDIT.md` rule 16 records why. The audit trail survives and
+  keeps the opaque account id, exactly as it does for every other change.
 
 ## What a project owner can and cannot do
 

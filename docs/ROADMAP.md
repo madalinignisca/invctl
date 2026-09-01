@@ -82,9 +82,9 @@ input gate while `select` was defended at render — **is closed**, in
 release item before anyone checked. A list like this is a claim about the
 past.
 
-**The other quality-of-life items:** WP-G4b (saved filters) and the 132
-`.CanWrite` template occurrences on estate-configuration pages, which show a
-project owner controls the server refuses. Confirmed cosmetic — every one
+**The other quality-of-life item:** the 132 `.CanWrite` template occurrences
+on estate-configuration pages, which show a project owner controls the server
+refuses. (WP-G4b, saved filters, was listed here and has since shipped.) Confirmed cosmetic — every one
 gates a control, none gates data — and the asset, service and circuit pages
 a project owner actually uses were swept for 1.0.
 
@@ -510,7 +510,7 @@ explicit rather than blocking it. Read the appendix before starting.*
 Free-text operational notes on entities. Distinct from audit: audit is what
 changed, journal is what a human observed. Cheap, and heavily used in practice.
 
-**WP-G4 · Tags, saved filters, table configs** — M — **G4a DONE, G4b 1.1, G4c DONE**
+**WP-G4 · Tags, saved filters, table configs** — M — **DONE**
 Makes large estates usable. Pure quality of life, and users notice its absence
 immediately.
 
@@ -519,10 +519,12 @@ see `docs/tags-design.md` §0.
 
 - **G4a · Tags — DONE.** Estate-level declared state, applied from an
   entity's own page, filterable, with bulk apply from a filtered view.
-- **G4b · Saved filters — 1.1.** Per-user, decided. Deferred because filters
-  need their own design, not for the GDPR reason an early draft gave: a saved
-  filter is attributed to its creator exactly as every other row here is, so
-  sharing redistributes access rather than erasing an obligation.
+- **G4b · Saved filters — DONE.** Per-user, in a table — deliberately unlike
+  G4c, and the contrast is the point: a column preference is about one browser,
+  but a saved filter is a thing you name and come back to from anywhere, so it
+  is account state and the database holds it. Nobody else can read or edit
+  another person's views, Administrators included, and scrubbing an account
+  deletes them. Design in `docs/saved-views-design.md`.
 - **G4c · Table configs — DONE.** Column visibility per table, remembered in
   the browser (`localStorage`), not in the database — the whole design decision
   was that a column preference is a display preference about one browser, so
