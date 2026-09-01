@@ -672,6 +672,14 @@ func TestTheOnlyFactDeletingStatementIsThePrune(t *testing.T) {
 		"internal/store/deps.go":   "dependency_data_class: a set the dependency owns, replaced wholesale",
 		"internal/store/search.go": "search_index: a derived index, rebuilt not authored",
 		"internal/store/prune.go":  "the rule 10 retention prune, the only statement here that removes a fact",
+		// saved_view: rule 16's second named exception. ScrubUser deletes a
+		// scrubbed person's saved views inside the scrub's own transaction.
+		// This is not a set replacement -- there is no parent row whose
+		// current value this is -- it is a genuine removal of a fact, and it
+		// is permitted for exactly the reason rule 16 gives: a saved view
+		// exists only for the person who made it, and once they are erased
+		// it belongs to nobody and serves nothing. docs/AUDIT.md rule 16.
+		"internal/store/users_admin.go": "saved_view: a scrubbed person's own views, erased on request per rule 16",
 		// certificate_san holds the CURRENT set of names a certificate covers,
 		// which the certificate owns. Replaced wholesale inside the parent's
 		// transaction, and certificateAudit folds the names into the audited

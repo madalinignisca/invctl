@@ -297,6 +297,31 @@ func (s *SQLStore) ScrubUser(ctx context.Context, p domain.Permit, id string) er
 			scrubbedName, id); err != nil {
 			return translateWriteErr(err, "scrubbing user "+id)
 		}
+
+		// A HARD DELETE, in a codebase whose rule is soft-delete only.
+		// Soft-delete exists to preserve ESTATE history: a retired asset is
+		// how the estate records that something used to be there. A saved
+		// view is not estate history -- it is one person's shortcut, and it
+		// exists only for them. After an erasure request it belongs to
+		// nobody and serves nothing, so keeping it is retaining personal
+		// data with no purpose. docs/AUDIT.md records this as the second
+		// named exception, beside the prune of observed_transition.
+		//
+		// This is a bare t.exec, deliberately not routed through tx.log:
+		// systemPermit.Covers excludes only app_user, so it DOES cover
+		// saved_view, and it would be tempting to "fix" this into the
+		// audited path. Don't. change_log records changes to declared
+		// state, and this is an erasure, not a change -- its audit entry is
+		// the app_user update this transaction already writes. A second
+		// entry describing the deletion would put the erased person's
+		// activity back into a permanent record. The change_log entries
+		// already written for this view survive this DELETE (entity_id is
+		// a bare TEXT column with no FK to saved_view), holding the opaque
+		// app_user.id and the view's name, the same position every other
+		// audit entry takes.
+		if _, err := t.exec(ctx, `DELETE FROM saved_view WHERE user_id = ?`, id); err != nil {
+			return fmt.Errorf("deleting saved views during scrub: %w", err)
+		}
 		after := *before
 		after.Username = scrubbedName
 		after.DisplayName = nil

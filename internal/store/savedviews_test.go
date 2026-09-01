@@ -267,3 +267,49 @@ func TestTheAuditRowForASavedViewRedactsTheParams(t *testing.T) {
 		})
 	}
 }
+
+// TestScrubbingAPersonDeletesTheirSavedViews. A saved view exists only for
+// the person who made it; once they are erased it belongs to nobody and
+// serves nothing, so retaining it is holding personal data with no purpose.
+// This is the one hard DELETE in a soft-delete codebase, and
+// docs/AUDIT.md §5 records why.
+func TestScrubbingAPersonDeletesTheirSavedViews(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			s, ctx := newStore(t, e)
+			alice := mustUserForSavedView(t, s, ctx, "alice")
+
+			v, err := domain.NewSavedView(NewID(), alice, domain.SavedViewAsset,
+				"Production servers", `{"kind":"server"}`, s.Now())
+			if err != nil {
+				t.Fatalf("building view: %v", err)
+			}
+			if err := s.CreateSavedView(ctx, savedViewPermit(alice), v); err != nil {
+				t.Fatalf("creating: %v", err)
+			}
+
+			admin := domain.AdministratorPermit(
+				domain.Actor{ID: "admin-1", Name: "admin-1", Kind: domain.ActorKindUser})
+			if err := s.ScrubUser(ctx, admin, alice); err != nil {
+				t.Fatalf("ScrubUser: %v", err)
+			}
+
+			var n int
+			if err := s.readOne(ctx, &n, `SELECT COUNT(*) FROM saved_view WHERE user_id = ?`, alice); err != nil {
+				t.Fatalf("counting: %v", err)
+			}
+			if n != 0 {
+				t.Errorf("%d saved view(s) survived the scrub", n)
+			}
+
+			// The audit trail survives, holding the opaque id and the name.
+			changes, err := s.ListChangesForEntity(ctx, "saved_view", v.ID, 10)
+			if err != nil {
+				t.Fatalf("listing changes: %v", err)
+			}
+			if len(changes) == 0 {
+				t.Error("the scrub destroyed the audit trail; only the personal data should go")
+			}
+		})
+	}
+}
