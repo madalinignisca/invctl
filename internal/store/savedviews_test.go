@@ -185,6 +185,54 @@ func TestTwoPeopleMayEachHaveAViewOfTheSameName(t *testing.T) {
 	}
 }
 
+// TestUpdateSavedViewLogsOnlyTheFieldsItActuallyWrites guards the shape of
+// the logged diff itself: UpdateSavedView's UPDATE statement writes name and
+// params only, so the "after" value it logs must be built from the stored
+// row plus exactly those two fields -- never the caller's submitted struct
+// wholesale, which could carry a forged Entity or CreatedAt the database
+// never touched.
+func TestUpdateSavedViewLogsOnlyTheFieldsItActuallyWrites(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			s, ctx := newStore(t, e)
+			alice := mustUserForSavedView(t, s, ctx, "alice")
+
+			v, err := domain.NewSavedView(NewID(), alice, domain.SavedViewAsset,
+				"Production servers", `{"kind":"server"}`, s.Now())
+			if err != nil {
+				t.Fatalf("building view: %v", err)
+			}
+			if err := s.CreateSavedView(ctx, savedViewPermit(alice), v); err != nil {
+				t.Fatalf("creating: %v", err)
+			}
+
+			// A real edit (Name) so a diff genuinely gets written, plus a
+			// forged Entity the UPDATE statement never touches.
+			v.Name = "Prod servers"
+			v.Entity = domain.SavedViewService
+			if err := s.UpdateSavedView(ctx, savedViewPermit(alice), v); err != nil {
+				t.Fatalf("UpdateSavedView: %v", err)
+			}
+
+			changes, err := s.ListChangesForEntity(ctx, "saved_view", v.ID, 10)
+			if err != nil {
+				t.Fatalf("listing changes: %v", err)
+			}
+			if len(changes) != 2 {
+				t.Fatalf("got %d change_log rows, want exactly 2 (create + update)", len(changes))
+			}
+			// ListChangesForEntity orders newest first; the update is [0].
+			diff := changes[0].Diff
+			if !strings.Contains(diff, "Prod servers") {
+				t.Errorf("the update diff lost the actual name change: %s", diff)
+			}
+			if strings.Contains(diff, "entity") || strings.Contains(diff, domain.SavedViewService) {
+				t.Errorf("the update diff records a change to entity, which the UPDATE never wrote: %s", diff)
+			}
+		})
+	}
+}
+
 // TestTheAuditRowForASavedViewRedactsTheParams: change_log is kept forever,
 // and a permanent record of what somebody repeatedly searches the estate for
 // is a behavioural profile nothing needs.
