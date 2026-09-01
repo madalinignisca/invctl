@@ -135,8 +135,11 @@ func savedViewListPath(entity, params string) string {
 // handleStoreError gives: a bare "That request was not valid." text body,
 // returned to a plain (non-hx-post) form post, would navigate the whole tab
 // away and silently drop the filters the operator had open. See
-// SavedViewCreate/SavedViewUpdate for the entity/currentFilters/name each
-// passes so the re-render can put the operator back where they were.
+// SavedViewCreate for the entity/currentFilters/name it passes so the
+// re-render can put the operator back where they were -- the only caller
+// that hits this path today; SavedViewUpdate never existed as a route (see
+// the removed-handler comment below) and SavedViewRetire has no form state
+// to redraw, so it calls this with nothing but the error.
 func (a *App) savedViewFailed(w http.ResponseWriter, r *http.Request, err error) {
 	a.handleStoreError(w, r, err)
 }

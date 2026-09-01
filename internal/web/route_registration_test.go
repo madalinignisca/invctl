@@ -23,12 +23,13 @@ import (
 // pattern argument of a mux.Handle/mux.HandleFunc call in routes.go, with the
 // reason each is exempt from going through a registrar closure.
 //
-// "pattern" covers the three registrars themselves -- read, write and
-// writeAdminOnly all register their argument, and everything that goes
-// through them is inventoried by routescan and driven by the boundary suite.
-// Every other entry is a route that deliberately does not.
+// "pattern" covers the four registrars themselves -- read, write,
+// writeAdminOnly and self (WP-G4b Wave B) all register their argument, and
+// everything that goes through them is inventoried by routescan and driven
+// by the boundary suite. Every other entry is a route that deliberately does
+// not.
 var allowedDirectRegistrations = map[string]string{
-	"pattern":        "the read/write/writeAdminOnly registrar closures themselves",
+	"pattern":        "the read/write/writeAdminOnly/self registrar closures themselves",
 	`"GET /static/"`: "static assets; no handler, no store access",
 	`"GET /healthz"`: "liveness probe, unauthenticated by design",
 	`"GET /login"`:   "the login form; unauthenticated by necessity",
