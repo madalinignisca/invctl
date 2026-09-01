@@ -80,9 +80,24 @@ func TestDomainActorDoesNotSatisfyPermit(t *testing.T) {
 
 // permitMinterDirs is where a function returning a Permit is allowed to live
 // at all: internal/domain (the interface's own package, the only one that
-// can implement it) and internal/auth (Authorizer.Permit, the one gate that
-// turns a signed-in user into a decision).
-var permitMinterDirs = []string{"internal/domain", "internal/auth"}
+// can implement it), internal/auth (Authorizer.Permit, the one gate that
+// turns a signed-in user into a decision), and internal/store.
+//
+// internal/store WAS NOT HERE UNTIL WP-G4B WAVE C, and an auth review named
+// that the single weakest assumption in the whole design: this package's own
+// authorizeSavedViewOwner, authorizeJournalSubject and their siblings
+// (storePermitMinters, below) each check a caller's existing Permit and mint
+// a NARROWER one scoped to the one row being written -- domain.ScopedPermit
+// called from inside internal/store, not internal/domain or internal/auth --
+// and nothing before this scanned the one directory where a route registered
+// through the `self` gate (routes.go) actually depends on that narrowing
+// happening correctly. A store method that minted a permit from
+// p.Actor() without first checking p.Covers(subjectType, subjectID) would be
+// exactly the "self stops being write your own things and starts being
+// write anything" failure routes.go's own comment on the self registrar
+// warns about, and it would have compiled, run and passed every OTHER test
+// in this suite, because those all assert on domain/auth alone.
+var permitMinterDirs = []string{"internal/domain", "internal/auth", "internal/store"}
 
 // permitMinterBudget is how many Permit-returning functions each directory
 // is expected to contain. Exact, not a maximum.
@@ -101,6 +116,84 @@ var permitMinterDirs = []string{"internal/domain", "internal/auth"}
 var permitMinterBudget = map[string]int{
 	"internal/domain": 3, // AdministratorPermit, SystemPermit, ScopedPermit
 	"internal/auth":   1, // Authorizer.Permit
+	// internal/store's budget is len(storePermitMinters), asserted equal in
+	// TestOnlyTheNamedFunctionsMintAPermit's own setup below rather than
+	// hand-kept in step with it -- the whole reason storePermitMinters
+	// carries a reason per entry is that ADDING one is meant to be a
+	// conversation, and a literal here that could silently drift out of
+	// step with that map would be a second, easier way to add one without
+	// having it.
+	"internal/store": len(storePermitMinters),
+}
+
+// storePermitMinters is the narrow-minter allowlist for internal/store, the
+// gap the WP-G4b Wave C auth review named directly (see permitMinterDirs'
+// own comment on why this directory was not scanned at all before).
+//
+// EVERY ENTRY HERE FOLLOWS THE SAME SHAPE, and that shape is the property
+// being allowlisted, not just the name: check the CALLER'S OWN permit with
+// p.Covers(subjectType, subjectID) -- proving they may already write the
+// SUBJECT the new row hangs off -- and only then mint a fresh
+// domain.ScopedPermit scoped to exactly the one row being created or
+// touched, off p.Actor(), never off a fresh domain.SystemActor or
+// domain.AdministratorPermit. A minter that skipped the Covers check, or
+// that scoped the new permit wider than the one row, would still compile
+// and pass this test's structural checks; that is why the reason recorded
+// for each entry names WHICH subject is checked and why that subject is the
+// right one, not merely that a check exists. Listed individually, same
+// discipline as dynamicTargetAllowlist (boundary_source_test.go): a new
+// entry is a diff somebody has to read, not a number silently bumped.
+var storePermitMinters = map[string]string{
+	// authorizeSavedViewOwner (savedviews.go): saved_view classifies
+	// ScopeSubjectDerived (docs/AUDIT.md) -- its subject is the person who
+	// owns it, not a project. Checks p.Actor().Kind == user and
+	// p.Actor().ID == ownerID (the STORED owner on update/retire, never a
+	// submitted field -- see UpdateSavedView/RetireSavedView's own
+	// comments), then scopes to exactly this view id. No Administrator
+	// exception, deliberately (see the function's own comment).
+	"authorizeSavedViewOwner": "saved_view's subject is a person: checks p.Actor().ID " +
+		"against the row's stored owner, then scopes to exactly that view id",
+
+	// authorizeJournalSubject (journal.go): a journal note's subject is
+	// whatever entity it is written on. Checks p.Covers(subjectType,
+	// subjectID) against the note's own EntityType/EntityID, then scopes to
+	// exactly this note id.
+	"authorizeJournalSubject": "a journal note's subject is the entity it documents: " +
+		"checks p.Covers(subjectType, subjectID), then scopes to exactly that note id",
+
+	// authorizeInstanceSubjects (services.go): a service_instance placement
+	// is two-ended -- checks p.Covers("service", serviceID) AND
+	// p.Covers("asset", hostAssetID), so a project owner cannot place their
+	// own service on somebody else's host or somebody else's service on
+	// their own host (docs/rbac-design.md §4, "both endpoints of a
+	// relationship must be in scope"), then scopes to exactly this
+	// instance id.
+	"authorizeInstanceSubjects": "a placement has two owners, the service and the host " +
+		"asset: checks p.Covers on both before scoping to exactly that instance id",
+
+	// authorizeInterfaceSubject (network.go): an interface carries no
+	// project of its own -- its scope is entirely the owning asset's, one
+	// hop away. Checks p.Covers("asset", assetID), then scopes to exactly
+	// this interface id.
+	"authorizeInterfaceSubject": "an interface's subject is the asset it belongs to: " +
+		"checks p.Covers(\"asset\", assetID), then scopes to exactly that interface id",
+
+	// authorizeAddressSubject (network.go): an address attached to an
+	// interface inherits that interface's asset as its subject and checks
+	// p.Covers("asset", ...) the same as authorizeInterfaceSubject. An
+	// UNATTACHED address (interfaceID == nil) is the one entry here that
+	// does not mint a narrower permit at all -- it returns the caller's own
+	// permit unchanged, which is safe only because ip_address is
+	// ScopeSubjectDerived and a project owner's ScopedPermit never lists
+	// "ip_address" among its entities (auth.Authorizer.Permit only ever
+	// populates asset/service/circuit), so Covers still refuses them lower
+	// down at tx.log; an Administrator or System permit still covers it
+	// unconditionally, which is the intended fail-closed behaviour, not an
+	// escalation.
+	"SQLStore.authorizeAddressSubject": "an attached address's subject is the interface's asset " +
+		"(checks p.Covers(\"asset\", ...)); an unattached one passes the caller's own " +
+		"permit through, refused downstream for a project owner because ip_address is " +
+		"never in their scoped entities",
 }
 
 // permitMinterNames is the exact, named set TestOnlyTheNamedFunctionsMintAPermit
@@ -192,11 +285,11 @@ func TestOnlyTheNamedFunctionsMintAPermit(t *testing.T) {
 	}
 
 	for _, m := range found {
-		if !permitMinterNames[m.name] {
-			t.Errorf("%s (%s) mints a domain.Permit but is not in permitMinterNames. "+
-				"A new permit minter is a security-relevant change: it needs "+
-				"auth-reviewer and the repository owner's sign-off, and this test "+
-				"failing is what makes the addition impossible to miss in the diff.",
+		if !permitMinterNames[m.name] && storePermitMinters[m.name] == "" {
+			t.Errorf("%s (%s) mints a domain.Permit but is not in permitMinterNames or "+
+				"storePermitMinters. A new permit minter is a security-relevant change: "+
+				"it needs auth-reviewer and the repository owner's sign-off, and this "+
+				"test failing is what makes the addition impossible to miss in the diff.",
 				m.name, m.file)
 		}
 	}
@@ -206,6 +299,15 @@ func TestOnlyTheNamedFunctionsMintAPermit(t *testing.T) {
 				"It usually moved somewhere not covered by permitMinterDirs, which "+
 				"is exactly the kind of disappearance dynamicTargetBudget's own "+
 				"doc comment warns about for this shape of check.", name)
+		}
+	}
+	for name := range storePermitMinters {
+		if !seen[name] {
+			t.Errorf("%s is expected to mint a domain.Permit (storePermitMinters) but "+
+				"was not found. It usually moved somewhere not covered by "+
+				"permitMinterDirs, which is exactly the kind of disappearance "+
+				"dynamicTargetBudget's own doc comment warns about for this shape of "+
+				"check.", name)
 		}
 	}
 
