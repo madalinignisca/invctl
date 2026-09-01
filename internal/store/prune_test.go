@@ -19,6 +19,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -666,12 +667,35 @@ func TestChangeLogIsAppendOnly(t *testing.T) {
 // individually, with the table each one targets, so that adding a fifth is a
 // deliberate edit to this list and a conversation, rather than a diff nobody
 // reads.
+// factDeleteAllowance is what one allowlisted file is permitted to delete
+// from: the specific tables, not the file as a whole. The prose reason is
+// kept verbatim -- several entries record mistakes this codebase made more
+// than once, and that history is load-bearing documentation, not decoration
+// to be regenerated from the table list.
+type factDeleteAllowance struct {
+	tables []string
+	reason string
+}
+
 func TestTheOnlyFactDeletingStatementIsThePrune(t *testing.T) {
-	allowed := map[string]string{
-		"internal/store/assets.go": "asset_closure and asset_environment: sets the asset owns, replaced wholesale",
-		"internal/store/deps.go":   "dependency_data_class: a set the dependency owns, replaced wholesale",
-		"internal/store/search.go": "search_index: a derived index, rebuilt not authored",
-		"internal/store/prune.go":  "the rule 10 retention prune, the only statement here that removes a fact",
+	allowed := map[string]factDeleteAllowance{
+		"internal/store/assets.go": {
+			tables: []string{"asset_closure", "asset_environment"},
+			reason: "asset_closure and asset_environment: sets the asset owns, replaced wholesale",
+		},
+		"internal/store/deps.go": {
+			tables: []string{"dependency_data_class"},
+			reason: "dependency_data_class: a set the dependency owns, replaced wholesale",
+		},
+		"internal/store/search.go": {
+			tables: []string{"search_index"},
+			reason: "search_index: a derived index, rebuilt not authored",
+		},
+		"internal/store/prune.go": {
+			tables: []string{prunableTable, "unmatched_observation"},
+			reason: "the rule 10 retention prune, the only statements here that remove a fact " +
+				"(observed_transition and its sibling prune of unmatched_observation)",
+		},
 		// saved_view: rule 16's second named exception. ScrubUser deletes a
 		// scrubbed person's saved views inside the scrub's own transaction.
 		// This is not a set replacement -- there is no parent row whose
@@ -679,7 +703,10 @@ func TestTheOnlyFactDeletingStatementIsThePrune(t *testing.T) {
 		// is permitted for exactly the reason rule 16 gives: a saved view
 		// exists only for the person who made it, and once they are erased
 		// it belongs to nobody and serves nothing. docs/AUDIT.md rule 16.
-		"internal/store/users_admin.go": "saved_view: a scrubbed person's own views, erased on request per rule 16",
+		"internal/store/users_admin.go": {
+			tables: []string{"saved_view"},
+			reason: "saved_view: a scrubbed person's own views, erased on request per rule 16",
+		},
 		// certificate_san holds the CURRENT set of names a certificate covers,
 		// which the certificate owns. Replaced wholesale inside the parent's
 		// transaction, and certificateAudit folds the names into the audited
@@ -688,7 +715,10 @@ func TestTheOnlyFactDeletingStatementIsThePrune(t *testing.T) {
 		//
 		// The DEPLOYMENTS are not deleted: certificate_asset and
 		// certificate_service are soft-retired like every other link.
-		"internal/store/certificates.go": "certificate_san: the set of names a certificate owns, replaced wholesale",
+		"internal/store/certificates.go": {
+			tables: []string{"certificate_san"},
+			reason: "certificate_san: the set of names a certificate owns, replaced wholesale",
+		},
 		// interface_vlan holds the CURRENT set of VLANs a port is in, which the
 		// port owns. Replaced wholesale inside the interface's transaction, and
 		// foldVLANValue puts the VIDs into the audited value so the replacement
@@ -698,15 +728,24 @@ func TestTheOnlyFactDeletingStatementIsThePrune(t *testing.T) {
 		//
 		// The VLANs themselves are soft-retired like every other entity, and
 		// RetireVLAN refuses while any prefix or port still names one.
-		"internal/store/vlans.go": "interface_vlan: the set of VLANs a port is in, replaced wholesale",
+		"internal/store/vlans.go": {
+			tables: []string{"interface_vlan"},
+			reason: "interface_vlan: the set of VLANs a port is in, replaced wholesale",
+		},
 		// fhrp_member: the routers in a redundancy group. Same rule, fifth time:
 		// replaced wholesale inside the group's transaction, folded into the
 		// group's audited value by auditedFHRPGroup.
-		"internal/store/fhrp.go": "fhrp_member: the routers in a group, replaced wholesale",
+		"internal/store/fhrp.go": {
+			tables: []string{"fhrp_member"},
+			reason: "fhrp_member: the routers in a group, replaced wholesale",
+		},
 		// cluster_member: the hosts in a cluster. Same rule, sixth time, and
 		// this one moves guests -- auditedCluster folds the names in so a host
 		// leaving cannot produce an empty diff on the cluster.
-		"internal/store/clusters.go": "cluster_member: the hosts in a cluster, replaced wholesale",
+		"internal/store/clusters.go": {
+			tables: []string{"cluster_member"},
+			reason: "cluster_member: the hosts in a cluster, replaced wholesale",
+		},
 		// asset_storage_claim: what a workload holds in one pool. Same rule,
 		// seventh time. The row is the CURRENT VALUE of a declared figure --
 		// how much this machine was given in this pool -- so correcting it is
@@ -716,18 +755,27 @@ func TestTheOnlyFactDeletingStatementIsThePrune(t *testing.T) {
 		// workload's audited value, so a claim that vanishes cannot produce an
 		// empty diff. The one-row-per-pair key is what makes it a set rather
 		// than a ledger.
-		"internal/store/storage.go": "asset_storage_claim: what a workload holds in a pool, replaced wholesale",
+		"internal/store/storage.go": {
+			tables: []string{"asset_storage_claim"},
+			reason: "asset_storage_claim: what a workload holds in a pool, replaced wholesale",
+		},
 		// asset_cost_consumer: which consumers a cost line applies to. Same
 		// rule, eighth time. The set is the current value of a declaration --
 		// who benefits from this licence -- replaced inside the line's own
 		// transaction and folded into its audited value by costScopeAudit.
-		"internal/store/costs.go": "asset_cost_consumer: which consumers a cost line applies to, replaced wholesale",
+		"internal/store/costs.go": {
+			tables: []string{"asset_cost_consumer"},
+			reason: "asset_cost_consumer: which consumers a cost line applies to, replaced wholesale",
+		},
 		// asset_occupant: who shares a machine and in what proportion. Same
 		// rule, ninth time. Replaced inside the asset's transaction and folded
 		// into its audited value by occupancyAudit -- somebody deciding a
 		// machine is no longer shared moves money, and a change with no diff
 		// on the parent could not be found afterwards.
-		"internal/store/occupancy.go": "asset_occupant: who shares a machine, replaced wholesale",
+		"internal/store/occupancy.go": {
+			tables: []string{"asset_occupant"},
+			reason: "asset_occupant: who shares a machine, replaced wholesale",
+		},
 		// custom_field_value: what one asset or service holds for the fields
 		// this estate defined. Same rule, tenth time, and design.md §6 states
 		// it explicitly -- the row is the CURRENT VALUE of something its
@@ -736,7 +784,10 @@ func TestTheOnlyFactDeletingStatementIsThePrune(t *testing.T) {
 		// an operator clearing one entity's value removes a row, inside that
 		// entity's own transaction, folded into assetAudit.CustomFields /
 		// serviceAudit.CustomFields so it cannot produce an empty diff.
-		"internal/store/customvalues.go": "custom_field_value: what one entity holds for each custom field, replaced wholesale",
+		"internal/store/customvalues.go": {
+			tables: []string{"custom_field_value"},
+			reason: "custom_field_value: what one entity holds for each custom field, replaced wholesale",
+		},
 		// entity_tag: the set of tags one asset, service or project carries.
 		// Same rule, eleventh time (WP-G4a piece 2, docs/tags-design.md §4).
 		// Replaced wholesale inside the ENTITY'S own transaction by
@@ -744,7 +795,10 @@ func TestTheOnlyFactDeletingStatementIsThePrune(t *testing.T) {
 		// projectAudit.Tags so the replacement cannot produce an empty diff --
 		// TestApplyingATagWritesExactlyOneChangeLogRowOnTheParent and its
 		// removal counterpart are exactly the tests this rule exists for.
-		"internal/store/entitytags.go": "entity_tag: the tags an entity carries, replaced wholesale",
+		"internal/store/entitytags.go": {
+			tables: []string{"entity_tag"},
+			reason: "entity_tag: the tags an entity carries, replaced wholesale",
+		},
 	}
 
 	root := repoRoot(t)
@@ -764,24 +818,50 @@ func TestTheOnlyFactDeletingStatementIsThePrune(t *testing.T) {
 		}
 		rel, _ := filepath.Rel(root, path)
 		rel = filepath.ToSlash(rel)
-		for _, lit := range goStringLiterals(t, path) {
+		for _, lit := range sqlConcatLiterals(t, path) {
 			normalised := strings.ToLower(strings.Join(strings.Fields(lit), " "))
 			if !strings.Contains(normalised, needle) {
 				continue
 			}
-			if _, ok := allowed[rel]; !ok {
+			allowance, ok := allowed[rel]
+			if !ok {
 				t.Errorf("%s deletes rows. Soft delete is the rule for entities, and the only "+
 					"permitted removal of a fact is the observed_transition prune in "+
 					"internal/store/prune.go. If this is a set replacement, add it to the list "+
 					"in this test and say which set it owns.", rel)
+				continue
 			}
-			return nil
+			table := deletedTable(normalised)
+			if table == "" || !slices.Contains(allowance.tables, table) {
+				t.Errorf("%s deletes from %q, which is not among the tables %v declared for "+
+					"this file (%s). Allowlisting a file permits only the DELETE FROM statements "+
+					"named for it -- widening it to a new table is a deliberate edit to this "+
+					"list, not a side effect of allowlisting the file for something else.",
+					rel, table, allowance.tables, allowance.reason)
+			}
 		}
 		return nil
 	})
 	if err != nil {
 		t.Fatalf("walking the tree: %v", err)
 	}
+}
+
+// deletedTable extracts the table name immediately following "delete from"
+// in an already-normalised (lower-cased, whitespace-collapsed) SQL string.
+// Returns "" if the statement has no discernible table name.
+func deletedTable(normalised string) string {
+	const needle = "delete from "
+	idx := strings.Index(normalised, needle)
+	if idx < 0 {
+		return ""
+	}
+	rest := normalised[idx+len(needle):]
+	fields := strings.Fields(rest)
+	if len(fields) == 0 {
+		return ""
+	}
+	return strings.Trim(fields[0], "`\"")
 }
 
 // TestPruneIsNotReachableFromAHandler enforces "admin-invoked cmd/invctl
@@ -907,6 +987,105 @@ func goStringLiterals(t *testing.T, path string) []string {
 		// both forms and simply fails on anything exotic, which cannot be SQL.
 		if unquoted, err := strconv.Unquote(lit.Value); err == nil {
 			out = append(out, unquoted)
+		}
+		return true
+	})
+	return out
+}
+
+// sqlConcatLiterals is goStringLiterals plus one extra step: where a `DELETE
+// FROM ` literal is immediately concatenated (`+`) with a package-level
+// string constant -- `DELETE FROM ` + prunableTable, prune.go's own shape --
+// the table name lives in the constant, not in the literal, and
+// deletedTable would read it as "". Resolving that one concatenation shape
+// is enough to see the real table name without evaluating Go generally: it
+// walks `+` chains of string literals and identifiers, resolving an
+// identifier only against a `const NAME = "value"` declared in the SAME
+// file, and falls back to the plain per-literal scan for anything it cannot
+// fully resolve, so an unresolvable expression is still visible as its
+// pieces rather than silently dropped.
+func sqlConcatLiterals(t *testing.T, path string) []string {
+	t.Helper()
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
+	if err != nil {
+		t.Fatalf("parsing %s: %v", path, err)
+	}
+
+	consts := map[string]string{}
+	for _, decl := range file.Decls {
+		gd, ok := decl.(*ast.GenDecl)
+		if !ok || gd.Tok != token.CONST {
+			continue
+		}
+		for _, spec := range gd.Specs {
+			vs, ok := spec.(*ast.ValueSpec)
+			if !ok || len(vs.Names) != len(vs.Values) {
+				continue
+			}
+			for i, name := range vs.Names {
+				lit, ok := vs.Values[i].(*ast.BasicLit)
+				if !ok || lit.Kind != token.STRING {
+					continue
+				}
+				if v, err := strconv.Unquote(lit.Value); err == nil {
+					consts[name.Name] = v
+				}
+			}
+		}
+	}
+
+	var resolve func(e ast.Expr) (string, bool)
+	resolve = func(e ast.Expr) (string, bool) {
+		switch v := e.(type) {
+		case *ast.BasicLit:
+			if v.Kind != token.STRING {
+				return "", false
+			}
+			s, err := strconv.Unquote(v.Value)
+			return s, err == nil
+		case *ast.Ident:
+			s, ok := consts[v.Name]
+			return s, ok
+		case *ast.BinaryExpr:
+			if v.Op != token.ADD {
+				return "", false
+			}
+			x, ok := resolve(v.X)
+			if !ok {
+				return "", false
+			}
+			y, ok := resolve(v.Y)
+			if !ok {
+				return "", false
+			}
+			return x + y, true
+		case *ast.ParenExpr:
+			return resolve(v.X)
+		default:
+			return "", false
+		}
+	}
+
+	var out []string
+	ast.Inspect(file, func(n ast.Node) bool {
+		switch v := n.(type) {
+		case *ast.BinaryExpr:
+			if s, ok := resolve(v); ok {
+				out = append(out, s)
+				// Do not descend: an unresolved fragment of this same
+				// expression (e.g. the bare "DELETE FROM " literal half of
+				// `DELETE FROM ` + prunableTable) would otherwise also be
+				// collected on its own below, with no table name for
+				// deletedTable to find.
+				return false
+			}
+		case *ast.BasicLit:
+			if v.Kind == token.STRING {
+				if s, err := strconv.Unquote(v.Value); err == nil {
+					out = append(out, s)
+				}
+			}
 		}
 		return true
 	})
