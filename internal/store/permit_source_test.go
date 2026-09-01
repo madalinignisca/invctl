@@ -410,7 +410,7 @@ var auditedEntityTypes = []string{
 	"power_source", "prefix", "project", "project_asset", "project_circuit",
 	"project_cost", "project_service", "provider", "responsibility_role",
 	"rir", "route", "rt_container", "rt_k8s", "rt_systemd", "rt_windows",
-	"service", "service_cost", "service_instance", "service_kind",
+	"saved_view", "service", "service_cost", "service_instance", "service_kind",
 	"storage_kind", "tag", "team", "unmatched_observation", "user_project",
 	"vlan", "vlan_group",
 }

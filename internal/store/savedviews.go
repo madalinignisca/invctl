@@ -18,13 +18,14 @@ import (
 // Saved views. A view is one person's named set of list filters --
 // internal/domain/savedview.go carries the "why a table" rationale. The
 // authorization here is the point of the whole work package: saved_view
-// classifies ScopeEstateConfig so no PROJECT scope reaches it, and
+// classifies ScopeSubjectDerived so no PROJECT scope reaches it -- an
+// ordinary permit's entities set has no saved_view bucket to consult -- and
 // authorizeSavedViewOwner below is what lets a person reach their own rows.
 
 // authorizeSavedViewOwner is the whole of saved-view authorization.
 //
 // A saved view's SUBJECT is a person, so the question is not "may you write
-// estate configuration" -- saved_view classifies as ScopeEstateConfig
+// estate configuration" -- saved_view classifies as ScopeSubjectDerived
 // precisely so no project scope reaches it -- but "is this row yours".
 //
 // NO ADMINISTRATOR EXCEPTION, deliberately. An AdministratorPermit Covers
@@ -102,7 +103,20 @@ func (s *SQLStore) UpdateSavedView(ctx context.Context, p domain.Permit, v *doma
 		if err := requireVersion(res, "saved_view", v.ID, &v.RowVersion); err != nil {
 			return err
 		}
-		return t.logUpdate(ctx, "saved_view", v.ID, stored, v)
+		// The logged "after" is built from stored plus only the two fields
+		// this statement actually writes -- name and params -- never from v
+		// wholesale. v is the caller's submitted struct; logging it directly
+		// would record a change to Entity or CreatedAt if the caller's copy
+		// happened to carry a different value there, even though neither
+		// column was ever touched by this UPDATE. A self-inflicted wrong
+		// entry is still a wrong entry: the audit trail must describe what
+		// the database did, not what the caller happened to submit.
+		after := *stored
+		after.Name = v.Name
+		after.Params = v.Params
+		after.UpdatedAt = v.UpdatedAt
+		after.RowVersion = v.RowVersion
+		return t.logUpdate(ctx, "saved_view", v.ID, stored, &after)
 	})
 }
 
