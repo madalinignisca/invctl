@@ -69,6 +69,12 @@
   </div>
 </div>
 
+{{/* Outside the swapped "service_table" partial deliberately: see
+     asset_list.html's identical comment. */}}
+<div x-data="savedViews">
+  {{template "saved_views" dict "Entity" "service" "Views" .SavedViews "CurrentFilters" .CurrentFilters "CSRF" .CSRF}}
+</div>
+
 {{template "service_table" .}}
 
 {{/* Creating an unlinked service is Administrator-only, the same reasoning

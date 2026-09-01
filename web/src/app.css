@@ -1154,3 +1154,17 @@ form.htmx-request .btn-primary { opacity: 0.6; pointer-events: none; }
   background: var(--raised); border-radius: 6px;
 }
 .column-picker-menu label { display: block; padding: 2px 0; }
+
+/* Saved views (WP-G4b Task 5). Same shape as .column-picker above, and the
+   same left:0 anchoring for the same reason: a right-anchored menu here
+   would extend leftward under the .rail nav and become unclickable there,
+   exactly as .column-picker-menu's comment describes. Do not revert to
+   right:0. */
+.saved-views { position: relative; display: inline-block; }
+.saved-views-menu {
+  position: absolute; z-index: 30; left: 0; right: auto; min-width: 16rem;
+  padding: 8px; border: 1px solid var(--line);
+  background: var(--raised); border-radius: 6px;
+}
+.saved-view-row { padding: 4px 0; border-bottom: 1px solid var(--line-soft); }
+.saved-view-save { margin-top: 8px; }

@@ -1,0 +1,52 @@
+<!--
+invctl — infrastructure inventory
+Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+
+Licensed under the GNU Affero General Public License, version 3 only —
+no later version applies. See LICENSE for the full text.
+
+SPDX-License-Identifier: AGPL-3.0-only
+-->
+{{define "saved_views"}}
+{{/* Renderable standalone: it needs only .Entity, .Views, .CurrentFilters
+     and .CSRF, all passed through dict by the caller (list is not a
+     template func in this repo -- only dict is). */}}
+{{/* No x-data here, same reasoning as column_picker.html: the wrapper in
+     the page declares the "savedViews" component, so $root reaches this
+     menu's own toggle button and its two forms. A second x-data here would
+     create a second, empty component instance and the menu would toggle
+     nothing. */}}
+<div class="saved-views" data-views="{{.Entity}}">
+  <button type="button" class="btn btn-sm" x-on:click="toggleMenu">Views</button>
+  <div class="saved-views-menu" x-show="open" x-cloak>
+    {{range .Views}}
+    <div class="saved-view-row">
+      <a href="{{.Path}}">{{.Name}}</a>
+      {{/* A view whose stored parameter names a vocabulary term that no
+           longer exists still opens and still runs (docs/saved-views-design.md
+           §6) -- Stale only explains an unexpectedly narrow result, computed
+           in the handler, never here. */}}
+      {{if .Stale}}<div class="field-hint">&#9888; {{.Stale}}</div>{{end}}
+      <form method="post" action="/views/{{.ID}}/retire">
+        <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+        <button type="submit" class="btn btn-sm btn-danger">Remove</button>
+      </form>
+    </div>
+    {{else}}
+    <div class="field-hint">No saved views yet.</div>
+    {{end}}
+    <form method="post" action="/views" class="saved-view-save">
+      <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+      <input type="hidden" name="entity" value="{{.Entity}}">
+      {{/* One hidden input per currently-applied filter, built in the
+           handler from the SAME allowlist SavedViewCreate reads the posted
+           form through (savedViewKeys) -- see CurrentFiltersFor. That is
+           what makes "save this view" capture exactly what the operator is
+           looking at right now. */}}
+      {{range .CurrentFilters}}<input type="hidden" name="{{.Key}}" value="{{.Value}}">{{end}}
+      <input type="text" name="name" placeholder="Name this view" required>
+      <button type="submit" class="btn btn-sm">Save this view</button>
+    </form>
+  </div>
+</div>
+{{end}}

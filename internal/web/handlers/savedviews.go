@@ -215,14 +215,23 @@ func (a *App) SavedViewRetire(w http.ResponseWriter, r *http.Request) {
 	render.Redirect(w, r, base)
 }
 
-// SavedViewOption is the view model Task 5's list-page templates render: a
-// name to show in a picker and the URL that applies it, with the params blob
-// already turned back into a query string so the template never has to know
-// the storage shape.
+// SavedViewOption is the view model Task 5's list-page templates render:
+// everything the "Views" menu needs, already resolved so the template never
+// has to know the storage shape or decide anything (docs/saved-views-design.md
+// treats the template as presentation only).
 type SavedViewOption struct {
 	ID   string
 	Name string
-	URL  string
+	// Path is the list URL with this view's filters applied.
+	Path string
+	// Stale is "" when every stored parameter still names something that
+	// exists. Otherwise it is a short explanation of what is missing, e.g.
+	// `environment "prod" no longer exists`. The view still opens and still
+	// runs either way -- Stale only carries the explanation so nobody looking
+	// at a suspiciously empty result concludes the estate itself is empty
+	// (docs/saved-views-design.md §6). Never computed in the template:
+	// business logic does not go there.
+	Stale string
 }
 
 // SavedViewOptionsFor lists one person's saved views for a list page, ready
@@ -230,7 +239,13 @@ type SavedViewOption struct {
 // ServiceList so Task 5 has a single call to make regardless of which list
 // page it is wiring, and so the URL-building rule above (savedViewListPath is
 // the only place params become a URL) has exactly one caller.
-func SavedViewOptionsFor(ctx context.Context, s *store.SQLStore, userID, entity string) ([]SavedViewOption, error) {
+//
+// environments and kinds are the SAME slices the filter form on that page
+// already renders (assetListPage.Environments/.Kinds or their service
+// equivalents) -- passed in rather than re-queried, so a view's staleness is
+// judged against the exact vocabulary the page is showing the operator right
+// now, not a second read that could race it.
+func SavedViewOptionsFor(ctx context.Context, s *store.SQLStore, userID, entity string, environments []domain.Environment, kinds []store.VocabularyTerm) ([]SavedViewOption, error) {
 	views, err := s.ListSavedViews(ctx, userID, entity)
 	if err != nil {
 		return nil, fmt.Errorf("listing saved views for the picker: %w", err)
@@ -238,10 +253,97 @@ func SavedViewOptionsFor(ctx context.Context, s *store.SQLStore, userID, entity 
 	options := make([]SavedViewOption, 0, len(views))
 	for _, v := range views {
 		options = append(options, SavedViewOption{
-			ID:   v.ID,
-			Name: v.Name,
-			URL:  savedViewListPath(v.Entity, v.Params),
+			ID:    v.ID,
+			Name:  v.Name,
+			Path:  savedViewListPath(v.Entity, v.Params),
+			Stale: savedViewStaleness(v.Params, environments, kinds),
 		})
 	}
 	return options, nil
+}
+
+// savedViewStaleness checks a stored view's params against the live
+// vocabulary and returns a human explanation of the first mismatch found, or
+// "" if none.
+//
+// Limited to "environment" and "kind" ON PURPOSE: those are the two lists
+// every list page already carries in identical shape (.Environments,
+// .Kinds), so this can run for both the asset and service pickers with no
+// per-entity branching. Other allowlisted keys (project, availability,
+// lifecycle, tag, q, retired, device_type_id) do not have a uniformly
+// available "live list" on both page structs today -- extending this is a
+// follow-up, not a silent gap, since a stale reference to one of those still
+// simply narrows the result to nothing, which is confusing but not wrong.
+func savedViewStaleness(params string, environments []domain.Environment, kinds []store.VocabularyTerm) string {
+	var fields map[string]string
+	if err := json.Unmarshal([]byte(params), &fields); err != nil {
+		// Malformed params already degrade gracefully in savedViewListPath
+		// (the view opens the unfiltered list); nothing more specific to say
+		// here.
+		return ""
+	}
+	if envID, ok := fields["environment"]; ok && envID != "" {
+		found := false
+		for _, e := range environments {
+			if e.ID == envID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Sprintf("environment %q no longer exists", envID)
+		}
+	}
+	if kind, ok := fields["kind"]; ok && kind != "" {
+		found := false
+		for _, k := range kinds {
+			if k.Code == kind {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Sprintf("kind %q no longer exists", kind)
+		}
+	}
+	return ""
+}
+
+// FilterPair is one currently-applied filter, rendered by the "saved_views"
+// partial as a hidden input on its "save this view" form.
+type FilterPair struct {
+	Key   string
+	Value string
+}
+
+// CurrentFiltersFor reads the filters actually applied to a list request,
+// through the SAME allowlist (savedViewKeys) that SavedViewCreate reads the
+// posted form through.
+//
+// Deliberately built from r.URL.Query() and this allowlist, NOT from the
+// page's typed Filter struct (store.AssetFilter / store.ServiceFilter).
+// Reading the typed struct back into key/value pairs would need a second
+// struct-field-to-form-key mapping alongside savedViewKeys, and two mappings
+// that must independently agree are two mappings that will eventually
+// disagree silently -- one adds a filter field and forgets the other. This
+// way there is exactly one allowlist, and the round trip is provably exact:
+// the hidden inputs this produces are precisely the keys SavedViewCreate
+// re-reads.
+//
+// One value per key, via q.Get, to match formValue's single-value read in
+// savedViewParamsFrom -- the value that actually gets saved on submit is a
+// single value per key today, so offering more here would just mislead about
+// what "save this view" will do with it.
+func CurrentFiltersFor(q url.Values, entity string) []FilterPair {
+	keys, ok := savedViewKeys[entity]
+	if !ok {
+		return nil
+	}
+	pairs := make([]FilterPair, 0, len(keys))
+	for _, k := range keys {
+		if v := q.Get(k); v != "" {
+			pairs = append(pairs, FilterPair{Key: k, Value: v})
+		}
+	}
+	return pairs
 }

@@ -498,6 +498,18 @@ document.addEventListener('alpine:init', () => {
       this.apply();
     },
   }));
+
+  // The Views menu. Local disclosure state only -- the views themselves are
+  // server state and arrive rendered; this component does not fetch, does
+  // not know a view's name or filters, and never should (see the file
+  // header). data-views (the entity, "asset" or "service") is read by the
+  // partial itself for form fields; this component only needs open/closed.
+  Alpine.data('savedViews', () => ({
+    open: false,
+    toggleMenu() {
+      this.open = !this.open;
+    },
+  }));
 });
 
 // A 422 carries a re-rendered form and must be swapped in.

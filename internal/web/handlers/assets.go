@@ -21,6 +21,7 @@ import (
 	"github.com/madalinignisca/invctl/internal/domain"
 	"github.com/madalinignisca/invctl/internal/impact"
 	"github.com/madalinignisca/invctl/internal/store"
+	"github.com/madalinignisca/invctl/internal/web/middleware"
 	"github.com/madalinignisca/invctl/internal/web/render"
 )
 
@@ -228,6 +229,11 @@ type assetListPage struct {
 	// (docs/tags-design.md §2, §4a, §5).
 	FilterTags []store.TagRow
 	ApplyTags  []domain.Tag
+	// SavedViews and CurrentFilters back the "Views" menu -- see Task 5's
+	// saved_views partial. CurrentFilters is built from the request's own
+	// query string, not from Filter above; see CurrentFiltersFor for why.
+	SavedViews     []SavedViewOption
+	CurrentFilters []FilterPair
 }
 
 // ColumnOptions lists the asset table's configurable columns, in header
@@ -296,6 +302,19 @@ func (a *App) AssetList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Saved views are per-owner, so an unauthenticated request (which should
+	// never reach this handler behind RequireAuth, but nothing here should
+	// 500 if it somehow does) simply gets none rather than failing the whole
+	// list render over a menu.
+	var savedViews []SavedViewOption
+	if user := middleware.UserFrom(r.Context()); user != nil {
+		savedViews, err = SavedViewOptionsFor(r.Context(), a.Store, user.ID, domain.SavedViewAsset, envs, kinds)
+		if err != nil {
+			a.serverError(w, r, err)
+			return
+		}
+	}
+
 	// The same rows the page would have shown, as a file. SHARED HANDLER AND
 	// SHARED FILTER, deliberately: a separate export route would parse the
 	// query a second time, and the day the two readings diverge is the day
@@ -323,6 +342,8 @@ func (a *App) AssetList(w http.ResponseWriter, r *http.Request) {
 		CustomFieldsCSVLink: customFieldsCSVLinkFor("/assets/custom-fields.csv", r),
 		FilterTags:          filterTags,
 		ApplyTags:           applyTags,
+		SavedViews:          savedViews,
+		CurrentFilters:      CurrentFiltersFor(q, domain.SavedViewAsset),
 	}
 	// Filtering swaps only the table, so typing in the filter box does not
 	// rebuild the page around it.

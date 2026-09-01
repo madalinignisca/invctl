@@ -16,6 +16,7 @@ import (
 
 	"github.com/madalinignisca/invctl/internal/domain"
 	"github.com/madalinignisca/invctl/internal/store"
+	"github.com/madalinignisca/invctl/internal/web/middleware"
 	"github.com/madalinignisca/invctl/internal/web/render"
 )
 
@@ -36,6 +37,9 @@ type serviceListPage struct {
 	// loadTagListOptions.
 	FilterTags []store.TagRow
 	ApplyTags  []domain.Tag
+	// SavedViews and CurrentFilters: see assetListPage's identical fields.
+	SavedViews     []SavedViewOption
+	CurrentFilters []FilterPair
 }
 
 // ColumnOptions lists the service table's configurable columns, in header
@@ -100,6 +104,17 @@ func (a *App) ServiceList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// See AssetList's identical block for why this degrades to "none" rather
+	// than failing the page.
+	var savedViews []SavedViewOption
+	if user := middleware.UserFrom(r.Context()); user != nil {
+		savedViews, err = SavedViewOptionsFor(r.Context(), a.Store, user.ID, domain.SavedViewService, envs, kinds)
+		if err != nil {
+			a.serverError(w, r, err)
+			return
+		}
+	}
+
 	if render.WantsCSV(r) {
 		render.CSV(w, r, store.ExportServices(services), a.Store.Now())
 		return
@@ -118,6 +133,8 @@ func (a *App) ServiceList(w http.ResponseWriter, r *http.Request) {
 		CustomFieldsCSVLink: customFieldsCSVLinkFor("/services/custom-fields.csv", r),
 		FilterTags:          filterTags,
 		ApplyTags:           applyTags,
+		SavedViews:          savedViews,
+		CurrentFilters:      CurrentFiltersFor(q, domain.SavedViewService),
 	}
 	a.Render.Respond(w, r, http.StatusOK, "service_list", "service_table", data)
 }

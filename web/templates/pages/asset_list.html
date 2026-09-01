@@ -64,6 +64,13 @@
   </div>
 </div>
 
+{{/* Outside the swapped "asset_table" partial deliberately: the Views menu
+     lists saved filters, it is not one of them, and swapping it on every
+     keystroke in the filter box would collapse it mid-use for no reason. */}}
+<div x-data="savedViews">
+  {{template "saved_views" dict "Entity" "asset" "Views" .SavedViews "CurrentFilters" .CurrentFilters "CSRF" .CSRF}}
+</div>
+
 {{template "asset_table" .}}
 
 {{/* The same rows, as a file. The link carries the CURRENT query, so the
