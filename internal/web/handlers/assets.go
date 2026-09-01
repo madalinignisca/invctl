@@ -310,11 +310,17 @@ func (a *App) AssetList(w http.ResponseWriter, r *http.Request) {
 	if user := middleware.UserFrom(r.Context()); user != nil {
 		// deviceTypes is a read fix 4 of the whole-branch review added: a
 		// view stored with device_type_id needs a live catalogue to check it
-		// against, and (unlike environments/kinds/tags) nothing on this page
-		// already loads one -- ListDeviceTypes' default excludes retired,
-		// matching how the page's own filter form treats device types
-		// elsewhere.
-		deviceTypes, err := a.Store.ListDeviceTypes(r.Context(), store.DeviceTypeFilter{})
+		// against, and (unlike environments/kinds) nothing on this page
+		// already loads one. IncludeRetired: true, like filterTags below --
+		// a RETIRED device type is still a real one an asset can still
+		// reference (assets.go never clears device_type_id on retirement),
+		// so filtering on it still returns rows; only a device type that
+		// has been genuinely DELETED should read as stale. Getting this
+		// wrong the other way round is worse than the gap it would close:
+		// a false "no longer exists" on a filter that is still quietly
+		// working tells an operator mid-incident that part of the estate
+		// is gone when it is not.
+		deviceTypes, err := a.Store.ListDeviceTypes(r.Context(), store.DeviceTypeFilter{IncludeRetired: true})
 		if err != nil {
 			a.serverError(w, r, err)
 			return

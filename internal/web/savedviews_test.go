@@ -221,6 +221,164 @@ func TestSavedViewCreateAndReopenPreservesEveryTagNotJustTheFirst(t *testing.T) 
 	}
 }
 
+// mustDeviceTypeWeb creates a live manufacturer + device type through the
+// store, bypassing the forms -- same shape as mustAssetWeb, for the tests
+// below that need a real device type to filter on and then retire.
+func mustDeviceTypeWeb(t *testing.T, h *harness, code, model string) string {
+	t.Helper()
+	ctx := context.Background()
+	admin := domain.AdministratorPermit(domain.SystemActor)
+	mfr, err := domain.NewManufacturer(store.NewID(), domain.ManufacturerSpec{Code: code, Name: code}, h.store.Now())
+	if err != nil {
+		t.Fatalf("building manufacturer %s: %v", code, err)
+	}
+	if err := h.store.CreateManufacturer(ctx, admin, mfr); err != nil {
+		t.Fatalf("creating manufacturer %s: %v", code, err)
+	}
+	dt, err := domain.NewDeviceType(store.NewID(), domain.DeviceTypeSpec{
+		ManufacturerID: mfr.ID, Model: model,
+	}, h.store.Now())
+	if err != nil {
+		t.Fatalf("building device type %s: %v", model, err)
+	}
+	if err := h.store.CreateDeviceType(ctx, admin, dt); err != nil {
+		t.Fatalf("creating device type %s: %v", model, err)
+	}
+	return dt.ID
+}
+
+// TestSavedViewOnARetiredDeviceTypeIsNotStaleAndStillReturnsRows pins the
+// coordinator's finding: retiring a device type only ever sets its own
+// lifecycle column (RetireDeviceType), it never clears the id an asset
+// already carries in asset.device_type_id, and ListAssets' own
+// f.DeviceTypeID clause has no lifecycle condition on the device type
+// itself -- so a view filtered on a device type that has since been
+// retired still returns real rows. Reading that as "no longer exists"
+// would be a false alarm on a filter that is still quietly working, the
+// exact opposite of what design §6's staleness explanation is for.
+//
+// Asserts BOTH halves: the Views menu carries no Stale warning for this
+// view, and the reopened list genuinely still has the asset in it -- a
+// regression that reintroduces IncludeRetired: false would fail the first
+// assertion even though the second stayed true, and a regression that
+// broke the filter itself (unrelated to staleness) would fail the second
+// even though the first stayed true. Neither alone pins the claim.
+func TestSavedViewOnARetiredDeviceTypeIsNotStaleAndStillReturnsRows(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	deviceTypeID := mustDeviceTypeWeb(t, h, "sv-retired-dt-mfr", "sv-retired-dt-model")
+	a, err := domain.NewAsset(store.NewID(), domain.KindServer, "sv-retired-dt-asset", nil, h.store.Now())
+	if err != nil {
+		t.Fatalf("building asset: %v", err)
+	}
+	a.DeviceTypeID = &deviceTypeID
+	if err := h.store.CreateAsset(context.Background(), domain.AdministratorPermit(domain.SystemActor), a, nil); err != nil {
+		t.Fatalf("creating asset: %v", err)
+	}
+
+	resp := h.post("/views", url.Values{
+		"csrf_token":     {h.csrfToken("/assets")},
+		"entity":         {"asset"},
+		"name":           {"Retired device type"},
+		"device_type_id": {deviceTypeID},
+	}, false)
+	resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		t.Fatalf("creating the device-type view: status = %d", resp.StatusCode)
+	}
+
+	if err := h.store.RetireDeviceType(context.Background(), domain.AdministratorPermit(domain.SystemActor), deviceTypeID); err != nil {
+		t.Fatalf("retiring the device type: %v", err)
+	}
+
+	resp = h.get("/assets", false)
+	b := body(t, resp)
+	if strings.Contains(b, "no longer exists") {
+		t.Errorf("a RETIRED device type is reported as stale, which is a false alarm -- the filter still works: %s", b)
+	}
+
+	resp = h.get("/assets?device_type_id="+deviceTypeID, false)
+	b = body(t, resp)
+	if !strings.Contains(b, "sv-retired-dt-asset") {
+		t.Fatalf("filtering by a retired device type's id returned no rows -- the fixture assumption broke: %s", b)
+	}
+}
+
+// TestSavedViewOnARetiredProjectStaysStaleBecauseRetirementCascades looks
+// like TestSavedViewOnARetiredDeviceTypeIsNotStaleAndStillReturnsRows's
+// service twin, and an earlier draft of this fix treated it as one --
+// applying the SAME "retired is not missing" reasoning to project as to
+// device type and tag. That was checked against the actual store behaviour
+// and found wrong: RetireProject cascades (releaseLinks) and retires every
+// `owns` project_service link the moment a project retires, so
+// ListServices' f.ProjectID filter (which only ever matches an `owns`
+// link) can never again return a row for that project's id. A retired
+// project is a genuine, permanent dead end for this filter -- unlike a
+// retired device type, where the reference is left untouched on purpose
+// (RetireDeviceType's own doc comment: "ALLOWED WHILE ASSETS STILL POINT AT
+// IT"). So staying stale here is the CORRECT behaviour, not the bug fix 4
+// found for device_type_id/tag, and this test pins that distinction rather
+// than "fixing" it to match -- see savedViewVocabulary.ProjectIDs' own
+// comment for the same reasoning next to the field it governs.
+func TestSavedViewOnARetiredProjectStaysStaleBecauseRetirementCascades(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+	ctx := context.Background()
+	admin := domain.AdministratorPermit(domain.SystemActor)
+
+	proj, err := domain.NewProject(store.NewID(), domain.ProjectSpec{
+		Code: "sv-retired-proj", Name: "sv-retired-proj",
+	}, h.store.Now())
+	if err != nil {
+		t.Fatalf("building project: %v", err)
+	}
+	if err := h.store.CreateProject(ctx, admin, proj); err != nil {
+		t.Fatalf("creating project: %v", err)
+	}
+	svcID := mustSavedViewService(t, h, "sv-retired-proj-svc")
+	link, err := domain.NewProjectServiceLink(proj.ID, svcID, domain.ProjectOwns, nil, h.store.Now())
+	if err != nil {
+		t.Fatalf("building project-service link: %v", err)
+	}
+	if err := h.store.LinkProjectService(ctx, admin, link); err != nil {
+		t.Fatalf("linking service to project: %v", err)
+	}
+
+	resp := h.post("/views", url.Values{
+		"csrf_token": {h.csrfToken("/services")},
+		"entity":     {"service"},
+		"name":       {"Retired project"},
+		"project":    {proj.ID},
+	}, false)
+	resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		t.Fatalf("creating the project view: status = %d", resp.StatusCode)
+	}
+
+	if err := h.store.RetireProject(ctx, admin, proj.ID); err != nil {
+		t.Fatalf("retiring the project: %v", err)
+	}
+
+	// The cascade's own effect, pinned first so a fixture regression here
+	// (e.g. LinkProjectService stops actually linking) is not mistaken for
+	// the staleness assertion below failing for the right reason.
+	resp = h.get("/services?project="+proj.ID, false)
+	b := body(t, resp)
+	if strings.Contains(b, "sv-retired-proj-svc") {
+		t.Fatalf("filtering by a retired project's id still returned its service -- "+
+			"RetireProject's cascade assumption broke, so this test's premise no "+
+			"longer holds: %s", b)
+	}
+
+	resp = h.get("/services", false)
+	b = body(t, resp)
+	if !strings.Contains(b, "no longer exists") {
+		t.Errorf("a retired project's saved view is not reported as stale, "+
+			"but its filter genuinely, permanently returns nothing now: %s", b)
+	}
+}
+
 // TestSavedViewUpdateRefusesSomebodyElsesView proves the property the whole
 // work package exists for: the handler never re-checks ownership itself, so
 // this is really a test that internal/store/savedviews.go's

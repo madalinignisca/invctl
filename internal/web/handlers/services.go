@@ -88,6 +88,15 @@ func (a *App) ServiceList(w http.ResponseWriter, r *http.Request) {
 		a.serverError(w, r, err)
 		return
 	}
+	// IncludeRetired stays false here, DELIBERATELY UNLIKE device types
+	// (AssetList) and tags: RetireProject cascades (releaseLinks) and
+	// retires every `owns` project_service link the moment a project
+	// retires, so a service can never again match `project=<a retired
+	// project's id>` -- the ownership relationship this filter tests is
+	// gone for good, not merely unlisted. A retired project genuinely IS a
+	// dead end for this filter, so reading it as stale is correct, not the
+	// bug device_type_id's identical-looking case turned out to be. Checked
+	// by TestSavedViewOnARetiredProjectStaysStaleBecauseRetirementCascades.
 	projects, err := a.Store.ListProjects(r.Context(), store.ProjectFilter{})
 	if err != nil {
 		a.serverError(w, r, err)

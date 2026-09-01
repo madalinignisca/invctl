@@ -216,14 +216,38 @@ type savedViewVocabulary struct {
 	// DeviceTypeIDs is asset-only (device_type_id is not a service filter);
 	// nil on the service path, where it is never consulted since
 	// savedViewKeys[SavedViewService] has no device_type_id entry.
+	//
+	// Includes RETIRED device types, deliberately, same reasoning as
+	// TagIDs below: RetireDeviceType is explicitly "ALLOWED WHILE ASSETS
+	// STILL POINT AT IT" (its own doc comment) and never touches
+	// asset.device_type_id or any other row, so a view filtered on a
+	// device type that has since been retired still returns real rows.
+	// Reading that as "no longer exists" would be a false alarm on a
+	// filter that is still quietly working -- exactly backwards from what
+	// design §6 staleness exists to report, and worse than saying nothing:
+	// it tells an operator mid-incident that part of the estate is gone
+	// when it is not. See
+	// TestSavedViewOnARetiredDeviceTypeIsNotStaleAndStillReturnsRows.
 	DeviceTypeIDs []string
-	// ProjectIDs is service-only, the mirror image of DeviceTypeIDs.
+	// ProjectIDs is service-only, the mirror image of DeviceTypeIDs -- but
+	// LIVE ONLY, unlike DeviceTypeIDs/TagIDs, and that asymmetry is real,
+	// not an oversight: RetireProject cascades (releaseLinks) and retires
+	// every `owns` project_service link the moment a project retires, so
+	// ListServices' f.ProjectID filter (which matches only `owns` links)
+	// can never again return a row for a retired project's id -- the
+	// ownership relationship the filter tests is gone for good. A retired
+	// project genuinely is a dead end here, so staying stale for it is
+	// correct. See
+	// TestSavedViewOnARetiredProjectStaysStaleBecauseRetirementCascades.
 	ProjectIDs []string
 	// TagIDs applies to both entities. Deliberately the SAME list
 	// loadTagListOptions' filterTags return already carries -- which
-	// includes retired tags. A retired tag is still a real one that assets
-	// still carry (see asset_list.html's "Tags (all of)" comment); only a
-	// deleted tag id should read as stale.
+	// includes retired tags: RetireTag never touches entity_tag, so an
+	// asset or service still carries a retired tag and filtering by it
+	// still works. Same shape as DeviceTypeIDs, different shape from
+	// ProjectIDs -- see each field's own comment for why they are not all
+	// three the same, and do not "tidy" them to match without re-reading
+	// RetireDeviceType/RetireProject/RetireTag first.
 	TagIDs []string
 }
 
@@ -252,7 +276,7 @@ func (a *App) savedViewVocabularyFor(ctx context.Context, entity string) (savedV
 		if err != nil {
 			return savedViewVocabulary{}, fmt.Errorf("listing kinds for the views menu: %w", err)
 		}
-		deviceTypes, err := a.Store.ListDeviceTypes(ctx, store.DeviceTypeFilter{})
+		deviceTypes, err := a.Store.ListDeviceTypes(ctx, store.DeviceTypeFilter{IncludeRetired: true})
 		if err != nil {
 			return savedViewVocabulary{}, fmt.Errorf("listing device types for the views menu: %w", err)
 		}
