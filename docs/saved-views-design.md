@@ -33,11 +33,11 @@ It also stores the filter's **parts**, not the URL string, so changing a
 route or a parameter name does not orphan everybody's saved views.
 
 **Two lists only: assets and services.** They are the ones with query
-filtering — seven parameters and six respectively: `kind`, `environment`,
-`lifecycle`, `device_type_id`, `q`, `retired`, `tag` on assets;
-`environment`, `kind`, `availability`, `project`, `q`, `tag` on services.
-Circuits and prefixes have no query filtering at all, so there is nothing to
-save; giving them filters is a different work package.
+filtering — seven parameters each: `kind`, `environment`, `lifecycle`,
+`device_type_id`, `q`, `retired`, `tag` on assets; `environment`, `kind`,
+`availability`, `project`, `q`, `tag`, `tier` on services. Circuits and
+prefixes have no query filtering at all, so there is nothing to save; giving
+them filters is a different work package.
 
 ## 2. It gets a table, and that is a reversal worth explaining
 

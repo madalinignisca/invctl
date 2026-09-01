@@ -45,8 +45,9 @@ footnote.
 
   A view stores the filter's parts, not a link, so it survives a change to
   how URLs are built. If a view refers to something that no longer exists —
-  an environment that was retired, say — it opens and tells you what is
-  missing rather than quietly showing nothing.
+  an environment, device type, project or tag that was retired or deleted,
+  say — it opens and tells you what is missing rather than quietly showing
+  nothing.
 
   Scrubbing an account deletes that person's views along with their personal
   data.

@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 
 	"github.com/justinas/nosurf"
 
@@ -34,11 +35,40 @@ import (
 // parsing below it) the day a new filter is added to either list page.
 var savedViewKeys = map[string][]string{
 	domain.SavedViewAsset:   {"kind", "environment", "lifecycle", "device_type_id", "q", "retired", "tag"},
-	domain.SavedViewService: {"environment", "kind", "availability", "project", "q", "tag"},
+	domain.SavedViewService: {"environment", "kind", "availability", "project", "q", "tag", "tier"},
+}
+
+// formValues reads every value posted under key, trimmed and with blanks
+// dropped -- the multi-value twin of formValue. A filter like "tag" is a
+// repeating form field (see the <select multiple> in asset_list.html), and
+// r.PostFormValue/formValue only ever return the FIRST one. Using that
+// single-value read here is exactly the defect this function exists to fix:
+// see savedViewParamsFrom's own comment for the consequence.
+func formValues(r *http.Request, key string) []string {
+	raw := r.PostForm[key]
+	vals := make([]string, 0, len(raw))
+	for _, v := range raw {
+		v = strings.TrimSpace(v)
+		if v != "" {
+			vals = append(vals, v)
+		}
+	}
+	return vals
 }
 
 // savedViewParamsFrom collects the filter parameters for one entity into the
 // opaque JSON blob a saved view stores.
+//
+// The stored shape is map[string][]string -- url.Values, not
+// map[string]string -- because a filter key can carry more than one value:
+// "tag" is a repeating field (docs/tags-design.md §5's AND-combined tag
+// picker), and assetFilterFrom/serviceFilterFrom already read every posted
+// value via q["tag"]. Collapsing to the first value here, as an earlier
+// version of this function did, silently WIDENS a saved view's result set --
+// a view saved from "tag=production AND tag=pci-scope" would reopen as just
+// "tag=production", matching every production asset including the ones out
+// of PCI scope. A populated, plausible, wrong answer is worse than an empty
+// one, because nobody double-checks it.
 //
 // The entity check happens here, against the allowlist's own keys, rather
 // than deferring to domain.NewSavedView -- an unknown entity has no key list
@@ -51,17 +81,17 @@ func savedViewParamsFrom(r *http.Request, entity string) (string, error) {
 	if !ok {
 		return "", domain.NewValidation("entity", "must be one of: asset, service")
 	}
-	fields := map[string]string{}
+	fields := map[string][]string{}
 	for _, k := range keys {
-		if v := formValue(r, k); v != "" {
-			fields[k] = v
+		if vals := formValues(r, k); len(vals) > 0 {
+			fields[k] = vals
 		}
 	}
 	b, err := json.Marshal(fields)
 	if err != nil {
-		// fields is a map[string]string built by this function; marshaling it
-		// cannot fail. Wrapped and surfaced anyway rather than ignored, on the
-		// house rule that nothing here swallows an error silently.
+		// fields is a map[string][]string built by this function; marshaling
+		// it cannot fail. Wrapped and surfaced anyway rather than ignored, on
+		// the house rule that nothing here swallows an error silently.
 		return "", fmt.Errorf("marshaling saved view params: %w", err)
 	}
 	return string(b), nil
@@ -76,14 +106,17 @@ func savedViewListPath(entity, params string) string {
 	if entity == domain.SavedViewService {
 		base = "/services"
 	}
-	var fields map[string]string
+	var fields map[string][]string
 	if err := json.Unmarshal([]byte(params), &fields); err != nil {
 		return base // a view whose params will not parse still opens the list
 	}
 	q := url.Values{}
 	for _, k := range savedViewKeys[entity] {
-		if v, ok := fields[k]; ok && v != "" {
-			q.Set(k, v)
+		if vals, ok := fields[k]; ok && len(vals) > 0 {
+			// One ?k=v pair per stored value, not just the first -- see
+			// savedViewParamsFrom's comment for what collapsing to one value
+			// does to a multi-tag view.
+			q[k] = append([]string(nil), vals...)
 		}
 	}
 	if len(q) == 0 {
@@ -146,12 +179,12 @@ func (a *App) renderSavedViewsInvalid(w http.ResponseWriter, r *http.Request, en
 	}
 	var views []SavedViewOption
 	if user := middleware.UserFrom(r.Context()); user != nil {
-		envs, kinds, vocabErr := a.savedViewVocabularyFor(r.Context(), entity)
+		vocab, vocabErr := a.savedViewVocabularyFor(r.Context(), entity)
 		if vocabErr != nil {
 			a.serverError(w, r, vocabErr)
 			return
 		}
-		views, vocabErr = SavedViewOptionsFor(r.Context(), a.Store, user.ID, entity, envs, kinds)
+		views, vocabErr = SavedViewOptionsFor(r.Context(), a.Store, user.ID, entity, vocab)
 		if vocabErr != nil {
 			a.serverError(w, r, vocabErr)
 			return
@@ -167,31 +200,87 @@ func (a *App) renderSavedViewsInvalid(w http.ResponseWriter, r *http.Request, en
 	})
 }
 
-// savedViewVocabularyFor loads the same environment/kind lists the asset and
-// service list pages already carry, so a validation-failure re-render can
-// compute Stale (via SavedViewOptionsFor) the same way an ordinary page load
-// does -- see savedViewStaleness's doc comment for why those two lists.
-func (a *App) savedViewVocabularyFor(ctx context.Context, entity string) ([]domain.Environment, []store.VocabularyTerm, error) {
+// savedViewVocabulary is the live vocabulary savedViewStaleness checks a
+// stored view's params against -- one struct rather than five parameters
+// threaded through SavedViewOptionsFor and savedViewStaleness, since every
+// caller either has all of it already loaded (the list pages) or needs to
+// load all of it (savedViewVocabularyFor, below).
+//
+// DeviceTypeIDs/ProjectIDs/TagIDs carry only IDs, not the full rows: staying
+// with IDs keeps this package's dependency on store row shapes to the one
+// place (savedViewVocabularyFor and the two list handlers) that already
+// reads them.
+type savedViewVocabulary struct {
+	Environments []domain.Environment
+	Kinds        []store.VocabularyTerm
+	// DeviceTypeIDs is asset-only (device_type_id is not a service filter);
+	// nil on the service path, where it is never consulted since
+	// savedViewKeys[SavedViewService] has no device_type_id entry.
+	DeviceTypeIDs []string
+	// ProjectIDs is service-only, the mirror image of DeviceTypeIDs.
+	ProjectIDs []string
+	// TagIDs applies to both entities. Deliberately the SAME list
+	// loadTagListOptions' filterTags return already carries -- which
+	// includes retired tags. A retired tag is still a real one that assets
+	// still carry (see asset_list.html's "Tags (all of)" comment); only a
+	// deleted tag id should read as stale.
+	TagIDs []string
+}
+
+// savedViewVocabularyFor loads the live vocabulary for one entity, so a
+// validation-failure re-render (renderSavedViewsInvalid) can compute Stale
+// the same way an ordinary page load does. The asset and service list
+// handlers build the same shape from lists they already have loaded for
+// their own filter forms, rather than calling this -- see AssetList and
+// ServiceList.
+func (a *App) savedViewVocabularyFor(ctx context.Context, entity string) (savedViewVocabulary, error) {
 	envs, err := a.Store.ListEnvironments(ctx)
 	if err != nil {
-		return nil, nil, fmt.Errorf("listing environments for the views menu: %w", err)
+		return savedViewVocabulary{}, fmt.Errorf("listing environments for the views menu: %w", err)
 	}
-	var kinds []store.VocabularyTerm
+	filterTagRows, _, err := a.loadTagListOptions(ctx)
+	if err != nil {
+		return savedViewVocabulary{}, fmt.Errorf("listing tags for the views menu: %w", err)
+	}
+	filterTags := make([]string, 0, len(filterTagRows))
+	for _, t := range filterTagRows {
+		filterTags = append(filterTags, t.ID)
+	}
 	switch entity {
 	case domain.SavedViewAsset:
-		kinds, err = a.Store.AssetKinds(ctx)
+		kinds, err := a.Store.AssetKinds(ctx)
+		if err != nil {
+			return savedViewVocabulary{}, fmt.Errorf("listing kinds for the views menu: %w", err)
+		}
+		deviceTypes, err := a.Store.ListDeviceTypes(ctx, store.DeviceTypeFilter{})
+		if err != nil {
+			return savedViewVocabulary{}, fmt.Errorf("listing device types for the views menu: %w", err)
+		}
+		ids := make([]string, 0, len(deviceTypes))
+		for _, d := range deviceTypes {
+			ids = append(ids, d.ID)
+		}
+		return savedViewVocabulary{Environments: envs, Kinds: kinds, DeviceTypeIDs: ids, TagIDs: filterTags}, nil
 	case domain.SavedViewService:
-		kinds, err = a.Store.ServiceKinds(ctx)
+		kinds, err := a.Store.ServiceKinds(ctx)
+		if err != nil {
+			return savedViewVocabulary{}, fmt.Errorf("listing kinds for the views menu: %w", err)
+		}
+		projects, err := a.Store.ListProjects(ctx, store.ProjectFilter{})
+		if err != nil {
+			return savedViewVocabulary{}, fmt.Errorf("listing projects for the views menu: %w", err)
+		}
+		ids := make([]string, 0, len(projects))
+		for _, p := range projects {
+			ids = append(ids, p.ID)
+		}
+		return savedViewVocabulary{Environments: envs, Kinds: kinds, ProjectIDs: ids, TagIDs: filterTags}, nil
 	default:
 		// An unknown entity has no kind vocabulary to check against; the
 		// caller's own validation already refuses this before staleness
 		// would matter.
-		return envs, nil, nil
+		return savedViewVocabulary{Environments: envs, TagIDs: filterTags}, nil
 	}
-	if err != nil {
-		return nil, nil, fmt.Errorf("listing kinds for the views menu: %w", err)
-	}
-	return envs, kinds, nil
 }
 
 // SavedViewCreate saves the filters currently applied, under a name.
@@ -360,12 +449,13 @@ type SavedViewOption struct {
 // page it is wiring, and so the URL-building rule above (savedViewListPath is
 // the only place params become a URL) has exactly one caller.
 //
-// environments and kinds are the SAME slices the filter form on that page
-// already renders (assetListPage.Environments/.Kinds or their service
-// equivalents) -- passed in rather than re-queried, so a view's staleness is
-// judged against the exact vocabulary the page is showing the operator right
-// now, not a second read that could race it.
-func SavedViewOptionsFor(ctx context.Context, s *store.SQLStore, userID, entity string, environments []domain.Environment, kinds []store.VocabularyTerm) ([]SavedViewOption, error) {
+// vocab is the SAME live lists the filter form on that page already renders
+// (assetListPage.Environments/.Kinds or their service equivalents, plus the
+// id lists AssetList/ServiceList build for staleness -- see
+// savedViewVocabulary) -- passed in rather than re-queried, so a view's
+// staleness is judged against exactly what the page is showing the operator
+// right now, not a second read that could race it.
+func SavedViewOptionsFor(ctx context.Context, s *store.SQLStore, userID, entity string, vocab savedViewVocabulary) ([]SavedViewOption, error) {
 	views, err := s.ListSavedViews(ctx, userID, entity)
 	if err != nil {
 		return nil, fmt.Errorf("listing saved views for the picker: %w", err)
@@ -376,35 +466,75 @@ func SavedViewOptionsFor(ctx context.Context, s *store.SQLStore, userID, entity 
 			ID:    v.ID,
 			Name:  v.Name,
 			Path:  savedViewListPath(v.Entity, v.Params),
-			Stale: savedViewStaleness(v.Params, environments, kinds),
+			Stale: savedViewStaleness(v.Entity, v.Params, vocab),
 		})
 	}
 	return options, nil
+}
+
+// idKnown reports whether id appears in a live id list -- the shared check
+// behind every one of savedViewStaleness's per-key lookups below.
+func idKnown(ids []string, id string) bool {
+	for _, known := range ids {
+		if known == id {
+			return true
+		}
+	}
+	return false
+}
+
+// firstStoredValue returns the first stored value for key, or "" if the key
+// is absent or empty. environment and kind are rendered as single-select
+// inputs, so they only ever carry one value in practice; checking just the
+// first is not a narrowing of a multi-select the way it would be for tag.
+func firstStoredValue(fields map[string][]string, key string) string {
+	vals := fields[key]
+	if len(vals) == 0 {
+		return ""
+	}
+	return vals[0]
 }
 
 // savedViewStaleness checks a stored view's params against the live
 // vocabulary and returns a human explanation of the first mismatch found, or
 // "" if none.
 //
-// Limited to "environment" and "kind" ON PURPOSE: those are the two lists
-// every list page already carries in identical shape (.Environments,
-// .Kinds), so this can run for both the asset and service pickers with no
-// per-entity branching. Other allowlisted keys (project, availability,
-// lifecycle, tag, q, retired, device_type_id) do not have a uniformly
-// available "live list" on both page structs today -- extending this is a
-// follow-up, not a silent gap, since a stale reference to one of those still
-// simply narrows the result to nothing, which is confusing but not wrong.
-func savedViewStaleness(params string, environments []domain.Environment, kinds []store.VocabularyTerm) string {
-	var fields map[string]string
+// entity gates two things: which keys are even allowed to be stored (an
+// unrecognised key is itself stale -- see below) and which of the two
+// id-valued checks (device_type_id, project) applies, since they belong to
+// different entities and vocab only carries the one the caller's list page
+// actually has.
+//
+// environment, kind, device_type_id, project and tag are all checked --
+// every allowlisted key that names something that can be renamed or
+// deleted. lifecycle, availability and retired are NOT checked: they are
+// fixed enum sets (domain constants plus a DB CHECK), so a stored value
+// there can never stop existing. q is free text with nothing to look up.
+// That is the whole of what is deliberately left out, not an oversight.
+func savedViewStaleness(entity, params string, vocab savedViewVocabulary) string {
+	var fields map[string][]string
 	if err := json.Unmarshal([]byte(params), &fields); err != nil {
 		// Malformed params already degrade gracefully in savedViewListPath
 		// (the view opens the unfiltered list); nothing more specific to say
 		// here.
 		return ""
 	}
-	if envID, ok := fields["environment"]; ok && envID != "" {
+	// A stored key outside the current allowlist -- e.g. a filter that was
+	// renamed or removed since the view was saved -- would otherwise be
+	// silently DROPPED by savedViewListPath (it only ever reads keys in
+	// savedViewKeys[entity]), which widens the view's result rather than
+	// explaining it. Surfacing it here turns that into the visible warning
+	// design §6 promises, the same way the tier gap (fix 2) would have been
+	// caught immediately had this check already existed.
+	allowed := savedViewKeys[entity]
+	for k := range fields {
+		if !idKnown(allowed, k) {
+			return fmt.Sprintf("filter %q is no longer recognised", k)
+		}
+	}
+	if envID := firstStoredValue(fields, "environment"); envID != "" {
 		found := false
-		for _, e := range environments {
+		for _, e := range vocab.Environments {
 			if e.ID == envID {
 				found = true
 				break
@@ -414,9 +544,9 @@ func savedViewStaleness(params string, environments []domain.Environment, kinds 
 			return fmt.Sprintf("environment %q no longer exists", envID)
 		}
 	}
-	if kind, ok := fields["kind"]; ok && kind != "" {
+	if kind := firstStoredValue(fields, "kind"); kind != "" {
 		found := false
-		for _, k := range kinds {
+		for _, k := range vocab.Kinds {
 			if k.Code == kind {
 				found = true
 				break
@@ -424,6 +554,17 @@ func savedViewStaleness(params string, environments []domain.Environment, kinds 
 		}
 		if !found {
 			return fmt.Sprintf("kind %q no longer exists", kind)
+		}
+	}
+	if dtID := firstStoredValue(fields, "device_type_id"); dtID != "" && !idKnown(vocab.DeviceTypeIDs, dtID) {
+		return fmt.Sprintf("device type %q no longer exists", dtID)
+	}
+	if projectID := firstStoredValue(fields, "project"); projectID != "" && !idKnown(vocab.ProjectIDs, projectID) {
+		return fmt.Sprintf("project %q no longer exists", projectID)
+	}
+	for _, tagID := range fields["tag"] {
+		if tagID != "" && !idKnown(vocab.TagIDs, tagID) {
+			return fmt.Sprintf("tag %q no longer exists", tagID)
 		}
 	}
 	return ""
@@ -450,10 +591,14 @@ type FilterPair struct {
 // the hidden inputs this produces are precisely the keys SavedViewCreate
 // re-reads.
 //
-// One value per key, via q.Get, to match formValue's single-value read in
-// savedViewParamsFrom -- the value that actually gets saved on submit is a
-// single value per key today, so offering more here would just mislead about
-// what "save this view" will do with it.
+// One FilterPair per stored value, not per key, via q[k] rather than q.Get
+// -- to mirror formValues' multi-value read in savedViewParamsFrom. A
+// key like "tag" can carry more than one value (the multi-select in
+// asset_list.html), and what "Save this view" is about to submit is
+// EXACTLY these hidden inputs (saved_views.html ranges over CurrentFilters
+// to build them) -- so offering only the first value here, while
+// savedViewParamsFrom saves all of them, would make the menu's own preview
+// lie about what pressing the button actually captures.
 func CurrentFiltersFor(q url.Values, entity string) []FilterPair {
 	keys, ok := savedViewKeys[entity]
 	if !ok {
@@ -461,8 +606,10 @@ func CurrentFiltersFor(q url.Values, entity string) []FilterPair {
 	}
 	pairs := make([]FilterPair, 0, len(keys))
 	for _, k := range keys {
-		if v := q.Get(k); v != "" {
-			pairs = append(pairs, FilterPair{Key: k, Value: v})
+		for _, v := range q[k] {
+			if v != "" {
+				pairs = append(pairs, FilterPair{Key: k, Value: v})
+			}
 		}
 	}
 	return pairs

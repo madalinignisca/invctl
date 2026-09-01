@@ -108,7 +108,19 @@ func (a *App) ServiceList(w http.ResponseWriter, r *http.Request) {
 	// than failing the page.
 	var savedViews []SavedViewOption
 	if user := middleware.UserFrom(r.Context()); user != nil {
-		savedViews, err = SavedViewOptionsFor(r.Context(), a.Store, user.ID, domain.SavedViewService, envs, kinds)
+		// projects and filterTags are already loaded above for this page's
+		// own filter form -- no new read needed here, unlike AssetList's
+		// device types (see that handler's comment).
+		projectIDs := make([]string, 0, len(projects))
+		for _, p := range projects {
+			projectIDs = append(projectIDs, p.ID)
+		}
+		tagIDs := make([]string, 0, len(filterTags))
+		for _, t := range filterTags {
+			tagIDs = append(tagIDs, t.ID)
+		}
+		vocab := savedViewVocabulary{Environments: envs, Kinds: kinds, ProjectIDs: projectIDs, TagIDs: tagIDs}
+		savedViews, err = SavedViewOptionsFor(r.Context(), a.Store, user.ID, domain.SavedViewService, vocab)
 		if err != nil {
 			a.serverError(w, r, err)
 			return

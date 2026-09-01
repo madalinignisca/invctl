@@ -10,6 +10,7 @@ package web_test
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
@@ -160,6 +161,63 @@ func TestSavedViewCreateWithUnknownEntityIs422NotA200WithAnErrorBuried(t *testin
 
 	if resp.StatusCode != http.StatusUnprocessableEntity {
 		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusUnprocessableEntity)
+	}
+}
+
+// TestSavedViewCreateAndReopenPreservesEveryTagNotJustTheFirst pins the fix
+// for the highest-value defect a whole-branch review found: params used to
+// be stored as map[string]string, so a filter posted with more than one
+// value for the same key -- "tag" is repeating, per the <select multiple>
+// in asset_list.html -- silently kept only the first, and reopening the
+// view WIDENED the result to everything carrying that one tag instead of
+// everything carrying all of them. A populated, plausible, wrong answer.
+//
+// Checks the round trip at both ends: the stored params blob must carry
+// both tag ids (not just the first), and the "open this view" link the
+// Views menu renders must carry both as separate ?tag= query parameters --
+// not just that the JSON happens to be right, but that what a click on the
+// menu actually requests is right.
+func TestSavedViewCreateAndReopenPreservesEveryTagNotJustTheFirst(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+	tag1 := mustTagWeb(t, h, "sv-multi-tag-a")
+	tag2 := mustTagWeb(t, h, "sv-multi-tag-b")
+
+	resp := h.post("/views", url.Values{
+		"csrf_token": {h.csrfToken("/assets")},
+		"entity":     {"asset"},
+		"name":       {"Two tags"},
+		"tag":        {tag1, tag2}, // THE CASE: two values under one key
+	}, false)
+	resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		t.Fatalf("creating the two-tag view: status = %d", resp.StatusCode)
+	}
+
+	params := h.lookup(`SELECT params FROM saved_view WHERE name = ?`, "Two tags")
+	var fields map[string][]string
+	if err := json.Unmarshal([]byte(params), &fields); err != nil {
+		t.Fatalf("stored params did not parse as a JSON object of arrays: %v (%s)", err, params)
+	}
+	got := fields["tag"]
+	if len(got) != 2 {
+		t.Fatalf("stored tag values = %v, want both %s and %s", got, tag1, tag2)
+	}
+	matched := (got[0] == tag1 && got[1] == tag2) || (got[0] == tag2 && got[1] == tag1)
+	if !matched {
+		t.Fatalf("stored tag values = %v, want exactly {%s, %s}", got, tag1, tag2)
+	}
+
+	// Reopen: the Views menu's link for this view must carry BOTH tags as
+	// the query string /assets replays, not just the one that survived a
+	// single-value round trip.
+	resp = h.get("/assets", false)
+	b := body(t, resp)
+	if !strings.Contains(b, "tag="+tag1) {
+		t.Fatalf("the saved view's reopen link dropped tag %s: %s", tag1, b)
+	}
+	if !strings.Contains(b, "tag="+tag2) {
+		t.Fatalf("the saved view's reopen link dropped tag %s: %s", tag2, b)
 	}
 }
 

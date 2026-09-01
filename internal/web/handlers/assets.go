@@ -308,7 +308,27 @@ func (a *App) AssetList(w http.ResponseWriter, r *http.Request) {
 	// list render over a menu.
 	var savedViews []SavedViewOption
 	if user := middleware.UserFrom(r.Context()); user != nil {
-		savedViews, err = SavedViewOptionsFor(r.Context(), a.Store, user.ID, domain.SavedViewAsset, envs, kinds)
+		// deviceTypes is a read fix 4 of the whole-branch review added: a
+		// view stored with device_type_id needs a live catalogue to check it
+		// against, and (unlike environments/kinds/tags) nothing on this page
+		// already loads one -- ListDeviceTypes' default excludes retired,
+		// matching how the page's own filter form treats device types
+		// elsewhere.
+		deviceTypes, err := a.Store.ListDeviceTypes(r.Context(), store.DeviceTypeFilter{})
+		if err != nil {
+			a.serverError(w, r, err)
+			return
+		}
+		deviceTypeIDs := make([]string, 0, len(deviceTypes))
+		for _, d := range deviceTypes {
+			deviceTypeIDs = append(deviceTypeIDs, d.ID)
+		}
+		tagIDs := make([]string, 0, len(filterTags))
+		for _, t := range filterTags {
+			tagIDs = append(tagIDs, t.ID)
+		}
+		vocab := savedViewVocabulary{Environments: envs, Kinds: kinds, DeviceTypeIDs: deviceTypeIDs, TagIDs: tagIDs}
+		savedViews, err = SavedViewOptionsFor(r.Context(), a.Store, user.ID, domain.SavedViewAsset, vocab)
 		if err != nil {
 			a.serverError(w, r, err)
 			return
