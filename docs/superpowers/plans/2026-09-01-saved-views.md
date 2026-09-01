@@ -278,13 +278,19 @@ In `internal/domain/role.go`'s `entityScope`, beside the other estate-config ent
 
 ```go
 	// One person's saved list filters (WP-G4b, migration 00060).
-	// ScopeEstateConfig so no ScopedPermit can ever cover it -- but that is
-	// only half the rule. A person MAY write their own views, which is
-	// enforced in internal/store/savedviews.go by comparing the row's owner
-	// to the caller before minting a narrow permit, the same shape
-	// journal_entry uses. Estate-config here means "not reachable by
-	// project scope", not "Administrator only".
-	"saved_view":            ScopeEstateConfig,
+	//
+	// ScopeSubjectDerived, NOT ScopeEstateConfig. EstateConfig would have
+	// been the intuitive choice -- no project scope may reach this table --
+	// and it is wrong: Covers returns false unconditionally for that class,
+	// so the narrow permit minted for a row's OWNER could never satisfy
+	// tx.log and a person would be refused their own view.
+	//
+	// Subject-derived is safe here for the same reason it is safe for
+	// journal_entry: auth.Authorizer.Permit builds buckets only for asset,
+	// service and circuit, so an ordinary permit has no saved_view bucket
+	// and covers nothing. Only the permit minted after
+	// internal/store/savedviews.go's ownership check can cover a row.
+	"saved_view":            ScopeSubjectDerived,
 ```
 
 In `internal/domain/classification.go`, add `saved_view` with its columns — `id`, `user_id`, `entity`, `name`, `params`, `lifecycle`, `created_at`, `updated_at`, `row_version` — classified **declared**. A person asserting "this view exists" is a declaration; no observation ever writes it.

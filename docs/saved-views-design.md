@@ -79,9 +79,25 @@ is not a parameter and belongs in a column.
 
 ## 3. Authorization: a person writes their own views and nobody else's
 
-`saved_view` classifies as `ScopeEstateConfig`, so no `ScopedPermit` can
-cover it — which is correct for "may a project owner edit the estate's
-configuration" and **wrong for "may a project owner save their own view"**.
+`saved_view` classifies as **`ScopeSubjectDerived`**, the class
+`journal_entry` uses.
+
+**An earlier draft of this section said `ScopeEstateConfig`, and that was
+wrong in a way worth recording.** The intent was right — no *project* scope
+may reach this table — but the mechanism contradicts it:
+`scopedPermit.Covers` consults its `entities` set only for
+`ScopeProjectLinked` and `ScopeSubjectDerived`; for `ScopeEstateConfig` it
+returns false unconditionally. So a narrow permit minted for the row's owner
+could never satisfy `tx.log`, and **the owner would have been refused their
+own view**. The implementer hit exactly that and stopped rather than working
+around it.
+
+`ScopeSubjectDerived` is safe here for the same reason it is safe for
+`journal_entry`: `auth.Authorizer.Permit` builds buckets only for `asset`,
+`service` and `circuit`, so an ordinary permit has no `saved_view` bucket and
+covers nothing. Only the narrow permit minted **after** the ownership check
+can cover a row. The class's own doc comment is widened to say the subject
+may be a person rather than only an estate entity.
 
 It therefore takes the `ScopeSubjectDerived` treatment `journal_entry`
 already uses (`internal/store/journal.go`'s `authorizeJournalSubject`): the
