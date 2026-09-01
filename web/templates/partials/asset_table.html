@@ -15,29 +15,39 @@
     <h2>{{pluralise (len .Assets) "asset" "assets"}}</h2>
     <span class="panel-note">Containment is a tree; environment membership is not.</span>
   </div>
-  {{if .Assets}}
-  {{/* WP-G4a piece 3 (docs/tags-design.md §4a): bulk-tagging this exact
-       filtered view. The checkbox column and its footer only render for a
-       write-capable operator with at least one live tag to offer -- a
-       read-only user or an estate with no tags yet sees the plain table. */}}
-  {{$bulkTag := and .CanWrite .ApplyTags}}
-  <form {{if $bulkTag}}hx-post="/assets/tags/apply" hx-target="#assets-bulk-tag-result" hx-swap="outerHTML"
-        x-data="bulkTagApply" data-entity-label="assets"{{end}}>
-    {{if $bulkTag}}<input type="hidden" name="csrf_token" value="{{.CSRF}}">{{end}}
-    {{/* INSIDE the swap target deliberately, not on the page template around
-         it: the filter toolbar's hx-get swaps only #asset-table
-         (hx-target="#asset-table" hx-swap="outerHTML"), so a menu living
-         outside it would never see a changed filter and "Save this view"
-         would silently capture whatever was applied at the last full page
-         load, not what is on screen. See CurrentFiltersFor's own comment for
-         why the hidden inputs it renders must match the request that just
-         ran -- this placement is what makes that request the one just made,
-         not an earlier one. */}}
-    <div x-data="savedViews">
-      {{template "saved_views" dict "Entity" "asset" "Views" .SavedViews "CurrentFilters" .CurrentFilters "CSRF" .CSRF}}
-    </div>
-    <div x-data="columnPicker" data-table-key="asset">
-      {{template "column_picker" dict "Table" "asset" "Columns" .ColumnOptions}}
+  {{/* Views and Columns render ABOVE {{if .Assets}} deliberately -- and
+       still INSIDE #asset-table, which is the swap-boundary fix, unchanged.
+       A stale saved view (naming an environment or kind that no longer
+       exists) is the LIKELIEST way to reach zero rows, and design §6 exists
+       precisely so that case still shows the Stale explanation instead of a
+       bare "nothing matches". Both menus used to sit inside the {{if
+       .Assets}} branch below and vanished along with it on an empty result
+       -- Columns picker included, a pre-existing WP-G4c defect fixed here
+       alongside the Views one because it is the identical mistake on the
+       adjacent line. See CurrentFiltersFor's own comment for why the
+       hidden inputs the Views form renders must match the request that just
+       ran; that property does not depend on any row existing. */}}
+  <div x-data="savedViews">
+    {{template "saved_views" dict "Entity" "asset" "Views" .SavedViews "CurrentFilters" .CurrentFilters "CSRF" .CSRF}}
+  </div>
+  {{/* Because the WHOLE #asset-table fragment (this menu included) is
+       swapped on every filter change (hx-trigger="change, keyup changed
+       delay:300ms from:input[name='q']" in asset_list.html), an open Views
+       menu closes and a partially-typed "name this view" is discarded the
+       moment the operator touches a filter while it is open. Accepted
+       trade, not a bug: the alternative is a menu that silently drifts from
+       the filters it is about to save. */}}
+  <div x-data="columnPicker" data-table-key="asset">
+    {{template "column_picker" dict "Table" "asset" "Columns" .ColumnOptions}}
+    {{if .Assets}}
+    {{/* WP-G4a piece 3 (docs/tags-design.md §4a): bulk-tagging this exact
+         filtered view. The checkbox column and its footer only render for a
+         write-capable operator with at least one live tag to offer -- a
+         read-only user or an estate with no tags yet sees the plain table. */}}
+    {{$bulkTag := and .CanWrite .ApplyTags}}
+    <form {{if $bulkTag}}hx-post="/assets/tags/apply" hx-target="#assets-bulk-tag-result" hx-swap="outerHTML"
+          x-data="bulkTagApply" data-entity-label="assets"{{end}}>
+      {{if $bulkTag}}<input type="hidden" name="csrf_token" value="{{.CSRF}}">{{end}}
       <div class="scroll-x">
       <table data-table="asset">
         <thead>
@@ -74,16 +84,16 @@
           {{end}}
         </tbody>
       </table>
+      </div>
+      {{if $bulkTag}}{{template "bulk_tag_panel" .}}{{end}}
+    </form>
+    {{else}}
+    <div class="empty">
+      <strong>Nothing matches those filters.</strong>
+      Clear the filters, or add the asset if it is genuinely missing.
     </div>
-    </div>
-    {{if $bulkTag}}{{template "bulk_tag_panel" .}}{{end}}
-  </form>
-  {{else}}
-  <div class="empty">
-    <strong>Nothing matches those filters.</strong>
-    Clear the filters, or add the asset if it is genuinely missing.
+    {{end}}
   </div>
-  {{end}}
 </div>
 <div id="assets-bulk-tag-result"></div>
 {{end}}

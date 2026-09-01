@@ -123,22 +123,22 @@
     <h2>{{pluralise (len .Services) "service" "services"}}</h2>
     <span class="panel-note">One row per logical service, however many replicas run.</span>
   </div>
-  {{if .Services}}
-  {{/* WP-G4a piece 3 (docs/tags-design.md §4a): see asset_table.html's
-       identical block for the reasoning. */}}
-  {{$bulkTag := and .CanWrite .ApplyTags}}
-  <form {{if $bulkTag}}hx-post="/services/tags/apply" hx-target="#services-bulk-tag-result" hx-swap="outerHTML"
-        x-data="bulkTagApply" data-entity-label="services"{{end}}>
-    {{if $bulkTag}}<input type="hidden" name="csrf_token" value="{{.CSRF}}">{{end}}
-    {{/* INSIDE the swap target deliberately -- see asset_table.html's
-         identical comment. #service-table is the hx-target for the filter
-         toolbar's hx-get; a menu outside it would freeze CurrentFilters at
-         the last full page load. */}}
-    <div x-data="savedViews">
-      {{template "saved_views" dict "Entity" "service" "Views" .SavedViews "CurrentFilters" .CurrentFilters "CSRF" .CSRF}}
-    </div>
-    <div x-data="columnPicker" data-table-key="service">
-      {{template "column_picker" dict "Table" "service" "Columns" .ColumnOptions}}
+  {{/* Views and Columns render ABOVE {{if .Services}} deliberately -- see
+       asset_table.html's identical comment for the design §6 reasoning and
+       the disclosure-reset trade-off. Still INSIDE #service-table, which is
+       the swap-boundary fix and is unchanged. */}}
+  <div x-data="savedViews">
+    {{template "saved_views" dict "Entity" "service" "Views" .SavedViews "CurrentFilters" .CurrentFilters "CSRF" .CSRF}}
+  </div>
+  <div x-data="columnPicker" data-table-key="service">
+    {{template "column_picker" dict "Table" "service" "Columns" .ColumnOptions}}
+    {{if .Services}}
+    {{/* WP-G4a piece 3 (docs/tags-design.md §4a): see asset_table.html's
+         identical block for the reasoning. */}}
+    {{$bulkTag := and .CanWrite .ApplyTags}}
+    <form {{if $bulkTag}}hx-post="/services/tags/apply" hx-target="#services-bulk-tag-result" hx-swap="outerHTML"
+          x-data="bulkTagApply" data-entity-label="services"{{end}}>
+      {{if $bulkTag}}<input type="hidden" name="csrf_token" value="{{.CSRF}}">{{end}}
       <div class="scroll-x">
       <table data-table="service">
         <thead>
@@ -176,16 +176,16 @@
           {{end}}
         </tbody>
       </table>
+      </div>
+      {{if $bulkTag}}{{template "bulk_tag_panel" .}}{{end}}
+    </form>
+    {{else}}
+    <div class="empty">
+      <strong>No services match those filters.</strong>
+      A service is the logical thing; its replicas are instances.
     </div>
-    </div>
-    {{if $bulkTag}}{{template "bulk_tag_panel" .}}{{end}}
-  </form>
-  {{else}}
-  <div class="empty">
-    <strong>No services match those filters.</strong>
-    A service is the logical thing; its replicas are instances.
+    {{end}}
   </div>
-  {{end}}
 </div>
 <div id="services-bulk-tag-result"></div>
 {{end}}

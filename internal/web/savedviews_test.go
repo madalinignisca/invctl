@@ -21,12 +21,15 @@ import (
 	"github.com/madalinignisca/invctl/internal/store"
 )
 
-// mustSavedViewService creates a real, live service with a known kind, so a
-// list request filtered to that kind is guaranteed at least one row -- both
-// asset_table.html and rows.html wrap the Views menu (and the Columns picker
-// beside it) in {{if .Assets}}/{{if .Services}}, so a filter that happened to
-// match nothing would hide the very form these regression tests assert on,
-// and a green test would not actually be exercising it.
+// mustSavedViewService creates a real, live service with a known kind, for
+// tests that filter to a kind and want a guaranteed non-empty result --
+// TestServiceListHTMXFragmentCarriesTheAppliedFilterIntoTheSaveViewForm needs
+// a real save-view form with real filter values to assert on, not the empty
+// state. It is unrelated to whether the Views/Columns menus render on an
+// EMPTY result: they now do either way (asset_table.html and rows.html hoist
+// both above {{if .Assets}}/{{if .Services}}), which
+// TestAssetListEmptyResultStillShowsViewsAndColumnsMenus and its service twin
+// pin directly, with no fixture asset or service at all.
 func mustSavedViewService(t *testing.T, h *harness, code string) string {
 	t.Helper()
 	svc, err := domain.NewService(store.NewID(), domain.ServiceSpec{
@@ -411,5 +414,71 @@ func TestSavedViewCreateValidationFailureRerendersTheMenuAt422(t *testing.T) {
 	// filters, the same failure mode fix 1 above pins from a different angle.
 	if !strings.Contains(b, `name="kind" value="server"`) {
 		t.Fatalf("re-rendered menu lost the filter that was being saved: %s", b)
+	}
+}
+
+// TestAssetListEmptyResultStillShowsViewsAndColumnsMenus pins the fix for a
+// FAIL the code review caught: both menus lived inside {{if .Assets}} in
+// asset_table.html, so a filter matching nothing hid the Views button, the
+// saved-view list, and every Stale explanation along with the table -- in
+// exactly the case design §6 exists for. A stale view (naming an
+// environment or kind that no longer exists) is the LIKELIEST way to reach
+// zero rows, so the explanation that stops an operator concluding the
+// estate is empty was hidden precisely when it was needed, replaced by a
+// bare "Nothing matches those filters." The Columns picker shared the same
+// wrapper and vanished the same way -- a pre-existing WP-G4c defect, fixed
+// here on the same edit rather than left half done.
+//
+// kind=router matches no seeded asset (the fixture asset kinds this
+// package's other tests create are firewall/server/vm/switch/storage), so
+// this exercises the true empty-result path, not a coincidentally-populated
+// one.
+func TestAssetListEmptyResultStillShowsViewsAndColumnsMenus(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	resp := h.get("/assets?kind=router", true)
+	b := body(t, resp)
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if !strings.Contains(b, "Nothing matches those filters.") {
+		t.Fatalf("kind=router should match nothing -- test fixture assumption broke: %s", b)
+	}
+	if !strings.Contains(b, `id="saved-views-asset"`) {
+		t.Fatalf("Views menu is missing from an empty-result fragment: %s", b)
+	}
+	if !strings.Contains(b, "Save this view") {
+		t.Fatalf("the save-view form is missing from an empty-result fragment: %s", b)
+	}
+	if !strings.Contains(b, `data-table-key="asset"`) {
+		t.Fatalf("Columns picker is missing from an empty-result fragment: %s", b)
+	}
+}
+
+// TestServiceListEmptyResultStillShowsViewsAndColumnsMenus is
+// TestAssetListEmptyResultStillShowsViewsAndColumnsMenus's service twin.
+func TestServiceListEmptyResultStillShowsViewsAndColumnsMenus(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	resp := h.get("/services?kind=nonexistent-service-kind", true)
+	b := body(t, resp)
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if !strings.Contains(b, "No services match those filters.") {
+		t.Fatalf("kind=nonexistent-service-kind should match nothing -- test fixture assumption broke: %s", b)
+	}
+	if !strings.Contains(b, `id="saved-views-service"`) {
+		t.Fatalf("Views menu is missing from an empty-result fragment: %s", b)
+	}
+	if !strings.Contains(b, "Save this view") {
+		t.Fatalf("the save-view form is missing from an empty-result fragment: %s", b)
+	}
+	if !strings.Contains(b, `data-table-key="service"`) {
+		t.Fatalf("Columns picker is missing from an empty-result fragment: %s", b)
 	}
 }
