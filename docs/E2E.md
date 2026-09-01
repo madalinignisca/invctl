@@ -83,19 +83,53 @@ the normal case.** The public demo
 both public by design -- see `docs/DEMO.md`) is the exception, useful for a
 quick check without standing anything up locally, not the primary target.
 
-## This suite never writes
+## This suite is read-only by default -- not never writes
 
-Every spec is read-only navigation: it fills the login form once
-(`global-setup.js`) and otherwise only follows links and reads the rendered
-DOM, including the retired-option spec, which opens `?edit=<id>#edit` to
-read the form's markup and **never submits it**. This matters beyond the
-usual "don't corrupt test data" reason: assets in this system are
-soft-delete only (CLAUDE.md: "Soft delete only, for entities... Never
-delete an asset"), this suite may run against the shared public demo, and
-any write there is a **permanent artefact** on an instance other people are
-shown. If a future spec needs to exercise a mutation, it must run against a
-disposable local instance only, and that constraint should be stated loudly
-at the top of that spec, not assumed.
+**This claim used to be absolute and is no longer true; treat any version of
+this file that says "never" as stale.** Most of this suite is read-only
+navigation: it fills the login form once (`global-setup.js`) and otherwise
+only follows links and reads the rendered DOM, including the retired-option
+spec, which opens `?edit=<id>#edit` to read the form's markup and **never
+submits it**. That matters beyond the usual "don't corrupt test data"
+reason: entities in this system are soft-delete only (CLAUDE.md: "Soft
+delete only, for entities... Never delete an asset"), this suite may run
+against the shared public demo, and any write there is a **permanent
+artefact** on an instance other people are shown.
+
+A handful of specs are the declared exception, because the flow they guard
+genuinely cannot be proven without a real mutation. Each states its own
+write loudly at the top of the file, per the rule below, and each is gated
+so it refuses to run somewhere that write would be a lasting problem --
+but the two guard shapes in this suite are not the same, and the difference
+matters:
+
+- **`user-administration.spec.js`** and the two `rbac-project-owner-*.spec.js`
+  specs use a **denylist**: they refuse only a host that *looks like* the
+  shared public demo (a hostname match on `invctl.madalin.me`), and
+  otherwise run against whatever `INV_E2E_BASE_URL` is already set to. That
+  is a reasonable bar for what they write -- a throwaway account promoted
+  and demoted within the same run, or a project-owner fixture the seeder
+  itself refuses to create without an explicit flag and password
+  (`INV_SEED_E2E_PROJECT_OWNER`, its own section above) -- and it means
+  these specs run in the normal `INV_E2E_BASE_URL=<local instance>` case
+  with no extra opt-in.
+- **`saved-views.spec.js`** uses a stricter **positive opt-in**,
+  `INV_E2E_DISPOSABLE=true`, and refuses to run at all without it -- a
+  saved view is a soft-delete-only row like everything else in this system,
+  so even this spec's own "remove" step leaves a permanently retired row
+  behind on whatever instance it ran against, and a hostname denylist only
+  ever knows about hosts someone thought to list. Without the opt-in the
+  spec reports itself skipped (with the reason in the skipped test's own
+  title, since a skipped `describe` block never runs a `beforeAll` that
+  could print anything); with the opt-in set but `INV_E2E_BASE_URL` pointed
+  anywhere other than `localhost`/`127.0.0.1`, it **fails loudly** instead
+  of skipping or running -- see the spec's own header for why that
+  combination specifically must not be treated as "probably fine".
+
+If a future spec needs to exercise a mutation, follow whichever of these two
+shapes actually fits what it writes, state the constraint loudly at the top
+of that spec (not assumed), and never write against a shared or public
+instance.
 
 ## Where the ownership report's mutation is covered instead
 
@@ -226,6 +260,21 @@ come back to these two files and remove the `test.fail()` calls.
   server-side; and creating an asset from their own project page through the
   route only a project owner may reach. See "The project-owner fixture"
   above -- both need `INV_SEED_E2E_PROJECT_OWNER=true` and both write.
+
+- **`saved-views.spec.js`** -- WP-G4b: a signed-in person can save the
+  filters currently applied to `/assets` under a name, reopen them from the
+  Views menu, and remove them. Filters `/assets` to `kind=firewall`, opens
+  the Views menu (which lives inside the `#asset-table` fragment the filter
+  toolbar swaps, so it has to be opened *after* filtering, not before -- an
+  open menu closes on every swap), saves it, navigates back to a genuinely
+  clean unfiltered `/assets` (not `page.reload()`, which would just refresh
+  a URL that already carries the filter and prove nothing), reopens the
+  menu, follows the saved view's plain `<a href>` link, and asserts the
+  filter is applied both in the rendered rows and in the URL -- then removes
+  the view and confirms it no longer appears. This is the one spec in the
+  suite gated by `INV_E2E_DISPOSABLE=true` rather than the shared-demo
+  denylist the other writing specs use -- see "This suite is read-only by
+  default" above and the spec's own header for why.
 
 ## Adding a spec
 
