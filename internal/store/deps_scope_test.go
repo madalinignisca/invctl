@@ -303,6 +303,52 @@ func TestDependencyScopeUpdateSeizesAForeignEdge(t *testing.T) {
 	}
 }
 
+// TestDependencyScopeUpdateBothEndsMineSucceeds is the positive path this
+// task actually delivers -- a project owner correcting their own declared
+// edge -- and until this test existed nothing in the suite proved it works:
+// TestDependencyScopeCoversBothEnds only exercises CreateDependency, and
+// every other Update* case above is a refusal. A mutant that made
+// UpdateDependency refuse every project owner unconditionally (e.g. always
+// running the STORED check against the wrong subject, or dropping
+// depPermit and writing under p) could have shipped as a silent, permanent
+// 403 with the rest of the suite still green.
+func TestDependencyScopeUpdateBothEndsMineSucceeds(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newDepScopeFixture(t, e)
+			d, err := domain.NewDependency(NewID(), newDependencySpec(f.s1, f.ep1), f.s.Now())
+			if err != nil {
+				t.Fatalf("building dependency: %v", err)
+			}
+			if err := f.s.CreateDependency(f.ctx, testPermit, d, nil); err != nil {
+				t.Fatalf("seeding the edge as an administrator: %v", err)
+			}
+			// The create above already wrote its own change_log row against
+			// this same dependency id, so the assertion below has to be a
+			// delta, not an absolute count.
+			before := len(mustChangesForDependency(t, f, d.ID))
+
+			corrected := *d
+			corrected.FailureMode = "it stops loudly"
+			if err := f.s.UpdateDependency(f.ctx, f.permit, &corrected, nil); err != nil {
+				t.Fatalf("UpdateDependency with both stored and submitted ends mine = %v, want nil", err)
+			}
+
+			after, err := f.s.GetDependency(f.ctx, d.ID)
+			if err != nil {
+				t.Fatalf("re-reading the edge: %v", err)
+			}
+			if after.FailureMode != "it stops loudly" {
+				t.Errorf("failure_mode after an allowed update = %q, want %q", after.FailureMode, "it stops loudly")
+			}
+			gotChanges := len(mustChangesForDependency(t, f, d.ID))
+			if gotChanges-before != 1 {
+				t.Errorf("an allowed update wrote %d change_log rows, want 1", gotChanges-before)
+			}
+		})
+	}
+}
+
 // TestDependencyScopeAdministrator: an AdministratorPermit covers every
 // row regardless of subject, the same as it does for every other
 // subject-derived type.

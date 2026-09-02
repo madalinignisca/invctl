@@ -187,6 +187,145 @@ func TestLinkScopeRetireUsesTheStoredEnds(t *testing.T) {
 	}
 }
 
+// TestLinkScopeRetireAEndMineBEndForeign is the retire-side sibling
+// TestLinkScopeRetireUsesTheStoredEnds does not carry: that test seeds a
+// link with BOTH ends foreign, so its A check alone is enough to refuse and
+// the B check never has to do anything. Here the A end is the caller's own
+// asset and only the B end is foreign, so a mutant that checked the A end
+// twice (or dropped the B check outright) would let this retire through.
+func TestLinkScopeRetireAEndMineBEndForeign(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newLinkScopeFixture(t, e)
+			l, err := domain.NewLink(NewID(), f.if1, f.if3)
+			if err != nil {
+				t.Fatalf("building link: %v", err)
+			}
+			if err := f.s.CreateLink(f.ctx, testPermit, l); err != nil {
+				t.Fatalf("seeding the link as an administrator: %v", err)
+			}
+
+			if err := f.s.RetireLink(f.ctx, f.permit, l.ID); !errors.Is(err, domain.ErrForbidden) {
+				t.Fatalf("RetireLink with the A end mine and the B end foreign = %v, want domain.ErrForbidden", err)
+			}
+
+			after, err := f.s.GetLink(f.ctx, l.ID)
+			if err != nil {
+				t.Fatalf("re-reading the link: %v", err)
+			}
+			if after.Lifecycle == domain.LifecycleRetired {
+				t.Error("a refused retire still retired the link")
+			}
+		})
+	}
+}
+
+// TestLinkScopeRetireAEndForeignBEndMine is the mirror: the A end is
+// foreign and only the B end belongs to the caller. A mutant that checked
+// the B end twice (or dropped the A check) would let this retire through.
+func TestLinkScopeRetireAEndForeignBEndMine(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newLinkScopeFixture(t, e)
+			l, err := domain.NewLink(NewID(), f.if2, f.if1)
+			if err != nil {
+				t.Fatalf("building link: %v", err)
+			}
+			if err := f.s.CreateLink(f.ctx, testPermit, l); err != nil {
+				t.Fatalf("seeding the link as an administrator: %v", err)
+			}
+
+			if err := f.s.RetireLink(f.ctx, f.permit, l.ID); !errors.Is(err, domain.ErrForbidden) {
+				t.Fatalf("RetireLink with the A end foreign and the B end mine = %v, want domain.ErrForbidden", err)
+			}
+
+			after, err := f.s.GetLink(f.ctx, l.ID)
+			if err != nil {
+				t.Fatalf("re-reading the link: %v", err)
+			}
+			if after.Lifecycle == domain.LifecycleRetired {
+				t.Error("a refused retire still retired the link")
+			}
+		})
+	}
+}
+
+// TestLinkScopeRetireBothEndsMine is the positive path this task actually
+// delivers -- a project owner unpatching their own cable -- and until this
+// test existed nothing in the suite exercised a successful project-owner
+// retire at all: every green RetireLink call elsewhere used testPermit
+// (an administrator). A mutant that made authorizeLinkSubjects, or the
+// wiring into RetireLink, refuse every project owner unconditionally could
+// have shipped as a silent, permanent 403 with the rest of the suite still
+// green.
+func TestLinkScopeRetireBothEndsMine(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newLinkScopeFixture(t, e)
+			otherOnA1 := mustInterface(t, f.s, f.ctx, f.a1, "eth9")
+			l, err := domain.NewLink(NewID(), f.if1, otherOnA1)
+			if err != nil {
+				t.Fatalf("building link: %v", err)
+			}
+			if err := f.s.CreateLink(f.ctx, testPermit, l); err != nil {
+				t.Fatalf("seeding the link as an administrator: %v", err)
+			}
+			// The create above already wrote its own change_log row against
+			// this same link id, so the assertion below has to be a delta,
+			// not an absolute count.
+			before := len(mustChangesForLink(t, f, l.ID))
+
+			if err := f.s.RetireLink(f.ctx, f.permit, l.ID); err != nil {
+				t.Fatalf("RetireLink with both ends mine = %v, want nil", err)
+			}
+
+			after, err := f.s.GetLink(f.ctx, l.ID)
+			if err != nil {
+				t.Fatalf("re-reading the link: %v", err)
+			}
+			if after.Lifecycle != domain.LifecycleRetired {
+				t.Errorf("lifecycle after an allowed retire = %q, want %q", after.Lifecycle, domain.LifecycleRetired)
+			}
+			gotChanges := len(mustChangesForLink(t, f, l.ID))
+			if gotChanges-before != 1 {
+				t.Errorf("an allowed retire wrote %d change_log rows, want 1", gotChanges-before)
+			}
+		})
+	}
+}
+
+// TestLinkScopeRetireAnAlreadyRetiredForeignLinkStillRefuses pins the
+// authorization-before-early-exit ordering in RetireLink: a link that is
+// ALREADY retired (by an administrator) is still refused, not silently
+// accepted as a no-op, when a project owner who does not cover either end
+// asks to retire it again. This is not closing a disclosure -- reads are
+// universal (docs/rbac-design.md §2), so the ordering reveals nothing a
+// reader could not already see via GetLink -- but it is the behaviour the
+// ordering is meant to guarantee, and worth pinning so a future edit that
+// moves the early exit back above the check is caught here rather than by
+// re-reading the comment.
+func TestLinkScopeRetireAnAlreadyRetiredForeignLinkStillRefuses(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newLinkScopeFixture(t, e)
+			l, err := domain.NewLink(NewID(), f.if2, f.if3)
+			if err != nil {
+				t.Fatalf("building link: %v", err)
+			}
+			if err := f.s.CreateLink(f.ctx, testPermit, l); err != nil {
+				t.Fatalf("seeding the link as an administrator: %v", err)
+			}
+			if err := f.s.RetireLink(f.ctx, testPermit, l.ID); err != nil {
+				t.Fatalf("retiring the link as an administrator: %v", err)
+			}
+
+			if err := f.s.RetireLink(f.ctx, f.permit, l.ID); !errors.Is(err, domain.ErrForbidden) {
+				t.Fatalf("RetireLink on an already-retired link covering neither of the caller's assets = %v, want domain.ErrForbidden, not a silent no-op", err)
+			}
+		})
+	}
+}
+
 // TestLinkScopeAdministrator: an AdministratorPermit covers every row
 // regardless of subject, the same as it does for every other
 // subject-derived type.

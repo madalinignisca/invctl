@@ -364,16 +364,17 @@ func (s *SQLStore) RetireLink(ctx context.Context, p domain.Permit, id string) e
 		return err
 	}
 	// Authorization runs BEFORE the already-retired early exit, deliberately
-	// -- not above it, as this method briefly had it. WP-1.1 item 1 found
-	// the same shape in RetireDependency: once a row is reachable by a
-	// project owner, an early "already retired -> nil" sitting above the
-	// check turns into a three-way oracle over rows the caller does not
-	// own -- nil for "exists, already retired", ErrForbidden for "exists,
-	// not yours", ErrNotFound (from GetLink above) for "no such row" -- and
-	// a caller can use that to map the estate without ever writing
-	// anything. Subjects come from the STORED row, the only one there is
-	// here -- a retire takes no submitted struct for a caller to forge one
-	// from.
+	// -- not above it, as this method briefly had it. This is authorize-
+	// before-act as a default, not a fix for a disclosure: reads are
+	// universal here (docs/rbac-design.md §2), so nil vs ErrForbidden vs
+	// ErrNotFound (from GetLink above) on a link id tells a caller nothing
+	// GetLink or the asset page wouldn't already. What the ordering DOES
+	// buy is real, just smaller than "closes an oracle": it means the
+	// early exit can never accidentally become the only gate a future edit
+	// leaves in place, and it keeps this function's shape consistent with
+	// every other authorize-then-mutate method in this file, at no cost.
+	// Subjects come from the STORED row, the only one there is here -- a
+	// retire takes no submitted struct for a caller to forge one from.
 	linkPermit, err := authorizeLinkSubjects(ctx, s, p, before.AInterfaceID, before.BInterfaceID, id)
 	if err != nil {
 		return err
