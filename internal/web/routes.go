@@ -215,17 +215,30 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	// writeCost gates the money surfaces on BOTH seams: RequireWrite for "may
 	// this session write at all", RequireCostVisibility for "may it see
 	// money". RequireWrite FIRST, always: an Observer must still be refused
-	// with RequireWrite's text, not RequireCostVisibility's, because
-	// rbac_boundary_test.go reads the refusal body to decide which layer
-	// refused a request, and inverting the order reports the wrong layer.
+	// with RequireWrite's text, not RequireCostVisibility's.
 	//
-	// This is not RequireWrite alone because writing a number you are not
-	// allowed to read is a blind write: a project owner or Observer granted
-	// write access to an asset but not app_user.can_see_costs could set an
-	// acquisition price or a support contract value they can never see back.
-	// Administrators always pass CanSeeCosts (see that method's own comment),
-	// so this closes no surface an Administrator could reach before -- there
-	// is no regression to weigh against the fix.
+	// THE CLAIM THAT USED TO SIT HERE -- that rbac_boundary_test.go's
+	// TestAProjectOwnerIsRefusedOnEveryNonProjectLinkableWriteRoute would
+	// catch an inversion by reading the refusal body -- was false, and a WP-1.1
+	// review caught it: that test drives a project owner, who PASSES
+	// RequireWrite, so the body it reads is identical whichever seam runs
+	// first and an inversion sails through it unnoticed. A body assertion only
+	// tells you which seam refused when the caller fails BOTH -- pass one and
+	// the other's message never gets a chance to differ. costs_test.go's
+	// TestCostsAreHiddenFromAnUngrantedObserverAndWritableByAdminsOnly is the
+	// one that actually can: "viewer" is an Observer with no can_see_costs
+	// grant either, so it fails both seams, and it asserts the exact body
+	// ("You have read-only access.\n") -- which only appears if RequireWrite
+	// is the one that runs first. Swap the order and that assertion goes red.
+	//
+	// The order itself is still right, independent of which test proves it:
+	// writing a number you are not allowed to read is a blind write. A
+	// project owner or Observer granted write access to an asset but not
+	// app_user.can_see_costs could set an acquisition price or a support
+	// contract value they can never see back. Administrators always pass
+	// CanSeeCosts (see that method's own comment), so this closes no surface
+	// an Administrator could reach before -- there is no regression to weigh
+	// against the fix.
 	requireCostVisibility := middleware.RequireCostVisibility(authz)
 	writeCost := func(pattern string, h http.HandlerFunc) {
 		mux.Handle(pattern, middleware.RequireAuth(requireWrite(requireCostVisibility(h))))

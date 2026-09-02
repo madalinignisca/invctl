@@ -141,3 +141,26 @@ func TestACustomFieldsRowCarriesAReaderNote(t *testing.T) {
 		}
 	})
 }
+
+// TestEveryCostTableEntityIsInCostEntityTypes makes the redaction list
+// structural instead of remembered. costEntityTypes (this file) and the four
+// costTable values (costs.go) name the same four surfaces, but nothing before
+// this test made that true by construction -- costEntityTypes is a hand-typed
+// map, and it had already gone stale once: WP-1.1's authorization review found
+// only "asset_cost" was ever proven redacted, and deleting "service_cost",
+// "project_cost" or "circuit_cost" from the map left both test suites green.
+// Iterating the real costTable values, rather than a second hand-typed list of
+// entity names, is what closes that: a fifth cost surface added to costs.go
+// without a matching costEntityTypes entry now fails here, on the one property
+// that actually matters -- that its change_log diff gets redacted for a viewer
+// with no can_see_costs grant -- rather than surviving both suites the way
+// three of the four existing ones already did.
+func TestEveryCostTableEntityIsInCostEntityTypes(t *testing.T) {
+	for _, table := range []costTable{costOnAsset, costOnService, costOnProject, costOnCircuit} {
+		if !IsCostEntityType(table.entity) {
+			t.Errorf("costTable %q (SQL table %q) has no costEntityTypes entry -- "+
+				"a change_log diff for it would show its amount_minor to any viewer, "+
+				"grant or no grant", table.entity, table.name)
+		}
+	}
+}
