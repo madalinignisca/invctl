@@ -317,6 +317,81 @@ func fieldNote(dbTag string) string {
 	return ""
 }
 
+// costEntityTypes are the entity types whose diff may carry a money figure.
+var costEntityTypes = map[string]bool{
+	"asset_cost":   true,
+	"service_cost": true,
+	"project_cost": true,
+	"circuit_cost": true,
+}
+
+// IsCostEntityType reports whether a change_log entry for entityType can hold
+// amount_minor, and therefore needs a per-viewer redaction pass before it is
+// shown. See RedactCostAmount for why this is a read-time decision rather
+// than a domain.RedactedFields entry.
+func IsCostEntityType(entityType string) bool {
+	return costEntityTypes[entityType]
+}
+
+// costRedactedFields names the db-tagged fields on a cost row that carry an
+// actual figure. amount_minor only -- kind and period are shape, valid_from
+// and valid_until are dates, and note is free text a person wrote, none of
+// which is the number the grant exists to gate.
+var costRedactedFields = map[string]bool{
+	"amount_minor": true,
+}
+
+// costRedactedPlaceholder replaces the figure. Not blank: a blank cell in a
+// table full of numbers reads as "not set", which is a different fact and one
+// that would misdirect a reader trying to work out whether the row even had a
+// value.
+const costRedactedPlaceholder = "•••"
+
+// costRedactedNote explains the placeholder, the same way fieldNote explains
+// custom_fields -- an unexplained "•••" is exactly the "reads as corruption"
+// support call FieldChange.Note exists to prevent (see its doc comment).
+const costRedactedNote = "Amount hidden — you do not have the cost-visibility grant."
+
+// RedactCostAmount blanks the money field of an already-parsed cost diff for
+// a viewer who lacks CanSeeCosts.
+//
+// RENDER-TIME AND PER-VIEWER, DELIBERATELY, unlike domain.RedactedFields.
+// password_hash and identity.secret_ref are redacted inside diffJSON, at
+// write time, because nobody should ever see them again and the value must
+// never reach the database. A cost figure is the opposite case: an
+// Administrator, and anyone holding the CanSeeCosts grant, MUST still be able
+// to read it, today and in a year. Redacting at write time would destroy that
+// permanently for everybody, which is why this function exists instead of a
+// costEntityTypes entry in domain.RedactedFieldsByEntity.
+//
+// REDACTS THE VALUE, NEVER THE ROW. The entry stays listed and countable --
+// see docs/AUDIT.md's append-only rule and the WP-G4c brief: an audit trail
+// that shows a different set of entries depending on who is reading it is a
+// worse property than one that shows a withheld number for a field it does.
+//
+// Called from exactly the two places that hand a parsed diff to a person:
+// misc.go's changeDetails (the /changes list) and ChangeEntry (the
+// single-entry page). Both call ParseDiff first; this runs after, so it never
+// needs to know the two payload shapes ParseDiff already resolved.
+func RedactCostAmount(detail ChangeDetail) ChangeDetail {
+	if len(detail.Fields) == 0 {
+		return detail
+	}
+	redacted := make([]FieldChange, len(detail.Fields))
+	for i, f := range detail.Fields {
+		if costRedactedFields[f.Field] {
+			if !f.Added {
+				f.Old = costRedactedPlaceholder
+			}
+			f.New = costRedactedPlaceholder
+			f.Note = costRedactedNote
+		}
+		redacted[i] = f
+	}
+	detail.Fields = redacted
+	return detail
+}
+
 func sortedKeys[V any](m map[string]V) []string {
 	keys := make([]string, 0, len(m))
 	for k := range m {

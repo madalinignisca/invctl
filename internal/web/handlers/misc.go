@@ -274,10 +274,11 @@ func (a *App) ChangeLog(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	base := a.base(r, "Change log", "changes")
 	data := changesPage{
-		Base:        a.base(r, "Change log", "changes"),
+		Base:        base,
 		Page:        page,
-		Details:     changeDetails(page.Changes),
+		Details:     changeDetails(page.Changes, base.CanSeeCosts),
 		EntityTypes: store.ChangeEntityTypes(),
 		Filter:      form,
 		Errors:      errors,
@@ -315,10 +316,15 @@ func (a *App) ChangeEntry(w http.ResponseWriter, r *http.Request) {
 		a.handleStoreError(w, r, err)
 		return
 	}
+	base := a.base(r, "Change entry", "changes")
+	detail := store.ParseDiff(entry.Diff)
+	if !base.CanSeeCosts && store.IsCostEntityType(entry.EntityType) {
+		detail = store.RedactCostAmount(detail)
+	}
 	a.Render.Page(w, http.StatusOK, "change_entry", changeEntryPage{
-		Base:      a.base(r, "Change entry", "changes"),
+		Base:      base,
 		Entry:     *entry,
-		Detail:    store.ParseDiff(entry.Diff),
+		Detail:    detail,
 		EntityURL: a.entityURL(r.Context(), entry.EntityType, entry.EntityID),
 	})
 }
@@ -329,10 +335,20 @@ func (a *App) ChangeEntry(w http.ResponseWriter, r *http.Request) {
 // Parsed here rather than in the template because a template cannot report a
 // failure: ParseDiff keeps the raw text when it cannot read a shape, and the
 // screen shows that instead of a blank cell.
-func changeDetails(changes []domain.ChangeLog) map[string]store.ChangeDetail {
+//
+// canSeeCosts is the viewer's grant, not a property of the data, which is why
+// this is decided per request rather than baked into the stored diff: an
+// Administrator and a grant holder read the same entries a stranger to the
+// grant reads, just with the figure visible. See store.RedactCostAmount for
+// why that has to happen here, at render time, rather than at write time.
+func changeDetails(changes []domain.ChangeLog, canSeeCosts bool) map[string]store.ChangeDetail {
 	out := make(map[string]store.ChangeDetail, len(changes))
 	for _, c := range changes {
-		out[c.ID] = store.ParseDiff(c.Diff)
+		detail := store.ParseDiff(c.Diff)
+		if !canSeeCosts && store.IsCostEntityType(c.EntityType) {
+			detail = store.RedactCostAmount(detail)
+		}
+		out[c.ID] = detail
 	}
 	return out
 }
