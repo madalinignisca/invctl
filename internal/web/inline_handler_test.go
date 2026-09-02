@@ -9,6 +9,7 @@
 package web_test
 
 import (
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -30,19 +31,20 @@ import (
 // That defect cannot be caught by a browser test in this suite (there is
 // none here), so the check that fits is a template-level one: no template
 // under web/templates may carry a NEW inline "on*=" event-handler attribute.
-// knownBrokenInlineHandlers is the closed, explicit list of the four that
-// predate this fix and are reported separately for their own scheduling
-// (task brief item 6) -- not fixed here, and not silently forgotten either.
-// Anything not on that list fails the moment it is added.
+// knownBrokenInlineHandlers is the closed, explicit list of the remaining
+// two that predate this fix and are reported separately for their own
+// scheduling (task brief item 6) -- not fixed here, and not silently
+// forgotten either. The other two entries this list used to carry --
+// custom_field_form.html's and tag_form.html's retire-confirmation
+// onclick="return confirm(...)" -- were fixed by replacing the dead-on-CSP
+// inline handler with htmx's own hx-confirm attribute (see task-10), so
+// they are gone from this list, not just from the source. Anything not on
+// this list fails the moment it is added.
 var knownBrokenInlineHandlers = map[string]string{
 	"partials/network.html:85": "onchange -- group picker for a VLAN member form; " +
 		"same CSP defeat as user_row.html's checkbox, reported separately, not fixed here.",
 	"partials/network.html:123": "onchange -- group picker for an uplink form; " +
 		"same CSP defeat as user_row.html's checkbox, reported separately, not fixed here.",
-	"partials/custom_field_form.html:96": "onclick=\"return confirm(...)\" -- retire " +
-		"confirmation; same CSP defeat, reported separately, not fixed here.",
-	"partials/tag_form.html:62": "onclick=\"return confirm(...)\" -- retire " +
-		"confirmation; same CSP defeat, reported separately, not fixed here.",
 }
 
 // inlineHandlerRe matches a genuine HTML event-handler attribute: "on"
@@ -156,4 +158,66 @@ func stripTemplateComments(src string) []string {
 		out.WriteByte(src[i])
 	}
 	return strings.Split(out.String(), "\n")
+}
+
+// TestRetireButtonsUseHXConfirmNotDeadOnclick is task-10's regression guard
+// for the two entries this file's allowlist used to carry and no longer
+// does. TestNoTemplateCarriesAnUnlistedInlineEventHandler already proves the
+// SOURCE contains no onclick="return confirm(...)" -- but a source-text scan
+// cannot prove the replacement actually renders a working control, only
+// that the old one is gone. This renders both real pages through the
+// router, as detail_pages_render_test.go's TestEveryDetailPageRenders does,
+// and requires the retire button carry hx-confirm with the exact wording
+// the task brief pins (the sentence says what SURVIVES retirement, which is
+// the point of the prompt -- CLAUDE.md, task-10 brief). It also re-asserts
+// no on*= attribute reaches the rendered output, belt-and-braces against
+// the source-only scan above.
+func TestRetireButtonsUseHXConfirmNotDeadOnclick(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	h.post("/custom-fields", url.Values{
+		"csrf_token":  {h.csrfToken("/custom-fields")},
+		"entity_type": {"asset"}, "code": {"confirm_check"}, "label": {"Confirm Check"},
+		"kind": {"text"}, "description": {"exercises the retire button's hx-confirm"},
+		"owner_team_id": {h.refs.Teams["platform"]},
+	}, false).Body.Close()
+
+	h.post("/tags", url.Values{
+		"csrf_token":  {h.csrfToken("/tags")},
+		"code":        {"confirm-check"},
+		"label":       {"Confirm Check"},
+		"description": {"exercises the retire button's hx-confirm"},
+	}, false).Body.Close()
+
+	fieldsPage := body(t, h.get("/custom-fields", false))
+	tagsPage := body(t, h.get("/tags", false))
+
+	for _, tc := range []struct {
+		name string
+		page string
+		want string
+	}{
+		{"custom field", fieldsPage, `hx-confirm="Retire this field? Every value it already holds is kept."`},
+		{"tag", tagsPage, `hx-confirm="Retire this tag? Anything already carrying it keeps it."`},
+	} {
+		if !strings.Contains(tc.page, tc.want) {
+			t.Errorf("%s registry does not render %s", tc.name, tc.want)
+		}
+	}
+
+	for _, tc := range []struct {
+		name string
+		page string
+	}{
+		{"custom field", fieldsPage},
+		{"tag", tagsPage},
+	} {
+		for _, line := range stripTemplateComments(tc.page) {
+			if m := inlineHandlerRe.FindStringSubmatch(line); m != nil {
+				t.Errorf("%s registry still renders an inline %s= handler: %s",
+					tc.name, m[1], line)
+			}
+		}
+	}
 }

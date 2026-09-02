@@ -90,11 +90,9 @@
     {{if eq $row.Kind "select"}}
     <a class="btn btn-sm" href="/custom-fields?options={{$row.ID}}">Options</a>
     {{end}}
-    <form method="post" action="/custom-fields/{{$row.ID}}/retire" style="display:inline">
-      <input type="hidden" name="csrf_token" value="{{$p.CSRF}}">
-      <button class="btn btn-sm btn-danger" type="submit"
-              onclick="return confirm('Retire this field? Every value it already holds is kept.')">Retire</button>
-    </form>
+    <button class="btn btn-sm btn-danger" type="button"
+            hx-post="/custom-fields/{{$row.ID}}/retire"
+            hx-confirm="Retire this field? Every value it already holds is kept.">Retire</button>
     {{end}}
   </td>
 </tr>

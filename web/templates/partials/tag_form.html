@@ -56,11 +56,9 @@
   <td style="white-space:nowrap">
     {{if $p.IsAdmin}}
     <a class="btn btn-sm" href="/tags?edit={{$row.ID}}">Edit</a>
-    <form method="post" action="/tags/{{$row.ID}}/retire" style="display:inline">
-      <input type="hidden" name="csrf_token" value="{{$p.CSRF}}">
-      <button class="btn btn-sm btn-danger" type="submit"
-              onclick="return confirm('Retire this tag? Anything already carrying it keeps it.')">Retire</button>
-    </form>
+    <button class="btn btn-sm btn-danger" type="button"
+            hx-post="/tags/{{$row.ID}}/retire"
+            hx-confirm="Retire this tag? Anything already carrying it keeps it.">Retire</button>
     {{end}}
   </td>
 </tr>

@@ -193,6 +193,45 @@ func TestARetiredFieldOffersRestoreAndKeepsItsValues(t *testing.T) {
 	}
 }
 
+// TestRetiringACustomFieldOverHTMXRedirectsAndRetires is task-10's mechanism
+// check: the registry's retire button changed from a native form POST to
+// hx-post, so a passing hx-confirm assertion on the markup alone would not
+// prove retiring itself still works over the new mechanism. This drives
+// POST /custom-fields/{id}/retire with HX-Request set, exactly as the
+// button now submits it, and requires both that the field is actually
+// retired in the store and that render.Redirect's HTMX branch fires
+// (HX-Redirect header and 204, not the 303 a plain form would expect and
+// HTMX will not follow the same way).
+func TestRetiringACustomFieldOverHTMXRedirectsAndRetires(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	create := url.Values{
+		"csrf_token":  {h.csrfToken("/custom-fields")},
+		"entity_type": {"asset"}, "code": {"htmx_retire"}, "label": {"HTMX Retire"},
+		"kind": {"text"}, "description": {"retired over HTMX to prove the mechanism still works"},
+		"owner_team_id": {h.refs.Teams["platform"]},
+	}
+	h.post("/custom-fields", create, false).Body.Close()
+
+	page := body(t, h.get("/custom-fields", false))
+	id := firstFieldIDFor(t, page, "htmx_retire")
+
+	resp := h.post("/custom-fields/"+id+"/retire",
+		url.Values{"csrf_token": {h.csrfToken("/custom-fields")}}, true)
+	resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("retiring over HTMX returned %d, want 204 (render.Redirect's HTMX branch)", resp.StatusCode)
+	}
+	if got := resp.Header.Get("HX-Redirect"); got != "/custom-fields" {
+		t.Fatalf("HX-Redirect header = %q, want /custom-fields", got)
+	}
+	if got := h.lookup(`SELECT COUNT(*) FROM custom_field WHERE id = ? AND retired_at IS NOT NULL`, id); got != "1" {
+		t.Fatalf("field %s was not retired in the store (matching rows = %q)", id, got)
+	}
+}
+
 // TestAStaleOptionsSubmissionIsRefusedWith409 is Ruling W at the HTTP layer:
 // the options editor carries the field's own row_version, and a second save
 // from one token must be refused rather than silently un-retiring or
