@@ -265,7 +265,7 @@
   {{if .Upstream}}
   <div class="scroll-x">
     <table>
-      <thead><tr><th>Provider</th><th>Nature</th><th>What breaks</th><th>Identity</th><th>Verified</th>{{if .IsAdmin}}<th></th>{{end}}</tr></thead>
+      <thead><tr><th>Provider</th><th>Nature</th><th>What breaks</th><th>Identity</th><th>Verified</th>{{if .Upstream.AnyWritable}}<th></th>{{end}}</tr></thead>
       <tbody>
         {{range .Upstream}}{{template "dependency_row" .}}{{end}}
       </tbody>
@@ -306,7 +306,7 @@
   {{if .Downstream}}
   <div class="scroll-x">
     <table>
-      <thead><tr><th>Consumer</th><th>Nature</th><th>What breaks</th><th>Identity</th><th>Verified</th>{{if .IsAdmin}}<th></th>{{end}}</tr></thead>
+      <thead><tr><th>Consumer</th><th>Nature</th><th>What breaks</th><th>Identity</th><th>Verified</th>{{if .Downstream.AnyWritable}}<th></th>{{end}}</tr></thead>
       <tbody>
         {{range .Downstream}}{{template "dependency_row" .}}{{end}}
       </tbody>

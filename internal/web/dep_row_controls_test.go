@@ -244,3 +244,79 @@ func TestDependencyRowSecretRefStaysAdministratorOnly(t *testing.T) {
 		})
 	}
 }
+
+// upstreamTableColumns returns the number of <th> cells in the upstream
+// dependency table's header and the number of <td> cells in its first data
+// row, for a rendered service page.
+//
+// Crude on purpose: a full HTML parse would be more precise and would also
+// hide the thing being measured behind a library. What matters here is only
+// that the two counts agree.
+func upstreamTableColumns(t *testing.T, page string) (headerCells, rowCells int) {
+	t.Helper()
+	const marker = "<th>Provider</th>"
+	i := strings.Index(page, marker)
+	if i < 0 {
+		t.Fatalf("no upstream dependency table on the page -- the fixture must "+
+			"seed one, or this test measures nothing:\n%.400s", page[:min(len(page), 400)])
+	}
+	head := page[i:]
+	endHead := strings.Index(head, "</thead>")
+	if endHead < 0 {
+		t.Fatal("upstream table header never closes")
+	}
+	headerCells = strings.Count(head[:endHead], "<th")
+
+	body := head[endHead:]
+	startRow := strings.Index(body, "<tr")
+	endRow := strings.Index(body, "</tr>")
+	if startRow < 0 || endRow < 0 || endRow < startRow {
+		t.Fatal("upstream table has a header but no data row -- fixture problem")
+	}
+	rowCells = strings.Count(body[startRow:endRow], "<td")
+	return headerCells, rowCells
+}
+
+// TestDependencyTableHeaderMatchesItsRows pins the column count.
+//
+// WRITTEN BECAUSE IT DID NOT. Widening the row's actions cell to the two-ended
+// CanWrite left the header still gated on IsAdmin, so a project owner who owns
+// both ends of an edge -- exactly the person that widening was for -- got a row
+// with one more cell than its header. Every existing assertion passed: they all
+// searched for a control's presence or absence, and none counted anything. The
+// browser pass found it by looking at the table.
+//
+// The header now asks depRowList.AnyWritable, which is per-table rather than
+// per-page because a dependency's write permission is two-ended and two rows in
+// one table can legitimately differ.
+func TestDependencyTableHeaderMatchesItsRows(t *testing.T) {
+	for _, eng := range boundaryEngines(t) {
+		t.Run(eng.name, func(t *testing.T) {
+			h, fx := setupBoundary(t, eng)
+			setupDepRowFixture(t, context.Background(), h, fx)
+
+			check := func(who string) {
+				page := body(t, h.get("/services/"+fx.serviceIn, false))
+				header, row := upstreamTableColumns(t, page)
+				if header != row {
+					t.Errorf("%s sees %d header cells and %d row cells in the upstream "+
+						"dependency table -- misaligned by %d", who, header, row, row-header)
+				}
+			}
+
+			h.login(boundaryAdminUser, boundaryAdminPassword)
+			check("an Administrator")
+			h.logout()
+
+			// The case that was broken: the row renders its actions cell for
+			// this person and the header did not.
+			h.login(boundaryOwnerUser, boundaryOwnerPassword)
+			check("a project owner owning both ends")
+			h.logout()
+
+			h.login(boundaryObserverUser, boundaryObserverPass)
+			check("an Observer owning nothing")
+			h.logout()
+		})
+	}
+}

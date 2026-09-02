@@ -710,6 +710,29 @@ type depRowData struct {
 // authorizeDependencySubjects. isAdmin gates SecretRef alone: that stays
 // deliberately narrower than CanWrite (see depRowData's doc comment), so a
 // project owner who now sees the controls still never sees the secret ref.
+// depRowList is one rendered dependency table's rows.
+//
+// AnyWritable exists for a single reason: the trailing actions column's <th>
+// must appear exactly when some row renders a trailing <td>, and CanWrite is
+// now PER ROW. A dependency's write permission is two-ended -- it depends on
+// the consumer service AND the provider's owning service -- so two rows in
+// the same table can legitimately differ, and no page-level flag can stand in
+// for them. The header used .IsAdmin while the rows moved to .CanWrite, which
+// left the table one column short for precisely the people this change set
+// out to serve: a project owner who owns both ends of some edge but is not an
+// administrator. Found by the E2E pass, not by any assertion.
+type depRowList []depRowData
+
+// AnyWritable reports whether any row will render its actions cell.
+func (rows depRowList) AnyWritable() bool {
+	for _, r := range rows {
+		if r.CanWrite {
+			return true
+		}
+	}
+	return false
+}
+
 func depRows(deps []store.DependencyRow, classes map[string][]string, direction, csrf string, isAdmin bool, covers func(entityType, id string) bool) []depRowData {
 	out := make([]depRowData, len(deps))
 	for i := range deps {

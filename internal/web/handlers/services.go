@@ -201,8 +201,8 @@ type serviceDetailPage struct {
 	Instances    []store.InstanceRow
 	Endpoints    []store.EndpointRow
 	Routes       []store.RouteRow
-	Upstream     []depRowData
-	Downstream   []depRowData
+	Upstream     depRowList
+	Downstream   depRowList
 	// InstanceHealth is what the estate reports about each placement, keyed by
 	// instance id, with staleness applied and any override alongside rather
 	// than merged in. A service has no health of its own -- only the places it
