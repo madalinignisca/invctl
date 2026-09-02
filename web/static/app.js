@@ -694,3 +694,49 @@ document.addEventListener('change', (event) => {
     event.target.form.requestSubmit();
   }
 });
+
+// Group-picker forms (data-action-template), CSP-safe.
+//
+// network.html's "Add a group member" and "Declare an uplink" forms render
+// pointed at the FIRST forwarder group in the list ({{(index .Groups 0).ID}}
+// in the form's own action and hx-post), because the group is part of the
+// URL path (POST /network/groups/{id}/members|uplinks) and the template has
+// to pick something before the operator has picked anything. The <select>
+// used to carry onchange="this.form.action='/network/groups/'+this.value+
+// '/members'; this.form.setAttribute('hx-post', this.form.action)" to
+// rewrite both once the operator chose -- same CSP defeat as
+// data-submit-on-change above (script-src 'self', no unsafe-inline): the
+// browser dropped the attribute silently, so the rewrite never ran, the
+// form kept posting to the first group no matter what was selected, and the
+// handler wrote the member (or uplink) into that wrong group while
+// reporting success. A wrong-group write that told nobody (task-11,
+// 2026-09-02 group-a-1-1 round).
+//
+// This does not have to be the ONLY defence -- reach.go's
+// groupIDFromRequest refuses server-side if the path and the submitted
+// group_id ever disagree, which is what happens if this listener is ever
+// blocked or fails to run again. But fixing the client side is still the
+// point: without it, every single submission would trip that refusal.
+//
+// data-action-template carries the URL with a literal "{id}" placeholder
+// rather than a prefix/suffix pair, so the group id can move anywhere in
+// the path (it's a prefix here, but a future route need not keep it that
+// way) without this listener caring where.
+//
+// Delegated on document for the same reason as data-submit-on-change: these
+// panels are swapped by HTMX (hx-target="#net-member-form" / "#net-uplink-
+// form", hx-swap="outerHTML"), so a per-element binding would need
+// re-attaching after every swap.
+document.addEventListener('change', (event) => {
+  if (!(event.target.matches && event.target.matches('[data-action-template]'))) {
+    return;
+  }
+  const form = event.target.form;
+  if (!form) {
+    return;
+  }
+  const template = event.target.dataset.actionTemplate;
+  const url = template.replace('{id}', encodeURIComponent(event.target.value));
+  form.setAttribute('action', url);
+  form.setAttribute('hx-post', url);
+});

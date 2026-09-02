@@ -17,6 +17,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/madalinignisca/invctl/internal/domain"
 )
 
 // Item 6 (2026-09-02 group-a-1-1 round): user_row.html's "sees costs"
@@ -30,22 +32,23 @@ import (
 //
 // That defect cannot be caught by a browser test in this suite (there is
 // none here), so the check that fits is a template-level one: no template
-// under web/templates may carry a NEW inline "on*=" event-handler attribute.
-// knownBrokenInlineHandlers is the closed, explicit list of the remaining
-// two that predate this fix and are reported separately for their own
-// scheduling (task brief item 6) -- not fixed here, and not silently
-// forgotten either. The other two entries this list used to carry --
-// custom_field_form.html's and tag_form.html's retire-confirmation
-// onclick="return confirm(...)" -- were fixed by replacing the dead-on-CSP
-// inline handler with htmx's own hx-confirm attribute (see task-10), so
-// they are gone from this list, not just from the source. Anything not on
-// this list fails the moment it is added.
-var knownBrokenInlineHandlers = map[string]string{
-	"partials/network.html:85": "onchange -- group picker for a VLAN member form; " +
-		"same CSP defeat as user_row.html's checkbox, reported separately, not fixed here.",
-	"partials/network.html:123": "onchange -- group picker for an uplink form; " +
-		"same CSP defeat as user_row.html's checkbox, reported separately, not fixed here.",
-}
+// under web/templates may carry an inline "on*=" event-handler attribute --
+// full stop, not "none new". knownBrokenInlineHandlers used to carry a
+// closed, explicit allowlist of cases fixed on their own schedule rather
+// than in the commit that found them: custom_field_form.html's and
+// tag_form.html's retire-confirmation onclick="return confirm(...)" (fixed
+// by task-10, replaced with htmx's own hx-confirm), then
+// network.html:85/123's group-picker onchange= for the member and uplink
+// forms (fixed by task-11, replaced with app.js's delegated
+// data-action-template listener -- see reach.go's groupIDFromRequest for
+// the server-side half, which refuses a write if the two ever disagree).
+// With that last pair gone, the allowlist is empty, and it stays that way:
+// every inline handler this app renders is now CSP-dead by construction,
+// and any template that adds one back fails this test on the spot, with no
+// "report it separately" escape hatch left to reach for. The map is kept,
+// empty, as the obvious home for a future genuinely-scheduled exception --
+// but adding an entry to it is a decision to make explicitly, not a default.
+var knownBrokenInlineHandlers = map[string]string{}
 
 // inlineHandlerRe matches a genuine HTML event-handler attribute: "on"
 // followed by lowercase letters and "=", with no letter, digit, underscore
@@ -106,9 +109,10 @@ func TestNoTemplateCarriesAnUnlistedInlineEventHandler(t *testing.T) {
 		t.Errorf("template(s) carry an inline event-handler attribute this app's CSP "+
 			"(script-src 'self', no unsafe-inline) silently drops -- the handler will "+
 			"never run and nothing will say why. Add a data-* attribute and a delegated "+
-			"listener in app.js instead (see app.js's data-submit-on-change for the "+
-			"pattern), or if this is one of the four known-and-scheduled cases, add it "+
-			"to knownBrokenInlineHandlers with a comment: %v", unlisted)
+			"listener in app.js instead (see app.js's data-submit-on-change and "+
+			"data-action-template for the pattern). knownBrokenInlineHandlers is "+
+			"intentionally empty; only add to it for a genuinely scheduled, explicitly "+
+			"agreed exception, with a comment explaining why it isn't fixed now: %v", unlisted)
 	}
 
 	var stale []string
@@ -218,6 +222,39 @@ func TestRetireButtonsUseHXConfirmNotDeadOnclick(t *testing.T) {
 				t.Errorf("%s registry still renders an inline %s= handler: %s",
 					tc.name, m[1], line)
 			}
+		}
+	}
+}
+
+// TestNetworkGroupPickersUseDataActionTemplateNotDeadOnchange is task-11's
+// regression guard for the pair this file's allowlist used to carry --
+// network.html:85/123's group pickers on the "add member" and "declare
+// uplink" forms. TestNoTemplateCarriesAnUnlistedInlineEventHandler already
+// proves the SOURCE contains no onchange=; this renders the real /network
+// page through the router (at least one group must exist for either form to
+// render at all, per network.html's own {{if .Groups}} guard) and requires
+// both selects carry data-action-template with the {id} placeholder app.js's
+// delegated listener substitutes -- the thing that actually replaces the
+// dead inline rewrite, not just the absence of the old one.
+func TestNetworkGroupPickersUseDataActionTemplateNotDeadOnchange(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+	mustNetGroupWeb(t, h, "picker-guard-group", domain.NetRoleCore, domain.AvailStandalone)
+
+	page := body(t, h.get("/network", false))
+
+	for _, want := range []string{
+		`id="nm-group" name="group_id" data-action-template="/network/groups/{id}/members"`,
+		`id="nu-group" name="group_id" data-action-template="/network/groups/{id}/uplinks"`,
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("/network does not render %s", want)
+		}
+	}
+
+	for _, line := range stripTemplateComments(page) {
+		if m := inlineHandlerRe.FindStringSubmatch(line); m != nil {
+			t.Errorf("/network still renders an inline %s= handler: %s", m[1], line)
 		}
 	}
 }
