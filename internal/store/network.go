@@ -257,15 +257,66 @@ func (s *SQLStore) UpdateInterface(ctx context.Context, p domain.Permit, i *doma
 	})
 }
 
+// authorizeLinkSubjects derives a link's TWO subjects -- the asset each
+// cabled interface belongs to -- and requires the caller's real permit to
+// cover BOTH before the write is allowed. Same two-ended shape
+// authorizeDependencySubjects (deps.go) already proved for dependency:
+// checking only the A end would let a project owner cable their own asset's
+// port to ANY interface in the estate, including one on an asset they do
+// not own.
+//
+// q is a dbGetter (deps.go) rather than *SQLStore directly for the same
+// reason resolveProviderService takes one: CreateLink mints this permit
+// BEFORE opening a transaction (writeSerializable's COUNT invariant needs
+// the permit to already be scoped when the transaction starts), and
+// RetireLink does the same, so both resolutions run against s, never a tx.
+//
+// ACCEPTED TOCTOU: an interface could in principle be reparented to a
+// different asset between this resolution and the transaction the caller
+// opens next. The window is narrow (one query round trip), reparenting a
+// live interface is not a supported operation on the path that exists
+// today (UpdateInterface explicitly refuses to move asset_id -- see its own
+// comment above), and the cost of closing it is folding this resolution
+// inside writeSerializable itself, which would mean minting the permit from
+// inside the transaction it is meant to gate. Left as a comment rather than
+// closed silently, per the brief.
+func authorizeLinkSubjects(ctx context.Context, q dbGetter, p domain.Permit,
+	aInterfaceID, bInterfaceID, linkID string,
+) (domain.Permit, error) {
+	var aAssetID, bAssetID string
+	if err := q.get(ctx, &aAssetID, `SELECT asset_id FROM interface WHERE id = ?`, aInterfaceID); err != nil {
+		return nil, fmt.Errorf("resolving link %s's A-end asset: %w", linkID, err)
+	}
+	if err := q.get(ctx, &bAssetID, `SELECT asset_id FROM interface WHERE id = ?`, bInterfaceID); err != nil {
+		return nil, fmt.Errorf("resolving link %s's B-end asset: %w", linkID, err)
+	}
+	if !p.Covers("asset", aAssetID) {
+		return nil, fmt.Errorf("cabling link %s at A-end asset %s: %w", linkID, aAssetID, domain.ErrForbidden)
+	}
+	if !p.Covers("asset", bAssetID) {
+		return nil, fmt.Errorf("cabling link %s at B-end asset %s: %w", linkID, bAssetID, domain.ErrForbidden)
+	}
+	return domain.ScopedPermit(p.Actor(), nil, domain.ScopedEntities{
+		"link": {linkID: true},
+	}), nil
+}
+
 // CreateLink cables two interfaces together.
 func (s *SQLStore) CreateLink(ctx context.Context, p domain.Permit, l *domain.Link) error {
 	if l.Lifecycle == "" {
 		l.Lifecycle = domain.LifecycleActive
 	}
+	// Both subjects come from the SUBMITTED struct, by necessity: the row
+	// does not exist yet, and l.AInterfaceID/BInterfaceID are exactly what
+	// the caller is asserting they may cable together.
+	linkPermit, err := authorizeLinkSubjects(ctx, s, p, l.AInterfaceID, l.BInterfaceID, l.ID)
+	if err != nil {
+		return err
+	}
 	// Serializable: the COUNT below asserts an invariant this transaction is
 	// about to break, and at read-committed two concurrent patches both see an
 	// unpatched port and both commit. See writeSerializable.
-	return s.writeSerializable(ctx, p, func(t *tx) error {
+	return s.writeSerializable(ctx, linkPermit, func(t *tx) error {
 		// A port has one active cable. Catching the second one here gives a
 		// usable error instead of a silently duplicated topology. A retired
 		// link does not count -- unpatching a port is exactly what frees it up
@@ -312,10 +363,26 @@ func (s *SQLStore) RetireLink(ctx context.Context, p domain.Permit, id string) e
 	if err != nil {
 		return err
 	}
+	// Authorization runs BEFORE the already-retired early exit, deliberately
+	// -- not above it, as this method briefly had it. This is authorize-
+	// before-act as a default, not a fix for a disclosure: reads are
+	// universal here (docs/rbac-design.md §2), so nil vs ErrForbidden vs
+	// ErrNotFound (from GetLink above) on a link id tells a caller nothing
+	// GetLink or the asset page wouldn't already. What the ordering DOES
+	// buy is real, just smaller than "closes an oracle": it means the
+	// early exit can never accidentally become the only gate a future edit
+	// leaves in place, and it keeps this function's shape consistent with
+	// every other authorize-then-mutate method in this file, at no cost.
+	// Subjects come from the STORED row, the only one there is here -- a
+	// retire takes no submitted struct for a caller to forge one from.
+	linkPermit, err := authorizeLinkSubjects(ctx, s, p, before.AInterfaceID, before.BInterfaceID, id)
+	if err != nil {
+		return err
+	}
 	if before.Lifecycle == domain.LifecycleRetired {
 		return nil
 	}
-	return s.write(ctx, p, func(t *tx) error {
+	return s.write(ctx, linkPermit, func(t *tx) error {
 		if _, err := t.exec(ctx, `UPDATE link SET lifecycle = ? WHERE id = ?`,
 			domain.LifecycleRetired, id); err != nil {
 			return translateWriteErr(err, "retiring link")

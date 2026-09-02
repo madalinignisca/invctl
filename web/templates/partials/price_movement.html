@@ -9,16 +9,22 @@
 
   How a price moved (WP-J2).
 
-  Expects: Movement ([]store.PriceSeries).
+  Expects: Movement ([]store.PriceSeries), CanSeeCosts (bool, from Base).
 
   THE REAL FIGURE IS SHOWN ONLY WHEN THE SERIES COVERS THE SPAN. A missing year
   counts as zero inflation, which understates what money did and so flatters the
   supplier -- the wrong way to be wrong on a page whose output is an argument
   with that supplier. Where a year is missing the panel names it and asks for it
   rather than printing a number.
+
+  GATED BEHIND CanSeeCosts, like every other money panel (see cost_report.html
+  and costs.html). This panel is every bit of money -- five money calls and,
+  until now, zero mentions of the grant -- so the handler must not even fetch
+  the series for a viewer who cannot see it; see assets.go's PriceMovementForAsset
+  call and circuits.go's PriceMovementForCircuit call.
 */}}
 {{define "price_movement_panel"}}
-{{if .Movement}}
+{{if and .CanSeeCosts .Movement}}
 <div class="panel">
   <div class="panel-head">
     <h2>How the price moved</h2>
@@ -27,6 +33,11 @@
   <div class="panel-body">
     {{range .Movement}}
     {{if .Moved}}
+    {{/* Item 3 marker (see asset_detail.html's comment): fires only where a
+         series actually moved, so a fixture with Movement but nothing Moved
+         still fails the admin positive control instead of passing on an
+         inert claim. */}}
+    <span data-money-marker="partials/price_movement.html" hidden></span>
     <div style="margin-bottom:18px">
       <div class="stat-row">
         <div class="stat">

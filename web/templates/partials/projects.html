@@ -211,12 +211,17 @@
        readable once the reader knows what it is a total OF. */}}
   {{template "project_cost_summary" .}}
 
+  {{/* project_cost is ScopeTopology, never project-owner-writable (role.go:
+       "ONLY asset_cost moves here -- service_cost, project_cost and
+       circuit_cost stay ScopeTopology... deliberately"), so this panel is
+       gated on .IsAdmin like its circuit/service siblings, not the
+       page-wide .CanWrite a project owner now holds. */}}
   {{template "cost_panel" dict
       "Action" (printf "/projects/%s/costs" .Project.ID) "Slug" "project"
       "Return" (printf "/projects/%s" .Project.ID) "EditID" .EditRow "RepriceID" .RepriceRow
       "Costs" .CostLines "Totals" .Costs.Direct
       "Kinds" .CostKinds "Periods" .CostPeriods
-      "CSRF" .CSRF "CanWrite" .CanWrite "CanSeeCosts" .CanSeeCosts
+      "CSRF" .CSRF "CanWrite" .IsAdmin "CanSeeCosts" .CanSeeCosts
     "Providers" .Providers
       "Heading" "Costs attached to the project itself"
       "Note" "SaaS, retainers, domains — the money that belongs to no box and no service."}}

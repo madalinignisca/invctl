@@ -534,6 +534,220 @@ func TestSavedViewCreateValidationFailureRerendersTheMenuAt422(t *testing.T) {
 	}
 }
 
+// --------------------------------------------------------------------------
+// Task 5: the saved-view rename control (POST /views/{id}/rename).
+//
+// The store side (internal/store.UpdateSavedView, authorizeSavedViewOwner)
+// is already covered at internal/store/savedviews_test.go -- these drive the
+// real router, the way TestSavedViewUpdateRefusesSomebodyElsesView and
+// TestSavedViewUpdateIgnoresASubmittedEntity did for the now-removed generic
+// update route (see the comment a few tests above), because the property
+// worth pinning here is what a caller reaches through the actual HTTP
+// surface, not what the store function does in isolation.
+
+// TestSavedViewRenameOwnViewSucceeds is the positive case every refusal test
+// below needs alongside it: a rename that SHOULD work must actually work,
+// or a bug that refuses everyone would pass every negative test in this file
+// by accident.
+func TestSavedViewRenameOwnViewSucceeds(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	resp := h.post("/views", url.Values{
+		"csrf_token": {h.csrfToken("/assets")},
+		"entity":     {"asset"},
+		"name":       {"Rename me"},
+		"kind":       {"server"},
+	}, false)
+	resp.Body.Close()
+	viewID := h.lookup(`SELECT id FROM saved_view WHERE name = ?`, "Rename me")
+	if viewID == "" {
+		t.Fatal("fixture view was not created")
+	}
+	changeLogBefore := h.count(`SELECT COUNT(*) FROM change_log WHERE entity_type = 'saved_view' AND entity_id = ? AND action = 'update'`, viewID)
+
+	resp = h.post("/views/"+viewID+"/rename", url.Values{
+		"csrf_token": {h.csrfToken("/assets")},
+		"name":       {"Renamed"},
+	}, false)
+	resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		t.Fatalf("renaming an own view: status = %d, want a redirect", resp.StatusCode)
+	}
+
+	name := h.lookup(`SELECT name FROM saved_view WHERE id = ?`, viewID)
+	if name != "Renamed" {
+		t.Fatalf("name = %q, want %q", name, "Renamed")
+	}
+	// A rename is a mutation of declared state (CLAUDE.md's "every mutation
+	// of declared state writes a change_log row in the same transaction"),
+	// so it must leave a real row behind, not merely change the column.
+	changeLogAfter := h.count(`SELECT COUNT(*) FROM change_log WHERE entity_type = 'saved_view' AND entity_id = ? AND action = 'update'`, viewID)
+	if changeLogAfter != changeLogBefore+1 {
+		t.Fatalf("change_log 'update' rows for %s = %d, want %d (one more than before the rename)",
+			viewID, changeLogAfter, changeLogBefore+1)
+	}
+}
+
+// TestSavedViewRenameWithABlankNameIs422AndLeavesTheNameUnchanged pins the
+// package-wide rule (CLAUDE.md, "HTTP and HTMX conventions"): a validation
+// failure re-renders the form partial and answers 422, never a 200 with the
+// mistake buried in the body -- and, distinctly, the row itself must not
+// have moved.
+func TestSavedViewRenameWithABlankNameIs422AndLeavesTheNameUnchanged(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	resp := h.post("/views", url.Values{
+		"csrf_token": {h.csrfToken("/assets")},
+		"entity":     {"asset"},
+		"name":       {"Keep me"},
+		"kind":       {"server"},
+	}, false)
+	resp.Body.Close()
+	viewID := h.lookup(`SELECT id FROM saved_view WHERE name = ?`, "Keep me")
+
+	resp = h.post("/views/"+viewID+"/rename", url.Values{
+		"csrf_token": {h.csrfToken("/assets")},
+		"name":       {""}, // THE FAILURE: a blank name
+	}, true)
+	b := body(t, resp)
+
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusUnprocessableEntity)
+	}
+	if strings.Contains(b, "That request was not valid.") {
+		t.Fatalf("body is handleStoreError's bare text, not the re-rendered menu partial: %s", b)
+	}
+	if !strings.Contains(b, `id="saved-views-asset"`) {
+		t.Fatalf("body is not the re-rendered saved_views partial: %s", b)
+	}
+	name := h.lookup(`SELECT name FROM saved_view WHERE id = ?`, viewID)
+	if name != "Keep me" {
+		t.Fatalf("name = %q, want unchanged %q", name, "Keep me")
+	}
+}
+
+// TestSavedViewRenameRefusesAnotherPersonsView is the ordinary ownership
+// refusal: an Observer, who owns nothing here, tries to rename the
+// Administrator's view.
+func TestSavedViewRenameRefusesAnotherPersonsView(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+	resp := h.post("/views", url.Values{
+		"csrf_token": {h.csrfToken("/assets")},
+		"entity":     {"asset"},
+		"name":       {"Admin's view (rename)"},
+		"kind":       {"server"},
+	}, false)
+	resp.Body.Close()
+	viewID := h.lookup(`SELECT id FROM saved_view WHERE name = ?`, "Admin's view (rename)")
+
+	h2 := secondClientOn(t, h)
+	h2.login("viewer", "viewer-password")
+
+	resp = h2.post("/views/"+viewID+"/rename", url.Values{
+		"csrf_token": {h2.csrfToken("/assets")},
+		"name":       {"Stolen"},
+	}, false)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("an Observer renaming another person's view: status = %d, want 403", resp.StatusCode)
+	}
+	name := h.lookup(`SELECT name FROM saved_view WHERE id = ?`, viewID)
+	if name != "Admin's view (rename)" {
+		t.Fatalf("name = %q; another person's view was renamed despite the 403", name)
+	}
+}
+
+// TestSavedViewRenameByAnAdministratorOnAnotherPersonsViewIsForbidden is the
+// case the brief calls out by name: authorizeSavedViewOwner has NO
+// Administrator exception, deliberately (internal/store/savedviews.go's own
+// comment) -- an AdministratorPermit Covers everything, so without this
+// check it would sail straight through tx.log. This is the test that would
+// go quietly green if a future contributor "helpfully" added one.
+func TestSavedViewRenameByAnAdministratorOnAnotherPersonsViewIsForbidden(t *testing.T) {
+	h := newHarness(t)
+	h.login("viewer", "viewer-password")
+	resp := h.post("/views", url.Values{
+		"csrf_token": {h.csrfToken("/assets")},
+		"entity":     {"asset"},
+		"name":       {"Viewer's view (rename)"},
+		"kind":       {"server"},
+	}, false)
+	resp.Body.Close()
+	viewID := h.lookup(`SELECT id FROM saved_view WHERE name = ?`, "Viewer's view (rename)")
+
+	h2 := secondClientOn(t, h)
+	h2.login("admin", "admin-password")
+
+	resp = h2.post("/views/"+viewID+"/rename", url.Values{
+		"csrf_token": {h2.csrfToken("/assets")},
+		"name":       {"Seized by admin"},
+	}, false)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("an Administrator renaming another person's view: status = %d, want 403 -- "+
+			"authorizeSavedViewOwner must have NO Administrator exception", resp.StatusCode)
+	}
+	name := h.lookup(`SELECT name FROM saved_view WHERE id = ?`, viewID)
+	if name != "Viewer's view (rename)" {
+		t.Fatalf("name = %q; an Administrator renamed another person's view despite the 403", name)
+	}
+}
+
+// TestSavedViewRenamePostedEntityAndParamsAreIgnored pins the specific bug
+// this task's brief calls out: the removed generic update handler let a
+// posted `entity` value select which allowlist gates `params`
+// (savedViewParamsFrom), and params IS persisted, so a form field that
+// should only ever affect what gets VALIDATED was able to change what gets
+// STORED. SavedViewRename never calls savedViewParamsFrom at all -- this
+// asserts the observable consequence: posting entity=service (and a
+// service-shaped filter) against an asset view changes only the name.
+func TestSavedViewRenamePostedEntityAndParamsAreIgnored(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	resp := h.post("/views", url.Values{
+		"csrf_token": {h.csrfToken("/assets")},
+		"entity":     {"asset"},
+		"name":       {"Params guard"},
+		"kind":       {"server"},
+	}, false)
+	resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		t.Fatalf("creating the fixture view: status = %d", resp.StatusCode)
+	}
+	viewID := h.lookup(`SELECT id FROM saved_view WHERE name = ?`, "Params guard")
+	paramsBefore := h.lookup(`SELECT params FROM saved_view WHERE id = ?`, viewID)
+
+	resp = h.post("/views/"+viewID+"/rename", url.Values{
+		"csrf_token": {h.csrfToken("/assets")},
+		"name":       {"Params guard renamed"},
+		"entity":     {"service"}, // THE ATTACK: not the entity this view was created with
+		"kind":       {"http"},    // a service-shaped filter value
+		"tier":       {"1"},       // service-only key, not in the asset allowlist at all
+	}, false)
+	resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		t.Fatalf("renaming with a posted entity: status = %d, want a redirect", resp.StatusCode)
+	}
+
+	name := h.lookup(`SELECT name FROM saved_view WHERE id = ?`, viewID)
+	if name != "Params guard renamed" {
+		t.Fatalf("name = %q, want %q -- the rename itself should still have applied", name, "Params guard renamed")
+	}
+	entity := h.lookup(`SELECT entity FROM saved_view WHERE id = ?`, viewID)
+	if entity != domain.SavedViewAsset {
+		t.Fatalf("entity = %q, want %q -- a posted `entity` field must never change what a saved view is stored against",
+			entity, domain.SavedViewAsset)
+	}
+	paramsAfter := h.lookup(`SELECT params FROM saved_view WHERE id = ?`, viewID)
+	if paramsAfter != paramsBefore {
+		t.Fatalf("params changed from %q to %q -- a rename must not touch params at all", paramsBefore, paramsAfter)
+	}
+}
+
 // TestAssetListEmptyResultStillShowsViewsAndColumnsMenus pins the fix for a
 // FAIL the code review caught: both menus lived inside {{if .Assets}} in
 // asset_table.html, so a filter matching nothing hid the Views button, the
@@ -597,5 +811,107 @@ func TestServiceListEmptyResultStillShowsViewsAndColumnsMenus(t *testing.T) {
 	}
 	if !strings.Contains(b, `data-table-key="service"`) {
 		t.Fatalf("Columns picker is missing from an empty-result fragment: %s", b)
+	}
+}
+
+// --------------------------------------------------------------------------
+// WP-1.1 Task 4d hardening.
+
+// TestAnObserverCanRenameTheirOwnSavedView is item 5: the rename route sits
+// in the "self" bucket (routes.go), not "write" -- an Observer with no
+// can_see_costs and no write grant can still create a saved view and rename
+// it, because a saved view is that person's own shortcut, not estate state
+// (docs/AUDIT.md rule 16's reasoning for the same route's OWN deletion, ScrubUser's
+// saved_view prune). Nothing before this test pinned WHY the route sits on
+// "self" rather than "write" -- moving it to "write" leaves every rename
+// test in this file green (they all either log in as admin or expect a
+// 403/422 that "write" would still produce for the wrong reason) and only
+// the route-inventory snapshot would notice. This is the positive path that
+// actually depends on "self": it fails the moment the route moves to
+// "write", because "viewer" carries no write grant at all.
+func TestAnObserverCanRenameTheirOwnSavedView(t *testing.T) {
+	h := newHarness(t)
+	h.login("viewer", "viewer-password")
+
+	resp := h.post("/views", url.Values{
+		"csrf_token": {h.csrfToken("/assets")},
+		"entity":     {"asset"},
+		"name":       {"Observer's own view"},
+		"kind":       {"server"},
+	}, false)
+	resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		t.Fatalf("an Observer creating their own saved view: status = %d, want a redirect",
+			resp.StatusCode)
+	}
+	viewID := h.lookup(`SELECT id FROM saved_view WHERE name = ?`, "Observer's own view")
+	if viewID == "" {
+		t.Fatal("fixture view was not created")
+	}
+
+	resp = h.post("/views/"+viewID+"/rename", url.Values{
+		"csrf_token": {h.csrfToken("/assets")},
+		"name":       {"Observer renamed it"},
+	}, false)
+	resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		t.Fatalf("an Observer renaming their own saved view: status = %d, want a redirect "+
+			"-- the rename route must stay in the \"self\" bucket, not \"write\"", resp.StatusCode)
+	}
+	name := h.lookup(`SELECT name FROM saved_view WHERE id = ?`, viewID)
+	if name != "Observer renamed it" {
+		t.Fatalf("name = %q, want %q", name, "Observer renamed it")
+	}
+}
+
+// TestSavedViewRenameValidationFailureKeepsTheCurrentFilters is item 6: the
+// rename twin of TestSavedViewCreateValidationFailureRerendersTheMenuAt422.
+// SavedViewRename's 422 path used to call renderSavedViewsInvalid with a
+// hard-coded nil for currentFilters, so the re-rendered menu's "Save this
+// view" form carried no hidden filter inputs at all -- a save attempted from
+// that state would silently store a FILTERLESS view, the exact failure mode
+// the create-path test above already pins for the create route. Posted with
+// HX-Request true, the way the rename form's own hx-post actually submits
+// it (see saved_views.html), and with the same filter (kind=server) already
+// applied on the list page the operator is looking at -- carried into this
+// request the way saved_views.html's rename form now carries it (its own
+// comment explains why the rename form needs it at all, despite
+// SavedViewRename never reading a filter field to decide anything).
+func TestSavedViewRenameValidationFailureKeepsTheCurrentFilters(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	resp := h.post("/views", url.Values{
+		"csrf_token": {h.csrfToken("/assets")},
+		"entity":     {"asset"},
+		"name":       {"Rename me with filters"},
+		"kind":       {"server"},
+	}, false)
+	resp.Body.Close()
+	viewID := h.lookup(`SELECT id FROM saved_view WHERE name = ?`, "Rename me with filters")
+	if viewID == "" {
+		t.Fatal("fixture view was not created")
+	}
+
+	resp = h.post("/views/"+viewID+"/rename", url.Values{
+		"csrf_token": {h.csrfToken("/assets")},
+		"name":       {""}, // THE FAILURE: a blank name
+		"kind":       {"server"},
+	}, true)
+	b := body(t, resp)
+
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusUnprocessableEntity)
+	}
+	if !strings.Contains(b, `id="saved-views-asset"`) {
+		t.Fatalf("body is not the re-rendered saved_views partial: %s", b)
+	}
+	// THE ASSERTION THAT WOULD HAVE CAUGHT THE BUG: the "Save this view" form
+	// further down the same re-rendered menu must still carry the filter
+	// that was applied on the page, or fixing the name and clicking Save
+	// there stores a view with no filters at all.
+	if !strings.Contains(b, `name="kind" value="server"`) {
+		t.Fatalf("re-rendered menu lost the currently-applied filter after a failed "+
+			"rename, so the save form beside it would now store a filterless view: %s", b)
 	}
 }

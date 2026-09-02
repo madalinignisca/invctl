@@ -46,7 +46,7 @@
 
 {{template "certificate_list_panel" .}}
 
-{{if .CanWrite}}
+{{if .IsAdmin}}
 {{template "certificate_form" .}}
 {{end}}
 {{end}}

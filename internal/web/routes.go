@@ -212,6 +212,37 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	write := func(pattern string, h http.HandlerFunc) {
 		mux.Handle(pattern, middleware.RequireAuth(requireWrite(h)))
 	}
+	// writeCost gates the money surfaces on BOTH seams: RequireWrite for "may
+	// this session write at all", RequireCostVisibility for "may it see
+	// money". RequireWrite FIRST, always: an Observer must still be refused
+	// with RequireWrite's text, not RequireCostVisibility's.
+	//
+	// THE CLAIM THAT USED TO SIT HERE -- that rbac_boundary_test.go's
+	// TestAProjectOwnerIsRefusedOnEveryNonProjectLinkableWriteRoute would
+	// catch an inversion by reading the refusal body -- was false, and a WP-1.1
+	// review caught it: that test drives a project owner, who PASSES
+	// RequireWrite, so the body it reads is identical whichever seam runs
+	// first and an inversion sails through it unnoticed. A body assertion only
+	// tells you which seam refused when the caller fails BOTH -- pass one and
+	// the other's message never gets a chance to differ. costs_test.go's
+	// TestCostsAreHiddenFromAnUngrantedObserverAndWritableByAdminsOnly is the
+	// one that actually can: "viewer" is an Observer with no can_see_costs
+	// grant either, so it fails both seams, and it asserts the exact body
+	// ("You have read-only access.\n") -- which only appears if RequireWrite
+	// is the one that runs first. Swap the order and that assertion goes red.
+	//
+	// The order itself is still right, independent of which test proves it:
+	// writing a number you are not allowed to read is a blind write. A
+	// project owner or Observer granted write access to an asset but not
+	// app_user.can_see_costs could set an acquisition price or a support
+	// contract value they can never see back. Administrators always pass
+	// CanSeeCosts (see that method's own comment), so this closes no surface
+	// an Administrator could reach before -- there is no regression to weigh
+	// against the fix.
+	requireCostVisibility := middleware.RequireCostVisibility(authz)
+	writeCost := func(pattern string, h http.HandlerFunc) {
+		mux.Handle(pattern, middleware.RequireAuth(requireWrite(requireCostVisibility(h))))
+	}
 	// The import page is admin-only on the GET as well as the POST. It is
 	// purely a write tool: rendering it to a read-only user offers a form whose
 	// only outcome is a 403.
@@ -379,19 +410,19 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	// Cost lines. One route per surface rather than a generic
 	// /costs/{type}/{id}: an entity type arriving in a URL is an entity type
 	// arriving from a request, and it would select a table name.
-	write("POST /assets/{id}/costs", app.CostAddToAsset)
-	write("POST /assets/{id}/costs/{costID}", app.CostEditOnAsset)
-	write("POST /assets/{id}/costs/{costID}/retire", app.CostRetireOnAsset)
-	write("POST /assets/{id}/costs/{costID}/reprice", app.CostRepriceOnAsset)
-	write("POST /assets/{id}/costs/{costID}/consumers", app.CostConsumersOnAsset)
-	write("POST /services/{id}/costs", app.CostAddToService)
-	write("POST /services/{id}/costs/{costID}", app.CostEditOnService)
-	write("POST /services/{id}/costs/{costID}/retire", app.CostRetireOnService)
-	write("POST /services/{id}/costs/{costID}/reprice", app.CostRepriceOnService)
-	write("POST /projects/{id}/costs", app.CostAddToProject)
-	write("POST /projects/{id}/costs/{costID}", app.CostEditOnProject)
-	write("POST /projects/{id}/costs/{costID}/retire", app.CostRetireOnProject)
-	write("POST /projects/{id}/costs/{costID}/reprice", app.CostRepriceOnProject)
+	writeCost("POST /assets/{id}/costs", app.CostAddToAsset)
+	writeCost("POST /assets/{id}/costs/{costID}", app.CostEditOnAsset)
+	writeCost("POST /assets/{id}/costs/{costID}/retire", app.CostRetireOnAsset)
+	writeCost("POST /assets/{id}/costs/{costID}/reprice", app.CostRepriceOnAsset)
+	writeCost("POST /assets/{id}/costs/{costID}/consumers", app.CostConsumersOnAsset)
+	writeCost("POST /services/{id}/costs", app.CostAddToService)
+	writeCost("POST /services/{id}/costs/{costID}", app.CostEditOnService)
+	writeCost("POST /services/{id}/costs/{costID}/retire", app.CostRetireOnService)
+	writeCost("POST /services/{id}/costs/{costID}/reprice", app.CostRepriceOnService)
+	writeCost("POST /projects/{id}/costs", app.CostAddToProject)
+	writeCost("POST /projects/{id}/costs/{costID}", app.CostEditOnProject)
+	writeCost("POST /projects/{id}/costs/{costID}/retire", app.CostRetireOnProject)
+	writeCost("POST /projects/{id}/costs/{costID}/reprice", app.CostRepriceOnProject)
 	write("POST /vocabularies", app.VocabularyUpsert)
 	write("POST /inflation", app.InflationSet)
 	write("POST /custom-fields", app.CustomFieldCreate)
@@ -459,10 +490,10 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 
 	write("POST /circuits/{id}/terminations", app.CircuitLand)
 	write("POST /circuits/{id}/terminations/{termID}/retire", app.CircuitLift)
-	write("POST /circuits/{id}/costs", app.CostAddToCircuit)
-	write("POST /circuits/{id}/costs/{costID}", app.CostEditOnCircuit)
-	write("POST /circuits/{id}/costs/{costID}/retire", app.CostRetireOnCircuit)
-	write("POST /circuits/{id}/costs/{costID}/reprice", app.CostRepriceOnCircuit)
+	writeCost("POST /circuits/{id}/costs", app.CostAddToCircuit)
+	writeCost("POST /circuits/{id}/costs/{costID}", app.CostEditOnCircuit)
+	writeCost("POST /circuits/{id}/costs/{costID}/retire", app.CostRetireOnCircuit)
+	writeCost("POST /circuits/{id}/costs/{costID}/reprice", app.CostRepriceOnCircuit)
 	write("POST /providers", app.ProviderCreate)
 	write("POST /overlays", app.L2VPNCreate)
 	write("POST /overlays/{id}/retire", app.L2VPNRetire)
@@ -498,11 +529,14 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	// by the route -- see internal/store/savedviews.go's
 	// authorizeSavedViewOwner.
 	//
-	// POST /views/{id} (rename) is deliberately absent: nothing posts to it
-	// (see SavedViewUpdate's removed-handler comment in
-	// internal/web/handlers/savedviews.go), and docs/ROADMAP.md's "Deferred
-	// to 1.1" records the decision.
+	// POST /views/{id}/rename gives the store's existing, tested
+	// UpdateSavedView its first caller (docs/ROADMAP.md's "Deferred to 1.1"
+	// item). Deliberately named /rename, not a re-registered POST /views/{id}:
+	// the removed generic update route accepted params and entity along with
+	// name, which is exactly the surface the rename control does not need
+	// and must not reopen -- see SavedViewRename's own comment.
 	self("POST /views", app.SavedViewCreate)
+	self("POST /views/{id}/rename", app.SavedViewRename)
 	self("POST /views/{id}/retire", app.SavedViewRetire)
 
 	// The machine-facing route. One route, and this is it.

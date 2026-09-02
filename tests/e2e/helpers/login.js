@@ -64,3 +64,21 @@ export async function csrfTokenFrom(page) {
   const raw = await page.locator('body').getAttribute('hx-headers');
   return JSON.parse(raw ?? '{}')['X-CSRF-Token'] ?? '';
 }
+
+/**
+ * A fresh admin context for a mutating spec's own fixture setup or cleanup --
+ * never the suite's shared session (playwright.config.js's global-setup
+ * session), for the identical isolation reason signInAsFreshUser's own
+ * comment gives for a project owner's session. Pulled out here because more
+ * than one WP-1.1 spec needs "a second, throwaway admin session that asserts
+ * nothing" (rbac-project-owner-edit-boundary.spec.js's own phrase for it).
+ *
+ * @param {import('@playwright/test').Browser} browser
+ * @param {string} baseURL
+ * @returns {Promise<{context: import('@playwright/test').BrowserContext, page: import('@playwright/test').Page}>}
+ */
+export async function signInAsAdmin(browser, baseURL) {
+  const username = process.env.INV_E2E_USERNAME || 'admin';
+  const password = process.env.INV_E2E_PASSWORD || 'demo-password';
+  return signInAsFreshUser(browser, baseURL, username, password);
+}

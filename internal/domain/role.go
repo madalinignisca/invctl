@@ -511,7 +511,55 @@ var entityScope = map[string]ScopeClass{
 	// service and circuit, so an ordinary permit has no saved_view bucket
 	// and covers nothing. Only the permit minted after
 	// internal/store/savedviews.go's ownership check can cover a row.
-	"saved_view":            ScopeSubjectDerived,
+	"saved_view": ScopeSubjectDerived,
+	// A dependency's subjects are the two services it connects: the
+	// consumer directly, and the provider one hop away -- an endpoint's own
+	// service_id, or a route's frontend endpoint's service_id, since route
+	// carries no service_id column of its own (WP-1.1 item 1, migration
+	// 00004's schema).
+	//
+	// Subject-derived is safe here for the same reason it is safe for
+	// saved_view and journal_entry: auth.Authorizer.Permit builds buckets
+	// only for asset, service and circuit, so an ordinary project-owner
+	// permit has no dependency bucket and covers nothing. Only the permit
+	// minted after internal/store/deps.go's authorizeDependencySubjects
+	// checks BOTH services can cover a row -- the same two-ended shape
+	// authorizeInstanceSubjects proved for service_instance, because
+	// checking only the consumer would let a project owner point their
+	// service at anybody's socket, and checking only the provider would let
+	// them attach anybody's service as a consumer of their own.
+	"dependency": ScopeSubjectDerived,
+	// A link's subjects are the two assets it cables together: an interface
+	// carries no project of its own (docs/rbac-design.md §4;
+	// authorizeInterfaceSubject, internal/store/network.go), so a link is
+	// two hops from each end -- a_interface_id -> asset and
+	// b_interface_id -> asset (WP-1.1 item 2).
+	//
+	// Subject-derived is safe here for the same reason it is safe for
+	// dependency and saved_view: auth.Authorizer.Permit builds buckets only
+	// for asset, service and circuit, so an ordinary project-owner permit
+	// has no link bucket and covers nothing. Only the permit minted after
+	// internal/store/network.go's authorizeLinkSubjects checks BOTH
+	// interfaces' owning assets can cover a row -- the same two-ended shape
+	// authorizeDependencySubjects proved for dependency, because checking
+	// only one end would let a project owner cable their own asset to
+	// anybody else's port.
+	"link": ScopeSubjectDerived,
+	// A cost line's subject is the asset it is attached to (WP-1.1 item 3,
+	// the row half). ONLY asset_cost moves here -- service_cost,
+	// project_cost and circuit_cost stay ScopeTopology below, deliberately,
+	// because they attach to something that is already the unit of
+	// attribution (a service, a project, a circuit) and nothing has asked
+	// for a project owner to write those. See authorizeCostSubject
+	// (internal/store/costs.go) for why it refuses every table but this
+	// one explicitly rather than trusting the classification alone.
+	//
+	// Subject-derived is safe here for the same reason it is safe for link
+	// and dependency: auth.Authorizer.Permit builds buckets only for asset,
+	// service and circuit, so an ordinary project-owner permit has no
+	// asset_cost bucket and covers nothing. Only the permit minted after
+	// authorizeCostSubject checks the owning asset can cover a row.
+	"asset_cost":            ScopeSubjectDerived,
 	"asset_kind":            ScopeEstateConfig,
 	"service_kind":          ScopeEstateConfig,
 	"interface_form_factor": ScopeEstateConfig,
@@ -532,14 +580,12 @@ var entityScope = map[string]ScopeClass{
 	// lands here rather than being guessed into ScopeProjectLinked.
 	"aggregate":           ScopeTopology,
 	"asn":                 ScopeTopology,
-	"asset_cost":          ScopeTopology,
 	"backend_member":      ScopeTopology,
 	"backend_pool":        ScopeTopology,
 	"certificate":         ScopeTopology,
 	"circuit_cost":        ScopeTopology,
 	"circuit_termination": ScopeTopology,
 	"cluster":             ScopeTopology,
-	"dependency":          ScopeTopology,
 	"endpoint":            ScopeTopology,
 	"fhrp_group":          ScopeTopology,
 	"health_override":     ScopeTopology,
@@ -549,7 +595,6 @@ var entityScope = map[string]ScopeClass{
 	"journal_entry":       ScopeSubjectDerived,
 	"l2vpn":               ScopeTopology,
 	"l2vpn_termination":   ScopeTopology,
-	"link":                ScopeTopology,
 	"net_anchor":          ScopeTopology,
 	"net_attachment":      ScopeTopology,
 	"net_group":           ScopeTopology,

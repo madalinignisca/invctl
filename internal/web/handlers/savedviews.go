@@ -367,14 +367,69 @@ func (a *App) SavedViewCreate(w http.ResponseWriter, r *http.Request) {
 	render.Redirect(w, r, savedViewListPath(v.Entity, v.Params))
 }
 
-// SavedViewUpdate (renaming or changing what filters a view captures) does
-// not exist as an HTTP route. internal/store.UpdateSavedView is real, tested
-// store-level work a future rename control (docs/ROADMAP.md, "Deferred to
-// 1.1") will call from a handler like this one -- but nothing posts to
-// POST /views/{id} today (checked against web/templates, web/static/app.js
-// and the E2E suite), so a mutating route with no caller was unreviewed
-// surface and was removed rather than kept "just in case". See routes.go's
-// saved-views comment for where this used to be registered.
+// SavedViewRename changes a view's name and nothing else.
+//
+// Entity and Params are read from the STORED row, never the form: the
+// removed generic SavedViewUpdate handler let a posted `entity` value select
+// which allowlist gates `params` (savedViewParamsFrom) -- and `params` IS
+// persisted -- so a form field that should only ever affect which filters
+// are *validated* was able to change which filters were *stored*. This
+// handler never calls savedViewParamsFrom at all: a rename touches Name and
+// nothing else, so there is nothing here for that bug to reattach to. See
+// internal/store.UpdateSavedView's own comment for why Entity is not even a
+// column that UPDATE statement writes.
+//
+// Ownership is enforced entirely by UpdateSavedView ->
+// authorizeSavedViewOwner, which reads the row's STORED owner and has no
+// Administrator exception -- saved views are private, including from
+// Administrators (internal/store/savedviews.go). Nothing here re-implements
+// or duplicates that check; duplicating it is how the two checks eventually
+// disagree.
+func (a *App) SavedViewRename(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Could not read that form.", http.StatusBadRequest)
+		return
+	}
+	// Read first so a rename of a fabricated id 404s here, the same shape
+	// SavedViewRetire already uses, and so the entity/params below come from
+	// a real row rather than being guessed.
+	existing, err := a.Store.GetSavedView(r.Context(), id)
+	if err != nil {
+		a.savedViewFailed(w, r, err)
+		return
+	}
+	name := formValue(r, "name")
+	// Read for the 422 path only -- see saved_views.html's rename form,
+	// which now carries the same hidden filter inputs the save form does,
+	// for exactly this reason (its own comment there explains why). A
+	// successful rename redirects and never renders this menu at all, so
+	// this has no effect on the ordinary path.
+	currentFilters := CurrentFiltersFor(r.PostForm, existing.Entity)
+	// A copy of the stored row with only Name touched -- Entity, Params,
+	// UserID and RowVersion travel through unchanged, so UpdateSavedView's
+	// optimistic-concurrency check runs against the version this handler
+	// actually just read, and there is no path from a posted `entity` or
+	// `params` field to what gets written.
+	v := *existing
+	v.Name = name
+	if err := a.Store.UpdateSavedView(r.Context(), a.permit(r), &v); err != nil {
+		if errors.Is(err, domain.ErrInvalid) {
+			// currentFilters, NOT nil -- nil was the bug (WP-1.1 Task 4d, item
+			// 6): the re-rendered menu's "save this view" form takes its
+			// hidden filter inputs from this value, so a nil here produced a
+			// form that looked fine and saved a FILTERLESS view on the next
+			// click. See TestSavedViewRenameValidationFailureKeepsTheCurrentFilters,
+			// the rename twin of
+			// TestSavedViewCreateValidationFailureRerendersTheMenuAt422.
+			a.renderSavedViewsInvalid(w, r, existing.Entity, currentFilters, name, err)
+			return
+		}
+		a.savedViewFailed(w, r, err)
+		return
+	}
+	render.Redirect(w, r, savedViewListPath(v.Entity, v.Params))
+}
 
 // SavedViewRetire soft-deletes a view. Like every entity here, a saved view
 // is never hard-deleted -- see RetireSavedView.

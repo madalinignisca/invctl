@@ -72,3 +72,41 @@ func TestTheSupplierReportIsBehindAuthentication(t *testing.T) {
 		t.Error("a read-only account cannot reach the supplier report")
 	}
 }
+
+// TestSupplierReportIsHiddenFromAnUngrantedObserver mirrors
+// TestCostReportIsHiddenFromAnUngrantedObserver (cost_report_test.go).
+// SupplierReport (internal/web/handlers/cost_report.go) skips SupplierMovements
+// entirely when the viewer lacks CanSeeCosts, and supplier_report.html falls
+// back to the same "Not for you" panel cost_report.html uses -- both money
+// figures on this page (the per-line total and every per-supplier monthly
+// amount) and the "name no supplier" line that names an amount alongside a
+// count must be withheld together, not just the numbers on their own; a
+// mutant that deletes either the handler gate or the template panel leaves
+// the rest of internal/web green and still leaks "26 cost line(s) name no
+// supplier, worth €4,006.17 a month" to an ungranted Observer.
+func TestSupplierReportIsHiddenFromAnUngrantedObserver(t *testing.T) {
+	h := newHarness(t)
+	h.login("viewer", "viewer-password")
+
+	resp := h.get("/reports/suppliers", false)
+	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
+		t.Fatalf("an ungranted Observer got %d from the supplier report, want 200 "+
+			"with the money withheld, not a hard refusal", resp.StatusCode)
+	}
+	page := body(t, resp)
+
+	if !strings.Contains(page, "Not for you") {
+		t.Error("an ungranted Observer was not shown the cost-visibility panel")
+	}
+	if !strings.Contains(page, "your account does not see money") {
+		t.Error("the withheld report carries no explanation of why")
+	}
+	if strings.Contains(page, "€") {
+		t.Error("an ungranted Observer could read a money figure on the supplier report")
+	}
+	if strings.Contains(page, "name no supplier") {
+		t.Error("the unattributed-lines callout leaked to an ungranted Observer, " +
+			"naming both a count and an amount")
+	}
+}

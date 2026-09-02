@@ -72,6 +72,147 @@ Naming is a hint, not the rule. `desired_state` contains "state" and is declared
 
 A migration that adds a column classifies it in this table **and** in `domain`. `TestEveryColumnIsClassified` reads the live schema on both engines and fails the build on an unclassified column — so a new column cannot default into the gap.
 
+## Write-authorization scope classification — normative
+
+The Go mirror of this table is `internal/domain/role.go`'s `entityScope` map,
+which `ScopeClassOf` consults from `tx.log` on every declared write — see "Since
+WP-G1, this is an authorization document as well as an audit one" above. This
+table exists for the same reason the column classification table above does:
+naming does not decide the class, a reader looks here first, and a change that
+moves an entity between classes without updating this table is exactly the kind
+of drift `TestTheWriteScopeTableMatchesEntityScope` (`internal/domain/role_scope_doc_test.go`)
+now fails the build on, in both directions.
+
+Four classes, in `ScopeClassOf`'s own order:
+
+- **`ScopeProjectLinked`** — carries a real `project_id` relationship (or
+  is the project-link table itself); a project owner may write it for their
+  own projects.
+- **`ScopeSubjectDerived`** — carries no project relationship of its own, but
+  a narrow, per-row store check can resolve its real subject (the asset,
+  service or person it belongs to) and mint a permit scoped to that one row.
+  Never authorized by project membership directly — always by the row's own
+  subject, checked at write time.
+- **`ScopeEstateConfig`** — estate-wide configuration; applies to every
+  project and is not owned by any one of them. Administrator-only.
+- **`ScopeTopology`** — physical and logical structure between projects, or
+  an entity explicitly excluded from the project-owner carve-out even where
+  a subject-derived check would otherwise be possible. Administrator-only.
+
+### ScopeProjectLinked
+
+The three, and only three, entity types a project actually links to
+(`docs/rbac-design.md` §4; migrations `00009`, `00041`).
+
+| Entity type | Notes |
+|---|---|
+| `asset` | owned via `project_asset` |
+| `circuit` | owned via `project_circuit` |
+| `service` | owned via `project_service` |
+
+### ScopeSubjectDerived
+
+No project relationship of its own. Authorized by a narrow, per-row store
+function — never by `ScopedPermit.projects` directly — that resolves the
+row's real subject and mints a permit covering only that row.
+`auth.Authorizer.Permit` builds `ScopedEntities` buckets only for `asset`,
+`service` and `circuit`, so an ordinary project-owner permit has an empty
+bucket for every type below and covers nothing until one of these
+per-row functions runs.
+
+| Entity type | Notes |
+|---|---|
+| `asset_cost` | **WP-1.1 item 3.** Subject is the owning asset — `authorizeCostSubject` (`internal/store/costs.go`) checks it and refuses every other cost table (`service_cost`, `project_cost`, `circuit_cost` stay `ScopeTopology`, deliberately — see the `ScopeTopology` section below). Gated on a **second, independent seam**: `middleware.RequireCostVisibility` also requires the caller's `can_see_costs` grant before the request reaches the store at all, so a project owner who cannot see costs cannot write them either — the store-level scope check alone would let them blind-write a price they are not permitted to read. `domain.Permit` itself was **not widened** to carry a cost dimension: it stays fixed at the three width-locked methods (`TestThePermitInterfaceCannotBeWidenedWithoutSayingSo`), so cost visibility is enforced once, in the request-gating middleware, rather than duplicated into every `Covers` call a permit could ever be asked. |
+| `dependency` | **WP-1.1 item 1, two-ended.** Subjects are the two services it connects — the consumer directly, and the provider one hop away (an endpoint's own `service_id`, or a route's frontend endpoint's `service_id`). `authorizeDependencySubjects` (`internal/store/deps.go`) requires **both** ends in the caller's project scope; checking only one would let a project owner point their service at anybody's socket, or attach anybody's service as a consumer of their own. |
+| `interface` | subject is the owning asset (`authorizeInterfaceSubject`, `internal/store/network.go`) |
+| `ip_address` | subject is the owning asset, one hop through its interface |
+| `journal_entry` | subject is the entity the note is attached to |
+| `link` | **WP-1.1 item 2, two-ended.** Subjects are the two assets it cables together — an interface carries no project of its own, so a link is two hops from each end (`a_interface_id` → asset, `b_interface_id` → asset). `authorizeLinkSubjects` (`internal/store/network.go`) requires **both** interfaces' owning assets in scope; checking only one would let a project owner cable their own asset to anybody else's port. |
+| `saved_view` | subject is the view's own owner (`internal/store/savedviews.go`) — the row a person may always write is their own, regardless of project membership |
+| `service_instance` | subject is the owning service (`authorizeInstanceSubjects`) |
+
+### ScopeEstateConfig
+
+Applies to every project and is owned by none of them. Administrator-only,
+including `user_project` — the table that decides a project owner's own
+scope, so a project owner able to write it could grant themselves every
+project and become an Administrator in all but name.
+
+| Entity type | Notes |
+|---|---|
+| `app_user` | accounts and roles |
+| `asset_kind` | vocabulary |
+| `container_engine` | vocabulary |
+| `cost_kind` | vocabulary |
+| `custom_field` | field definitions (values fold into the owning entity's own `change_log` row, not this type) |
+| `data_class` | vocabulary |
+| `device_type` | catalogue |
+| `environment` | catalogue |
+| `environment_role` | vocabulary |
+| `identity` | credential references |
+| `inflation_rate` | reference data |
+| `interface_form_factor` | vocabulary |
+| `ip_address_role` | vocabulary |
+| `manufacturer` | catalogue |
+| `observed_transition` | the retention prune's own audit entries — an administrator's maintenance action against the whole estate, not any one project's |
+| `project` | a project owner does not own the `project` row itself, only their `user_project` membership — editing a project's own name/description/lifecycle stays Administrator-only |
+| `project_asset` | linking an *existing* asset to a project (create-vs-link distinction, `docs/rbac-design.md` §4) |
+| `project_circuit` | linking an existing circuit to a project |
+| `project_service` | linking an existing service to a project |
+| `provider` | catalogue |
+| `responsibility_role` | vocabulary |
+| `service_kind` | vocabulary |
+| `storage_kind` | vocabulary |
+| `tag` | tag definitions (`entity_tag` application folds into the tagged entity's own `change_log` row) |
+| `team` | teams |
+| `unmatched_observation` | telemetry that matched no entity — the prune's own audit entries, same reasoning as `observed_transition` |
+| `user_project` | **load-bearing.** Decides a project owner's own scope; only an Administrator grants it |
+
+### ScopeTopology
+
+The default for topology, cross-cutting facts, and anything not yet proven
+project-linked — including entities that could theoretically resolve a
+subject but are excluded on purpose.
+
+| Entity type | Notes |
+|---|---|
+| `aggregate` | addressing |
+| `asn` | addressing |
+| `backend_member` | load-balancing |
+| `backend_pool` | load-balancing |
+| `certificate` | **considered and rejected for WP-1.1** (`docs/ROADMAP.md`). A certificate is many-to-many with assets and services (`certificate_asset`, `certificate_service`) — it has no single owning subject the way `asset_cost` has one owning asset. "Every member in scope" is **vacuously true for an undeployed certificate** (no members to fail the check against), which would make every unattached certificate writable by every project owner in the estate. Stays Administrator-only until a real subject-resolution rule is designed, not merely "not needed yet". |
+| `circuit_cost` | explicitly excluded from the `asset_cost` carve-out — a circuit is already the unit of attribution, and nothing has asked for a project owner to write this |
+| `circuit_termination` | topology |
+| `cluster` | **considered and rejected for WP-1.1**, same shape as `certificate`. Many-to-many with assets via `cluster_member`, no single owning subject, and "every member in scope" is **vacuously true for an empty cluster** — a cluster with no hosts yet would be writable by every project owner. Stays Administrator-only. |
+| `endpoint` | topology |
+| `fhrp_group` | topology |
+| `health_override` | a person overruling a monitor; estate-wide operational surface |
+| `ip_range` | addressing |
+| `l2vpn` | overlays |
+| `l2vpn_termination` | overlays |
+| `net_anchor` | topology |
+| `net_attachment` | topology |
+| `net_group` | topology |
+| `net_group_member` | topology |
+| `net_uplink` | topology |
+| `port_pass_through` | physical topology |
+| `power_feed` | physical topology |
+| `power_input` | physical topology |
+| `power_panel` | physical topology |
+| `power_source` | physical topology |
+| `prefix` | addressing |
+| `project_cost` | costs attached to the project itself, not to one of its assets — explicitly excluded from the `asset_cost` carve-out |
+| `rir` | addressing |
+| `route` | topology |
+| `rt_container` | runtime topology |
+| `rt_k8s` | runtime topology |
+| `rt_systemd` | runtime topology |
+| `rt_windows` | runtime topology |
+| `service_cost` | explicitly excluded from the `asset_cost` carve-out — a service is already the unit of attribution |
+| `vlan` | topology |
+| `vlan_group` | topology |
+
+
 ## The rules
 
 > **Since WP-G1, this is an authorization document as well as an audit one.**

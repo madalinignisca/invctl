@@ -208,7 +208,13 @@ func (a *App) NetworkGroupMemberCreate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Could not read that form.", http.StatusBadRequest)
 		return
 	}
-	groupID := r.PathValue("id")
+	groupID, mismatch := groupIDFromRequest(r)
+	if mismatch {
+		a.rerenderNetworkForm(w, r, "net_member_form", "member", map[string]string{
+			"group_id": "the group you picked does not match this form's target group -- pick it again",
+		})
+		return
+	}
 	m, err := domain.NewNetGroupMember(groupID, formValue(r, "asset_id"), formValue(r, "role"), a.Store.Now())
 	if err == nil {
 		err = a.Store.AddNetGroupMember(r.Context(), a.permit(r), m)
@@ -236,7 +242,13 @@ func (a *App) NetworkUplinkCreate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Could not read that form.", http.StatusBadRequest)
 		return
 	}
-	groupID := r.PathValue("id")
+	groupID, mismatch := groupIDFromRequest(r)
+	if mismatch {
+		a.rerenderNetworkForm(w, r, "net_uplink_form", "uplink", map[string]string{
+			"group_id": "the group you picked does not match this form's target group -- pick it again",
+		})
+		return
+	}
 	u, err := domain.NewNetUplink(store.NewID(), groupID, formValue(r, "upstream_group_id"),
 		formValue(r, "plane"), a.Store.Now())
 	if err == nil {
@@ -319,6 +331,41 @@ func (a *App) NetworkAnchorCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	a.setFlash(r, "success", "Anchor "+na.Code+" declared.")
 	render.Redirect(w, r, "/network")
+}
+
+// groupIDFromRequest resolves which group a member/uplink form is writing
+// to, and reports whether the request disagrees with itself about it.
+//
+// The route carries the group id in the path (POST /network/groups/{id}/...,
+// the shape every route in this app uses), but the form's group <select>
+// also carries name="group_id" -- the operator's actual choice, since the
+// select is what they touched. Those two are supposed to always agree: when
+// the operator picks a different group, app.js's data-action-template
+// listener rewrites both the form's action (which supplies the path) and
+// its hx-post attribute to match the new selection. Before that listener
+// existed, the rewrite lived in an inline onchange= on the <select>, and
+// this app's CSP (script-src 'self', no unsafe-inline) silently dropped it
+// -- no console error, no visible failure -- so the path stayed pointed at
+// whichever group rendered first and every submission wrote into THAT
+// group while reporting success. A wrong-group write that never told
+// anyone (task-11, 2026-09-02 group-a-1-1 round).
+//
+// The two fields can only disagree if that client-side rewrite did not run:
+// a CSP change, a script error, a stale cached page. Trusting the path in
+// that case reproduces the exact silent-corruption bug this fix exists to
+// close, so the caller refuses instead. An absent group_id is not a
+// disagreement -- it's a client that never had the field to begin with --
+// and falls back to the path value.
+func groupIDFromRequest(r *http.Request) (groupID string, mismatch bool) {
+	pathID := r.PathValue("id")
+	submitted := formValue(r, "group_id")
+	if submitted == "" {
+		return pathID, false
+	}
+	if submitted != pathID {
+		return "", true
+	}
+	return pathID, false
 }
 
 // rerenderNetworkForm re-renders one embedded form partial with error state,

@@ -98,6 +98,12 @@
   {{end}}
 </div>
 
+{{/* Unlike asset_detail.html's identical panel, this stays on .IsAdmin:
+     circuit_cost is still ScopeTopology (role.go's entityScope), not
+     ScopeSubjectDerived -- only asset_cost moved when 1.0 item 3 built its
+     store-side check, and nothing has asked for a project owner to write
+     this one. Do not "fix" this to match the asset page; it would open a
+     write the store still refuses. */}}
 {{template "cost_panel" dict
     "Action" (printf "/circuits/%s/costs" .Circuit.ID) "Slug" "circuit"
     "Return" (printf "/circuits/%s" .Circuit.ID) "EditID" .EditRow "RepriceID" .RepriceRow

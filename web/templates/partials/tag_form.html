@@ -13,12 +13,12 @@
   it when $.Page.Base.EditRow (or a rejected edit) names this tag.
 
   Takes dict{Row, Page} rather than the row alone, the same shape
-  custom_field_row does, so $p.CanWrite / $p.CSRF / $p.Edit are all in reach.
+  custom_field_row does, so $p.IsAdmin / $p.CSRF / $p.Edit are all in reach.
 */}}
 {{define "tag_row"}}
 {{$row := .Row}}
 {{$p := .Page}}
-{{if and $p.CanWrite (eq $row.ID $p.Base.EditRow)}}
+{{if and $p.IsAdmin (eq $row.ID $p.Base.EditRow)}}
 <tr class="row-editing">
   <td>
     <input form="tag-{{$row.ID}}" class="mono {{if $p.Edit.Err "code"}}invalid{{end}}" type="text" name="code"
@@ -54,13 +54,11 @@
     <span style="color:var(--muted)">{{shortTime $row.CreatedAt}}</span>
   </td>
   <td style="white-space:nowrap">
-    {{if $p.CanWrite}}
+    {{if $p.IsAdmin}}
     <a class="btn btn-sm" href="/tags?edit={{$row.ID}}">Edit</a>
-    <form method="post" action="/tags/{{$row.ID}}/retire" style="display:inline">
-      <input type="hidden" name="csrf_token" value="{{$p.CSRF}}">
-      <button class="btn btn-sm btn-danger" type="submit"
-              onclick="return confirm('Retire this tag? Anything already carrying it keeps it.')">Retire</button>
-    </form>
+    <button class="btn btn-sm btn-danger" type="button"
+            hx-post="/tags/{{$row.ID}}/retire"
+            hx-confirm="Retire this tag? Anything already carrying it keeps it.">Retire</button>
     {{end}}
   </td>
 </tr>
@@ -110,7 +108,7 @@
             <td>{{deref .RetiredByName}}</td>
             <td>{{if .RetiredAt}}{{shortTime (deref .RetiredAt)}}{{end}}</td>
             <td>
-              {{if $.CanWrite}}
+              {{if $.IsAdmin}}
               <form method="post" action="/tags/{{.ID}}/restore" style="display:inline">
                 <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
                 <button class="btn btn-sm" type="submit">Restore</button>

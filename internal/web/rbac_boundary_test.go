@@ -774,7 +774,7 @@ func TestNoWriteRouteIsReachableWithoutGoingThroughTheRouter(t *testing.T) {
 //   - administratorGate == 6: the writeAdminOnly import surface is
 //     untouched by this flip, because it gates on IsAdministrator, not
 //     CanWrite, and a project owner is never an Administrator.
-//   - permitGate == 9: routes whose handler's error path preserves
+//   - permitGate == 10: routes whose handler's error path preserves
 //     handleStoreError's generic "You are not allowed to do that." text
 //     for a plain domain.ErrForbidden, reached with an empty body. 9, not
 //     8: WP-G4b Wave B moved POST /views/{id}/retire off `write` onto
@@ -785,7 +785,13 @@ func TestNoWriteRouteIsReachableWithoutGoingThroughTheRouter(t *testing.T) {
 //     more permit-layer 403 than before. Previously it fell back to
 //     store.NewID() and 404'd at GetSavedView instead, landing in "other"
 //     -- a real row was never in scope to prove the refusal, so the old 8
-//     undercounted what this route actually does.
+//     undercounted what this route actually does. 10, not 9: Task 5 added
+//     POST /views/{id}/rename to the same `self` registrar, on the same
+//     "views" -> savedViewID fixture resolution, so an empty-body project-
+//     owner request also resolves to a real row it does not own and is
+//     refused at authorizeSavedViewOwner before UpdateSavedView's own
+//     Validate() ever runs (the store authorizes before validating -- see
+//     UpdateSavedView's comment) -- another clean permit-layer 403.
 //   - userForbiddenGate == 2: the two /users/* mutation routes, which go
 //     through respondUserMutation's own deliberate exception (see that
 //     function's comment) and therefore surface the raw wrapped error
@@ -804,6 +810,12 @@ func TestAProjectOwnerIsRefusedOnEveryNonProjectLinkableWriteRoute(t *testing.T)
 		bodyRequireWrite         = "You have read-only access.\n"
 		bodyRequireAdministrator = "This requires an Administrator.\n"
 		bodyPermitRefused        = "You are not allowed to do that.\n"
+		// Task 4a: middleware.RequireCostVisibility's refusal text, checked
+		// on the same "which layer refused this" basis as the three above.
+		// boundaryOwnerUser is a project owner with app_user.can_see_costs
+		// left at its zero value (false), so a writeCost route it reaches
+		// through RequireWrite is refused here, not at the permit layer.
+		bodyCostVisibilityRefused = "You may not view or change costs.\n"
 	)
 	isUserForbiddenBody := func(body string) bool {
 		return strings.HasPrefix(body, "writing change log for app_user ") &&
@@ -843,7 +855,7 @@ func TestAProjectOwnerIsRefusedOnEveryNonProjectLinkableWriteRoute(t *testing.T)
 			// property the test's name claims.
 			changeLogBefore := h.count(`SELECT COUNT(*) FROM change_log`)
 
-			var driven, adminGate, administratorGate, permitGate, userForbiddenGate, other int
+			var driven, adminGate, administratorGate, permitGate, userForbiddenGate, costVisibilityGate, other int
 			for _, route := range routes {
 				if excluded[route.Pattern] {
 					continue
@@ -874,6 +886,11 @@ func TestAProjectOwnerIsRefusedOnEveryNonProjectLinkableWriteRoute(t *testing.T)
 					}
 				case body == bodyPermitRefused:
 					permitGate++
+				case body == bodyCostVisibilityRefused:
+					costVisibilityGate++
+					if route.Gate != "writeCost" {
+						t.Errorf("%s refused by RequireCostVisibility's text but registered gate is %q", route.Pattern, route.Gate)
+					}
 				case isUserForbiddenBody(body):
 					userForbiddenGate++
 					if !strings.HasPrefix(route.Pattern, "POST /users/") {
@@ -918,9 +935,30 @@ func TestAProjectOwnerIsRefusedOnEveryNonProjectLinkableWriteRoute(t *testing.T)
 				t.Errorf("RequireAdministrator refusals = %d, want 14 (six import routes "+
 					"and eight /users routes)", administratorGate)
 			}
-			if permitGate != 9 {
-				t.Errorf("permit-layer refusals (generic body) = %d, want 9 -- see this test's own "+
+			if permitGate != 10 {
+				t.Errorf("permit-layer refusals (generic body) = %d, want 10 -- see this test's own "+
 					"comment for the routes this pins", permitGate)
+			}
+			// 4: the four /projects/{id}/costs* routes (Task 4a moved all
+			// cost-line write routes onto writeCost). Before this task these
+			// four were NOT in permitGate at all -- they landed in "other",
+			// because CostAddToProject/CostEditOnProject/CostRetireOnProject/
+			// CostRepriceOnProject either redirect on an empty form (303) or
+			// 404 against the random costID fallback BEFORE any permit check
+			// runs, the same way most of this suite's driven routes do. Now
+			// RequireCostVisibility refuses boundaryOwnerUser (can_see_costs
+			// left false) before the handler is reached at all, so all four
+			// become a clean 403 instead of a redirect or a 404.
+			//
+			// The other 13 cost routes (5 under /assets/, 4 under
+			// /services/, 4 under /circuits/) never appear here: they are
+			// already excluded by excludedFromStep4, because their first
+			// path segment pluralises a project-linkable type, the same
+			// exclusion that keeps the ~40 asset/service/circuit routes out
+			// of this project-owner suite entirely.
+			if costVisibilityGate != 4 {
+				t.Errorf("RequireCostVisibility refusals = %d, want 4 (the four /projects/{id}/costs* "+
+					"routes -- see this test's own comment)", costVisibilityGate)
 			}
 			// 0, and the counter stays. It was 2 while /users/{id}/active and
 			// /users/{id}/scrub reached their handlers and were refused deep
@@ -1089,8 +1127,9 @@ func truncate(s string) string {
 // them prove middleware.RequireAuth is actually in the chain; that was
 // verified only by reading routes.go. It became worth writing down at WP-G4b,
 // which added a fourth registrar, self, whose ENTIRE gate is RequireAuth: for
-// POST /views and POST /views/{id}/retire, an unnoticed break in that
-// middleware is the whole authorization story, not one layer of it.
+// POST /views, POST /views/{id}/rename and POST /views/{id}/retire, an
+// unnoticed break in that middleware is the whole authorization story, not
+// one layer of it.
 //
 // Every non-GET route from the write, writeAdminOnly and self registrars is
 // driven here -- the full census routescan.WriteRoutes returns, not a
@@ -1111,12 +1150,13 @@ func truncate(s string) string {
 func TestNoWriteRouteIsReachableWithNoSessionAtAll(t *testing.T) {
 	// pinnedNoSessionRouteCount is every non-GET route the write,
 	// writeAdminOnly and self registrars register today. Pinned rather than
-	// merely asserted nonzero, the same way Step 4 pins permitGate == 9 -- a
+	// merely asserted nonzero, the same way Step 4 pins permitGate == 10 -- a
 	// sweep that drives zero routes passes trivially, and asserting only
 	// "> 0" would not catch the census quietly shrinking by one route that
 	// stopped being walked. Update this deliberately if the route count
-	// genuinely changes; do not let it drift unnoticed.
-	const pinnedNoSessionRouteCount = 181
+	// genuinely changes; do not let it drift unnoticed. 181 -> 182: Task 5
+	// added POST /views/{id}/rename to the self registrar.
+	const pinnedNoSessionRouteCount = 182
 
 	for _, eng := range boundaryEngines(t) {
 		t.Run(eng.name, func(t *testing.T) {
@@ -1165,6 +1205,84 @@ func TestNoWriteRouteIsReachableWithNoSessionAtAll(t *testing.T) {
 				t.Errorf("change_log grew from %d to %d while driving %d routes with no session "+
 					"at all -- an unauthenticated caller wrote something",
 					changeLogBefore, after, driven)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Task 4a: RequireCostVisibility is the layer that refuses, or lets through,
+// a project owner writing a cost line -- proven end to end, through the real
+// router, not just at the middleware unit level.
+//
+// Two claims, each needing its own case per this task's brief: a case where
+// the grant is the ONLY thing standing between the caller and success, and a
+// case where its absence is what refuses -- on a route and an asset where
+// every OTHER check (RequireWrite, the object-scope permit) would have
+// passed. fx.assetIn is owned by boundaryOwnerUser's own project (alpha), so
+// a refusal here cannot be the permit layer running out of scope; it can
+// only be RequireCostVisibility.
+func TestAProjectOwnersCostWriteTurnsOnTheGrantAlone(t *testing.T) {
+	for _, eng := range boundaryEngines(t) {
+		t.Run(eng.name, func(t *testing.T) {
+			h, fx := setupBoundary(t, eng)
+			ctx := context.Background()
+			admin := domain.AdministratorPermit(domain.SystemActor)
+
+			ownerRow, err := h.store.GetUserByUsername(ctx, boundaryOwnerUser)
+			if err != nil {
+				t.Fatalf("looking up %s: %v", boundaryOwnerUser, err)
+			}
+			if ownerRow.CanSeeCosts {
+				t.Fatalf("%s already has can_see_costs -- fixture assumption broken, this test proves nothing", boundaryOwnerUser)
+			}
+
+			// Case 1: no grant, in-scope asset. Refused, and refused BY
+			// REQUIRECOSTVISIBILITY specifically -- not the permit layer,
+			// which would have let this through (the asset is fx.assetIn,
+			// alpha's own).
+			h.login(boundaryOwnerUser, boundaryOwnerPassword)
+			changeLogBefore := h.count(`SELECT COUNT(*) FROM change_log`)
+			resp := h.post("/assets/"+fx.assetIn+"/costs", url.Values{
+				"csrf_token": {h.csrfToken("/assets/" + fx.assetIn)},
+				"kind":       {"operating"}, "period": {"monthly"}, "amount": {"10"},
+			}, false)
+			body := drainedBody(t, resp)
+			if resp.StatusCode != http.StatusForbidden {
+				t.Fatalf("ungranted owner writing an in-scope cost = %d (body %q), want 403", resp.StatusCode, truncate(body))
+			}
+			if body != "You may not view or change costs.\n" {
+				t.Errorf("ungranted owner refused with body %q, want RequireCostVisibility's own text -- "+
+					"a different refusal here means some OTHER layer caught this first, "+
+					"which is not the claim this test makes", body)
+			}
+			if after := h.count(`SELECT COUNT(*) FROM change_log`); after != changeLogBefore {
+				t.Errorf("change_log grew from %d to %d on a refused write", changeLogBefore, after)
+			}
+
+			// Case 2: grant it, same asset, same route. Now let through --
+			// reaches the handler, writes, and change_log gets a row. If
+			// this fails, the middleware refuses everyone regardless of the
+			// grant, and Case 1 alone would not have caught that.
+			if err := h.store.SetUserCostVisibility(ctx, admin, ownerRow.ID, true); err != nil {
+				t.Fatalf("granting can_see_costs: %v", err)
+			}
+			// Re-baselined here: SetUserCostVisibility itself writes its own
+			// change_log row (an app_user grant is declared state), which
+			// would otherwise be mistaken for the cost write this case is
+			// actually proving.
+			changeLogBeforeGrantedWrite := h.count(`SELECT COUNT(*) FROM change_log`)
+			resp2 := h.post("/assets/"+fx.assetIn+"/costs", url.Values{
+				"csrf_token": {h.csrfToken("/assets/" + fx.assetIn)},
+				"kind":       {"operating"}, "period": {"monthly"}, "amount": {"10"},
+			}, false)
+			body2 := drainedBody(t, resp2)
+			if resp2.StatusCode != http.StatusSeeOther {
+				t.Fatalf("granted owner writing an in-scope cost = %d (body %q), want a redirect", resp2.StatusCode, truncate(body2))
+			}
+			if after := h.count(`SELECT COUNT(*) FROM change_log`); after != changeLogBeforeGrantedWrite+1 {
+				t.Errorf("change_log = %d after a granted owner's write, want %d (exactly one committed write)",
+					after, changeLogBeforeGrantedWrite+1)
 			}
 		})
 	}

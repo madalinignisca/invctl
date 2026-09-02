@@ -611,10 +611,25 @@ func hostableAssets(assets []store.AssetRow) []store.AssetRow {
 // the service page and on its own after a verify, so it gets a real type
 // rather than a map assembled in the template.
 //
-// CanWrite HERE MEANS ADMINISTRATOR, NOT Base.CanWrite. "dependency" is
-// ScopeTopology (domain/role.go's entityScope) -- explicitly deferred by 1.0
-// item 1's DEFER list (the ReparentAsset two-ended trap) -- so it stays
-// Administrator-only regardless of which service either end belongs to.
+// CanWrite HERE MEANS ADMINISTRATOR, NOT Base.CanWrite, and that is now a
+// DELIBERATE narrowing rather than a class default. WP-1.1 item 1 moved
+// "dependency" out of ScopeTopology into domain.ScopeSubjectDerived (the
+// ReparentAsset two-ended trap, resolved by authorizeDependencySubjects in
+// internal/store/deps.go) -- so a project owner who owns BOTH ends CAN now
+// write a dependency at the store layer. This view model still gates on
+// Administrator anyway, because CanWrite here would have to answer "does
+// this project owner's permit cover both the consumer service and the
+// provider's owning service" for THIS row, and that is exactly the
+// two-ended derivation authorizeDependencySubjects performs -- it resolves
+// a route's provider through its frontend endpoint with a store query, which
+// this handler-side view model has no business re-deriving from data it
+// already has half of. Computing it here would either duplicate that
+// derivation (a second place for the two to drift, the same risk
+// dependencyAudit's own comment warns about for change_log) or under- or
+// over-report what the row partial then renders as clickable. Administrator
+// stays the honest answer for THIS field until a caller is prepared to ask
+// the store the real question per row, not a limitation of what the store
+// itself now allows.
 // Every caller passes isAdmin for this field; see depRows and
 // DependencyVerify. Named CanWrite rather than IsAdmin only because the
 // partial (rows.html's dependency_row) is shared with no other caller that

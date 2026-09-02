@@ -82,9 +82,10 @@
     <div class="field-row">
       <div class="field">
         <label for="nm-group">Group</label>
-        <select id="nm-group" name="group_id" onchange="this.form.action='/network/groups/'+this.value+'/members'; this.form.setAttribute('hx-post', this.form.action)">
+        <select id="nm-group" name="group_id" data-action-template="/network/groups/{id}/members">
           {{range .Groups}}<option value="{{.ID}}">{{.Code}}</option>{{end}}
         </select>
+        {{with index .Errors "group_id"}}<div class="field-error">{{.}}</div>{{end}}
       </div>
       <div class="field">
         <label for="nm-asset">Asset</label>
@@ -120,9 +121,10 @@
     <div class="field-row">
       <div class="field">
         <label for="nu-group">Group</label>
-        <select id="nu-group" name="group_id" onchange="this.form.action='/network/groups/'+this.value+'/uplinks'; this.form.setAttribute('hx-post', this.form.action)">
+        <select id="nu-group" name="group_id" data-action-template="/network/groups/{id}/uplinks">
           {{range .Groups}}<option value="{{.ID}}">{{.Code}}</option>{{end}}
         </select>
+        {{with index .Errors "group_id"}}<div class="field-error">{{.}}</div>{{end}}
       </div>
       <div class="field">
         <label for="nu-upstream">Upstream group</label>

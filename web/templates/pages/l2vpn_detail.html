@@ -34,7 +34,7 @@
   {{if .Terminations}}
   <div class="scroll-x">
     <table>
-      <thead><tr><th>End</th><th>What</th>{{if .CanWrite}}<th></th>{{end}}</tr></thead>
+      <thead><tr><th>End</th><th>What</th>{{if .IsAdmin}}<th></th>{{end}}</tr></thead>
       <tbody>
         {{range .Terminations}}
         <tr>
@@ -43,7 +43,7 @@
             {{if .VLANID}}<a href="/vlans/{{deref .VLANID}}">{{.VLANName}}{{if .VLANVID}} ({{derefInt .VLANVID}}){{end}}</a>
             {{else}}<a href="/assets/{{.AssetID}}">{{.AssetName}}</a> · {{.InterfaceName}}{{end}}
           </td>
-          {{if $.CanWrite}}
+          {{if $.IsAdmin}}
           <td style="white-space:nowrap">
             <form method="post" action="/overlays/{{$.VPN.ID}}/terminations/{{.ID}}/retire" style="display:inline">
               <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
@@ -60,7 +60,7 @@
   <div class="empty"><strong>Nothing terminates into this overlay.</strong>It carries no traffic at all.</div>
   {{end}}
 
-  {{if .CanWrite}}
+  {{if .IsAdmin}}
   <form class="panel-body" method="post" action="/overlays/{{.VPN.ID}}/terminations">
     <input type="hidden" name="csrf_token" value="{{.CSRF}}">
     <div class="field-row">

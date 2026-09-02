@@ -474,6 +474,100 @@ func (s *SQLStore) GetDependency(ctx context.Context, id string) (*DependencyRow
 	return &row, nil
 }
 
+// dbGetter is the single-row read capability authorizeDependencySubjects
+// needs to resolve a provider's owning service, and nothing more. Satisfied
+// by *SQLStore -- the only implementation any real caller here uses,
+// because CreateDependency, UpdateDependency, RetireDependency and
+// VerifyDependency all mint their narrow permit BEFORE opening a
+// transaction, the same reason authorizeAddressSubject (network.go) queries
+// through s rather than through a tx -- and, trivially, by *tx too (its get
+// method already has this exact shape), so a future caller that needs to
+// resolve mid-transaction is not blocked by the type.
+type dbGetter interface {
+	get(ctx context.Context, dest any, query string, args ...any) error
+}
+
+// get is SQLStore's own dbGetter, delegating to readOne so a provider that
+// names an endpoint or route id which no longer resolves reports
+// domain.ErrNotFound rather than a bare driver error. *tx.get does NOT do
+// this translation, which is fine here: every real caller resolves before a
+// transaction exists, so *tx's half of dbGetter is never actually
+// exercised -- it is kept only so the interface is honest about the
+// smallest thing it needs.
+func (s *SQLStore) get(ctx context.Context, dest any, query string, args ...any) error {
+	return s.readOne(ctx, dest, query, args...)
+}
+
+// resolveProviderService finds the service that owns a dependency's
+// provider -- an endpoint's own service_id directly, or a route's service
+// one hop further, through the frontend endpoint it fronts (route carries
+// no service_id column of its own; migration 00004's schema). Exactly one
+// of endpointID/routeID is non-nil by the time this runs:
+// domain.Dependency.Validate already enforced the table's either-or CHECK,
+// and every caller below validates before authorizing.
+//
+// If BOTH were ever non-nil, the switch below falls into the endpoint
+// branch first and the route is silently ignored -- CURRENTLY IMPOSSIBLE,
+// enforced twice over (domain.Dependency.Validate's hasEndpoint&&hasRoute
+// refusal, and the table's own dependency_provider_exclusive_check CHECK),
+// so nothing exercises this today. Stated anyway: a future migration that
+// relaxes the CHECK to allow both would silently authorize off only one of
+// the two providers rather than failing loudly, and that is the kind of
+// thing this comment exists to make a reviewer re-check rather than assume.
+func resolveProviderService(ctx context.Context, q dbGetter, endpointID, routeID *string) (string, error) {
+	var serviceID string
+	switch {
+	case endpointID != nil:
+		if err := q.get(ctx, &serviceID,
+			`SELECT service_id FROM endpoint WHERE id = ?`, *endpointID); err != nil {
+			return "", fmt.Errorf("resolving the provider endpoint's service: %w", err)
+		}
+	case routeID != nil:
+		if err := q.get(ctx, &serviceID,
+			`SELECT e.service_id FROM route r JOIN endpoint e ON e.id = r.frontend_endpoint_id
+			 WHERE r.id = ?`, *routeID); err != nil {
+			return "", fmt.Errorf("resolving the provider route's service: %w", err)
+		}
+	default:
+		return "", fmt.Errorf("dependency has no provider endpoint or route: %w", domain.ErrForbidden)
+	}
+	return serviceID, nil
+}
+
+// authorizeDependencySubjects derives a dependency's TWO subjects -- the
+// consumer service and the service that owns its provider (an endpoint
+// directly, or a route's frontend endpoint, one hop further) -- and
+// requires the caller's real permit to cover BOTH before the write is
+// allowed.
+//
+// TWO-ENDED, DELIBERATELY, and the same shape authorizeInstanceSubjects
+// (services.go) already proved one level up for service_instance: checking
+// only the consumer would let a project owner who owns a service point a
+// declared dependency at ANY endpoint or route in the estate, including one
+// on a service they do not own; checking only the provider would let them
+// attach somebody else's service as the consumer of their own socket.
+// docs/rbac-design.md §4: "both endpoints of a relationship must be in
+// scope."
+func authorizeDependencySubjects(ctx context.Context, q dbGetter, p domain.Permit,
+	consumerServiceID string, providerEndpointID, providerRouteID *string, dependencyID string,
+) (domain.Permit, error) {
+	providerServiceID, err := resolveProviderService(ctx, q, providerEndpointID, providerRouteID)
+	if err != nil {
+		return nil, err
+	}
+	if !p.Covers("service", consumerServiceID) {
+		return nil, fmt.Errorf("declaring dependency %s from consumer service %s: %w",
+			dependencyID, consumerServiceID, domain.ErrForbidden)
+	}
+	if !p.Covers("service", providerServiceID) {
+		return nil, fmt.Errorf("declaring dependency %s to provider service %s: %w",
+			dependencyID, providerServiceID, domain.ErrForbidden)
+	}
+	return domain.ScopedPermit(p.Actor(), nil, domain.ScopedEntities{
+		"dependency": {dependencyID: true},
+	}), nil
+}
+
 // CreateDependency inserts an edge and its data classes.
 func (s *SQLStore) CreateDependency(ctx context.Context, p domain.Permit, d *domain.Dependency, dataClasses []string) error {
 	// The row the INSERT just wrote is version 1 (the column default).
@@ -488,10 +582,19 @@ func (s *SQLStore) CreateDependency(ctx context.Context, p domain.Permit, d *dom
 		return err
 	}
 	d.Confidence = domain.ConfidenceFor(p.Actor(), d.Confidence)
+	// Both subjects come from the SUBMITTED struct, by necessity: the row
+	// does not exist yet, and d.ConsumerServiceID/ProviderEndpointID/
+	// ProviderRouteID are exactly what the caller is asserting they may
+	// declare an edge between.
+	depPermit, err := authorizeDependencySubjects(ctx, s, p,
+		d.ConsumerServiceID, d.ProviderEndpointID, d.ProviderRouteID, d.ID)
+	if err != nil {
+		return err
+	}
 	// Serializable, as the retire guard is: the check below asserts an
 	// invariant this transaction depends on, and at read-committed a
 	// concurrent retirement is invisible to it.
-	return s.writeSerializable(ctx, p, func(t *tx) error {
+	return s.writeSerializable(ctx, depPermit, func(t *tx) error {
 		if err := requireLiveProvider(ctx, t, d.ProviderEndpointID, d.ProviderRouteID); err != nil {
 			return err
 		}
@@ -540,10 +643,49 @@ func (s *SQLStore) UpdateDependency(ctx context.Context, p domain.Permit, d *dom
 	if err != nil {
 		return err
 	}
+	// NOT verified_by, verified_at or lifecycle -- carried over from the
+	// STORED row, never taken from the caller, the same rule UpdateInstance
+	// applies to service_id/host_asset_id (services.go). Without this, a
+	// caller reaching this method could name any app_user id as verified_by
+	// and any timestamp as verified_at, forging an attestation that reads as
+	// if an administrator (or anyone else) put their name to the edge --
+	// VerifyDependency is the only place that is allowed to derive
+	// verified_by, and it derives it from p.Actor().ID, never accepts it as
+	// input. The same carry-over closes lifecycle too: without it, this
+	// method could flip a withdrawn edge back to active with no retire guard
+	// and no change_log entry naming a re-declaration, which is exactly the
+	// silent revival UpdateInstance's own comment on the withdrawn-placement
+	// guard exists to prevent one level up. There is no HTTP route reaching
+	// UpdateDependency as a non-administrator today; WP-1.1 item 1 is what
+	// makes that reachable, so the store is what has to hold the line.
+	d.VerifiedBy = before.VerifiedBy
+	d.VerifiedAt = before.VerifiedAt
+	d.Lifecycle = before.Lifecycle
 	d.CreatedAt = before.CreatedAt
 	d.UpdatedAt = domain.FormatTime(s.now())
 
-	return s.writeSerializable(ctx, p, func(t *tx) error {
+	// TWO CHECKS, NOT ONE -- the seizure attempt UpdateJournalEntry's own
+	// comment warns about, one level up: a caller who could re-point an
+	// edge by naming a DIFFERENT consumer or provider in the submitted
+	// struct could otherwise move an edge they already own onto a subject
+	// they do not. The STORED subjects prove the caller may touch this row
+	// at all; the SUBMITTED subjects prove they may touch what it is being
+	// re-pointed to. Both have to pass, and only the second mints the
+	// permit the write actually runs under -- it is scoped to this
+	// dependency id either way, but requiring the first means a stored
+	// subject out of scope is refused even when the submitted one
+	// (deceptively) is not.
+	if _, err := authorizeDependencySubjects(ctx, s, p,
+		before.ConsumerServiceID, before.ProviderEndpointID, before.ProviderRouteID, d.ID); err != nil {
+		return err
+	}
+	depPermit, err := authorizeDependencySubjects(ctx, s, p,
+		d.ConsumerServiceID, d.ProviderEndpointID, d.ProviderRouteID, d.ID)
+	if err != nil {
+		return err
+	}
+
+	return s.writeSerializable(ctx, depPermit, func(t *tx) error {
 		// Re-pointing an edge is declaring it, so it faces the same check. No
 		// route reaches this today; that is not a reason to leave the hole.
 		if err := requireLiveProvider(ctx, t, d.ProviderEndpointID, d.ProviderRouteID); err != nil {
@@ -591,8 +733,15 @@ func (s *SQLStore) RetireDependency(ctx context.Context, p domain.Permit, id str
 	if before.Lifecycle == domain.LifecycleRetired {
 		return nil
 	}
+	// Subjects come from the STORED row, the only one there is here -- a
+	// retire takes no submitted struct for a caller to forge one from.
+	depPermit, err := authorizeDependencySubjects(ctx, s, p,
+		before.ConsumerServiceID, before.ProviderEndpointID, before.ProviderRouteID, id)
+	if err != nil {
+		return err
+	}
 	at := domain.FormatTime(s.now())
-	return s.write(ctx, p, func(t *tx) error {
+	return s.write(ctx, depPermit, func(t *tx) error {
 		if _, err := t.exec(ctx,
 			`UPDATE dependency SET lifecycle = 'retired', updated_at = ?,
 			                       row_version = row_version + 1 WHERE id = ?`, at, id); err != nil {
@@ -617,9 +766,16 @@ func (s *SQLStore) VerifyDependency(ctx context.Context, p domain.Permit, id str
 	if err != nil {
 		return err
 	}
+	// Subjects come from the STORED row, the only one there is here -- a
+	// verify takes no submitted struct for a caller to forge one from.
+	depPermit, err := authorizeDependencySubjects(ctx, s, p,
+		before.ConsumerServiceID, before.ProviderEndpointID, before.ProviderRouteID, id)
+	if err != nil {
+		return err
+	}
 	at := domain.FormatTime(s.now())
 	verifiedBy := p.Actor().ID
-	return s.write(ctx, p, func(t *tx) error {
+	return s.write(ctx, depPermit, func(t *tx) error {
 		if _, err := t.exec(ctx,
 			`UPDATE dependency SET verified_by = ?, verified_at = ?, updated_at = ?,
 			                       row_version = row_version + 1 WHERE id = ?`,

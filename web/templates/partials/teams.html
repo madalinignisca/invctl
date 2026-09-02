@@ -58,7 +58,7 @@
       nobody has picked these up. Reassign them rather than expecting the list to empty.
     </p>
   </div>
-  {{else if .CanWrite}}
+  {{else if .IsAdmin}}
   {{/* A plain link, not hx-post + hx-confirm: the confirmation this action
        needs is counts plus a team picker, which a text prompt cannot hold
        (docs/ownership-report-design.md §5). It is a real page, reachable
@@ -167,7 +167,7 @@
   </div>
   {{end}}
 
-  {{if .CanWrite}}
+  {{if .IsAdmin}}
   <div class="panel">
     <div class="panel-head"><h2>Edit</h2></div>
     <form class="panel-body" method="post" action="/teams/{{.Team.ID}}"

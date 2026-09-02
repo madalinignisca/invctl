@@ -298,11 +298,21 @@
 <div id="edit">{{template "asset_form" .AssetEdit}}</div>
 {{end}}
 
+{{/* asset_cost moved to ScopeSubjectDerived (1.0 item 3, role.go's
+     entityScope) -- the one cost table a project owner can write, scoped
+     through authorizeCostSubject to the owning asset. So this is
+     .CanWriteEntity "asset" .Asset.ID, the same question
+     authorizeCostSubject asks server-side, NOT .IsAdmin the way its
+     service/circuit siblings below stay (service_cost and circuit_cost are
+     still ScopeTopology, Administrator-only -- see their own comments).
+     CanSeeCosts still rides alongside it unconditionally: the store checks
+     the row, the middleware checks the money-visibility grant, and both
+     have to hold. */}}
 {{template "cost_panel" dict
     "Action" (printf "/assets/%s/costs" .Asset.ID) "Slug" "asset"
     "Return" (printf "/assets/%s" .Asset.ID) "EditID" .EditRow "RepriceID" .RepriceRow
     "Costs" .Costs "Totals" .CostTotals "Kinds" .CostKinds "Periods" .CostPeriods
-    "CSRF" .CSRF "CanWrite" .IsAdmin "CanSeeCosts" .CanSeeCosts
+    "CSRF" .CSRF "CanWrite" (.CanWriteEntity "asset" .Asset.ID) "CanSeeCosts" .CanSeeCosts
     "Providers" .Providers
     "Heading" "What it costs"
     "Scoped" true "Guests" .Guests "Consumers" .CostConsumers
@@ -607,6 +617,7 @@
 </div>
 
 
+{{if .CanSeeCosts}}
 {{with .Replacement}}
 {{/* What this took over from (WP-J1). Above the fit panel because it answers a
      question somebody arrives with -- "did that refresh cost us?" -- rather than
@@ -615,7 +626,13 @@
      THE PERCENTAGE ONLY APPEARS WHEN BOTH ENDS CARRY AN ACQUISITION PRICE. Half
      a comparison rendered as a whole one is the failure this panel could most
      easily have: a rise computed against a missing number looks authoritative
-     and is invented. */}}
+     and is invented.
+
+     GATED BEHIND CanSeeCosts, checked outside the "with" block above (dot
+     becomes .Replacement inside it, which would shadow the page-level grant):
+     this panel is nothing but acquisition prices, and the handler skips the
+     ReplacementFor query entirely for a viewer without the grant -- see
+     assets.go. */}}
 <div class="panel">
   <div class="panel-head">
     <h2>Replaced</h2>
@@ -630,6 +647,13 @@
     </p>
 
     {{if .Comparable}}
+    {{/* Item 3 (2026-09-02 group-a-1-1 round): a marker at the exact point
+         money renders, not merely where the panel is gated -- the
+         behavioural half of money_visibility_test.go asserts this on the
+         admin fetch so a template LISTED in moneyRouteCoverage but never
+         actually reached by the fixture (price_movement.html on hv-01 was
+         exactly this) fails loudly instead of passing on an inert claim. */}}
+    <span data-money-marker="pages/asset_detail.html" hidden></span>
     <div class="stat-row">
       <div class="stat">
         <div class="stat-label">Then · {{.ThenDate}}</div>
@@ -678,6 +702,7 @@
     {{end}}
   </div>
 </div>
+{{end}}
 {{end}}
 
 {{with .Fit}}

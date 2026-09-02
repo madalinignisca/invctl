@@ -125,6 +125,16 @@ func TestAddingAndRemovingACostLine(t *testing.T) {
 // "viewer" fixture account is an Observer with no grant, so it is the case
 // this test now has to prove (see CHANGELOG.md's Action Required entry for
 // the release note this test guards).
+//
+// THE BODY ASSERTION BELOW IS THE ORDER GUARD. routes.go's writeCost checks
+// RequireWrite before RequireCostVisibility, and "viewer" fails BOTH seams --
+// no write access at all, and no cost grant either -- which is exactly the
+// case where the refusal body reveals which seam ran first (a caller who
+// fails only one seam gets that seam's message regardless of order, so it
+// proves nothing; see routes.go's own comment on writeCost). Swap the two
+// middlewares and this string flips to RequireCostVisibility's own text,
+// "You may not view or change costs.\n" -- proven by mutation for WP-1.1
+// Task 4c.
 func TestCostsAreHiddenFromAnUngrantedObserverAndWritableByAdminsOnly(t *testing.T) {
 	viewer := newHarness(t)
 	viewer.login("viewer", "viewer-password")
@@ -142,9 +152,14 @@ func TestCostsAreHiddenFromAnUngrantedObserverAndWritableByAdminsOnly(t *testing
 		"csrf_token": {viewer.csrfToken("/assets/" + id)},
 		"kind":       {"operating"}, "period": {"monthly"}, "amount": {"10"},
 	}, false)
-	resp.Body.Close()
+	respBody := body(t, resp)
 	if resp.StatusCode == http.StatusSeeOther || resp.StatusCode == http.StatusOK {
 		t.Errorf("a read-only user added a cost line (%d)", resp.StatusCode)
+	}
+	if respBody != "You have read-only access.\n" {
+		t.Errorf("an ungranted Observer posting a cost got body %q, want RequireWrite's own "+
+			"text -- a different body means RequireCostVisibility ran first, which would be "+
+			"an inversion of routes.go's writeCost order", respBody)
 	}
 }
 

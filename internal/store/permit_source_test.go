@@ -194,6 +194,34 @@ var storePermitMinters = map[string]string{
 		"(checks p.Covers(\"asset\", ...)); an unattached one passes the caller's own " +
 		"permit through, refused downstream for a project owner because ip_address is " +
 		"never in their scoped entities",
+
+	// authorizeDependencySubjects (deps.go): a dependency has two owners,
+	// the consumer service and the service that owns its provider (an
+	// endpoint directly, or a route's frontend endpoint one hop further) --
+	// checks p.Covers("service", consumerServiceID) AND
+	// p.Covers("service", providerServiceID), so a project owner cannot
+	// point their own service at somebody else's socket, or attach
+	// somebody else's service as a consumer of their own, then scopes to
+	// exactly this dependency id.
+	"authorizeDependencySubjects": "a dependency has two owners, the consumer service and the " +
+		"provider's owning service: checks p.Covers on both before scoping to exactly that " +
+		"dependency id",
+
+	// authorizeLinkSubjects (network.go): a link has two owners, the asset
+	// each cabled interface belongs to -- checks p.Covers("asset", ...) on
+	// BOTH the A-end and the B-end asset, so a project owner cannot cable
+	// their own port to anybody else's, then scopes to exactly this link id.
+	"authorizeLinkSubjects": "a link has two owners, the asset each cabled interface belongs to: " +
+		"checks p.Covers on both ends before scoping to exactly that link id",
+
+	// authorizeCostSubject (costs.go): an asset cost line's subject is the
+	// asset it is attached to. Refuses every costTable but costOnAsset
+	// outright (service_cost/project_cost/circuit_cost stay
+	// Administrator-only), then checks p.Covers("asset", ownerID) before
+	// scoping to exactly that cost line's id.
+	"authorizeCostSubject": "an asset cost line's subject is the asset it is attached to: " +
+		"refuses every cost table but asset_cost outright, then checks p.Covers(\"asset\", " +
+		"ownerID) before scoping to exactly that cost id",
 }
 
 // permitMinterNames is the exact, named set TestOnlyTheNamedFunctionsMintAPermit

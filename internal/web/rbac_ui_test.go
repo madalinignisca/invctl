@@ -83,51 +83,136 @@ func TestAProjectOwnerSeesEditControlsOnTheirOwnAssetsAndNotOnOthers(t *testing.
 }
 
 // ---------------------------------------------------------------------------
-// Step 2, test 2: estate-wide configuration stays exactly as CanWrite
-// already had it BEFORE WP-G1 Task 13's flip -- a project owner sees no
-// write control on a team or a tag page, regardless of which project they
-// own. That was true when this test was written because CanWrite(project
-// owner) was unconditionally false; Task 13 made it true (it now means "may
-// reach a write-gated route", not "may write everything" -- see
-// auth.CanWrite's own comment), and teams.html/tags.html gate their
-// creation forms on `.CanWrite` PAGE-WIDE, never converted to the
-// entity-scoped CanWriteEntity check Step 1 gave the asset/service/circuit
-// templates (these pages have no entity to scope one to in the first place
-// -- a team or a tag is estate-wide config, docs/rbac-design.md §4). Task 17
-// counted 132 `.CanWrite` occurrences across 38 template files with this
-// same property; widening all of them is EXPLICITLY DEFERRED (WP-G1 Task
-// 13's own brief calls it "a UX defect, not a security one" -- the server
-// still refuses every write, proved independently by
-// TestAProjectOwnerIsRefusedOnEveryNonProjectLinkableWriteRoute in
-// rbac_boundary_test.go, which drives POST /teams and POST /tags directly
-// and gets a permit refusal). So this test now pins the controls being
-// VISIBLE, not absent -- flip the two Errorf branches back to their
-// original "still absent" shape the day that template sweep lands, not
-// before.
+// Step 2, test 2: estate-wide configuration -- FLIPPED BACK, task 6 (the
+// `.CanWrite` template sweep). This test used to pin the deferred UX gap
+// this comment used to describe: teams.html/tags.html gated their creation
+// forms on page-wide `.CanWrite`, which WP-G1 Task 13 made true for a
+// project owner even though `team`/`tag` are ScopeEstateConfig
+// (internal/domain/role.go) and every write was still refused server-side
+// (TestAProjectOwnerIsRefusedOnEveryNonProjectLinkableWriteRoute in
+// rbac_boundary_test.go proved that independently, driving POST /teams and
+// POST /tags directly). Task 6's census found both pages among the 25 files
+// still gated on the page-wide flag and switched them to `.IsAdmin` -- the
+// same answer CanWriteEntity gives an asset/service/circuit page, just with
+// no entity to scope one to (a team or a tag is estate-wide, not owned by
+// any one project -- docs/rbac-design.md §4). This test now pins the
+// controls being ABSENT again, matching what a project owner could
+// legitimately do all along.
+//
+// Item 2 (2026-09-02 group-a-1-1 round): this pinned exactly two of the 24
+// files task 6's census flipped -- team_list.html and tag_list.html.
+// Reverting every OTHER flip left the whole internal/web suite green, which
+// means a project owner was re-offered a creation form on roughly 15 other
+// pages, each one 403ing on submit, and nothing here would have said so.
+// Now a table over every swept page task 6's own commit (a3f0d61) touched,
+// checked two ways per row the same way the money-visibility census does:
+// the marker must be ABSENT for the project owner (the regression this
+// guards) and PRESENT for an Administrator on the very same fetch (the
+// positive control -- without it a page that happened to 403 outright, or
+// render nothing for an unrelated reason, would pass having proven nothing).
+//
+// fhrp_detail.html and l2vpn_detail.html need a real group/overlay row to
+// reach their write form at all -- the seed fixture carries none of either
+// -- so their path funcs create one through the real handler first, the
+// same way money_visibility_test.go's circuit case adds a fixture cost line
+// before either viewer checks the page. ownership_report.html's admin-only
+// panel is reachable only when the estate has an unowned entity, which nothing
+// here guarantees, so it is left out rather than risk an inert positive
+// control; flagged as a follow-up, not silently dropped.
+var sweptEstateConfigPages = []struct {
+	name string
+	// path does any admin-only setup a route needs (creating a fixture row
+	// through the real handler) and returns the URL to fetch. Runs already
+	// logged in as boundaryAdminUser.
+	path func(t *testing.T, h *harness) string
+	// marker is the control -- a creation form's action, or its heading --
+	// that only .IsAdmin renders.
+	marker string
+}{
+	{"teams", func(t *testing.T, h *harness) string { return "/teams" }, `action="/teams"`},
+	{"tags", func(t *testing.T, h *harness) string { return "/tags" }, `action="/tags"`},
+	{"catalogue", func(t *testing.T, h *harness) string { return "/catalogue" }, `action="/catalogue/types"`},
+	{"certificates", func(t *testing.T, h *harness) string { return "/certificates" }, `action="/certificates"`},
+	{"clusters", func(t *testing.T, h *harness) string { return "/clusters" }, `action="/clusters"`},
+	{"custom fields", func(t *testing.T, h *harness) string { return "/custom-fields" }, `action="/custom-fields"`},
+	{"environments", func(t *testing.T, h *harness) string { return "/environments" }, `action="/environments"`},
+	{"redundancy list", func(t *testing.T, h *harness) string { return "/redundancy" }, `action="/redundancy"`},
+	{"inflation", func(t *testing.T, h *harness) string { return "/inflation" }, `action="/inflation"`},
+	{"overlays list", func(t *testing.T, h *harness) string { return "/overlays" }, `action="/overlays"`},
+	{"networks", func(t *testing.T, h *harness) string { return "/network" }, `action="/network/derive"`},
+	{"power", func(t *testing.T, h *harness) string { return "/power" }, `action="/power/feeds"`},
+	{"prefixes", func(t *testing.T, h *harness) string { return "/prefixes" }, `action="/ip-ranges"`},
+	{"registry", func(t *testing.T, h *harness) string { return "/allocations" }, `action="/allocations"`},
+	{"vlans", func(t *testing.T, h *harness) string { return "/vlans" }, `action="/vlans"`},
+	{
+		"redundancy detail", func(t *testing.T, h *harness) string {
+			resp := h.post("/redundancy", url.Values{
+				"csrf_token": {h.csrfToken("/redundancy")},
+				"name":       {"sweep-fixture-group"}, "protocol": {"vrrp2"}, "group_number": {"77"},
+			}, false)
+			resp.Body.Close()
+			if resp.StatusCode != http.StatusSeeOther {
+				t.Fatalf("creating the fhrp group fixture returned %d, want a redirect", resp.StatusCode)
+			}
+			id := h.lookup(`SELECT id FROM fhrp_group WHERE name = ?`, "sweep-fixture-group")
+			if id == "" {
+				t.Fatal("fhrp group fixture was not created")
+			}
+			return "/redundancy/" + id
+		},
+		`action="/redundancy/`, // the member-add form's action is /redundancy/{id}/members
+	},
+	{
+		"overlay detail", func(t *testing.T, h *harness) string {
+			resp := h.post("/overlays", url.Values{
+				"csrf_token": {h.csrfToken("/overlays")},
+				"name":       {"sweep-fixture-overlay"}, "kind": {"vxlan"}, "identifier": {"10099"},
+			}, false)
+			resp.Body.Close()
+			if resp.StatusCode != http.StatusSeeOther {
+				t.Fatalf("creating the l2vpn fixture returned %d, want a redirect", resp.StatusCode)
+			}
+			id := h.lookup(`SELECT id FROM l2vpn WHERE name = ?`, "sweep-fixture-overlay")
+			if id == "" {
+				t.Fatal("l2vpn fixture was not created")
+			}
+			return "/overlays/" + id
+		},
+		`action="/overlays/`, // the termination-add form's action is /overlays/{id}/terminations
+	},
+}
+
 func TestAProjectOwnerSeesNoEditControlOnAnyTeamOrTagPage(t *testing.T) {
 	for _, eng := range boundaryEngines(t) {
 		t.Run(eng.name, func(t *testing.T) {
-			h, _ := setupBoundary(t, eng)
-			h.login(boundaryOwnerUser, boundaryOwnerPassword)
+			for _, tc := range sweptEstateConfigPages {
+				t.Run(tc.name, func(t *testing.T) {
+					h, _ := setupBoundary(t, eng)
+					h.login(boundaryAdminUser, boundaryAdminPassword)
+					path := tc.path(t, h)
 
-			teamsBody := body(t, h.get("/teams", false))
-			if !strings.Contains(teamsBody, "Add a team") {
-				t.Error("teams page no longer offers \"Add a team\" to a project owner -- " +
-					"see this test's own comment: it should today (known, deferred UX gap)")
-			}
-			if !strings.Contains(teamsBody, `action="/teams"`) {
-				t.Error("teams page no longer renders the team-creation form for a project owner -- " +
-					"see this test's own comment")
-			}
+					adminBody := body(t, h.get(path, false))
+					if !strings.Contains(adminBody, tc.marker) {
+						t.Fatalf("GET %s as Administrator does not carry %q -- this route is "+
+							"not proven to render the control at all, so the project-owner "+
+							"check below would prove nothing", path, tc.marker)
+					}
 
-			tagsBody := body(t, h.get("/tags", false))
-			if !strings.Contains(tagsBody, "Define a tag") {
-				t.Error("tags page no longer offers \"Define a tag\" to a project owner -- " +
-					"see this test's own comment: it should today (known, deferred UX gap)")
-			}
-			if !strings.Contains(tagsBody, `action="/tags"`) {
-				t.Error("tags page no longer renders the tag-creation form for a project owner -- " +
-					"see this test's own comment")
+					h.logout()
+					h.login(boundaryOwnerUser, boundaryOwnerPassword)
+					resp := h.get(path, false)
+					if resp.StatusCode != http.StatusOK {
+						resp.Body.Close()
+						t.Fatalf("GET %s as a project owner returned %d, want 200 with the "+
+							"control withheld, not a hard refusal", path, resp.StatusCode)
+					}
+					ownerBody := body(t, resp)
+					if strings.Contains(ownerBody, tc.marker) {
+						t.Errorf("GET %s unexpectedly carries %q for a project owner -- %s is "+
+							"ScopeEstateConfig, Administrator-only, and a control offered here "+
+							"403s on submit", path, tc.marker, tc.name)
+					}
+				})
 			}
 		})
 	}
@@ -261,11 +346,19 @@ func TestAProjectOwnerSeesTheAssetScopedTopologyControlsOnTheirOwnAssetOnly(t *t
 }
 
 // TestNeitherAssetPageOffersTheCostLineControlToAProjectOwner is the mirror
-// case: asset_cost is ScopeTopology (domain/role.go's entityScope), never
-// extended to a project owner regardless of which asset it is attached to,
-// so cost_panel's dict must be built from .IsAdmin, not from
-// Base.CanWriteEntity or Base.CanWrite. A project owner gets it on neither
-// page, including their own asset -- the one case a same-entity-type
+// case, and its own class claim went stale once WP-1.1 item 3 landed:
+// asset_cost is domain.ScopeSubjectDerived now (authorizeCostSubject,
+// internal/store/costs.go), not ScopeTopology, so the STORE will accept a
+// project owner writing a cost line on their own asset. This UI gate did
+// NOT move with it, and that is deliberate, the same reason depRowData's
+// own comment gives for dependency (internal/web/handlers/forms.go): an
+// honest per-row CanWrite here would have to ask whether the caller's
+// permit covers THIS asset, which is exactly authorizeCostSubject's
+// derivation, and duplicating a store-layer authorization check in a
+// handler-side view model is a second place for the two to drift. So
+// cost_panel's dict is still built from .IsAdmin, not from
+// Base.CanWriteEntity or Base.CanWrite, and a project owner gets it on
+// neither page, including their own asset -- the one case a same-entity-type
 // intuition (interface behaves like this, so cost should too) gets wrong.
 // TestAnAdministratorGetsTheCostLineControlOnBothAssetPages is the other
 // half: an Administrator gets it regardless of project ownership.
@@ -283,7 +376,8 @@ func TestNeitherAssetPageOffersTheCostLineControlToAProjectOwner(t *testing.T) {
 			inBody := body(t, h.get("/assets/"+fx.assetIn, false))
 			if strings.Contains(inBody, costForm) {
 				t.Error("a project owner's OWN asset page offers the add-a-cost form; " +
-					"asset_cost is ScopeTopology and stays Administrator-only")
+					"asset_cost is ScopeSubjectDerived at the store layer now, but this UI gate " +
+					"deliberately stays on .IsAdmin -- see this test's own doc comment")
 			}
 			outBody := body(t, h.get("/assets/"+fx.assetOut, false))
 			if strings.Contains(outBody, costForm) {

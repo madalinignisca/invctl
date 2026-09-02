@@ -254,10 +254,18 @@ func TestAProjectOwnersPermitNeverCoversEstateConfiguration(t *testing.T) {
 // them in this table would have this test assert the opposite of what
 // Task 1 was built to do, exactly the way a mutation-testing pass would be
 // expected to catch a class moved the wrong way.
+//
+// link, dependency and asset_cost left this list for the SAME reason in
+// 1.1 (commits b28d0ed, 438c848, 309ac19), and their departure is why this
+// list is dangerous: it is HAND-MAINTAINED, so reclassifying an entity
+// falsifies it silently and no scoped `go test ./internal/store/` run
+// touches it. Both 1.1 tasks reported green having never run this package.
+// If you move an entity between scope classes, this table and its positive
+// sibling below are part of that change, not a follow-up to it.
 func TestAProjectOwnersPermitNeverCoversTopology(t *testing.T) {
 	types := []string{
-		"link", "power_feed", "prefix",
-		"vlan", "cluster", "dependency", "endpoint",
+		"power_feed", "prefix",
+		"vlan", "cluster", "endpoint",
 	}
 	p := permitCoveringEveryType(types...)
 	for _, entityType := range types {
@@ -277,7 +285,12 @@ func TestAProjectOwnersPermitNeverCoversTopology(t *testing.T) {
 // authorizeAddressSubject, authorizeInstanceSubjects in
 // internal/store/network.go and services.go).
 func TestAProjectOwnersPermitCoversASubjectDerivedTypeItActuallyHolds(t *testing.T) {
-	types := []string{"interface", "ip_address", "service_instance"}
+	types := []string{
+		"interface", "ip_address", "service_instance",
+		// 1.1: two-ended subjects (both ends checked in the store before a
+		// narrow permit is minted) and, for asset_cost, the owning asset.
+		"link", "dependency", "asset_cost",
+	}
 	p := permitCoveringEveryType(types...)
 	for _, entityType := range types {
 		if !p.Covers(entityType, "shared-id") {

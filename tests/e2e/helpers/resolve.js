@@ -75,6 +75,38 @@ export async function resolveProjectPath(page, code) {
   return href;
 }
 
+/**
+ * Resolves a service's URL path by its CODE, never a hardcoded ID -- same
+ * reasoning as resolveAssetPath/resolveProjectPath above. The service list's
+ * own filter (web/templates/pages/service_list.html, `?q=`) searches by
+ * code/name, and each row's Code cell links to the service's own detail page
+ * (web/templates/partials/rows.html's "service_table") -- this walks that
+ * link rather than guessing a path shape.
+ *
+ * @param {import('@playwright/test').Page} page
+ * @param {string} code
+ * @returns {Promise<string>} the service's detail path, e.g. "/services/<id>"
+ */
+export async function resolveServicePath(page, code) {
+  await page.goto(`/services?q=${encodeURIComponent(code)}`, {
+    waitUntil: 'networkidle',
+  });
+  const link = page.locator('#service-table a.id', { hasText: new RegExp(`^${escapeRegExp(code)}$`) }).first();
+  const count = await link.count();
+  if (count === 0) {
+    throw new Error(
+      `no service coded "${code}" was found via /services?q=${code} -- this ` +
+        'suite expects the demo estate. See docs/E2E.md ' +
+        '(INV_SEED=true; the BASE fixture seeds services unconditionally).',
+    );
+  }
+  const href = await link.getAttribute('href');
+  if (!href) {
+    throw new Error(`service row for "${code}" has no href`);
+  }
+  return href;
+}
+
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }

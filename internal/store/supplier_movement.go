@@ -247,7 +247,12 @@ func (s *SQLStore) SupplierMovements(ctx context.Context, on string) (*SupplierR
 // pricedOwners is every entity carrying at least one live cost line.
 func (s *SQLStore) pricedOwners(ctx context.Context) ([]supplierOwner, error) {
 	out := []supplierOwner{}
-	for _, t := range []costTable{costOnAsset, costOnService, costOnProject, costOnCircuit} {
+	// Item 4 (2026-09-02 group-a-1-1 round): was its own hand-typed
+	// []costTable{...} literal here, a second copy of the same four entries
+	// costs.go's allCostTables already declares -- so a fifth costTable
+	// added there would silently never reach the supplier report. Now
+	// consumes that one canonical list; see allCostTables' own comment.
+	for _, t := range allCostTables {
 		var ids []string
 		// DISTINCT: one owner is visited once however many lines it carries.
 		if err := s.read(ctx, &ids, `

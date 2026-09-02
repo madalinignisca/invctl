@@ -22,10 +22,15 @@
   <div class="eyebrow">analysis</div>
   <h1>What it costs</h1>
   <p class="lede">
+    {{if .CanSeeCosts}}
     Every live cost line in the estate, totalled as at {{.Report.On}}. Capital is
     what has already been spent; the run rate is what leaves the bank each month
     to keep this running. Amortisation is shown beside the run rate and never
     added to it — it is an accounting view of money that has already gone.
+    {{else}}
+    Every live cost line in the estate, totalled. This report shows money, and
+    your account does not see money.
+    {{end}}
   </p>
 </div>
 
@@ -34,6 +39,20 @@
 
 {{define "cost_report"}}
 <div id="cost-report">
+
+{{if not .CanSeeCosts}}
+<div class="panel">
+  <div class="empty">
+    <strong>Not for you</strong>
+    This report shows money, and your account does not see money.
+  </div>
+</div>
+{{else}}
+{{/* Item 3 marker (see asset_detail.html's comment). Placed in the
+     CanSeeCosts branch of THIS report, not the report itself, because
+     the totals below always render once a grant holds -- there is no
+     narrower "did it actually show a number" gate here to key off. */}}
+<span data-money-marker="pages/cost_report.html" hidden></span>
 {{/* The uncertainty first, and only when there is some. A page that leads with
      a caveat it does not need trains people to skip the caveat. */}}
 {{if not .Report.FullyPriced}}
@@ -130,5 +149,6 @@
   </div>
   {{end}}
 </div>
+{{end}}
 </div>
 {{end}}

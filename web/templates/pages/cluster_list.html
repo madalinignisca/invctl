@@ -28,7 +28,7 @@
   {{if .Clusters}}
   <div class="scroll-x">
     <table>
-      <thead><tr><th>Name</th><th>Runs</th><th>HA</th><th class="num">Hosts</th><th class="num">Guests</th><th>Losing one host</th>{{if .CanWrite}}<th></th>{{end}}</tr></thead>
+      <thead><tr><th>Name</th><th>Runs</th><th>HA</th><th class="num">Hosts</th><th class="num">Guests</th><th>Losing one host</th>{{if .IsAdmin}}<th></th>{{end}}</tr></thead>
       <tbody>
         {{range .Clusters}}
         <tr>
@@ -45,7 +45,7 @@
             {{else if .AtRisk}}<span class="pill pill-degraded" title="HA is configured and cannot help">not survivable</span>
             {{else}}<span class="pill pill-ok">guests relocate</span>{{end}}
           </td>
-          {{if $.CanWrite}}
+          {{if $.IsAdmin}}
           <td style="white-space:nowrap">
             <form method="post" action="/clusters/{{.ID}}/retire" style="display:inline">
               <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
@@ -67,7 +67,7 @@
   {{end}}
 </div>
 
-{{if .CanWrite}}
+{{if .IsAdmin}}
 <form id="cluster-form" class="panel" method="post" action="/clusters"
       hx-post="/clusters" hx-target="#cluster-form" hx-swap="outerHTML">
   <input type="hidden" name="csrf_token" value="{{.CSRF}}">

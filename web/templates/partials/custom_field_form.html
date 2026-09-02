@@ -14,12 +14,12 @@
   its options editor open beneath it when $.Page.EditOptions names it.
 
   Takes dict{Row, Page} rather than the row alone, because OptionRows and
-  every $.CanWrite / $.CSRF / $.EditRow check need the whole page.
+  every $.IsAdmin / $.CSRF / $.EditRow check need the whole page.
 */}}
 {{define "custom_field_row"}}
 {{$row := .Row}}
 {{$p := .Page}}
-{{if and $p.CanWrite (eq $row.ID $p.Base.EditRow)}}
+{{if and $p.IsAdmin (eq $row.ID $p.Base.EditRow)}}
 <tr class="row-editing">
   <td>
     <input form="cf-{{$row.ID}}" class="mono {{if $p.Edit.Err "code"}}invalid{{end}}" type="text" name="code"
@@ -85,16 +85,14 @@
   </td>
   <td class="num">{{$row.UsageCount}}</td>
   <td style="white-space:nowrap">
-    {{if $p.CanWrite}}
+    {{if $p.IsAdmin}}
     <a class="btn btn-sm" href="/custom-fields?edit={{$row.ID}}">Edit</a>
     {{if eq $row.Kind "select"}}
     <a class="btn btn-sm" href="/custom-fields?options={{$row.ID}}">Options</a>
     {{end}}
-    <form method="post" action="/custom-fields/{{$row.ID}}/retire" style="display:inline">
-      <input type="hidden" name="csrf_token" value="{{$p.CSRF}}">
-      <button class="btn btn-sm btn-danger" type="submit"
-              onclick="return confirm('Retire this field? Every value it already holds is kept.')">Retire</button>
-    </form>
+    <button class="btn btn-sm btn-danger" type="button"
+            hx-post="/custom-fields/{{$row.ID}}/retire"
+            hx-confirm="Retire this field? Every value it already holds is kept.">Retire</button>
     {{end}}
   </td>
 </tr>
@@ -207,7 +205,7 @@
             <td>{{if .RetiredAt}}{{shortTime (deref .RetiredAt)}}{{end}}</td>
             <td class="num">{{.UsageCount}}</td>
             <td>
-              {{if $.CanWrite}}
+              {{if $.IsAdmin}}
               <form method="post" action="/custom-fields/{{.ID}}/restore" style="display:inline">
                 <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
                 <button class="btn btn-sm" type="submit">Restore</button>

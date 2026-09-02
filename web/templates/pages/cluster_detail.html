@@ -66,7 +66,7 @@
   <div class="empty"><strong>No hosts in this cluster.</strong>It carries nothing and changes nothing.</div>
   {{end}}
 
-  {{if .CanWrite}}
+  {{if .IsAdmin}}
   <form class="panel-body" method="post" action="/clusters/{{.Cluster.ID}}/hosts">
     <input type="hidden" name="csrf_token" value="{{.CSRF}}">
     <div class="field">
@@ -88,7 +88,7 @@
   {{end}}
 </div>
 
-{{if .CanWrite}}
+{{if .IsAdmin}}
 <form class="panel" method="post" action="/clusters/{{.Cluster.ID}}">
   <input type="hidden" name="csrf_token" value="{{.CSRF}}">
   <input type="hidden" name="row_version" value="{{itoa .Cluster.RowVersion}}">
@@ -321,6 +321,8 @@
      panels use: a reader who cannot see a rack's price cannot see it divided. */}}
 {{if and .CanSeeCosts .Cost}}
 {{with .Cost}}
+{{/* Item 3 marker (see asset_detail.html's comment). */}}
+<span data-money-marker="pages/cluster_detail.html" hidden></span>
 <div class="panel">
   <div class="panel-head">
     <h2>What that share costs</h2>

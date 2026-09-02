@@ -556,6 +556,25 @@ document.addEventListener('alpine:init', () => {
   // partial itself for form fields; this component only needs open/closed.
   Alpine.data('savedViews', () => ({
     open: false,
+
+    init() {
+      // A $watch, not a check inside toggleMenu/close alone: claimDisclosure
+      // (module scope, above) can set `this.open = false` directly on a menu
+      // that loses the latch to a sibling opening -- e.g. Columns opening
+      // while Views is mid-rename -- bypassing both of this component's own
+      // methods. Without this watcher a row's rename form stays open in the
+      // DOM under a menu that is now `x-show`n hidden, and the NEXT time
+      // this same component instance reopens (toggleMenu, no fresh element
+      // -- the fragment was not replaced) the rename form reappears already
+      // open for a row nobody clicked. Watching open itself catches every
+      // path that flips it, not just the two this file writes today.
+      this.$watch('open', (isOpen) => {
+        if (!isOpen) {
+          this.closeAnyRename();
+        }
+      });
+    },
+
     toggleMenu() {
       this.open = !this.open;
       if (this.open) {
@@ -571,6 +590,46 @@ document.addEventListener('alpine:init', () => {
       if (this.open) {
         this.open = false;
         releaseDisclosure(this);
+      }
+    },
+
+    // Which row's rename form shows is plain DOM state (a CSS class on the
+    // row), not Alpine-reactive state: the CSP build evaluates NO
+    // expressions in ANY directive, including a comparison, so
+    // `x-show="editing === id"` would be silently inert
+    // (TestAlpineDirectivesAreCSPSafe catches exactly this). Same shape as
+    // columnPicker.apply()'s classList.toggle('col-hidden', ...) -- see
+    // .saved-view-rename / .is-editing in app.css.
+    closeAnyRename() {
+      document.querySelectorAll('.saved-view-row.is-editing').forEach((row) => {
+        row.classList.remove('is-editing');
+      });
+    },
+
+    // The id and current name ride on the clicked button as data-view /
+    // data-name -- same pattern as columnPicker.toggleColumn's data-col --
+    // because the CSP build cannot pass an argument from an x-on
+    // expression. At most one row is ever mid-rename: closeAnyRename first,
+    // so switching from renaming one view straight to another does not
+    // leave two forms open.
+    startRename(event) {
+      this.closeAnyRename();
+      const row = event.target.closest('.saved-view-row');
+      if (!row) {
+        return;
+      }
+      row.classList.add('is-editing');
+      const input = row.querySelector('.saved-view-rename input[name="name"]');
+      if (input) {
+        input.value = event.target.dataset.name || '';
+        input.focus();
+      }
+    },
+
+    cancelRename(event) {
+      const row = event.target.closest('.saved-view-row');
+      if (row) {
+        row.classList.remove('is-editing');
       }
     },
   }));
@@ -610,3 +669,74 @@ function scheduleFlashDismissal(root) {
     setTimeout(() => el.remove(), 6000);
   });
 }
+
+// Submit-on-change fields (data-submit-on-change), CSP-safe.
+//
+// onchange="this.form.requestSubmit()" is an inline handler, and this app's
+// own CSP is script-src 'self' with no unsafe-inline (middleware.go's
+// Content-Security-Policy) -- the browser drops the attribute silently
+// rather than erroring anywhere visible. user_row.html's "sees costs"
+// checkbox carried exactly this: it toggled visually and never submitted,
+// so an administrator could not grant can_see_costs through the UI at all
+// (item 6, 2026-09-02 group-a-1-1 round).
+//
+// Delegated on document rather than bound to each element: the roster this
+// checkbox lives on is swapped by HTMX on every one of the row's own
+// mutations (role, costs, active, scrub, project assign/release -- see
+// user_row.html's own comment), and a per-element binding would need
+// re-attaching after every one of those swaps. A delegated listener needs
+// no rebinding because it is never bound to the element in the first place.
+//
+// Only `change`, not `input`: this is for checkboxes and selects whose value
+// is only meaningful once committed, not text fields mid-keystroke.
+document.addEventListener('change', (event) => {
+  if (event.target.matches && event.target.matches('[data-submit-on-change]') && event.target.form) {
+    event.target.form.requestSubmit();
+  }
+});
+
+// Group-picker forms (data-action-template), CSP-safe.
+//
+// network.html's "Add a group member" and "Declare an uplink" forms render
+// pointed at the FIRST forwarder group in the list ({{(index .Groups 0).ID}}
+// in the form's own action and hx-post), because the group is part of the
+// URL path (POST /network/groups/{id}/members|uplinks) and the template has
+// to pick something before the operator has picked anything. The <select>
+// used to carry onchange="this.form.action='/network/groups/'+this.value+
+// '/members'; this.form.setAttribute('hx-post', this.form.action)" to
+// rewrite both once the operator chose -- same CSP defeat as
+// data-submit-on-change above (script-src 'self', no unsafe-inline): the
+// browser dropped the attribute silently, so the rewrite never ran, the
+// form kept posting to the first group no matter what was selected, and the
+// handler wrote the member (or uplink) into that wrong group while
+// reporting success. A wrong-group write that told nobody (task-11,
+// 2026-09-02 group-a-1-1 round).
+//
+// This does not have to be the ONLY defence -- reach.go's
+// groupIDFromRequest refuses server-side if the path and the submitted
+// group_id ever disagree, which is what happens if this listener is ever
+// blocked or fails to run again. But fixing the client side is still the
+// point: without it, every single submission would trip that refusal.
+//
+// data-action-template carries the URL with a literal "{id}" placeholder
+// rather than a prefix/suffix pair, so the group id can move anywhere in
+// the path (it's a prefix here, but a future route need not keep it that
+// way) without this listener caring where.
+//
+// Delegated on document for the same reason as data-submit-on-change: these
+// panels are swapped by HTMX (hx-target="#net-member-form" / "#net-uplink-
+// form", hx-swap="outerHTML"), so a per-element binding would need
+// re-attaching after every swap.
+document.addEventListener('change', (event) => {
+  if (!(event.target.matches && event.target.matches('[data-action-template]'))) {
+    return;
+  }
+  const form = event.target.form;
+  if (!form) {
+    return;
+  }
+  const template = event.target.dataset.actionTemplate;
+  const url = template.replace('{id}', encodeURIComponent(event.target.value));
+  form.setAttribute('action', url);
+  form.setAttribute('hx-post', url);
+});

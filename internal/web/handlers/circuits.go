@@ -105,9 +105,16 @@ func (a *App) renderCircuitDetail(w http.ResponseWriter, r *http.Request, id str
 		a.serverError(w, r, err)
 		return
 	}
-	movement, err := a.Store.PriceMovementForCircuit(r.Context(), id)
-	if err != nil {
-		slog.Error("resolving price movement", "error", err, "circuit", id)
+	// GATED BEHIND CanSeeCosts, like the same query on the asset page (see
+	// assets.go): price_movement_panel is entirely money, so a viewer without
+	// the grant gets neither the query nor the render.
+	base := a.base(r, circuit.CID, "circuits")
+	var movement []store.PriceSeries
+	if base.CanSeeCosts {
+		movement, err = a.Store.PriceMovementForCircuit(r.Context(), id)
+		if err != nil {
+			slog.Error("resolving price movement", "error", err, "circuit", id)
+		}
 	}
 	costs, err := a.Store.ListCircuitCosts(r.Context(), id)
 	if err != nil {
@@ -129,7 +136,18 @@ func (a *App) renderCircuitDetail(w http.ResponseWriter, r *http.Request, id str
 		a.serverError(w, r, err)
 		return
 	}
-	base := a.base(r, circuit.CID, "circuits")
+	// The cost panel offers a supplier picker, so this page owes it the
+	// provider list. Missing since J6 (732c6b0) added "Providers" .Providers
+	// to circuit_detail.html without adding the field here: html/template
+	// fails execution on an absent struct field, so every GET /circuits/{id}
+	// returned 500. Nothing caught it because no test rendered this page --
+	// handler tests call handlers directly and never execute the template
+	// against the real page struct.
+	providers, err := a.Store.ListProviders(r.Context())
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
 	a.Render.Page(w, status, "circuit_detail", struct {
 		Base
 		Circuit      *domain.Circuit
@@ -142,6 +160,7 @@ func (a *App) renderCircuitDetail(w http.ResponseWriter, r *http.Request, id str
 		Ports        []store.InterfaceOption
 		Sites        []store.AssetRow
 		Sides        []string
+		Providers    []store.ProviderRow
 		Errors       map[string]string
 	}{
 		Base:         base,
@@ -155,6 +174,7 @@ func (a *App) renderCircuitDetail(w http.ResponseWriter, r *http.Request, id str
 		Ports:        ports,
 		Sites:        sites,
 		Sides:        domain.CircuitSides,
+		Providers:    providers,
 		Errors:       orEmpty(errs),
 	})
 }

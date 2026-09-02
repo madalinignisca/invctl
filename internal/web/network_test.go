@@ -342,3 +342,140 @@ func TestVocabularyValuesRoundTripThroughAForm(t *testing.T) {
 		}
 	})
 }
+
+// TestNetworkGroupMemberRefusesGroupIDMismatch is task-11's server-side half:
+// the group id in the path and the group_id the form actually submitted must
+// agree, or the write is refused rather than silently landing in the group
+// named by the path. That path/body split is exactly what the CSP-dead
+// inline onchange= used to hide -- the path stayed on whichever group
+// rendered first while the operator's actual pick sat unused in the body --
+// so this drives the mismatch directly, without relying on app.js having run
+// (it hasn't: this is a raw POST), which is the point.
+func TestNetworkGroupMemberRefusesGroupIDMismatch(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+	ctx := context.Background()
+
+	groupA := mustNetGroupWeb(t, h, "mismatch-a", domain.NetRoleCore, domain.AvailStandalone)
+	groupB := mustNetGroupWeb(t, h, "mismatch-b", domain.NetRoleCore, domain.AvailStandalone)
+	assetID := mustServerAssetWeb(t, h, "mismatch-member-asset")
+
+	memberCountBefore := h.count(`SELECT COUNT(*) FROM net_group_member WHERE group_id IN (?, ?)`, groupA, groupB)
+	changeLogBefore := h.count(`SELECT COUNT(*) FROM change_log`)
+
+	token := h.csrfToken("/network")
+	resp := h.post("/network/groups/"+groupA+"/members", url.Values{
+		"csrf_token": {token},
+		"group_id":   {groupB}, // disagrees with the path -- the case app.js's rewrite exists to prevent
+		"asset_id":   {assetID},
+		"role":       {domain.RolePrimary},
+	}, true)
+	text := body(t, resp)
+
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422", resp.StatusCode)
+	}
+	if !strings.Contains(text, `id="net-member-form"`) {
+		t.Error("the response is not the member form partial")
+	}
+	if !strings.Contains(text, "does not match this form") {
+		t.Error("the response does not explain the group_id/path disagreement")
+	}
+	if strings.Contains(text, "<!doctype html>") {
+		t.Error("an HTMX request received a full page")
+	}
+
+	if got := h.count(`SELECT COUNT(*) FROM net_group_member WHERE group_id IN (?, ?)`, groupA, groupB); got != memberCountBefore {
+		t.Errorf("net_group_member row count changed from %d to %d despite the refusal -- "+
+			"a mismatched group_id must write nothing, into either group", memberCountBefore, got)
+	}
+	if got := h.count(`SELECT COUNT(*) FROM change_log`); got != changeLogBefore {
+		t.Errorf("change_log grew from %d to %d rows despite the refusal", changeLogBefore, got)
+	}
+
+	// The matching case -- group_id agrees with the path -- must still
+	// succeed. Without this half, a bug that refused EVERY member write
+	// (not just a mismatched one) would pass the assertions above too.
+	resp2 := h.post("/network/groups/"+groupA+"/members", url.Values{
+		"csrf_token": {h.csrfToken("/network")},
+		"group_id":   {groupA},
+		"asset_id":   {assetID},
+		"role":       {domain.RolePrimary},
+	}, false)
+	resp2.Body.Close()
+	if resp2.StatusCode != http.StatusSeeOther {
+		t.Fatalf("status = %d, want 303 for a matching group_id", resp2.StatusCode)
+	}
+	members, err := h.store.ListNetGroupMembers(ctx, groupA)
+	if err != nil {
+		t.Fatalf("listing members: %v", err)
+	}
+	found := false
+	for _, m := range members {
+		if m.AssetID == assetID {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("a matching group_id was refused, or the member was not written into groupA")
+	}
+}
+
+// TestNetworkUplinkRefusesGroupIDMismatch mirrors the member-form guard above
+// for the uplink form's identical shape (network.html:123).
+func TestNetworkUplinkRefusesGroupIDMismatch(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+	ctx := context.Background()
+
+	groupA := mustNetGroupWeb(t, h, "uplink-mismatch-a", domain.NetRoleCore, domain.AvailStandalone)
+	groupB := mustNetGroupWeb(t, h, "uplink-mismatch-b", domain.NetRoleCore, domain.AvailStandalone)
+	upstream := mustNetGroupWeb(t, h, "uplink-mismatch-upstream", domain.NetRoleDistribution, domain.AvailStandalone)
+
+	uplinkCountBefore := h.count(`SELECT COUNT(*) FROM net_uplink WHERE group_id IN (?, ?)`, groupA, groupB)
+	changeLogBefore := h.count(`SELECT COUNT(*) FROM change_log`)
+
+	token := h.csrfToken("/network")
+	resp := h.post("/network/groups/"+groupA+"/uplinks", url.Values{
+		"csrf_token":        {token},
+		"group_id":          {groupB}, // disagrees with the path
+		"upstream_group_id": {upstream},
+		"plane":             {"data"},
+	}, true)
+	text := body(t, resp)
+
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422", resp.StatusCode)
+	}
+	if !strings.Contains(text, `id="net-uplink-form"`) {
+		t.Error("the response is not the uplink form partial")
+	}
+	if !strings.Contains(text, "does not match this form") {
+		t.Error("the response does not explain the group_id/path disagreement")
+	}
+
+	if got := h.count(`SELECT COUNT(*) FROM net_uplink WHERE group_id IN (?, ?)`, groupA, groupB); got != uplinkCountBefore {
+		t.Errorf("net_uplink row count changed from %d to %d despite the refusal", uplinkCountBefore, got)
+	}
+	if got := h.count(`SELECT COUNT(*) FROM change_log`); got != changeLogBefore {
+		t.Errorf("change_log grew from %d to %d rows despite the refusal", changeLogBefore, got)
+	}
+
+	resp2 := h.post("/network/groups/"+groupA+"/uplinks", url.Values{
+		"csrf_token":        {h.csrfToken("/network")},
+		"group_id":          {groupA},
+		"upstream_group_id": {upstream},
+		"plane":             {"data"},
+	}, false)
+	resp2.Body.Close()
+	if resp2.StatusCode != http.StatusSeeOther {
+		t.Fatalf("status = %d, want 303 for a matching group_id", resp2.StatusCode)
+	}
+	uplinks, err := h.store.ListNetUplinks(ctx, groupA)
+	if err != nil {
+		t.Fatalf("listing uplinks: %v", err)
+	}
+	if len(uplinks) == 0 {
+		t.Error("a matching group_id was refused, or the uplink was not written into groupA")
+	}
+}

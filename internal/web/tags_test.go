@@ -130,3 +130,39 @@ func tagIDFromRegistry(t *testing.T, page, code string) string {
 	}
 	return rest[:j]
 }
+
+// TestRetiringATagOverHTMXRedirectsAndRetires is task-10's mechanism check:
+// converting the retire control from a native form POST to hx-post changes
+// HOW the request reaches the server, not just what the button attribute
+// says, so a passing hx-confirm assertion alone would not prove retiring
+// still works. This drives POST /tags/{id}/retire exactly the way the
+// button now does -- HX-Request set -- and requires both that the tag is
+// actually retired in the store and that render.Redirect's HTMX branch
+// fires (HX-Redirect header, not a 303 HTMX would not follow the way a
+// plain form expects).
+func TestRetiringATagOverHTMXRedirectsAndRetires(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	h.post("/tags", url.Values{
+		"csrf_token": {h.csrfToken("/tags")}, "code": {"htmx-retire"}, "label": {"HTMX Retire"},
+		"description": {"retired over HTMX to prove the mechanism still works"},
+	}, false).Body.Close()
+
+	page := body(t, h.get("/tags", false))
+	id := tagIDFromRegistry(t, page, "htmx-retire")
+
+	resp := h.post("/tags/"+id+"/retire",
+		url.Values{"csrf_token": {h.csrfToken("/tags")}}, true)
+	resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("retiring over HTMX returned %d, want 204 (render.Redirect's HTMX branch)", resp.StatusCode)
+	}
+	if got := resp.Header.Get("HX-Redirect"); got != "/tags" {
+		t.Fatalf("HX-Redirect header = %q, want /tags", got)
+	}
+	if got := h.lookup(`SELECT COUNT(*) FROM tag WHERE id = ? AND retired_at IS NOT NULL`, id); got != "1" {
+		t.Fatalf("tag %s was not retired in the store (matching rows = %q)", id, got)
+	}
+}
