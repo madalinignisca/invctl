@@ -604,6 +604,7 @@
           <option value="{{.ID}}">{{.ServiceCode}} / {{.Name}} ({{.Addr}})</option>
         {{end}}
       </select>
+      {{if not .AllEndpoints}}<div class="field-hint">There is nothing here you can depend on -- every live endpoint belongs to a service you don't own.</div>{{end}}
     </div>
     <div class="field" x-show="usesRoute">
       <label for="dep-route">Provider route</label>
@@ -613,6 +614,7 @@
           <option value="{{.ID}}">{{.FrontendService}} → {{deref .MatchValue}}</option>
         {{end}}
       </select>
+      {{if not .AllRoutes}}<div class="field-hint">There is nothing here you can depend on -- every route's frontend belongs to a service you don't own.</div>{{end}}
     </div>
     {{with index .Errors "provider"}}<div class="field-error">{{.}}</div>{{end}}
   </div>
@@ -769,6 +771,7 @@
         <select id="link-target" name="target_interface_id">
           {{range .Targets}}<option value="{{.ID}}">{{.AssetName}} / {{.Name}}</option>{{end}}
         </select>
+        {{if not .Targets}}<div class="field-hint">There is nothing here you can cable to -- every unpatched port belongs to an asset you don't own.</div>{{end}}
         {{with index .Errors "target_interface_id"}}<div class="field-error">{{.}}</div>{{end}}
         {{with index .Errors "b_interface_id"}}<div class="field-error">{{.}}</div>{{end}}
       </div>
@@ -781,7 +784,7 @@
         <input id="link-length" type="number" name="length_m" min="0">
       </div>
     </div>
-    <button class="btn btn-primary" type="submit" {{if not .Interfaces}}disabled{{end}}>Patch cable</button>
+    <button class="btn btn-primary" type="submit" {{if or (not .Interfaces) (not .Targets)}}disabled{{end}}>Patch cable</button>
   </div>
 </form>
 {{end}}

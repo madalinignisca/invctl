@@ -274,10 +274,15 @@
   {{else}}
   <div class="empty"><strong>No recorded dependencies.</strong>Almost nothing genuinely has none — this usually means nobody has written them down.</div>
   {{end}}
-  {{/* dependency is ScopeTopology (still Administrator-only; explicitly
-       deferred by 1.0 item 1's DEFER list -- the ReparentAsset two-ended
-       trap). */}}
-  {{if .IsAdmin}}
+  {{/* dependency moved out of ScopeTopology into ScopeSubjectDerived with TWO
+       subjects (authorizeDependencySubjects, internal/store/deps.go): a
+       project owner may declare a dependency only when they own BOTH the
+       consumer service and the provider's owning service. The near end of a
+       new "Depends on" edge is always THIS service (the consumer), so the
+       create form is gated on CanWriteEntity for this service alone -- the
+       far end is what DependencyForm's AllEndpoints/AllRoutes filter, not
+       what decides whether the form appears (Task 3). */}}
+  {{if or .IsAdmin ($.CanWriteEntity "service" .Service.ID)}}
   <div class="panel-body" style="border-top:1px solid var(--line-soft)">
     {{/* Behind a disclosure: the panel is a RECORD by default and a form on
          request. Sitting open between the table and the next panel, the form

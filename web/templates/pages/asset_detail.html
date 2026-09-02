@@ -278,9 +278,14 @@
   {{end}}
 
   {{/* interface/ip_address are asset-scoped (see the table header comment
-       above); "link" is a patch cable and stays Administrator-only -- a
-       shared panel gated on one .CanWrite would show a project owner a form
-       (LinkForm) the server refuses. Split, not shared. */}}
+       above). "link" is a patch cable, ScopeSubjectDerived with TWO subjects
+       (authorizeLinkSubjects) -- but a new cable's near end is always THIS
+       asset, so gating the create form on CanWriteEntity for this asset alone
+       is correct: it is exactly the "near end the operator is already on"
+       (Task 3). The far end is what LinkForm.Targets filters, not what gates
+       whether the form appears at all. A project owner who owns this asset
+       gets the form; the far-end picker then narrows to ports they may
+       actually cable to. */}}
   {{if or ($.CanWriteEntity "asset" .Asset.ID) .IsAdmin}}
   <div class="panel-body" style="border-top:1px solid var(--border)">
     {{if $.CanWriteEntity "asset" .Asset.ID}}
@@ -289,11 +294,11 @@
       {{template "ip_address_form" .IPAddressForm}}
     </div>
     {{end}}
-    {{if .IsAdmin}}
+    {{/* The outer if is exactly this form's near-end gate too: reaching here
+         means CanWriteEntity(asset) or IsAdmin already held. */}}
     <div style="margin-top:12px">
       {{template "link_form" .LinkForm}}
     </div>
-    {{end}}
   </div>
   {{end}}
 </div>

@@ -521,18 +521,57 @@ func (a *App) newEndpointEditForm(r *http.Request, e *domain.Endpoint, errs map[
 	return f
 }
 
+// newDependencyForm builds the "add a dependency" panel.
+//
+// AllEndpoints and AllRoutes are FILTERED to what the caller could actually
+// write, not offered whole and refused on submit. Task 3's ruling (2026-09-02):
+// a control that looks available and isn't is the defect the two-ended-write
+// sweep just removed from the row controls, and a picker is a control too.
+// The filter is `Base.CanWriteEntity("service", ...)`, backed by the same
+// `permit.Covers` the store's `authorizeDependencySubjects` calls at write
+// time -- so the picker and the enforcement cannot drift, by construction,
+// not by two people remembering to keep two predicates in sync. For an
+// Administrator, whose permit covers everything, the filter removes nothing:
+// this is a widening for a project owner, never a narrowing for anyone else.
 func (a *App) newDependencyForm(r *http.Request, serviceID string, errs map[string]string, spec domain.DependencySpec, endpoints []store.EndpointRow, routes []store.RouteRow, identities []domain.Identity, classes []store.VocabularyTerm) dependencyFormData {
+	base := a.base(r, "Services", "services")
 	return dependencyFormData{
-		Base:         a.base(r, "Services", "services"),
+		Base:         base,
 		ServiceID:    serviceID,
 		Errors:       orEmpty(errs),
 		Spec:         spec,
-		AllEndpoints: endpoints,
-		AllRoutes:    routes,
+		AllEndpoints: writableEndpoints(base, endpoints),
+		AllRoutes:    writableRoutes(base, routes),
 		Identities:   identities,
 		Natures:      domain.Natures,
 		ClassOptions: classes,
 	}
+}
+
+// writableEndpoints keeps only the endpoints whose owning service the caller
+// may write -- the provider side of a new dependency. See newDependencyForm.
+func writableEndpoints(b Base, endpoints []store.EndpointRow) []store.EndpointRow {
+	out := make([]store.EndpointRow, 0, len(endpoints))
+	for _, ep := range endpoints {
+		if b.CanWriteEntity("service", ep.ServiceID) {
+			out = append(out, ep)
+		}
+	}
+	return out
+}
+
+// writableRoutes keeps only the routes whose frontend service the caller may
+// write. FrontendServiceID is the same service authorizeDependencySubjects
+// resolves for a route provider (internal/store/deps.go), so the picker and
+// the store's rule agree on the same id, not merely the same code.
+func writableRoutes(b Base, routes []store.RouteRow) []store.RouteRow {
+	out := make([]store.RouteRow, 0, len(routes))
+	for _, rt := range routes {
+		if b.CanWriteEntity("service", rt.FrontendServiceID) {
+			out = append(out, rt)
+		}
+	}
+	return out
 }
 
 func (a *App) newInterfaceForm(r *http.Request, assetID string, errs map[string]string, formFactors []store.VocabularyTerm) interfaceFormData {
@@ -554,14 +593,32 @@ func (a *App) newIPAddressForm(r *http.Request, assetID string, errs map[string]
 	}
 }
 
+// newLinkForm builds the "patch a cable" panel. Targets is FILTERED to ports
+// on assets the caller may write, the same reasoning as newDependencyForm's
+// AllEndpoints/AllRoutes: the far-end picker and the store's two-ended
+// `authorizeLinkSubjects` check both ask `permit.Covers`, so they cannot
+// disagree.
 func (a *App) newLinkForm(r *http.Request, assetID string, errs map[string]string, interfaces []store.InterfaceRow, targets []store.InterfaceOption) linkFormData {
+	base := a.base(r, "Assets", "assets")
 	return linkFormData{
-		Base:       a.base(r, "Assets", "assets"),
+		Base:       base,
 		AssetID:    assetID,
 		Errors:     orEmpty(errs),
 		Interfaces: unpatchedInterfaces(interfaces),
-		Targets:    targets,
+		Targets:    writableInterfaceOptions(base, targets),
 	}
+}
+
+// writableInterfaceOptions keeps only the ports on assets the caller may
+// write -- the far end of a new cable. See newLinkForm.
+func writableInterfaceOptions(b Base, targets []store.InterfaceOption) []store.InterfaceOption {
+	out := make([]store.InterfaceOption, 0, len(targets))
+	for _, opt := range targets {
+		if b.CanWriteEntity("asset", opt.AssetID) {
+			out = append(out, opt)
+		}
+	}
+	return out
 }
 
 func (a *App) newPrefixForm(r *http.Request, errs map[string]string, envs []domain.Environment,
