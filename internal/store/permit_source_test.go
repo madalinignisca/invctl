@@ -213,6 +213,15 @@ var storePermitMinters = map[string]string{
 	// their own port to anybody else's, then scopes to exactly this link id.
 	"authorizeLinkSubjects": "a link has two owners, the asset each cabled interface belongs to: " +
 		"checks p.Covers on both ends before scoping to exactly that link id",
+
+	// authorizeCostSubject (costs.go): an asset cost line's subject is the
+	// asset it is attached to. Refuses every costTable but costOnAsset
+	// outright (service_cost/project_cost/circuit_cost stay
+	// Administrator-only), then checks p.Covers("asset", ownerID) before
+	// scoping to exactly that cost line's id.
+	"authorizeCostSubject": "an asset cost line's subject is the asset it is attached to: " +
+		"refuses every cost table but asset_cost outright, then checks p.Covers(\"asset\", " +
+		"ownerID) before scoping to exactly that cost id",
 }
 
 // permitMinterNames is the exact, named set TestOnlyTheNamedFunctionsMintAPermit

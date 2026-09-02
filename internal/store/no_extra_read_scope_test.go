@@ -91,11 +91,25 @@ func TestRetiringAnOutOfScopeClusterIsRefused(t *testing.T) {
 	}
 }
 
+// TestRetiringAnOutOfScopeCostLineIsRefused USED TO prove a permit covering
+// the owning asset was not enough -- back when asset_cost was
+// domain.ScopeTopology and unconditionally Administrator-only regardless of
+// what the permit covered. WP-1.1 item 3 made that assertion false on
+// purpose: asset_cost is domain.ScopeSubjectDerived now, and a permit that
+// covers the owning asset IS meant to retire a cost line on it (see
+// costs_scope_test.go's TestCostScopeOnTheirOwnAsset for that positive
+// case). What this file's own family of tests is actually about --
+// refused, and refused WITHOUT the handler having to load the object first
+// -- still needs a genuinely out-of-scope permit to demonstrate, so this
+// case now holds an unrelated asset instead of the cost line's own owner,
+// the same shape TestRetiringAnOutOfScopeAssetIsRefusedWithoutTheHandlerLoadingIt
+// and TestRetiringAnOutOfScopeClusterIsRefused already use above.
 func TestRetiringAnOutOfScopeCostLineIsRefused(t *testing.T) {
 	for _, e := range Engines(t) {
 		t.Run(e.Name, func(t *testing.T) {
 			s, ctx := newStore(t, e)
 			assetID := mustAsset(t, s, ctx, domain.KindServer, "no-extra-read-cost-asset", nil)
+			otherAssetID := mustAsset(t, s, ctx, domain.KindServer, "no-extra-read-cost-other-asset", nil)
 			cost, err := domain.NewCost(NewID(), domain.CostSpec{
 				Kind: "acquisition", Period: domain.CostOnce, AmountMinor: 100_00,
 			}, s.Now())
@@ -107,12 +121,13 @@ func TestRetiringAnOutOfScopeCostLineIsRefused(t *testing.T) {
 			}
 
 			poID := mustEntityTagsScopeUser(t, s, ctx, "no-extra-read-po-cost")
-			// Holds the asset itself: proves the refusal is on the COST
-			// LINE's own scope class (asset_cost, ScopeTopology -- always
-			// Administrator-only), not merely on the asset it is attached to.
+			// Holds a DIFFERENT asset, not the cost line's own owner: proves
+			// the refusal is a genuine out-of-scope subject, not merely
+			// asset_cost being unconditionally Administrator-only (which it
+			// no longer is).
 			permit := domain.ScopedPermit(
 				domain.Actor{ID: poID, Name: "no-extra-read-po-cost", Kind: domain.ActorKindUser},
-				nil, domain.ScopedEntities{"asset": {assetID: true}})
+				nil, domain.ScopedEntities{"asset": {otherAssetID: true}})
 
 			if err := s.RetireAssetCost(ctx, permit, assetID, cost.ID); !errors.Is(err, domain.ErrForbidden) {
 				t.Fatalf("RetireAssetCost = %v, want domain.ErrForbidden", err)

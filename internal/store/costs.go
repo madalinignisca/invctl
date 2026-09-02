@@ -194,6 +194,39 @@ func (s *SQLStore) AddProjectCost(ctx context.Context, p domain.Permit, projectI
 	return s.addCost(ctx, p, costOnProject, projectID, c)
 }
 
+// authorizeCostSubject narrows a permit to one asset cost line. A cost
+// line's subject is the asset it is attached to (WP-1.1 item 3, the row
+// half; asset_cost moved to domain.ScopeSubjectDerived in role.go).
+//
+// ONLY asset_cost widens -- deliberately written explicit rather than
+// generalised over t.parent, so a reader can see the boundary here rather
+// than trust it held somewhere else. service_cost, project_cost and
+// circuit_cost stay domain.ScopeTopology, so even if a caller mistakenly
+// reached this function for one of them, Covers would refuse it downstream
+// at tx.log -- but relying on that would be a trapdoor, so this function
+// refuses them itself, at the point a reviewer is actually reading.
+//
+// CALLERS MUST ONLY INVOKE THIS FOR t.entity == costOnAsset.entity. addCost,
+// updateCost and retireCost each branch on that before calling in, and pass
+// the caller's OWN permit through UNCHANGED for the other three tables --
+// so an Administrator writing a service, project or circuit cost is
+// entirely unaffected by this function existing at all; Covers still
+// authorizes them unconditionally the way it always has, at tx.log, and a
+// project owner's ScopedPermit still refuses them the way ScopeTopology
+// always has.
+func authorizeCostSubject(p domain.Permit, t costTable, ownerID, costID string) (domain.Permit, error) {
+	if t.entity != costOnAsset.entity {
+		return nil, fmt.Errorf("writing a %s line through the subject-derived path: %w",
+			t.entity, domain.ErrForbidden)
+	}
+	if !p.Covers("asset", ownerID) {
+		return nil, fmt.Errorf("writing cost line %s on asset %s: %w", costID, ownerID, domain.ErrForbidden)
+	}
+	return domain.ScopedPermit(p.Actor(), nil, domain.ScopedEntities{
+		costOnAsset.entity: {costID: true},
+	}), nil
+}
+
 func (s *SQLStore) addCost(ctx context.Context, p domain.Permit, t costTable, ownerID string, c *domain.Cost) error {
 	// The row the INSERT just wrote is version 1 (the column default).
 	// Without this a caller that creates and then updates the SAME struct
@@ -202,7 +235,23 @@ func (s *SQLStore) addCost(ctx context.Context, p domain.Permit, t costTable, ow
 	if err := c.Validate(); err != nil {
 		return err
 	}
-	return s.write(ctx, p, func(tx *tx) error {
+	// ONLY asset_cost narrows the permit here. The subject is read from the
+	// SUBMITTED ownerID, by necessity: the row does not exist yet, so there
+	// is no stored one to read, and the submitted owner is exactly what the
+	// caller is asserting they may attach a cost line to (the same reasoning
+	// authorizeInterfaceSubject's callers use for a fresh interface).
+	// service_cost, project_cost and circuit_cost pass p straight through
+	// UNCHANGED -- an Administrator adding one of those is unaffected by
+	// this branch existing.
+	costPermit := p
+	if t.entity == costOnAsset.entity {
+		var err error
+		costPermit, err = authorizeCostSubject(p, t, ownerID, c.ID)
+		if err != nil {
+			return err
+		}
+	}
+	return s.write(ctx, costPermit, func(tx *tx) error {
 		if err := tx.requireVocabulary(ctx, vocabCostKind, "kind", c.Kind); err != nil {
 			return err
 		}
@@ -249,6 +298,25 @@ func (s *SQLStore) updateCost(ctx context.Context, p domain.Permit, t costTable,
 	if err != nil {
 		return err
 	}
+	// Authorization runs BEFORE the already-retired early exit below,
+	// deliberately -- not after, as this method briefly would have had it.
+	// WP-1.1 items 1 and 2 found the same shape backwards in
+	// RetireDependency and RetireLink: once a row is reachable by a project
+	// owner, an early "already retired -> refuse" sitting above the check
+	// turns into a distinguishable answer over a row the caller does not
+	// own -- ErrConflict for "exists, retired" vs ErrForbidden for "exists,
+	// not yours" -- letting a caller map which asset costs exist and their
+	// lifecycle without ever writing anything. The subject is read from the
+	// STORED row (before.OwnerID), never the submitted struct: nothing here
+	// lets the owning asset move through an update, so before.OwnerID and
+	// whatever the caller submitted are the same value by construction.
+	costPermit := p
+	if t.entity == costOnAsset.entity {
+		costPermit, err = authorizeCostSubject(p, t, before.OwnerID, c.ID)
+		if err != nil {
+			return err
+		}
+	}
 	// HISTORY IS NOT AMENDABLE. A retired line records a figure that was
 	// withdrawn, and both the figure and the withdrawal are facts somebody may
 	// be reading. Amending one silently rewrites what the estate cost in a
@@ -265,7 +333,7 @@ func (s *SQLStore) updateCost(ctx context.Context, p domain.Permit, t costTable,
 	c.CreatedAt = before.CreatedAt
 	c.UpdatedAt = domain.FormatTime(s.now())
 
-	return s.write(ctx, p, func(tx *tx) error {
+	return s.write(ctx, costPermit, func(tx *tx) error {
 		if err := tx.requireVocabulary(ctx, vocabCostKind, "kind", c.Kind); err != nil {
 			return err
 		}
@@ -354,11 +422,30 @@ func (s *SQLStore) retireCost(ctx context.Context, p domain.Permit, t costTable,
 	if before.OwnerID != ownerID {
 		return fmt.Errorf("cost line %s does not belong to %s: %w", id, ownerID, domain.ErrNotFound)
 	}
+	// Authorization runs BEFORE the already-retired early exit, deliberately
+	// -- not below it, as RetireDependency and RetireLink both briefly had
+	// it (WP-1.1 items 1 and 2). Once a row is reachable by a project
+	// owner, "already retired -> nil" sitting above the check turns into a
+	// three-way oracle over rows the caller does not own -- nil for
+	// "exists, already retired", ErrForbidden for "exists, not yours",
+	// ErrNotFound (from getCost/the ownerID mismatch above) for "no such
+	// row" -- and a caller can use that to map the estate without ever
+	// writing anything. Subjects come from the STORED row (before.OwnerID),
+	// the only one there is here -- a retire takes no submitted struct for
+	// a caller to forge one from.
+	costPermit := p
+	if t.entity == costOnAsset.entity {
+		var err error
+		costPermit, err = authorizeCostSubject(p, t, before.OwnerID, id)
+		if err != nil {
+			return err
+		}
+	}
 	if before.Lifecycle == domain.LifecycleRetired {
 		return nil
 	}
 	at := domain.FormatTime(s.now())
-	return s.write(ctx, p, func(tx *tx) error {
+	return s.write(ctx, costPermit, func(tx *tx) error {
 		if _, err := tx.exec(ctx,
 			`UPDATE `+t.name+` SET lifecycle = ?, updated_at = ?,
 			                       row_version = row_version + 1 WHERE id = ?`,
@@ -442,8 +529,33 @@ func (s *SQLStore) SetCostConsumers(ctx context.Context, p domain.Permit,
 	if err != nil {
 		return err
 	}
+	// The cost line itself is authorized here, the same as any other write
+	// to it: its subject is the owning asset. costPermit narrows to exactly
+	// this cost_id and is what the transaction actually runs under.
+	costPermit, err := authorizeCostSubject(p, costOnAsset, before.OwnerID, costID)
+	if err != nil {
+		return err
+	}
+	// TRAP 2: the consumer set names ARBITRARY asset ids, a second set of
+	// subjects distinct from the line's own owning asset. Without this, a
+	// project owner divides their own invoice across somebody else's
+	// hardware and it lands in that project's totals.
+	//
+	// This runs against the caller's ORIGINAL permit p, NOT costPermit --
+	// and that is the only reason it can work at all. costPermit is scoped
+	// to entity type "asset_cost" and covers no "asset" id whatsoever
+	// (domain.ScopedEntities keys by entity type), so checking a consumer
+	// asset against it would refuse every consumer including the line's own
+	// owning asset. p is the caller's real, wider permit, which is what
+	// actually carries their asset-scoped entities.
+	for _, assetID := range assetIDs {
+		if !p.Covers("asset", assetID) {
+			return fmt.Errorf("naming asset %s as a consumer of cost line %s: %w",
+				assetID, costID, domain.ErrForbidden)
+		}
+	}
 	at := domain.FormatTime(s.Now())
-	return s.write(ctx, p, func(t *tx) error {
+	return s.write(ctx, costPermit, func(t *tx) error {
 		beforeAudit, err := costScopeAudit(ctx, t, &before.Cost)
 		if err != nil {
 			return err

@@ -544,7 +544,22 @@ var entityScope = map[string]ScopeClass{
 	// authorizeDependencySubjects proved for dependency, because checking
 	// only one end would let a project owner cable their own asset to
 	// anybody else's port.
-	"link":                  ScopeSubjectDerived,
+	"link": ScopeSubjectDerived,
+	// A cost line's subject is the asset it is attached to (WP-1.1 item 3,
+	// the row half). ONLY asset_cost moves here -- service_cost,
+	// project_cost and circuit_cost stay ScopeTopology below, deliberately,
+	// because they attach to something that is already the unit of
+	// attribution (a service, a project, a circuit) and nothing has asked
+	// for a project owner to write those. See authorizeCostSubject
+	// (internal/store/costs.go) for why it refuses every table but this
+	// one explicitly rather than trusting the classification alone.
+	//
+	// Subject-derived is safe here for the same reason it is safe for link
+	// and dependency: auth.Authorizer.Permit builds buckets only for asset,
+	// service and circuit, so an ordinary project-owner permit has no
+	// asset_cost bucket and covers nothing. Only the permit minted after
+	// authorizeCostSubject checks the owning asset can cover a row.
+	"asset_cost":            ScopeSubjectDerived,
 	"asset_kind":            ScopeEstateConfig,
 	"service_kind":          ScopeEstateConfig,
 	"interface_form_factor": ScopeEstateConfig,
@@ -565,7 +580,6 @@ var entityScope = map[string]ScopeClass{
 	// lands here rather than being guessed into ScopeProjectLinked.
 	"aggregate":           ScopeTopology,
 	"asn":                 ScopeTopology,
-	"asset_cost":          ScopeTopology,
 	"backend_member":      ScopeTopology,
 	"backend_pool":        ScopeTopology,
 	"certificate":         ScopeTopology,
