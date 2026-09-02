@@ -32,50 +32,65 @@ These are decided, not forgotten. Each is recorded here rather than in a
 scratch file, because the scratch directory is git-ignored and a plan nobody
 else can read is not a plan.
 
-**Project-owner write scope, the rest of it.** WP-G1 extended a project
-owner to their projects' assets, services and circuits, plus the types
-scoped by one owning entity: `interface`, `ip_address`, `service_instance`
-and `journal_entry` (`domain.ScopeSubjectDerived`). Still Administrator-only:
+**Project-owner write scope, the rest of it — `dependency`, `link` and
+`asset_cost` are done, WP-1.1 items 1–3.** WP-G1 extended a project owner to
+their projects' assets, services and circuits, plus the types scoped by one
+owning entity: `interface`, `ip_address`, `service_instance` and
+`journal_entry` (`domain.ScopeSubjectDerived`). WP-1.1 reclassified three
+more into that same class, each authorized by a narrow, per-row store
+function rather than by project membership directly (`docs/AUDIT.md`'s
+"Write-authorization scope classification" table has the full matrix):
 
 - `dependency` and `link` — **two-ended writes.** Each connects two entities
   and logs one `change_log` row, so `tx.log` authorizes one end and the
   other needs its own check. This is the shape that produced the
-  `ReparentAsset` escalation; do both ends, and test each end independently,
-  or the bug passes half-present.
-- `asset_cost` — crosses the cost-visibility axis. Writing a cost line while
-  `can_see_costs` may be false needs thinking about before building.
-- `certificate`, `cluster` — no argument against, just not needed for 1.0.
+  `ReparentAsset` escalation; both ends are checked independently
+  (`authorizeDependencySubjects`, `authorizeLinkSubjects`), and each is
+  tested independently rather than assumed to follow from the other.
+- `asset_cost` — gated across **two seams, not one.** The store's
+  `authorizeCostSubject` checks the row against the owning asset, same
+  shape as `dependency`/`link`; separately, `middleware.RequireCostVisibility`
+  requires the caller's `can_see_costs` grant before the request reaches the
+  store at all, so a project owner who cannot see a cost cannot write it
+  either — the store-level scope check alone would let them blind-write a
+  price they are not permitted to read. `domain.Permit` was **deliberately
+  not widened** to carry a cost dimension: it stays fixed at the three
+  width-locked methods (`TestThePermitInterfaceCannotBeWidenedWithoutSayingSo`),
+  so the cost-visibility question is answered once, in the request-gating
+  middleware, rather than duplicated into every `Covers` call a permit could
+  ever be asked to answer.
 
-Widening scope is never a breaking change, so 1.1 can take these freely.
+**`certificate`, `cluster` stay Administrator-only — and there IS an
+argument, not merely "not needed yet".** Neither has a single owning
+subject the way `asset_cost` has one owning asset: both are many-to-many
+with assets (`certificate_asset`/`certificate_service`, `cluster_member`).
+"Every member in scope" is **vacuously true for an empty cluster or an
+undeployed certificate** — no members to fail the check against — which
+would make every unattached certificate or empty cluster writable by every
+project owner in the estate, not narrower access but an accidental
+estate-wide grant. Recorded here so 1.2 does not rediscover it by trying
+the same subject-derived shape and finding it silently wrong.
 
-**Saved-view rename.** `internal/store.UpdateSavedView` is real, tested
-store-level work (`internal/store/savedviews_test.go`), but WP-G4b Wave B
-removed the `POST /views/{id}` route and its `SavedViewUpdate` handler:
-nothing posted to it — checked against `web/templates`, `web/static/app.js`
-and the E2E suite — and a mutating route with no caller is unreviewed
-surface. A rename control in 1.1 wires a new handler to the existing store
-method; the store side needs no further work.
+Widening scope is never a breaking change, so a real subject-resolution
+rule for these two can still land in a later release.
 
-**Tighten the fact-deleting allowlist to the table, not the file.**
-`TestTheOnlyFactDeletingStatementIsThePrune` (`internal/store/prune_test.go`)
-maps a **file path** to a reason, so allowlisting a file exempts every
-`DELETE FROM` in it. WP-G4b added `internal/store/users_admin.go` for the
-scrub's erasure of saved views — and that is precisely the file where a
-future `DELETE FROM app_user` would plausibly be written, hard-deleting a
-person instead of scrubbing them. It would pass silently. The map's values
-already name the table each entry is for, so the check can compare the
-deleted table against the reason string; eleven existing entries share this
-coarseness, which is why this is its own small piece of work rather than a
-line in someone else's.
+**Saved-view rename — done.** `internal/store.UpdateSavedView` is real,
+tested store-level work (`internal/store/savedviews_test.go`); WP-G4b Wave B
+had removed the `POST /views/{id}` route and its `SavedViewUpdate` handler
+with nothing posted to it, and WP-1.1 wired a new rename control to the
+existing store method.
 
-**No test drives a write route unauthenticated.** The boundary sweep proves
-object-level permission holds for an authenticated caller, and
-`route_registration_test.go` proves nothing registers around the registrars.
-Neither proves `middleware.RequireAuth` is actually in the chain — that is
-verified by reading. It became worth writing down in WP-G4b, which added a
-fourth registrar (`self`) whose *entire* gate is `RequireAuth`: for those two
-routes, an unnoticed break in that middleware is the whole authorization
-story, not one layer of it.
+**Tighten the fact-deleting allowlist to the table, not the file — done, in
+`79e14f2`.** `TestTheOnlyFactDeletingStatementIsThePrune`
+(`internal/store/prune_test.go`) now compares the deleted table against
+each allowlist entry's own reason string, not just the file path it lives
+in — closing the gap where allowlisting a file would have exempted every
+`DELETE FROM` in it, including a future `DELETE FROM app_user`.
+
+**No test drives a write route unauthenticated — done, in `f232a63`.** Every
+write route, across all four registrars including the `self` registrar
+whose entire gate is `RequireAuth`, is now driven with no session at all and
+asserted refused.
 
 **WP-A4 follow-ups**, filed at that work package's merge and re-verified
 2026-08-31:
@@ -111,11 +126,23 @@ input gate while `select` was defended at render — **is closed**, in
 release item before anyone checked. A list like this is a claim about the
 past.
 
-**The other quality-of-life item:** the 132 `.CanWrite` template occurrences
-on estate-configuration pages, which show a project owner controls the server
-refuses. (WP-G4b, saved filters, was listed here and has since shipped.) Confirmed cosmetic — every one
-gates a control, none gates data — and the asset, service and circuit pages
-a project owner actually uses were swept for 1.0.
+**The other quality-of-life item — done, and the 132 figure was stale.**
+A census (WP-1.1) measured the real count before the fix at **118
+`.CanWrite` occurrences across 33 files**, not 132 across 38 — and
+`pages/asset_list.html` genuinely carried zero, confirmed by the census (it
+does not appear in the grep at all). Of those 33, 25 files
+needed a change from a bare page-wide `.CanWrite` (which showed a control a
+project owner does not have) to `.IsAdmin`, for entities classified
+`ScopeEstateConfig`/`ScopeTopology`; 24 were flipped mechanically (`sed`
+after hand-confirming each occurrence was an unmixed page-wide gate), the
+Go-side equivalent (`projects.go`'s `loadEntityTagsPanel`) fixed alongside
+them, and `pages/vlan_detail.html` left exactly as `.CanWrite` on purpose —
+that write is genuinely subject-derived (a project owner's own asset's
+ports) but not expressible through today's `CanWriteEntity`, which only
+answers for `asset`/`service`/`circuit`; the reasoning is recorded as a
+comment on the template itself rather than fixed by widening
+`CanWriteEntity`, which is its own scope decision. Confirmed cosmetic before
+the sweep too — every one gated a control, none gated data.
 
 ---
 
@@ -521,10 +548,12 @@ document as well as an audit one. If every account ever loses write access,
 the documented way back in is still `docs/RECOVERY.md` (`INV_ADMIN_USERS`
 overrides the role column).
 
-Known follow-up, not security-affecting: 132 `.CanWrite` occurrences across
-38 templates still render controls to a project owner that the server
-correctly refuses. (The misnamed `middleware.RequireAdmin` was renamed to
-`RequireWrite`.)
+(The misnamed `middleware.RequireAdmin` was renamed to `RequireWrite`.) The
+`.CanWrite` template sweep this entry used to list as a follow-up — never
+security-affecting, since every one gated a control rather than data — is
+done; see "The other quality-of-life item" under "Deferred to 1.1,
+deliberately" above for the real count (118 across 33 files, not the 132
+across 38 templates once written here) and what changed.
 
 **WP-G2 · Webhooks and event rules** — M
 Fire on declared-state change. Outbound HTTP to a *user-configured* endpoint is

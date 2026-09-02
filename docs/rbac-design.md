@@ -118,6 +118,54 @@ an in-scope service to an out-of-scope one is a write against something the PO
 does not own, reachable without touching it directly. Same for containment: a
 PO owning a VM does not thereby own its hypervisor, its rack or its site.
 
+**Built, in WP-1.1: `dependency`, `link` and `asset_cost`, each a two-ended
+or subject-derived check against the caller's own permit rather than a
+project scope directly.** Classified `domain.ScopeSubjectDerived`, the same
+class §4's own `interface`/`ip_address`/`service_instance`/`journal_entry`
+already use — a narrow, per-row store function resolves the row's real
+subject and mints a permit covering only that row, since `auth.Authorizer.
+Permit` itself only ever builds scope buckets for `asset`/`service`/
+`circuit`.
+
+- **`dependency`** — the two endpoints named above, made concrete:
+  `authorizeDependencySubjects` requires BOTH the consumer service and the
+  provider service in the caller's scope. Checking only one would let a PO
+  point their own service at anybody's socket, or attach anybody's service
+  as a consumer of their own.
+- **`link`** — the same two-ended rule, one hop further, since a cable
+  connects interfaces rather than assets directly: `authorizeLinkSubjects`
+  requires BOTH interfaces' owning assets in scope.
+- **`asset_cost`** — gated on **two independent seams**, not one. The store
+  check (`authorizeCostSubject`) requires the owning asset in scope, the same
+  shape as `dependency`/`link`; a second, separate gate,
+  `middleware.RequireCostVisibility`, requires the caller's `can_see_costs`
+  grant (§3) before the request ever reaches the store. **A project owner
+  who cannot see costs cannot write them either** — the row-scope check
+  alone would let them blind-write a price they are not permitted to read,
+  which is its own information leak (a suspiciously round number, corrected
+  or not, tells you something about the real one). `domain.Permit` was
+  deliberately **not** widened to know about cost visibility at all: it
+  stays fixed at its three width-locked methods
+  (`TestThePermitInterfaceCannotBeWidenedWithoutSayingSo`), so this
+  question is answered once, in the request-gating middleware, rather than
+  threaded into every `Covers` call a permit could ever be asked to answer.
+  `service_cost`, `project_cost` and `circuit_cost` are **not** included —
+  each attaches to something that is already the unit of attribution (a
+  service, a project, a circuit), and nothing has asked for a PO to write
+  those.
+
+**`certificate` and `cluster` were considered for the same treatment and
+rejected — there IS an argument, not merely "not needed yet".** Both are
+many-to-many with assets rather than owned by a single one
+(`certificate_asset`/`certificate_service`, `cluster_member`), so neither has
+a single subject a per-row check could resolve the way `asset_cost` resolves
+to one asset. "Every member in scope" is **vacuously true for an empty
+cluster or an undeployed certificate** — there is nothing to fail the check
+against — which would make every unattached certificate or empty cluster in
+the estate writable by every project owner: an accidental estate-wide grant,
+not narrower access. A real subject-resolution rule for these two (e.g. "in
+scope only once every member is") is future work, not a gap in this pass.
+
 **They may not touch estate-wide configuration** — teams, vocabularies,
 custom-field definitions, tags, users, projects themselves. A PO retiring a
 team or renaming a vocabulary changes what every other person sees, and there

@@ -23,7 +23,9 @@ estate-wide configuration. The exception is another person's saved views; see
 **Observer** — reads everything, writes nothing.
 
 **Project owner** — reads everything, and writes the assets, services and
-circuits linked to the projects they are assigned to.
+circuits linked to the projects they are assigned to, plus a dependency,
+network link or cost line where **every** entity it touches is one of theirs
+(see "What a project owner can and cannot do" below).
 
 ## Everyone reads everything
 
@@ -138,7 +140,26 @@ Two consequences follow, and both are intended:
 - Create an asset, service or circuit **from inside one of their project
   pages**. The entity is created and linked to the project in one step.
 - Edit and retire the assets, services and circuits linked to their projects.
+- Manage interfaces, IP addresses and service placements on their own assets
+  and services.
 - Write journal notes on anything they can write.
+- **Create or retire a dependency, where BOTH the consumer service and the
+  provider service are theirs.** A dependency connects two services and logs
+  one `change_log` row, so both ends are checked — pointing your own service
+  at somebody else's socket, or attaching somebody else's service as a
+  consumer of your own, is refused just as pointing it at a service that
+  isn't yours at all would be.
+- **Create or retire a network link, where BOTH cabled assets are theirs.**
+  Same two-ended rule, one hop further: a link's ends are interfaces, and an
+  interface's subject is the asset that owns it.
+- **Add, reprice or remove a cost line on an asset they own — but only if
+  they also have the `can see costs` grant.** Without that grant, the write
+  is refused even though the asset itself is theirs: being allowed to change
+  a thing is not the same question as being allowed to see what it cost, and
+  writing a price you cannot read is a way to leak it sideways (setting a
+  suspiciously round number and watching whether anyone corrects it, for
+  instance). `service_cost`, `project_cost` and `circuit_cost` are **not**
+  included — see "Cannot" below.
 
 **Cannot:**
 
@@ -147,16 +168,19 @@ Two consequences follow, and both are intended:
 - Link an **existing** entity into their project. That stays with
   Administrators deliberately: otherwise anyone could pull any asset in the
   estate into a project they hold and inherit write access to it.
-- Manage IP addresses, interfaces, dependencies, cost lines, service
-  placements, certificates, network links or clusters — even on their own
-  assets.
+- Write a dependency, link or cost line where **any** entity it touches
+  falls outside their projects — including their own asset's cost line, if
+  they lack the `can see costs` grant.
+- Manage certificates, network topology beyond point-to-point cabling (VLANs,
+  overlays, routing, addressing), power, or clusters — even ones built
+  entirely from their own assets. A certificate or a cluster is many-to-many
+  with the assets it touches rather than owned by a single one, and "every
+  member in scope" would be **vacuously true for an empty cluster or an
+  undeployed certificate** — writable by every project owner in the estate,
+  not narrower access. This is deliberate, not an oversight; see
+  `docs/ROADMAP.md`'s "Deferred to 1.1, deliberately" for the reasoning.
 - Administer accounts, run imports, or change anything estate-wide: teams,
   tags, vocabularies, custom field definitions, projects themselves.
-
-The third item is a **known limitation, not a decision**. The mechanism to
-extend scope to those types exists and journal notes already use it. Do not
-plan around the limitation as though it were permanent, and do not assume it
-is already fixed.
 
 ## "Why can't I change this?"
 

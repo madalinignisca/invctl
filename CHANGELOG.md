@@ -36,7 +36,49 @@ footnote.
 
 ## [Unreleased]
 
+### Action required
+
+- **A project owner needs both write scope and the `can_see_costs` grant to
+  manage a cost line — granting only one is not enough.** Project owners can
+  now add, reprice and remove `asset_cost` lines on assets linked to their
+  projects (see **Added** below), but the write is refused unless the same
+  account also has `can_see_costs` ticked on `/users`. This is deliberate,
+  not a bug to work around: being allowed to change a thing is not the same
+  question as being allowed to see what it cost, and a write without the
+  grant would let a project owner set a price they cannot themselves read
+  back — its own information leak. If you plan to let a project owner run
+  cost lines on their own estate, grant `can_see_costs` on their account as
+  part of that setup, the same way it is already required to *see* a cost
+  figure anywhere else. `service_cost`, `project_cost` and `circuit_cost`
+  are unaffected — those stay Administrator-only regardless of the grant.
+
 ### Added
+
+- **Project owners can now write `dependency`, `link` and `asset_cost` rows,
+  scoped by subject rather than by project directly.** Each is authorized by
+  a narrow, per-row check against the caller's own permit — never by a
+  project-owner permit's ordinary scope, which has no bucket for these
+  types at all:
+  - **A dependency** — both the consumer service and the provider service
+    must be theirs. Pointing your own service at somebody else's socket, or
+    attaching somebody else's service as a consumer of your own, is refused.
+  - **A network link** — both cabled assets must be theirs, checked through
+    each interface's owning asset.
+  - **A cost line on an asset** (`asset_cost`) — the owning asset must be
+    theirs, **and** see "Action required" above for the second gate this
+    one carries.
+
+  `certificate` and `cluster` are unaffected and stay Administrator-only:
+  both are many-to-many with the assets they touch rather than owned by a
+  single one, so "every member in scope" would be vacuously true for an
+  empty cluster or an undeployed certificate — writable by every project
+  owner in the estate, which is not what a narrower role is supposed to
+  mean. See `docs/ROADMAP.md`'s "Deferred to 1.1, deliberately" for the
+  full reasoning.
+
+- **Rename a saved view.** The Views menu's rename control now posts to a
+  real route; renaming somebody else's view, or your own without the
+  `write` grant, is refused the same way editing one already was.
 
 - **Save a filtered list under a name.** On the asset and service lists, the
   Views menu remembers the filters you have applied so you can come back to
@@ -60,6 +102,19 @@ footnote.
 
   A CSV export still contains every column, whatever the screen shows: the
   export is an importable table, not a picture of the page.
+
+### Fixed
+
+- **Two more money surfaces were readable by a viewer without the
+  `can_see_costs` grant: the price-movement panel** (an asset or circuit's
+  recent reprice, "then €X, now €Y") **and an asset's replacement panel**
+  (what it replaced, and the two prices side by side). Neither had ever
+  carried a `CanSeeCosts` check — the estate-total reports (`/reports/cost`,
+  `/reports/suppliers`) were already gated earlier in this cycle, and these
+  two were found by a sweep specifically looking for anything the same
+  pattern had missed. Fixed the same way as those: the handler skips the
+  fetch and the template gates the panel, for an ungranted reader on either
+  role.
 
 ## [1.0.0] — 2026-08-31
 
@@ -124,8 +179,13 @@ New in the release itself, beyond the entries below:
   attached to one you do not.
 
   The rest of the topology surface -- addresses, interfaces, dependencies,
-  cost lines, placements -- is still Administrator-only. That is a known
-  limitation rather than a decision that it should stay that way.
+  cost lines, placements -- is still Administrator-only as of this release.
+  That was a known limitation rather than a decision that it should stay
+  that way: interfaces, IP addresses and service placements were classified
+  the same way as this note in the same work package, so they were in fact
+  already project-owner-writable at this point even though this entry does
+  not call them out by name; dependency, link and asset_cost followed in an
+  unreleased change above (see "Added").
 
 - **A project owner creates entities from inside a project, not from the
   generic form.** `POST /projects/{id}/assets/new` and its service and
