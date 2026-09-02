@@ -206,6 +206,13 @@ var storePermitMinters = map[string]string{
 	"authorizeDependencySubjects": "a dependency has two owners, the consumer service and the " +
 		"provider's owning service: checks p.Covers on both before scoping to exactly that " +
 		"dependency id",
+
+	// authorizeLinkSubjects (network.go): a link has two owners, the asset
+	// each cabled interface belongs to -- checks p.Covers("asset", ...) on
+	// BOTH the A-end and the B-end asset, so a project owner cannot cable
+	// their own port to anybody else's, then scopes to exactly this link id.
+	"authorizeLinkSubjects": "a link has two owners, the asset each cabled interface belongs to: " +
+		"checks p.Covers on both ends before scoping to exactly that link id",
 }
 
 // permitMinterNames is the exact, named set TestOnlyTheNamedFunctionsMintAPermit

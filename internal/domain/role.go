@@ -528,7 +528,23 @@ var entityScope = map[string]ScopeClass{
 	// checking only the consumer would let a project owner point their
 	// service at anybody's socket, and checking only the provider would let
 	// them attach anybody's service as a consumer of their own.
-	"dependency":            ScopeSubjectDerived,
+	"dependency": ScopeSubjectDerived,
+	// A link's subjects are the two assets it cables together: an interface
+	// carries no project of its own (docs/rbac-design.md §4;
+	// authorizeInterfaceSubject, internal/store/network.go), so a link is
+	// two hops from each end -- a_interface_id -> asset and
+	// b_interface_id -> asset (WP-1.1 item 2).
+	//
+	// Subject-derived is safe here for the same reason it is safe for
+	// dependency and saved_view: auth.Authorizer.Permit builds buckets only
+	// for asset, service and circuit, so an ordinary project-owner permit
+	// has no link bucket and covers nothing. Only the permit minted after
+	// internal/store/network.go's authorizeLinkSubjects checks BOTH
+	// interfaces' owning assets can cover a row -- the same two-ended shape
+	// authorizeDependencySubjects proved for dependency, because checking
+	// only one end would let a project owner cable their own asset to
+	// anybody else's port.
+	"link":                  ScopeSubjectDerived,
 	"asset_kind":            ScopeEstateConfig,
 	"service_kind":          ScopeEstateConfig,
 	"interface_form_factor": ScopeEstateConfig,
@@ -565,7 +581,6 @@ var entityScope = map[string]ScopeClass{
 	"journal_entry":       ScopeSubjectDerived,
 	"l2vpn":               ScopeTopology,
 	"l2vpn_termination":   ScopeTopology,
-	"link":                ScopeTopology,
 	"net_anchor":          ScopeTopology,
 	"net_attachment":      ScopeTopology,
 	"net_group":           ScopeTopology,
