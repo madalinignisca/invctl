@@ -611,29 +611,24 @@ func hostableAssets(assets []store.AssetRow) []store.AssetRow {
 // the service page and on its own after a verify, so it gets a real type
 // rather than a map assembled in the template.
 //
-// CanWrite HERE MEANS ADMINISTRATOR, NOT Base.CanWrite, and that is now a
-// DELIBERATE narrowing rather than a class default. WP-1.1 item 1 moved
-// "dependency" out of ScopeTopology into domain.ScopeSubjectDerived (the
-// ReparentAsset two-ended trap, resolved by authorizeDependencySubjects in
-// internal/store/deps.go) -- so a project owner who owns BOTH ends CAN now
-// write a dependency at the store layer. This view model still gates on
-// Administrator anyway, because CanWrite here would have to answer "does
-// this project owner's permit cover both the consumer service and the
-// provider's owning service" for THIS row, and that is exactly the
-// two-ended derivation authorizeDependencySubjects performs -- it resolves
-// a route's provider through its frontend endpoint with a store query, which
-// this handler-side view model has no business re-deriving from data it
-// already has half of. Computing it here would either duplicate that
-// derivation (a second place for the two to drift, the same risk
-// dependencyAudit's own comment warns about for change_log) or under- or
-// over-report what the row partial then renders as clickable. Administrator
-// stays the honest answer for THIS field until a caller is prepared to ask
-// the store the real question per row, not a limitation of what the store
-// itself now allows.
-// Every caller passes isAdmin for this field; see depRows and
-// DependencyVerify. Named CanWrite rather than IsAdmin only because the
-// partial (rows.html's dependency_row) is shared with no other caller that
-// would need to tell the two apart.
+// CanWrite mirrors the store's own two-ended rule, not Base.CanWrite and not
+// isAdmin. WP-1.1 item 1 moved "dependency" out of ScopeTopology into
+// domain.ScopeSubjectDerived (the ReparentAsset two-ended trap, resolved by
+// authorizeDependencySubjects in internal/store/deps.go), so a project owner
+// who owns BOTH ends -- the consumer service and the provider's owning
+// service -- can write a dependency at the store layer. store.DependencyRow
+// already carries both subjects: ConsumerServiceID directly, and ProviderSvc
+// (`db:"provider_service_id"`) resolved by dependencySelect through the same
+// two LEFT JOIN chains (endpoint→service, route→frontend_endpoint→service)
+// that authorizeDependencySubjects performs at write time. Nothing here
+// re-derives that join or queries the store again -- it reads two columns
+// the select already produced and asks the caller's own resolved permit
+// (Base.CanWriteEntity, backed by permit.Covers, no extra DB round trip)
+// whether it covers both. Administrator continues to cover both by
+// construction, so this is a widening of what renders, never a narrowing.
+//
+// SecretRef stays gated on isAdmin alone -- see depRows' doc comment for why
+// that is a deliberately different, narrower question than CanWrite.
 type depRowData struct {
 	Dep         *store.DependencyRow
 	CanWrite    bool
@@ -651,17 +646,19 @@ type depRowData struct {
 	SecretRef string
 }
 
-// depRows decorates dependency rows for rendering. isAdmin gates both
-// SecretRef (see IsAdmin's doc comment on why this is deliberately narrower
-// than CanWrite) and the row's own CanWrite field -- see depRowData's doc
-// comment for why a dependency write is Administrator-only regardless of
-// the caller's ordinary write permit.
-func depRows(deps []store.DependencyRow, classes map[string][]string, direction, csrf string, isAdmin bool) []depRowData {
+// depRows decorates dependency rows for rendering. covers is the caller's
+// own write predicate (Base.CanWriteEntity, or an equivalent in tests) --
+// CanWrite is set only when it covers BOTH the consumer service and the
+// provider's owning service, the same two-ended rule the store enforces in
+// authorizeDependencySubjects. isAdmin gates SecretRef alone: that stays
+// deliberately narrower than CanWrite (see depRowData's doc comment), so a
+// project owner who now sees the controls still never sees the secret ref.
+func depRows(deps []store.DependencyRow, classes map[string][]string, direction, csrf string, isAdmin bool, covers func(entityType, id string) bool) []depRowData {
 	out := make([]depRowData, len(deps))
 	for i := range deps {
 		out[i] = depRowData{
 			Dep:         &deps[i],
-			CanWrite:    isAdmin,
+			CanWrite:    covers("service", deps[i].ConsumerServiceID) && covers("service", deps[i].ProviderSvc),
 			CSRF:        csrf,
 			Direction:   direction,
 			DataClasses: classes[deps[i].ID],
