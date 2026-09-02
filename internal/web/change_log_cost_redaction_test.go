@@ -10,6 +10,7 @@ package web_test
 
 import (
 	"context"
+	"net/http"
 	"net/url"
 	"strings"
 	"testing"
@@ -40,7 +41,7 @@ func correctHV01CostLine(t *testing.T, h *harness) (costID string) {
 		"note": {"corrected against the invoice"},
 	}, false)
 	resp.Body.Close()
-	if resp.StatusCode != 303 {
+	if resp.StatusCode != http.StatusSeeOther {
 		t.Fatalf("correcting the cost line returned %d, want a redirect", resp.StatusCode)
 	}
 	return costID
@@ -77,7 +78,7 @@ func correctCostLineByID(t *testing.T, h *harness, urlPrefix, ownerID, costID st
 		"note": {"corrected against the invoice"},
 	}, false)
 	resp.Body.Close()
-	if resp.StatusCode != 303 {
+	if resp.StatusCode != http.StatusSeeOther {
 		t.Fatalf("correcting the cost line at %s%s returned %d, want a redirect",
 			urlPrefix, ownerID, resp.StatusCode)
 	}
@@ -126,7 +127,7 @@ func TestAnUngrantedViewerCannotReadAnAmountFromTheChangeLogList(t *testing.T) {
 				"amount": {"1450"}, "note": {"fixture line for the redaction test"},
 			}, false)
 			resp.Body.Close()
-			if resp.StatusCode != 303 {
+			if resp.StatusCode != http.StatusSeeOther {
 				t.Fatalf("adding the fixture circuit cost line returned %d, want a redirect",
 					resp.StatusCode)
 			}
@@ -314,7 +315,7 @@ func TestANonCostEntitysDiffIsUnaffectedByCostRedaction(t *testing.T) {
 		"asset_tag": {"redaction-boundary-serial"},
 	}, false)
 	resp.Body.Close()
-	if resp.StatusCode != 303 {
+	if resp.StatusCode != http.StatusSeeOther {
 		t.Fatalf("editing the asset returned %d, want a redirect", resp.StatusCode)
 	}
 

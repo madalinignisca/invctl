@@ -89,7 +89,7 @@ func TestSupplierReportIsHiddenFromAnUngrantedObserver(t *testing.T) {
 	h.login("viewer", "viewer-password")
 
 	resp := h.get("/reports/suppliers", false)
-	if resp.StatusCode != 200 {
+	if resp.StatusCode != http.StatusOK {
 		resp.Body.Close()
 		t.Fatalf("an ungranted Observer got %d from the supplier report, want 200 "+
 			"with the money withheld, not a hard refusal", resp.StatusCode)

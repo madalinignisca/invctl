@@ -66,7 +66,7 @@ func TestTheWriteScopeTableMatchesEntityScope(t *testing.T) {
 		line := scanner.Text()
 
 		if m := headingRe.FindStringSubmatch(line); m != nil {
-			current = ScopeClass(scopeClassFromHeadingName(m[1]))
+			current = scopeClassFromHeadingName(m[1])
 			inScopeSection = true
 			continue
 		}

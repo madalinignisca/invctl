@@ -124,7 +124,7 @@ func TestCostScopeOnTheirOwnAsset(t *testing.T) {
 			if err != nil {
 				t.Fatalf("reading the cost back: %v", err)
 			}
-			row.Cost.Note = strPtr("corrected")
+			row.Note = strPtr("corrected")
 			if err := f.s.UpdateAssetCost(f.ctx, f.permit, &row.Cost); err != nil {
 				t.Fatalf("UpdateAssetCost on the owner's own asset cost = %v, want nil", err)
 			}
@@ -316,7 +316,7 @@ func TestUpdateCostAuthorizationRunsBeforeTheRetiredCheck(t *testing.T) {
 			if err != nil {
 				t.Fatalf("reading the cost back: %v", err)
 			}
-			row.Cost.Note = strPtr("a project owner should never see this accepted or refused for its lifecycle")
+			row.Note = strPtr("a project owner should never see this accepted or refused for its lifecycle")
 
 			err = f.s.UpdateAssetCost(f.ctx, f.permit, &row.Cost)
 			if !errors.Is(err, domain.ErrForbidden) {
