@@ -240,6 +240,48 @@ func RequireWrite(authz *auth.Authorizer) func(http.Handler) http.Handler {
 	}
 }
 
+// RequireCostVisibility rejects a signed-in, write-capable user who may not
+// see money: acquisition prices, support contract values, project totals.
+//
+// This is a SESSION question, modelled exactly on RequireWrite -- same
+// signature shape, same refusal status, same body-text convention -- and it
+// deliberately is NOT a widening of domain.Permit. auth.Authorizer.CanSeeCosts
+// (docs/rbac-design.md §3) is a grant separate from role: an Administrator
+// always passes without consulting app_user.can_see_costs at all, while an
+// Observer or a project owner passes only if that column is set. Nothing
+// about that question is "may THIS row be written" -- it is "may THIS
+// SESSION see money at all" -- so it cannot live at internal/store's tx.log
+// the way object-level permission does: domain.Permit is width-locked to
+// three methods by TestThePermitInterfaceCannotBeWidenedWithoutSayingSo, and
+// it carries no cost dimension for CanSeeCosts to plug into. Widening it to
+// answer a session-level question that middleware can already answer would
+// be solving this in the wrong layer, not just the wrong function.
+//
+// Composed AFTER RequireWrite at the route table (routes.go's writeCost),
+// never before and never alone: writing a value you may not read is a blind
+// write, on every cost surface, for every role. An Administrator's grant is
+// implicit (see CanSeeCosts) so this never regresses an Administrator's
+// access -- there is no cost surface an Administrator could reach before this
+// existed that this closes off.
+func RequireCostVisibility(authz *auth.Authorizer) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			user := UserFrom(r.Context())
+			if user == nil {
+				render.Redirect(w, r, "/login?next="+url.QueryEscape(r.URL.Path))
+				return
+			}
+			if !authz.CanSeeCosts(user) {
+				auth.LogSecurityEvent(r.Context(), slog.LevelWarn, auth.EventWriteDenied,
+					"user", user.Username, "path", r.URL.Path, "method", r.Method)
+				http.Error(w, "You may not view or change costs.", http.StatusForbidden)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
 // RequireAdministrator rejects anyone who is not a full Administrator, even a
 // project owner for whom authz.CanWrite is true.
 //

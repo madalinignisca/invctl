@@ -212,6 +212,24 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	write := func(pattern string, h http.HandlerFunc) {
 		mux.Handle(pattern, middleware.RequireAuth(requireWrite(h)))
 	}
+	// writeCost gates the money surfaces on BOTH seams: RequireWrite for "may
+	// this session write at all", RequireCostVisibility for "may it see
+	// money". RequireWrite FIRST, always: an Observer must still be refused
+	// with RequireWrite's text, not RequireCostVisibility's, because
+	// rbac_boundary_test.go reads the refusal body to decide which layer
+	// refused a request, and inverting the order reports the wrong layer.
+	//
+	// This is not RequireWrite alone because writing a number you are not
+	// allowed to read is a blind write: a project owner or Observer granted
+	// write access to an asset but not app_user.can_see_costs could set an
+	// acquisition price or a support contract value they can never see back.
+	// Administrators always pass CanSeeCosts (see that method's own comment),
+	// so this closes no surface an Administrator could reach before -- there
+	// is no regression to weigh against the fix.
+	requireCostVisibility := middleware.RequireCostVisibility(authz)
+	writeCost := func(pattern string, h http.HandlerFunc) {
+		mux.Handle(pattern, middleware.RequireAuth(requireWrite(requireCostVisibility(h))))
+	}
 	// The import page is admin-only on the GET as well as the POST. It is
 	// purely a write tool: rendering it to a read-only user offers a form whose
 	// only outcome is a 403.
@@ -379,19 +397,19 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	// Cost lines. One route per surface rather than a generic
 	// /costs/{type}/{id}: an entity type arriving in a URL is an entity type
 	// arriving from a request, and it would select a table name.
-	write("POST /assets/{id}/costs", app.CostAddToAsset)
-	write("POST /assets/{id}/costs/{costID}", app.CostEditOnAsset)
-	write("POST /assets/{id}/costs/{costID}/retire", app.CostRetireOnAsset)
-	write("POST /assets/{id}/costs/{costID}/reprice", app.CostRepriceOnAsset)
-	write("POST /assets/{id}/costs/{costID}/consumers", app.CostConsumersOnAsset)
-	write("POST /services/{id}/costs", app.CostAddToService)
-	write("POST /services/{id}/costs/{costID}", app.CostEditOnService)
-	write("POST /services/{id}/costs/{costID}/retire", app.CostRetireOnService)
-	write("POST /services/{id}/costs/{costID}/reprice", app.CostRepriceOnService)
-	write("POST /projects/{id}/costs", app.CostAddToProject)
-	write("POST /projects/{id}/costs/{costID}", app.CostEditOnProject)
-	write("POST /projects/{id}/costs/{costID}/retire", app.CostRetireOnProject)
-	write("POST /projects/{id}/costs/{costID}/reprice", app.CostRepriceOnProject)
+	writeCost("POST /assets/{id}/costs", app.CostAddToAsset)
+	writeCost("POST /assets/{id}/costs/{costID}", app.CostEditOnAsset)
+	writeCost("POST /assets/{id}/costs/{costID}/retire", app.CostRetireOnAsset)
+	writeCost("POST /assets/{id}/costs/{costID}/reprice", app.CostRepriceOnAsset)
+	writeCost("POST /assets/{id}/costs/{costID}/consumers", app.CostConsumersOnAsset)
+	writeCost("POST /services/{id}/costs", app.CostAddToService)
+	writeCost("POST /services/{id}/costs/{costID}", app.CostEditOnService)
+	writeCost("POST /services/{id}/costs/{costID}/retire", app.CostRetireOnService)
+	writeCost("POST /services/{id}/costs/{costID}/reprice", app.CostRepriceOnService)
+	writeCost("POST /projects/{id}/costs", app.CostAddToProject)
+	writeCost("POST /projects/{id}/costs/{costID}", app.CostEditOnProject)
+	writeCost("POST /projects/{id}/costs/{costID}/retire", app.CostRetireOnProject)
+	writeCost("POST /projects/{id}/costs/{costID}/reprice", app.CostRepriceOnProject)
 	write("POST /vocabularies", app.VocabularyUpsert)
 	write("POST /inflation", app.InflationSet)
 	write("POST /custom-fields", app.CustomFieldCreate)
@@ -459,10 +477,10 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 
 	write("POST /circuits/{id}/terminations", app.CircuitLand)
 	write("POST /circuits/{id}/terminations/{termID}/retire", app.CircuitLift)
-	write("POST /circuits/{id}/costs", app.CostAddToCircuit)
-	write("POST /circuits/{id}/costs/{costID}", app.CostEditOnCircuit)
-	write("POST /circuits/{id}/costs/{costID}/retire", app.CostRetireOnCircuit)
-	write("POST /circuits/{id}/costs/{costID}/reprice", app.CostRepriceOnCircuit)
+	writeCost("POST /circuits/{id}/costs", app.CostAddToCircuit)
+	writeCost("POST /circuits/{id}/costs/{costID}", app.CostEditOnCircuit)
+	writeCost("POST /circuits/{id}/costs/{costID}/retire", app.CostRetireOnCircuit)
+	writeCost("POST /circuits/{id}/costs/{costID}/reprice", app.CostRepriceOnCircuit)
 	write("POST /providers", app.ProviderCreate)
 	write("POST /overlays", app.L2VPNCreate)
 	write("POST /overlays/{id}/retire", app.L2VPNRetire)

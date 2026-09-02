@@ -114,10 +114,14 @@ type Route struct {
 	File    string // "internal/web/handlers/assets.go"
 	// Gate is the registrar that declared this route: "write" (behind
 	// RequireWrite/auth.CanWrite), "writeAdminOnly" (behind
-	// RequireAdministrator/auth.IsAdministrator), or "self" (behind
+	// RequireAdministrator/auth.IsAdministrator), "self" (behind
 	// RequireAuth alone -- a mutation whose subject is the signed-in person,
 	// never the estate, with the per-object decision made downstream in the
-	// store; see routes.go's own comment on the self registrar).
+	// store; see routes.go's own comment on the self registrar), or
+	// "writeCost" (behind RequireWrite THEN RequireCostVisibility/
+	// auth.CanSeeCosts -- Task 4a: every cost-line write route, because
+	// writing a number you may not read is a blind write on every surface;
+	// see routes.go's own comment on the writeCost registrar).
 	//
 	// IT IS IN THE COMMITTED INVENTORY DELIBERATELY. WP-G1 Task 13 makes
 	// CanWrite true for a project owner, so the two gates stop being
@@ -146,21 +150,26 @@ type Route struct {
 // root.
 const routesFile = "internal/web/routes.go"
 
-// isRouteRegistrar reports whether name is one of routes.go's three
+// isRouteRegistrar reports whether name is one of routes.go's four
 // write-bucket registrar closures: write (behind RequireWrite/CanWrite),
 // writeAdminOnly (behind RequireAdministrator -- WP-G1 Task 15, F2: the
 // import surface, where no ScopedPermit can ever cover a freshly-minted row,
-// so it stays reachable by a full Administrator only), and self (behind
+// so it stays reachable by a full Administrator only), self (behind
 // RequireAuth alone -- WP-G4b Wave B: a mutation whose subject is the
 // signed-in person, not the estate, with per-object ownership enforced in
-// the store rather than by the route). All three register a route the same
+// the store rather than by the route), and writeCost (behind RequireWrite
+// THEN RequireCostVisibility -- Task 4a: every cost-line write route, because
+// auth.Authorizer.CanSeeCosts is a grant separate from role and cannot live
+// at domain.Permit's width-locked interface, so it is enforced one layer up,
+// at the session, beside RequireWrite). All four register a route the same
 // shape this package cares about -- pattern, handler, whether the handler's
 // call graph reaches actor( -- so the walk treats them identically; WHICH of
-// the three gates a route sits behind is authz.CanWrite vs
-// authz.IsAdministrator vs "merely signed in", an orthogonal question this
-// package does not answer, only records on Route.Gate.
+// the four gates a route sits behind is authz.CanWrite vs
+// authz.IsAdministrator vs "merely signed in" vs authz.CanWrite-then-
+// CanSeeCosts, an orthogonal question this package does not answer, only
+// records on Route.Gate.
 func isRouteRegistrar(name string) bool {
-	return name == "write" || name == "writeAdminOnly" || name == "self"
+	return name == "write" || name == "writeAdminOnly" || name == "self" || name == "writeCost"
 }
 
 // handlersDir is where every write-bucket handler and the shared helpers it
