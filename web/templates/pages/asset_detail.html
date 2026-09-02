@@ -240,17 +240,23 @@
           <td class="mono" style="font-size:12px;color:var(--muted)">
             {{if .PeerAsset}}{{.PeerAsset}} · {{.PeerPort}}{{else}}—{{end}}
           </td>
-          {{/* Editing the port itself is asset-scoped (subject-derived);
-               unpatching is a "link" write, which is ScopeTopology and stays
-               Administrator-only (1.0 item 1's DEFER list) -- so the two
-               controls in this cell are gated separately, not on one shared
-               .CanWrite the way this cell used to be. */}}
+          {{/* Editing the port itself is single-subject (subject-derived):
+               the port's only owner is this asset, so it is gated on
+               CanWriteEntity for $.Asset.ID alone. Unpatching is "link",
+               which is ScopeSubjectDerived with TWO subjects
+               (authorizeLinkSubjects, internal/store/network.go) -- a
+               project owner may retire a cable only when they own BOTH
+               ends, so the control needs CanWriteEntity on THIS asset AND
+               on .PeerAssetID, the far end. The two controls in this cell
+               stay gated separately rather than on one shared .CanWrite
+               because they are genuinely different-shaped checks: one
+               subject for Edit, two for Unpatch. */}}
           {{if or ($.CanWriteEntity "asset" $.Asset.ID) (and .IsPatched $.IsAdmin)}}
           <td style="white-space:nowrap">
             {{if $.CanWriteEntity "asset" $.Asset.ID}}
             <a class="btn btn-sm" href="/assets/{{$.Asset.ID}}?edit={{.ID}}#ports">Edit</a>
             {{end}}
-            {{if and .IsPatched $.IsAdmin}}
+            {{if and .IsPatched (or $.IsAdmin (and ($.CanWriteEntity "asset" $.Asset.ID) ($.CanWriteEntity "asset" .PeerAssetID)))}}
             <form method="post" action="/links/{{.LinkID}}/retire" style="display:inline"
                   hx-post="/links/{{.LinkID}}/retire"
                   hx-confirm="Unpatch {{.Name}}? The record is kept.">

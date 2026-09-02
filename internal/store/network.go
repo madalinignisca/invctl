@@ -27,7 +27,13 @@ type InterfaceRow struct {
 	Addresses []domain.IPAddress
 	LinkID    string
 	PeerAsset string
-	PeerPort  string
+	// PeerAssetID is the far end's owning asset id -- not just its name --
+	// so the asset_detail template can ask CanWriteEntity about the SECOND
+	// subject a link write requires (authorizeLinkSubjects checks both ends;
+	// the UI gate has to match it or Unpatch would render for a caller the
+	// store then refuses). Empty on an unpatched port, same as PeerAsset.
+	PeerAssetID string
+	PeerPort    string
 }
 
 // IsPatched reports whether this port already carries an active cable.
@@ -75,14 +81,16 @@ func (s *SQLStore) ListInterfaces(ctx context.Context, assetID string) ([]Interf
 	// links are excluded: an unpatched cable must not still show as a port's
 	// far end (docs/DECISIONS.md, 2026-07-28 decisions).
 	type peer struct {
-		NearID    string `db:"near_id"`
-		LinkID    string `db:"link_id"`
-		PeerPort  string `db:"peer_port"`
-		PeerAsset string `db:"peer_asset"`
+		NearID      string `db:"near_id"`
+		LinkID      string `db:"link_id"`
+		PeerPort    string `db:"peer_port"`
+		PeerAsset   string `db:"peer_asset"`
+		PeerAssetID string `db:"peer_asset_id"`
 	}
 	var peers []peer
 	err = s.read(ctx, &peers, `
-		SELECT l.id AS link_id, l.a_interface_id AS near_id, bi.name AS peer_port, ba.name AS peer_asset
+		SELECT l.id AS link_id, l.a_interface_id AS near_id, bi.name AS peer_port,
+		       ba.name AS peer_asset, ba.id AS peer_asset_id
 		FROM link l
 		JOIN interface bi ON bi.id = l.b_interface_id
 		JOIN asset ba ON ba.id = bi.asset_id
@@ -92,7 +100,8 @@ func (s *SQLStore) ListInterfaces(ctx context.Context, assetID string) ([]Interf
 	}
 	var peersB []peer
 	err = s.read(ctx, &peersB, `
-		SELECT l.id AS link_id, l.b_interface_id AS near_id, ai.name AS peer_port, aa.name AS peer_asset
+		SELECT l.id AS link_id, l.b_interface_id AS near_id, ai.name AS peer_port,
+		       aa.name AS peer_asset, aa.id AS peer_asset_id
 		FROM link l
 		JOIN interface ai ON ai.id = l.a_interface_id
 		JOIN asset aa ON aa.id = ai.asset_id
@@ -104,6 +113,7 @@ func (s *SQLStore) ListInterfaces(ctx context.Context, assetID string) ([]Interf
 		if i, ok := index[p.NearID]; ok {
 			rows[i].LinkID = p.LinkID
 			rows[i].PeerAsset = p.PeerAsset
+			rows[i].PeerAssetID = p.PeerAssetID
 			rows[i].PeerPort = p.PeerPort
 		}
 	}

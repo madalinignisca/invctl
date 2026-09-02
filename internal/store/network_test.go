@@ -90,6 +90,9 @@ func TestLinkLifecycle(t *testing.T) {
 				if rowsA[0].PeerAsset != "srv-1" || rowsA[0].PeerPort != "eth0" {
 					t.Errorf("A's peer = %s/%s, want srv-1/eth0", rowsA[0].PeerAsset, rowsA[0].PeerPort)
 				}
+				if rowsA[0].PeerAssetID != assetB {
+					t.Errorf("A's peer asset id = %s, want %s", rowsA[0].PeerAssetID, assetB)
+				}
 				if !rowsA[0].IsPatched() {
 					t.Error("A's port does not report itself as patched")
 				}
@@ -119,6 +122,9 @@ func TestLinkLifecycle(t *testing.T) {
 				if rowsA[0].PeerAsset != "" || rowsA[0].PeerPort != "" {
 					t.Errorf("A still shows a peer after the cable was retired: %s/%s",
 						rowsA[0].PeerAsset, rowsA[0].PeerPort)
+				}
+				if rowsA[0].PeerAssetID != "" {
+					t.Errorf("A still shows a peer asset id after the cable was retired: %s", rowsA[0].PeerAssetID)
 				}
 				if rowsA[0].IsPatched() {
 					t.Error("A still reports itself as patched after the cable was retired")
