@@ -688,15 +688,29 @@ func (a *App) renderAssetDetail(w http.ResponseWriter, r *http.Request, status i
 
 	// What this replaced, when it replaced anything (WP-J1). Same treatment as
 	// the elevation: logged and absent rather than fatal.
-	replacement, err := a.Store.ReplacementFor(r.Context(), id, a.Store.Now())
-	if err != nil {
-		slog.Error("resolving the replacement", "error", err, "asset", id)
+	//
+	// GATED BEHIND CanSeeCosts, like every other money query (see cost_report.go).
+	// The panel is nothing but acquisition prices, so a viewer without the
+	// grant gets neither the query nor the render -- not fetching money you
+	// may not show is the safer default.
+	var replacement *store.ReplacementComparison
+	if assetBase.CanSeeCosts {
+		replacement, err = a.Store.ReplacementFor(r.Context(), id, a.Store.Now())
+		if err != nil {
+			slog.Error("resolving the replacement", "error", err, "asset", id)
+		}
 	}
 
 	// How its prices moved (WP-J2). Logged and absent rather than fatal.
-	movement, err := a.Store.PriceMovementForAsset(r.Context(), id)
-	if err != nil {
-		slog.Error("resolving price movement", "error", err, "asset", id)
+	//
+	// GATED BEHIND CanSeeCosts for the same reason as the replacement above:
+	// price_movement_panel is entirely money.
+	var movement []store.PriceSeries
+	if assetBase.CanSeeCosts {
+		movement, err = a.Store.PriceMovementForAsset(r.Context(), id)
+		if err != nil {
+			slog.Error("resolving price movement", "error", err, "asset", id)
+		}
 	}
 
 	// Suppliers for the cost picker. Logged and absent rather than fatal: an

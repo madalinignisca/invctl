@@ -56,6 +56,18 @@ SPDX-License-Identifier: AGPL-3.0-only
       <form method="post" action="/views/{{.ID}}/rename" class="saved-view-rename"
             hx-post="/views/{{.ID}}/rename" hx-target="#saved-views-{{$.Entity}}" hx-swap="outerHTML">
         <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+        {{/* Carried for the SAME reason the save form below carries them, and
+             for no reason of the rename's own -- SavedViewRename never reads
+             a filter field, it only writes Name (see the handler's own
+             comment). But a REJECTED rename (blank name) re-renders this
+             whole menu at 422 through renderSavedViewsInvalid, and that
+             re-render includes the "Save this view" form further down,
+             which DOES need the filters currently applied on the page. The
+             rename request is the only thing carrying that page state to
+             the server at that moment, so it has to carry these too, or the
+             re-rendered save form silently loses them -- see
+             TestSavedViewRenameValidationFailureKeepsTheCurrentFilters. */}}
+        {{range $.CurrentFilters}}<input type="hidden" name="{{.Key}}" value="{{.Value}}">{{end}}
         <input type="text" name="name" required>
         <button type="submit" class="btn btn-sm">Save</button>
         <button type="button" class="btn btn-sm" x-on:click="cancelRename">Cancel</button>

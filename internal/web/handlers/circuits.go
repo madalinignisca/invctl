@@ -105,9 +105,16 @@ func (a *App) renderCircuitDetail(w http.ResponseWriter, r *http.Request, id str
 		a.serverError(w, r, err)
 		return
 	}
-	movement, err := a.Store.PriceMovementForCircuit(r.Context(), id)
-	if err != nil {
-		slog.Error("resolving price movement", "error", err, "circuit", id)
+	// GATED BEHIND CanSeeCosts, like the same query on the asset page (see
+	// assets.go): price_movement_panel is entirely money, so a viewer without
+	// the grant gets neither the query nor the render.
+	base := a.base(r, circuit.CID, "circuits")
+	var movement []store.PriceSeries
+	if base.CanSeeCosts {
+		movement, err = a.Store.PriceMovementForCircuit(r.Context(), id)
+		if err != nil {
+			slog.Error("resolving price movement", "error", err, "circuit", id)
+		}
 	}
 	costs, err := a.Store.ListCircuitCosts(r.Context(), id)
 	if err != nil {
@@ -141,7 +148,6 @@ func (a *App) renderCircuitDetail(w http.ResponseWriter, r *http.Request, id str
 		a.serverError(w, r, err)
 		return
 	}
-	base := a.base(r, circuit.CID, "circuits")
 	a.Render.Page(w, status, "circuit_detail", struct {
 		Base
 		Circuit      *domain.Circuit

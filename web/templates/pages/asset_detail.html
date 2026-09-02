@@ -617,6 +617,7 @@
 </div>
 
 
+{{if .CanSeeCosts}}
 {{with .Replacement}}
 {{/* What this took over from (WP-J1). Above the fit panel because it answers a
      question somebody arrives with -- "did that refresh cost us?" -- rather than
@@ -625,7 +626,13 @@
      THE PERCENTAGE ONLY APPEARS WHEN BOTH ENDS CARRY AN ACQUISITION PRICE. Half
      a comparison rendered as a whole one is the failure this panel could most
      easily have: a rise computed against a missing number looks authoritative
-     and is invented. */}}
+     and is invented.
+
+     GATED BEHIND CanSeeCosts, checked outside the "with" block above (dot
+     becomes .Replacement inside it, which would shadow the page-level grant):
+     this panel is nothing but acquisition prices, and the handler skips the
+     ReplacementFor query entirely for a viewer without the grant -- see
+     assets.go. */}}
 <div class="panel">
   <div class="panel-head">
     <h2>Replaced</h2>
@@ -688,6 +695,7 @@
     {{end}}
   </div>
 </div>
+{{end}}
 {{end}}
 
 {{with .Fit}}

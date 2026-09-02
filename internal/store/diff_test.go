@@ -8,7 +8,15 @@
 
 package store
 
-import "testing"
+import (
+	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"path/filepath"
+	"strconv"
+	"testing"
+)
 
 // The parser and the writer must agree, and they only will if something makes
 // them. They sit in one file for that reason; this is the test that pins it.
@@ -143,24 +151,105 @@ func TestACustomFieldsRowCarriesAReaderNote(t *testing.T) {
 }
 
 // TestEveryCostTableEntityIsInCostEntityTypes makes the redaction list
-// structural instead of remembered. costEntityTypes (this file) and the four
-// costTable values (costs.go) name the same four surfaces, but nothing before
-// this test made that true by construction -- costEntityTypes is a hand-typed
-// map, and it had already gone stale once: WP-1.1's authorization review found
-// only "asset_cost" was ever proven redacted, and deleting "service_cost",
+// structural instead of remembered. costEntityTypes (this file) and the
+// costTable values (costs.go) name the same surfaces, but nothing before this
+// test made that true by construction -- costEntityTypes is a hand-typed map,
+// and it had already gone stale once: WP-1.1's authorization review found only
+// "asset_cost" was ever proven redacted, and deleting "service_cost",
 // "project_cost" or "circuit_cost" from the map left both test suites green.
-// Iterating the real costTable values, rather than a second hand-typed list of
-// entity names, is what closes that: a fifth cost surface added to costs.go
-// without a matching costEntityTypes entry now fails here, on the one property
-// that actually matters -- that its change_log diff gets redacted for a viewer
-// with no can_see_costs grant -- rather than surviving both suites the way
-// three of the four existing ones already did.
+//
+// THE FIRST VERSION OF THIS TEST STILL ITERATED A HAND-TYPED SLICE --
+// []costTable{costOnAsset, costOnService, costOnProject, costOnCircuit} --
+// which guards deletion (remove a name from the slice, the test still passes
+// because nothing is missing) but not ADDITION: a fifth costTable declared in
+// costs.go with no costEntityTypes entry compiles, is never mentioned in this
+// slice, and this test stays green while its diff leaks an amount to every
+// viewer. That is the exact case the test's own comment claimed to cover.
+//
+// costTableEntitiesFromSource fixes that by reading costs.go with go/ast --
+// the same approach permit_source_test.go (this package) already uses to
+// census permit minters -- and collecting every `entity:` field out of every
+// costTable{...} composite literal actually declared in the file, however
+// many there are. A sixth cost surface is found the moment it is written,
+// not the moment somebody remembers to update a slice beside this test.
 func TestEveryCostTableEntityIsInCostEntityTypes(t *testing.T) {
-	for _, table := range []costTable{costOnAsset, costOnService, costOnProject, costOnCircuit} {
-		if !IsCostEntityType(table.entity) {
-			t.Errorf("costTable %q (SQL table %q) has no costEntityTypes entry -- "+
-				"a change_log diff for it would show its amount_minor to any viewer, "+
-				"grant or no grant", table.entity, table.name)
+	root := repoRoot(t)
+	path := filepath.Join(root, "internal", "store", "costs.go")
+	entities, err := costTableEntitiesFromSource(path)
+	if err != nil {
+		t.Fatalf("reading costTable declarations from %s: %v", path, err)
+	}
+	if len(entities) == 0 {
+		t.Fatalf("found no costTable{...} composite literals in %s -- the scan itself is "+
+			"broken, since costs.go plainly declares some", path)
+	}
+	for _, entity := range entities {
+		if !IsCostEntityType(entity) {
+			t.Errorf("costTable with entity %q (declared in costs.go) has no "+
+				"costEntityTypes entry -- a change_log diff for it would show its "+
+				"amount_minor to any viewer, grant or no grant", entity)
 		}
 	}
+}
+
+// costTableEntitiesFromSource parses path and returns the `entity` field's
+// string value out of every costTable{...} composite literal it declares,
+// regardless of how many there are or what variable each is assigned to.
+//
+// A literal missing an `entity:` key, or one whose value is not a plain
+// string constant, is a scan failure (an error), never a silent skip: a
+// costTable this scan cannot read is a costTable TestEveryCostTableEntityIs-
+// InCostEntityTypes cannot check, which is exactly the gap this rewrite
+// exists to close.
+func costTableEntitiesFromSource(path string) ([]string, error) {
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, path, nil, 0)
+	if err != nil {
+		return nil, err
+	}
+
+	var entities []string
+	var walkErr error
+	ast.Inspect(f, func(n ast.Node) bool {
+		if walkErr != nil {
+			return false
+		}
+		lit, ok := n.(*ast.CompositeLit)
+		if !ok {
+			return true
+		}
+		ident, ok := lit.Type.(*ast.Ident)
+		if !ok || ident.Name != "costTable" {
+			return true
+		}
+		for _, elt := range lit.Elts {
+			kv, ok := elt.(*ast.KeyValueExpr)
+			if !ok {
+				continue
+			}
+			key, ok := kv.Key.(*ast.Ident)
+			if !ok || key.Name != "entity" {
+				continue
+			}
+			basic, ok := kv.Value.(*ast.BasicLit)
+			if !ok || basic.Kind != token.STRING {
+				walkErr = fmt.Errorf("a costTable{...} literal at %s has a non-literal "+
+					"`entity` field, which this scan cannot read statically",
+					fset.Position(lit.Pos()))
+				return false
+			}
+			value, err := strconv.Unquote(basic.Value)
+			if err != nil {
+				walkErr = fmt.Errorf("unquoting entity field at %s: %w",
+					fset.Position(basic.Pos()), err)
+				return false
+			}
+			entities = append(entities, value)
+		}
+		return true
+	})
+	if walkErr != nil {
+		return nil, walkErr
+	}
+	return entities, nil
 }

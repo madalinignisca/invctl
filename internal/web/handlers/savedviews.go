@@ -400,6 +400,12 @@ func (a *App) SavedViewRename(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := formValue(r, "name")
+	// Read for the 422 path only -- see saved_views.html's rename form,
+	// which now carries the same hidden filter inputs the save form does,
+	// for exactly this reason (its own comment there explains why). A
+	// successful rename redirects and never renders this menu at all, so
+	// this has no effect on the ordinary path.
+	currentFilters := CurrentFiltersFor(r.PostForm, existing.Entity)
 	// A copy of the stored row with only Name touched -- Entity, Params,
 	// UserID and RowVersion travel through unchanged, so UpdateSavedView's
 	// optimistic-concurrency check runs against the version this handler
@@ -409,7 +415,14 @@ func (a *App) SavedViewRename(w http.ResponseWriter, r *http.Request) {
 	v.Name = name
 	if err := a.Store.UpdateSavedView(r.Context(), a.permit(r), &v); err != nil {
 		if errors.Is(err, domain.ErrInvalid) {
-			a.renderSavedViewsInvalid(w, r, existing.Entity, nil, name, err)
+			// currentFilters, NOT nil -- nil was the bug (WP-1.1 Task 4d, item
+			// 6): the re-rendered menu's "save this view" form takes its
+			// hidden filter inputs from this value, so a nil here produced a
+			// form that looked fine and saved a FILTERLESS view on the next
+			// click. See TestSavedViewRenameValidationFailureKeepsTheCurrentFilters,
+			// the rename twin of
+			// TestSavedViewCreateValidationFailureRerendersTheMenuAt422.
+			a.renderSavedViewsInvalid(w, r, existing.Entity, currentFilters, name, err)
 			return
 		}
 		a.savedViewFailed(w, r, err)
