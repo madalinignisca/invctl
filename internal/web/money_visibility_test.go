@@ -9,6 +9,7 @@
 package web_test
 
 import (
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -57,9 +58,34 @@ var moneyRouteCoverage = []struct {
 	{
 		name: "asset detail",
 		path: func(t *testing.T, h *harness) string {
-			id := h.refs.Assets["hv-01"]
-			if id == "" {
-				t.Fatal("fixture asset hv-01 not found")
+			// Item 3: hv-01 carries zero price history by default, so
+			// price_movement.html's claim below was decorative -- listed as
+			// covered but never actually rendered by this route's fixture
+			// (price_history_visibility_test.go's repriceHV01Once doc comment
+			// explains why a single valid_from entry never "moved"). Reusing
+			// that same helper here, rather than inventing a second one,
+			// makes the claim genuine: a real two-step series, so
+			// PriceSeries.Moved() is true and the marker actually fires.
+			id, _ := repriceHV01Once(t, h)
+			// pages/asset_detail.html's own money marker sits in the
+			// "Replaced" panel ({{with .Replacement}}{{if .Comparable}}),
+			// which needs a genuine replacement lineage recorded, not just a
+			// priced asset -- the same lineage
+			// TestReplacementPanelIsHiddenFromAnUngrantedObserver builds
+			// between hv-01 and sw-core-1. Without this the panel never
+			// renders and the claim is decorative all over again, just for
+			// a different template on the same route.
+			predecessor := h.refs.Assets["sw-core-1"]
+			page := body(t, h.get("/assets/"+id+"?edit="+id, false))
+			resp := h.post("/assets/"+id, url.Values{
+				"csrf_token":  {h.csrfToken("/assets/" + id)},
+				"row_version": {versionInForm(t, page)},
+				"name":        {"hv-01"}, "kind": {"hypervisor"}, "lifecycle": {"active"},
+				"replaces_asset_id": {predecessor},
+			}, false)
+			resp.Body.Close()
+			if resp.StatusCode != http.StatusSeeOther {
+				t.Fatalf("recording the replacement lineage returned %d, want a redirect", resp.StatusCode)
 			}
 			return "/assets/" + id
 		},
@@ -82,19 +108,45 @@ var moneyRouteCoverage = []struct {
 			// The base fixture circuit carries no cost line (see
 			// change_log_cost_redaction_test.go's identical comment), so one
 			// is added here through the real handler before either viewer
-			// checks the page.
+			// checks the page. A provider is attached, matching what
+			// "supplier report" below builds for itself in its own,
+			// separate harness -- each case in this table gets a fresh
+			// newHarness, so a fixture built here is invisible there.
 			id := h.lookup(`SELECT id FROM circuit LIMIT 1`)
 			if id == "" {
 				t.Fatal("no circuit in the fixture")
 			}
-			resp := h.post("/circuits/"+id+"/costs", url.Values{
+			providerID := h.lookup(`SELECT id FROM provider LIMIT 1`)
+			if providerID == "" {
+				t.Fatal("no provider in the fixture")
+			}
+			add := h.post("/circuits/"+id+"/costs", url.Values{
 				"csrf_token": {h.csrfToken("/")},
 				"kind":       {"operating"}, "period": {"monthly"}, "amount": {"1450"},
-				"note": {"fixture line for the money-visibility census"},
+				"valid_from":  {"2024-01-01"},
+				"provider_id": {providerID},
+				"note":        {"fixture line for the money-visibility census"},
 			}, false)
-			resp.Body.Close()
-			if resp.StatusCode != 303 {
-				t.Fatalf("adding the fixture circuit cost line returned %d, want 303", resp.StatusCode)
+			add.Body.Close()
+			if add.StatusCode != http.StatusSeeOther {
+				t.Fatalf("adding the fixture circuit cost line returned %d, want 303", add.StatusCode)
+			}
+			// Item 3: a single valid_from entry never "moved" (see
+			// repriceHV01Once's doc comment), so partials/price_movement.html
+			// would never actually render on this route without a genuine
+			// two-step series. Reprice it once, the same way
+			// TestPriceMovementPanelIsHiddenFromAnUngrantedObserver's
+			// "circuit" subtest does.
+			costID := firstRepriceID(t, body(t, h.get("/circuits/"+id, false)))
+			reprice := h.post("/circuits/"+id+"/costs/"+costID+"/reprice", url.Values{
+				"csrf_token":     {h.csrfToken("/")},
+				"amount":         {"1780.00"},
+				"effective_from": {"2027-06-01"},
+				"note":           {"uplift for the money-visibility fixture"},
+			}, false)
+			reprice.Body.Close()
+			if reprice.StatusCode != http.StatusSeeOther {
+				t.Fatalf("repricing the fixture circuit cost line returned %d, want 303", reprice.StatusCode)
 			}
 			return "/circuits/" + id
 		},
@@ -128,8 +180,36 @@ var moneyRouteCoverage = []struct {
 		templates: []string{"pages/cost_report.html"},
 	},
 	{
-		name:      "supplier report",
-		path:      func(t *testing.T, h *harness) string { return "/reports/suppliers" },
+		name: "supplier report",
+		path: func(t *testing.T, h *harness) string {
+			// pages/supplier_report.html's own marker sits inside
+			// {{if .Attributed}} -- rendered only once at least one live
+			// cost line names a supplier. The base fixture's cost lines
+			// carry no provider (see the circuit-detail case's identical
+			// comment), so without this the marker claim is decorative:
+			// the report renders (proving SOME money, via the
+			// unattributed-lines callout) while the one table this route
+			// exists for never does.
+			id := h.lookup(`SELECT id FROM circuit LIMIT 1`)
+			if id == "" {
+				t.Fatal("no circuit in the fixture")
+			}
+			providerID := h.lookup(`SELECT id FROM provider LIMIT 1`)
+			if providerID == "" {
+				t.Fatal("no provider in the fixture")
+			}
+			resp := h.post("/circuits/"+id+"/costs", url.Values{
+				"csrf_token": {h.csrfToken("/")},
+				"kind":       {"operating"}, "period": {"monthly"}, "amount": {"990"},
+				"provider_id": {providerID},
+				"note":        {"fixture line for the supplier-report money-visibility case"},
+			}, false)
+			resp.Body.Close()
+			if resp.StatusCode != http.StatusSeeOther {
+				t.Fatalf("adding the fixture attributed cost line returned %d, want 303", resp.StatusCode)
+			}
+			return "/reports/suppliers"
+		},
 		templates: []string{"pages/supplier_report.html"},
 	},
 }
@@ -163,6 +243,35 @@ func TestNoMoneySurfaceLeaksToAnUngrantedObserver(t *testing.T) {
 				t.Fatalf("GET %s showed no currency symbol to an Administrator; this route "+
 					"is not proven to render money at all, so a passing viewer check below "+
 					"would prove nothing", path)
+			}
+			// Item 3 (2026-09-02 group-a-1-1 round): the currency-symbol check
+			// above proves the ROUTE shows money somewhere, not that every
+			// template it CLAIMS in tc.templates was actually reached. That is
+			// exactly the hole that let partials/price_movement.html sit in
+			// "asset detail"'s list for three commits: hv-01 has no price
+			// movement, so the template was never rendered, and the
+			// static-only TestEveryMoneyTemplateHasABehaviouralRoute below has
+			// no way to know that -- it only checks the template is named
+			// somewhere, never that the named route reaches it. So: every
+			// claimed template must leave its own marker comment (see each
+			// template's own "Item 3 marker" comment for where) on the SAME
+			// admin, money-showing fetch already proven non-inert above. A
+			// template listed here that the fixture never actually renders now
+			// fails on the positive control, not silently.
+			for _, tpl := range tc.templates {
+				// A hidden <span>, not an HTML comment: html/template strips
+				// static HTML comments from its own output (documented
+				// behaviour, not a bug here) -- a literal <!-- MONEY:... -->
+				// in the template source never reaches the response body at
+				// all, which made every case in this loop fail identically
+				// the first time this was written, comment stripped or not.
+				marker := `<span data-money-marker="` + tpl + `" hidden></span>`
+				if !strings.Contains(adminPage, marker) {
+					t.Errorf("GET %s (admin) claims template %q in moneyRouteCoverage but "+
+						"never rendered its money marker (%s) -- this route's fixture does "+
+						"not actually exercise that template, so the viewer check below "+
+						"proves nothing about it", path, tpl, marker)
+				}
 			}
 
 			h.logout()

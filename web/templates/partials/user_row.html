@@ -76,9 +76,17 @@
           method="post" action="/users/{{.User.ID}}/costs">
       <input type="hidden" name="csrf_token" value="{{.CSRF}}">
       <label style="display:flex;gap:4px;align-items:center;font-weight:normal">
+        {{/* Item 6 (2026-09-02 group-a-1-1 round): was
+             onchange="this.form.requestSubmit()", which this app's own CSP
+             (script-src 'self', no unsafe-inline -- middleware.go) drops
+             silently. The checkbox toggled and nothing ever submitted, so
+             an administrator could not grant can_see_costs through the UI
+             at all. data-submit-on-change is read by a delegated listener
+             in app.js instead -- see its comment for why delegated, not
+             per-element. */}}
         <input type="checkbox" name="can_see_costs" value="true"
                {{if .User.CanSeeCosts}}checked{{end}}
-               onchange="this.form.requestSubmit()">
+               data-submit-on-change>
         sees costs
       </label>
     </form>

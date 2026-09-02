@@ -31,6 +31,12 @@
     A blank here means nobody has written the figure down, not that it is free.
   </div>
   {{else}}
+  {{/* Item 3 marker (see asset_detail.html's comment): fires only in the
+       branch that actually shows a total, not the empty-state branch above
+       -- one file, two {{define}} blocks (this one and project_cost_summary
+       below), so the money_visibility_test.go static scan sees it as one
+       template and this marker has to be correct in both. */}}
+  <span data-money-marker="partials/costs.html" hidden></span>
   <div class="stat-row" style="margin:0;border:none;border-bottom:1px solid var(--line)">
     <div class="stat">
       <div class="k">capital, once</div>
@@ -332,6 +338,9 @@
   </div>
 
   {{if .Costs.HasAnything}}
+  {{/* Item 3 marker, project_cost_summary's own instance -- see the
+       cost_panel marker above for why this file needs two. */}}
+  <span data-money-marker="partials/costs.html" hidden></span>
   <div class="stat-row" style="margin:0;border:none;border-bottom:1px solid var(--line)">
     <div class="stat">
       <div class="k">capital committed</div>

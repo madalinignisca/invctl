@@ -48,6 +48,11 @@
   </div>
 </div>
 {{else}}
+{{/* Item 3 marker (see asset_detail.html's comment). Placed in the
+     CanSeeCosts branch of THIS report, not the report itself, because
+     the totals below always render once a grant holds -- there is no
+     narrower "did it actually show a number" gate here to key off. */}}
+<span data-money-marker="pages/cost_report.html" hidden></span>
 {{/* The uncertainty first, and only when there is some. A page that leads with
      a caveat it does not need trains people to skip the caveat. */}}
 {{if not .Report.FullyPriced}}

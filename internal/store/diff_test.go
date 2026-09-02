@@ -13,8 +13,10 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -174,14 +176,21 @@ func TestACustomFieldsRowCarriesAReaderNote(t *testing.T) {
 // not the moment somebody remembers to update a slice beside this test.
 func TestEveryCostTableEntityIsInCostEntityTypes(t *testing.T) {
 	root := repoRoot(t)
-	path := filepath.Join(root, "internal", "store", "costs.go")
-	entities, err := costTableEntitiesFromSource(path)
+	dir := filepath.Join(root, "internal", "store")
+	// Item 4 (2026-09-02 group-a-1-1 round): this used to read only
+	// costs.go, which contradicted its own doc comment ("a fifth cost
+	// surface is found the moment it is written") -- a costTable{...}
+	// declared in estate_costs.go, reprice.go, or any new file was simply
+	// never looked at. permit_source_test.go's TestOnlyTheNamedFunctionsMint-
+	// APermit already walks a whole directory rather than a single named
+	// file for exactly this reason; this scan now does the same.
+	entities, err := costTableEntitiesFromDir(dir)
 	if err != nil {
-		t.Fatalf("reading costTable declarations from %s: %v", path, err)
+		t.Fatalf("reading costTable declarations from %s: %v", dir, err)
 	}
 	if len(entities) == 0 {
 		t.Fatalf("found no costTable{...} composite literals in %s -- the scan itself is "+
-			"broken, since costs.go plainly declares some", path)
+			"broken, since costs.go plainly declares some", dir)
 	}
 	for _, entity := range entities {
 		if !IsCostEntityType(entity) {
@@ -190,6 +199,81 @@ func TestEveryCostTableEntityIsInCostEntityTypes(t *testing.T) {
 				"amount_minor to any viewer, grant or no grant", entity)
 		}
 	}
+}
+
+// TestAllCostTablesIsEveryDeclaredCostTable is item 4's other half: the AST
+// scan above proves every DECLARED costTable{...} is redaction-safe, but
+// supplier_movement.go's pricedOwners (and, before it, estate_costs.go's
+// EstateCosts) do not walk declarations -- they range over allCostTables, a
+// runtime []costTable literal in costs.go. A fifth costTable could be
+// declared, redaction-safe per the test above, and STILL never appear in the
+// supplier report if nobody remembered to add it to allCostTables too. This
+// asserts the entity set the AST scan finds equals the entity set
+// allCostTables actually carries, so that omission fails here rather than
+// silently under-counting a report nothing here would otherwise catch.
+func TestAllCostTablesIsEveryDeclaredCostTable(t *testing.T) {
+	root := repoRoot(t)
+	dir := filepath.Join(root, "internal", "store")
+	declared, err := costTableEntitiesFromDir(dir)
+	if err != nil {
+		t.Fatalf("reading costTable declarations from %s: %v", dir, err)
+	}
+
+	declaredSet := map[string]bool{}
+	for _, e := range declared {
+		declaredSet[e] = true
+	}
+	runtimeSet := map[string]bool{}
+	for _, t := range allCostTables {
+		runtimeSet[t.entity] = true
+	}
+
+	for e := range declaredSet {
+		if !runtimeSet[e] {
+			t.Errorf("costTable with entity %q is declared but missing from allCostTables -- "+
+				"supplier_movement.go's pricedOwners would never visit it, so its lines are "+
+				"silently absent from the supplier report", e)
+		}
+	}
+	for e := range runtimeSet {
+		if !declaredSet[e] {
+			t.Errorf("allCostTables carries entity %q that the declaration scan did not find "+
+				"-- either the scan is broken or allCostTables carries a stale entry", e)
+		}
+	}
+}
+
+// costTableEntitiesFromDir walks every non-test .go file directly in dir
+// (mirroring permit_source_test.go's TestOnlyTheNamedFunctionsMintAPermit --
+// one directory level, not a recursive tree, since internal/store has no
+// subpackages that could hide a costTable) and returns the `entity` field's
+// string value out of every costTable{...} composite literal any of them
+// declares, regardless of how many there are, which file, or what variable
+// each is assigned to.
+//
+// A literal missing an `entity:` key, or one whose value is not a plain
+// string constant, is a scan failure (an error), never a silent skip: a
+// costTable this scan cannot read is a costTable TestEveryCostTableEntityIs-
+// InCostEntityTypes cannot check, which is exactly the gap this rewrite
+// exists to close.
+func costTableEntitiesFromDir(dir string) ([]string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	var all []string
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		found, err := costTableEntitiesFromSource(filepath.Join(dir, name))
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, found...)
+	}
+	return all, nil
 }
 
 // costTableEntitiesFromSource parses path and returns the `entity` field's

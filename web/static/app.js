@@ -669,3 +669,28 @@ function scheduleFlashDismissal(root) {
     setTimeout(() => el.remove(), 6000);
   });
 }
+
+// Submit-on-change fields (data-submit-on-change), CSP-safe.
+//
+// onchange="this.form.requestSubmit()" is an inline handler, and this app's
+// own CSP is script-src 'self' with no unsafe-inline (middleware.go's
+// Content-Security-Policy) -- the browser drops the attribute silently
+// rather than erroring anywhere visible. user_row.html's "sees costs"
+// checkbox carried exactly this: it toggled visually and never submitted,
+// so an administrator could not grant can_see_costs through the UI at all
+// (item 6, 2026-09-02 group-a-1-1 round).
+//
+// Delegated on document rather than bound to each element: the roster this
+// checkbox lives on is swapped by HTMX on every one of the row's own
+// mutations (role, costs, active, scrub, project assign/release -- see
+// user_row.html's own comment), and a per-element binding would need
+// re-attaching after every one of those swaps. A delegated listener needs
+// no rebinding because it is never bound to the element in the first place.
+//
+// Only `change`, not `input`: this is for checkboxes and selects whose value
+// is only meaningful once committed, not text fields mid-keystroke.
+document.addEventListener('change', (event) => {
+  if (event.target.matches && event.target.matches('[data-submit-on-change]') && event.target.form) {
+    event.target.form.requestSubmit();
+  }
+});

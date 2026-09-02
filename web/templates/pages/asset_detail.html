@@ -647,6 +647,13 @@
     </p>
 
     {{if .Comparable}}
+    {{/* Item 3 (2026-09-02 group-a-1-1 round): a marker at the exact point
+         money renders, not merely where the panel is gated -- the
+         behavioural half of money_visibility_test.go asserts this on the
+         admin fetch so a template LISTED in moneyRouteCoverage but never
+         actually reached by the fixture (price_movement.html on hv-01 was
+         exactly this) fails loudly instead of passing on an inert claim. */}}
+    <span data-money-marker="pages/asset_detail.html" hidden></span>
     <div class="stat-row">
       <div class="stat">
         <div class="stat-label">Then · {{.ThenDate}}</div>

@@ -60,6 +60,10 @@ SPDX-License-Identifier: AGPL-3.0-only
   </div>
   <div class="panel-body">
     {{if .Attributed}}
+    {{/* Item 3 marker (see asset_detail.html's comment): fires only in the
+         branch that actually has an attributed supplier row to show a
+         monthly figure for. */}}
+    <span data-money-marker="pages/supplier_report.html" hidden></span>
     <div class="scroll-x">
       <table class="grid">
         <thead>

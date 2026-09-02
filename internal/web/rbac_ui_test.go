@@ -98,28 +98,121 @@ func TestAProjectOwnerSeesEditControlsOnTheirOwnAssetsAndNotOnOthers(t *testing.
 // any one project -- docs/rbac-design.md §4). This test now pins the
 // controls being ABSENT again, matching what a project owner could
 // legitimately do all along.
+//
+// Item 2 (2026-09-02 group-a-1-1 round): this pinned exactly two of the 24
+// files task 6's census flipped -- team_list.html and tag_list.html.
+// Reverting every OTHER flip left the whole internal/web suite green, which
+// means a project owner was re-offered a creation form on roughly 15 other
+// pages, each one 403ing on submit, and nothing here would have said so.
+// Now a table over every swept page task 6's own commit (a3f0d61) touched,
+// checked two ways per row the same way the money-visibility census does:
+// the marker must be ABSENT for the project owner (the regression this
+// guards) and PRESENT for an Administrator on the very same fetch (the
+// positive control -- without it a page that happened to 403 outright, or
+// render nothing for an unrelated reason, would pass having proven nothing).
+//
+// fhrp_detail.html and l2vpn_detail.html need a real group/overlay row to
+// reach their write form at all -- the seed fixture carries none of either
+// -- so their path funcs create one through the real handler first, the
+// same way money_visibility_test.go's circuit case adds a fixture cost line
+// before either viewer checks the page. ownership_report.html's admin-only
+// panel is reachable only when the estate has an unowned entity, which nothing
+// here guarantees, so it is left out rather than risk an inert positive
+// control; flagged as a follow-up, not silently dropped.
+var sweptEstateConfigPages = []struct {
+	name string
+	// path does any admin-only setup a route needs (creating a fixture row
+	// through the real handler) and returns the URL to fetch. Runs already
+	// logged in as boundaryAdminUser.
+	path func(t *testing.T, h *harness) string
+	// marker is the control -- a creation form's action, or its heading --
+	// that only .IsAdmin renders.
+	marker string
+}{
+	{"teams", func(t *testing.T, h *harness) string { return "/teams" }, `action="/teams"`},
+	{"tags", func(t *testing.T, h *harness) string { return "/tags" }, `action="/tags"`},
+	{"catalogue", func(t *testing.T, h *harness) string { return "/catalogue" }, `action="/catalogue/types"`},
+	{"certificates", func(t *testing.T, h *harness) string { return "/certificates" }, `action="/certificates"`},
+	{"clusters", func(t *testing.T, h *harness) string { return "/clusters" }, `action="/clusters"`},
+	{"custom fields", func(t *testing.T, h *harness) string { return "/custom-fields" }, `action="/custom-fields"`},
+	{"environments", func(t *testing.T, h *harness) string { return "/environments" }, `action="/environments"`},
+	{"redundancy list", func(t *testing.T, h *harness) string { return "/redundancy" }, `action="/redundancy"`},
+	{"inflation", func(t *testing.T, h *harness) string { return "/inflation" }, `action="/inflation"`},
+	{"overlays list", func(t *testing.T, h *harness) string { return "/overlays" }, `action="/overlays"`},
+	{"networks", func(t *testing.T, h *harness) string { return "/network" }, `action="/network/derive"`},
+	{"power", func(t *testing.T, h *harness) string { return "/power" }, `action="/power/feeds"`},
+	{"prefixes", func(t *testing.T, h *harness) string { return "/prefixes" }, `action="/ip-ranges"`},
+	{"registry", func(t *testing.T, h *harness) string { return "/allocations" }, `action="/allocations"`},
+	{"vlans", func(t *testing.T, h *harness) string { return "/vlans" }, `action="/vlans"`},
+	{
+		"redundancy detail", func(t *testing.T, h *harness) string {
+			resp := h.post("/redundancy", url.Values{
+				"csrf_token": {h.csrfToken("/redundancy")},
+				"name":       {"sweep-fixture-group"}, "protocol": {"vrrp2"}, "group_number": {"77"},
+			}, false)
+			resp.Body.Close()
+			if resp.StatusCode != http.StatusSeeOther {
+				t.Fatalf("creating the fhrp group fixture returned %d, want a redirect", resp.StatusCode)
+			}
+			id := h.lookup(`SELECT id FROM fhrp_group WHERE name = ?`, "sweep-fixture-group")
+			if id == "" {
+				t.Fatal("fhrp group fixture was not created")
+			}
+			return "/redundancy/" + id
+		},
+		`action="/redundancy/`, // the member-add form's action is /redundancy/{id}/members
+	},
+	{
+		"overlay detail", func(t *testing.T, h *harness) string {
+			resp := h.post("/overlays", url.Values{
+				"csrf_token": {h.csrfToken("/overlays")},
+				"name":       {"sweep-fixture-overlay"}, "kind": {"vxlan"}, "identifier": {"10099"},
+			}, false)
+			resp.Body.Close()
+			if resp.StatusCode != http.StatusSeeOther {
+				t.Fatalf("creating the l2vpn fixture returned %d, want a redirect", resp.StatusCode)
+			}
+			id := h.lookup(`SELECT id FROM l2vpn WHERE name = ?`, "sweep-fixture-overlay")
+			if id == "" {
+				t.Fatal("l2vpn fixture was not created")
+			}
+			return "/overlays/" + id
+		},
+		`action="/overlays/`, // the termination-add form's action is /overlays/{id}/terminations
+	},
+}
+
 func TestAProjectOwnerSeesNoEditControlOnAnyTeamOrTagPage(t *testing.T) {
 	for _, eng := range boundaryEngines(t) {
 		t.Run(eng.name, func(t *testing.T) {
-			h, _ := setupBoundary(t, eng)
-			h.login(boundaryOwnerUser, boundaryOwnerPassword)
+			for _, tc := range sweptEstateConfigPages {
+				t.Run(tc.name, func(t *testing.T) {
+					h, _ := setupBoundary(t, eng)
+					h.login(boundaryAdminUser, boundaryAdminPassword)
+					path := tc.path(t, h)
 
-			teamsBody := body(t, h.get("/teams", false))
-			if strings.Contains(teamsBody, "Add a team") {
-				t.Error("teams page unexpectedly offers \"Add a team\" to a project owner -- " +
-					"team is ScopeEstateConfig, Administrator-only")
-			}
-			if strings.Contains(teamsBody, `action="/teams"`) {
-				t.Error("teams page unexpectedly renders the team-creation form for a project owner")
-			}
+					adminBody := body(t, h.get(path, false))
+					if !strings.Contains(adminBody, tc.marker) {
+						t.Fatalf("GET %s as Administrator does not carry %q -- this route is "+
+							"not proven to render the control at all, so the project-owner "+
+							"check below would prove nothing", path, tc.marker)
+					}
 
-			tagsBody := body(t, h.get("/tags", false))
-			if strings.Contains(tagsBody, "Define a tag") {
-				t.Error("tags page unexpectedly offers \"Define a tag\" to a project owner -- " +
-					"tag is ScopeEstateConfig, Administrator-only")
-			}
-			if strings.Contains(tagsBody, `action="/tags"`) {
-				t.Error("tags page unexpectedly renders the tag-creation form for a project owner")
+					h.logout()
+					h.login(boundaryOwnerUser, boundaryOwnerPassword)
+					resp := h.get(path, false)
+					if resp.StatusCode != http.StatusOK {
+						resp.Body.Close()
+						t.Fatalf("GET %s as a project owner returned %d, want 200 with the "+
+							"control withheld, not a hard refusal", path, resp.StatusCode)
+					}
+					ownerBody := body(t, resp)
+					if strings.Contains(ownerBody, tc.marker) {
+						t.Errorf("GET %s unexpectedly carries %q for a project owner -- %s is "+
+							"ScopeEstateConfig, Administrator-only, and a control offered here "+
+							"403s on submit", path, tc.marker, tc.name)
+					}
+				})
 			}
 		})
 	}

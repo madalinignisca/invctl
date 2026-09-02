@@ -44,6 +44,19 @@ var (
 		parent: "circuit", eolColumn: "contract_end"}
 )
 
+// allCostTables is the ONE list of every costTable that exists, and the
+// source of truth anything that must visit "every cost surface" dispatches
+// from -- supplier_movement.go's pricedOwners is exactly that: it used to
+// hand-type its own copy of this same four-entry list, which meant a fifth
+// costTable added here would be silently absent from the supplier report
+// until somebody remembered to update a second place. diff_test.go's
+// TestEveryCostTableEntityIsInCostEntityTypes AST-scans this file (and every
+// other file in this package) for costTable{...} literals independently of
+// this var, so the two are cross-checked by
+// TestAllCostTablesIsEveryDeclaredCostTable rather than trusted to agree by
+// convention.
+var allCostTables = []costTable{costOnAsset, costOnService, costOnProject, costOnCircuit}
+
 type costTable struct {
 	name   string
 	column string

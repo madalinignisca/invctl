@@ -321,6 +321,8 @@
      panels use: a reader who cannot see a rack's price cannot see it divided. */}}
 {{if and .CanSeeCosts .Cost}}
 {{with .Cost}}
+{{/* Item 3 marker (see asset_detail.html's comment). */}}
+<span data-money-marker="pages/cluster_detail.html" hidden></span>
 <div class="panel">
   <div class="panel-head">
     <h2>What that share costs</h2>

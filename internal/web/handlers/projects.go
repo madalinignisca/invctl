@@ -264,7 +264,14 @@ func (a *App) renderProjectWith(w http.ResponseWriter, r *http.Request, status i
 		return
 	}
 	var edit *projectEditForm
-	if base.CanWrite && base.EditRow == project.ID {
+	// base.IsAdmin, NOT base.CanWrite: editing the project row itself
+	// (project_detail.html's Edit link) is ScopeEstateConfig,
+	// Administrator-only, same as the tags panel eight lines below. Gating
+	// this on base.CanWrite hid the link from a project owner but still
+	// rendered the edit form -- and its POST target -- to one who typed
+	// ?edit=<id>, a form the store then 403s on submit with no
+	// change_log row.
+	if base.IsAdmin && base.EditRow == project.ID {
 		spec := domain.ProjectSpec{
 			Code: project.Code, Name: project.Name,
 			Description: project.Description, TeamID: project.TeamID,
