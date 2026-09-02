@@ -505,6 +505,15 @@ func (s *SQLStore) get(ctx context.Context, dest any, query string, args ...any)
 // of endpointID/routeID is non-nil by the time this runs:
 // domain.Dependency.Validate already enforced the table's either-or CHECK,
 // and every caller below validates before authorizing.
+//
+// If BOTH were ever non-nil, the switch below falls into the endpoint
+// branch first and the route is silently ignored -- CURRENTLY IMPOSSIBLE,
+// enforced twice over (domain.Dependency.Validate's hasEndpoint&&hasRoute
+// refusal, and the table's own dependency_provider_exclusive_check CHECK),
+// so nothing exercises this today. Stated anyway: a future migration that
+// relaxes the CHECK to allow both would silently authorize off only one of
+// the two providers rather than failing loudly, and that is the kind of
+// thing this comment exists to make a reviewer re-check rather than assume.
 func resolveProviderService(ctx context.Context, q dbGetter, endpointID, routeID *string) (string, error) {
 	var serviceID string
 	switch {
@@ -634,6 +643,24 @@ func (s *SQLStore) UpdateDependency(ctx context.Context, p domain.Permit, d *dom
 	if err != nil {
 		return err
 	}
+	// NOT verified_by, verified_at or lifecycle -- carried over from the
+	// STORED row, never taken from the caller, the same rule UpdateInstance
+	// applies to service_id/host_asset_id (services.go). Without this, a
+	// caller reaching this method could name any app_user id as verified_by
+	// and any timestamp as verified_at, forging an attestation that reads as
+	// if an administrator (or anyone else) put their name to the edge --
+	// VerifyDependency is the only place that is allowed to derive
+	// verified_by, and it derives it from p.Actor().ID, never accepts it as
+	// input. The same carry-over closes lifecycle too: without it, this
+	// method could flip a withdrawn edge back to active with no retire guard
+	// and no change_log entry naming a re-declaration, which is exactly the
+	// silent revival UpdateInstance's own comment on the withdrawn-placement
+	// guard exists to prevent one level up. There is no HTTP route reaching
+	// UpdateDependency as a non-administrator today; WP-1.1 item 1 is what
+	// makes that reachable, so the store is what has to hold the line.
+	d.VerifiedBy = before.VerifiedBy
+	d.VerifiedAt = before.VerifiedAt
+	d.Lifecycle = before.Lifecycle
 	d.CreatedAt = before.CreatedAt
 	d.UpdatedAt = domain.FormatTime(s.now())
 

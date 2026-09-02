@@ -261,11 +261,19 @@ func TestAProjectOwnerSeesTheAssetScopedTopologyControlsOnTheirOwnAssetOnly(t *t
 }
 
 // TestNeitherAssetPageOffersTheCostLineControlToAProjectOwner is the mirror
-// case: asset_cost is ScopeTopology (domain/role.go's entityScope), never
-// extended to a project owner regardless of which asset it is attached to,
-// so cost_panel's dict must be built from .IsAdmin, not from
-// Base.CanWriteEntity or Base.CanWrite. A project owner gets it on neither
-// page, including their own asset -- the one case a same-entity-type
+// case, and its own class claim went stale once WP-1.1 item 3 landed:
+// asset_cost is domain.ScopeSubjectDerived now (authorizeCostSubject,
+// internal/store/costs.go), not ScopeTopology, so the STORE will accept a
+// project owner writing a cost line on their own asset. This UI gate did
+// NOT move with it, and that is deliberate, the same reason depRowData's
+// own comment gives for dependency (internal/web/handlers/forms.go): an
+// honest per-row CanWrite here would have to ask whether the caller's
+// permit covers THIS asset, which is exactly authorizeCostSubject's
+// derivation, and duplicating a store-layer authorization check in a
+// handler-side view model is a second place for the two to drift. So
+// cost_panel's dict is still built from .IsAdmin, not from
+// Base.CanWriteEntity or Base.CanWrite, and a project owner gets it on
+// neither page, including their own asset -- the one case a same-entity-type
 // intuition (interface behaves like this, so cost should too) gets wrong.
 // TestAnAdministratorGetsTheCostLineControlOnBothAssetPages is the other
 // half: an Administrator gets it regardless of project ownership.
@@ -283,7 +291,8 @@ func TestNeitherAssetPageOffersTheCostLineControlToAProjectOwner(t *testing.T) {
 			inBody := body(t, h.get("/assets/"+fx.assetIn, false))
 			if strings.Contains(inBody, costForm) {
 				t.Error("a project owner's OWN asset page offers the add-a-cost form; " +
-					"asset_cost is ScopeTopology and stays Administrator-only")
+					"asset_cost is ScopeSubjectDerived at the store layer now, but this UI gate " +
+					"deliberately stays on .IsAdmin -- see this test's own doc comment")
 			}
 			outBody := body(t, h.get("/assets/"+fx.assetOut, false))
 			if strings.Contains(outBody, costForm) {

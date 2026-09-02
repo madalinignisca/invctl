@@ -258,6 +258,51 @@ func TestDependencyScopeUpdateMovesTheProvider(t *testing.T) {
 	}
 }
 
+// TestDependencyScopeUpdateSeizesAForeignEdge is the case the brief's
+// original "moves the consumer"/"moves the provider" pair missed: both of
+// those start from a row the caller ALREADY owns, so the SUBMITTED check
+// alone refuses them and the STORED check never carries any weight. This is
+// the mirror image -- the row belongs to nobody the permit covers (consumer
+// S2, provider on S3), and the caller submits subjects it DOES own (S1,
+// S1). Without the stored-subject check, the submitted check passes on its
+// own, the permit is minted, and somebody else's declared edge is rewritten
+// out from under them -- attributed to the hijacker, with a clean diff in
+// change_log. See internal/store/deps.go's UpdateDependency comment: this is
+// exactly why there are two checks, not one.
+func TestDependencyScopeUpdateSeizesAForeignEdge(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newDepScopeFixture(t, e)
+			d, err := domain.NewDependency(NewID(), newDependencySpec(f.s2, f.ep3), f.s.Now())
+			if err != nil {
+				t.Fatalf("building the foreign edge: %v", err)
+			}
+			if err := f.s.CreateDependency(f.ctx, testPermit, d, nil); err != nil {
+				t.Fatalf("seeding the foreign edge: %v", err)
+			}
+
+			seized := *d
+			seized.ConsumerServiceID = f.s1
+			ep1 := f.ep1
+			seized.ProviderEndpointID = &ep1
+			if err := f.s.UpdateDependency(f.ctx, f.permit, &seized, nil); !errors.Is(err, domain.ErrForbidden) {
+				t.Fatalf("UpdateDependency hijacking a foreign edge = %v, want domain.ErrForbidden", err)
+			}
+
+			after, err := f.s.GetDependency(f.ctx, d.ID)
+			if err != nil {
+				t.Fatalf("re-reading the edge: %v", err)
+			}
+			if after.ConsumerServiceID != f.s2 {
+				t.Errorf("a refused hijack still moved the consumer to %s, want %s", after.ConsumerServiceID, f.s2)
+			}
+			if after.ProviderEndpointID == nil || *after.ProviderEndpointID != f.ep3 {
+				t.Error("a refused hijack still moved the provider")
+			}
+		})
+	}
+}
+
 // TestDependencyScopeAdministrator: an AdministratorPermit covers every
 // row regardless of subject, the same as it does for every other
 // subject-derived type.
