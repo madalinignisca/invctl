@@ -80,11 +80,46 @@ func (s *SQLStore) reprice(ctx context.Context, p domain.Permit, t costTable,
 	}
 	// The owner is checked rather than trusted, like retireCost: a line id
 	// arriving in a URL must not let somebody reprice a line on a thing they
-	// were not looking at.
+	// were not looking at. This collapses to the SAME ErrNotFound getCost
+	// already returns for a missing row, so it is not a new distinguishable
+	// answer -- unlike every check below it, which is why authorization runs
+	// AFTER this one and BEFORE all the others.
 	if before.OwnerID != ownerID {
 		return nil, fmt.Errorf("cost line %s does not belong to %s: %w",
 			spec.LineID, ownerID, domain.ErrNotFound)
 	}
+
+	// authorizeCostSubject needs BOTH ids this transaction is about to
+	// write -- the line it closes (spec.LineID) and the line it opens,
+	// which does not exist yet. Minted here, before it is otherwise needed,
+	// purely so authorization can run before anything below leaks a fact
+	// about a line the caller does not own.
+	openedID := NewID()
+
+	// AUTHORIZATION RUNS BEFORE EVERY CHECK BELOW IT, DELIBERATELY -- not
+	// merely before the write, as updateCost and retireCost's own early-exit
+	// fix required, but before EVERY refusal that follows, because each one
+	// leaks something about a line the caller may not be allowed to see at
+	// all: "is retired" (ErrConflict, leaking lifecycle), "a one-off cannot
+	// be repriced" (ErrConflict, leaking period), and "the new price must
+	// start after %s, when the line it replaces began" (a ValidationError
+	// that echoes before.ValidFrom itself back to the caller, which
+	// afterCostWrite then flashes to the user). A project owner probing a
+	// foreign line through this route would otherwise learn its lifecycle,
+	// its period and its start date without ever being authorized to touch
+	// it -- worse than the retired-vs-not two-way oracle updateCost and
+	// retireCost were fixed against, because it is three answers instead of
+	// one and one of them is a raw date. Subjects come from the STORED row
+	// (before.OwnerID): reprice takes no submitted owner for a caller to
+	// forge one from, only ownerID from the URL, already checked above.
+	repricePermit := p
+	if t.entity == costOnAsset.entity {
+		repricePermit, err = authorizeCostSubject(p, t, before.OwnerID, spec.LineID, openedID)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	if before.Lifecycle == domain.LifecycleRetired {
 		return nil, fmt.Errorf("cost line %s is retired and cannot be repriced: %w",
 			spec.LineID, domain.ErrConflict)
@@ -125,7 +160,7 @@ func (s *SQLStore) reprice(ctx context.Context, p domain.Permit, t costTable,
 	closed.UpdatedAt = now
 
 	opened := domain.Cost{
-		ID: NewID(), Kind: before.Kind, Period: before.Period,
+		ID: openedID, Kind: before.Kind, Period: before.Period,
 		AmountMinor: spec.NewAmountMinor, Note: spec.Note,
 		ValidFrom: spec.EffectiveFrom, Lifecycle: domain.LifecycleActive,
 		CreatedAt: now, UpdatedAt: now, RowVersion: 1,
@@ -145,7 +180,7 @@ func (s *SQLStore) reprice(ctx context.Context, p domain.Permit, t costTable,
 		return nil, err
 	}
 
-	err = s.write(ctx, p, func(tx *tx) error {
+	err = s.write(ctx, repricePermit, func(tx *tx) error {
 		res, err := tx.exec(ctx,
 			`UPDATE `+t.name+` SET valid_until = ?, updated_at = ?,
 			                       row_version = row_version + 1

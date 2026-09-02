@@ -261,6 +261,105 @@ func TestCostScopeConsumerSetIsAllInScope(t *testing.T) {
 	}
 }
 
+// TestAuthorizeCostSubjectRefusesEveryTableButAsset is the direct unit test
+// for authorizeCostSubject's own "t.entity != costOnAsset.entity" guard
+// (fix round 1, item 3). Every real caller already branches on
+// t.entity == costOnAsset.entity before calling in, so nothing in
+// internal/store's own suite reaches this line through a caller -- it is
+// belt-and-braces with no strap otherwise. Called DIRECTLY, and with an
+// AdministratorPermit specifically, so a failure here can only be this
+// guard: an Administrator's Covers is unconditional, so if this function's
+// own refusal were deleted or reordered after the Covers check, this test
+// would go green for the wrong reason (Covers happening to also refuse
+// costOnService, which it does not -- ScopeTopology is Administrator-only,
+// but authorizeCostSubject never calls Covers for a non-asset table at
+// all, by design).
+func TestAuthorizeCostSubjectRefusesEveryTableButAsset(t *testing.T) {
+	admin := domain.AdministratorPermit(
+		domain.Actor{ID: "admin-3", Name: "admin-3", Kind: domain.ActorKindUser})
+	_, err := authorizeCostSubject(admin, costOnService, "svc-1", "cost-1")
+	if !errors.Is(err, domain.ErrForbidden) {
+		t.Fatalf("authorizeCostSubject(admin, costOnService, ...) = %v, want domain.ErrForbidden", err)
+	}
+}
+
+// TestUpdateCostAuthorizationRunsBeforeTheRetiredCheck is the POSITION test
+// for updateCost's early-exit ordering (fix round 1, item 4). The BEHAVIOUR
+// -- a retired foreign line refused -- already holds either way the two
+// checks are ordered, which is exactly why the earlier report's prose
+// argument was not itself proof: get the order backwards (retired check
+// first) and this still returns an error, just the WRONG one --
+// domain.ErrConflict ("is retired"), which leaks the line's lifecycle to a
+// caller who is not authorized to know it exists at all, the same oracle
+// RetireDependency and RetireLink were fixed against. Asserting
+// errors.Is(err, domain.ErrForbidden) specifically, not merely err != nil,
+// is what makes this test fail if a future refactor moves the check back
+// above the authorization branch.
+func TestUpdateCostAuthorizationRunsBeforeTheRetiredCheck(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newCostScopeFixture(t, e)
+			c, err := domain.NewCost(NewID(), newCostSpec(), f.s.Now())
+			if err != nil {
+				t.Fatalf("building the cost: %v", err)
+			}
+			// On A2, out of f.permit's scope, and retired -- as an
+			// Administrator, so the fixture's own setup is never gated by
+			// the thing under test.
+			if err := f.s.AddAssetCost(f.ctx, testPermit, f.a2, c); err != nil {
+				t.Fatalf("seeding the cost line: %v", err)
+			}
+			if err := f.s.RetireAssetCost(f.ctx, testPermit, f.a2, c.ID); err != nil {
+				t.Fatalf("retiring the cost line as an administrator: %v", err)
+			}
+			row, err := f.s.GetAssetCost(f.ctx, c.ID)
+			if err != nil {
+				t.Fatalf("reading the cost back: %v", err)
+			}
+			row.Cost.Note = strPtr("a project owner should never see this accepted or refused for its lifecycle")
+
+			err = f.s.UpdateAssetCost(f.ctx, f.permit, &row.Cost)
+			if !errors.Is(err, domain.ErrForbidden) {
+				t.Fatalf("UpdateAssetCost on a retired, out-of-scope line = %v, want domain.ErrForbidden "+
+					"(if this is domain.ErrConflict, authorization moved back below the retired check)", err)
+			}
+		})
+	}
+}
+
+// TestRetireCostAuthorizationRunsBeforeTheAlreadyRetiredCheck is
+// TestUpdateCostAuthorizationRunsBeforeTheRetiredCheck's sibling for
+// retireCost: the "already retired -> nil" early exit sits below
+// authorization today. Get that backwards and a project owner retiring an
+// already-retired, out-of-scope line gets nil back -- success reported for
+// a write that never happened, and a distinguishable THIRD answer alongside
+// ErrForbidden (exists, not theirs) and ErrNotFound (no such row) that lets
+// a caller map which foreign asset costs are already retired.
+func TestRetireCostAuthorizationRunsBeforeTheAlreadyRetiredCheck(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newCostScopeFixture(t, e)
+			c, err := domain.NewCost(NewID(), newCostSpec(), f.s.Now())
+			if err != nil {
+				t.Fatalf("building the cost: %v", err)
+			}
+			if err := f.s.AddAssetCost(f.ctx, testPermit, f.a2, c); err != nil {
+				t.Fatalf("seeding the cost line: %v", err)
+			}
+			if err := f.s.RetireAssetCost(f.ctx, testPermit, f.a2, c.ID); err != nil {
+				t.Fatalf("retiring the cost line as an administrator: %v", err)
+			}
+
+			err = f.s.RetireAssetCost(f.ctx, f.permit, f.a2, c.ID)
+			if !errors.Is(err, domain.ErrForbidden) {
+				t.Fatalf("RetireAssetCost on an already-retired, out-of-scope line = %v, want "+
+					"domain.ErrForbidden (if this is nil, authorization moved back below the "+
+					"already-retired check)", err)
+			}
+		})
+	}
+}
+
 // TestCostScopeAdministrator: an AdministratorPermit covers every write on
 // every one of the four surfaces, regardless of subject.
 func TestCostScopeAdministrator(t *testing.T) {

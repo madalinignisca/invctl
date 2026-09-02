@@ -207,23 +207,42 @@ func (s *SQLStore) AddProjectCost(ctx context.Context, p domain.Permit, projectI
 // refuses them itself, at the point a reviewer is actually reading.
 //
 // CALLERS MUST ONLY INVOKE THIS FOR t.entity == costOnAsset.entity. addCost,
-// updateCost and retireCost each branch on that before calling in, and pass
-// the caller's OWN permit through UNCHANGED for the other three tables --
-// so an Administrator writing a service, project or circuit cost is
-// entirely unaffected by this function existing at all; Covers still
-// authorizes them unconditionally the way it always has, at tx.log, and a
-// project owner's ScopedPermit still refuses them the way ScopeTopology
-// always has.
-func authorizeCostSubject(p domain.Permit, t costTable, ownerID, costID string) (domain.Permit, error) {
+// updateCost, retireCost and reprice (reprice.go) each branch on that
+// before calling in, and pass the caller's OWN permit through UNCHANGED for
+// the other three tables -- so an Administrator writing a service, project
+// or circuit cost is entirely unaffected by this function existing at all;
+// Covers still authorizes them unconditionally the way it always has, at
+// tx.log, and a project owner's ScopedPermit still refuses them the way
+// ScopeTopology always has. This is proved directly, not just relied on
+// through those callers, by TestAuthorizeCostSubjectRefusesEveryTableButAsset
+// (costs_scope_test.go) -- calling it for costOnService with an
+// Administrator's own permit still returns domain.ErrForbidden, because
+// this function's own guard runs before Covers is ever consulted.
+//
+// costIDs IS VARIADIC because reprice (reprice.go) writes and audits TWO
+// rows in one transaction -- the line it closes and the line it opens --
+// and both need to be covered by the SAME permit the write runs under. A
+// single-id permit minted for only one of the two would make the second
+// tx.log call fail for a project owner even though the caller demonstrably
+// owns the asset both rows are attached to; widening Covers itself, or
+// minting a second permit mid-transaction, would be worse options than
+// simply letting this function's caller name every id it is about to
+// write. Every other caller here passes exactly one id, which reads
+// identically to the pre-variadic signature at the call site.
+func authorizeCostSubject(p domain.Permit, t costTable, ownerID string, costIDs ...string) (domain.Permit, error) {
 	if t.entity != costOnAsset.entity {
 		return nil, fmt.Errorf("writing a %s line through the subject-derived path: %w",
 			t.entity, domain.ErrForbidden)
 	}
 	if !p.Covers("asset", ownerID) {
-		return nil, fmt.Errorf("writing cost line %s on asset %s: %w", costID, ownerID, domain.ErrForbidden)
+		return nil, fmt.Errorf("writing cost line(s) %v on asset %s: %w", costIDs, ownerID, domain.ErrForbidden)
+	}
+	ids := make(map[string]bool, len(costIDs))
+	for _, id := range costIDs {
+		ids[id] = true
 	}
 	return domain.ScopedPermit(p.Actor(), nil, domain.ScopedEntities{
-		costOnAsset.entity: {costID: true},
+		costOnAsset.entity: ids,
 	}), nil
 }
 
