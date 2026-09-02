@@ -511,7 +511,24 @@ var entityScope = map[string]ScopeClass{
 	// service and circuit, so an ordinary permit has no saved_view bucket
 	// and covers nothing. Only the permit minted after
 	// internal/store/savedviews.go's ownership check can cover a row.
-	"saved_view":            ScopeSubjectDerived,
+	"saved_view": ScopeSubjectDerived,
+	// A dependency's subjects are the two services it connects: the
+	// consumer directly, and the provider one hop away -- an endpoint's own
+	// service_id, or a route's frontend endpoint's service_id, since route
+	// carries no service_id column of its own (WP-1.1 item 1, migration
+	// 00004's schema).
+	//
+	// Subject-derived is safe here for the same reason it is safe for
+	// saved_view and journal_entry: auth.Authorizer.Permit builds buckets
+	// only for asset, service and circuit, so an ordinary project-owner
+	// permit has no dependency bucket and covers nothing. Only the permit
+	// minted after internal/store/deps.go's authorizeDependencySubjects
+	// checks BOTH services can cover a row -- the same two-ended shape
+	// authorizeInstanceSubjects proved for service_instance, because
+	// checking only the consumer would let a project owner point their
+	// service at anybody's socket, and checking only the provider would let
+	// them attach anybody's service as a consumer of their own.
+	"dependency":            ScopeSubjectDerived,
 	"asset_kind":            ScopeEstateConfig,
 	"service_kind":          ScopeEstateConfig,
 	"interface_form_factor": ScopeEstateConfig,
@@ -539,7 +556,6 @@ var entityScope = map[string]ScopeClass{
 	"circuit_cost":        ScopeTopology,
 	"circuit_termination": ScopeTopology,
 	"cluster":             ScopeTopology,
-	"dependency":          ScopeTopology,
 	"endpoint":            ScopeTopology,
 	"fhrp_group":          ScopeTopology,
 	"health_override":     ScopeTopology,
