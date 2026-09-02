@@ -556,6 +556,25 @@ document.addEventListener('alpine:init', () => {
   // partial itself for form fields; this component only needs open/closed.
   Alpine.data('savedViews', () => ({
     open: false,
+
+    init() {
+      // A $watch, not a check inside toggleMenu/close alone: claimDisclosure
+      // (module scope, above) can set `this.open = false` directly on a menu
+      // that loses the latch to a sibling opening -- e.g. Columns opening
+      // while Views is mid-rename -- bypassing both of this component's own
+      // methods. Without this watcher a row's rename form stays open in the
+      // DOM under a menu that is now `x-show`n hidden, and the NEXT time
+      // this same component instance reopens (toggleMenu, no fresh element
+      // -- the fragment was not replaced) the rename form reappears already
+      // open for a row nobody clicked. Watching open itself catches every
+      // path that flips it, not just the two this file writes today.
+      this.$watch('open', (isOpen) => {
+        if (!isOpen) {
+          this.closeAnyRename();
+        }
+      });
+    },
+
     toggleMenu() {
       this.open = !this.open;
       if (this.open) {
@@ -571,6 +590,46 @@ document.addEventListener('alpine:init', () => {
       if (this.open) {
         this.open = false;
         releaseDisclosure(this);
+      }
+    },
+
+    // Which row's rename form shows is plain DOM state (a CSS class on the
+    // row), not Alpine-reactive state: the CSP build evaluates NO
+    // expressions in ANY directive, including a comparison, so
+    // `x-show="editing === id"` would be silently inert
+    // (TestAlpineDirectivesAreCSPSafe catches exactly this). Same shape as
+    // columnPicker.apply()'s classList.toggle('col-hidden', ...) -- see
+    // .saved-view-rename / .is-editing in app.css.
+    closeAnyRename() {
+      document.querySelectorAll('.saved-view-row.is-editing').forEach((row) => {
+        row.classList.remove('is-editing');
+      });
+    },
+
+    // The id and current name ride on the clicked button as data-view /
+    // data-name -- same pattern as columnPicker.toggleColumn's data-col --
+    // because the CSP build cannot pass an argument from an x-on
+    // expression. At most one row is ever mid-rename: closeAnyRename first,
+    // so switching from renaming one view straight to another does not
+    // leave two forms open.
+    startRename(event) {
+      this.closeAnyRename();
+      const row = event.target.closest('.saved-view-row');
+      if (!row) {
+        return;
+      }
+      row.classList.add('is-editing');
+      const input = row.querySelector('.saved-view-rename input[name="name"]');
+      if (input) {
+        input.value = event.target.dataset.name || '';
+        input.focus();
+      }
+    },
+
+    cancelRename(event) {
+      const row = event.target.closest('.saved-view-row');
+      if (row) {
+        row.classList.remove('is-editing');
       }
     },
   }));

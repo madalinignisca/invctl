@@ -516,11 +516,14 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	// by the route -- see internal/store/savedviews.go's
 	// authorizeSavedViewOwner.
 	//
-	// POST /views/{id} (rename) is deliberately absent: nothing posts to it
-	// (see SavedViewUpdate's removed-handler comment in
-	// internal/web/handlers/savedviews.go), and docs/ROADMAP.md's "Deferred
-	// to 1.1" records the decision.
+	// POST /views/{id}/rename gives the store's existing, tested
+	// UpdateSavedView its first caller (docs/ROADMAP.md's "Deferred to 1.1"
+	// item). Deliberately named /rename, not a re-registered POST /views/{id}:
+	// the removed generic update route accepted params and entity along with
+	// name, which is exactly the surface the rename control does not need
+	// and must not reopen -- see SavedViewRename's own comment.
 	self("POST /views", app.SavedViewCreate)
+	self("POST /views/{id}/rename", app.SavedViewRename)
 	self("POST /views/{id}/retire", app.SavedViewRetire)
 
 	// The machine-facing route. One route, and this is it.

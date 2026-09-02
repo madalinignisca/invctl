@@ -774,7 +774,7 @@ func TestNoWriteRouteIsReachableWithoutGoingThroughTheRouter(t *testing.T) {
 //   - administratorGate == 6: the writeAdminOnly import surface is
 //     untouched by this flip, because it gates on IsAdministrator, not
 //     CanWrite, and a project owner is never an Administrator.
-//   - permitGate == 9: routes whose handler's error path preserves
+//   - permitGate == 10: routes whose handler's error path preserves
 //     handleStoreError's generic "You are not allowed to do that." text
 //     for a plain domain.ErrForbidden, reached with an empty body. 9, not
 //     8: WP-G4b Wave B moved POST /views/{id}/retire off `write` onto
@@ -785,7 +785,13 @@ func TestNoWriteRouteIsReachableWithoutGoingThroughTheRouter(t *testing.T) {
 //     more permit-layer 403 than before. Previously it fell back to
 //     store.NewID() and 404'd at GetSavedView instead, landing in "other"
 //     -- a real row was never in scope to prove the refusal, so the old 8
-//     undercounted what this route actually does.
+//     undercounted what this route actually does. 10, not 9: Task 5 added
+//     POST /views/{id}/rename to the same `self` registrar, on the same
+//     "views" -> savedViewID fixture resolution, so an empty-body project-
+//     owner request also resolves to a real row it does not own and is
+//     refused at authorizeSavedViewOwner before UpdateSavedView's own
+//     Validate() ever runs (the store authorizes before validating -- see
+//     UpdateSavedView's comment) -- another clean permit-layer 403.
 //   - userForbiddenGate == 2: the two /users/* mutation routes, which go
 //     through respondUserMutation's own deliberate exception (see that
 //     function's comment) and therefore surface the raw wrapped error
@@ -929,8 +935,8 @@ func TestAProjectOwnerIsRefusedOnEveryNonProjectLinkableWriteRoute(t *testing.T)
 				t.Errorf("RequireAdministrator refusals = %d, want 14 (six import routes "+
 					"and eight /users routes)", administratorGate)
 			}
-			if permitGate != 9 {
-				t.Errorf("permit-layer refusals (generic body) = %d, want 9 -- see this test's own "+
+			if permitGate != 10 {
+				t.Errorf("permit-layer refusals (generic body) = %d, want 10 -- see this test's own "+
 					"comment for the routes this pins", permitGate)
 			}
 			// 4: the four /projects/{id}/costs* routes (Task 4a moved all
@@ -1121,8 +1127,9 @@ func truncate(s string) string {
 // them prove middleware.RequireAuth is actually in the chain; that was
 // verified only by reading routes.go. It became worth writing down at WP-G4b,
 // which added a fourth registrar, self, whose ENTIRE gate is RequireAuth: for
-// POST /views and POST /views/{id}/retire, an unnoticed break in that
-// middleware is the whole authorization story, not one layer of it.
+// POST /views, POST /views/{id}/rename and POST /views/{id}/retire, an
+// unnoticed break in that middleware is the whole authorization story, not
+// one layer of it.
 //
 // Every non-GET route from the write, writeAdminOnly and self registrars is
 // driven here -- the full census routescan.WriteRoutes returns, not a
@@ -1143,12 +1150,13 @@ func truncate(s string) string {
 func TestNoWriteRouteIsReachableWithNoSessionAtAll(t *testing.T) {
 	// pinnedNoSessionRouteCount is every non-GET route the write,
 	// writeAdminOnly and self registrars register today. Pinned rather than
-	// merely asserted nonzero, the same way Step 4 pins permitGate == 9 -- a
+	// merely asserted nonzero, the same way Step 4 pins permitGate == 10 -- a
 	// sweep that drives zero routes passes trivially, and asserting only
 	// "> 0" would not catch the census quietly shrinking by one route that
 	// stopped being walked. Update this deliberately if the route count
-	// genuinely changes; do not let it drift unnoticed.
-	const pinnedNoSessionRouteCount = 181
+	// genuinely changes; do not let it drift unnoticed. 181 -> 182: Task 5
+	// added POST /views/{id}/rename to the self registrar.
+	const pinnedNoSessionRouteCount = 182
 
 	for _, eng := range boundaryEngines(t) {
 		t.Run(eng.name, func(t *testing.T) {

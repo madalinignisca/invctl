@@ -1176,3 +1176,18 @@ form.htmx-request .btn-primary { opacity: 0.6; pointer-events: none; }
 }
 .saved-view-row { padding: 4px 0; border-bottom: 1px solid var(--line-soft); }
 .saved-view-save { margin-top: 8px; }
+
+/* Rename control (Task 5). Which half of a row shows is plain CSS, toggled
+   by app.js adding/removing .is-editing on the row (startRename /
+   cancelRename) -- the CSP build of Alpine evaluates no expressions in any
+   directive, so a reactive `x-show="editing === id"` per row is not
+   available; see .col-hidden's own comment above for the same constraint
+   solved the same way for column visibility. */
+.saved-view-rename { display: none; }
+.saved-view-row.is-editing .saved-view-rename { display: block; margin-top: 4px; }
+.saved-view-row.is-editing .sv-view-name,
+.saved-view-row.is-editing .sv-view-stale,
+.saved-view-row.is-editing .sv-rename-btn,
+.saved-view-row.is-editing .sv-retire-form {
+  display: none;
+}

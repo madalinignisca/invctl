@@ -177,6 +177,7 @@ POST /users/{id}/projects/{projectID}/release | UserReleaseProject | writeAdminO
 POST /users/{id}/role | UserSetRole | writeAdminOnly | true
 POST /users/{id}/scrub | UserScrub | writeAdminOnly | true
 POST /views | SavedViewCreate | self | true
+POST /views/{id}/rename | SavedViewRename | self | true
 POST /views/{id}/retire | SavedViewRetire | self | true
 POST /vlans | VLANCreate | write | true
 POST /vlans/{id}/journal | JournalCreate | write | true
