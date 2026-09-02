@@ -28,7 +28,7 @@
   {{if .Aggregates}}
   <div class="scroll-x">
     <table>
-      <thead><tr><th>Block</th><th>Registry</th><th>Allocated</th><th class="num">Networks</th><th>Used</th>{{if .CanWrite}}<th></th>{{end}}</tr></thead>
+      <thead><tr><th>Block</th><th>Registry</th><th>Allocated</th><th class="num">Networks</th><th>Used</th>{{if .IsAdmin}}<th></th>{{end}}</tr></thead>
       <tbody>
         {{range .Aggregates}}
         <tr>
@@ -46,7 +46,7 @@
                  allocation is money nobody is using. */}}
             {{if and .Unused (not .IsPrivate)}}<span class="util-full" title="Nothing has been carved out of this delegation">unused</span>{{end}}
           </td>
-          {{if $.CanWrite}}
+          {{if $.IsAdmin}}
           <td style="white-space:nowrap">
             <form method="post" action="/allocations/{{.ID}}/retire" style="display:inline">
               <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
@@ -69,7 +69,7 @@
   {{if .ASNs}}
   <div class="scroll-x">
     <table>
-      <thead><tr><th>Number</th><th>Name</th><th>Registry</th>{{if .CanWrite}}<th></th>{{end}}</tr></thead>
+      <thead><tr><th>Number</th><th>Name</th><th>Registry</th>{{if .IsAdmin}}<th></th>{{end}}</tr></thead>
       <tbody>
         {{range .ASNs}}
         <tr>
@@ -78,7 +78,7 @@
           </td>
           <td>{{if .Name}}{{deref .Name}}{{else}}—{{end}}</td>
           <td>{{if .RIRName}}{{.RIRName}}{{else}}<span class="util-note">unrecorded</span>{{end}}</td>
-          {{if $.CanWrite}}
+          {{if $.IsAdmin}}
           <td style="white-space:nowrap">
             <form method="post" action="/asn/{{.ID}}/retire" style="display:inline">
               <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
@@ -96,7 +96,7 @@
   {{end}}
 </div>
 
-{{if .CanWrite}}
+{{if .IsAdmin}}
 <div class="grid-2">
   <form id="agg-form" class="panel" method="post" action="/allocations"
         hx-post="/allocations" hx-target="#agg-form" hx-swap="outerHTML">

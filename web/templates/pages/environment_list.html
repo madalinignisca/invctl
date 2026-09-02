@@ -27,7 +27,7 @@
       <tbody>
         {{range .Environments}}
         {{$env := .}}
-        {{if and $.CanWrite (eq .ID $.EditRow)}}
+        {{if and $.IsAdmin (eq .ID $.EditRow)}}
         <tr class="row-editing">
           {{/* The code is editable. Nothing resolves an environment by it --
                every reference in the schema is by id -- so a rename moves no
@@ -84,7 +84,7 @@
           <td>{{if .InScope}}<span class="pill pill-info">in scope</span>{{else}}<span class="pill pill-muted">out of scope</span>{{end}}</td>
           <td style="white-space:nowrap">
             <a class="btn btn-sm" href="/environments/{{.ID}}/map">Map — all three layers</a>
-            {{if $.CanWrite}}<a class="btn btn-sm" href="/environments?edit={{.ID}}">Edit</a>{{end}}
+            {{if $.IsAdmin}}<a class="btn btn-sm" href="/environments?edit={{.ID}}">Edit</a>{{end}}
           </td>
         </tr>
         {{end}}
@@ -97,7 +97,7 @@
   {{end}}
 </div>
 
-{{if .CanWrite}}
+{{if .IsAdmin}}
   {{template "environment_form" .FormData}}
 {{end}}
 {{end}}

@@ -26,14 +26,14 @@
     {{template "column_picker" dict "Table" "prefix" "Columns" .ColumnOptions}}
     <div class="scroll-x">
     <table data-table="prefix">
-      <thead><tr><th>CIDR</th><th data-col="vlan">VLAN</th><th data-col="environment">Environment</th><th data-col="role">Role</th><th data-col="addresses" class="num">Addresses</th><th data-col="allocated">Allocated</th><th data-col="next_free">Next free</th>{{if .CanWrite}}<th></th>{{end}}</tr></thead>
+      <thead><tr><th>CIDR</th><th data-col="vlan">VLAN</th><th data-col="environment">Environment</th><th data-col="role">Role</th><th data-col="addresses" class="num">Addresses</th><th data-col="allocated">Allocated</th><th data-col="next_free">Next free</th>{{if .IsAdmin}}<th></th>{{end}}</tr></thead>
       <tbody>
         {{range .Prefixes}}
         {{$p := .}}
         {{/* Editing the network itself, including its CIDR: the text and the
              byte range it is searched by are one fact stored four times, and
              SetCIDR is the only way to move them, together. */}}
-        {{if and $.CanWrite (eq .ID $.EditRow)}}
+        {{if and $.IsAdmin (eq .ID $.EditRow)}}
         <tr class="row-editing">
           <td><input form="pfx-{{.ID}}" class="mono {{if $.Edit.Err "cidr_text"}}invalid{{end}}" type="text" name="cidr_text"
                      value="{{$.Edit.Value "cidr_text" .CIDRText}}" aria-label="Network" required style="width:12em">
@@ -92,7 +92,7 @@
             {{if .HasNextFree}}{{.NextFree}}
             {{else}}<span class="util-full" title="Every usable address is assigned, reserved or inside a child network">none</span>{{end}}
           </td>
-          <td>{{if $.CanWrite}}<a class="btn btn-sm" href="/prefixes?edit={{.ID}}">Edit</a>{{end}}</td>
+          <td>{{if $.IsAdmin}}<a class="btn btn-sm" href="/prefixes?edit={{.ID}}">Edit</a>{{end}}</td>
         </tr>
         {{end}}
         {{end}}
@@ -113,7 +113,7 @@
   {{if .Ranges}}
   <div class="scroll-x">
     <table>
-      <thead><tr><th>Span</th><th class="num">Addresses</th><th>Held by</th><th>Note</th>{{if .CanWrite}}<th></th>{{end}}</tr></thead>
+      <thead><tr><th>Span</th><th class="num">Addresses</th><th>Held by</th><th>Note</th>{{if .IsAdmin}}<th></th>{{end}}</tr></thead>
       <tbody>
         {{range .Ranges}}
         <tr>
@@ -122,7 +122,7 @@
           <td class="num">{{.Size}}</td>
           <td>{{if .Role}}<span class="pill pill-info">{{deref .Role}}</span>{{else}}—{{end}}</td>
           <td>{{if .Description}}{{deref .Description}}{{else}}—{{end}}</td>
-          {{if $.CanWrite}}
+          {{if $.IsAdmin}}
           <td style="white-space:nowrap">
             <form method="post" action="/ip-ranges/{{.ID}}/retire"
                   hx-post="/ip-ranges/{{.ID}}/retire" style="display:inline">
@@ -141,7 +141,7 @@
   {{end}}
 </div>
 
-{{if .CanWrite}}
+{{if .IsAdmin}}
   {{template "prefix_form" .FormData}}
   {{template "range_form" .RangeForm}}
 {{end}}

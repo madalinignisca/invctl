@@ -27,7 +27,7 @@
   {{if .VLANs}}
   <div class="scroll-x">
     <table>
-      <thead><tr><th class="num">VID</th><th>Name</th><th>Group</th><th>Environment</th><th>Role</th><th class="num">Networks</th><th class="num">Ports</th>{{if .CanWrite}}<th></th>{{end}}</tr></thead>
+      <thead><tr><th class="num">VID</th><th>Name</th><th>Group</th><th>Environment</th><th>Role</th><th class="num">Networks</th><th class="num">Ports</th>{{if .IsAdmin}}<th></th>{{end}}</tr></thead>
       <tbody>
         {{range .VLANs}}
         <tr>
@@ -45,7 +45,7 @@
             {{if .PortCount}}{{.PortCount}}
             {{else}}<span class="util-full" title="Nothing is in this VLAN, so it is a record rather than a broadcast domain">0</span>{{end}}
           </td>
-          {{if $.CanWrite}}
+          {{if $.IsAdmin}}
           <td style="white-space:nowrap">
             <form method="post" action="/vlans/{{.ID}}/retire" style="display:inline">
               <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
@@ -63,7 +63,7 @@
   {{end}}
 </div>
 
-{{if .CanWrite}}
+{{if .IsAdmin}}
 <form id="vlan-form" class="panel" method="post" action="/vlans"
       hx-post="/vlans" hx-target="#vlan-form" hx-swap="outerHTML">
   <input type="hidden" name="csrf_token" value="{{.CSRF}}">

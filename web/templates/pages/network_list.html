@@ -44,7 +44,7 @@
         <div class="field-hint">{{.Coverage.Storage.Unmodelled}} unmodelled</div>
       </div>
     </div>
-    {{if .CanWrite}}
+    {{if .IsAdmin}}
     <form method="post" action="/network/derive" hx-post="/network/derive"
           hx-target="#network-derive-result" hx-swap="innerHTML">
       <input type="hidden" name="csrf_token" value="{{.CSRF}}">
@@ -106,7 +106,7 @@
   {{end}}
 </div>
 
-{{if .CanWrite}}
+{{if .IsAdmin}}
   {{template "net_group_form" .GroupForm}}
   {{template "net_member_form" .MemberForm}}
   {{template "net_uplink_form" .UplinkForm}}

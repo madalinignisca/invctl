@@ -35,14 +35,14 @@
   {{if .Members}}
   <div class="scroll-x">
     <table>
-      <thead><tr><th>Asset</th><th>Port</th><th class="num">Priority</th>{{if .CanWrite}}<th></th>{{end}}</tr></thead>
+      <thead><tr><th>Asset</th><th>Port</th><th class="num">Priority</th>{{if .IsAdmin}}<th></th>{{end}}</tr></thead>
       <tbody>
         {{range .Members}}
         <tr>
           <td><a href="/assets/{{.AssetID}}">{{.AssetName}}</a></td>
           <td class="mono">{{.InterfaceName}}</td>
           <td class="num">{{if .Priority}}{{derefInt .Priority}}{{else}}<span class="util-note">default</span>{{end}}</td>
-          {{if $.CanWrite}}
+          {{if $.IsAdmin}}
           <td style="white-space:nowrap">
             <form method="post" action="/redundancy/{{$.Group.ID}}/members/{{.InterfaceID}}/remove" style="display:inline">
               <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
@@ -58,7 +58,7 @@
   {{else}}
   <div class="empty"><strong>No routers in this group.</strong>The address is declared and nothing answers for it.</div>
   {{end}}
-  {{if .CanWrite}}
+  {{if .IsAdmin}}
   <form class="panel-body" method="post" action="/redundancy/{{.Group.ID}}/members">
     <input type="hidden" name="csrf_token" value="{{.CSRF}}">
     <div class="field-row">

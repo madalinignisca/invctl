@@ -297,8 +297,15 @@ func (a *App) renderProjectWith(w http.ResponseWriter, r *http.Request, status i
 		return
 	}
 
+	// base.IsAdmin, NOT base.CanWrite: a project's own entity_tag set folds
+	// into the "project" change_log row (entitytags.go's setEntityTags /
+	// logProjectTags), and "project" is ScopeEstateConfig
+	// (internal/domain/role.go) -- Administrator-only, same as editing the
+	// project row itself (see project_detail.html's Edit link). Using
+	// base.CanWrite here would offer a project owner a tag picker the store
+	// refuses on every submit.
 	tags, err := a.loadEntityTagsPanel(r, domain.TagEntityProject, project.ID,
-		project.RowVersion, "/projects/"+project.ID+"/tags", base.CSRF, base.CanWrite, tagsEdit)
+		project.RowVersion, "/projects/"+project.ID+"/tags", base.CSRF, base.IsAdmin, tagsEdit)
 	if err != nil {
 		a.serverError(w, r, err)
 		return

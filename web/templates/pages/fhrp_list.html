@@ -25,7 +25,7 @@
   {{if .Groups}}
   <div class="scroll-x">
     <table>
-      <thead><tr><th>Name</th><th>Protocol</th><th class="num">Group</th><th>Virtual address</th><th>Redundancy</th>{{if .CanWrite}}<th></th>{{end}}</tr></thead>
+      <thead><tr><th>Name</th><th>Protocol</th><th class="num">Group</th><th>Virtual address</th><th>Redundancy</th>{{if .IsAdmin}}<th></th>{{end}}</tr></thead>
       <tbody>
         {{range .Groups}}
         <tr>
@@ -38,7 +38,7 @@
             {{else if eq (printf "%s" .Redundancy) "single_member"}}<span class="pill pill-degraded" title="{{.RedundancyNote}}">1 router</span>
             {{else}}<span class="pill pill-down" title="{{.RedundancyNote}}">empty</span>{{end}}
           </td>
-          {{if $.CanWrite}}
+          {{if $.IsAdmin}}
           <td style="white-space:nowrap">
             <form method="post" action="/redundancy/{{.ID}}/retire" style="display:inline">
               <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
@@ -56,7 +56,7 @@
   {{end}}
 </div>
 
-{{if .CanWrite}}
+{{if .IsAdmin}}
 <form id="fhrp-form" class="panel" method="post" action="/redundancy"
       hx-post="/redundancy" hx-target="#fhrp-form" hx-swap="outerHTML">
   <input type="hidden" name="csrf_token" value="{{.CSRF}}">

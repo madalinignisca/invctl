@@ -298,11 +298,21 @@
 <div id="edit">{{template "asset_form" .AssetEdit}}</div>
 {{end}}
 
+{{/* asset_cost moved to ScopeSubjectDerived (1.0 item 3, role.go's
+     entityScope) -- the one cost table a project owner can write, scoped
+     through authorizeCostSubject to the owning asset. So this is
+     .CanWriteEntity "asset" .Asset.ID, the same question
+     authorizeCostSubject asks server-side, NOT .IsAdmin the way its
+     service/circuit siblings below stay (service_cost and circuit_cost are
+     still ScopeTopology, Administrator-only -- see their own comments).
+     CanSeeCosts still rides alongside it unconditionally: the store checks
+     the row, the middleware checks the money-visibility grant, and both
+     have to hold. */}}
 {{template "cost_panel" dict
     "Action" (printf "/assets/%s/costs" .Asset.ID) "Slug" "asset"
     "Return" (printf "/assets/%s" .Asset.ID) "EditID" .EditRow "RepriceID" .RepriceRow
     "Costs" .Costs "Totals" .CostTotals "Kinds" .CostKinds "Periods" .CostPeriods
-    "CSRF" .CSRF "CanWrite" .IsAdmin "CanSeeCosts" .CanSeeCosts
+    "CSRF" .CSRF "CanWrite" (.CanWriteEntity "asset" .Asset.ID) "CanSeeCosts" .CanSeeCosts
     "Providers" .Providers
     "Heading" "What it costs"
     "Scoped" true "Guests" .Guests "Consumers" .CostConsumers

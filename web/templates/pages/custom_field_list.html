@@ -23,7 +23,7 @@
 
 {{template "custom_field_list_panel" .}}
 
-{{if .CanWrite}}
+{{if .IsAdmin}}
 {{template "custom_field_form" .}}
 {{end}}
 {{end}}

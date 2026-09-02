@@ -20,7 +20,7 @@
 
 {{template "power_panel_list" .}}
 
-{{if .CanWrite}}
+{{if .IsAdmin}}
 <div class="panel">
   <div class="panel-head"><h2>Add a feed</h2></div>
   <form class="panel-body" method="post" action="/power/feeds">
@@ -181,7 +181,7 @@
             <td>{{.Inputs}}</td>
             <td class="row-actions">
               <a class="btn btn-sm" href="/power/feeds/{{.ID}}/impact">If it fails</a>
-              {{if $.CanWrite}}
+              {{if $.IsAdmin}}
               <form method="post" action="/power/feeds/{{.ID}}/retire" style="display:inline">
                 <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
                 <button class="btn btn-sm" type="submit">Withdraw</button>
@@ -217,7 +217,7 @@
             <td>{{.Panels}}</td>
             <td class="row-actions">
               <a class="btn btn-sm" href="/power/sources/{{.ID}}/impact">If it fails</a>
-              {{if and $.CanWrite (not .Panels) (not .Children)}}
+              {{if and $.IsAdmin (not .Panels) (not .Children)}}
               <form method="post" action="/power/sources/{{.ID}}/retire" style="display:inline">
                 <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
                 <button class="btn btn-sm" type="submit">Withdraw</button>
@@ -249,7 +249,7 @@
             <td>{{.SiteName}}</td>
             <td class="mono">{{.Name}}</td>
             <td class="mono">
-              {{if $.CanWrite}}
+              {{if $.IsAdmin}}
               <form method="post" action="/power/panels/{{.ID}}" style="display:flex;gap:4px">
                 <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
                 <input type="hidden" name="row_version" value="{{.RowVersion}}">
@@ -271,7 +271,7 @@
             <td class="mono">{{template "power_rating" .}}</td>
             <td>{{.Feeds}}</td>
             <td class="row-actions">
-              {{if and $.CanWrite (not .Feeds)}}
+              {{if and $.IsAdmin (not .Feeds)}}
               <form method="post" action="/power/panels/{{.ID}}/retire" style="display:inline">
                 <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
                 <button class="btn btn-sm" type="submit">Retire</button>

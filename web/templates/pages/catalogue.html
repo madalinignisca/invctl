@@ -21,7 +21,7 @@
 
 {{template "catalogue_panel" .}}
 
-{{if .CanWrite}}
+{{if .IsAdmin}}
 <p class="hint" style="margin:12px 0">
   Loading a hardware list? <a href="/import/device-types">Import a CSV</a> — the
   whole file or none of it, and it previews first if you ask.
@@ -197,7 +197,7 @@
         </thead>
         <tbody>
           {{range .DeviceTypes}}
-            {{if and $.CanWrite (eq $.Editing .ID)}}
+            {{if and $.IsAdmin (eq $.Editing .ID)}}
             <tr>
               <td colspan="7">
                 <form method="post" action="/catalogue/types/{{.ID}}">
@@ -303,7 +303,7 @@
                 {{end}}
               </td>
               <td class="row-actions">
-                {{if $.CanWrite}}
+                {{if $.IsAdmin}}
                   <a class="btn btn-sm" href="/catalogue?edit={{.ID}}">Edit</a>
                   <form method="post" action="/catalogue/types/{{.ID}}/retire" style="display:inline">
                     <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
@@ -333,7 +333,7 @@
         <thead><tr><th>Code</th><th>Name</th><th>Support</th><th>Models</th><th></th></tr></thead>
         <tbody>
           {{range .Manufacturers}}
-            {{if and $.CanWrite (eq $.Editing .ID)}}
+            {{if and $.IsAdmin (eq $.Editing .ID)}}
             <tr>
               <td colspan="5">
                 <form method="post" action="/catalogue/manufacturers/{{.ID}}">
@@ -378,7 +378,7 @@
               <td class="mono">{{truncate (deref .SupportRef) 40}}</td>
               <td>{{.DeviceTypes}}</td>
               <td class="row-actions">
-                {{if $.CanWrite}}
+                {{if $.IsAdmin}}
                   <a class="btn btn-sm" href="/catalogue?edit={{.ID}}">Edit</a>
                   {{if not .DeviceTypes}}
                   <form method="post" action="/catalogue/manufacturers/{{.ID}}/retire" style="display:inline">

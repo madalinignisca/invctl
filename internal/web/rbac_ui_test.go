@@ -83,27 +83,21 @@ func TestAProjectOwnerSeesEditControlsOnTheirOwnAssetsAndNotOnOthers(t *testing.
 }
 
 // ---------------------------------------------------------------------------
-// Step 2, test 2: estate-wide configuration stays exactly as CanWrite
-// already had it BEFORE WP-G1 Task 13's flip -- a project owner sees no
-// write control on a team or a tag page, regardless of which project they
-// own. That was true when this test was written because CanWrite(project
-// owner) was unconditionally false; Task 13 made it true (it now means "may
-// reach a write-gated route", not "may write everything" -- see
-// auth.CanWrite's own comment), and teams.html/tags.html gate their
-// creation forms on `.CanWrite` PAGE-WIDE, never converted to the
-// entity-scoped CanWriteEntity check Step 1 gave the asset/service/circuit
-// templates (these pages have no entity to scope one to in the first place
-// -- a team or a tag is estate-wide config, docs/rbac-design.md §4). Task 17
-// counted 132 `.CanWrite` occurrences across 38 template files with this
-// same property; widening all of them is EXPLICITLY DEFERRED (WP-G1 Task
-// 13's own brief calls it "a UX defect, not a security one" -- the server
-// still refuses every write, proved independently by
-// TestAProjectOwnerIsRefusedOnEveryNonProjectLinkableWriteRoute in
-// rbac_boundary_test.go, which drives POST /teams and POST /tags directly
-// and gets a permit refusal). So this test now pins the controls being
-// VISIBLE, not absent -- flip the two Errorf branches back to their
-// original "still absent" shape the day that template sweep lands, not
-// before.
+// Step 2, test 2: estate-wide configuration -- FLIPPED BACK, task 6 (the
+// `.CanWrite` template sweep). This test used to pin the deferred UX gap
+// this comment used to describe: teams.html/tags.html gated their creation
+// forms on page-wide `.CanWrite`, which WP-G1 Task 13 made true for a
+// project owner even though `team`/`tag` are ScopeEstateConfig
+// (internal/domain/role.go) and every write was still refused server-side
+// (TestAProjectOwnerIsRefusedOnEveryNonProjectLinkableWriteRoute in
+// rbac_boundary_test.go proved that independently, driving POST /teams and
+// POST /tags directly). Task 6's census found both pages among the 25 files
+// still gated on the page-wide flag and switched them to `.IsAdmin` -- the
+// same answer CanWriteEntity gives an asset/service/circuit page, just with
+// no entity to scope one to (a team or a tag is estate-wide, not owned by
+// any one project -- docs/rbac-design.md §4). This test now pins the
+// controls being ABSENT again, matching what a project owner could
+// legitimately do all along.
 func TestAProjectOwnerSeesNoEditControlOnAnyTeamOrTagPage(t *testing.T) {
 	for _, eng := range boundaryEngines(t) {
 		t.Run(eng.name, func(t *testing.T) {
@@ -111,23 +105,21 @@ func TestAProjectOwnerSeesNoEditControlOnAnyTeamOrTagPage(t *testing.T) {
 			h.login(boundaryOwnerUser, boundaryOwnerPassword)
 
 			teamsBody := body(t, h.get("/teams", false))
-			if !strings.Contains(teamsBody, "Add a team") {
-				t.Error("teams page no longer offers \"Add a team\" to a project owner -- " +
-					"see this test's own comment: it should today (known, deferred UX gap)")
+			if strings.Contains(teamsBody, "Add a team") {
+				t.Error("teams page unexpectedly offers \"Add a team\" to a project owner -- " +
+					"team is ScopeEstateConfig, Administrator-only")
 			}
-			if !strings.Contains(teamsBody, `action="/teams"`) {
-				t.Error("teams page no longer renders the team-creation form for a project owner -- " +
-					"see this test's own comment")
+			if strings.Contains(teamsBody, `action="/teams"`) {
+				t.Error("teams page unexpectedly renders the team-creation form for a project owner")
 			}
 
 			tagsBody := body(t, h.get("/tags", false))
-			if !strings.Contains(tagsBody, "Define a tag") {
-				t.Error("tags page no longer offers \"Define a tag\" to a project owner -- " +
-					"see this test's own comment: it should today (known, deferred UX gap)")
+			if strings.Contains(tagsBody, "Define a tag") {
+				t.Error("tags page unexpectedly offers \"Define a tag\" to a project owner -- " +
+					"tag is ScopeEstateConfig, Administrator-only")
 			}
-			if !strings.Contains(tagsBody, `action="/tags"`) {
-				t.Error("tags page no longer renders the tag-creation form for a project owner -- " +
-					"see this test's own comment")
+			if strings.Contains(tagsBody, `action="/tags"`) {
+				t.Error("tags page unexpectedly renders the tag-creation form for a project owner")
 			}
 		})
 	}
