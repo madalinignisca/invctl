@@ -129,6 +129,18 @@ func (a *App) renderCircuitDetail(w http.ResponseWriter, r *http.Request, id str
 		a.serverError(w, r, err)
 		return
 	}
+	// The cost panel offers a supplier picker, so this page owes it the
+	// provider list. Missing since J6 (732c6b0) added "Providers" .Providers
+	// to circuit_detail.html without adding the field here: html/template
+	// fails execution on an absent struct field, so every GET /circuits/{id}
+	// returned 500. Nothing caught it because no test rendered this page --
+	// handler tests call handlers directly and never execute the template
+	// against the real page struct.
+	providers, err := a.Store.ListProviders(r.Context())
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
 	base := a.base(r, circuit.CID, "circuits")
 	a.Render.Page(w, status, "circuit_detail", struct {
 		Base
@@ -142,6 +154,7 @@ func (a *App) renderCircuitDetail(w http.ResponseWriter, r *http.Request, id str
 		Ports        []store.InterfaceOption
 		Sites        []store.AssetRow
 		Sides        []string
+		Providers    []store.ProviderRow
 		Errors       map[string]string
 	}{
 		Base:         base,
@@ -155,6 +168,7 @@ func (a *App) renderCircuitDetail(w http.ResponseWriter, r *http.Request, id str
 		Ports:        ports,
 		Sites:        sites,
 		Sides:        domain.CircuitSides,
+		Providers:    providers,
 		Errors:       orEmpty(errs),
 	})
 }
