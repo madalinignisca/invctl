@@ -598,3 +598,105 @@ func TestTheScopeClassificationCoversEveryAuditedEntityType(t *testing.T) {
 	// property (CLAUDE.md's own audit rules), not this test's job.
 	sort.Strings(auditedEntityTypes)
 }
+
+// storeWidePermitCallers is the allowlist for
+// TestNoStoreMethodMintsAPermitWiderThanItsCaller, keyed "file.go
+// Func" or "file.go Recv.Method".
+//
+// ONE ENTRY, AND IT SHOULD STAY THAT WAY. A store method receives a permit;
+// deriving a narrower one is the job of the functions in storePermitMinters
+// above. Minting a WIDER one discards what the request was actually granted.
+var storeWidePermitCallers = map[string]string{
+	"users.go SQLStore.UpsertLDAPUser": "the directory is the actor, not the person signing in: " +
+		"the row exists because LDAP said so, and there is no request permit to inherit -- " +
+		"the bind happens before any session exists",
+}
+
+// TestNoStoreMethodMintsAPermitWiderThanItsCaller closes the seam between the
+// two permit guards this repo already had.
+//
+// FOUND BY MUTATION, NOT BY READING. An authorization review replaced
+// RetireDependency's `authorizeDependencySubjects(...)` call with
+// `domain.AdministratorPermit(p.Actor())` and the ENTIRE repo suite stayed
+// green -- a project owner could then retire a dependency they owned neither
+// end of. Both existing guards missed it, and for different reasons:
+//
+//   - TestOnlyTheNamedFunctionsMintAPermit (above) scans for functions that
+//     RETURN a Permit. RetireDependency returns error, so it is not a minter
+//     declaration and never enters that census. Calling AdministratorPermit
+//     is not itself suspicious -- it is on the allowlist, legitimately.
+//   - TestNoHandlerMintsAPermitWiderThanItsCaller
+//     (internal/web/handlers/permit_mint_test.go) asks exactly the right
+//     question, and asks it only of handlers.
+//
+// So the two guards divided the world by SHAPE (who returns a Permit) and by
+// PACKAGE (handlers), and nothing asked the store the handler's question --
+// despite internal/store being where tx.log is the authorization chokepoint,
+// i.e. the layer with the most to lose. This closes that asymmetry rather
+// than inventing a new kind of check: it is the handler guard, pointed here.
+//
+// Deliberately a source scan, for the same reason the handler one is: the
+// failure is a call site that LOOKS correct and is wrong only because of what
+// it replaced, so no request demonstrates it until the day it is exploitable.
+func TestNoStoreMethodMintsAPermitWiderThanItsCaller(t *testing.T) {
+	wide := map[string]bool{"AdministratorPermit": true, "SystemPermit": true}
+
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatalf("reading internal/store: %v", err)
+	}
+	seen := map[string]bool{}
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		f, perr := parser.ParseFile(token.NewFileSet(), name, nil, 0)
+		if perr != nil {
+			t.Fatalf("parsing %s: %v", name, perr)
+		}
+		var fn string
+		ast.Inspect(f, func(n ast.Node) bool {
+			if d, ok := n.(*ast.FuncDecl); ok {
+				fn = d.Name.Name
+				if d.Recv != nil && len(d.Recv.List) == 1 {
+					fn = recvTypeName(d.Recv.List[0].Type) + "." + fn
+				}
+			}
+			ce, ok := n.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			se, ok := ce.Fun.(*ast.SelectorExpr)
+			if !ok {
+				return true
+			}
+			pkg, ok := se.X.(*ast.Ident)
+			if !ok || pkg.Name != "domain" || !wide[se.Sel.Name] {
+				return true
+			}
+			key := name + " " + fn
+			seen[key] = true
+			if _, allowed := storeWidePermitCallers[key]; !allowed {
+				t.Errorf("%s mints domain.%s -- a store method takes the permit it was "+
+					"given and may only NARROW it (see storePermitMinters). Minting a wider "+
+					"one discards what the request was actually granted, which is how "+
+					"RetireDependency's two-ended check was bypassed with the suite green. "+
+					"If this is genuinely a system write with no request behind it, add it "+
+					"to storeWidePermitCallers with the reason.", key, se.Sel.Name)
+			}
+			return true
+		})
+	}
+
+	// A stale allowlist is the failure mode this repo keeps finding: an entry
+	// whose call site has gone stops guarding anything and starts licensing
+	// whatever is written next under that name.
+	for key := range storeWidePermitCallers {
+		if !seen[key] {
+			t.Errorf("storeWidePermitCallers lists %q, which no longer mints a wide permit -- "+
+				"remove it rather than leaving a standing exemption for a call site that "+
+				"does not exist", key)
+		}
+	}
+}
