@@ -255,6 +255,25 @@ domains ship first, how far to take each one. Argue about all of it.
 - [ ] Both engines green, 581+ still passing
 - [ ] Self-checks pass: audit coverage, no personal data, no hard deletes,
       portability — these are the named tests above, not a review checklist
+- [ ] **Reachable by everyone the rule admits.** If a store rule admits a class
+      of caller, name the surface that offers it to them — or state that none
+      does, and why. A capability nobody can reach is not done.
+
+That last one is here because its absence has cost twice. A release shipped
+with four green checks and a **404 on a button**: every handler test passed,
+because they call handlers directly and inject router params by hand, so the
+router was never consulted and nothing tested whether anything could reach the
+handler. Then WP-1.1 widened `dependency`, `link` and `asset_cost` to project
+owners, shipped no control for any of them, and this file recorded all three as
+**done** — the capability was reachable only by forging a POST, which is what
+the E2E specs had to do to prove it worked at all. Both were invisible to
+everything above this line: the rule was right, the tests were green, and no
+person could get at it.
+
+The question the rest of this list does not ask is not "is the rule correct"
+but "who can reach it". Answer it explicitly, including when the answer is
+"nobody yet, deliberately, because X" — that is a fine answer and a very
+different one from silence.
 
 ---
 
