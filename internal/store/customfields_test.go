@@ -11,6 +11,7 @@ package store
 import (
 	"context"
 	"errors"
+	"sort"
 	"strings"
 	"testing"
 
@@ -692,6 +693,10 @@ func TestRenamingAnOptionsLabelIsAuditedEvenWithNoOtherChange(t *testing.T) {
 				t.Fatalf("a label-only rename wrote %d change_log rows, want exactly 1", got-before)
 			}
 			diff := lastChangeDiff(t, f, "custom_field", id)
+			// WP-A4 follow-up item 1 (revised): the fold escapes '\\', '='
+			// and ',' inside a value or label, but "gold", "Gold" and
+			// "Gold Tier" contain none of those, so the fold is back to
+			// exactly its original, readable "value=label" shape.
 			if !strings.Contains(diff, "gold=Gold") || !strings.Contains(diff, "gold=Gold Tier") {
 				t.Fatalf("the diff must show the old and the new label, got: %s", diff)
 			}
@@ -754,6 +759,153 @@ func TestSetCustomFieldOptionsRefusesADuplicateValue(t *testing.T) {
 			}
 			if !strings.Contains(err.Error(), "gold") {
 				t.Errorf("the refusal must name the offending value; got %v", err)
+			}
+		})
+	}
+}
+
+// TestOptionFoldIsInjectiveAgainstTheKnownCollision is WP-A4 follow-up item
+// 1: the old fold joined "value=label" pairs on "," and neither "=" nor ","
+// is refused by domain.ValidateCustomFieldOptionText (any printable
+// non-space rune is legal), so two genuinely different option sets could
+// fold to the SAME change_log entry. Set A is two options {a:b} and {c:d};
+// set B is one option whose label happens to contain what set A's fold looks
+// like once joined. Under the old fold both produced the literal string
+// "a=b,c=d". A JSON encoding must tell them apart.
+func TestOptionFoldIsInjectiveAgainstTheKnownCollision(t *testing.T) {
+	setA := []auditedOption{
+		{Value: "a", Label: "b"},
+		{Value: "c", Label: "d"},
+	}
+	setB := []auditedOption{
+		{Value: "a", Label: "b,c=d"},
+	}
+
+	// Prove the old fold really did collide, so this isn't a strawman: this
+	// is exactly value+"="+label joined on ",", the code this test replaces.
+	oldFold := func(opts []auditedOption) string {
+		pairs := make([]string, len(opts))
+		for i, o := range opts {
+			pairs[i] = o.Value + "=" + o.Label
+		}
+		sort.Strings(pairs)
+		return strings.Join(pairs, ",")
+	}
+	if oldFold(setA) != oldFold(setB) {
+		t.Fatalf("setup is broken: the old fold was supposed to collide on these two sets, got %q vs %q",
+			oldFold(setA), oldFold(setB))
+	}
+
+	f := &domain.CustomField{ID: "field-1"}
+	foldA := auditedCustomField(f, setA).Options
+	foldB := auditedCustomField(f, setB).Options
+	if foldA == foldB {
+		t.Fatalf("two different option sets folded to the same string %q -- the fold is not injective", foldA)
+	}
+
+	// The bug this item exists to fix: a label rename must never fold
+	// identically to no change at all.
+	renamed := []auditedOption{{Value: "a", Label: "b renamed"}}
+	original := []auditedOption{{Value: "a", Label: "b"}}
+	if auditedCustomField(f, renamed).Options == auditedCustomField(f, original).Options {
+		t.Fatal("a label rename folded identically to the original -- the audit trail would show no change")
+	}
+}
+
+// TestOptionFoldOfAnOrdinaryOptionSetStaysReadable pins the literal shape of
+// the common case, so a future change that reaches for something like JSON
+// again -- trading readability for injectivity, when this repo can have
+// both -- has to break a NAMED test rather than just a habit. No option's
+// value or label here contains '\\', '=' or ',', so escapeOptionFoldPart is a
+// no-op on every one of them: the fold must come back EXACTLY as it did
+// before WP-A4 follow-up item 1 existed, because that readable shape is what
+// /changes renders to a person during an incident (CLAUDE.md).
+func TestOptionFoldOfAnOrdinaryOptionSetStaysReadable(t *testing.T) {
+	f := &domain.CustomField{ID: "field-1"}
+	got := auditedCustomField(f, []auditedOption{
+		{Value: "high", Label: "High"},
+		{Value: "low", Label: "Low"},
+	}).Options
+	want := "high=High,low=Low"
+	if got != want {
+		t.Fatalf("an ordinary option set folded to %q, want the plain readable %q", got, want)
+	}
+}
+
+// TestSetCustomFieldOptionsDoesNotMutateTheCallersSlice is WP-A4 follow-up
+// item 2: the validated, trimmed value and label used to be written back
+// into the caller's own opts[i] in place. Pass options whose value and
+// label need trimming, and assert the caller's original slice still holds
+// the untrimmed text after the call.
+func TestSetCustomFieldOptionsDoesNotMutateTheCallersSlice(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newCustomFieldFixture(t, e)
+			id := mustField(t, f, "asset", "tier", domain.CustomFieldSelect)
+
+			opts := []domain.CustomFieldOption{
+				{Value: "  gold  ", Label: "  Gold  "},
+			}
+			if err := f.s.SetCustomFieldOptions(f.ctx, domain.AdministratorPermit(f.actor), id, fieldVersion(t, f, id), opts); err != nil {
+				t.Fatalf("setting options: %v", err)
+			}
+
+			if opts[0].Value != "  gold  " {
+				t.Fatalf("caller's Value was mutated: got %q, want the untrimmed original", opts[0].Value)
+			}
+			if opts[0].Label != "  Gold  " {
+				t.Fatalf("caller's Label was mutated: got %q, want the untrimmed original", opts[0].Label)
+			}
+
+			// The trimmed text must still be what was actually persisted.
+			row, err := f.s.GetCustomField(f.ctx, id)
+			if err != nil {
+				t.Fatalf("reading: %v", err)
+			}
+			if len(row.Options) != 1 || row.Options[0].Value != "gold" || row.Options[0].Label != "Gold" {
+				t.Fatalf("stored option was not the trimmed text: got %+v", row.Options)
+			}
+		})
+	}
+}
+
+// TestSetCustomFieldOptionsDuplicateRefusalNamesTheValueNotTheFieldID is
+// WP-A4 follow-up item 3: the duplicate-value refusal used to wrap
+// domain.ErrInvalid directly, so its entire rendered text -- including the
+// field's UUID -- was what handlers/customfields.go's trimSentinel path put
+// in front of the browser. A UUID names nothing an operator can act on; the
+// value they typed does. The refusal must now come back as a
+// *domain.ValidationError whose single field message names the value alone.
+func TestSetCustomFieldOptionsDuplicateRefusalNamesTheValueNotTheFieldID(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newCustomFieldFixture(t, e)
+			id := mustField(t, f, "asset", "tier", domain.CustomFieldSelect)
+
+			err := f.s.SetCustomFieldOptions(f.ctx, domain.AdministratorPermit(f.actor), id, fieldVersion(t, f, id), []domain.CustomFieldOption{
+				{Value: "gold", Label: "Gold"},
+				{Value: "gold", Label: "Gold (again)"},
+			})
+			if err == nil {
+				t.Fatal("a duplicate option value must be refused")
+			}
+
+			ve, ok := domain.AsValidation(err)
+			if !ok || len(ve.Fields) == 0 {
+				t.Fatalf("the refusal must be a *domain.ValidationError so the handler renders only its field message; got %v", err)
+			}
+			rendered := ve.Fields[0].Message
+			if !strings.Contains(rendered, "gold") {
+				t.Fatalf("the rendered message must name the offending value; got %q", rendered)
+			}
+			if strings.Contains(rendered, id) {
+				t.Fatalf("the rendered message must not name the field's id; got %q", rendered)
+			}
+
+			// The id must still be present somewhere in the full error chain,
+			// for whatever logs it -- only the RENDERED text drops it.
+			if !strings.Contains(err.Error(), id) {
+				t.Fatalf("the field id must still be in the wrapped error for logs; got %v", err)
 			}
 		})
 	}

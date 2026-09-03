@@ -112,18 +112,81 @@ const customFieldSelect = `
 // (CLAUDE.md, "the one that is easy to get wrong").
 type customFieldAudit struct {
 	domain.CustomField
-	// Sorted and joined so re-submitting the same set in a different order
-	// is never reported as a change.
+	// Sorted and folded (foldOptions) so re-submitting the same set in a
+	// different order is never reported as a change, and so two genuinely
+	// different option sets can never fold to the same string.
 	Options string `db:"options"`
 }
 
-func auditedCustomField(f *domain.CustomField, optionValues []string) *customFieldAudit {
-	sorted := append([]string(nil), optionValues...)
-	sort.Strings(sorted)
-	return &customFieldAudit{CustomField: *f, Options: strings.Join(sorted, ",")}
+// auditedOption is one option's (value, label) pair, for folding into the
+// audit trail.
+type auditedOption struct {
+	Value string
+	Label string
 }
 
-// optionValues extracts the LIVE options as "value=label" pairs, for folding
+// escapeOptionFoldPart backslash-escapes the three bytes foldOptions uses as
+// structure -- '\\', '=' and ',' -- so a value or label that happens to
+// CONTAIN one can never be mistaken for the separator that follows it.
+// Single pass over the runes, escape written immediately before the byte it
+// guards, so there is no second pass to get the ordering of "escape the
+// separators" vs "escape the escape" wrong: each byte is inspected exactly
+// once and, if it is one of the three, a '\\' is emitted right before it.
+func escapeOptionFoldPart(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		switch r {
+		case '\\', '=', ',':
+			b.WriteByte('\\')
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
+// foldOptions sorts and joins (value, label) pairs into "value=label" pairs
+// joined on ",", the exact shape this fold used before WP-A4 follow-up item
+// 1 -- for the common case, no option's value or label contains '\\', '='
+// or ',', so an ordinary option set folds to EXACTLY what it always did
+// (TestOptionFoldOfAnOrdinaryOptionSetStaysReadable) and change_log.diff
+// keeps reading as "high=High,low=Low" rather than a JSON blob, which is
+// what /changes renders to a person reading it during an incident
+// (CLAUDE.md: "the audience is a person during an incident and the output
+// is understanding" -- and this repo already grew FieldChange.Note because
+// an unescaped delimiter inside a value read as corruption to a reader,
+// see cost_centre@3).
+//
+// What changed for item 1 is that a value or label CONTAINING '\\', '=' or
+// ',' -- both legal under ValidateCustomFieldOptionText, which permits any
+// printable non-space rune -- now has those three bytes escaped
+// (escapeOptionFoldPart) before joining. An unescaped '=' can then only ever
+// be the pair separator and an unescaped ',' can only ever be the pair-list
+// separator, so two different option sets can never fold to the same
+// string: the old collision {"a","b"},{"c","d"} vs {"a","b,c=d"} now folds
+// to "a=b,c=d" and "a=b\\,c\\=d" respectively -- different strings, and the
+// visible backslashes in the second are themselves the tell that the value
+// contains characters that would otherwise be read as structure. See
+// TestOptionFoldIsInjectiveAgainstTheKnownCollision.
+func foldOptions(options []auditedOption) string {
+	sorted := append([]auditedOption(nil), options...)
+	sort.Slice(sorted, func(i, j int) bool {
+		if sorted[i].Value != sorted[j].Value {
+			return sorted[i].Value < sorted[j].Value
+		}
+		return sorted[i].Label < sorted[j].Label
+	})
+	pairs := make([]string, len(sorted))
+	for i, o := range sorted {
+		pairs[i] = escapeOptionFoldPart(o.Value) + "=" + escapeOptionFoldPart(o.Label)
+	}
+	return strings.Join(pairs, ",")
+}
+
+func auditedCustomField(f *domain.CustomField, options []auditedOption) *customFieldAudit {
+	return &customFieldAudit{CustomField: *f, Options: foldOptions(options)}
+}
+
+// liveOptions extracts the LIVE options as (value, label) pairs, for folding
 // into the audited shape. A retired option keeps displaying on existing
 // values but is no longer part of what the field currently offers.
 //
@@ -139,15 +202,15 @@ func auditedCustomField(f *domain.CustomField, optionValues []string) *customFie
 // three times -- a set replacement that leaves the parent struct untouched
 // producing no audit entry -- because the earlier three folds all fixed the
 // SET (which value is live) without also folding what changed ABOUT a
-// member that stays in the set. auditedCustomField still sorts and joins the
-// resulting "value=label" strings exactly as before, so
+// member that stays in the set. auditedCustomField still sorts and encodes
+// the resulting pairs exactly as before, so
 // TestReorderingCustomFieldOptionsIsNotAChange keeps holding: the set is
 // still unordered, only what each member carries changed.
-func optionValues(opts []domain.CustomFieldOption) []string {
-	var pairs []string
+func liveOptions(opts []domain.CustomFieldOption) []auditedOption {
+	var pairs []auditedOption
 	for _, o := range opts {
 		if o.RetiredAt == nil {
-			pairs = append(pairs, o.Value+"="+o.Label)
+			pairs = append(pairs, auditedOption{Value: o.Value, Label: o.Label})
 		}
 	}
 	return pairs
@@ -371,7 +434,7 @@ func (s *SQLStore) UpdateCustomField(ctx context.Context, p domain.Permit, f *do
 		if err := requireVersion(res, "custom field", f.ID, &f.RowVersion); err != nil {
 			return err
 		}
-		values := optionValues(before.Options)
+		values := liveOptions(before.Options)
 		beforeAudit := auditedCustomField(&before.CustomField, values)
 		afterAudit := auditedCustomField(f, values)
 		return t.logUpdate(ctx, "custom_field", f.ID, beforeAudit, afterAudit)
@@ -495,7 +558,7 @@ func (s *SQLStore) SetCustomFieldOptions(ctx context.Context, p domain.Permit, f
 	if err != nil {
 		return err
 	}
-	beforeValues := optionValues(before.Options)
+	beforeValues := liveOptions(before.Options)
 
 	// A duplicate value would silently double-write the same row -- last one
 	// wins, and nothing above notices -- so both it and an empty value or
@@ -507,9 +570,15 @@ func (s *SQLStore) SetCustomFieldOptions(ctx context.Context, p domain.Permit, f
 	// administrator typed, and CanonicalCustomValue's select branch only
 	// ever checks MEMBERSHIP, never bounds, so an oversized or control-
 	// character-laden option value sailed straight through the moment a
-	// value selected it. opts[i] is rewritten in place with the trimmed,
-	// validated text, the same way the text kind stores the trimmed original
-	// rather than the raw submission.
+	// value selected it.
+	//
+	// WP-A4 FOLLOW-UP ITEM 2: the validated, trimmed text used to be written
+	// back into opts[i] in place -- a store method silently rewriting its
+	// caller's slice. validated is a separate slice built from opts rather
+	// than opts mutated in place, so the caller's own slice is left exactly
+	// as it was submitted. See
+	// TestSetCustomFieldOptionsDoesNotMutateTheCallersSlice.
+	validated := make([]domain.CustomFieldOption, len(opts))
 	desired := make(map[string]bool, len(opts))
 	for i := range opts {
 		value, err := domain.ValidateCustomFieldOptionText("value", opts[i].Value)
@@ -520,11 +589,23 @@ func (s *SQLStore) SetCustomFieldOptions(ctx context.Context, p domain.Permit, f
 		if err != nil {
 			return fmt.Errorf("setting options of custom field %s: option %q label %w", fieldID, value, err)
 		}
-		opts[i].Value = value
-		opts[i].Label = label
+		validated[i] = domain.CustomFieldOption{Value: value, Label: label}
 		if desired[value] {
-			return fmt.Errorf("setting options of custom field %s: value %q is listed more than once: %w",
-				fieldID, value, domain.ErrInvalid)
+			// WP-A4 FOLLOW-UP ITEM 3: this used to be a bare domain.ErrInvalid
+			// whose ENTIRE text -- "setting options of custom field <uuid>:
+			// value ... is listed more than once" -- was what the handler
+			// rendered to the browser (trimSentinel only strips the trailing
+			// ": invalid", nothing else). The field's UUID told an operator
+			// nothing they could act on; what they typed does. A
+			// *domain.ValidationError renders as just its field message
+			// (handlers/customfields.go's ve.Fields[0].Message branch,
+			// already how the value/label bound violations above render),
+			// so the UUID never reaches the browser -- while fieldID stays in
+			// the OUTER wrap below, so anything that logs the full error
+			// chain still has it. See
+			// TestSetCustomFieldOptionsDuplicateRefusalNamesTheValueNotTheFieldID.
+			return fmt.Errorf("setting options of custom field %s: %w", fieldID,
+				domain.NewValidation("value", fmt.Sprintf("%q is listed more than once", value)))
 		}
 		desired[value] = true
 	}
@@ -549,7 +630,7 @@ func (s *SQLStore) SetCustomFieldOptions(ctx context.Context, p domain.Permit, f
 			return err
 		}
 
-		for i, o := range opts {
+		for i, o := range validated {
 			if cur, ok := existingByValue[o.Value]; ok {
 				if _, err := t.exec(ctx, `
 					UPDATE custom_field_option SET label = ?, position = ?, retired_at = NULL
@@ -576,14 +657,14 @@ func (s *SQLStore) SetCustomFieldOptions(ctx context.Context, p domain.Permit, f
 			}
 		}
 
-		// FINAL REVIEW B2: "value=label", the same shape optionValues folds
-		// beforeValues into, so a label-only rename (value and position
-		// unchanged) still produces a diff -- opts is what the submission
-		// named, not a re-read, but it carries every live option's label
-		// exactly as it will be written above.
-		afterValues := make([]string, 0, len(opts))
-		for _, o := range opts {
-			afterValues = append(afterValues, o.Value+"="+o.Label)
+		// FINAL REVIEW B2: the same shape liveOptions folds beforeValues
+		// into, so a label-only rename (value and position unchanged) still
+		// produces a diff -- validated is what the submission named, not a
+		// re-read, but it carries every live option's label exactly as it
+		// will be written above.
+		afterValues := make([]auditedOption, 0, len(validated))
+		for _, o := range validated {
+			afterValues = append(afterValues, auditedOption{Value: o.Value, Label: o.Label})
 		}
 		beforeAudit := auditedCustomField(&before.CustomField, beforeValues)
 		afterAudit := auditedCustomField(&before.CustomField, afterValues)
