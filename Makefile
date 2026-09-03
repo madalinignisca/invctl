@@ -207,6 +207,19 @@ compose-down: ## Stop the supporting containers
 # Quality
 # ---------------------------------------------------------------------------
 
+# The linter version, and it must equal the one .github/workflows/ci.yml
+# passes to golangci-lint-action. TestTheLinterPinMatchesCI (internal/license)
+# fails if the two drift, because they already did: this pinned v2.6.2 while CI
+# ran v2.11.1, so `make lint` reported 0 issues on a tree CI then rejected for
+# a gosec rule five minor versions of new checks had introduced. Twice in one
+# day.
+#
+# A gate that runs a DIFFERENT tool than CI is the same lie as one that does
+# not run at all -- it reports on work the actual gate will not accept. Bump
+# this and the workflow together, in a commit that also handles what the new
+# version finds.
+GOLANGCI_VERSION := v2.11.1
+
 .PHONY: lint
 lint: ## gofmt, go vet, golangci-lint and govulncheck
 	@echo "== gofmt =="
@@ -221,6 +234,13 @@ lint: ## gofmt, go vet, golangci-lint and govulncheck
 	@# gate, because it is believed.
 	@command -v golangci-lint >/dev/null 2>&1 || \
 	  (echo "golangci-lint is required: see 'make tools'"; exit 1)
+	@# A WRONG VERSION IS ALSO A FAILURE. Running a different linter than CI
+	@# reports on a gate that is not the gate; this is what let two CI-red
+	@# pushes leave a machine where `make lint` said 0 issues.
+	@have=$$(golangci-lint version --short 2>/dev/null | tr -d 'v'); \
+	  want=$$(echo '$(GOLANGCI_VERSION)' | tr -d 'v'); \
+	  test "$$have" = "$$want" || \
+	  (echo "golangci-lint is v$$have, CI runs v$$want -- run 'make tools'"; exit 1)
 	golangci-lint run ./...
 	@echo "== govulncheck =="
 	@command -v govulncheck >/dev/null 2>&1 || \
@@ -236,7 +256,7 @@ tools: ## Install the linters `make lint` requires
 	# findings appeared out of a `go install` nobody ran deliberately. Bump
 	# this on purpose, in a commit that also handles whatever the new version
 	# finds.
-	go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.6.2
+	go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_VERSION)
 	go install golang.org/x/vuln/cmd/govulncheck@latest
 
 .PHONY: tidy
