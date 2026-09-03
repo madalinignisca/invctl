@@ -312,15 +312,20 @@ func (s *SQLStore) CreateRoute(ctx context.Context, p domain.Permit, r *domain.R
 type RouteRow struct {
 	domain.Route
 	FrontendService string `db:"frontend_service"`
-	FrontendName    string `db:"frontend_name"`
-	PoolName        string `db:"pool_name"`
-	PoolService     string `db:"pool_service"`
-	MemberCount     int    `db:"member_count"`
+	// FrontendServiceID is the id behind FrontendService's code -- the same
+	// service authorizeDependencySubjects resolves for a route provider, kept
+	// alongside the code rather than replacing it so the picker's filter and
+	// the store's rule can never resolve to two different services.
+	FrontendServiceID string `db:"frontend_service_id"`
+	FrontendName      string `db:"frontend_name"`
+	PoolName          string `db:"pool_name"`
+	PoolService       string `db:"pool_service"`
+	MemberCount       int    `db:"member_count"`
 }
 
 const routeSelect = `
 	SELECT r.*,
-	       fs.code AS frontend_service, fe.name AS frontend_name,
+	       fs.code AS frontend_service, fs.id AS frontend_service_id, fe.name AS frontend_name,
 	       bp.name AS pool_name, ps.code AS pool_service,
 	       (SELECT COUNT(*) FROM backend_member bm WHERE bm.pool_id = r.backend_pool_id) AS member_count
 	FROM route r

@@ -201,8 +201,8 @@ type serviceDetailPage struct {
 	Instances    []store.InstanceRow
 	Endpoints    []store.EndpointRow
 	Routes       []store.RouteRow
-	Upstream     []depRowData
-	Downstream   []depRowData
+	Upstream     depRowList
+	Downstream   depRowList
 	// InstanceHealth is what the estate reports about each placement, keyed by
 	// instance id, with staleness applied and any override alongside rather
 	// than merged in. A service has no health of its own -- only the places it
@@ -436,8 +436,8 @@ func (a *App) renderServiceDetail(w http.ResponseWriter, r *http.Request, status
 		Instances:      instances,
 		Endpoints:      endpoints,
 		Routes:         routes,
-		Upstream:       depRows(upstream, classes, "upstream", b.CSRF, b.IsAdmin),
-		Downstream:     depRows(downstream, classes, "downstream", b.CSRF, b.IsAdmin),
+		Upstream:       depRows(upstream, classes, "upstream", b.CSRF, b.IsAdmin, b.CanWriteEntity),
+		Downstream:     depRows(downstream, classes, "downstream", b.CSRF, b.IsAdmin, b.CanWriteEntity),
 		InstanceHealth: instanceHealth,
 		Timeline:       timeline,
 		InstanceForm:   a.newInstanceForm(r, id, nil, hostable),

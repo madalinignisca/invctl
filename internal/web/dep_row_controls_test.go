@@ -1,0 +1,477 @@
+// invctl — infrastructure inventory
+// Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+//
+// Licensed under the GNU Affero General Public License, version 3 only —
+// no later version applies. See LICENSE for the full text.
+//
+// SPDX-License-Identifier: AGPL-3.0-only
+
+package web_test
+
+import (
+	"context"
+	"net/url"
+	"strings"
+	"testing"
+
+	"github.com/madalinignisca/invctl/internal/domain"
+	"github.com/madalinignisca/invctl/internal/store"
+)
+
+// verifyPost issues the HTMX-flavoured POST DependencyVerify's own fragment
+// re-render goes through: HX-Request set, a valid CSRF token pulled off
+// consumerServicePage (both fixtures below verify a dependency from the
+// consumer's own service page, which is the upstream panel, the same
+// direction TestVerifyKeepsThePanelItCameFrom exercises), and the request
+// returns the freshly rendered dependency_row fragment -- the ONE OTHER
+// place besides depRows that renders a dependency row for a caller who may
+// not be an Administrator.
+func verifyPost(t *testing.T, h *harness, consumerServicePage, depID string) string {
+	t.Helper()
+	token := h.csrfToken(consumerServicePage)
+	resp := h.post("/dependencies/"+depID+"/verify?direction=upstream",
+		url.Values{"csrf_token": {token}}, true)
+	return body(t, resp)
+}
+
+// WP-1.1 Task 1: a project owner who owns BOTH ends of a dependency -- the
+// consumer service and the provider's owning service -- has been able to
+// write it at the store layer since authorizeDependencySubjects (deps.go)
+// landed, but no control was ever rendered: depRows fed isAdmin into
+// CanWrite regardless of what the caller actually owned. This file pins the
+// four-way boundary (both ends, consumer only, provider only, neither) plus
+// the one thing that must NOT move with it: the secret ref stays
+// Administrator-only even for a project owner who now sees the controls.
+type depRowFixture struct {
+	// serviceIn is already owned by project alpha (via setupBoundary);
+	// serviceIn2 is a second service linked to alpha here, so a dependency
+	// can have BOTH ends inside the owner's project without depending on a
+	// service being both its own consumer and provider.
+	serviceIn2 string
+
+	// depBoth: consumer=serviceIn (owned), provider=serviceIn2 (owned).
+	depBoth string
+	// depConsumerOnly: consumer=serviceIn (owned), provider=serviceOut (not).
+	depConsumerOnly string
+	// depProviderOnly: consumer=serviceOut (not owned), provider=serviceIn2 (owned).
+	depProviderOnly string
+	// depNeither: consumer=serviceOut, provider=serviceOut -- neither end owned.
+	depNeither string
+
+	// depWithSecret carries an identity with a secret_ref, both ends owned
+	// by the project owner -- so CanWrite is true, and SecretRef must still
+	// be redacted for anyone who is not a full Administrator.
+	depWithSecret string
+	vaultRef      string
+}
+
+func setupDepRowFixture(t *testing.T, ctx context.Context, h *harness, fx *boundaryFixtures) *depRowFixture {
+	t.Helper()
+	admin := domain.AdministratorPermit(domain.SystemActor)
+
+	env, err := h.store.ListEnvironments(ctx)
+	if err != nil || len(env) == 0 {
+		t.Fatalf("listing environments for the dep-row fixture: %v", err)
+	}
+	serviceIn2 := mustBoundaryService(t, ctx, h, "t-alpha-svc-2", env[0].ID)
+	link, err := domain.NewProjectServiceLink(fx.projectAlpha, serviceIn2, domain.ProjectOwns, nil, h.store.Now())
+	if err != nil {
+		t.Fatalf("building the second in-scope service link: %v", err)
+	}
+	if err := h.store.LinkProjectService(ctx, admin, link); err != nil {
+		t.Fatalf("linking the second in-scope service to alpha: %v", err)
+	}
+
+	mkEndpoint := func(serviceID, name string) string {
+		port := 5432
+		ep, err := domain.NewEndpoint(store.NewID(), serviceID, name, domain.ProtoTCP, &port, domain.BindHost)
+		if err != nil {
+			t.Fatalf("building endpoint %s: %v", name, err)
+		}
+		if err := h.store.CreateEndpoint(ctx, admin, ep); err != nil {
+			t.Fatalf("creating endpoint %s: %v", name, err)
+		}
+		return ep.ID
+	}
+	epOnIn2 := mkEndpoint(serviceIn2, "ep-on-in2")
+	epOnOut := mkEndpoint(fx.serviceOut, "ep-on-out")
+
+	mkDep := func(consumerID, providerEndpointID string) string {
+		ep := providerEndpointID
+		d, err := domain.NewDependency(store.NewID(), domain.DependencySpec{
+			ConsumerServiceID:  consumerID,
+			ProviderEndpointID: &ep,
+			Nature:             domain.NatureHard,
+			FailureMode:        "dep-row-controls fixture",
+			Source:             domain.SourceDeclared,
+		}, h.store.Now())
+		if err != nil {
+			t.Fatalf("building dependency: %v", err)
+		}
+		if err := h.store.CreateDependency(ctx, admin, d, nil); err != nil {
+			t.Fatalf("creating dependency: %v", err)
+		}
+		return d.ID
+	}
+
+	depBoth := mkDep(fx.serviceIn, epOnIn2)
+	depConsumerOnly := mkDep(fx.serviceIn, epOnOut)
+	depProviderOnly := mkDep(fx.serviceOut, epOnIn2)
+	depNeither := mkDep(fx.serviceOut, epOnOut)
+
+	// A second, dedicated dependency for the secret-ref check, both ends
+	// owned, carrying an identity with a real (path-shaped) secret_ref.
+	identity, err := domain.NewIdentity(store.NewID(), domain.IdentityServiceAccount, "dep-row-secret-identity")
+	if err != nil {
+		t.Fatalf("building identity: %v", err)
+	}
+	vaultRef := "kv/prod/dep-row-controls/fixture"
+	identity.SecretRef = &vaultRef
+	if err := h.store.CreateIdentity(ctx, admin, identity); err != nil {
+		t.Fatalf("creating identity: %v", err)
+	}
+	epForSecret := mkEndpoint(serviceIn2, "ep-on-in2-secret")
+	identityID := identity.ID
+	dSecret, err := domain.NewDependency(store.NewID(), domain.DependencySpec{
+		ConsumerServiceID:  fx.serviceIn,
+		ProviderEndpointID: &epForSecret,
+		Nature:             domain.NatureHard,
+		FailureMode:        "dep-row-controls secret fixture",
+		Source:             domain.SourceDeclared,
+		IdentityID:         &identityID,
+	}, h.store.Now())
+	if err != nil {
+		t.Fatalf("building the secret-carrying dependency: %v", err)
+	}
+	if err := h.store.CreateDependency(ctx, admin, dSecret, nil); err != nil {
+		t.Fatalf("creating the secret-carrying dependency: %v", err)
+	}
+
+	return &depRowFixture{
+		serviceIn2:      serviceIn2,
+		depBoth:         depBoth,
+		depConsumerOnly: depConsumerOnly,
+		depProviderOnly: depProviderOnly,
+		depNeither:      depNeither,
+		depWithSecret:   dSecret.ID,
+		vaultRef:        vaultRef,
+	}
+}
+
+// verifyAction is the marker rendered only inside {{if .CanWrite}} on
+// rows.html's dependency_row -- the Verify button's own hx-post target.
+func verifyAction(depID string) string {
+	return `hx-post="/dependencies/` + depID + `/verify`
+}
+
+// retireAction is verifyAction's sibling for the Retire button, the other
+// control inside the same {{if .CanWrite}} block.
+func retireAction(depID string) string {
+	return `hx-post="/dependencies/` + depID + `/retire`
+}
+
+// TestDependencyRowControlsAreTwoEnded drives all four ownership
+// combinations through one project owner, on the two service pages that
+// between them carry every dependency the fixture built (a dependency's
+// consumer is always the page it appears on, in the upstream panel).
+func TestDependencyRowControlsAreTwoEnded(t *testing.T) {
+	for _, eng := range boundaryEngines(t) {
+		t.Run(eng.name, func(t *testing.T) {
+			h, fx := setupBoundary(t, eng)
+			ctx := context.Background()
+			dfx := setupDepRowFixture(t, ctx, h, fx)
+
+			// Positive control: an Administrator sees Verify on every row,
+			// including the one where NEITHER end is anybody's project --
+			// proving the marker itself renders before the owner checks
+			// below mean anything.
+			h.login(boundaryAdminUser, boundaryAdminPassword)
+			adminOutBody := body(t, h.get("/services/"+fx.serviceOut, false))
+			for _, id := range []string{dfx.depProviderOnly, dfx.depNeither} {
+				if !strings.Contains(adminOutBody, verifyAction(id)) {
+					t.Fatalf("GET /services/%s as Administrator does not carry %q -- the row "+
+						"partial is not proven to render its controls at all", fx.serviceOut, verifyAction(id))
+				}
+			}
+			h.logout()
+
+			h.login(boundaryOwnerUser, boundaryOwnerPassword)
+
+			// fx.serviceIn's upstream panel carries depBoth and depConsumerOnly.
+			inBody := body(t, h.get("/services/"+fx.serviceIn, false))
+			if !strings.Contains(inBody, verifyAction(dfx.depBoth)) {
+				t.Errorf("GET /services/%s as the owner of BOTH ends does not carry %q -- "+
+					"authorizeDependencySubjects grants this write at the store layer, and the "+
+					"row must offer it", fx.serviceIn, verifyAction(dfx.depBoth))
+			}
+			if strings.Contains(inBody, verifyAction(dfx.depConsumerOnly)) {
+				t.Errorf("GET /services/%s carries %q for a dependency where the owner holds "+
+					"only the CONSUMER end -- the provider end (serviceOut) is not theirs, and "+
+					"the store refuses this write", fx.serviceIn, verifyAction(dfx.depConsumerOnly))
+			}
+
+			// fx.serviceOut's upstream panel carries depProviderOnly and depNeither.
+			outBody := body(t, h.get("/services/"+fx.serviceOut, false))
+			if strings.Contains(outBody, verifyAction(dfx.depProviderOnly)) {
+				t.Errorf("GET /services/%s carries %q for a dependency where the owner holds "+
+					"only the PROVIDER end -- the consumer end (serviceOut) is not theirs, and "+
+					"the store refuses this write", fx.serviceOut, verifyAction(dfx.depProviderOnly))
+			}
+			if strings.Contains(outBody, verifyAction(dfx.depNeither)) {
+				t.Errorf("GET /services/%s carries %q for a dependency the owner has no claim "+
+					"on at either end", fx.serviceOut, verifyAction(dfx.depNeither))
+			}
+		})
+	}
+}
+
+// TestDependencyRowSecretRefStaysAdministratorOnly is THE ONE THING THAT
+// MUST NOT BREAK: a project owner who now sees the write controls on a
+// dependency they own both ends of must still get domain.Redacted for the
+// secret ref -- SecretRef is gated on isAdmin alone, deliberately narrower
+// than the new two-ended CanWrite.
+func TestDependencyRowSecretRefStaysAdministratorOnly(t *testing.T) {
+	for _, eng := range boundaryEngines(t) {
+		t.Run(eng.name, func(t *testing.T) {
+			h, fx := setupBoundary(t, eng)
+			ctx := context.Background()
+			dfx := setupDepRowFixture(t, ctx, h, fx)
+
+			h.login(boundaryAdminUser, boundaryAdminPassword)
+			adminBody := body(t, h.get("/services/"+fx.serviceIn, false))
+			if !strings.Contains(adminBody, dfx.vaultRef) {
+				t.Fatalf("GET /services/%s as Administrator does not carry the raw secret_ref "+
+					"%q -- the field is not proven to render at all", fx.serviceIn, dfx.vaultRef)
+			}
+			h.logout()
+
+			h.login(boundaryOwnerUser, boundaryOwnerPassword)
+			ownerBody := body(t, h.get("/services/"+fx.serviceIn, false))
+
+			// This owner owns both ends of depWithSecret (serviceIn and
+			// serviceIn2), so they DO see the write controls on that row.
+			if !strings.Contains(ownerBody, verifyAction(dfx.depWithSecret)) {
+				t.Fatalf("GET /services/%s as the owner of both ends of the secret-carrying "+
+					"dependency does not carry %q -- the fixture must grant CanWrite here for "+
+					"the redaction check below to mean anything", fx.serviceIn, verifyAction(dfx.depWithSecret))
+			}
+			if strings.Contains(ownerBody, dfx.vaultRef) {
+				t.Errorf("GET /services/%s as a project owner (NOT an Administrator) carries "+
+					"the raw secret_ref %q -- SecretRef must stay gated on isAdmin even though "+
+					"this owner now sees the row's write controls", fx.serviceIn, dfx.vaultRef)
+			}
+			if !strings.Contains(ownerBody, domain.Redacted) {
+				t.Errorf("GET /services/%s as a project owner does not carry %q anywhere -- "+
+					"the redacted placeholder itself is not proven to render", fx.serviceIn, domain.Redacted)
+			}
+		})
+	}
+}
+
+// TestDependencyVerifySecretRefStaysAdministratorOnly is
+// TestDependencyRowSecretRefStaysAdministratorOnly's sibling for the OTHER
+// place a dependency row gets rendered: DependencyVerify (deps.go:106)
+// builds its own depRowData directly rather than going through depRows, and
+// nothing previously proved its SecretRef gate. The GET-only test above
+// cannot catch a bug confined to the POST path -- verifying is the only
+// action available to a project owner that returns a freshly rendered row
+// carrying identity.secret_ref, so this is the one place the leak the
+// review flagged (b.IsAdmin swapped for true) would actually surface.
+func TestDependencyVerifySecretRefStaysAdministratorOnly(t *testing.T) {
+	for _, eng := range boundaryEngines(t) {
+		t.Run(eng.name, func(t *testing.T) {
+			h, fx := setupBoundary(t, eng)
+			ctx := context.Background()
+			dfx := setupDepRowFixture(t, ctx, h, fx)
+			servicePage := "/services/" + fx.serviceIn
+
+			// Positive control: an Administrator verifying the SAME
+			// dependency gets the raw path back. Without this, a change
+			// that redacted the ref for everyone -- including
+			// Administrators -- would make the assertion below pass for
+			// the wrong reason.
+			h.login(boundaryAdminUser, boundaryAdminPassword)
+			adminFragment := verifyPost(t, h, servicePage, dfx.depWithSecret)
+			if !strings.Contains(adminFragment, dfx.vaultRef) {
+				t.Fatalf("verifying as Administrator did not return the raw secret_ref %q -- "+
+					"the fragment is not proven to carry it at all: %s", dfx.vaultRef, adminFragment)
+			}
+			h.logout()
+
+			// Re-verifying the SAME edge as the owner is fine: VerifyDependency
+			// only overwrites verified_by/verified_at, it has no "already
+			// verified" refusal, and re-seeding the fixture here would collide
+			// on setupDepRowFixture's fixed service code (t-alpha-svc-2).
+			h.login(boundaryOwnerUser, boundaryOwnerPassword)
+
+			// Assert the precondition first: this owner must actually own
+			// BOTH ends of the dependency being verified, or a refused
+			// verify would make the redaction assertion below pass for a
+			// reason that has nothing to do with redaction.
+			preCheck := body(t, h.get(servicePage, false))
+			if !strings.Contains(preCheck, verifyAction(dfx.depWithSecret)) {
+				t.Fatalf("GET %s as the owner of both ends of the secret-carrying dependency "+
+					"does not carry %q -- CanWrite must be true here for the redaction check "+
+					"below to mean anything", servicePage, verifyAction(dfx.depWithSecret))
+			}
+
+			ownerFragment := verifyPost(t, h, servicePage, dfx.depWithSecret)
+			if strings.Contains(ownerFragment, dfx.vaultRef) {
+				t.Errorf("POST /dependencies/%s/verify as a project owner (NOT an Administrator) "+
+					"returned the raw secret_ref %q in the swapped fragment", dfx.depWithSecret, dfx.vaultRef)
+			}
+			if !strings.Contains(ownerFragment, domain.Redacted) {
+				t.Errorf("POST /dependencies/%s/verify as a project owner does not carry %q "+
+					"anywhere -- the redacted placeholder itself is not proven to render", dfx.depWithSecret, domain.Redacted)
+			}
+		})
+	}
+}
+
+// TestDependencyVerifyFragmentCarriesControlsForTheOwner pins fix-b item 4:
+// DependencyVerify (deps.go) builds its OWN depRowData directly, using its
+// own copy of the two-ended CanWrite check -- since fix-b item 5,
+// canWriteDependency -- rather than going through depRows. Nothing
+// previously asserted what the SWAPPED FRAGMENT ITSELF carries for a
+// project owner: TestDependencyRowControlsAreTwoEnded only ever GETs the
+// page (depRows' path), and
+// TestDependencyVerifySecretRefStaysAdministratorOnly's owner assertions on
+// the POST response check only for the ABSENCE of the secret ref, never for
+// the PRESENCE of the row's own Verify/Retire controls. Narrowing
+// DependencyVerify's CanWrite back to b.IsAdmin -- or forgetting
+// ShowActions on this one-row re-render -- survives every other test in
+// this file and silently strips the controls from the row a project owner
+// just acted on.
+func TestDependencyVerifyFragmentCarriesControlsForTheOwner(t *testing.T) {
+	for _, eng := range boundaryEngines(t) {
+		t.Run(eng.name, func(t *testing.T) {
+			h, fx := setupBoundary(t, eng)
+			ctx := context.Background()
+			dfx := setupDepRowFixture(t, ctx, h, fx)
+			servicePage := "/services/" + fx.serviceIn
+
+			h.login(boundaryOwnerUser, boundaryOwnerPassword)
+			ownerFragment := verifyPost(t, h, servicePage, dfx.depBoth)
+			if !strings.Contains(ownerFragment, verifyAction(dfx.depBoth)) {
+				t.Errorf("POST /dependencies/%s/verify as the owner of BOTH ends does not carry "+
+					"%q in the swapped fragment -- the row lost its own Verify control", dfx.depBoth, verifyAction(dfx.depBoth))
+			}
+			if !strings.Contains(ownerFragment, retireAction(dfx.depBoth)) {
+				t.Errorf("POST /dependencies/%s/verify as the owner of BOTH ends does not carry "+
+					"%q in the swapped fragment -- the row lost its own Retire control", dfx.depBoth, retireAction(dfx.depBoth))
+			}
+		})
+	}
+}
+
+// tableColumns returns the number of <th> cells in the header of the table
+// whose header row contains marker, and the number of <td> cells in EVERY
+// <tr> in that table's <tbody> -- not just the first.
+//
+// EVERY ROW, DELIBERATELY. fix-b item 1 found a test that only ever measured
+// the first data row (upstreamTableColumns, the predecessor of this
+// function): the fixture it drove has TWO writable rows and ONE
+// non-writable one, and the query's own ORDER BY happened to put a writable
+// row first every time, so the test passed on alphabetical luck -- the one
+// row it never looked at, the non-writable one with an actions cell simply
+// omitted, was exactly where the column count disagreed.
+//
+// Crude on purpose: a full HTML parse would be more precise and would also
+// hide the thing being measured behind a library. What matters here is only
+// that the counts agree.
+func tableColumns(t *testing.T, page, marker string) (headerCells int, rowCells []int) {
+	t.Helper()
+	i := strings.Index(page, marker)
+	if i < 0 {
+		t.Fatalf("no table with marker %q on the page -- the fixture must "+
+			"seed one, or this test measures nothing:\n%.400s", marker, page[:min(len(page), 400)])
+	}
+	head := page[i:]
+	endHead := strings.Index(head, "</thead>")
+	if endHead < 0 {
+		t.Fatal("table header never closes")
+	}
+	headerCells = strings.Count(head[:endHead], "<th")
+
+	tbodyStart := strings.Index(head, "<tbody>")
+	tbodyEnd := strings.Index(head, "</tbody>")
+	if tbodyStart < 0 || tbodyEnd < 0 || tbodyEnd < tbodyStart {
+		t.Fatal("table has a header but no <tbody> -- fixture problem")
+	}
+	rowsHTML := strings.Split(head[tbodyStart:tbodyEnd], "<tr")
+	for _, r := range rowsHTML[1:] { // rowsHTML[0] is whatever precedes the first <tr
+		end := strings.Index(r, "</tr>")
+		if end < 0 {
+			t.Fatal("a data row never closes")
+		}
+		rowCells = append(rowCells, strings.Count(r[:end], "<td"))
+	}
+	if len(rowCells) == 0 {
+		t.Fatal("table has a header but no data rows -- fixture problem")
+	}
+	return headerCells, rowCells
+}
+
+// TestDependencyTableHeaderMatchesItsRows pins the column count, for every
+// row, on BOTH the upstream and the downstream table.
+//
+// WRITTEN BECAUSE IT DID NOT. Widening the row's actions cell to the two-ended
+// CanWrite left the header still gated on IsAdmin, so a project owner who owns
+// both ends of an edge -- exactly the person that widening was for -- got a row
+// with one more cell than its header. Every existing assertion passed: they all
+// searched for a control's presence or absence, and none counted anything. The
+// browser pass found it by looking at the table.
+//
+// FIXED WRONG THE FIRST TIME (fix-b item 1). Matching the header to
+// depRowList.AnyWritable is only half the rule: AnyWritable is an
+// EXISTENTIAL ("does the column exist"), correct for the header, but the row
+// partial stayed gated on the per-row CanWrite, an OMIT-the-cell condition.
+// Those two agree only when every row in a table shares one CanWrite -- and
+// a dependency's write permission is two-ended, so a mixed table (some rows
+// writable, some not) is the ORDINARY case, not an edge case, and is exactly
+// what setupDepRowFixture already builds on both tables exercised below. The
+// fix is a THIRD field, ShowActions (forms.go), carrying the table-wide
+// AnyWritable answer onto every row, so a non-writable row in a writable
+// table still contributes an (empty) cell rather than omitting it.
+func TestDependencyTableHeaderMatchesItsRows(t *testing.T) {
+	for _, eng := range boundaryEngines(t) {
+		t.Run(eng.name, func(t *testing.T) {
+			h, fx := setupBoundary(t, eng)
+			ctx := context.Background()
+			dfx := setupDepRowFixture(t, ctx, h, fx)
+
+			check := func(who, url, marker string) {
+				page := body(t, h.get(url, false))
+				header, rows := tableColumns(t, page, marker)
+				for i, row := range rows {
+					if row != header {
+						t.Errorf("%s at %s: data row %d has %d <td> cells against a "+
+							"%d-<th> header -- misaligned by %d", who, url, i, row, header, row-header)
+					}
+				}
+			}
+
+			h.login(boundaryAdminUser, boundaryAdminPassword)
+			check("an Administrator", "/services/"+fx.serviceIn, "<th>Provider</th>")
+			check("an Administrator", "/services/"+dfx.serviceIn2, "<th>Consumer</th>")
+			h.logout()
+
+			// The MIXED case, on both tables -- not constructed for this test,
+			// but the fixture's ordinary shape: fx.serviceIn's upstream table
+			// carries depBoth and depWithSecret (both ends owned, writable)
+			// alongside depConsumerOnly (provider end foreign, not writable);
+			// dfx.serviceIn2's downstream table carries the same depBoth and
+			// depWithSecret alongside depProviderOnly (consumer end foreign,
+			// not writable). This is the case
+			// TestDependencyRowControlsAreTwoEnded never counted a cell on.
+			h.login(boundaryOwnerUser, boundaryOwnerPassword)
+			check("a project owner with a MIXED upstream table", "/services/"+fx.serviceIn, "<th>Provider</th>")
+			check("a project owner with a MIXED downstream table", "/services/"+dfx.serviceIn2, "<th>Consumer</th>")
+			h.logout()
+
+			h.login(boundaryObserverUser, boundaryObserverPass)
+			check("an Observer owning nothing", "/services/"+fx.serviceIn, "<th>Provider</th>")
+			h.logout()
+		})
+	}
+}

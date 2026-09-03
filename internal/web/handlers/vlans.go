@@ -102,21 +102,83 @@ func (a *App) VLANDetail(w http.ResponseWriter, r *http.Request) {
 		a.serverError(w, r, err)
 		return
 	}
+	base := a.base(r, "VLAN "+vlan.Name, "vlans")
+	writable := writableInterfaceOptions(base, options)
 	a.Render.Page(w, http.StatusOK, "vlan_detail", struct {
 		Base
 		VLAN     *domain.VLAN
-		Ports    []store.VLANPort
+		Ports    vlanPortRows
 		Prefixes []store.PrefixTreeRow
-		Options  []store.InterfaceOption
-		Modes    []string
+		// Options is FILTERED to ports on assets the caller may write, the
+		// same reasoning and the same helper (writableInterfaceOptions,
+		// forms.go) newLinkForm's Targets already uses -- fix-b item 3.
+		// AddPortToVLAN/SetInterfaceVLANs (vlans.go) is ScopeSubjectDerived
+		// through the port's OWNING ASSET (authorizeInterfaceSubject), so a
+		// picker offering a port on an asset the caller does not own would
+		// be offered-and-refused, the defect Task 3 already closed for the
+		// dependency and link pickers.
+		Options []store.InterfaceOption
+		// OptionsHint explains a picker the filter has thinned, so an
+		// operator is never handed a short or blank required <select> with
+		// no account of why -- the same defect fix-b item 2 closed for the
+		// dependency and link pickers, which this form was missed out of.
+		OptionsHint string
+		Modes       []string
 	}{
-		Base:     a.base(r, "VLAN "+vlan.Name, "vlans"),
+		Base:     base,
 		VLAN:     vlan,
-		Ports:    ports,
+		Ports:    vlanPortRowsFor(ports, base.CanWriteEntity),
 		Prefixes: on,
-		Options:  options,
-		Modes:    domain.VLANModes,
+		Options:  writable,
+		OptionsHint: pickerHint(len(writable), len(options),
+			"There are no ports in the estate yet.",
+			"Every port belongs to an asset you do not own.",
+			"Showing %d of %d ports -- the rest are on assets you do not own."),
+		Modes: domain.VLANModes,
 	})
+}
+
+// vlanPortRow decorates one VLAN membership row with CanWrite/ShowActions --
+// the same two-field shape depRowData uses (forms.go) and for the identical
+// reason (fix-b item 3). Port-to-VLAN membership
+// (AddPortToVLAN/RemovePortFromVLAN, vlans.go's SetInterfaceVLANs) is
+// ScopeSubjectDerived through the port's OWNING ASSET
+// (authorizeInterfaceSubject, internal/store/network.go), so two ports on
+// the SAME VLAN can have different owners -- a page-wide .CanWrite over-offers
+// Remove on a foreign port's row and, the one time a project owner's own
+// port and a foreign one share a table, leaves the header one column short
+// of the writable row (the exact defect TestDependencyTableHeaderMatchesItsRows
+// pins for dependencies).
+type vlanPortRow struct {
+	store.VLANPort
+	CanWrite    bool
+	ShowActions bool
+}
+
+type vlanPortRows []vlanPortRow
+
+// AnyWritable reports whether any port in the table has CanWrite -- whether
+// the actions column exists at all this render. Mirrors
+// depRowList.AnyWritable (forms.go).
+func (rows vlanPortRows) AnyWritable() bool {
+	for _, r := range rows {
+		if r.CanWrite {
+			return true
+		}
+	}
+	return false
+}
+
+func vlanPortRowsFor(ports []store.VLANPort, covers func(entityType, id string) bool) vlanPortRows {
+	out := make(vlanPortRows, len(ports))
+	for i, p := range ports {
+		out[i] = vlanPortRow{VLANPort: p, CanWrite: covers("asset", p.AssetID)}
+	}
+	any := out.AnyWritable()
+	for i := range out {
+		out[i].ShowActions = any
+	}
+	return out
 }
 
 // VLANCreate declares a broadcast domain.

@@ -240,17 +240,23 @@
           <td class="mono" style="font-size:12px;color:var(--muted)">
             {{if .PeerAsset}}{{.PeerAsset}} · {{.PeerPort}}{{else}}—{{end}}
           </td>
-          {{/* Editing the port itself is asset-scoped (subject-derived);
-               unpatching is a "link" write, which is ScopeTopology and stays
-               Administrator-only (1.0 item 1's DEFER list) -- so the two
-               controls in this cell are gated separately, not on one shared
-               .CanWrite the way this cell used to be. */}}
-          {{if or ($.CanWriteEntity "asset" $.Asset.ID) (and .IsPatched $.IsAdmin)}}
+          {{/* Editing the port itself is single-subject (subject-derived):
+               the port's only owner is this asset, so it is gated on
+               CanWriteEntity for $.Asset.ID alone. Unpatching is "link",
+               ScopeSubjectDerived with TWO subjects (authorizeLinkSubjects,
+               internal/store/network.go) -- a project owner may retire a
+               cable only when they own BOTH ends. .CanUnpatch is computed
+               once, in Go, by canWriteLink (forms.go's interfaceRowsFor) --
+               the same helper this rule is pinned to everywhere else it is
+               checked -- rather than re-derived here with an inline
+               `and`/`CanWriteEntity` chain that no compiler and no test tied
+               back to authorizeLinkSubjects (fix-b item 5). */}}
+          {{if or ($.CanWriteEntity "asset" $.Asset.ID) .CanUnpatch}}
           <td style="white-space:nowrap">
             {{if $.CanWriteEntity "asset" $.Asset.ID}}
             <a class="btn btn-sm" href="/assets/{{$.Asset.ID}}?edit={{.ID}}#ports">Edit</a>
             {{end}}
-            {{if and .IsPatched $.IsAdmin}}
+            {{if .CanUnpatch}}
             <form method="post" action="/links/{{.LinkID}}/retire" style="display:inline"
                   hx-post="/links/{{.LinkID}}/retire"
                   hx-confirm="Unpatch {{.Name}}? The record is kept.">
@@ -272,9 +278,14 @@
   {{end}}
 
   {{/* interface/ip_address are asset-scoped (see the table header comment
-       above); "link" is a patch cable and stays Administrator-only -- a
-       shared panel gated on one .CanWrite would show a project owner a form
-       (LinkForm) the server refuses. Split, not shared. */}}
+       above). "link" is a patch cable, ScopeSubjectDerived with TWO subjects
+       (authorizeLinkSubjects) -- but a new cable's near end is always THIS
+       asset, so gating the create form on CanWriteEntity for this asset alone
+       is correct: it is exactly the "near end the operator is already on"
+       (Task 3). The far end is what LinkForm.Targets filters, not what gates
+       whether the form appears at all. A project owner who owns this asset
+       gets the form; the far-end picker then narrows to ports they may
+       actually cable to. */}}
   {{if or ($.CanWriteEntity "asset" .Asset.ID) .IsAdmin}}
   <div class="panel-body" style="border-top:1px solid var(--border)">
     {{if $.CanWriteEntity "asset" .Asset.ID}}
@@ -283,11 +294,11 @@
       {{template "ip_address_form" .IPAddressForm}}
     </div>
     {{end}}
-    {{if .IsAdmin}}
+    {{/* The outer if is exactly this form's near-end gate too: reaching here
+         means CanWriteEntity(asset) or IsAdmin already held. */}}
     <div style="margin-top:12px">
       {{template "link_form" .LinkForm}}
     </div>
-    {{end}}
   </div>
   {{end}}
 </div>

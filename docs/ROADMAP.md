@@ -60,6 +60,54 @@ function rather than by project membership directly (`docs/AUDIT.md`'s
   middleware, rather than duplicated into every `Covers` call a permit could
   ever be asked to answer.
 
+**The two-ended capability is now reachable in a browser — WP-1.1 items 1-3
+shipped the rule, this shipped the controls.** Widening the store was only
+half of it: every control for `dependency` and `link` was still gated on
+Administrator, so a project owner who owned both ends could exercise the
+right only by direct POST, and the E2E specs proving it worked had to forge
+requests because no form would ever offer them one. Three things closed
+that, all gated on exactly the predicate the store enforces:
+
+- **Row controls.** A dependency row's Retire/Verify now render when the
+  caller's permit covers the consumer service AND the provider's owning
+  service. (There is no Edit control on a dependency row and no route
+  reaches `UpdateDependency` — an earlier version of this entry claimed
+  Edit too; it did not exist.) No store change was needed:
+  `DependencyRow.ProviderSvc` was already resolved by the list query
+  through both the endpoint and the route-to-frontend-endpoint paths — the
+  same derivation `authorizeDependencySubjects` performs. The doc comment
+  that had argued this was not computable in the view model was simply
+  wrong.
+- **Unpatch.** Gated on both end assets. `InterfaceRow` carried the peer's
+  *name* but not its id, so one column was added to a join that already
+  existed. Note that the "is this port patched" guard turned out to be
+  load-bearing rather than tidy: an administrator's permit covers an empty
+  id unconditionally, so without it an unpatched port would offer Unpatch.
+- **Create pickers are filtered, not offered-and-refused.** A project owner's
+  far-end dropdown lists only interfaces, endpoints and routes they can
+  write. Filtering happens in Go against `permit.Covers` rather than in SQL.
+  **What is actually shared between a picker and the store's enforcement is
+  `permit.Covers` itself, not the subject resolution** — which two ids get
+  asked about it. An earlier version of this entry claimed the two "cannot
+  drift apart" by construction; that overstated it. For `dependency` and
+  `link`, the two-ended subject resolution is now pinned to one function
+  each (`canWriteDependency`, `canWriteLink` in
+  `internal/web/handlers/forms.go`), called from every render site
+  (the table, the standalone verify re-render, and — for `link` — the
+  per-port Unpatch control), so it has exactly one place to go wrong
+  rather than one per call site. **Filtering is a courtesy, never the
+  enforcement**: a forged out-of-scope submission is still refused by the
+  store, and the tests assert that independently of what the UI offers.
+
+One defect this created is worth recording because nothing in the suite could
+have caught it. Widening the row's actions cell left the matching `<th>` on
+`.IsAdmin`, so a project owner who owned both ends got a table one column
+short — invisible to every existing assertion, because they all search for a
+control's presence and none counts cells. The browser pass found it. The
+header now asks `depRowList.AnyWritable`, computed per table rather than per
+page, because a two-ended permission can legitimately differ between two rows
+of the same table.
+
 **`certificate`, `cluster` stay Administrator-only — and there IS an
 argument, not merely "not needed yet".** Neither has a single owning
 subject the way `asset_cost` has one owning asset: both are many-to-many
