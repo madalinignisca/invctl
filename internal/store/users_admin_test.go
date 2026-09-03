@@ -391,6 +391,31 @@ func TestTheLastAdministratorGuardCoversAllThreeVerbs(t *testing.T) {
 // under read-committed and both commit, leaving zero. If it does not fail,
 // the barrier below is not forcing the interleaving and this test is
 // decoration.
+// waitForAdministratorCount blocks until the estate reports want active
+// administrators, so a test can wait on a committed effect instead of a
+// duration. A fixed sleep here would be a guess calibrated to whichever
+// machine it was written on.
+func waitForAdministratorCount(t *testing.T, s *SQLStore, ctx context.Context, want int) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		n, err := s.CountActiveAdministrators(ctx)
+		if err != nil {
+			t.Errorf("counting administrators while waiting for the winner to commit: %v", err)
+			return
+		}
+		if n == want {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Errorf("waited 5s for the active administrator count to reach %d, still %d -- "+
+				"the winning demotion never committed", want, n)
+			return
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+}
+
 func TestTwoSimultaneousDemotionsCannotRemoveTheLastAdministrator(t *testing.T) {
 	if os.Getenv(postgresDSNEnv) == "" {
 		t.Skipf("%s not set: this test exercises PostgreSQL's read-committed isolation "+
@@ -423,7 +448,24 @@ func TestTwoSimultaneousDemotionsCannotRemoveTheLastAdministrator(t *testing.T) 
 	proceed := make(chan struct{})
 	var closeOnce sync.Once
 	testAfterAdministratorCount = func() {
-		if atomic.AddInt32(&arrivals, 1) >= 2 {
+		n := atomic.AddInt32(&arrivals, 1)
+		if n >= 3 {
+			// A RETRY, and this is what stopped the test being timing-bound.
+			// The loser's transaction was refused as unserialisable and
+			// writeSerializable is trying again; it must re-read AFTER the
+			// winner commits, or it races the same window and burns its
+			// remaining attempts on the same conflict. That is precisely how
+			// this test failed twice in CI while passing every local run --
+			// the difference was not the code but how long the winner's
+			// commit took on a loaded database.
+			//
+			// Waiting for the observable effect rather than sleeping is the
+			// whole point: a sleep long enough for a busy machine is a sleep
+			// wasted on every fast one, and still only probably long enough.
+			waitForAdministratorCount(t, s, ctx, 1)
+			return
+		}
+		if n >= 2 {
 			closeOnce.Do(func() { close(proceed) })
 		}
 		select {
