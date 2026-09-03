@@ -1287,3 +1287,92 @@ func TestChangingTheOwnerWritesExactlyOneChangeLogRowWhoseDiffShowsOldAndNew(t *
 		})
 	}
 }
+
+// TestOptionsForFieldsBatchesEveryFieldsOptionsInOneQuery is WP-A4 follow-up
+// item 2's store-level unit: OptionsForFields is what loadCustomFieldsPanel
+// (internal/web/handlers/customvalues.go) now calls once, with every select
+// field's id already collected, instead of calling GetCustomField once per
+// field inside its render loop. See
+// TestCustomFieldsPanelOptionQueriesDoNotScaleWithFieldCount
+// (internal/web/customfieldvalues_query_count_test.go) for the measured
+// proof at the real query-count level; this is the narrower unit proof that
+// the method itself returns the right shape: live and retired options
+// together (GetCustomField's own contract), keyed by field id, and a field
+// id with no options at all simply absent from the map rather than an error.
+func TestOptionsForFieldsBatchesEveryFieldsOptionsInOneQuery(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newCustomFieldFixture(t, e)
+			tier := mustField(t, f, "asset", "tier", domain.CustomFieldSelect)
+			mustOptions(t, f, tier, "gold", "silver")
+			// Retire "silver" so the retired-together-with-live half of the
+			// contract is actually exercised, not just the live half.
+			if err := f.s.SetCustomFieldOptions(f.ctx, domain.AdministratorPermit(f.actor), tier,
+				fieldVersion(t, f, tier), []domain.CustomFieldOption{{Value: "gold", Label: "Gold"}}); err != nil {
+				t.Fatalf("retiring silver: %v", err)
+			}
+
+			priority := mustField(t, f, "asset", "priority", domain.CustomFieldSelect)
+			mustOptions(t, f, priority, "p1", "p2")
+
+			// A non-select field, and one with no options at all -- both
+			// must simply be absent from the result, never an error.
+			text := mustField(t, f, "asset", "notes", domain.CustomFieldText)
+
+			got, err := f.s.OptionsForFields(f.ctx, []string{tier, priority, text})
+			if err != nil {
+				t.Fatalf("OptionsForFields: %v", err)
+			}
+
+			if len(got[tier]) != 2 {
+				t.Fatalf("tier: got %d options, want 2 (one live, one retired): %+v", len(got[tier]), got[tier])
+			}
+			var sawLiveGold, sawRetiredSilver bool
+			for _, o := range got[tier] {
+				switch o.Value {
+				case "gold":
+					sawLiveGold = o.RetiredAt == nil
+				case "silver":
+					sawRetiredSilver = o.RetiredAt != nil
+				}
+			}
+			if !sawLiveGold {
+				t.Errorf("tier's live option %q did not come back live: %+v", "gold", got[tier])
+			}
+			if !sawRetiredSilver {
+				t.Errorf("tier's retired option %q did not come back retired: %+v", "silver", got[tier])
+			}
+
+			if len(got[priority]) != 2 {
+				t.Errorf("priority: got %d options, want 2: %+v", len(got[priority]), got[priority])
+			}
+
+			if _, ok := got[text]; ok {
+				t.Errorf("a non-select field must be absent from the map, not an empty slice: got %+v", got[text])
+			}
+			if _, ok := got["not-a-real-field-id"]; ok {
+				t.Errorf("an id naming no field at all must be absent too")
+			}
+		})
+	}
+}
+
+// TestOptionsForFieldsOfAnEmptyListReadsNothing proves the no-op case does
+// not run a query at all (chunkIDs would otherwise still build and run a
+// `WHERE field_id IN (NULL)` round trip for zero ids), and returns an empty,
+// non-nil map -- the shape loadCustomFieldsPanel's own range loop over it
+// (a select field's id simply missing) already assumes.
+func TestOptionsForFieldsOfAnEmptyListReadsNothing(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newCustomFieldFixture(t, e)
+			got, err := f.s.OptionsForFields(f.ctx, nil)
+			if err != nil {
+				t.Fatalf("OptionsForFields(nil): %v", err)
+			}
+			if len(got) != 0 {
+				t.Errorf("got %d entries for an empty field list, want 0: %+v", len(got), got)
+			}
+		})
+	}
+}

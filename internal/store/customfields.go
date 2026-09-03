@@ -314,6 +314,49 @@ func (t *tx) requireActiveOwnerTeam(ctx context.Context, ownerTeamID string) err
 	return nil
 }
 
+// OptionsForFields loads the full option list -- live and retired together,
+// exactly what GetCustomField returns for one field -- for every field id
+// given, in as few queries as the id count requires (chunkIDs' 500-wide
+// batches; one for anything this feature will ever see in practice).
+//
+// WP-A4 FOLLOW-UP ITEM 2: loadCustomFieldsPanel
+// (internal/web/handlers/customvalues.go) used to call GetCustomField once
+// PER SELECT FIELD on every asset and service detail-page render -- an N+1 on
+// the hottest page in the product. This is what it calls instead: the panel
+// already has every live field definition before its loop starts, so every
+// select field's id is known up front and their options can be fetched
+// together. postCustomFields' own per-field GetCustomField call (validating a
+// submission against each select field's live options) is untouched -- that
+// path only ever touches the handful of fields a single submission names, not
+// every select field an entity type defines, so it was never the N+1 this
+// item is about.
+//
+// A field id absent from the returned map holds no options -- true both for a
+// field that has none yet and for one that does not exist -- so the caller
+// must treat a missing key as "no options", never as an error.
+func (s *SQLStore) OptionsForFields(ctx context.Context, fieldIDs []string) (map[string][]domain.CustomFieldOption, error) {
+	result := make(map[string][]domain.CustomFieldOption, len(fieldIDs))
+	if len(fieldIDs) == 0 {
+		return result, nil
+	}
+	for _, chunk := range chunkIDs(fieldIDs) {
+		if len(chunk) == 0 {
+			continue
+		}
+		var opts []domain.CustomFieldOption
+		if err := s.read(ctx, &opts,
+			`SELECT * FROM custom_field_option WHERE field_id IN (`+placeholders(len(chunk))+`)
+			 ORDER BY field_id, position`,
+			anySlice(chunk)...); err != nil {
+			return nil, fmt.Errorf("loading options for %d custom fields: %w", len(chunk), err)
+		}
+		for _, o := range opts {
+			result[o.FieldID] = append(result[o.FieldID], o)
+		}
+	}
+	return result, nil
+}
+
 // UpdateCustomField persists field changes. The label and the description
 // stay editable forever -- the two things an administrator actually needs to
 // correct -- but a Kind change is refused once any value exists: retyping a

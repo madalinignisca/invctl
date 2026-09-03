@@ -55,6 +55,11 @@ type harness struct {
 	client *http.Client
 	store  *store.SQLStore
 	refs   *seed.Refs
+	// dsn is the on-disk path this harness's SQLite database was opened
+	// against. Exposed only so a test can open a SECOND, read-only
+	// connection to the same file -- see queryCountingHarness in
+	// customfieldvalues_query_count_test.go, which is the only caller.
+	dsn string
 }
 
 // Monitoring credentials the harness configures (docs/AUDIT.md rule 6). They
@@ -373,7 +378,7 @@ func newHarnessSecure(t *testing.T, creds []config.AgentCredential, readerCreds 
 		},
 	}
 
-	return &harness{t: t, server: server, client: client, store: st, refs: refs}
+	return &harness{t: t, server: server, client: client, store: st, refs: refs, dsn: dsn}
 }
 
 // staticFS serves the real embedded assets, so a template referencing a
