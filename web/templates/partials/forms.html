@@ -604,7 +604,7 @@
           <option value="{{.ID}}">{{.ServiceCode}} / {{.Name}} ({{.Addr}})</option>
         {{end}}
       </select>
-      {{if not .AllEndpoints}}<div class="field-hint">There is nothing here you can depend on -- every live endpoint belongs to a service you don't own.</div>{{end}}
+      {{if .EndpointHint}}<div class="field-hint">{{.EndpointHint}}</div>{{end}}
     </div>
     <div class="field" x-show="usesRoute">
       <label for="dep-route">Provider route</label>
@@ -614,7 +614,7 @@
           <option value="{{.ID}}">{{.FrontendService}} → {{deref .MatchValue}}</option>
         {{end}}
       </select>
-      {{if not .AllRoutes}}<div class="field-hint">There is nothing here you can depend on -- every route's frontend belongs to a service you don't own.</div>{{end}}
+      {{if .RouteHint}}<div class="field-hint">{{.RouteHint}}</div>{{end}}
     </div>
     {{with index .Errors "provider"}}<div class="field-error">{{.}}</div>{{end}}
   </div>
@@ -771,7 +771,7 @@
         <select id="link-target" name="target_interface_id">
           {{range .Targets}}<option value="{{.ID}}">{{.AssetName}} / {{.Name}}</option>{{end}}
         </select>
-        {{if not .Targets}}<div class="field-hint">There is nothing here you can cable to -- every unpatched port belongs to an asset you don't own.</div>{{end}}
+        {{if .TargetHint}}<div class="field-hint">{{.TargetHint}}</div>{{end}}
         {{with index .Errors "target_interface_id"}}<div class="field-error">{{.}}</div>{{end}}
         {{with index .Errors "b_interface_id"}}<div class="field-error">{{.}}</div>{{end}}
       </div>

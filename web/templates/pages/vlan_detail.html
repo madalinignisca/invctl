@@ -17,31 +17,23 @@
   {{if .VLAN.Description}}<p class="lede">{{deref .VLAN.Description}}</p>{{end}}
 </div>
 
-{{/* LEFT ON .CanWrite DELIBERATELY -- task 6's census flagged this as
-     uncertain rather than mechanically flipping it to .IsAdmin, and the
-     controller's ruling was to leave it. Port-to-VLAN membership
-     (AddPortToVLAN/RemovePortFromVLAN, vlans.go's SetInterfaceVLANs) is
-     genuinely ScopeSubjectDerived: authorizeInterfaceSubject scopes it to
-     the port's OWNING ASSET, so a project owner who owns that asset can
-     already add or remove its ports here today -- .CanWrite is CORRECT for
-     that case, not merely tolerated. It only over-offers the Add-port
-     form and the per-row Remove button for ports on assets the operator
-     does NOT own, which the store then 403s -- a visible, reportable
-     error, not a silent one.
+{{/* Port-to-VLAN membership (AddPortToVLAN/RemovePortFromVLAN, vlans.go's
+     SetInterfaceVLANs) is ScopeSubjectDerived through the port's OWNING
+     ASSET (authorizeInterfaceSubject, internal/store/network.go) -- the
+     same single-subject shape asset_detail.html and service_detail.html
+     already gate their own rows on. vlanPortRow.CanWrite (vlans.go) is
+     `$.CanWriteEntity "asset" .AssetID`, computed once per port in Go: the
+     row already carries the port's owning asset id (the link two lines
+     below proves it), so there was never a missing primitive here, only a
+     page-wide .CanWrite left over from before this was recognised as
+     subject-derived (fix-b item 3 -- the previous version of this comment
+     argued a view-model change was needed to fix it "honestly"; it wasn't,
+     the field already existed).
 
-     Switching this to .IsAdmin would be worse, not safer: it would remove
-     a capability that genuinely works for a project owner acting on their
-     own hardware, and nobody would ever notice the regression because an
-     under-offered control fails silently (the button just isn't there) --
-     see task-6-report.md's "over-offering vs under-offering" note. The
-     honest fix is a view-model change, not a template one: this page
-     would need to carry each port's owning asset id so
-     .CanWriteEntity "asset" <that id> could answer per row, the same
-     shape asset_detail.html and service_detail.html already use. Base
-     .CanWriteEntity does not support "interface" as an entityType today
-     (it only asks the permit's Covers for "asset"/"service"/"circuit"),
-     so this is a primitive to add, not a one-line template fix -- flagged
-     as a follow-up in task-6-report.md, not built here. */}}
+     The header asks .Ports.AnyWritable, per table rather than per page,
+     for the same reason depRowList.AnyWritable does (rows.html): two
+     ports on the SAME VLAN can have different owners, so no page-level
+     flag can stand in for whether the actions column exists. */}}
 <div class="grid-2">
   <div class="panel">
     <div class="panel-head">
@@ -51,7 +43,7 @@
     {{if .Ports}}
     <div class="scroll-x">
       <table>
-        <thead><tr><th>Asset</th><th>Port</th><th>Mode</th>{{if .CanWrite}}<th></th>{{end}}</tr></thead>
+        <thead><tr><th>Asset</th><th>Port</th><th>Mode</th>{{if .Ports.AnyWritable}}<th></th>{{end}}</tr></thead>
         <tbody>
           {{range .Ports}}
           <tr>
@@ -61,12 +53,14 @@
               {{if eq .Mode "untagged"}}<span class="pill pill-ok">access</span>
               {{else}}<span class="pill pill-info">trunk</span>{{end}}
             </td>
-            {{if $.CanWrite}}
+            {{if $.Ports.AnyWritable}}
             <td style="white-space:nowrap">
+              {{if .CanWrite}}
               <form method="post" action="/vlans/{{$.VLAN.ID}}/ports/{{.InterfaceID}}/remove" style="display:inline">
                 <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
                 <button class="btn btn-sm btn-danger" type="submit">Remove</button>
               </form>
+              {{end}}
             </td>
             {{end}}
           </tr>

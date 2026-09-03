@@ -97,9 +97,19 @@ func (a *App) DependencyVerify(w http.ResponseWriter, r *http.Request) {
 	// Swap just the row that changed, and confirm the action out of band --
 	// the row itself has nowhere to show a message.
 	b := a.base(r, "", "")
+	// CanWrite uses the same canWriteDependency (forms.go) depRows calls, so
+	// this standalone re-render and the table it swaps into can never
+	// disagree on the two-ended rule (fix-b item 5). ShowActions is
+	// unconditionally true, not the table's AnyWritable: this handler only
+	// reaches here after a.Store.VerifyDependency has already accepted the
+	// write, which itself requires the two-ended authorizeDependencySubjects
+	// check to pass -- so CanWrite is always true on this path, and the row
+	// being swapped in must carry its own actions cell regardless of what any
+	// OTHER row in the (untouched) table looks like.
 	a.Render.PartialWithOOB(w, http.StatusOK, "dependency_row", depRowData{
 		Dep:         dep,
-		CanWrite:    b.CanWriteEntity("service", dep.ConsumerServiceID) && b.CanWriteEntity("service", dep.ProviderSvc),
+		CanWrite:    canWriteDependency(b.CanWriteEntity, dep.ConsumerServiceID, dep.ProviderSvc),
+		ShowActions: true,
 		CSRF:        b.CSRF,
 		Direction:   directionOf(r),
 		DataClasses: classes[id],

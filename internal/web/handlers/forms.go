@@ -9,6 +9,7 @@
 package handlers
 
 import (
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -297,6 +298,12 @@ type dependencyFormData struct {
 	Spec         domain.DependencySpec
 	AllEndpoints []store.EndpointRow
 	AllRoutes    []store.RouteRow
+	// EndpointHint and RouteHint explain an AllEndpoints/AllRoutes picker that
+	// filtering left shorter than the estate actually is -- fix-b item 2.
+	// Empty when no explanation is needed (the picker holds everything the
+	// estate has to offer, filtered or not). See pickerHint.
+	EndpointHint string
+	RouteHint    string
 	Identities   []domain.Identity
 	Natures      []string
 	ClassOptions []store.VocabularyTerm
@@ -323,6 +330,9 @@ type linkFormData struct {
 	Errors     map[string]string
 	Interfaces []store.InterfaceRow    // this asset's unpatched ports, the "from" side
 	Targets    []store.InterfaceOption // candidates across the estate, the "to" side
+	// TargetHint is Targets' empty-picker/partial-filtering explanation --
+	// see pickerHint and dependencyFormData.EndpointHint.
+	TargetHint string
 }
 
 type prefixFormData struct {
@@ -535,16 +545,57 @@ func (a *App) newEndpointEditForm(r *http.Request, e *domain.Endpoint, errs map[
 // this is a widening for a project owner, never a narrowing for anyone else.
 func (a *App) newDependencyForm(r *http.Request, serviceID string, errs map[string]string, spec domain.DependencySpec, endpoints []store.EndpointRow, routes []store.RouteRow, identities []domain.Identity, classes []store.VocabularyTerm) dependencyFormData {
 	base := a.base(r, "Services", "services")
+	filteredEndpoints := writableEndpoints(base, endpoints)
+	filteredRoutes := writableRoutes(base, routes)
 	return dependencyFormData{
 		Base:         base,
 		ServiceID:    serviceID,
 		Errors:       orEmpty(errs),
 		Spec:         spec,
-		AllEndpoints: writableEndpoints(base, endpoints),
-		AllRoutes:    writableRoutes(base, routes),
+		AllEndpoints: filteredEndpoints,
+		AllRoutes:    filteredRoutes,
+		EndpointHint: pickerHint(len(filteredEndpoints), len(endpoints),
+			"There are no live endpoints in the estate yet.",
+			"There is nothing here you can depend on -- every live endpoint belongs to a service you don't own.",
+			"Showing %d of %d endpoints -- the rest belong to services you don't own."),
+		RouteHint: pickerHint(len(filteredRoutes), len(routes),
+			"There are no routes in the estate yet.",
+			"There is nothing here you can depend on -- every route's frontend belongs to a service you don't own.",
+			"Showing %d of %d routes -- the rest belong to services you don't own."),
 		Identities:   identities,
 		Natures:      domain.Natures,
 		ClassOptions: classes,
+	}
+}
+
+// pickerHint explains why a create form's picker holds fewer options than it
+// might, or says nothing when no explanation is needed -- fix-b item 2. It
+// existed before as `{{if not .AllEndpoints}}` in the template, which fires
+// on EMPTINESS rather than on FILTERING and is wrong on both counts:
+//
+//   - The common case filtering actually produces is PARTIAL, not empty --
+//     a project owner who owns 2 of an estate's 50 endpoints saw a two-entry
+//     dropdown with no explanation, reading as "the estate has two
+//     endpoints".
+//   - The condition also fired for an ADMINISTRATOR whenever the estate
+//     genuinely had nothing to offer, telling them "everything here belongs
+//     to a service you don't own" -- false for someone whose permit covers
+//     the whole estate.
+//
+// filtered is what the caller's own scope kept; total is what the estate
+// actually holds before filtering. total == 0 is the estate itself having
+// nothing, true for an Administrator too, so it gets its own honest message
+// rather than reusing the "belongs to someone else" one.
+func pickerHint(filtered, total int, emptyEstate, allExcluded, someExcludedFmt string) string {
+	switch {
+	case total == 0:
+		return emptyEstate
+	case filtered == 0:
+		return allExcluded
+	case filtered < total:
+		return fmt.Sprintf(someExcludedFmt, filtered, total)
+	default:
+		return ""
 	}
 }
 
@@ -600,12 +651,17 @@ func (a *App) newIPAddressForm(r *http.Request, assetID string, errs map[string]
 // disagree.
 func (a *App) newLinkForm(r *http.Request, assetID string, errs map[string]string, interfaces []store.InterfaceRow, targets []store.InterfaceOption) linkFormData {
 	base := a.base(r, "Assets", "assets")
+	filteredTargets := writableInterfaceOptions(base, targets)
 	return linkFormData{
 		Base:       base,
 		AssetID:    assetID,
 		Errors:     orEmpty(errs),
 		Interfaces: unpatchedInterfaces(interfaces),
-		Targets:    writableInterfaceOptions(base, targets),
+		Targets:    filteredTargets,
+		TargetHint: pickerHint(len(filteredTargets), len(targets),
+			"There are no unpatched ports in the estate yet.",
+			"There is nothing here you can cable to -- every unpatched port belongs to an asset you don't own.",
+			"Showing %d of %d ports -- the rest belong to assets you don't own."),
 	}
 }
 
@@ -687,10 +743,23 @@ func hostableAssets(assets []store.AssetRow) []store.AssetRow {
 // SecretRef stays gated on isAdmin alone -- see depRows' doc comment for why
 // that is a deliberately different, narrower question than CanWrite.
 type depRowData struct {
-	Dep         *store.DependencyRow
-	CanWrite    bool
-	CSRF        string
-	Direction   string // "upstream" or "downstream"
+	Dep       *store.DependencyRow
+	CanWrite  bool
+	CSRF      string
+	Direction string // "upstream" or "downstream"
+	// ShowActions is set from the TABLE's depRowList.AnyWritable, not from
+	// this row's own CanWrite -- fix-b item 1. A dependency's write
+	// permission is two-ended, so two rows in the same table can legitimately
+	// disagree on CanWrite; if the <td> itself only rendered on CanWrite (the
+	// original defect this replaced), every row in a mixed table would carry
+	// a different cell count than every other row, not just than the header.
+	// The header decides whether the COLUMN exists (AnyWritable, per table);
+	// ShowActions carries that same table-wide answer onto every row so they
+	// all render the identical number of cells; CanWrite alone then decides,
+	// per row, whether the cell is empty or holds the buttons.
+	// TestDependencyTableHeaderMatchesItsRows pins this by walking every
+	// <tr>, not just the first, in a fixture with a mixed table.
+	ShowActions bool
 	DataClasses []string
 	// SecretRef is the identity's secret_ref, ALREADY REDACTED for anyone who
 	// is not a full Administrator -- computed once here, in the handler's
@@ -723,7 +792,11 @@ type depRowData struct {
 // administrator. Found by the E2E pass, not by any assertion.
 type depRowList []depRowData
 
-// AnyWritable reports whether any row will render its actions cell.
+// AnyWritable reports whether any row in the table has CanWrite, i.e.
+// whether the actions column exists at all this render. Every row's
+// ShowActions is set from this same table-wide answer (depRows), so once the
+// column exists every row contributes a cell for it -- CanWrite alone then
+// decides, per row, whether that cell is empty or holds the buttons.
 func (rows depRowList) AnyWritable() bool {
 	for _, r := range rows {
 		if r.CanWrite {
@@ -738,14 +811,47 @@ func depRows(deps []store.DependencyRow, classes map[string][]string, direction,
 	for i := range deps {
 		out[i] = depRowData{
 			Dep:         &deps[i],
-			CanWrite:    covers("service", deps[i].ConsumerServiceID) && covers("service", deps[i].ProviderSvc),
+			CanWrite:    canWriteDependency(covers, deps[i].ConsumerServiceID, deps[i].ProviderSvc),
 			CSRF:        csrf,
 			Direction:   direction,
 			DataClasses: classes[deps[i].ID],
 			SecretRef:   secretRefDisplay(deps[i].IdentitySecretRef, isAdmin),
 		}
 	}
+	// Second pass, deliberately: ShowActions needs the WHOLE table's answer
+	// (depRowList.AnyWritable), which does not exist until every row's
+	// CanWrite has been set above.
+	anyWritable := depRowList(out).AnyWritable()
+	for i := range out {
+		out[i].ShowActions = anyWritable
+	}
 	return out
+}
+
+// canWriteDependency is the one place a dependency's two-ended write rule is
+// evaluated on the read path, shared by depRows (the table) and
+// DependencyVerify (deps.go, the standalone re-render after a verify) so the
+// two call sites cannot drift the way the table header and its rows once
+// did (fix-b item 5). It mirrors authorizeDependencySubjects
+// (internal/store/deps.go): a project owner may write a dependency only when
+// their permit covers BOTH the consumer service and the provider's owning
+// service. covers is the caller's own predicate (Base.CanWriteEntity, or an
+// equivalent in a test) -- what is actually shared between here and the
+// store is permit.Covers itself; the SUBJECT RESOLUTION (which two ids to
+// ask it about) is what this function pins, and pinning it in one function
+// is what makes "cannot drift" true rather than merely asserted.
+func canWriteDependency(covers func(entityType, id string) bool, consumerServiceID, providerServiceID string) bool {
+	return covers("service", consumerServiceID) && covers("service", providerServiceID)
+}
+
+// canWriteLink is canWriteDependency's sibling for "link": a project owner
+// may retire a cable only when their permit covers the asset on BOTH ends
+// (authorizeLinkSubjects, internal/store/network.go). Before fix-b item 5
+// this was written out inline in asset_detail.html, with no compiler and no
+// test coupling the template's `and`/`CanWriteEntity` chain to the store
+// function it was meant to mirror.
+func canWriteLink(covers func(entityType, id string) bool, nearAssetID, peerAssetID string) bool {
+	return covers("asset", nearAssetID) && covers("asset", peerAssetID)
 }
 
 // secretRefDisplay applies the read-path redaction identity.secret_ref needs

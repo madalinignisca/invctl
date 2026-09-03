@@ -12,6 +12,8 @@ import (
 	"context"
 	"net/http"
 	"net/url"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -333,6 +335,142 @@ func TestEmptyPickerShowsHintNotBlankSelect(t *testing.T) {
 			if !strings.Contains(ownerBody, "There is nothing here you can cable to") {
 				t.Errorf("an emptied link-target picker carries no explanatory hint -- an empty " +
 					"dropdown with no explanation reads as a broken page")
+			}
+		})
+	}
+}
+
+// showingCount matches pickerHint's (forms.go) "Showing %d of %d ..." wording.
+var showingCount = regexp.MustCompile(`Showing (\d+) of (\d+) ports`)
+
+// TestPartiallyFilteredPickerShowsACount pins fix-b item 2's real defect: the
+// hint used to fire on `not .AllEndpoints` -- EMPTINESS -- so a project owner
+// who owns SOME but not all of the estate's options got a shortened dropdown
+// with no explanation at all, reading as "the estate has exactly this many
+// endpoints". setupPickerFixture builds exactly this shape for the link
+// picker: pfx.ifaceTargetOwned is kept, pfx.ifaceTargetForeign is dropped, so
+// the owner's Targets is neither empty nor the whole estate -- and the
+// SEEDED estate (setupBoundary calls seed.Load) means the total is not a
+// number this test can predict, only that it must be MORE than what the
+// owner is shown.
+func TestPartiallyFilteredPickerShowsACount(t *testing.T) {
+	for _, eng := range boundaryEngines(t) {
+		t.Run(eng.name, func(t *testing.T) {
+			h, fx := setupBoundary(t, eng)
+			ctx := context.Background()
+			pfx := setupPickerFixture(t, ctx, h, fx)
+
+			h.login(boundaryOwnerUser, boundaryOwnerPassword)
+			ownerBody := body(t, h.get("/assets/"+fx.assetIn, false))
+			ownerSelect := selectBlock(t, ownerBody, "link-target")
+
+			// Precondition: exactly the owned target, not the foreign one --
+			// otherwise this is testing the empty or the unfiltered case, not
+			// the partial one the hint is meant to explain.
+			if !strings.Contains(ownerSelect, `value="`+pfx.ifaceTargetOwned+`"`) {
+				t.Fatalf("owner's link-target picker does not list the owned target %s -- the "+
+					"partial-filtering precondition does not hold", pfx.ifaceTargetOwned)
+			}
+			if strings.Contains(ownerSelect, `value="`+pfx.ifaceTargetForeign+`"`) {
+				t.Fatalf("owner's link-target picker lists the foreign target %s -- the "+
+					"partial-filtering precondition does not hold", pfx.ifaceTargetForeign)
+			}
+
+			if strings.Contains(ownerBody, "There is nothing here you can cable to") {
+				t.Errorf("a PARTIALLY filtered picker (one option kept, one dropped) carries the " +
+					"EMPTY-picker wording -- there is something here, the hint must say so")
+			}
+			m := showingCount.FindStringSubmatch(ownerBody)
+			if m == nil {
+				t.Fatalf("a partially filtered link-target picker does not carry a 'Showing N of M "+
+					"ports' count at all -- an owner who owns only some candidates sees a shortened "+
+					"dropdown with nothing explaining the rest is not theirs: %s", ownerBody)
+			}
+			shown, total := m[1], m[2]
+			// link-target's <select> carries no blank placeholder option (unlike
+			// dep-endpoint/dep-route), so every "<option value=" in it is one of
+			// the owner's actually-offered targets -- link_form's own option
+			// count is the ground truth the hint's "shown" number must agree
+			// with, not an assumption this test makes about the fixture.
+			actualShown := strconv.Itoa(strings.Count(ownerSelect, `<option value="`))
+			if shown != actualShown {
+				t.Errorf("the hint says %q ports shown, but the owner's own <select> carries %s "+
+					"<option> elements -- the count in the hint must match what is actually offered",
+					shown, actualShown)
+			}
+			if total == shown {
+				t.Errorf("the hint says the estate total (%s) equals what is shown (%s) -- that is "+
+					"the no-filtering case's wording, not the partial one this test built (the "+
+					"foreign target %s was proven above to be dropped)", total, shown, pfx.ifaceTargetForeign)
+			}
+		})
+	}
+}
+
+// setupEmptyEstateHarness builds an Administrator against a MIGRATED but
+// UNSEEDED database -- deliberately not setupBoundary, which calls
+// seed.Load and leaves the demo estate's own endpoints, routes and ports in
+// place. TestEmptyEstatePickerTellsAnAdministratorTheTruth needs an estate
+// that genuinely has none of something, and the seeded demo data makes that
+// impossible to construct honestly with setupBoundary. Returns the
+// Administrator's own harness, already logged in, and the one service its
+// dependency-form picker renders against.
+func setupEmptyEstateHarness(t *testing.T, eng boundaryEngine) (*harness, string) {
+	t.Helper()
+	ctx := context.Background()
+	db := eng.open(t)
+	st := store.New(db)
+	h := newBoundaryHarness(t, boundaryAdminUser, st)
+	admin := domain.AdministratorPermit(domain.SystemActor)
+
+	mustBoundaryUser(t, ctx, h, boundaryAdminUser, boundaryAdminPassword, domain.RoleObserver)
+
+	env, err := domain.NewEnvironment(store.NewID(), "empty-estate-env", "Empty Estate",
+		domain.EnvRoleProduction, true, 3, st.Now())
+	if err != nil {
+		t.Fatalf("building the empty-estate environment: %v", err)
+	}
+	if err := h.store.CreateEnvironment(ctx, admin, env); err != nil {
+		t.Fatalf("creating the empty-estate environment: %v", err)
+	}
+	svc := mustBoundaryService(t, ctx, h, "t-empty-estate-svc", env.ID)
+
+	h.login(boundaryAdminUser, boundaryAdminPassword)
+	return h, svc
+}
+
+// TestEmptyEstatePickerTellsAnAdministratorTheTruth pins fix-b item 2's
+// second defect: the same `not .AllEndpoints`/`not .AllRoutes` condition
+// fired for an ADMINISTRATOR whenever the estate genuinely had nothing to
+// offer, and told them "every route's frontend belongs to a service you
+// don't own" -- false for someone whose permit covers the whole estate. An
+// unseeded estate with exactly one service and nothing else has zero
+// routes, so an Administrator's dep-route picker is empty because the
+// ESTATE is empty, not because anything was filtered out of their view.
+func TestEmptyEstatePickerTellsAnAdministratorTheTruth(t *testing.T) {
+	for _, eng := range boundaryEngines(t) {
+		t.Run(eng.name, func(t *testing.T) {
+			h, svc := setupEmptyEstateHarness(t, eng)
+
+			adminBody := body(t, h.get("/services/"+svc, false))
+			adminSelect := selectBlock(t, adminBody, "dep-route")
+			// dep-route always carries a blank `<option value="">—</option>`
+			// placeholder (forms.html) even with zero routes, so the precondition
+			// has to look past it for a NON-EMPTY value -- `<option value=""` alone
+			// would match that placeholder and pass regardless of what AllRoutes held.
+			if regexp.MustCompile(`<option value="[^"]`).MatchString(adminSelect) {
+				t.Fatalf("Administrator's dep-route picker carries a non-blank option -- the estate "+
+					"is not actually empty of routes, so this test proves nothing: %s", adminSelect)
+			}
+
+			if strings.Contains(adminBody, "belongs to a service you don't own") {
+				t.Errorf("an Administrator, whose permit covers the entire estate, sees the " +
+					"'belongs to a service you don't own' hint on a picker that is empty because " +
+					"the ESTATE has no routes at all -- that claim is false for this caller")
+			}
+			if !strings.Contains(adminBody, "There are no routes in the estate yet.") {
+				t.Errorf("an Administrator viewing a genuinely empty dep-route picker gets no "+
+					"honest explanation for the empty dropdown: %s", adminBody)
 			}
 		})
 	}

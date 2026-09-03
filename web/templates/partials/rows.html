@@ -51,8 +51,17 @@
     {{end}}
     {{if eq .Dep.Source "declared"}}{{else}}<div><span class="pill pill-degraded">{{.Dep.Source}}</span></div>{{end}}
   </td>
-  {{if .CanWrite}}
+  {{/* ShowActions is the TABLE's answer (depRowList.AnyWritable, set once by
+       depRows onto every row) -- whether this row renders the trailing <td>
+       at all. CanWrite is THIS row's own two-ended answer -- whether that
+       cell, once it exists, is empty or holds the buttons. Splitting the two
+       keeps every row in a mixed table (some writable, some not) at the same
+       cell count: gating the <td> itself on CanWrite, the way this used to
+       read, made a writable row's cell count disagree with a non-writable
+       row's in the SAME table, not merely with the header (fix-b item 1). */}}
+  {{if .ShowActions}}
   <td style="white-space:nowrap">
+    {{if .CanWrite}}
     {{/* The direction travels with the request: only the client knows which
          of the two panels this row is in, and the row re-renders differently
          for each. Without it every verified row comes back upstream-shaped,
@@ -63,6 +72,7 @@
     <button class="btn btn-sm btn-danger" type="button"
             hx-post="/dependencies/{{.Dep.ID}}/retire"
             hx-confirm="Retire this dependency? The record is kept.">Retire</button>
+    {{end}}
   </td>
   {{end}}
 </tr>

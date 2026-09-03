@@ -164,6 +164,12 @@ func verifyAction(depID string) string {
 	return `hx-post="/dependencies/` + depID + `/verify`
 }
 
+// retireAction is verifyAction's sibling for the Retire button, the other
+// control inside the same {{if .CanWrite}} block.
+func retireAction(depID string) string {
+	return `hx-post="/dependencies/` + depID + `/retire`
+}
+
 // TestDependencyRowControlsAreTwoEnded drives all four ownership
 // combinations through one project owner, on the two service pages that
 // between them carry every dependency the fixture built (a dependency's
@@ -322,39 +328,92 @@ func TestDependencyVerifySecretRefStaysAdministratorOnly(t *testing.T) {
 	}
 }
 
-// upstreamTableColumns returns the number of <th> cells in the upstream
-// dependency table's header and the number of <td> cells in its first data
-// row, for a rendered service page.
+// TestDependencyVerifyFragmentCarriesControlsForTheOwner pins fix-b item 4:
+// DependencyVerify (deps.go) builds its OWN depRowData directly, using its
+// own copy of the two-ended CanWrite check -- since fix-b item 5,
+// canWriteDependency -- rather than going through depRows. Nothing
+// previously asserted what the SWAPPED FRAGMENT ITSELF carries for a
+// project owner: TestDependencyRowControlsAreTwoEnded only ever GETs the
+// page (depRows' path), and
+// TestDependencyVerifySecretRefStaysAdministratorOnly's owner assertions on
+// the POST response check only for the ABSENCE of the secret ref, never for
+// the PRESENCE of the row's own Verify/Retire controls. Narrowing
+// DependencyVerify's CanWrite back to b.IsAdmin -- or forgetting
+// ShowActions on this one-row re-render -- survives every other test in
+// this file and silently strips the controls from the row a project owner
+// just acted on.
+func TestDependencyVerifyFragmentCarriesControlsForTheOwner(t *testing.T) {
+	for _, eng := range boundaryEngines(t) {
+		t.Run(eng.name, func(t *testing.T) {
+			h, fx := setupBoundary(t, eng)
+			ctx := context.Background()
+			dfx := setupDepRowFixture(t, ctx, h, fx)
+			servicePage := "/services/" + fx.serviceIn
+
+			h.login(boundaryOwnerUser, boundaryOwnerPassword)
+			ownerFragment := verifyPost(t, h, servicePage, dfx.depBoth)
+			if !strings.Contains(ownerFragment, verifyAction(dfx.depBoth)) {
+				t.Errorf("POST /dependencies/%s/verify as the owner of BOTH ends does not carry "+
+					"%q in the swapped fragment -- the row lost its own Verify control", dfx.depBoth, verifyAction(dfx.depBoth))
+			}
+			if !strings.Contains(ownerFragment, retireAction(dfx.depBoth)) {
+				t.Errorf("POST /dependencies/%s/verify as the owner of BOTH ends does not carry "+
+					"%q in the swapped fragment -- the row lost its own Retire control", dfx.depBoth, retireAction(dfx.depBoth))
+			}
+		})
+	}
+}
+
+// tableColumns returns the number of <th> cells in the header of the table
+// whose header row contains marker, and the number of <td> cells in EVERY
+// <tr> in that table's <tbody> -- not just the first.
+//
+// EVERY ROW, DELIBERATELY. fix-b item 1 found a test that only ever measured
+// the first data row (upstreamTableColumns, the predecessor of this
+// function): the fixture it drove has TWO writable rows and ONE
+// non-writable one, and the query's own ORDER BY happened to put a writable
+// row first every time, so the test passed on alphabetical luck -- the one
+// row it never looked at, the non-writable one with an actions cell simply
+// omitted, was exactly where the column count disagreed.
 //
 // Crude on purpose: a full HTML parse would be more precise and would also
 // hide the thing being measured behind a library. What matters here is only
-// that the two counts agree.
-func upstreamTableColumns(t *testing.T, page string) (headerCells, rowCells int) {
+// that the counts agree.
+func tableColumns(t *testing.T, page, marker string) (headerCells int, rowCells []int) {
 	t.Helper()
-	const marker = "<th>Provider</th>"
 	i := strings.Index(page, marker)
 	if i < 0 {
-		t.Fatalf("no upstream dependency table on the page -- the fixture must "+
-			"seed one, or this test measures nothing:\n%.400s", page[:min(len(page), 400)])
+		t.Fatalf("no table with marker %q on the page -- the fixture must "+
+			"seed one, or this test measures nothing:\n%.400s", marker, page[:min(len(page), 400)])
 	}
 	head := page[i:]
 	endHead := strings.Index(head, "</thead>")
 	if endHead < 0 {
-		t.Fatal("upstream table header never closes")
+		t.Fatal("table header never closes")
 	}
 	headerCells = strings.Count(head[:endHead], "<th")
 
-	body := head[endHead:]
-	startRow := strings.Index(body, "<tr")
-	endRow := strings.Index(body, "</tr>")
-	if startRow < 0 || endRow < 0 || endRow < startRow {
-		t.Fatal("upstream table has a header but no data row -- fixture problem")
+	tbodyStart := strings.Index(head, "<tbody>")
+	tbodyEnd := strings.Index(head, "</tbody>")
+	if tbodyStart < 0 || tbodyEnd < 0 || tbodyEnd < tbodyStart {
+		t.Fatal("table has a header but no <tbody> -- fixture problem")
 	}
-	rowCells = strings.Count(body[startRow:endRow], "<td")
+	rowsHTML := strings.Split(head[tbodyStart:tbodyEnd], "<tr")
+	for _, r := range rowsHTML[1:] { // rowsHTML[0] is whatever precedes the first <tr
+		end := strings.Index(r, "</tr>")
+		if end < 0 {
+			t.Fatal("a data row never closes")
+		}
+		rowCells = append(rowCells, strings.Count(r[:end], "<td"))
+	}
+	if len(rowCells) == 0 {
+		t.Fatal("table has a header but no data rows -- fixture problem")
+	}
 	return headerCells, rowCells
 }
 
-// TestDependencyTableHeaderMatchesItsRows pins the column count.
+// TestDependencyTableHeaderMatchesItsRows pins the column count, for every
+// row, on BOTH the upstream and the downstream table.
 //
 // WRITTEN BECAUSE IT DID NOT. Widening the row's actions cell to the two-ended
 // CanWrite left the header still gated on IsAdmin, so a project owner who owns
@@ -363,36 +422,55 @@ func upstreamTableColumns(t *testing.T, page string) (headerCells, rowCells int)
 // searched for a control's presence or absence, and none counted anything. The
 // browser pass found it by looking at the table.
 //
-// The header now asks depRowList.AnyWritable, which is per-table rather than
-// per-page because a dependency's write permission is two-ended and two rows in
-// one table can legitimately differ.
+// FIXED WRONG THE FIRST TIME (fix-b item 1). Matching the header to
+// depRowList.AnyWritable is only half the rule: AnyWritable is an
+// EXISTENTIAL ("does the column exist"), correct for the header, but the row
+// partial stayed gated on the per-row CanWrite, an OMIT-the-cell condition.
+// Those two agree only when every row in a table shares one CanWrite -- and
+// a dependency's write permission is two-ended, so a mixed table (some rows
+// writable, some not) is the ORDINARY case, not an edge case, and is exactly
+// what setupDepRowFixture already builds on both tables exercised below. The
+// fix is a THIRD field, ShowActions (forms.go), carrying the table-wide
+// AnyWritable answer onto every row, so a non-writable row in a writable
+// table still contributes an (empty) cell rather than omitting it.
 func TestDependencyTableHeaderMatchesItsRows(t *testing.T) {
 	for _, eng := range boundaryEngines(t) {
 		t.Run(eng.name, func(t *testing.T) {
 			h, fx := setupBoundary(t, eng)
-			setupDepRowFixture(t, context.Background(), h, fx)
+			ctx := context.Background()
+			dfx := setupDepRowFixture(t, ctx, h, fx)
 
-			check := func(who string) {
-				page := body(t, h.get("/services/"+fx.serviceIn, false))
-				header, row := upstreamTableColumns(t, page)
-				if header != row {
-					t.Errorf("%s sees %d header cells and %d row cells in the upstream "+
-						"dependency table -- misaligned by %d", who, header, row, row-header)
+			check := func(who, url, marker string) {
+				page := body(t, h.get(url, false))
+				header, rows := tableColumns(t, page, marker)
+				for i, row := range rows {
+					if row != header {
+						t.Errorf("%s at %s: data row %d has %d <td> cells against a "+
+							"%d-<th> header -- misaligned by %d", who, url, i, row, header, row-header)
+					}
 				}
 			}
 
 			h.login(boundaryAdminUser, boundaryAdminPassword)
-			check("an Administrator")
+			check("an Administrator", "/services/"+fx.serviceIn, "<th>Provider</th>")
+			check("an Administrator", "/services/"+dfx.serviceIn2, "<th>Consumer</th>")
 			h.logout()
 
-			// The case that was broken: the row renders its actions cell for
-			// this person and the header did not.
+			// The MIXED case, on both tables -- not constructed for this test,
+			// but the fixture's ordinary shape: fx.serviceIn's upstream table
+			// carries depBoth and depWithSecret (both ends owned, writable)
+			// alongside depConsumerOnly (provider end foreign, not writable);
+			// dfx.serviceIn2's downstream table carries the same depBoth and
+			// depWithSecret alongside depProviderOnly (consumer end foreign,
+			// not writable). This is the case
+			// TestDependencyRowControlsAreTwoEnded never counted a cell on.
 			h.login(boundaryOwnerUser, boundaryOwnerPassword)
-			check("a project owner owning both ends")
+			check("a project owner with a MIXED upstream table", "/services/"+fx.serviceIn, "<th>Provider</th>")
+			check("a project owner with a MIXED downstream table", "/services/"+dfx.serviceIn2, "<th>Consumer</th>")
 			h.logout()
 
 			h.login(boundaryObserverUser, boundaryObserverPass)
-			check("an Observer owning nothing")
+			check("an Observer owning nothing", "/services/"+fx.serviceIn, "<th>Provider</th>")
 			h.logout()
 		})
 	}

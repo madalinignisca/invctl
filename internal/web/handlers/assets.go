@@ -413,7 +413,7 @@ type assetDetailPage struct {
 	CostPeriods []string
 	Ancestors   []domain.Asset
 	Children    []store.AssetRow
-	Interfaces  []store.InterfaceRow
+	Interfaces  []interfaceRowData
 	Instances   []store.InstanceRow
 	// Health is what the estate reports about this asset, with staleness
 	// applied and any operator override alongside it -- never merged into it.
@@ -489,6 +489,36 @@ type assetDetailPage struct {
 	// entity types where custom fields do not, so they are shown separately
 	// rather than merged into one section.
 	Tags entityTagsPanel
+}
+
+// interfaceRowData decorates one port for asset_detail.html with CanUnpatch,
+// computed once here in Go rather than re-derived by the template (fix-b
+// item 3/5). Editing the port itself is single-subject -- this asset is its
+// only owner, so the page's existing per-row `CanWriteEntity "asset"
+// $.Asset.ID` already answers it correctly. Unpatching is "link", which is
+// TWO-ended (authorizeLinkSubjects, internal/store/network.go): a project
+// owner may retire a cable only when their permit covers the asset on BOTH
+// ends. store.InterfaceRow already carries PeerAssetID, so nothing here
+// re-queries the store -- it reads the column the select already produced
+// and asks canWriteLink (forms.go), the one place that rule is evaluated.
+type interfaceRowData struct {
+	store.InterfaceRow
+	CanUnpatch bool
+}
+
+// interfaceRowsFor builds one asset page's port rows. assetID is this page's
+// own asset -- always the NEAR end of any cable patched into one of its
+// ports, so canWriteLink's first argument is fixed for every row; only the
+// peer (far end) varies row to row.
+func interfaceRowsFor(rows []store.InterfaceRow, covers func(entityType, id string) bool, assetID string) []interfaceRowData {
+	out := make([]interfaceRowData, len(rows))
+	for i, ifc := range rows {
+		out[i] = interfaceRowData{
+			InterfaceRow: ifc,
+			CanUnpatch:   ifc.IsPatched() && canWriteLink(covers, assetID, ifc.PeerAssetID),
+		}
+	}
+	return out
 }
 
 // AssetDetail renders one asset with its containment, ports and workloads.
@@ -825,7 +855,7 @@ func (a *App) renderAssetDetail(w http.ResponseWriter, r *http.Request, status i
 		CostPeriods:     domain.CostPeriods,
 		Ancestors:       ancestors,
 		Children:        children,
-		Interfaces:      interfaces,
+		Interfaces:      interfaceRowsFor(interfaces, assetBase.CanWriteEntity, id),
 		Instances:       instances,
 		Health:          health,
 		InstanceHealth:  instanceHealth,

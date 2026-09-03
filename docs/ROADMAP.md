@@ -68,13 +68,16 @@ right only by direct POST, and the E2E specs proving it worked had to forge
 requests because no form would ever offer them one. Three things closed
 that, all gated on exactly the predicate the store enforces:
 
-- **Row controls.** A dependency row's Edit/Retire/Verify now render when the
+- **Row controls.** A dependency row's Retire/Verify now render when the
   caller's permit covers the consumer service AND the provider's owning
-  service. No store change was needed: `DependencyRow.ProviderSvc` was
-  already resolved by the list query through both the endpoint and the
-  route-to-frontend-endpoint paths — the same derivation
-  `authorizeDependencySubjects` performs. The doc comment that had argued
-  this was not computable in the view model was simply wrong.
+  service. (There is no Edit control on a dependency row and no route
+  reaches `UpdateDependency` — an earlier version of this entry claimed
+  Edit too; it did not exist.) No store change was needed:
+  `DependencyRow.ProviderSvc` was already resolved by the list query
+  through both the endpoint and the route-to-frontend-endpoint paths — the
+  same derivation `authorizeDependencySubjects` performs. The doc comment
+  that had argued this was not computable in the view model was simply
+  wrong.
 - **Unpatch.** Gated on both end assets. `InterfaceRow` carried the peer's
   *name* but not its id, so one column was added to a join that already
   existed. Note that the "is this port patched" guard turned out to be
@@ -82,10 +85,18 @@ that, all gated on exactly the predicate the store enforces:
   id unconditionally, so without it an unpatched port would offer Unpatch.
 - **Create pickers are filtered, not offered-and-refused.** A project owner's
   far-end dropdown lists only interfaces, endpoints and routes they can
-  write. Filtering happens in Go against `permit.Covers` rather than in SQL —
-  the permit exposes no enumerable set, and using its own predicate means the
-  picker and the rule cannot drift apart. **Filtering is a courtesy, never
-  the enforcement**: a forged out-of-scope submission is still refused by the
+  write. Filtering happens in Go against `permit.Covers` rather than in SQL.
+  **What is actually shared between a picker and the store's enforcement is
+  `permit.Covers` itself, not the subject resolution** — which two ids get
+  asked about it. An earlier version of this entry claimed the two "cannot
+  drift apart" by construction; that overstated it. For `dependency` and
+  `link`, the two-ended subject resolution is now pinned to one function
+  each (`canWriteDependency`, `canWriteLink` in
+  `internal/web/handlers/forms.go`), called from every render site
+  (the table, the standalone verify re-render, and — for `link` — the
+  per-port Unpatch control), so it has exactly one place to go wrong
+  rather than one per call site. **Filtering is a courtesy, never the
+  enforcement**: a forged out-of-scope submission is still refused by the
   store, and the tests assert that independently of what the UI offers.
 
 One defect this created is worth recording because nothing in the suite could

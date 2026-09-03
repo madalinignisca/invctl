@@ -243,20 +243,20 @@
           {{/* Editing the port itself is single-subject (subject-derived):
                the port's only owner is this asset, so it is gated on
                CanWriteEntity for $.Asset.ID alone. Unpatching is "link",
-               which is ScopeSubjectDerived with TWO subjects
-               (authorizeLinkSubjects, internal/store/network.go) -- a
-               project owner may retire a cable only when they own BOTH
-               ends, so the control needs CanWriteEntity on THIS asset AND
-               on .PeerAssetID, the far end. The two controls in this cell
-               stay gated separately rather than on one shared .CanWrite
-               because they are genuinely different-shaped checks: one
-               subject for Edit, two for Unpatch. */}}
-          {{if or ($.CanWriteEntity "asset" $.Asset.ID) (and .IsPatched $.IsAdmin)}}
+               ScopeSubjectDerived with TWO subjects (authorizeLinkSubjects,
+               internal/store/network.go) -- a project owner may retire a
+               cable only when they own BOTH ends. .CanUnpatch is computed
+               once, in Go, by canWriteLink (forms.go's interfaceRowsFor) --
+               the same helper this rule is pinned to everywhere else it is
+               checked -- rather than re-derived here with an inline
+               `and`/`CanWriteEntity` chain that no compiler and no test tied
+               back to authorizeLinkSubjects (fix-b item 5). */}}
+          {{if or ($.CanWriteEntity "asset" $.Asset.ID) .CanUnpatch}}
           <td style="white-space:nowrap">
             {{if $.CanWriteEntity "asset" $.Asset.ID}}
             <a class="btn btn-sm" href="/assets/{{$.Asset.ID}}?edit={{.ID}}#ports">Edit</a>
             {{end}}
-            {{if and .IsPatched (or $.IsAdmin (and ($.CanWriteEntity "asset" $.Asset.ID) ($.CanWriteEntity "asset" .PeerAssetID)))}}
+            {{if .CanUnpatch}}
             <form method="post" action="/links/{{.LinkID}}/retire" style="display:inline"
                   hx-post="/links/{{.LinkID}}/retire"
                   hx-confirm="Unpatch {{.Name}}? The record is kept.">
