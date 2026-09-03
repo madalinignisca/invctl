@@ -406,6 +406,275 @@ func TestDependencyScopeProviderThroughARoute(t *testing.T) {
 	}
 }
 
+// TestDependencyScopeRetireConsumerMineProviderForeign is the retire-side
+// sibling deps_scope_test.go was missing entirely: RetireDependency and
+// VerifyDependency both call authorizeDependencySubjects off the STORED
+// row, the same as UpdateDependency's stored-subject check, but until this
+// test existed nothing exercised either with only ONE end foreign. A
+// mutant that replaced either call with domain.AdministratorPermit(p.Actor())
+// -- collapsing the two-ended check to "any signed-in caller" -- left the
+// whole repo suite green, because every other RetireDependency/
+// VerifyDependency call in the suite runs as testPermit (an administrator)
+// or (via TestDependencyScopeCoversNeitherEnd's shape) with BOTH ends
+// foreign, where the first p.Covers call alone already refuses and the
+// second one never carries any weight. Consumer S1 (the permit's own
+// scope) is in scope here; the provider socket on S3 is not.
+func TestDependencyScopeRetireConsumerMineProviderForeign(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newDepScopeFixture(t, e)
+			d, err := domain.NewDependency(NewID(), newDependencySpec(f.s1, f.ep3), f.s.Now())
+			if err != nil {
+				t.Fatalf("building dependency: %v", err)
+			}
+			if err := f.s.CreateDependency(f.ctx, testPermit, d, nil); err != nil {
+				t.Fatalf("seeding the edge as an administrator: %v", err)
+			}
+			before := len(mustChangesForDependency(t, f, d.ID))
+
+			if err := f.s.RetireDependency(f.ctx, f.permit, d.ID); !errors.Is(err, domain.ErrForbidden) {
+				t.Fatalf("RetireDependency with the consumer mine and the provider foreign = %v, want domain.ErrForbidden", err)
+			}
+
+			after, err := f.s.GetDependency(f.ctx, d.ID)
+			if err != nil {
+				t.Fatalf("re-reading the edge: %v", err)
+			}
+			if after.Lifecycle == domain.LifecycleRetired {
+				t.Error("a refused retire still retired the dependency")
+			}
+			gotChanges := len(mustChangesForDependency(t, f, d.ID))
+			if gotChanges != before {
+				t.Errorf("a refused retire wrote %d change_log rows, want %d", gotChanges, before)
+			}
+		})
+	}
+}
+
+// TestDependencyScopeRetireConsumerForeignProviderMine is the mirror: the
+// consumer is on S2, outside the permit's scope, and only the provider
+// socket on S1 belongs to the caller.
+func TestDependencyScopeRetireConsumerForeignProviderMine(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newDepScopeFixture(t, e)
+			d, err := domain.NewDependency(NewID(), newDependencySpec(f.s2, f.ep1), f.s.Now())
+			if err != nil {
+				t.Fatalf("building dependency: %v", err)
+			}
+			if err := f.s.CreateDependency(f.ctx, testPermit, d, nil); err != nil {
+				t.Fatalf("seeding the edge as an administrator: %v", err)
+			}
+			before := len(mustChangesForDependency(t, f, d.ID))
+
+			if err := f.s.RetireDependency(f.ctx, f.permit, d.ID); !errors.Is(err, domain.ErrForbidden) {
+				t.Fatalf("RetireDependency with the consumer foreign and the provider mine = %v, want domain.ErrForbidden", err)
+			}
+
+			after, err := f.s.GetDependency(f.ctx, d.ID)
+			if err != nil {
+				t.Fatalf("re-reading the edge: %v", err)
+			}
+			if after.Lifecycle == domain.LifecycleRetired {
+				t.Error("a refused retire still retired the dependency")
+			}
+			gotChanges := len(mustChangesForDependency(t, f, d.ID))
+			if gotChanges != before {
+				t.Errorf("a refused retire wrote %d change_log rows, want %d", gotChanges, before)
+			}
+		})
+	}
+}
+
+// TestDependencyScopeRetireBothEndsMineSucceeds is the positive path: a
+// project owner retiring their own edge, both ends covered. Until this
+// test existed nothing in the suite proved a project owner can retire a
+// dependency at all -- every other passing RetireDependency call in the
+// suite runs as testPermit.
+func TestDependencyScopeRetireBothEndsMineSucceeds(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newDepScopeFixture(t, e)
+			d, err := domain.NewDependency(NewID(), newDependencySpec(f.s1, f.ep1), f.s.Now())
+			if err != nil {
+				t.Fatalf("building dependency: %v", err)
+			}
+			if err := f.s.CreateDependency(f.ctx, testPermit, d, nil); err != nil {
+				t.Fatalf("seeding the edge as an administrator: %v", err)
+			}
+			before := len(mustChangesForDependency(t, f, d.ID))
+
+			if err := f.s.RetireDependency(f.ctx, f.permit, d.ID); err != nil {
+				t.Fatalf("RetireDependency with both ends mine = %v, want nil", err)
+			}
+
+			after, err := f.s.GetDependency(f.ctx, d.ID)
+			if err != nil {
+				t.Fatalf("re-reading the edge: %v", err)
+			}
+			if after.Lifecycle != domain.LifecycleRetired {
+				t.Errorf("lifecycle after an allowed retire = %q, want %q", after.Lifecycle, domain.LifecycleRetired)
+			}
+			gotChanges := len(mustChangesForDependency(t, f, d.ID))
+			if gotChanges-before != 1 {
+				t.Errorf("an allowed retire wrote %d change_log rows, want 1", gotChanges-before)
+			}
+		})
+	}
+}
+
+// TestDependencyScopeRetireAdministrator: an AdministratorPermit covers
+// every row regardless of subject.
+func TestDependencyScopeRetireAdministrator(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newDepScopeFixture(t, e)
+			admin := domain.AdministratorPermit(
+				domain.Actor{ID: "admin-1", Name: "admin-1", Kind: domain.ActorKindUser})
+			d, err := domain.NewDependency(NewID(), newDependencySpec(f.s2, f.ep3), f.s.Now())
+			if err != nil {
+				t.Fatalf("building dependency: %v", err)
+			}
+			if err := f.s.CreateDependency(f.ctx, admin, d, nil); err != nil {
+				t.Fatalf("seeding the edge as an administrator: %v", err)
+			}
+			if err := f.s.RetireDependency(f.ctx, admin, d.ID); err != nil {
+				t.Fatalf("RetireDependency as an administrator = %v, want nil", err)
+			}
+		})
+	}
+}
+
+// TestDependencyScopeVerifyConsumerMineProviderForeign is VerifyDependency's
+// twin of TestDependencyScopeRetireConsumerMineProviderForeign: same
+// authorizeDependencySubjects call, same stored-row-only authorization, a
+// different mutation target (deps.go's VerifyDependency rather than
+// RetireDependency).
+func TestDependencyScopeVerifyConsumerMineProviderForeign(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newDepScopeFixture(t, e)
+			d, err := domain.NewDependency(NewID(), newDependencySpec(f.s1, f.ep3), f.s.Now())
+			if err != nil {
+				t.Fatalf("building dependency: %v", err)
+			}
+			if err := f.s.CreateDependency(f.ctx, testPermit, d, nil); err != nil {
+				t.Fatalf("seeding the edge as an administrator: %v", err)
+			}
+			before := len(mustChangesForDependency(t, f, d.ID))
+
+			if err := f.s.VerifyDependency(f.ctx, f.permit, d.ID); !errors.Is(err, domain.ErrForbidden) {
+				t.Fatalf("VerifyDependency with the consumer mine and the provider foreign = %v, want domain.ErrForbidden", err)
+			}
+
+			after, err := f.s.GetDependency(f.ctx, d.ID)
+			if err != nil {
+				t.Fatalf("re-reading the edge: %v", err)
+			}
+			if after.VerifiedBy != nil {
+				t.Error("a refused verify still recorded a verifier")
+			}
+			gotChanges := len(mustChangesForDependency(t, f, d.ID))
+			if gotChanges != before {
+				t.Errorf("a refused verify wrote %d change_log rows, want %d", gotChanges, before)
+			}
+		})
+	}
+}
+
+// TestDependencyScopeVerifyConsumerForeignProviderMine is the mirror: the
+// consumer is on S2, outside the permit's scope, and only the provider
+// socket on S1 belongs to the caller.
+func TestDependencyScopeVerifyConsumerForeignProviderMine(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newDepScopeFixture(t, e)
+			d, err := domain.NewDependency(NewID(), newDependencySpec(f.s2, f.ep1), f.s.Now())
+			if err != nil {
+				t.Fatalf("building dependency: %v", err)
+			}
+			if err := f.s.CreateDependency(f.ctx, testPermit, d, nil); err != nil {
+				t.Fatalf("seeding the edge as an administrator: %v", err)
+			}
+			before := len(mustChangesForDependency(t, f, d.ID))
+
+			if err := f.s.VerifyDependency(f.ctx, f.permit, d.ID); !errors.Is(err, domain.ErrForbidden) {
+				t.Fatalf("VerifyDependency with the consumer foreign and the provider mine = %v, want domain.ErrForbidden", err)
+			}
+
+			after, err := f.s.GetDependency(f.ctx, d.ID)
+			if err != nil {
+				t.Fatalf("re-reading the edge: %v", err)
+			}
+			if after.VerifiedBy != nil {
+				t.Error("a refused verify still recorded a verifier")
+			}
+			gotChanges := len(mustChangesForDependency(t, f, d.ID))
+			if gotChanges != before {
+				t.Errorf("a refused verify wrote %d change_log rows, want %d", gotChanges, before)
+			}
+		})
+	}
+}
+
+// TestDependencyScopeVerifyBothEndsMineSucceeds is the positive path: a
+// project owner verifying their own edge, both ends covered. Until this
+// test existed nothing in the suite proved a project owner can verify a
+// dependency at all.
+func TestDependencyScopeVerifyBothEndsMineSucceeds(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newDepScopeFixture(t, e)
+			d, err := domain.NewDependency(NewID(), newDependencySpec(f.s1, f.ep1), f.s.Now())
+			if err != nil {
+				t.Fatalf("building dependency: %v", err)
+			}
+			if err := f.s.CreateDependency(f.ctx, testPermit, d, nil); err != nil {
+				t.Fatalf("seeding the edge as an administrator: %v", err)
+			}
+			before := len(mustChangesForDependency(t, f, d.ID))
+
+			if err := f.s.VerifyDependency(f.ctx, f.permit, d.ID); err != nil {
+				t.Fatalf("VerifyDependency with both ends mine = %v, want nil", err)
+			}
+
+			after, err := f.s.GetDependency(f.ctx, d.ID)
+			if err != nil {
+				t.Fatalf("re-reading the edge: %v", err)
+			}
+			if after.VerifiedBy == nil || *after.VerifiedBy != f.permit.Actor().ID {
+				t.Errorf("verified_by after an allowed verify = %v, want %q", after.VerifiedBy, f.permit.Actor().ID)
+			}
+			gotChanges := len(mustChangesForDependency(t, f, d.ID))
+			if gotChanges-before != 1 {
+				t.Errorf("an allowed verify wrote %d change_log rows, want 1", gotChanges-before)
+			}
+		})
+	}
+}
+
+// TestDependencyScopeVerifyAdministrator: an AdministratorPermit covers
+// every row regardless of subject.
+func TestDependencyScopeVerifyAdministrator(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newDepScopeFixture(t, e)
+			admin := domain.AdministratorPermit(
+				domain.Actor{ID: "admin-1", Name: "admin-1", Kind: domain.ActorKindUser})
+			d, err := domain.NewDependency(NewID(), newDependencySpec(f.s2, f.ep3), f.s.Now())
+			if err != nil {
+				t.Fatalf("building dependency: %v", err)
+			}
+			if err := f.s.CreateDependency(f.ctx, admin, d, nil); err != nil {
+				t.Fatalf("seeding the edge as an administrator: %v", err)
+			}
+			if err := f.s.VerifyDependency(f.ctx, admin, d.ID); err != nil {
+				t.Fatalf("VerifyDependency as an administrator = %v, want nil", err)
+			}
+		})
+	}
+}
+
 func mustChangesForDependency(t *testing.T, f *depScopeFixture, id string) []domain.ChangeLog {
 	t.Helper()
 	changes, err := f.s.ListChangesForEntity(f.ctx, "dependency", id, 10)

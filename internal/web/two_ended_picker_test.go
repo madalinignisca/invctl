@@ -108,9 +108,20 @@ func setupPickerFixture(t *testing.T, ctx context.Context, h *harness, fx *bound
 	epOwned := mkEndpoint(serviceIn2, "picker-fixture-ep-owned")
 	epForeign := mkEndpoint(fx.serviceOut, "picker-fixture-ep-foreign")
 
-	mkRoute := func(serviceID, name string) string {
-		frontend := mkEndpoint(serviceID, name+"-front")
-		pool := &domain.BackendPool{ID: store.NewID(), ServiceID: serviceID, Name: name + "-pool"}
+	// mkRoute takes the frontend and pool as TWO DIFFERENT services,
+	// deliberately: authorizeDependencySubjects (and this picker's own
+	// writableRoutes) resolve a route's provider service through the
+	// FRONTEND end only (routeSelect's fs.id, deps.go), never the pool's.
+	// A frontend and pool on the SAME service can't tell the two columns
+	// apart, so a query that swapped fs.id for the pool's ps.id would still
+	// pass every test built on that shape -- which is exactly what
+	// happened here until this fixture was split. The pool's service is
+	// the OPPOSITE of the frontend's scope on purpose, so a caller who owns
+	// the frontend but not the pool (or vice versa) makes the two columns
+	// disagree and any query resolving off the wrong one is caught.
+	mkRoute := func(frontendServiceID, poolServiceID, name string) string {
+		frontend := mkEndpoint(frontendServiceID, name+"-front")
+		pool := &domain.BackendPool{ID: store.NewID(), ServiceID: poolServiceID, Name: name + "-pool"}
 		if err := h.store.CreateBackendPool(ctx, admin, pool); err != nil {
 			t.Fatalf("creating backend pool for route %s: %v", name, err)
 		}
@@ -123,8 +134,14 @@ func setupPickerFixture(t *testing.T, ctx context.Context, h *harness, fx *bound
 		}
 		return r.ID
 	}
-	routeOwned := mkRoute(serviceIn2, "picker-fixture-route-owned")
-	routeForeign := mkRoute(fx.serviceOut, "picker-fixture-route-foreign")
+	// routeOwned: frontend on serviceIn2 (owned), pool on fx.serviceOut
+	// (foreign) -- resolving off the pool instead of the frontend would
+	// wrongly classify this route as foreign.
+	routeOwned := mkRoute(serviceIn2, fx.serviceOut, "picker-fixture-route-owned")
+	// routeForeign: frontend on fx.serviceOut (foreign), pool on serviceIn2
+	// (owned) -- the mirror image, so resolving off the pool would wrongly
+	// classify this route as owned.
+	routeForeign := mkRoute(fx.serviceOut, serviceIn2, "picker-fixture-route-foreign")
 
 	return &pickerFixture{
 		assetIn2:           assetIn2,

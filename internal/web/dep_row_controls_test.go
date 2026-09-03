@@ -10,12 +10,29 @@ package web_test
 
 import (
 	"context"
+	"net/url"
 	"strings"
 	"testing"
 
 	"github.com/madalinignisca/invctl/internal/domain"
 	"github.com/madalinignisca/invctl/internal/store"
 )
+
+// verifyPost issues the HTMX-flavoured POST DependencyVerify's own fragment
+// re-render goes through: HX-Request set, a valid CSRF token pulled off
+// consumerServicePage (both fixtures below verify a dependency from the
+// consumer's own service page, which is the upstream panel, the same
+// direction TestVerifyKeepsThePanelItCameFrom exercises), and the request
+// returns the freshly rendered dependency_row fragment -- the ONE OTHER
+// place besides depRows that renders a dependency row for a caller who may
+// not be an Administrator.
+func verifyPost(t *testing.T, h *harness, consumerServicePage, depID string) string {
+	t.Helper()
+	token := h.csrfToken(consumerServicePage)
+	resp := h.post("/dependencies/"+depID+"/verify?direction=upstream",
+		url.Values{"csrf_token": {token}}, true)
+	return body(t, resp)
+}
 
 // WP-1.1 Task 1: a project owner who owns BOTH ends of a dependency -- the
 // consumer service and the provider's owning service -- has been able to
@@ -240,6 +257,66 @@ func TestDependencyRowSecretRefStaysAdministratorOnly(t *testing.T) {
 			if !strings.Contains(ownerBody, domain.Redacted) {
 				t.Errorf("GET /services/%s as a project owner does not carry %q anywhere -- "+
 					"the redacted placeholder itself is not proven to render", fx.serviceIn, domain.Redacted)
+			}
+		})
+	}
+}
+
+// TestDependencyVerifySecretRefStaysAdministratorOnly is
+// TestDependencyRowSecretRefStaysAdministratorOnly's sibling for the OTHER
+// place a dependency row gets rendered: DependencyVerify (deps.go:106)
+// builds its own depRowData directly rather than going through depRows, and
+// nothing previously proved its SecretRef gate. The GET-only test above
+// cannot catch a bug confined to the POST path -- verifying is the only
+// action available to a project owner that returns a freshly rendered row
+// carrying identity.secret_ref, so this is the one place the leak the
+// review flagged (b.IsAdmin swapped for true) would actually surface.
+func TestDependencyVerifySecretRefStaysAdministratorOnly(t *testing.T) {
+	for _, eng := range boundaryEngines(t) {
+		t.Run(eng.name, func(t *testing.T) {
+			h, fx := setupBoundary(t, eng)
+			ctx := context.Background()
+			dfx := setupDepRowFixture(t, ctx, h, fx)
+			servicePage := "/services/" + fx.serviceIn
+
+			// Positive control: an Administrator verifying the SAME
+			// dependency gets the raw path back. Without this, a change
+			// that redacted the ref for everyone -- including
+			// Administrators -- would make the assertion below pass for
+			// the wrong reason.
+			h.login(boundaryAdminUser, boundaryAdminPassword)
+			adminFragment := verifyPost(t, h, servicePage, dfx.depWithSecret)
+			if !strings.Contains(adminFragment, dfx.vaultRef) {
+				t.Fatalf("verifying as Administrator did not return the raw secret_ref %q -- "+
+					"the fragment is not proven to carry it at all: %s", dfx.vaultRef, adminFragment)
+			}
+			h.logout()
+
+			// Re-verifying the SAME edge as the owner is fine: VerifyDependency
+			// only overwrites verified_by/verified_at, it has no "already
+			// verified" refusal, and re-seeding the fixture here would collide
+			// on setupDepRowFixture's fixed service code (t-alpha-svc-2).
+			h.login(boundaryOwnerUser, boundaryOwnerPassword)
+
+			// Assert the precondition first: this owner must actually own
+			// BOTH ends of the dependency being verified, or a refused
+			// verify would make the redaction assertion below pass for a
+			// reason that has nothing to do with redaction.
+			preCheck := body(t, h.get(servicePage, false))
+			if !strings.Contains(preCheck, verifyAction(dfx.depWithSecret)) {
+				t.Fatalf("GET %s as the owner of both ends of the secret-carrying dependency "+
+					"does not carry %q -- CanWrite must be true here for the redaction check "+
+					"below to mean anything", servicePage, verifyAction(dfx.depWithSecret))
+			}
+
+			ownerFragment := verifyPost(t, h, servicePage, dfx.depWithSecret)
+			if strings.Contains(ownerFragment, dfx.vaultRef) {
+				t.Errorf("POST /dependencies/%s/verify as a project owner (NOT an Administrator) "+
+					"returned the raw secret_ref %q in the swapped fragment", dfx.depWithSecret, dfx.vaultRef)
+			}
+			if !strings.Contains(ownerFragment, domain.Redacted) {
+				t.Errorf("POST /dependencies/%s/verify as a project owner does not carry %q "+
+					"anywhere -- the redacted placeholder itself is not proven to render", dfx.depWithSecret, domain.Redacted)
 			}
 		})
 	}
