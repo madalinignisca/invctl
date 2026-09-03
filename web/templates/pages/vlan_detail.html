@@ -84,6 +84,7 @@
           <select id="vlan-port" name="interface_id" required>
             {{range .Options}}<option value="{{.ID}}">{{.AssetName}} · {{.Name}}</option>{{end}}
           </select>
+        {{with .OptionsHint}}<div class="field-hint">{{.}}</div>{{end}}
         </div>
         <div class="field">
           <label for="vlan-mode">Mode</label>

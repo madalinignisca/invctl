@@ -191,3 +191,54 @@ func TestVLANAddPortOptionsAreFilteredToOwnedAssets(t *testing.T) {
 		})
 	}
 }
+
+// TestVLANAddPortPickerExplainsWhatTheFilterRemoved pins the hint.
+//
+// WRITTEN AFTER THE FACT, WHICH IS THE POINT. The hint was added to this form
+// last, once a re-review noticed the VLAN page had been left out of the pass
+// that gave the dependency and link pickers one. It shipped with no test, and
+// a mutation making pickerHint blind to filtering (passing the FILTERED count
+// as the total, so filtered < total can never hold) survived the suite --
+// exactly the "a control with no evidence" shape this branch has been fixing
+// since the first review.
+//
+// The property: a project owner whose picker the filter has thinned is told
+// how many of the estate's ports they are seeing and why the rest are absent.
+// A short <select> with no explanation reads as an estate that only has two
+// ports, which is a lie of omission about the shape of the world.
+func TestVLANAddPortPickerExplainsWhatTheFilterRemoved(t *testing.T) {
+	for _, eng := range boundaryEngines(t) {
+		t.Run(eng.name, func(t *testing.T) {
+			h, fx := setupBoundary(t, eng)
+			vfx := setupVLANPortRowFixture(t, context.Background(), h, fx)
+
+			// Positive control first: the Administrator sees every port and
+			// is told nothing, because nothing was removed for them. Without
+			// this, a hint shown to everyone would satisfy the owner check
+			// below and still be wrong.
+			h.login(boundaryAdminUser, boundaryAdminPassword)
+			adminBody := body(t, h.get("/vlans/"+vfx.vlanID, false))
+			if showingCount.MatchString(adminBody) {
+				t.Errorf("the Administrator is told ports were filtered out, but their permit "+
+					"covers the estate and nothing was removed: %q",
+					showingCount.FindString(adminBody))
+			}
+			h.logout()
+
+			h.login(boundaryOwnerUser, boundaryOwnerPassword)
+			ownerBody := body(t, h.get("/vlans/"+vfx.vlanID, false))
+			m := showingCount.FindStringSubmatch(ownerBody)
+			if m == nil {
+				t.Fatalf("the owner's vlan-port picker was thinned by the filter and says " +
+					"nothing about it -- a short dropdown with no explanation reads as an " +
+					"estate with only those ports in it")
+			}
+			shown, total := m[1], m[2]
+			if shown == total {
+				t.Errorf("the hint claims %s of %s ports, which is not a filtered picker at "+
+					"all -- the counts must differ or the hint is measuring the wrong thing",
+					shown, total)
+			}
+		})
+	}
+}

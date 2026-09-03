@@ -103,6 +103,7 @@ func (a *App) VLANDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	base := a.base(r, "VLAN "+vlan.Name, "vlans")
+	writable := writableInterfaceOptions(base, options)
 	a.Render.Page(w, http.StatusOK, "vlan_detail", struct {
 		Base
 		VLAN     *domain.VLAN
@@ -117,14 +118,23 @@ func (a *App) VLANDetail(w http.ResponseWriter, r *http.Request) {
 		// be offered-and-refused, the defect Task 3 already closed for the
 		// dependency and link pickers.
 		Options []store.InterfaceOption
-		Modes   []string
+		// OptionsHint explains a picker the filter has thinned, so an
+		// operator is never handed a short or blank required <select> with
+		// no account of why -- the same defect fix-b item 2 closed for the
+		// dependency and link pickers, which this form was missed out of.
+		OptionsHint string
+		Modes       []string
 	}{
 		Base:     base,
 		VLAN:     vlan,
 		Ports:    vlanPortRowsFor(ports, base.CanWriteEntity),
 		Prefixes: on,
-		Options:  writableInterfaceOptions(base, options),
-		Modes:    domain.VLANModes,
+		Options:  writable,
+		OptionsHint: pickerHint(len(writable), len(options),
+			"There are no ports in the estate yet.",
+			"Every port belongs to an asset you do not own.",
+			"Showing %d of %d ports -- the rest are on assets you do not own."),
+		Modes: domain.VLANModes,
 	})
 }
 

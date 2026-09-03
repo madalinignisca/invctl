@@ -539,8 +539,22 @@ func (a *App) newEndpointEditForm(r *http.Request, e *domain.Endpoint, errs map[
 // sweep just removed from the row controls, and a picker is a control too.
 // The filter is `Base.CanWriteEntity("service", ...)`, backed by the same
 // `permit.Covers` the store's `authorizeDependencySubjects` calls at write
-// time -- so the picker and the enforcement cannot drift, by construction,
-// not by two people remembering to keep two predicates in sync. For an
+// time.
+//
+// AN EARLIER VERSION OF THIS COMMENT CLAIMED THE TWO "CANNOT DRIFT, BY
+// CONSTRUCTION". They can, and a review demonstrated it. What is shared is
+// `Covers` -- the question "does this permit cover this row". What is NOT
+// shared is the SUBJECT RESOLUTION: which service a route's provider
+// actually belongs to. The picker reads `routeSelect`'s
+// `fs.id AS frontend_service_id`; the store resolves it again in
+// `resolveProviderService`. Change one to the backend pool's service instead
+// of the frontend endpoint's and the picker silently offers routes the store
+// will refuse -- the offer-and-refuse this filtering exists to remove. That
+// mutation survived the suite until the fixture was split so the two services
+// differ (`TestDependencyRoutePickerIsFilteredToOwnedServices`).
+//
+// So the coupling is a TEST, not a construction. Keep it that way: if you
+// add a third subject-resolution path, give it a case there. For an
 // Administrator, whose permit covers everything, the filter removes nothing:
 // this is a widening for a project owner, never a narrowing for anyone else.
 func (a *App) newDependencyForm(r *http.Request, serviceID string, errs map[string]string, spec domain.DependencySpec, endpoints []store.EndpointRow, routes []store.RouteRow, identities []domain.Identity, classes []store.VocabularyTerm) dependencyFormData {
