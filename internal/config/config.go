@@ -52,6 +52,28 @@ type Config struct {
 	// produce totals that are wrong without looking wrong.
 	Currency string
 
+	// PowerTariffMinorPerKWh is the electricity rate, in the same minor units
+	// as every other amount here (docs/power-cost-design.md D1). Zero means no
+	// tariff is configured and the cost report says so, rather than rendering
+	// nothing -- an administrator who sees a blank section cannot tell "not
+	// configured" from "nothing to show" or "I lack the permission" (D5).
+	//
+	// ONE RATE, IN CONFIG, and the alternatives were considered: a column on
+	// power_source is per-supply rather than per-contract and would give
+	// PARTIAL coverage, which for a cost figure is worse than none; a tariff
+	// entity is CRUD, audit and UI for a number most estates have one of.
+	// A second rate becomes a real requirement the day a second site is on a
+	// different contract, and that is a work package, not a column.
+	//
+	// IT CARRIES NO CURRENCY OF ITS OWN. Currency above is estate-wide; a
+	// second currency on one page is a bug, not a feature.
+	//
+	// A tariff of zero is treated as unset rather than as free electricity.
+	// Nobody has free electricity, and rendering EUR 0.00 beside "per month"
+	// as though it were computed is exactly the measured-looking figure this
+	// design refuses.
+	PowerTariffMinorPerKWh int64
+
 	// AgentCredentials are the monitoring credentials (docs/AUDIT.md rule 6).
 	// They are a different principal type entirely: not app_user rows, never in
 	// AdminUsers, and never seen by authz.CanWrite. Empty means no
@@ -148,6 +170,7 @@ func Load() (*Config, error) {
 	// Collected rather than returned inline so an operator with two typos
 	// learns about both on the first start rather than one per restart.
 	var badBools []string
+	var badInts []string
 	cfg := &Config{
 		DBDriver:                    envOr("INV_DB_DRIVER", "sqlite"),
 		DBDSN:                       envOr("INV_DB_DSN", "file:invctl.db?_txlock=immediate"),
@@ -155,6 +178,7 @@ func Load() (*Config, error) {
 		SessionTimeout:              envDuration("INV_SESSION_TIMEOUT", 12*time.Hour),
 		AdminUsers:                  splitList(os.Getenv("INV_ADMIN_USERS")),
 		Currency:                    envOr("INV_CURRENCY", "EUR"),
+		PowerTariffMinorPerKWh:      envInt64("INV_POWER_TARIFF_MINOR_PER_KWH", 0, &badInts),
 		AuthLocal:                   envBool("INV_AUTH_LOCAL", true, &badBools),
 		AuthLDAP:                    envBool("INV_AUTH_LDAP", false, &badBools),
 		SeedOnStart:                 envBool("INV_SEED", false, &badBools),
@@ -179,6 +203,13 @@ func Load() (*Config, error) {
 			"Refusing to start rather than falling back to a default, because every flag here "+
 			"decides a security posture and the fallback is the permissive one",
 			strings.Join(badBools, ", "))
+	}
+	if len(badInts) > 0 {
+		return nil, fmt.Errorf("validating config: %s is not a whole number of minor "+
+			"currency units; a rate of 0.28 is written as 28. Refusing to start rather than "+
+			"falling back to a default, because the default renders as "+
+			"\"no tariff is configured\" on a page somebody has just configured",
+			strings.Join(badInts, ", "))
 	}
 
 	key, err := sessionKey()
@@ -257,6 +288,11 @@ func (c *Config) validate() error {
 				"answer %q could present its own certificate and collect operator passwords. "+
 				"Add the directory's CA to the host trust store instead", c.LDAP.URL)
 		}
+	}
+	if c.PowerTariffMinorPerKWh < 0 {
+		return fmt.Errorf("validating config: INV_POWER_TARIFF_MINOR_PER_KWH is %d; "+
+			"a negative tariff would report the estate as earning money by being "+
+			"switched on", c.PowerTariffMinorPerKWh)
 	}
 	if err := c.validateAgents(); err != nil {
 		return err
@@ -373,6 +409,26 @@ func envBool(key string, fallback bool, bad *[]string) bool {
 		return fallback
 	}
 	parsed, err := strconv.ParseBool(v)
+	if err != nil {
+		*bad = append(*bad, fmt.Sprintf("%s=%q", key, v))
+		return fallback
+	}
+	return parsed
+}
+
+// envInt64 parses an integer, recording anything it could not parse.
+//
+// Same posture as envBool: a value somebody typed and got wrong must not
+// degrade into the default. "0.28" is exactly the value an operator reaches
+// for here -- the variable is named MINOR units, so the answer is 28 -- and
+// silently taking 0 would render "no tariff is configured" on a page they had
+// just configured.
+func envInt64(key string, fallback int64, bad *[]string) int64 {
+	v := os.Getenv(key)
+	if v == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseInt(v, 10, 64)
 	if err != nil {
 		*bad = append(*bad, fmt.Sprintf("%s=%q", key, v))
 		return fallback

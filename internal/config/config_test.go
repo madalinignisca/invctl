@@ -40,6 +40,7 @@ func pristineEnv(t *testing.T) {
 		"INV_SESSION_KEY", "INV_SESSION_TIMEOUT",
 		"INV_AGENT_TOKENS", "INV_AGENT_SCOPES", "INV_AGENT_VOCAB",
 		"INV_API_TOKENS", "INV_API_SCOPES",
+		"INV_POWER_TARIFF_MINOR_PER_KWH",
 	} {
 		t.Setenv(key, "")
 	}
@@ -544,4 +545,54 @@ func TestDistinctAgentAndReaderTokensStartFine(t *testing.T) {
 	if len(cfg.Readers) != 1 || cfg.Readers[0].ID != "ansible" {
 		t.Fatalf("got readers %+v, want exactly [ansible]", cfg.Readers)
 	}
+}
+
+// TestThePowerTariffIsUnsetByDefaultAndRefusesRubbish. The default matters:
+// an unset tariff is what makes the cost report render D5's explanation
+// rather than a figure, and a default of anything else would put a number
+// nobody chose in front of a reader.
+func TestThePowerTariffIsUnsetByDefaultAndRefusesRubbish(t *testing.T) {
+	t.Run("unset", func(t *testing.T) {
+		pristineEnv(t)
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if cfg.PowerTariffMinorPerKWh != 0 {
+			t.Errorf("tariff = %d, want 0 (unset)", cfg.PowerTariffMinorPerKWh)
+		}
+	})
+
+	t.Run("set", func(t *testing.T) {
+		pristineEnv(t)
+		t.Setenv("INV_POWER_TARIFF_MINOR_PER_KWH", "28")
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if cfg.PowerTariffMinorPerKWh != 28 {
+			t.Errorf("tariff = %d, want 28", cfg.PowerTariffMinorPerKWh)
+		}
+	})
+
+	// The value an operator actually types when they read "per kWh" and think
+	// in major units. It must refuse to start, not quietly become zero and
+	// report itself unconfigured on a page they just configured.
+	for _, bad := range []string{"0.28", "28 cents", "-"} {
+		t.Run("refuses "+bad, func(t *testing.T) {
+			pristineEnv(t)
+			t.Setenv("INV_POWER_TARIFF_MINOR_PER_KWH", bad)
+			if _, err := Load(); err == nil {
+				t.Fatalf("Load accepted INV_POWER_TARIFF_MINOR_PER_KWH=%q", bad)
+			}
+		})
+	}
+
+	t.Run("refuses a negative rate", func(t *testing.T) {
+		pristineEnv(t)
+		t.Setenv("INV_POWER_TARIFF_MINOR_PER_KWH", "-28")
+		if _, err := Load(); err == nil {
+			t.Fatal("Load accepted a negative tariff")
+		}
+	})
 }
