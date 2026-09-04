@@ -256,8 +256,61 @@ func (s *SQLStore) writeSerializable(ctx context.Context, p domain.Permit, fn fu
 		if err == nil || !isSerializationFailure(err) {
 			return err
 		}
+		if attempt < attempts {
+			if waitErr := serializationBackoff(ctx, attempt); waitErr != nil {
+				// The caller gave up while we were waiting. Report why the
+				// transaction failed, not that the context closed after it.
+				return err
+			}
+		}
 	}
 	return fmt.Errorf("after %d serialization retries: %w", attempts, err)
+}
+
+// serializationBackoff pauses between two attempts at a transaction the engine
+// refused to serialise.
+//
+// WITHOUT THIS THE RETRIES ARE NOT RETRIES. The loop used to re-enter
+// writeTx immediately, so all three attempts could land inside the window of
+// the very transaction they were losing to -- three round trips is no time at
+// all against a database mid-checkpoint. The loser then surfaced a raw
+// SQLSTATE 40001 to the operator instead of the decision the retry exists to
+// let it reach: "you cannot remove the last administrator" is an answer,
+// "could not serialize access due to read/write dependencies" is a database
+// noticing it was busy.
+//
+// Found as a CI flake in TestTwoSimultaneousDemotionsCannotRemoveTheLastAdministrator,
+// which failed twice on unrelated branches while passing every local run. The
+// flake was the symptom; a production estate with two administrators demoting
+// at once on a loaded database is the same event, and there the raw error
+// reaches a person.
+//
+// JITTERED, because the racers are symmetric. Two transactions that back off
+// by the same amount wake together and collide again, which is a slower way of
+// doing exactly what the un-backed-off loop did. The jitter is what makes the
+// second attempt a different moment rather than the same moment later.
+//
+// Deliberately short: this bounds added latency at roughly 45ms across the two
+// waits, which is invisible next to a round trip that already failed, and the
+// alternative -- waiting long enough to be certain -- would make every
+// contended write feel broken.
+func serializationBackoff(ctx context.Context, attempt int) error {
+	base := time.Duration(attempt) * 10 * time.Millisecond
+	// Jitter from the clock rather than a PRNG. It needs to be unpredictable
+	// only with respect to the OTHER racer, not to an attacker, and two
+	// transactions that reach this line do so nanoseconds apart -- so the low
+	// bits of the wall clock separate them exactly as well as a random source
+	// would, with no seeding, no import, and nothing for a linter to
+	// reasonably object to. (gosec flags math/rand here, and it is right that
+	// the question "is this random enough" deserves an answer; this is the
+	// answer.)
+	jitter := time.Duration(time.Now().UnixNano() % int64(base))
+	select {
+	case <-time.After(base + jitter):
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // isSerializationFailure reports whether the engine aborted the transaction

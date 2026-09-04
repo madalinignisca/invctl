@@ -43,7 +43,7 @@
              backfill an owner for. */}}
         {{if .OwnerDisplay}}<div class="field-hint">Owner: {{.OwnerDisplay}}{{if .OwnerRetired}} (retired){{end}}</div>{{end}}
       </dt>
-      <dd class="mono">{{if .Value}}{{.Value}}{{else}}<span style="color:var(--faint)">not recorded</span>{{end}}</dd>
+      <dd class="mono">{{if .Value}}{{.DisplayValue}}{{else}}<span style="color:var(--faint)">not recorded</span>{{end}}</dd>
       {{end}}
     </dl>
   </div>

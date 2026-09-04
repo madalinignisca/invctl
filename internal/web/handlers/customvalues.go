@@ -28,8 +28,28 @@ import (
 // slice is built from a live-only field list.
 type customFieldFormRow struct {
 	Field domain.CustomField
-	// Value is the stored value_text, or "" when the entity holds none.
+	// Value is the stored value_text, verbatim, or "" when the entity holds
+	// none. This is what the FORM posts back and what its input's default
+	// is built from -- never reformatted, never resolved. Read custom_fields
+	// _show.html and DisplayValue is what a reader is actually shown.
 	Value string
+	// DisplayValue is what custom_fields_show renders (WP-A4 follow-up item
+	// 1). For every kind except select it is Value itself, unchanged. For a
+	// select field the STORED value is the option's CODE (e.g. "high"), and
+	// design.md §3 gives every option a Label as "what a reader sees" (e.g.
+	// "High") -- so a select's read view resolves Value against Options,
+	// which for a select already carries a retired option's label back in
+	// alongside the live ones when Value names one (see the "FINAL REVIEW
+	// B1" comment below), so a value naming a since-retired option still
+	// shows its label rather than its code.
+	//
+	// Falls back to Value ITSELF, deliberately, when no option resolves at
+	// all -- an option row deleted out from under a value is not something
+	// this schema's soft-delete rule should ever produce (custom_field_option
+	// is retired, never deleted), but the fallback exists for the day some
+	// other path does, because showing the raw code is still strictly better
+	// than showing nothing for a value that IS recorded.
+	DisplayValue string
 	// Options is the field's LIVE options, for a select kind only. A
 	// retired option keeps displaying on the values that already chose it
 	// but is never offered to a new one (design.md §3), so only live ones
@@ -118,20 +138,37 @@ func (a *App) loadCustomFieldsPanel(r *http.Request, entityType, entityID string
 		byField[v.FieldID] = v.ValueText
 	}
 
+	// WP-A4 FOLLOW-UP ITEM 2: every select field's id is already known here,
+	// before the loop below touches a single row, so their options are
+	// fetched TOGETHER -- one call, not one GetCustomField call per select
+	// field inside the loop. This is what used to be an N+1 on the hottest
+	// page in the product; see OptionsForFields' own comment for the rest of
+	// the reasoning. A field id absent from the returned map (a non-select
+	// field, or a select field with no options yet) is simply never looked
+	// up below.
+	var selectIDs []string
+	for _, d := range defs {
+		if d.Kind == domain.CustomFieldSelect {
+			selectIDs = append(selectIDs, d.ID)
+		}
+	}
+	optionsByField, err := a.Store.OptionsForFields(r.Context(), selectIDs)
+	if err != nil {
+		return customFieldsPanel{}, err
+	}
+
 	rows := make([]customFieldFormRow, 0, len(defs))
 	for _, d := range defs {
 		row := customFieldFormRow{
 			Field:        d.CustomField,
 			Value:        byField[d.ID],
+			DisplayValue: byField[d.ID],
 			OwnerDisplay: d.OwnerDisplay(),
 			OwnerRetired: d.OwnerRetired(),
 		}
 		if d.Kind == domain.CustomFieldSelect {
-			full, err := a.Store.GetCustomField(r.Context(), d.ID)
-			if err != nil {
-				return customFieldsPanel{}, err
-			}
-			for _, o := range full.Options {
+			full := optionsByField[d.ID]
+			for _, o := range full {
 				if o.RetiredAt == nil {
 					row.Options = append(row.Options, o)
 				}
@@ -154,7 +191,7 @@ func (a *App) loadCustomFieldsPanel(r *http.Request, entityType, entityID string
 					}
 				}
 				if !current {
-					for _, o := range full.Options {
+					for _, o := range full {
 						if o.Value == row.Value && o.RetiredAt != nil {
 							row.Options = append(row.Options, o)
 							break
@@ -162,6 +199,30 @@ func (a *App) loadCustomFieldsPanel(r *http.Request, entityType, entityID string
 					}
 				}
 			}
+			// WP-A4 FOLLOW-UP ITEM 1: custom_fields_show renders a select
+			// value's LABEL, not the code stored in Value -- design.md §3
+			// gives every option a label as "what a reader sees". Resolved
+			// against row.Options, which by this point already carries a
+			// since-retired option back in when Value names one (the block
+			// just above), so a value whose option has since been retired
+			// still resolves to a label rather than falling back to raw.
+			// A template cannot do this lookup itself (no way to look an
+			// option up from a bare code), so it happens here, the same
+			// place depRowData and secretRefDisplay resolve their own
+			// display-only derivations.
+			for _, o := range row.Options {
+				if o.Value == row.Value {
+					row.DisplayValue = o.Label
+					break
+				}
+			}
+			// row.DisplayValue is left as row.Value (its zero-value default
+			// above) when nothing resolves -- deliberate, not an oversight:
+			// custom_field_option is retired, never deleted (CLAUDE.md), so
+			// a live value's option going fully missing should not happen
+			// today, but a value is still a value even if some future path
+			// broke that invariant, and showing the raw code beats showing
+			// nothing for something the estate actually has recorded.
 		}
 		// Representability is checked against the SAME options the widget
 		// would offer (row.Options, which for a select already carries the

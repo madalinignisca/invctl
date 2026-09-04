@@ -578,24 +578,36 @@ with at least one asset holding a value and one deliberately holding none — a
 field that is null everywhere is a field whose behaviour no test exercises,
 which is how WP-A2 published a column nobody had checked.
 
-- `TestACustomValueChangeIsAuditedAgainstTheEntity`
+- `TestSettingAValueIsAuditedAgainstTheEntity`
 - `TestReorderingCustomValuesIsNotAChange`
-- `TestRetiringAFieldKeepsEveryValue` / `TestRestoringAFieldBringsThemBack`
-- `TestARetiredFieldStillExports`, with the `(retired)` header
+- `TestRetiringAFieldKeepsEveryValue` / `TestARetiredFieldOffersRestoreAndKeepsItsValues`
+- `TestARetiredFieldStillExportsUnderARetiredHeader`, with the `(retired)` header
 - `TestAFieldsKindCannotChangeWhileValuesExist`
 - `TestASelectValueMustBeALiveOption`
-- `TestARetiredOptionKeepsExistingValuesAndRefusesNewOnes`
-- `TestTheRegistryNeverStoresAUsername` — `created_by` is an id, and scrubbing
+- `TestRetiringAnOptionKeepsItSelectableOnExistingValues`
+- `TestTheRegistryResolvesTheCreatorWithoutStoringAUsername` — `created_by` is an id, and scrubbing
   the user leaves the row readable
 - `TestCustomFieldsNeverReachTheAPI` — the WP-A2 DTOs and golden files are
   unchanged by any custom field existing
 - `TestAValueForAnUnknownFieldIsRefused`
 - `TestClearingAValueIsAuditedOnTheParent` — the set-replacement diff actually
   appears, rather than the row vanishing silently
-- `TestBothCustomFieldEditorsRefuseASecondSave` — 409, per invariant 4
-- `TestServiceAuditEmbedsByValue` — the pointer-embed panic, asserted rather
+- `TestEveryEditorRefusesASecondSaveFromOneToken` — 409, per invariant 4
+- `TestAnAuditShapeEmbedsByValue` — the pointer-embed panic, asserted rather
   than relied upon
 - Every mutation writes a `change_log` row, per the standing guard
+
+Seven of the thirteen names above were wrong until 2026-09-03. Every one of
+those tests existed and had done since the work package merged -- under a
+different name -- so this list read as a coverage inventory while being a
+false index: a reader checking whether a property was tested would have
+found nothing and concluded it was not. That is worse than an absent list,
+because an absent list invites you to go and look.
+
+`TestSectionNineNamesTestsThatExist` (internal/store) now parses this
+section and fails if a name here has no matching `func` under internal/.
+Rename a test and this list fails with it, which is the only arrangement
+under which a documented index stays true.
 
 ---
 

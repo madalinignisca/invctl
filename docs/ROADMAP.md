@@ -140,33 +140,50 @@ write route, across all four registrars including the `self` registrar
 whose entire gate is `RequireAuth`, is now driven with no session at all and
 asserted refused.
 
-**WP-A4 follow-ups**, filed at that work package's merge and re-verified
-2026-08-31:
+**WP-A4 follow-ups — all eight DONE**, 2026-09-03. Filed at that work
+package's merge, re-verified against the code before being worked (this
+section's own warning below applies to itself, and it was right to: every one
+still stood, but two were worse than filed).
 
-- `custom_fields_show.html` renders a select's raw stored value (`high`)
-  rather than its option label (`High`), though the design gives options a
-  label as "what a reader sees".
-- `internal/csvsafe` ships with no test file — a package holding the one
-  security control on the CSV boundary, extracted from a package that had
-  coverage. It is exercised indirectly; the idempotency property its doc
-  comment leans on is asserted nowhere.
-- `SetCustomFieldOptions` folds `value=Label` joined on `,` for its audit
-  entry. An option value containing `=` or `,` can make a label rename fold
-  identically, and `checkVocabulary` permits any printable non-space rune,
-  so `a=b,c` is a legal code.
-- `SetCustomFieldOptions` rewrites the caller's `opts` slice in place. No
-  caller is harmed today and the behaviour is now commented, so this is
-  documented rather than surprising.
-- A duplicate-option message rendered to the browser carries the field UUID.
-  Not a leak; store phrasing reaching a user.
-- A refused `+42` echoes back into a `type="number"` widget that blanks it,
-  so the operator's rejected text vanishes — contradicting this repo's own
-  "your text is still here" principle. Refusal path only.
-- `loadCustomFieldsPanel` issues one extra `GetCustomField` per select field
-  per detail-page render, on the hottest page.
-- `docs/custom-fields-design.md` §9's test-name list has drifted from what
-  shipped: the coverage exists under different names, so the list is a false
-  index.
+- The **audit fold could swallow a change**, which was listed as an ambiguity
+  and was a hole in `change_log`. Options folded to `value=label` joined on
+  `,`, and option text permits any printable non-space rune, so `a=b,c` is
+  legal and two different option sets could fold identically — a label rename
+  could fold to no change at all, in the one table whose purpose is being the
+  permanent record of what was declared. The separators are now escaped inside
+  each field, which keeps an ordinary set folding to the readable
+  `high=High,low=Low` it always did. A first attempt used JSON: unambiguous by
+  construction, and it made every option diff on `/changes` double-escaped and
+  unreadable for the person the audit trail is *for*. Two tests hold the pair
+  apart — strip the escaping and injectivity fails while readability passes.
+- **§9 of `docs/custom-fields-design.md` was a false index.** Seven of its
+  thirteen names did not exist, and every one of those tests had shipped under
+  a different name — so it read as a coverage inventory while telling a reader
+  a tested property was untested. A wrong index is worse than none: an absent
+  list invites you to look, a wrong one tells you not to bother. The names are
+  corrected and `TestSectionNineNamesTestsThatExist` now parses the section, so
+  a rename breaks the index instead of silently invalidating it.
+- **`internal/csvsafe` had no test file** — the one control on the CSV
+  boundary, extracted from a package that had coverage, so the coverage was
+  lost in the move. Three properties now, including the **idempotency** its own
+  doc comment leaned on and nothing asserted; every exported custom value
+  passes through `Cell` twice, so a second pass that changed anything would
+  corrupt real data on the ordinary path.
+- A select rendered its code (`high`) rather than its label (`High`); resolved
+  where the row is built, since a template cannot look an option up. A value
+  naming a since-retired option still displays, per §3.
+- The **N+1 on the hottest page** — one `GetCustomField` per select field per
+  render — is batched into one query. Measured with a driver-level counter, not
+  estimated: the panel now costs the same for one select field as for five.
+- A refused `+42` vanished from its `type="number"` widget; number and date
+  fields fall back to text **only** when that field has just been refused, so
+  the ordinary path keeps its native spinner and picker.
+- `SetCustomFieldOptions` no longer rewrites its caller's slice.
+- A duplicate-option refusal named the field UUID to the operator; it now names
+  the offending value, while the wrapped error a log sees keeps the id.
+
+Two of the eight got guards rather than corrections, on the reasoning that a
+fix which can silently rot is a fix with a deadline.
 
 One further entry on that list — number and date fields defended only at the
 input gate while `select` was defended at render — **is closed**, in

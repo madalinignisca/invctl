@@ -1327,3 +1327,59 @@ func TestAuditSnapshotIsComplete(t *testing.T) {
 		})
 	}
 }
+
+// TestSerializationBackoffWaitsAndIsJittered pins the two properties the
+// retry loop depends on.
+//
+// The loop used to re-enter writeTx with no pause at all, so three attempts
+// could land inside the window of the transaction they were losing to and the
+// caller received a raw SQLSTATE 40001 instead of the decision the retry
+// exists to let it reach. That surfaced as a CI flake in
+// TestTwoSimultaneousDemotionsCannotRemoveTheLastAdministrator, twice, on
+// branches that touched nothing near it.
+//
+// Both properties are asserted because either alone is insufficient: a wait
+// with no jitter makes two symmetric racers collide again at the same later
+// moment, which is the original bug with extra latency.
+func TestSerializationBackoffWaitsAndIsJittered(t *testing.T) {
+	t.Run("it actually waits", func(t *testing.T) {
+		start := time.Now()
+		if err := serializationBackoff(context.Background(), 1); err != nil {
+			t.Fatalf("backoff returned %v", err)
+		}
+		// attempt 1 is a 10ms base plus jitter; anything under the base means
+		// the pause was skipped.
+		if waited := time.Since(start); waited < 10*time.Millisecond {
+			t.Errorf("backoff for attempt 1 returned after %v, want at least 10ms -- "+
+				"a retry that does not pause is the bug this exists to fix", waited)
+		}
+	})
+
+	t.Run("it is jittered", func(t *testing.T) {
+		seen := map[time.Duration]bool{}
+		for i := 0; i < 12; i++ {
+			start := time.Now()
+			if err := serializationBackoff(context.Background(), 2); err != nil {
+				t.Fatalf("backoff returned %v", err)
+			}
+			// Round to the millisecond: the scheduler's own noise is finer
+			// than that, so identical values here mean a fixed delay rather
+			// than a jittered one.
+			seen[time.Since(start).Round(time.Millisecond)] = true
+		}
+		if len(seen) < 3 {
+			t.Errorf("12 backoffs produced %d distinct durations, want at least 3 -- "+
+				"two racers backing off by the same amount wake together and collide "+
+				"again, which is the un-backed-off loop with extra steps", len(seen))
+		}
+	})
+
+	t.Run("it gives up when the caller does", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		if err := serializationBackoff(ctx, 3); err == nil {
+			t.Error("backoff ignored a cancelled context -- a caller that has given " +
+				"up must not be held for the full wait")
+		}
+	})
+}
