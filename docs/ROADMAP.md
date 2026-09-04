@@ -789,9 +789,50 @@ manager. Keep the boundary visible in the UI — call the button *Render*, never
 
 Run after any two groups, not at the end. This is where plans like this rot.
 
-**WP-I1 · Engine consolidation** — M, recurring
-Every new edge type must appear in impact simulation, reachability findings,
-shutdown order, and the fixture. Audit that they do; add the missing ones.
+**WP-I1 · Engine consolidation** — M, recurring — **DONE, and the audit is now
+standing.** Every new edge type must appear in impact simulation, reachability
+findings, shutdown order, and the fixture.
+
+*Audited 2026-09-04. **No missing edges.** Every table carrying two or more
+foreign keys — the mechanical signature of an edge — is either read by
+`LoadGraph` or accounted for, and the reasons divide into three kinds:*
+
+- *Deliberately not reachability edges: `link` and `port_pass_through`.
+  `docs/reachability-design.md` models reachability at FORWARDER GROUP level,
+  with `net_attachment_member` naming which chassis a cable actually lands on —
+  "directed, unlike `link`" — because a cable cannot tell you which way traffic
+  flows, so it is declared rather than guessed. Loading cables would be a
+  second, disagreeing answer to a question `net_attachment` already answers.*
+- *Reached by another route: the power chain. `AssetsLosingPower` and
+  `AssetsLosingSupply` resolve a failed feed or supply to the assets that
+  actually lose power — honouring dual-feed redundancy, which the graph could
+  not — and the handler hands that set to the ordinary impact page.
+  `Request.DownAssetIDs`' own comment names the case: "reboot this VM" and
+  "this rack loses power" arrive in the same shape.*
+- *Not propagation edges at all: costs, tags, certificates, ownership,
+  addressing. Two keys, no connectivity.*
+
+***The audit is the deliverable, and doing it by hand is what proved that.***
+*Two false gaps nearly went into this entry: `circuit_termination` is reached
+through a JOIN rather than a FROM, and power reaches impact through a redirect
+rather than the graph — a grep found neither, and only reading four files did.
+A hand audit of a recurring work package is wrong by the next merge anyway. So
+`TestEveryConnectiveTableIsAccountedForInTheImpactGraph` (`internal/store`) now
+reads the migrated schema, counts foreign keys, and requires every connective
+table to be either loaded by the graph or listed with the reason it is not. A
+new edge type cannot arrive quietly: it appears as a failure naming the table
+and asking the question this work package exists to ask. Stale exemptions fail
+too, since one that outlives its table stops describing the code and starts
+licensing whatever is written under that name next.*
+
+*The rule counts foreign KEYS, not distinct targets — the first version counted
+targets and silently excluded `link`, whose two keys both point at `interface`.
+A self-edge between two rows of one table is the most edge-like shape there is.
+The test found that against its own author's hand classification on first run.*
+
+*What it does not check: that an outage propagates CORRECTLY along a loaded
+edge. That is what the scenario tests in `internal/impact` are for. This checks
+the thing those cannot — that the edge reached the engine at all.*
 
 **WP-I2 · Report consolidation** — M, recurring
 Expiry (type EOL, circuit contract end, with provenance), cost (circuits, power
