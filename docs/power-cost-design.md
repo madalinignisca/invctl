@@ -10,7 +10,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 # Power cost — design
 
-**Status: REVISED 2026-09-04 after review, approved, not yet built.**
+**Status: REVISED 2026-09-04 after review, D3 amended after planning, not yet built.**
 
 The first version of this spec was wrong in its central mechanism and was
 rejected before any code was written. §2.1 now records what it got wrong and
@@ -190,20 +190,46 @@ one silently narrows the figure. Note the scope carefully, per §2.3: 1.0 is
 conservative for the VA→W step **only**, and does not make the end-to-end
 figure an upper bound.
 
-### D3. An asset with no declared draw — **unknown, and counted**
+### D3. An asset with no declared draw — **count what was recorded, not what wasn't**
 
-The rest of this codebase is unambiguous here — `Rating`'s fields are nullable
-"because not recorded must stay distinguishable from zero", and `EstateCosts`
-reports coverage precisely so a partial total is not read as a whole one.
+**AMENDED 2026-09-04**, after the plan flagged that the first wording produced
+a meaningless denominator. It said the coverage line was *"N of M assets
+declare no draw"*, with M being "assets that could plausibly carry one".
 
-The report gives the figure over assets that declare a draw, plus *"N of M
-assets declare no draw"* beside it, exactly as `EstateCosts` does for pricing
-and the power report does for unrated feeds.
+There is no honest way to compute M. Narrowing it by `asset.kind` is the
+obvious idea and it is a trap: `asset.kind` is a foreign key into the
+`asset_kind` lookup table, an **open set that grows by INSERT**, and
+`internal/domain/asset.go:114-127` already records what a Go-side hand-listed
+subset does to it — `CanHostInstances` and `IsAttachable` "answer false for
+anything they have not heard of", so a kind added by INSERT is silently
+excluded with no diagnostic. A coverage figure that silently stops counting a
+new kind is worse than no coverage figure, and this document exists to refuse
+exactly that trade.
 
-**The denominator is assets that could plausibly carry one**, which after §2.2
-means assets not contained inside another asset that declares a draw. Counting
-every VM in the estate as "failed to declare a draw" would make the coverage
-figure meaningless, and coverage exists to make the rest honest.
+Leaving M as *every* live asset is no better: it counts every site, rack,
+bridge, cluster and VM as having "failed" to declare a draw, so a fully-modelled
+estate reports single-digit coverage and the number reads as noise.
+
+**The adjacent power report already answered this**, and this spec was the thing
+out of step. `powerCoverage` in `internal/store/power_findings.go` says so
+outright:
+
+> "Not `assets with no input` — almost nothing in a rack has its own input
+> modelled and never will."
+
+`PowerReport.Assets` is therefore *live assets with at least one power input* —
+a positive count — and `PowerReport.UndeclaredDraw` is *live inputs with no
+draw recorded*, which is the gap that is actually actionable.
+
+**Follow that precedent exactly.** The section reports:
+
+- **how many assets contributed** a declared draw to the figure, and
+- **how many live inputs declare no draw** — someone recorded the supply path
+  but not the number, which is a real gap somebody can go and close.
+
+No ratio against the whole estate, because the denominator would be invented.
+If nothing at all declares a draw, say that in words rather than showing a
+zero, for the same reason D5 refuses to render nothing.
 
 ### D4. Where does it appear? — **a section on `/reports/cost`**
 
@@ -239,7 +265,9 @@ assets rather than hiding them.
    - the **sum over assets of `MAX(draw_va)` per asset** (§2.1),
    - excluding an asset whose `asset_closure` ancestor also declares a draw
      (§2.2),
-   - the count of qualifying assets declaring no draw, and the total (D3).
+   - the count of assets that contributed a draw, and the count of live
+     inputs declaring none (D3 as amended) — never a ratio against every
+     live asset, and never a `kind IN (...)` list.
 3. `kWh/month = VA × 1.0 × 730 ÷ 1000`, cost = kWh × tariff. 730 is the mean
    hours in a month, stated in the report rather than hidden in a constant.
    **Sum raw VA across the estate first, divide once at the end** — per-asset
@@ -260,7 +288,11 @@ assets rather than hiding them.
      seed fixture, not a hypothetical one.
    - a VM declaring a draw inside a hypervisor that also declares one does not
      add to the total.
-   - unknown draw is excluded from the figure and counted in coverage.
+   - an input with no `draw_va` is excluded from the figure and counted in
+     the undeclared-inputs number.
+   - the coverage numbers do not vary with the number of sites, racks or VMs
+     in the estate — the guard against D3's amended denominator regressing to
+     a ratio over everything.
    - the section renders the D5 message when no tariff is configured.
    - an ungranted viewer sees no figure (`CanSeeCosts`).
    - the estate total on the same page is unchanged by any of it.
@@ -295,6 +327,13 @@ Three further findings were accepted without needing a decision: "ceiling" was
 unearned wording (§2.3), silent non-rendering was the wrong failure mode (D5),
 and per-asset rounding would erode the figure downward (§4.3). The lifecycle
 question (§4.4) came from the same review.
+
+Planning then found one more, and it was a spec defect rather than a plan
+problem: D3's denominator was uncomputable, and narrowing it by `asset.kind`
+would have inherited the documented open-set gap in `asset.go:114-127`. D3 is
+amended above to follow `powerCoverage`'s existing precedent instead. That the
+adjacent report had already answered the same question, in a comment, is the
+reason to read neighbouring code before specifying against it.
 
 **Nothing in the first draft was a coding error.** Every defect was in the
 document, and all of them were found by reading the schema and the fixture the
