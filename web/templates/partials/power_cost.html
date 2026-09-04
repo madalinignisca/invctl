@@ -1,0 +1,66 @@
+{{/*
+  invctl — infrastructure inventory
+  Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+
+  Licensed under the GNU Affero General Public License, version 3 only —
+  no later version applies. See LICENSE for the full text.
+
+  SPDX-License-Identifier: AGPL-3.0-only
+
+  Renders from a domain.PowerEstimate ({{template "power_cost" .Power}}), so
+  it is standalone -- the house rule for partials.
+
+  OWN HEADING TIER, NO SHARED GRAND-TOTAL STYLING (docs/power-cost-design.md
+  §2.4). This section is a figure this system DERIVED from a nameplate and a
+  rate; the panels above it total what somebody PRICED. Keeping the structs
+  apart (see internal/store/power_cost.go) stops the arithmetic contamination.
+  This markup stops the human half: a reader must not be able to mistake this
+  for another line of the priced total, and the label below must never repeat
+  the estate stat-row's "Per month" -- money_visibility and power_cost_test.go
+  both key off that distinction.
+*/}}
+{{define "power_cost"}}
+<div class="panel" id="power-cost">
+  <div class="panel-head">
+    <h3>Electricity, estimated</h3>
+    <span class="panel-note">declared load — nothing here is measured</span>
+  </div>
+  {{if not .Configured}}
+  <div class="empty">
+    <strong>No electricity figure: no tariff is configured.</strong>
+    Set <code>INV_POWER_TARIFF_MINOR_PER_KWH</code> to the rate in minor units
+    per kWh — 28 for 0.28 — and this section shows what the declared load costs.
+  </div>
+  {{else}}
+  {{/* Item 3 marker (see asset_detail.html's comment). In the branch that
+       actually renders an amount, not the panel unconditionally -- a
+       deployment with no tariff never shows a marker here, on purpose. */}}
+  <span data-money-marker="partials/power_cost.html" hidden></span>
+  <div class="stat-row">
+    <div class="stat">
+      <div class="stat-label">Electricity, estimated monthly</div>
+      <div class="stat-value">{{money .MonthlyMinor}}</div>
+      <div class="stat-note">
+        {{.KWhPerMonth}} kWh at {{money .TariffMinorPerKWh}} per kWh
+      </div>
+    </div>
+  </div>
+  <div class="panel-body">
+    <p>
+      An estimate from <strong>declared</strong> nameplate draw. Nothing in this
+      system measures power: {{.Draw.Declaring}} asset(s) contributed a declared
+      draw, and {{.Draw.UndeclaredDraw}} live power input(s) record no draw at
+      all — a real gap, not counted in the figure above. Power factor is
+      assumed 1.0 (volt-amps treated as watts) over {{.HoursPerMonth}} hours a
+      month.
+    </p>
+    <p>
+      <strong>Not comparable to an all-in hosting quote.</strong> It excludes
+      loss in the UPS and distribution above each declared input, and excludes
+      cooling and other facility overhead — a hosting price bundles all of
+      those in. Add them before comparing.
+    </p>
+  </div>
+  {{end}}
+</div>
+{{end}}

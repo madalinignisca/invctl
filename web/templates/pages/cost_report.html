@@ -149,6 +149,15 @@
   </div>
   {{end}}
 </div>
+
+{{/* THE ESTIMATE, LAST AND SEPARATE. Everything above is money somebody
+     typed against a thing they bought; this is a figure this system derived
+     from a nameplate and a rate, and it is never added to the totals above
+     (docs/power-cost-design.md §2.4). Its own heading tier and its own
+     assumptions, rendered beside it rather than footnoted, because a reader
+     who takes the number without the caveat is the failure mode. */}}
+<hr class="section-break">
+{{template "power_cost" .Power}}
 {{end}}
 </div>
 {{end}}
