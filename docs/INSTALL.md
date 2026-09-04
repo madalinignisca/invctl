@@ -23,6 +23,9 @@ at, `make demo` is faster than any of this.
 - **Go 1.26.6** to build from source (`go.mod` pins it), or a binary someone
   built for you. The build sets `CGO_ENABLED=0`, so the result runs on any
   Linux with a matching architecture and needs no shared libraries.
+- **`git` and `make`**, if you are building. Obvious once said and absent from
+  a minimal server image: a clean Debian 13 has neither, and the first command
+  below is `git clone`.
 - **A database.** SQLite needs nothing installed. PostgreSQL needs a server.
 - **A reverse proxy that terminates TLS.** invctl speaks plain HTTP and will
   not do TLS itself. This is deliberate — your proxy already does it better,
@@ -50,6 +53,16 @@ git clone https://github.com/madalinignisca/invctl.git
 cd invctl
 make build          # produces bin/invctl
 ```
+
+**The build needs outbound internet, and for more than Go modules.** It also
+downloads the Tailwind standalone binary — around 110 MB — to compile the
+stylesheet. That is fine on a workstation and a problem on a locked-down
+server, which is the environment this program expects to end up in.
+
+So build somewhere with network access and copy `bin/invctl` to the target.
+That is what "a binary someone built for you" above means in practice, and it
+is the normal case rather than the exception: the result is one static file
+with everything compiled in, which is the whole reason it ships that way.
 
 ## The database
 
@@ -284,7 +297,7 @@ set, a token under 24 characters, a duplicate credential id, a token shared
 between two credentials, and a boolean variable set to something that is not
 a boolean.
 
-## Two failures that look like something else
+## Three failures that look like something else
 
 **Login appears to succeed and then bounces back to the login page.** The
 session cookie is marked `Secure` and the browser is not on HTTPS, or the
@@ -295,6 +308,29 @@ served.
 insecure. Behind a proxy that means `X-Forwarded-Proto` is missing, or
 `INV_SECURE_COOKIES` is false so the header is not trusted. They work as a
 pair.
+
+**A script that logs in gets "Your session expired", while a browser works
+fine.** You are almost certainly scraping the CSRF token out of the HTML with
+`grep`. The token is base64 and can contain `+`, which `html/template`
+correctly escapes to `&#43;` in the attribute. A browser turns that back into
+a `+` before it submits; a shell script posts the escaped text, the token no
+longer matches its cookie, and the refusal says nothing about encoding.
+
+A working check needs three things — the cookie jar, the entity decoded, and
+an `Origin` header, since the same-origin check is separate from the token:
+
+```sh
+TOK=$(curl -s -c jar http://127.0.0.1:8080/login \
+      | grep -oE 'name="csrf_token" value="[^"]+"' \
+      | sed -e 's/^.*value="//' -e 's/"$//' -e 's/&#43;/+/g')
+curl -s -b jar -c jar -H 'Origin: http://127.0.0.1:8080' \
+     -d username=admin -d password=... --data-urlencode "csrf_token=$TOK" \
+     http://127.0.0.1:8080/login
+```
+
+This matters because verifying the install is the next thing you do after
+starting it, and the failure looks like a session bug rather than an encoding
+one — which is exactly the wrong place to go looking.
 
 ## Next
 
