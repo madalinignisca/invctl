@@ -54,6 +54,10 @@ var moneyRouteCoverage = []struct {
 	// covered by some route -- TestEveryMoneyTemplateHasABehaviouralRoute
 	// checks both directions.
 	templates []string
+	// deployment builds the harness this case needs, for a route whose money
+	// only renders under a particular configuration. nil means newHarness --
+	// the ordinary case, and the one every other entry uses.
+	deployment func(t *testing.T) *harness
 }{
 	{
 		name: "asset detail",
@@ -175,9 +179,16 @@ var moneyRouteCoverage = []struct {
 		templates: []string{"partials/costs.html"},
 	},
 	{
-		name:      "cost report",
-		path:      func(t *testing.T, h *harness) string { return "/reports/cost" },
-		templates: []string{"pages/cost_report.html"},
+		name: "cost report",
+		// WITH A TARIFF CONFIGURED, because partials/power_cost.html only
+		// renders an amount when there is a rate to apply -- and a case that
+		// claims to cover a money template while rendering its "no tariff is
+		// configured" branch proves nothing about the CanSeeCosts gate on the
+		// figure. Exactly the hole price_movement.html sat in for three
+		// commits, which is why this table checks markers at all.
+		deployment: func(t *testing.T) *harness { return newHarnessWithTariff(t, 28) },
+		path:       func(t *testing.T, h *harness) string { return "/reports/cost" },
+		templates:  []string{"pages/cost_report.html", "partials/power_cost.html"},
 	},
 	{
 		name: "supplier report",
@@ -234,7 +245,11 @@ var currencySymbols = []string{"€", "$", "£", "CHF ", "lei "}
 func TestNoMoneySurfaceLeaksToAnUngrantedObserver(t *testing.T) {
 	for _, tc := range moneyRouteCoverage {
 		t.Run(tc.name, func(t *testing.T) {
-			h := newHarness(t)
+			build := tc.deployment
+			if build == nil {
+				build = newHarness
+			}
+			h := build(t)
 			h.login("admin", "admin-password")
 			path := tc.path(t, h)
 

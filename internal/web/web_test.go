@@ -139,6 +139,16 @@ func newSecureHarness(t *testing.T) *harness {
 	return newHarnessSecure(t, testAgentCredentials(), nil, true)
 }
 
+// newHarnessWithTariff is the same fixture deployment with an electricity
+// rate configured. THE DEFAULT HARNESS DELIBERATELY HAS NONE: an unset tariff
+// is the state most deployments start in, and it is the state D5's "say so,
+// do not render nothing" rule exists for -- so it stays the default here and
+// every existing test keeps describing the deployment it was written against.
+func newHarnessWithTariff(t *testing.T, minorPerKWh int64) *harness {
+	t.Helper()
+	return newHarnessTuned(t, testAgentCredentials(), nil, false, minorPerKWh)
+}
+
 // newHarnessWithoutAgents builds the same deployment with no monitoring
 // credentials configured, which mounts no machine-facing route and registers no
 // CSRF exemption.
@@ -273,6 +283,17 @@ func webTemplate(t *testing.T) (string, *seed.Refs) {
 
 func newHarnessSecure(t *testing.T, creds []config.AgentCredential, readerCreds []config.ReaderCredential, secure bool) *harness {
 	t.Helper()
+	return newHarnessTuned(t, creds, readerCreds, secure, 0)
+}
+
+// newHarnessTuned is newHarnessSecure with one more knob: an electricity
+// tariff, needed by exactly one caller (newHarnessWithTariff) so the
+// power-cost section has a rate to render a figure for. Every other entry
+// point above stays a thin wrapper passing 0 -- "no tariff configured" is
+// the deployment every other test in this package was written against, and
+// this rename must not move that default out from under them.
+func newHarnessTuned(t *testing.T, creds []config.AgentCredential, readerCreds []config.ReaderCredential, secure bool, tariffMinorPerKWh int64) *harness {
+	t.Helper()
 
 	template, refs := webTemplate(t)
 
@@ -324,7 +345,12 @@ func newHarnessSecure(t *testing.T, creds []config.AgentCredential, readerCreds 
 		t.Fatalf("parsing templates: %v", err)
 	}
 
-	cfg := &config.Config{AdminUsers: []string{"admin"}, AuthLocal: true, SecureCookies: secure}
+	cfg := &config.Config{
+		AdminUsers:             []string{"admin"},
+		AuthLocal:              true,
+		SecureCookies:          secure,
+		PowerTariffMinorPerKWh: tariffMinorPerKWh,
+	}
 	authz := auth.NewAuthorizer(cfg.AdminUsers, st)
 
 	app := &handlers.App{
