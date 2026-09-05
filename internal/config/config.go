@@ -18,6 +18,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -73,6 +74,25 @@ type Config struct {
 	// as though it were computed is exactly the measured-looking figure this
 	// design refuses.
 	PowerTariffMinorPerKWh int64
+
+	// PowerPUEHundredths is the operator-declared facility Power Usage
+	// Effectiveness, in integer hundredths -- 140 for a PUE of 1.40
+	// (docs/power-cost-design.md D6). Zero means undeclared, and the cost
+	// report renders exactly today's IT-load-only figure: this is what
+	// guarantees a deployment that never sets INV_POWER_PUE sees no change
+	// in behaviour.
+	//
+	// Parsed from a decimal on the environment ("1.4"), because that is how
+	// an operator knows a PUE, the same reasoning D1 already applied to the
+	// tariff being read in minor units rather than major ones. Hundredths
+	// rather than a float from here on, so the report's own arithmetic
+	// (domain.PowerEstimate) stays entirely in integers.
+	//
+	// It REFUSES rather than defaults: below 100 (PUE < 1.0) is physically
+	// impossible -- a facility cannot use less power than the load inside it
+	// -- and an absurd value is far more likely a typo than a real facility,
+	// so both stop the process at startup exactly as a malformed tariff does.
+	PowerPUEHundredths int64
 
 	// AgentCredentials are the monitoring credentials (docs/AUDIT.md rule 6).
 	// They are a different principal type entirely: not app_user rows, never in
@@ -171,6 +191,7 @@ func Load() (*Config, error) {
 	// learns about both on the first start rather than one per restart.
 	var badBools []string
 	var badInts []string
+	var badDecimals []string
 	cfg := &Config{
 		DBDriver:                    envOr("INV_DB_DRIVER", "sqlite"),
 		DBDSN:                       envOr("INV_DB_DSN", "file:invctl.db?_txlock=immediate"),
@@ -179,6 +200,7 @@ func Load() (*Config, error) {
 		AdminUsers:                  splitList(os.Getenv("INV_ADMIN_USERS")),
 		Currency:                    envOr("INV_CURRENCY", "EUR"),
 		PowerTariffMinorPerKWh:      envInt64("INV_POWER_TARIFF_MINOR_PER_KWH", 0, &badInts),
+		PowerPUEHundredths:          envDecimalHundredths("INV_POWER_PUE", 0, &badDecimals),
 		AuthLocal:                   envBool("INV_AUTH_LOCAL", true, &badBools),
 		AuthLDAP:                    envBool("INV_AUTH_LDAP", false, &badBools),
 		SeedOnStart:                 envBool("INV_SEED", false, &badBools),
@@ -210,6 +232,12 @@ func Load() (*Config, error) {
 			"falling back to a default, because the default renders as "+
 			"\"no tariff is configured\" on a page somebody has just configured",
 			strings.Join(badInts, ", "))
+	}
+	if len(badDecimals) > 0 {
+		return nil, fmt.Errorf("validating config: %s is not a decimal PUE; a facility PUE "+
+			"of 1.4 is written as 1.4, not 140. Refusing to start rather than falling back to "+
+			"a default, because there is no honest default PUE to fall back to -- see D6",
+			strings.Join(badDecimals, ", "))
 	}
 
 	key, err := sessionKey()
@@ -293,6 +321,28 @@ func (c *Config) validate() error {
 		return fmt.Errorf("validating config: INV_POWER_TARIFF_MINOR_PER_KWH is %d; "+
 			"a negative tariff would report the estate as earning money by being "+
 			"switched on", c.PowerTariffMinorPerKWh)
+	}
+	// D6: zero means undeclared and is handled entirely by the domain layer
+	// defaulting effectivePUEHundredths to 100 -- this only ever sees a
+	// genuinely declared, non-zero value.
+	if c.PowerPUEHundredths != 0 {
+		if c.PowerPUEHundredths < 100 {
+			return fmt.Errorf("validating config: INV_POWER_PUE is %s, which is below 1.0; "+
+				"a facility cannot use less power than the load inside it, so this is "+
+				"almost certainly a decimal typed as hundredths (140 instead of 1.4)",
+				formatHundredths(c.PowerPUEHundredths))
+		}
+		// PUE 10.0 (=10x the IT load) is generously above every real facility
+		// this project has ever seen documented -- typical figures sit between
+		// 1.1 and 2.0. It is not a physical limit the way < 1.0 is, so this is
+		// a typo guard, not a law of thermodynamics: an operator hitting it
+		// with a real number is a conversation, not a crash nobody can fix.
+		if c.PowerPUEHundredths > 1000 {
+			return fmt.Errorf("validating config: INV_POWER_PUE is %s, which is above 10.0; "+
+				"refusing to start rather than showing a figure this implausible -- if this "+
+				"facility genuinely runs a PUE that high, raise the limit deliberately",
+				formatHundredths(c.PowerPUEHundredths))
+		}
 	}
 	if err := c.validateAgents(); err != nil {
 		return err
@@ -434,6 +484,41 @@ func envInt64(key string, fallback int64, bad *[]string) int64 {
 		return fallback
 	}
 	return parsed
+}
+
+// formatHundredths renders integer hundredths back as the decimal an
+// operator typed, e.g. 140 -> "1.40", for a validation message that speaks
+// the unit INV_POWER_PUE is actually read in rather than the internal one.
+func formatHundredths(h int64) string {
+	sign := ""
+	if h < 0 {
+		sign, h = "-", -h
+	}
+	return fmt.Sprintf("%s%d.%02d", sign, h/100, h%100)
+}
+
+// envDecimalHundredths parses a decimal like "1.4" into integer hundredths
+// (140), recording anything it could not parse.
+//
+// D6: operators know a PUE as a decimal, the way they know a tariff in major
+// currency units -- so this reads the natural spelling and does the
+// minor-unit conversion itself, rather than asking for INV_POWER_PUE=140 the
+// way the tariff variable asks for minor units directly. strconv.ParseFloat
+// is used ONLY here, at startup, for a single one-off parse of a short
+// operator-typed string -- every arithmetic use of the result downstream
+// (internal/domain.PowerEstimate) stays in integer hundredths, per D6's own
+// instruction to keep the arithmetic in integers.
+func envDecimalHundredths(key string, fallback int64, bad *[]string) int64 {
+	v := os.Getenv(key)
+	if v == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseFloat(v, 64)
+	if err != nil {
+		*bad = append(*bad, fmt.Sprintf("%s=%q", key, v))
+		return fallback
+	}
+	return int64(math.Round(parsed * 100))
 }
 
 func envDuration(key string, fallback time.Duration) time.Duration {

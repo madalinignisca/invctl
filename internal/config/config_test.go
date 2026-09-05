@@ -596,3 +596,67 @@ func TestThePowerTariffIsUnsetByDefaultAndRefusesRubbish(t *testing.T) {
 		}
 	})
 }
+
+// TestThePowerPUEIsUnsetByDefaultAndRefusesNonsense is D6 / §4b.11. Unset
+// must stay zero -- that is what lets internal/domain.PowerEstimate treat it
+// as a no-op multiplier and reproduce today's output exactly.
+func TestThePowerPUEIsUnsetByDefaultAndRefusesNonsense(t *testing.T) {
+	t.Run("unset", func(t *testing.T) {
+		pristineEnv(t)
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if cfg.PowerPUEHundredths != 0 {
+			t.Errorf("PowerPUEHundredths = %d, want 0 (undeclared)", cfg.PowerPUEHundredths)
+		}
+	})
+
+	t.Run("set, as the decimal an operator actually types", func(t *testing.T) {
+		pristineEnv(t)
+		t.Setenv("INV_POWER_PUE", "1.4")
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if cfg.PowerPUEHundredths != 140 {
+			t.Errorf("PowerPUEHundredths = %d, want 140", cfg.PowerPUEHundredths)
+		}
+	})
+
+	t.Run("refuses garbage", func(t *testing.T) {
+		pristineEnv(t)
+		t.Setenv("INV_POWER_PUE", "one point four")
+		if _, err := Load(); err == nil {
+			t.Fatal("Load accepted a non-decimal INV_POWER_PUE")
+		}
+	})
+
+	t.Run("refuses below 1.0 -- physically impossible", func(t *testing.T) {
+		pristineEnv(t)
+		t.Setenv("INV_POWER_PUE", "0.9")
+		if _, err := Load(); err == nil {
+			t.Fatal("Load accepted a PUE below 1.0; a facility cannot use less power than the load inside it")
+		}
+	})
+
+	// The value an operator would type if they read "hundredths" and typed
+	// the tariff's own convention by habit -- 140 meaning "1.40" written the
+	// tariff's way. It must be refused as absurd, not silently accepted as a
+	// PUE of 140.
+	t.Run("refuses a value that reads as the tariff's own hundredths convention", func(t *testing.T) {
+		pristineEnv(t)
+		t.Setenv("INV_POWER_PUE", "140")
+		if _, err := Load(); err == nil {
+			t.Fatal("Load accepted INV_POWER_PUE=140 (a PUE of 140.0), which is a typo, not a real facility")
+		}
+	})
+
+	t.Run("accepts a real facility PUE at the boundary", func(t *testing.T) {
+		pristineEnv(t)
+		t.Setenv("INV_POWER_PUE", "1.0")
+		if _, err := Load(); err != nil {
+			t.Fatalf("Load refused PUE 1.0, which is the boundary of physically possible: %v", err)
+		}
+	})
+}
