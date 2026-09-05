@@ -153,6 +153,38 @@ an all-in hosting quote without adding those**.
 The exclusions are right. Only the word was wrong, and a wrong word on a money
 figure is the failure this whole document is arranged to avoid.
 
+### 2.3b Which way the figure is wrong: NOBODY KNOWS, and that is the answer
+
+**ADDED 2026-09-05.** The round-2 review found the page asserting, in bold,
+that the figure "reads low". It has not earned that either, and the reason is
+the term this document never mentioned at all.
+
+**`draw_va × 730 h` assumes 100% duty at rated PSU capacity.** A 900 VA
+nameplate server that actually draws ~350 W for most of the month is overstated
+by about 2.5×. That is the single largest term in the estimate, larger than
+everything §2.3 carefully bounds, and the words *duty*, *utilisation* and *full
+load* appeared nowhere in this document before this amendment. §2.3 asked how
+conservative the VA→W step is and never asked the same question of the 730 h
+step; D2 discusses power factor and never mentions utilisation.
+
+So the errors run in both directions:
+
+| Pushes the figure HIGH | Pushes it LOW |
+|---|---|
+| nameplate draw at 100% duty (dominant) | a chassis with independent rails, counted at its larger side (§2.1) |
+| a PDU whose declared draw is what it passes through (§2.2) | any unmodelled site, missing entirely |
+| a declared PUE double-counted against §2.3's list (D6) | assets that declare no draw at all |
+
+**The net direction is unknown, and the report must say exactly that.**
+
+This is §2.3's own defect, mirrored. §2.3 refused the word "ceiling" because a
+ceiling promises the real bill cannot exceed it. Asserting "reads low" installs
+an unearned **floor** — and a reader who believes the figure is a lower bound on
+staying will buy the hosting quote on it. That is the worse error of the two,
+because it is stated in bold rather than implied by one word.
+
+Name both columns. Claim neither direction.
+
 ### 2.4 It must not contaminate the estate total
 
 `EstateCosts` carries a deliberate property, argued in its own comment: the
@@ -253,7 +285,28 @@ one that matters more here: an estate with three sites and one power-modelled
 produces a figure covering a third of it, wrong in the direction that makes
 staying look cheap.
 
-The section must also **state the direction of its error**. `powerUtilisation`
+**AMENDED A THIRD TIME 2026-09-05: carry `PowerReport.Assets` as a
+comparator.** The two counts above cannot detect the state every pilot
+deployment passes through. Model one rack: one server declares a draw, two
+hundred assets have **no `power_input` row at all**, and every site already has
+a panel (panels get created early, inputs late). Then `TotalVA > 0` so a real
+figure renders, `UndeclaredDraw` is **0** — it counts input rows whose
+`draw_va` is NULL, and an asset with no input row produces nothing to count —
+and `UnmodelledSites` is **0**. The page prints money under three green
+coverage signals, over an estate that is half a percent modelled.
+
+`powerCoverage` already computes `PowerReport.Assets`, *live assets with at
+least one power input*: the same single-closed-equality precedent, no invented
+denominator. **"3 of 47 assets that have a power input declared a draw"**
+collapses that state on sight.
+
+And **delete the sentence "Every live site carries at least some power model."**
+A panel at every site says nothing about whether any load is declared. That
+sentence turns a silence into an all-clear, which is the failure this whole
+document exists to refuse.
+
+The section must also **state the direction of its error**, per §2.3b — both
+columns, and no claim about the net. `powerUtilisation`
 already appends "and N of its inputs declare no draw at all" so a reader knows
 which way the figure is off; the money section states no direction at all. Two
 things understate the IT-load figure itself and neither reaches the page today:
@@ -315,6 +368,18 @@ Both figures are shown when a PUE is set: the IT load, and the facility figure
 derived from it. Showing only the multiplied number would hide which of the two
 assumptions moved it.
 
+**A DECLARED PUE CLOSES TWO OF §2.3's THREE EXCLUSIONS, and the page must stop
+telling the reader to add them again.** PUE is *Total Facility Energy ÷ IT
+Equipment Energy*, where the denominator is measured at the **UPS/PDU output**.
+UPS conversion loss and distribution loss therefore sit in the **numerator** —
+inside the multiplier by definition, alongside cooling. §2.3's instruction to
+"add UPS and distribution loss before comparing" was written for a world with no
+multiplier; repeating it beside a facility figure double-counts them, on the
+one number the keep-or-move decision is made from.
+
+When a PUE is declared, the caveat says the facility figure already includes
+UPS, distribution and cooling. When it is not, §2.3's list stands unchanged.
+
 ### D7. The form must state the convention it depends on
 
 **ADDED 2026-09-05.** §2.1 decided `MAX` per asset on one premise: two inputs
@@ -335,10 +400,30 @@ is already wrong for anyone who took the "or allocated" reading.** This feature
 did not create that; it made the ambiguity load-bearing enough to notice.
 
 **The hint states the convention**: record the whole load on each input,
-because a feed must be able to carry its partner's load alone. That converts an
-error accepted in perpetuity into one that converges as data is re-entered, and
-it is in scope precisely because §2.1 is the reason we now know the hint is
-wrong.
+because a feed must be able to carry its partner's load alone.
+
+**AMENDED 2026-09-05, twice over.**
+
+*One.* §2.1 enumerated **four** places that fail to distinguish the readings —
+the schema, the form, `checkDraw`, and the column comment — and the first
+attempt changed only the form. The phrase "a nameplate or allocated figure
+somebody typed" still stands verbatim in `00023_power.sql` and its Postgres
+twin, in `domain/power.go`, in `domain/classification.go` and in
+`docs/AUDIT.md`; `docs/ROADMAP.md` now **quotes the retired hint as current**,
+which makes that line false. The form is what an operator reads once. The column
+comment is what the **next implementer** reads before writing the next query
+over this column — which is exactly how this defect was introduced. All of them
+change, and a test pins the hint, because the one fix whose entire deliverable
+is a sentence was also the only one shipped without a guard.
+
+*Two.* "Whole load" alone is not enough, and §2.2's claim that this wording is
+"most of the mitigation" for the PDU case was wrong as written. **Whole load of
+what?** For a server it is unambiguous. For a rack PDU — a containment *sibling*
+of the servers it powers, which `asset_closure` structurally cannot exclude — it
+is the most natural possible instruction to enter the sum of everything
+downstream, which is precisely the double-count §2.2 cannot catch. The hint must
+bound it to the asset's **own** consumption: not your half of it, and not what
+it passes through to others.
 
 ## 4. What gets built
 
@@ -407,6 +492,47 @@ wrong.
     per kWh means a real rate of 0.2847 is entered as 28 — a systematic ~1.7%
     understatement, an order of magnitude larger than the truncation §4.3
     exists to prevent. Inconsistent rigour is itself a signal.
+
+## 4c. Added by the round-2 re-review (2026-09-05)
+
+15. **The direction claim goes** (§2.3b). Both columns named, net direction
+    stated as unknown. The bold "reads low" is an unearned floor and worse than
+    the "ceiling" §2.3 removed.
+16. **The PUE caveat stops double-counting** (D6/§2.3). With a PUE declared the
+    page says the facility figure already includes UPS, distribution and
+    cooling, instead of instructing the reader to add them again.
+17. **`PowerReport.Assets` as a comparator, and the false all-clear deleted**
+    (D3). "3 of 47 assets that have a power input declared a draw"; and "Every
+    live site carries at least some power model" goes, because a panel says
+    nothing about a declared load.
+18. **D7 reaches all four places §2.1 named**, plus `classification.go`,
+    `AUDIT.md`, and `ROADMAP.md`'s now-false quotation of the retired hint — and
+    a test pins the hint.
+19. **The hint bounds "whole load" to the asset's own consumption**, so a rack
+    PDU is not invited to record what it passes through (§2.2, D7).
+20. **Two inert assertions replaced.** `Contains(lower(page), "low")` matches
+    "figures be**low**" elsewhere on the page and cannot fail;
+    `if !A && !B` with `B = Contains(lower, "nothing")` is a tautology because
+    the panel note "nothing here is measured" renders in every branch. Both are
+    the exact defect the testing policy names — a test that passes identically
+    when the thing it guards is gone.
+21. **The tariff widens to a decimal before anything deploys.**
+    `envDecimalHundredths` already exists and was applied to the newer, less
+    consequential knob while the money one kept whole-minor-unit resolution.
+    `INV_POWER_TARIFF_MINOR_PER_KWH` is a near-permanent interface: once set in
+    the field, reinterpreting the same name at a finer scale divides every
+    figure by 100 with no error anywhere. Nothing is deployed and it is not in
+    `INSTALL.md`; this is the cheapest this change will ever be.
+22. **The "~1.7% systematic understatement" line goes with it** — quantisation
+    is ±half a unit and its direction depends on whether the operator truncated
+    or rounded, which nothing tells them. It was never systematic, and it was
+    being reused to support the direction claim in item 15.
+23. **`INV_POWER_PUE=0` refuses**, like every other value below 1.0. The guard
+    currently exempts exactly the one physically impossible value it exists to
+    catch, because the range check sits behind `if PowerPUEHundredths != 0`.
+24. **The tariff gets the absurd-value guard** whose argument this design
+    already wrote two functions away, and which is the only path an `int64`
+    overflow could reach the money arithmetic.
 
 ## 5. What this explicitly does not do
 
@@ -477,3 +603,31 @@ while §5 forbade the multiplier that makes one — resolved by D6.
 The pattern across all three rounds is worth naming: **every defect was a place
 where this document reasoned correctly and then failed to carry the reasoning
 one step further.** None was a wrong idea. All were right ideas stopped early.
+
+### Round-2 re-review, 2026-09-05
+
+The same reviewer, asked directly to find a fourth instance of that pattern,
+found six — and all of them in the *statements added to close round one*, not in
+the mechanism. `HasFigure`, the `unmodelledSites` factoring and the driver-level
+gate test were all accepted without objection; the gate test was called the
+strongest thing in that round.
+
+- **D6 got the arithmetic right and the sentence wrong**: PUE already contains
+  UPS and distribution loss, so telling the reader to add them was a
+  double-count (§2.3, D6).
+- **The direction-of-error claim shipped without its dominant term** —
+  nameplate at 100% duty — so the page asserted "reads low" while the largest
+  error ran high (§2.3b).
+- **A fourth render state** prints money under three green coverage signals
+  over a barely-modelled estate (D3).
+- **D7 changed one of the four places §2.1 enumerated**, and left `ROADMAP.md`
+  quoting the retired hint as current.
+- **§2.2's PDU mitigation did not exist**: "whole load" is exactly the wrong
+  instruction for a rack PDU.
+- **Two of the new tests could not fail** — one matching "be**low**" elsewhere
+  on the page, one a tautology on a note that renders in every branch.
+
+That the fix round reproduced the defect it was fixing, in prose, is the most
+useful thing this document records. **On this feature the prose is the product**
+— the number is four multiplications; everything that makes it safe to act on is
+a sentence.
