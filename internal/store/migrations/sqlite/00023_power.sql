@@ -116,8 +116,10 @@ CREATE TABLE power_input (
   -- Almost always 'A' or 'B'. Free text because estates label them their own
   -- way, and a vocabulary here would be a lookup table with two rows in it.
   name        TEXT NOT NULL,
-  -- Declared draw in volt-amps: a nameplate or allocated figure somebody typed.
-  -- NOT observed -- nothing in the estate reports it here, and a measured draw
+  -- Declared draw in volt-amps: the whole nameplate load of this asset, not a
+  -- share of it and not what it passes on to something downstream -- see
+  -- docs/power-cost-design.md D7. NOT observed -- nothing in the estate
+  -- reports it here, and a measured draw
   -- arriving from a PDU would be observed state with a reporter and an age,
   -- which is a different contract entirely (docs/AUDIT.md). Nullable, because an
   -- unknown draw must stay distinguishable from a declared zero.

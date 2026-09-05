@@ -318,6 +318,16 @@ h2 {
   font-size: 12.5px;
 }
 
+/* Separates a DERIVED section (e.g. the power-cost estimate) from the
+   PRICED panels above it (docs/power-cost-design.md §2.4). Plain rule,
+   no panel chrome of its own -- the point is visual distance, not another
+   box that could be mistaken for a line of the total it sits beside. */
+.section-break {
+  border: none;
+  border-top: 1px solid var(--line);
+  margin: 22px 0;
+}
+
 .grid-2 {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));

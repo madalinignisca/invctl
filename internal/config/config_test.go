@@ -40,6 +40,7 @@ func pristineEnv(t *testing.T) {
 		"INV_SESSION_KEY", "INV_SESSION_TIMEOUT",
 		"INV_AGENT_TOKENS", "INV_AGENT_SCOPES", "INV_AGENT_VOCAB",
 		"INV_API_TOKENS", "INV_API_SCOPES",
+		"INV_POWER_TARIFF_MINOR_PER_KWH",
 	} {
 		t.Setenv(key, "")
 	}
@@ -544,4 +545,174 @@ func TestDistinctAgentAndReaderTokensStartFine(t *testing.T) {
 	if len(cfg.Readers) != 1 || cfg.Readers[0].ID != "ansible" {
 		t.Fatalf("got readers %+v, want exactly [ansible]", cfg.Readers)
 	}
+}
+
+// TestThePowerTariffIsUnsetByDefaultAndRefusesRubbish. The default matters:
+// an unset tariff is what makes the cost report render D5's explanation
+// rather than a figure, and a default of anything else would put a number
+// nobody chose in front of a reader.
+//
+// Item 21 widened this from whole minor units to hundredths of a minor unit,
+// parsed the same way PUE already is (envDecimalHundredths): "28" still
+// means the identical rate it always did (2800 internally), and "28.47" is
+// now representable at all, which it never was before.
+func TestThePowerTariffIsUnsetByDefaultAndRefusesRubbish(t *testing.T) {
+	t.Run("unset", func(t *testing.T) {
+		pristineEnv(t)
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if cfg.PowerTariffHundredthsMinorPerKWh != 0 {
+			t.Errorf("tariff = %d, want 0 (unset)", cfg.PowerTariffHundredthsMinorPerKWh)
+		}
+	})
+
+	t.Run("set to a whole minor unit, as before widening", func(t *testing.T) {
+		pristineEnv(t)
+		t.Setenv("INV_POWER_TARIFF_MINOR_PER_KWH", "28")
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if cfg.PowerTariffHundredthsMinorPerKWh != 2800 {
+			t.Errorf("tariff = %d, want 2800 (28.00 minor units) -- an operator who typed "+
+				"a whole number before widening must see the identical rate today",
+				cfg.PowerTariffHundredthsMinorPerKWh)
+		}
+	})
+
+	// The whole reason item 21 exists: a real rate with a fraction of a minor
+	// unit, unrepresentable before this widening.
+	t.Run("set to a fraction of a minor unit", func(t *testing.T) {
+		pristineEnv(t)
+		t.Setenv("INV_POWER_TARIFF_MINOR_PER_KWH", "28.47")
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if cfg.PowerTariffHundredthsMinorPerKWh != 2847 {
+			t.Errorf("tariff = %d, want 2847 (28.47 minor units)", cfg.PowerTariffHundredthsMinorPerKWh)
+		}
+	})
+
+	// Genuinely malformed input, not merely a value that used to be refused
+	// for being finer-grained than a whole minor unit -- "0.28" is now a
+	// legitimate (if absurdly tiny) rate, not a parse error.
+	for _, bad := range []string{"28 cents", "-", "twenty-eight"} {
+		t.Run("refuses "+bad, func(t *testing.T) {
+			pristineEnv(t)
+			t.Setenv("INV_POWER_TARIFF_MINOR_PER_KWH", bad)
+			if _, err := Load(); err == nil {
+				t.Fatalf("Load accepted INV_POWER_TARIFF_MINOR_PER_KWH=%q", bad)
+			}
+		})
+	}
+
+	t.Run("refuses a negative rate", func(t *testing.T) {
+		pristineEnv(t)
+		t.Setenv("INV_POWER_TARIFF_MINOR_PER_KWH", "-28")
+		if _, err := Load(); err == nil {
+			t.Fatal("Load accepted a negative tariff")
+		}
+	})
+
+	// item 24: the argument for this guard was already written for PowerPUE
+	// two functions away and applied only there. An absurd tariff is the
+	// only path an int64 large enough to matter could reach the money
+	// arithmetic.
+	t.Run("refuses an absurdly high rate", func(t *testing.T) {
+		pristineEnv(t)
+		t.Setenv("INV_POWER_TARIFF_MINOR_PER_KWH", "100.01")
+		if _, err := Load(); err == nil {
+			t.Fatal("Load accepted a tariff of 100.01 minor units per kWh, an implausible rate")
+		}
+	})
+
+	t.Run("accepts the boundary of the absurd-value guard", func(t *testing.T) {
+		pristineEnv(t)
+		t.Setenv("INV_POWER_TARIFF_MINOR_PER_KWH", "100.00")
+		if _, err := Load(); err != nil {
+			t.Fatalf("Load refused 100.00, the guard's own boundary: %v", err)
+		}
+	})
+}
+
+// TestThePowerPUEIsUnsetByDefaultAndRefusesNonsense is D6 / §4b.11. Unset
+// must stay zero -- that is what lets internal/domain.PowerEstimate treat it
+// as a no-op multiplier and reproduce today's output exactly.
+func TestThePowerPUEIsUnsetByDefaultAndRefusesNonsense(t *testing.T) {
+	t.Run("unset", func(t *testing.T) {
+		pristineEnv(t)
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if cfg.PowerPUEHundredths != 0 {
+			t.Errorf("PowerPUEHundredths = %d, want 0 (undeclared)", cfg.PowerPUEHundredths)
+		}
+	})
+
+	t.Run("set, as the decimal an operator actually types", func(t *testing.T) {
+		pristineEnv(t)
+		t.Setenv("INV_POWER_PUE", "1.4")
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if cfg.PowerPUEHundredths != 140 {
+			t.Errorf("PowerPUEHundredths = %d, want 140", cfg.PowerPUEHundredths)
+		}
+	})
+
+	t.Run("refuses garbage", func(t *testing.T) {
+		pristineEnv(t)
+		t.Setenv("INV_POWER_PUE", "one point four")
+		if _, err := Load(); err == nil {
+			t.Fatal("Load accepted a non-decimal INV_POWER_PUE")
+		}
+	})
+
+	t.Run("refuses below 1.0 -- physically impossible", func(t *testing.T) {
+		pristineEnv(t)
+		t.Setenv("INV_POWER_PUE", "0.9")
+		if _, err := Load(); err == nil {
+			t.Fatal("Load accepted a PUE below 1.0; a facility cannot use less power than the load inside it")
+		}
+	})
+
+	// item 23: 0 parses to the identical int64 zero an UNSET variable
+	// produces, so a range check gated on "!= 0" exempted exactly the one
+	// physically impossible value it exists to catch. A facility using no
+	// power at all is impossible in the same way 0.9 is.
+	for _, zero := range []string{"0", "0.0", "0.00"} {
+		t.Run("refuses an explicit "+zero, func(t *testing.T) {
+			pristineEnv(t)
+			t.Setenv("INV_POWER_PUE", zero)
+			if _, err := Load(); err == nil {
+				t.Fatalf("Load accepted INV_POWER_PUE=%q; it parses to the same zero an "+
+					"unset variable produces, so the range check must not exempt it", zero)
+			}
+		})
+	}
+
+	// The value an operator would type if they read "hundredths" and typed
+	// the tariff's own convention by habit -- 140 meaning "1.40" written the
+	// tariff's way. It must be refused as absurd, not silently accepted as a
+	// PUE of 140.
+	t.Run("refuses a value that reads as the tariff's own hundredths convention", func(t *testing.T) {
+		pristineEnv(t)
+		t.Setenv("INV_POWER_PUE", "140")
+		if _, err := Load(); err == nil {
+			t.Fatal("Load accepted INV_POWER_PUE=140 (a PUE of 140.0), which is a typo, not a real facility")
+		}
+	})
+
+	t.Run("accepts a real facility PUE at the boundary", func(t *testing.T) {
+		pristineEnv(t)
+		t.Setenv("INV_POWER_PUE", "1.0")
+		if _, err := Load(); err != nil {
+			t.Fatalf("Load refused PUE 1.0, which is the boundary of physically possible: %v", err)
+		}
+	})
 }

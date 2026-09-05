@@ -842,17 +842,39 @@ buckets for new cost-bearing entities.
 *Audited 2026-08-14, and most of it was already done. Expiry covers device-type
 EOL with provenance and circuit contract ends. Search resolves serials, part
 numbers, VLAN IDs **and circuit IDs** — a circuit is indexed with its CID as
-both title and body. Two real gaps remain: circuits were absent from the project
-cost rollup (a wrong number, not a missing feature — fixed by migration 00041),
-and there is no `/reports/cost` page at all.*
+both title and body. Two real gaps remained: circuits were absent from the
+project cost rollup (a wrong number, not a missing feature — fixed by
+migration 00041), and there was no `/reports/cost` page at all.*
 
 *The entry used to say "metered power draw". **Nothing meters anything** — this
-system never touches the estate, and the form says so: "Draw (VA) — nameplate or
-allocated. Nothing measures this." Decided 2026-08-14: power cost is an
+system never touches the estate, and the form said so at the time: "Draw (VA) —
+nameplate or allocated. Nothing measures this." (That hint has since been
+rewritten twice over, D7, because "nameplate or allocated" offered both
+readings as equally valid and an operator who took the "allocated" one was
+silently halving the real draw — see the entry below for what it says now.)
+Decided 2026-08-14: power cost is an
 **estimate**, declared nameplate draw times a tariff, and it must be labelled as
 one everywhere it appears. It is useful for the comparison the estate actually
 makes — keep this platform or move to another — and it must never be mistaken
 for a reading. A figure that looks measured and is not is worse than no figure.*
+
+*Built 2026-09-04 (WP-I2, `docs/power-cost-design.md`). `/reports/cost` now
+carries a separate, own-heading-tier section: `internal/store.DeclaredPowerDraw`
+sums `MAX(draw_va)` per asset (never `SUM` — draw_va is an allocation figure,
+not a demand figure, and a dual-fed server records the whole load on each
+side), excludes an asset already covered by a drawing ancestor via
+`asset_closure`, and reports how many assets contributed a draw and how many
+live inputs declared none — never a ratio against every live asset, since
+`asset.kind` is an open lookup table with no honest denominator (D3, amended
+during planning). `internal/domain.PowerEstimate` applies
+`INV_POWER_TARIFF_MINOR_PER_KWH` at power factor 1.0 over 730 h/month, states
+that scope beside the figure, and says outright it is not comparable to an
+all-in hosting quote without adding UPS/distribution loss and facility
+overhead. Zero tariff renders "No electricity figure: no tariff is
+configured." rather than nothing (D5), and the figure never enters
+`EstateCostReport.Totals` — a separate struct, pinned by
+`TestThePowerFigureIsNotInTheEstateTotals` at store level and
+`TestTheEstateTotalIsUnchangedByThePowerFigure` at the page.*
 
 **WP-I3 · Performance** — M — **DONE (first pass)**
 Built the fixture the entry asked for — 4,000 assets, 10,000 prefixes, 50,000

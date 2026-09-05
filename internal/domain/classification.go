@@ -549,9 +549,11 @@ var DeclaredColumns = map[string][]string{
 		"row_version",
 	},
 	// The power chain (migration 00023). Declared throughout, and worth stating
-	// because one column looks observed and is not: `power_input.draw_va` is a
-	// NAMEPLATE or allocated figure a person typed, not a measurement. Nothing in
-	// the estate reports it. A measured draw arriving from a PDU would be
+	// because one column looks observed and is not: `power_input.draw_va` is
+	// the whole nameplate load of this asset, not a share of it and not what
+	// it passes on to something downstream (D7), typed by a person, not a
+	// measurement. Nothing in the estate reports it. A measured draw arriving
+	// from a PDU would be
 	// observed state with a reporter, an age and a transition rule -- a different
 	// contract entirely (rules 1 and 3), and it would be a new column beside this
 	// one rather than a reinterpretation of it.

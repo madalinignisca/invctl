@@ -433,6 +433,32 @@ func moneyFormatter(currency string) func(int64) string {
 	}
 }
 
+// moneyPreciseFormatter renders an amount given in HUNDREDTHS of a minor
+// unit -- four decimal places of the major currency instead of `money`'s two.
+//
+// Built for exactly one caller: the electricity tariff (item 21), widened
+// from whole minor units so a real rate like 0.2847 is representable at all
+// instead of being silently rounded to 0.28. `money` cannot render that
+// value -- it assumes its int64 argument IS whole minor units, so handing it
+// hundredths-of-a-minor-unit directly would print a figure 100x too large.
+// Reusing `money`'s own two-decimal assumption for a value that carries two
+// MORE digits of resolution would be exactly the kind of silent unit
+// mismatch this design elsewhere refuses.
+func moneyPreciseFormatter(currency string) func(int64) string {
+	symbol, ok := currencySymbols[strings.ToUpper(currency)]
+	if !ok {
+		symbol = strings.ToUpper(currency) + " "
+	}
+	return func(hundredthsMinor int64) string {
+		sign := ""
+		if hundredthsMinor < 0 {
+			sign, hundredthsMinor = "-", -hundredthsMinor
+		}
+		whole, frac := hundredthsMinor/10000, hundredthsMinor%10000
+		return fmt.Sprintf("%s%s%s.%04d", sign, symbol, groupThousands(whole), frac)
+	}
+}
+
 // amountMinor renders a figure for an INPUT rather than for a reader.
 //
 // Deliberately not `money`. That formatter groups thousands with a comma and

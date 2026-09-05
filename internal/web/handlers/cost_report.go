@@ -11,6 +11,7 @@ package handlers
 import (
 	"net/http"
 
+	"github.com/madalinignisca/invctl/internal/domain"
 	"github.com/madalinignisca/invctl/internal/store"
 )
 
@@ -37,6 +38,7 @@ func (a *App) CostReport(w http.ResponseWriter, r *http.Request) {
 	base := a.base(r, "What it costs", "cost-report")
 
 	var report *store.EstateCostReport
+	var power domain.PowerEstimate
 	if base.CanSeeCosts {
 		var err error
 		report, err = a.Store.EstateCosts(r.Context(), a.Store.Now())
@@ -44,16 +46,62 @@ func (a *App) CostReport(w http.ResponseWriter, r *http.Request) {
 			a.serverError(w, r, err)
 			return
 		}
+		// THE DRAW IS ONLY QUERIED WHEN THERE IS A RATE TO APPLY. With no
+		// tariff the section renders one sentence saying so (D5) and no
+		// figures at all, so scanning the estate for a draw nobody can price
+		// is the same waste as computing EstateCosts for a viewer who may not
+		// see it -- which is why that fetch is already conditional above.
+		if tariff := a.powerTariff(); tariff > 0 {
+			draw, err := a.Store.DeclaredPowerDraw(r.Context())
+			if err != nil {
+				a.serverError(w, r, err)
+				return
+			}
+			power = domain.PowerEstimate{Draw: draw, TariffHundredthsMinorPerKWh: tariff, PUEHundredths: a.powerPUE()}
+		}
 	}
 	a.Render.Respond(w, r, http.StatusOK, "cost_report", "cost_report", costReportPage{
 		Base:   base,
 		Report: report,
+		Power:  power,
 	})
 }
 
 type costReportPage struct {
 	Base
 	Report *store.EstateCostReport
+	// Power is the ESTIMATED electricity figure, and it is a separate field
+	// rather than a surface inside Report on purpose: EstateCostReport totals
+	// what somebody PRICED, and a derived figure inside it would make that
+	// total part-declared and part-derived with no way to tell which
+	// (docs/power-cost-design.md §2.4). The zero value is the unconfigured
+	// state and renders D5's explanation, never nothing.
+	Power domain.PowerEstimate
+}
+
+// powerTariff is the configured electricity rate, or zero.
+//
+// Guarded against a nil Config because the failure mode matters: App.Config is
+// set by every real construction and by both test harnesses, so nil is a
+// programming error -- but the page it would take down is otherwise fine, and
+// "no tariff configured" is a truthful answer to give while somebody fixes the
+// wiring. A panic here would lose the estate totals as well.
+func (a *App) powerTariff() int64 {
+	if a.Config == nil {
+		return 0
+	}
+	return a.Config.PowerTariffHundredthsMinorPerKWh
+}
+
+// powerPUE is the operator-declared facility PUE (D6), or zero when nothing
+// was declared. Same nil-Config guard as powerTariff, and the same reasoning:
+// App.Config is set by every real construction, nil is a programming error,
+// and "no PUE declared" is a truthful thing to say while somebody fixes it.
+func (a *App) powerPUE() int64 {
+	if a.Config == nil {
+		return 0
+	}
+	return a.Config.PowerPUEHundredths
 }
 
 // SupplierReport answers the third of the CEO's questions: which suppliers raise

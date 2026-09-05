@@ -195,6 +195,35 @@ func TestAFeedThatTakesNothingDownSaysSo(t *testing.T) {
 	}
 }
 
+// TestTheDrawHintBoundsWholeLoadToThisAssetsOwnConsumption is R5/item 19.
+// §2.2's PDU mitigation claim depended on the form's wording alone -- a rack
+// PDU is a containment SIBLING of the servers it powers, which asset_closure
+// structurally cannot exclude, so an unqualified "whole load" instruction
+// invites exactly the double-count §2.2 admits it cannot catch: the most
+// natural reading for a PDU is "the sum of everything downstream", not "my
+// own overhead". The hint must bound it to the asset's OWN consumption.
+func TestTheDrawHintBoundsWholeLoadToThisAssetsOwnConsumption(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	asset := h.asset("sw-core-2")
+	page := body(t, h.get("/assets/"+asset, false))
+
+	if !strings.Contains(page, "the whole load of THIS asset") {
+		t.Error("the draw hint does not bound \"whole load\" to the asset's own consumption")
+	}
+	if !strings.Contains(page, "not what it passes on to something downstream") {
+		t.Error("the draw hint does not rule out entering what a PDU passes through to " +
+			"the servers behind it -- the exact reading §2.2 cannot catch structurally")
+	}
+	// "Nameplate" was dropped from round 1's fix while the report still says
+	// "declared nameplate draw" -- the form must still say where the number
+	// comes from.
+	if !strings.Contains(page, "Nameplate") {
+		t.Error("the draw hint no longer tells the operator where the number comes from")
+	}
+}
+
 func TestPowerIsReadableByAnyoneAndWritableByAdminsOnly(t *testing.T) {
 	h := newHarness(t)
 	h.login("admin", "admin-password")

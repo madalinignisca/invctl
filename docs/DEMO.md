@@ -486,6 +486,15 @@ Also worth setting: `INV_SESSION_KEY`, or a random one is generated per start an
 everyone is signed out whenever the process restarts. And `INV_LISTEN` bound to
 loopback, so the plaintext port is not reachable directly.
 
+Also worth setting for a demo that should show a figure: `INV_POWER_TARIFF_MINOR_PER_KWH`
+(28 for €0.28/kWh, or 28.47 for a real rate like €0.2847/kWh — the variable
+was widened to a hundredth of a minor unit before this shipped, item 21 of
+the round-2 review, so both spellings are accepted). Unset, `/reports/cost`'s
+electricity section renders "No electricity figure: no tariff is
+configured." — a legitimate state, but not one worth a visitor's ten
+minutes; the estimate itself is what §2 of `docs/power-cost-design.md` is
+written to explain.
+
 HSTS belongs on the proxy — the app cannot know whether every hostname it is
 served under is HTTPS-only.
 
