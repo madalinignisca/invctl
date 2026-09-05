@@ -640,6 +640,21 @@ func TestThePowerPUEIsUnsetByDefaultAndRefusesNonsense(t *testing.T) {
 		}
 	})
 
+	// item 23: 0 parses to the identical int64 zero an UNSET variable
+	// produces, so a range check gated on "!= 0" exempted exactly the one
+	// physically impossible value it exists to catch. A facility using no
+	// power at all is impossible in the same way 0.9 is.
+	for _, zero := range []string{"0", "0.0", "0.00"} {
+		t.Run("refuses an explicit "+zero, func(t *testing.T) {
+			pristineEnv(t)
+			t.Setenv("INV_POWER_PUE", zero)
+			if _, err := Load(); err == nil {
+				t.Fatalf("Load accepted INV_POWER_PUE=%q; it parses to the same zero an "+
+					"unset variable produces, so the range check must not exempt it", zero)
+			}
+		})
+	}
+
 	// The value an operator would type if they read "hundredths" and typed
 	// the tariff's own convention by habit -- 140 meaning "1.40" written the
 	// tariff's way. It must be refused as absurd, not silently accepted as a

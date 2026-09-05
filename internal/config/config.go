@@ -323,9 +323,20 @@ func (c *Config) validate() error {
 			"switched on", c.PowerTariffMinorPerKWh)
 	}
 	// D6: zero means undeclared and is handled entirely by the domain layer
-	// defaulting effectivePUEHundredths to 100 -- this only ever sees a
-	// genuinely declared, non-zero value.
-	if c.PowerPUEHundredths != 0 {
+	// defaulting effectivePUEHundredths to 100 -- this must only skip the
+	// range check for a GENUINELY absent variable, never for one somebody
+	// explicitly set to a value that happens to parse to zero.
+	//
+	// item 23 / round-2 review: this used to read
+	// "if c.PowerPUEHundredths != 0", which exempted exactly the one value
+	// the check below exists to catch. INV_POWER_PUE=0 (or "0.0", or "0.004"
+	// rounding down) parses to the identical zero envDecimalHundredths
+	// returns for an unset variable, so the range check silently treated a
+	// physically impossible declared PUE as "nothing declared" -- while
+	// INV_POWER_PUE=0.9 was correctly refused. Checking the raw environment
+	// variable's presence, not the parsed value, is the only way to tell
+	// "typed zero" from "typed nothing" once both produce the same int64.
+	if raw := os.Getenv("INV_POWER_PUE"); raw != "" {
 		if c.PowerPUEHundredths < 100 {
 			return fmt.Errorf("validating config: INV_POWER_PUE is %s, which is below 1.0; "+
 				"a facility cannot use less power than the load inside it, so this is "+
