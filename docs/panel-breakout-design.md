@@ -109,6 +109,29 @@ available here.
 to the node being expanded.** That is also the correct definition of a cycle,
 which the path case only got right by coincidence of having one branch.
 
+**The concrete case, because asserting this is not enough.** Two strands of one
+trunk land on two front ports of a second panel, and that panel's rear port is
+cabled onward:
+
+```
+                    ┌─ pos 1 → panel-b/f1 ─┐
+switch ═ panel-a/rear                       ├─ panel-b/rear ═ core
+                    └─ pos 7 → panel-b/f7 ─┘
+```
+
+Both strands legitimately reach `panel-b/rear`. With a global `visited`, strand
+1 marks it, and **strand 7 stops one hop short with no error** — it reports a
+run ending at `panel-b/f7` rather than at `core`, and nothing distinguishes that
+from a genuinely unpatched port. With a per-branch set each strand carries its
+own ancestry, both reach `core`, and a strand that truly loops back onto its own
+path still terminates.
+
+**The plausible wrong turn is to conclude no set is needed at all**, on the
+reasoning that branches start from distinct front ports and are therefore
+naturally independent. They are not: they converge, as above. And within one
+branch the set is still what makes the walk directional, which is the job the
+file's own comment says it is really doing.
+
 ### 2.4 A fan-out needs a budget the path case never needed
 
 `traceHopLimit = 64` bounds depth. Depth is no longer the only way a walk gets
@@ -120,6 +143,13 @@ limit.** Both are needed and they answer different questions — one is "this ru
 is absurdly long", the other is "this plant fans out faster than anyone wants to
 read". Exceeding either terminates that branch with a reason, exactly as the
 hop limit does now, rather than truncating silently.
+
+**`traceNodeBudget = 512`**, and the reasoning matters as much as the number,
+the way `traceHopLimit = 64`'s does. A twelve-fibre MPO trunk is the motivating
+case; one nested inside another is 144 nodes; 512 is comfortably past anything
+that exists in a rack and still small enough that a malformed plant renders a
+bounded page rather than hanging a browser. It is a guard against a plant being
+edited halfway through, not a capacity limit anyone should meet.
 
 ## 3. Decisions
 
@@ -143,13 +173,31 @@ The trace as a whole reports counts, not a verdict. A summary bool over a tree
 is precisely the "figure that looks more certain than it is" this codebase
 refuses elsewhere.
 
-### D4. An unpatched position is a LEAF, not an absence
+### D4. Only RECORDED positions appear — **corrected 2026-09-05**
 
-A twelve-position trunk with three strands patched must render twelve leaves,
-nine of them saying nothing is patched there. **The empty positions are the
-answer** — "which of these strands is free" is the question somebody is
-standing in front of the rack asking, and a tree that silently omits them
-answers a different one.
+The first draft said a twelve-position trunk with three strands patched must
+render twelve leaves, nine of them saying nothing is patched there, because
+"which of these strands is free" is what somebody in front of the rack is
+asking.
+
+**That is unbuildable, and the challenge round found it.** `port_pass_through`
+holds a row per *patched* position. Nothing anywhere records how many positions
+a rear port physically has — there is no strand count on `interface`, and
+adding one is a migration, which D2 exists to avoid. So the nine free strands
+are not merely unqueried; **the database does not know they exist.**
+
+The draft reasoned correctly that free strands are what an operator wants, and
+never asked whether anything records them. That is the same one-step-short
+failure this project's last two specs made, and it is worth leaving in the
+document rather than quietly correcting.
+
+**The trace shows the positions that have rows, in position order, and says how
+many it found.** It must not imply a total. "Three strands are patched here" is
+true; "nine are free" is a claim about a trunk nobody described.
+
+A declared strand count is a reasonable future feature — it would make capacity
+answerable — and it is a migration plus a form field plus a coverage problem,
+which is its own work package.
 
 ### D5. Position is not renumbered, reused, or inferred
 
@@ -157,6 +205,59 @@ answers a different one.
 nothing renumbers it when a neighbour is retired: strand 7 stays strand 7 when
 strand 6 is unpatched, because it is a physical fact about which hole the fibre
 is in, not an ordinal in a list.
+
+## 3b. The result type, and the successor rule
+
+Both were missing from the first draft and both block implementation. The
+challenge round could not tell whether the tree was a recursive node or a flat
+list of branches, and could not tell what a walk starting at a rear port does
+first.
+
+### The type is a recursive node
+
+```go
+// TraceNode is one step of a run. Children are its continuations: none for a
+// leaf, one for an ordinary hop, several where a rear port breaks out.
+type TraceNode struct {
+	// Hop is how the run arrived HERE. Zero on the root, which is the port
+	// the caller asked about.
+	Hop TraceHop
+	// Position is which strand of the parent rear port this node came through,
+	// and is 0 for every node that is not the far side of a breakout. It is
+	// port_pass_through.position, never an index into Children -- see D5.
+	Position int
+	Children []*TraceNode
+	// Outcome and Why are set on a LEAF and empty on an interior node (D3).
+	Outcome string
+	Why     string
+}
+```
+
+**Recursive, not a flat list of branches**, because breakouts nest: a strand of
+a twelve-way trunk can land on another panel that breaks out again. A flat list
+would have to repeat the shared prefix once per leaf, and the repetition is
+exactly the sort of thing that drifts.
+
+A 1:1 run is a chain of single-child nodes — which is why the existing content
+survives unchanged, and why the page's existing rendering is a loop over one
+branch rather than new machinery.
+
+### The successor rule is UNCHANGED: cable first, then pass-through
+
+The walk already tries a cable before a panel, guarded by `previous` so it does
+not bounce back down the cable it arrived on:
+
+> "A cable first: leaving the box is the interesting move."
+
+**That rule does not change. The only difference is that the pass-through step
+may now yield more than one successor.** So a trace starting at a rear port with
+a trunk plugged into it follows that trunk first, exactly as it does today —
+starting mid-run and walking one way is existing behaviour, and
+`TestATraceRunsBothWays` already covers the ends.
+
+This is stated because "tracing down from the MPO port has twelve answers" reads
+as though the walk acquires a notion of direction. It does not. It acquires
+nothing but a branching pass-through step.
 
 ## 4. What gets built
 
@@ -168,9 +269,12 @@ is in, not an ordinal in a list.
 3. **A tree result type**, replacing the flat hop list. Every leaf carries its
    own outcome and reason (D3); unpatched positions are leaves (D4).
 4. **The trace page renders the tree**, with each branch labelled by its
-   position. A 1:1 run must look exactly as it does today — same hops, same
-   wording — because that is the overwhelming majority of runs and a
-   regression there is a regression for everybody.
+   position. **The 1:1 requirement is about the structured result, not the
+   rendered HTML**: a 1:1 run yields a single chain whose hops, order, kinds and
+   reasons equal today's flat list exactly. That is what the tests assert. The
+   page is then expected to look the same because it is rendering the same
+   data, but no test pins pixels or markup — the first draft said "same hops,
+   same wording", which reads as a rendering requirement and is not one.
 5. **Tests.** The existing trace tests change shape rather than meaning, and
    that is the risk this work carries: a test rewritten while its subject
    changes can be rewritten into agreement. Each must keep asserting what it
@@ -187,7 +291,11 @@ is in, not an ordinal in a list.
      rear port's far side
    - `TestAMisPatchedPanelTerminatesRatherThanLooping` still terminates, still
      under the hop limit
-6. **`docs/AUDIT.md` and `internal/domain/classification.go`** need no change:
+6. **`PassThroughsFor` orders by position, then name.** It currently orders by
+   front-port name (`cabling.go:294`), which puts strand 10 before strand 2 the
+   moment positions mean anything. The panel's own editing view is where
+   somebody reads them off against the physical trunk.
+7. **`docs/AUDIT.md` and `internal/domain/classification.go`** need no change:
    no column is added. `classification.go:519-526`'s note that `position` "is 1
    for every 1:1 panel, which is all of them until then" becomes false on
    delivery and must be updated to say the tracer now reads it.
@@ -212,7 +320,16 @@ is in, not an ordinal in a list.
 - **Bundles** — "runs managed as a unit". Independent of breakout, and well
   served by the existing parent-plus-member precedent (`cluster_member` and
   five siblings, with the wholesale-replace-and-fold-the-audit rule already
-  established). It touches the tracer not at all.
+  established).
+
+  **Why that independence is real rather than convenient**, since the challenge
+  round rightly asked: a bundle groups `link` ROWS — the cables somebody pulled
+  together and will replace together — and a trace is a *derived* walk over
+  those rows. Bundling is a fact somebody declares about cables; a trace is a
+  question asked of them. Whether a run through a bundled cable is a chain or a
+  tree changes nothing about which cables are in the bundle, and a bundle
+  membership table has nothing a tree could disagree with. It touches the tracer
+  not at all.
 - **Nothing about `Path` or `Neighbourhood`.** They are asset-level walkers with
   their own definitions of connected; `dataPlaneAdjacency` does not join
   `port_pass_through` at all, so a panel is already invisible to them and stays
