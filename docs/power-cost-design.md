@@ -107,8 +107,17 @@ host's wall draw.
 
 **Decision: an asset contributes only if no ancestor of it also declares a
 draw.** Containment goes through `asset_closure`, per the standing rule — never
-a recursive `parent_id` walk. This costs one join and closes the hole
-permanently rather than relying on nobody entering the data.
+a recursive `parent_id` walk. This costs one join and closes
+**this** hole rather than relying on nobody entering the data.
+
+It does not close every double-count. There are two graphs here — containment
+(`asset_closure`) and distribution (`power_input → power_feed → power_panel →
+power_source`) — and a rack PDU is where they disagree: a **sibling** in
+containment, **upstream** in power. `pdu-a1` in the fixture is a child of
+`rack-a1` with its own 120 VA input, which reads as the PDU's own overhead and
+is harmless. A PDU whose declared draw was the sum of everything it feeds would
+double-count that rack, and `asset_closure` cannot see it because the PDU is
+not those servers' ancestor. D7's form wording is most of the mitigation.
 
 ### 2.3 VA is not watts, kWh is neither, and "ceiling" was the wrong word
 
@@ -229,7 +238,26 @@ draw recorded*, which is the gap that is actually actionable.
 
 No ratio against the whole estate, because the denominator would be invented.
 If nothing at all declares a draw, say that in words rather than showing a
-zero, for the same reason D5 refuses to render nothing.
+zero, for the same reason D5 refuses to render nothing. **That sentence is
+normative and was missed once already** — a tariff set over an estate with no
+declared draws must not print a computed-looking zero.
+
+**AMENDED AGAIN 2026-09-05: also carry `UnmodelledSites`.** The amendment above
+generalised its own objection too far. The objection is to a hand-listed
+**subset** of an open lookup table (`kind IN (server, hypervisor, …)`), which
+inherits the documented gap in `asset.go:114-127`. It does not reach
+`powerCoverage`'s `UnmodelledSites`, which is `a.kind = ?` — a **single closed
+equality**, already computed, already tested, in the very function cited as the
+precedent. This spec took `UndeclaredDraw` from that function and dropped the
+one that matters more here: an estate with three sites and one power-modelled
+produces a figure covering a third of it, wrong in the direction that makes
+staying look cheap.
+
+The section must also **state the direction of its error**. `powerUtilisation`
+already appends "and N of its inputs declare no draw at all" so a reader knows
+which way the figure is off; the money section states no direction at all. Two
+things understate the IT-load figure itself and neither reaches the page today:
+the independent-rail chassis §2.1 accepted, and the unmodelled estate.
 
 ### D4. Where does it appear? — **a section on `/reports/cost`**
 
@@ -256,6 +284,61 @@ design exists to stop a reader guessing at what a number means.
 **Render the heading with one line: "No electricity figure: no tariff is
 configured."** Consistent with how this app reports unrated feeds and unpriced
 assets rather than hiding them.
+
+### D6. Facility overhead — **an operator-declared PUE, or nothing**
+
+**ADDED 2026-09-05.** The review found §1 and §5 in contradiction: §1 said the
+figure exists to decide *keep this platform or move to hosting*, §5 forbade the
+one multiplier that makes it comparable to a hosting quote, and §2.3 told the
+reader to "add them before comparing" while giving them no handle to do it.
+That is the document promising what the code refuses.
+
+`INV_POWER_PUE`, unset by default, following D1's reasoning verbatim:
+
+- **Unset means PUE 1.0**, and the report shows exactly the IT-load figure it
+  shows today. No behaviour changes for anyone who does not set it.
+- **Set, it multiplies**, and the report states the PUE in force beside the
+  result and says it was declared, not measured — the same posture as the
+  tariff and the assumed power factor.
+- **It refuses rather than defaults.** Below 1.0 is physically impossible (a
+  facility cannot use less power than the load inside it), and an absurd value
+  is a typo that would make the figure ridiculous rather than merely wrong.
+  Both stop the process at startup, the way `INV_POWER_TARIFF_MINOR_PER_KWH`
+  already refuses `0.28`.
+
+**It is a decimal, and operators know it as one** — 1.4, not 140. Parse
+`1.4` into integer hundredths and keep the arithmetic in integers, folding the
+extra divisor into the single end-of-chain division (§4.3) so it stays one
+division rather than two truncations.
+
+Both figures are shown when a PUE is set: the IT load, and the facility figure
+derived from it. Showing only the multiplied number would hide which of the two
+assumptions moved it.
+
+### D7. The form must state the convention it depends on
+
+**ADDED 2026-09-05.** §2.1 decided `MAX` per asset on one premise: two inputs
+on an asset are two paths to one load, each recording the **whole** load. The
+spec then said nothing in the schema or the form *distinguishes* that from
+"this is my half".
+
+That was too weak, and the review found why. `asset_detail.html`'s hint reads
+**"Nameplate or allocated"** — it does not fail to distinguish the readings, it
+offers **both as valid**. An operator who follows it and records 450/450 for a
+900 VA dual-fed server gets `MAX` = 450: half the real draw, silently, counted
+as no gap anywhere.
+
+This is wider than cost. `internal/store/power.go:178` computes `allocated_va`
+as `SUM(draw_va)` per feed against the feed's derated capacity, which is only
+correct under the whole-load convention — so **the pre-existing capacity report
+is already wrong for anyone who took the "or allocated" reading.** This feature
+did not create that; it made the ambiguity load-bearing enough to notice.
+
+**The hint states the convention**: record the whole load on each input,
+because a feed must be able to carry its partner's load alone. That converts an
+error accepted in perpetuity into one that converges as data is re-entered, and
+it is in scope precisely because §2.1 is the reason we now know the hint is
+wrong.
 
 ## 4. What gets built
 
@@ -297,6 +380,34 @@ assets rather than hiding them.
    - an ungranted viewer sees no figure (`CanSeeCosts`).
    - the estate total on the same page is unchanged by any of it.
 
+## 4b. Added by the stage-7 review (2026-09-05)
+
+7. **A third render state.** `Configured()` tests the tariff alone, so a set
+   rate over an estate with no declared draws prints a computed-looking zero —
+   on day one of every deployment, since the tariff is one variable and the
+   draws are hundreds of form entries. Gate the figure on a tariff **and** a
+   non-zero declared draw; say so in words otherwise (D3, D5).
+8. **The form hint states the whole-load convention** (D7), and the capacity
+   report's existing `allocated_va` reading is noted as depending on it.
+9. **`UnmodelledSites` beside the figure**, and a sentence saying there is no
+   honest percentage — so a bare count does not read as a coverage figure next
+   to three real ones (D3 as amended).
+10. **The direction of error is stated on the page**, not only in code
+    comments: the independent-rail chassis reads low, and an unmodelled site
+    is missing entirely.
+11. **`INV_POWER_PUE`** (D6), unset by default, refusing values below 1.0 and
+    absurd ones, shown as both the IT-load and the facility figure.
+12. **A negative tariff must refuse at startup.** It currently parses cleanly
+    and then renders "no tariff is configured" on a page somebody just
+    configured — the exact outcome `Configured()`'s own comment refuses.
+13. **The handler-side skip becomes a tested control.** Mutating
+    `if base.CanSeeCosts` to `if true` leaves every test green today, so the
+    template is the only gate actually proven; the comment claims two.
+14. **The tariff's resolution is stated beside the rate.** Whole minor units
+    per kWh means a real rate of 0.2847 is entered as 28 — a systematic ~1.7%
+    understatement, an order of magnitude larger than the truncation §4.3
+    exists to prevent. Inconsistent rigour is itself a signal.
+
 ## 5. What this explicitly does not do
 
 - No metering, no PDU polling, no observed draw. That is observed state and a
@@ -305,10 +416,13 @@ assets rather than hiding them.
 - No per-project attribution of power. Power attaches to an asset; a project's
   share of a shared host is the same problem `WP-J5 · Shared occupancy` already
   solves for money, and reusing it is a later decision, not this one.
-- No cooling multiplier or PUE. A datacentre's PUE is a fact about the
-  building, not the estate, and inventing one would be exactly the
-  measured-looking figure this design refuses. §2.3 requires the report to say
-  this rather than leave the reader to assume otherwise.
+- **No INVENTED PUE.** Amended 2026-09-05: a *declared* one is now allowed, see
+  D6. The original bullet refused any cooling multiplier on the grounds that
+  inventing one would be the measured-looking figure this design refuses. That
+  reasoning is sound and still binds — it simply does not reach an operator's
+  own declared figure, which is declared exactly as the tariff is. Nobody calls
+  the tariff invented. This design still refuses to supply a default PUE, to
+  guess one from site metadata, or to imply one was measured.
 - No per-asset demand field. §2.1 says why that is a separate work package.
 
 ## 6. Review record
@@ -338,3 +452,28 @@ reason to read neighbouring code before specifying against it.
 **Nothing in the first draft was a coding error.** Every defect was in the
 document, and all of them were found by reading the schema and the fixture the
 document claimed to describe.
+
+### Stage-7 review, 2026-09-05
+
+Four reviewers. `codex-reviewer` approved with no findings; `auth-reviewer`
+found no blocking issue and proved the `CanSeeCosts` gate by mutation.
+`vibe-reviewer` found the coverage sentence ambiguous — "record no draw at all"
+reads equally as "nobody typed a number" and "carries no power", and the
+comfortable reading is the wrong one.
+
+`senior-reviewer` found three blocking defects, **all the same shape as the
+first two: a true statement that stops one step short of its consequence.**
+
+- **D3's own last sentence was specified and never built** (§4b.7).
+- **§2.1 diagnosed the `draw_va` ambiguity and left the form that creates it
+  untouched** (D7) — and that form has been quietly corrupting the *capacity*
+  report for longer than this feature has existed.
+- **D3 refused an invented denominator and dropped the honest one** its own
+  cited precedent already computes (§4b.9).
+
+It also found §1 and §5 in contradiction — §1 promising a keep-or-move figure
+while §5 forbade the multiplier that makes one — resolved by D6.
+
+The pattern across all three rounds is worth naming: **every defect was a place
+where this document reasoned correctly and then failed to carry the reasoning
+one step further.** None was a wrong idea. All were right ideas stopped early.
