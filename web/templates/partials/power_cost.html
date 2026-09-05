@@ -95,7 +95,15 @@
     </ul>
     <p>
       {{if .PUEDeclared}}
-      <strong>The facility figure already includes UPS, distribution and cooling.</strong> PUE is measured at the UPS/PDU output, so those losses sit in its numerator alongside cooling — adding them again on top of the facility figure would double-count them on the one number a keep-or-move decision is made from.
+      {{/* BOTH SENTENCES, and they are not the same claim. Round 2 rightly
+           stopped this branch telling the reader to add UPS and distribution
+           loss on top of a facility figure that already contains them -- and
+           dropped the comparability caveat with it, which the E2E caught. A
+           declared PUE closes the ENERGY exclusions; it does not add space,
+           hardware, network, staff or margin, all of which a hosting price
+           bundles. Closer is not comparable. */}}
+      <strong>Still not comparable to an all-in hosting quote.</strong> A hosting price also bundles space, hardware, network, staff and margin; this is electricity and the facility overhead around it, nothing else.
+      <strong>But do not add UPS or distribution loss on top of it:</strong> the facility figure already includes UPS, distribution and cooling, because PUE is measured at the UPS/PDU output and those losses sit in its numerator — adding them again would double-count them on the one number a keep-or-move decision is made from.
       {{else}}
       <strong>Not comparable to an all-in hosting quote.</strong> It excludes loss in the UPS and distribution above each declared input, and excludes cooling and other facility overhead — a hosting price bundles all of those in. Add them before comparing — declaring <code>INV_POWER_PUE</code> adds back the facility share.
       {{end}}

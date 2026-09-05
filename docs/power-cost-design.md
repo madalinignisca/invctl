@@ -380,6 +380,16 @@ one number the keep-or-move decision is made from.
 When a PUE is declared, the caveat says the facility figure already includes
 UPS, distribution and cooling. When it is not, §2.3's list stands unchanged.
 
+**A declared PUE does NOT make the figure comparable, and the page must keep
+saying so.** Closing the energy exclusions is not the same as closing the
+comparison: a hosting price also bundles space, hardware, network, staff and
+margin, and no multiplier here adds any of them. The first attempt at this
+branch dropped the comparability caveat along with the double-add instruction
+— two different claims, only one of which was wrong — and the E2E suite caught
+it after `make test` and four reviewers did not, because it is a claim about
+which sentence renders in which state rather than whether a string exists
+anywhere on the page. **Both sentences render when a PUE is declared.**
+
 ### D7. The form must state the convention it depends on
 
 **ADDED 2026-09-05.** §2.1 decided `MAX` per asset on one premise: two inputs

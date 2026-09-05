@@ -401,3 +401,44 @@ func statValue(page, label string) (string, bool) {
 	}
 	return m[1], true
 }
+
+// TestADeclaredPUEKeepsTheComparabilityCaveatAndDropsTheDoubleAdd pins the two
+// sentences of the PUE branch, which are DIFFERENT CLAIMS and were briefly
+// collapsed into one.
+//
+// Round 2 correctly stopped this branch telling a reader to add UPS and
+// distribution loss on top of a facility figure that already contains them
+// (PUE is measured at the UPS/PDU output, so those losses are in its
+// numerator). It then dropped the comparability caveat along with the
+// double-add instruction -- and closing the ENERGY exclusions is not closing
+// the comparison, because a hosting price also bundles space, hardware,
+// network, staff and margin, none of which any multiplier here adds back.
+//
+// THE E2E SUITE CAUGHT THAT AND make test DID NOT, which is why this exists.
+// TestADeclaredPUEShowsBothFigures above asserts the figures and their labels
+// and never looked at the prose; the defect was a claim about WHICH SENTENCE
+// RENDERS IN WHICH STATE, and no Go test asked. `make e2e` is opt-in and needs
+// a running instance, so a regression that only it can see is one CI cannot.
+func TestADeclaredPUEKeepsTheComparabilityCaveatAndDropsTheDoubleAdd(t *testing.T) {
+	h := newHarnessWithTariffAndPUE(t, 28, 140)
+	h.login("admin", "admin-password")
+
+	page := body(t, h.get("/reports/cost", false))
+
+	if !strings.Contains(strings.ToLower(page), "not comparable to an all-in hosting quote") {
+		t.Error("with a PUE declared the page no longer says the figure is not comparable " +
+			"to a hosting quote; a PUE closes the energy exclusions and adds no space, " +
+			"hardware, network, staff or margin, so the comparison is still not one to make")
+	}
+	if !strings.Contains(page, "UPS/PDU output") {
+		t.Error("the page does not say why UPS and distribution loss must NOT be added on " +
+			"top of the facility figure, which is the double-count this branch exists to stop")
+	}
+	// The no-PUE branch's instruction must NOT survive into the PUE branch:
+	// that is precisely the double-add this state is here to prevent.
+	if strings.Contains(page, "Add them before comparing") {
+		t.Error("with a PUE declared the page still tells the reader to add UPS and " +
+			"distribution loss, which the facility figure already includes -- a double-count " +
+			"on the one number a keep-or-move decision is made from")
+	}
+}
