@@ -23,13 +23,12 @@
 -- `link` for the two to disagree over. One small table over two existing edge
 -- types buys the same answers.
 --
--- POSITION IS HERE FOR A FEATURE THAT DOES NOT EXIST YET, which usually earns a
--- column its removal. It stays because the shape it anticipates is not
--- speculative: a twelve-fibre MPO trunk breaking out to twelve LC front ports is
--- ordinary, and it is WP-B4. Without a position the rear port could only ever
--- carry one front port, and adding it later would mean rewriting the uniqueness
--- rule underneath live data. Default 1 is the 1:1 case, which is everything
--- until B4.
+-- POSITION IS WHAT WP-B4'S TRACER READS. A twelve-fibre MPO trunk breaking out
+-- to twelve LC front ports is ordinary, and without a position the rear port
+-- could only ever carry one front port -- adding it after the fact would have
+-- meant rewriting the uniqueness rule underneath live data. Default 1 is the
+-- 1:1 case, which is still the common one; the column and the index below were
+-- both already exactly what breakout needed, so WP-B4 added no migration.
 --
 -- BOTH ENDS MUST BE ON ONE ASSET. A pass-through is what happens INSIDE a panel;
 -- two ports on different boxes are joined by a cable, which is what `link` is
@@ -60,8 +59,8 @@ CREATE UNIQUE INDEX port_pass_through_front_key
   WHERE lifecycle <> 'retired';
 
 -- And a given position on a rear port takes exactly one front port. With the
--- default position of 1 this is "one front port per rear port"; when B4 arrives
--- it is already the rule breakout needs.
+-- default position of 1 this is "one front port per rear port"; it is also
+-- exactly the rule a breakout needs, one row per strand.
 CREATE UNIQUE INDEX port_pass_through_rear_key
   ON port_pass_through(rear_interface_id, position)
   WHERE lifecycle <> 'retired';

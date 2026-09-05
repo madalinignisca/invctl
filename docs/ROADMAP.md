@@ -371,10 +371,17 @@ subtly wrong.
 Engine: a cable or panel becomes a failure target; partitioned findings gain the
 specific hop responsible.
 
-**WP-B4 · Cable profiles and bundles** — L — depends: B3
-Breakout and multi-strand lane mapping (4×10 GE ↔ 40 GE), and bundles representing
-runs managed as a unit. This is parity with NetBox 4.5/4.6 and it is genuinely
-hard — the profile changes what "connected" means in the tracer.
+**WP-B4 · Cable profiles and bundles** — L — depends: B3 — **PANEL BREAKOUT DONE, CABLES AND BUNDLES NOT STARTED**
+Panel breakout is delivered: `docs/panel-breakout-design.md` and
+`docs/superpowers/plans/2026-09-05-panel-breakout.md`. The tracer follows every
+recorded strand of a rear port's breakout as a tree, `port_pass_through.position`
+(already in the schema since WP-B3, no migration needed) is what it reads, and
+the patch form gained the field to record one. Breakout **cables** — a
+QSFP-to-4×SFP+ DAC with no panel in the middle, one end on one side and four on
+the other — and bundles representing runs managed as a unit are not: `link` has
+exactly two foreign-key columns and cannot express either, and both need a
+schema decision the panel case did not (see the design doc §5). This remains
+parity work against NetBox 4.5/4.6 for the cable/bundle half.
 
 **WP-B5 · Rack elevations** — M — **DONE**
 Units, position, orientation, depth, blade and slot occupancy. Utilisation derived,

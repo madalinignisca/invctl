@@ -10,8 +10,10 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 # Panel breakout — design
 
-**Status: DRAFT 2026-09-05, awaiting challenge.** This is the first half of
-WP-B4. The roadmap entry reads:
+**Status: DELIVERED 2026-09-05**, survived two challenge rounds and built
+per `docs/superpowers/plans/2026-09-05-panel-breakout.md` (Tasks 1-9; Task 10,
+E2E, is a separate scope decision -- see that plan). This is the first half of
+WP-B4; breakout cables and bundles (§5) are not built. The roadmap entry read:
 
 > **WP-B4 · Cable profiles and bundles** — L — depends: B3
 > Breakout and multi-strand lane mapping (4×10 GE ↔ 40 GE), and bundles
