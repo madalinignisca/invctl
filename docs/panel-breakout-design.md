@@ -267,7 +267,8 @@ nothing but a branching pass-through step.
 2. **The walk branches**, with per-branch `visited` (§2.3) and a total-node
    budget beside the existing per-branch hop limit (§2.4).
 3. **A tree result type**, replacing the flat hop list. Every leaf carries its
-   own outcome and reason (D3); unpatched positions are leaves (D4).
+   own outcome and reason (D3); only recorded positions appear, and nothing
+   implies a total (D4 as corrected).
 4. **The trace page renders the tree**, with each branch labelled by its
    position. **The 1:1 requirement is about the structured result, not the
    rendered HTML**: a 1:1 run yields a single chain whose hops, order, kinds and
@@ -283,7 +284,10 @@ nothing but a branching pass-through step.
      three cables and two panels, now as a single-branch tree — the direct
      descendant of `TestATraceCrossesThePanelsInTheWay`
    - a 4-position rear port yields **four** leaves, one per position
-   - three patched of twelve yields twelve leaves, nine of them unpatched (D4)
+   - a rear port with three recorded positions yields **three** leaves and
+     claims nothing about a fourth — the corrected D4. Nothing records how many
+     positions a trunk has, so a test asserting "nine unpatched" could only pass
+     by inventing a strand count
    - a branch that loops terminates **without** truncating its siblings — the
      per-branch `visited` guard, and the one a global set would silently break
    - a fan-out exceeding the node budget says so, and says it per branch
@@ -291,11 +295,21 @@ nothing but a branching pass-through step.
      rear port's far side
    - `TestAMisPatchedPanelTerminatesRatherThanLooping` still terminates, still
      under the hop limit
-6. **`PassThroughsFor` orders by position, then name.** It currently orders by
-   front-port name (`cabling.go:294`), which puts strand 10 before strand 2 the
-   moment positions mean anything. The panel's own editing view is where
-   somebody reads them off against the physical trunk.
-7. **`docs/AUDIT.md` and `internal/domain/classification.go`** need no change:
+6. **`PassThroughsFor` orders by rear port, then position, then name.** It
+   currently orders by front-port name (`cabling.go:294`), which puts strand 10
+   before strand 2 the moment positions mean anything. **Rear port first**: a
+   panel has several, and ordering by position alone interleaves two trunks into
+   one unreadable list. The panel's editing view is where somebody reads these
+   off against the physical trunk, one trunk at a time.
+7. **The patch form gains a position field.** `asset_detail.html` has none, so
+   every pass-through a user can create is position 1 and the rear-port unique
+   index refuses the second. **Shipping the tracer without this renders a
+   breakout nobody can record** — the same shape as the release that shipped a
+   404 on a button with four green checks, and the reason E2E exists here.
+8. **The seed grows a breakout.** There are no `port_pass_through` rows in the
+   seed at all today, so the demo estate cannot show a trace through a panel,
+   let alone through a breakout, and E2E has nothing to point at.
+9. **`docs/AUDIT.md` and `internal/domain/classification.go`** need no change:
    no column is added. `classification.go:519-526`'s note that `position` "is 1
    for every 1:1 panel, which is all of them until then" becomes false on
    delivery and must be updated to say the tracer now reads it.
