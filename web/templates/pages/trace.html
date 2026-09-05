@@ -33,42 +33,56 @@
       <table class="grid">
         <thead><tr><th></th><th>Where</th><th>Port</th><th>Reached by</th></tr></thead>
         <tbody>
+          {{range .Trace.Rows}}
+          {{$n := .Node}}
           <tr>
-            <td class="mono muted">0</td>
-            <td><a class="id" href="/assets/{{.Trace.StartAssetID}}">{{.Trace.StartAsset}}</a></td>
-            <td class="mono">{{.Trace.StartInterface}}</td>
-            <td class="muted">start</td>
-          </tr>
-          {{range $i, $h := .Trace.Hops}}
-          <tr>
-            <td class="mono muted">{{add $i 1}}</td>
-            <td><a class="id" href="/assets/{{$h.AssetID}}">{{$h.AssetName}}</a>
-              <div class="muted" style="font-size:11.5px">{{$h.AssetKind}}</div></td>
-            <td class="mono">{{$h.Interface}}</td>
+            <td class="mono muted">{{.Step}}</td>
+            {{if eq .Step 0}}
+            <td><a class="id" href="/assets/{{$.Trace.StartAssetID}}">{{$.Trace.StartAsset}}</a></td>
+            <td class="mono">{{$.Trace.StartInterface}}</td>
+            <td class="muted">
+              start
+              {{if $n.Outcome}}
+                {{if eq $n.Outcome "complete"}}<span class="pill pill-ok">complete</span>
+                {{else}}<span class="pill pill-degraded">{{$n.Outcome}}</span>{{end}}
+                {{$n.Why}}
+              {{end}}
+            </td>
+            {{else}}
+            <td><a class="id" href="/assets/{{$n.Hop.AssetID}}">{{$n.Hop.AssetName}}</a>
+              <div class="muted" style="font-size:11.5px">{{$n.Hop.AssetKind}}</div></td>
+            <td class="mono">{{$n.Hop.Interface}}{{if .Strand}}
+              <span class="pill pill-muted">strand {{$n.Position}}</span>{{end}}</td>
             <td>
-              {{if eq $h.Kind "panel"}}
+              {{if eq $n.Hop.Kind "panel"}}
                 <span class="pill pill-muted">through the panel</span>
               {{else}}
                 <span class="pill pill-info">cable</span>
-                {{if $h.Medium}}<span class="muted">{{$h.Medium}}</span>{{end}}
-                {{if $h.Length}}<span class="muted">{{derefInt $h.Length}} m</span>{{end}}
+                {{if $n.Hop.Medium}}<span class="muted">{{$n.Hop.Medium}}</span>{{end}}
+                {{if $n.Hop.Length}}<span class="muted">{{derefInt $n.Hop.Length}} m</span>{{end}}
+              {{end}}
+              {{if $n.Outcome}}
+                {{if eq $n.Outcome "complete"}}<span class="pill pill-ok">complete</span>
+                {{else}}<span class="pill pill-degraded">{{$n.Outcome}}</span>{{end}}
+                {{$n.Why}}
               {{end}}
             </td>
+            {{end}}
           </tr>
           {{end}}
         </tbody>
       </table>
 
-      {{/* Never blank. "The path ends here" and "we gave up" are different
-           answers, and a reader who cannot tell them apart plans with the
-           wrong one. */}}
+      {{/* Never blank, and never a single verdict. With three strands patched
+           and one looping, neither "complete" nor "incomplete" is true of the
+           whole run, so the answer sits on each end (D3). */}}
       <p class="hint" style="margin-top:12px">
-        {{if .Trace.Complete}}
-          <span class="pill pill-ok">complete</span>
-        {{else}}
-          <span class="pill pill-degraded">incomplete</span>
-        {{end}}
-        {{.Trace.Why}}
+        {{$c := .Trace.Counts}}
+        {{$c.Strands}} end{{if ne $c.Strands 1}}s{{end}},
+        {{$c.Ends}} reaching a far end{{if $c.Loops}}, {{$c.Loops}} looping{{end}}{{if $c.Stopped}}, {{$c.Stopped}} stopped short{{end}}.
+        Only the strands that have been recorded are shown: nothing records how
+        many positions a rear port physically has, so this is not a count of the
+        trunk.
       </p>
     </div>
   </div>

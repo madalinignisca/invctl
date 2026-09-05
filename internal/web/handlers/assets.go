@@ -474,6 +474,9 @@ type assetDetailPage struct {
 	PoolShare *domain.Division
 	// PassThroughs is what this panel does between its own ports.
 	PassThroughs []store.PassThroughRow
+	// PassThroughForm is the "patch through" form, present (with Errors set)
+	// when a create was refused. See PassThroughCreate.
+	PassThroughForm passThroughFormData
 	// Notes somebody wrote about this asset, and what the panel posts to.
 	Journal         []store.JournalRow
 	JournalResource string
@@ -866,6 +869,7 @@ func (a *App) renderAssetDetail(w http.ResponseWriter, r *http.Request, status i
 		InterfaceForm:   a.newInterfaceForm(r, id, nil, formFactors),
 		IPAddressForm:   a.newIPAddressForm(r, id, nil, interfaces, ipRoles),
 		LinkForm:        a.newLinkForm(r, id, nil, interfaces, linkTargets),
+		PassThroughForm: a.newPassThroughForm(r, id, nil, interfaces),
 		OverrideForm:    a.newOverrideForm(r, targets, nil, overrideForm{}),
 	})
 }
