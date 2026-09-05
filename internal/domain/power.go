@@ -236,9 +236,10 @@ type PowerInput struct {
 	AssetID string `db:"asset_id"`
 	FeedID  string `db:"feed_id"`
 	Name    string `db:"name"`
-	// DrawVA is DECLARED: a nameplate or allocated figure somebody typed.
-	// Nothing observes it. Nil means nobody has recorded one, which the
-	// utilisation report says rather than treating as zero.
+	// DrawVA is DECLARED: the whole nameplate load of this asset, not a share
+	// of it and not what it passes on to something downstream (D7). Nothing
+	// observes it. Nil means nobody has recorded one, which the utilisation
+	// report says rather than treating as zero.
 	DrawVA     *int    `db:"draw_va"`
 	Notes      *string `db:"notes"`
 	Lifecycle  string  `db:"lifecycle"`

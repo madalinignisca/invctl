@@ -847,8 +847,12 @@ project cost rollup (a wrong number, not a missing feature — fixed by
 migration 00041), and there was no `/reports/cost` page at all.*
 
 *The entry used to say "metered power draw". **Nothing meters anything** — this
-system never touches the estate, and the form says so: "Draw (VA) — nameplate or
-allocated. Nothing measures this." Decided 2026-08-14: power cost is an
+system never touches the estate, and the form said so at the time: "Draw (VA) —
+nameplate or allocated. Nothing measures this." (That hint has since been
+rewritten twice over, D7, because "nameplate or allocated" offered both
+readings as equally valid and an operator who took the "allocated" one was
+silently halving the real draw — see the entry below for what it says now.)
+Decided 2026-08-14: power cost is an
 **estimate**, declared nameplate draw times a tariff, and it must be labelled as
 one everywhere it appears. It is useful for the comparison the estate actually
 makes — keep this platform or move to another — and it must never be mistaken
