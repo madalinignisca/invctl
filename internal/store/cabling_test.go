@@ -50,18 +50,28 @@ func mustCable(t *testing.T, s *SQLStore, ctx context.Context, a, b string) stri
 	return l.ID
 }
 
-func mustPatch(t *testing.T, s *SQLStore, ctx context.Context, front, rear string) string {
+// mustPatchAt records one strand: a front port at a declared position on a
+// rear port. mustPatch is the 1:1 case and is exactly this at position 1.
+func mustPatchAt(t *testing.T, s *SQLStore, ctx context.Context, front, rear string, position int) string {
 	t.Helper()
 	p, err := domain.NewPassThrough(NewID(), domain.PassThroughSpec{
-		FrontInterfaceID: front, RearInterfaceID: rear,
+		FrontInterfaceID: front, RearInterfaceID: rear, Position: position,
 	}, s.Now())
 	if err != nil {
-		t.Fatalf("building pass-through: %v", err)
+		t.Fatalf("building pass-through at position %d: %v", position, err)
 	}
 	if err := s.CreatePassThrough(ctx, testPermit, p); err != nil {
-		t.Fatalf("creating pass-through: %v", err)
+		t.Fatalf("creating pass-through at position %d: %v", position, err)
 	}
 	return p.ID
+}
+
+func mustPatch(t *testing.T, s *SQLStore, ctx context.Context, front, rear string) string {
+	t.Helper()
+	// Position 1 explicitly rather than relying on NewPassThrough's 0 -> 1
+	// default: the default is a domain rule with its own test, and a fixture
+	// that leans on it tests two things at once.
+	return mustPatchAt(t, s, ctx, front, rear, 1)
 }
 
 // cablePlant builds the estate above and returns the two end ports.
@@ -88,6 +98,11 @@ func cablePlant(t *testing.T, s *SQLStore, ctx context.Context) (swPort, srvPort
 	return swPort, srvPort
 }
 
+// TestATraceCrossesThePanelsInTheWay is §4.4's structured-result requirement:
+// a 1:1 run yields a single chain whose hops, order, kinds and reasons equal
+// today's flat list exactly. Asserting the exact sequence is strictly
+// stronger than the strings.Contains this test used before the tree, which
+// was order-blind.
 func TestATraceCrossesThePanelsInTheWay(t *testing.T) {
 	for _, e := range Engines(t) {
 		t.Run(e.Name, func(t *testing.T) {
@@ -98,31 +113,33 @@ func TestATraceCrossesThePanelsInTheWay(t *testing.T) {
 			if err != nil {
 				t.Fatalf("tracing: %v", err)
 			}
-			if !trace.Complete {
-				t.Fatalf("the trace did not complete: %s", trace.Why)
+			hops, single := trace.Chain()
+			if !single {
+				t.Fatalf("a 1:1 run branched. Every existing run must render as a single " +
+					"chain: the tree is what CHANGED, not what a run through two ordinary " +
+					"panels means.")
 			}
-			end, ok := trace.End()
-			if !ok || end.InterfaceID != srvPort {
-				t.Fatalf("the path ended at %+v, want srv-1 eth0. A tracer that stops at "+
-					"the first cable answers \"a patch panel\", which is true and useless.", end)
+			// EVERY HOP NAMED, IN ORDER. "It goes through panel-b, port
+			// b-front-1" is actionable; "these two are connected" is not.
+			want := []struct{ kind, where string }{
+				{HopCable, "panel-a/a-front-1"},
+				{HopPanel, "panel-a/a-rear-1"},
+				{HopCable, "panel-b/b-rear-1"},
+				{HopPanel, "panel-b/b-front-1"},
+				{HopCable, "srv-1/eth0"},
 			}
-
-			// EVERY HOP NAMED. "It goes through panel-b, port b-front-1" is
-			// actionable; "these two are connected" is not.
-			var names []string
-			for _, h := range trace.Hops {
-				names = append(names, h.AssetName+"/"+h.Interface)
+			if len(hops) != len(want) {
+				t.Fatalf("the path has %d hops, want %d: %+v", len(hops), len(want), hops)
 			}
-			joined := strings.Join(names, " → ")
-			for _, want := range []string{"panel-a/a-front-1", "panel-a/a-rear-1",
-				"panel-b/b-rear-1", "panel-b/b-front-1", "srv-1/eth0"} {
-				if !strings.Contains(joined, want) {
-					t.Errorf("the path %q does not name %q", joined, want)
+			for i, w := range want {
+				got := hops[i].AssetName + "/" + hops[i].Interface
+				if got != w.where || hops[i].Kind != w.kind {
+					t.Errorf("hop %d is %s (%s), want %s (%s)", i+1, got, hops[i].Kind, w.where, w.kind)
 				}
 			}
 			// And it says which steps were cable and which were the panel.
 			var cables, panels int
-			for _, h := range trace.Hops {
+			for _, h := range hops {
 				switch h.Kind {
 				case HopCable:
 					cables++
@@ -132,6 +149,14 @@ func TestATraceCrossesThePanelsInTheWay(t *testing.T) {
 			}
 			if cables != 3 || panels != 2 {
 				t.Errorf("path has %d cable hops and %d panel hops, want 3 and 2", cables, panels)
+			}
+			leaves := trace.Leaves()
+			if len(leaves) != 1 || leaves[0].Hop.InterfaceID != srvPort {
+				t.Fatalf("the path ended at %+v, want srv-1 eth0. A tracer that stops at "+
+					"the first cable answers \"a patch panel\", which is true and useless.", leaves)
+			}
+			if leaves[0].Outcome != OutcomeComplete {
+				t.Fatalf("the trace did not complete: %s", leaves[0].Why)
 			}
 		})
 	}
@@ -149,9 +174,9 @@ func TestATraceRunsBothWays(t *testing.T) {
 			if err != nil {
 				t.Fatalf("tracing: %v", err)
 			}
-			end, ok := trace.End()
-			if !ok || end.InterfaceID != swPort {
-				t.Errorf("tracing from the server ended at %+v, want the switch", end)
+			hops, single := trace.Chain()
+			if !single || len(hops) == 0 || hops[len(hops)-1].InterfaceID != swPort {
+				t.Errorf("tracing from the server ended at %+v, want the switch", hops)
 			}
 		})
 	}
@@ -192,15 +217,21 @@ func TestAMisPatchedPanelTerminatesRatherThanLooping(t *testing.T) {
 				if trace == nil {
 					t.Fatal("tracing a looped plant errored")
 				}
-				if trace.Complete {
-					t.Error("a looped path reported as complete; it has no far end")
+				for _, leaf := range trace.Leaves() {
+					if leaf.Outcome == OutcomeComplete {
+						t.Error("a looped path reported a leaf as complete; it has no far end")
+					}
+					if leaf.Why == "" {
+						t.Error("a leaf stopped without saying why. \"The path ends here\" " +
+							"and \"we gave up\" are different answers.")
+					}
 				}
-				if trace.Why == "" {
-					t.Error("the trace stopped without saying why. \"The path ends here\" " +
-						"and \"we gave up\" are different answers.")
+				hops, single := trace.Chain()
+				if single && len(hops) > traceHopLimit {
+					t.Errorf("walked %d hops, past the limit of %d", len(hops), traceHopLimit)
 				}
-				if len(trace.Hops) > traceHopLimit {
-					t.Errorf("walked %d hops, past the limit of %d", len(trace.Hops), traceHopLimit)
+				if trace.Nodes() > traceNodeBudget+1 {
+					t.Errorf("the tree has %d nodes, past the node budget of %d", trace.Nodes(), traceNodeBudget)
 				}
 			case <-timeoutAfter():
 				t.Fatal("tracing a looped plant did not terminate. A page that never " +
@@ -223,14 +254,17 @@ func TestAnUnpluggedPortSaysSoRatherThanReturningNothing(t *testing.T) {
 			if err != nil {
 				t.Fatalf("tracing: %v", err)
 			}
-			if len(trace.Hops) != 0 {
-				t.Errorf("an unplugged port produced %d hops", len(trace.Hops))
+			// THIS IS THE TEST THAT PROVES THE ROOT'S OWN LEAF REASON SURVIVED
+			// THE TREE -- the one thing the tree walk's own leaf() call on an
+			// empty root could have quietly dropped.
+			if len(trace.Root.Children) != 0 {
+				t.Errorf("an unplugged port produced %d children", len(trace.Root.Children))
 			}
-			if !strings.Contains(trace.Why, "nothing is plugged") {
+			if !strings.Contains(trace.Root.Why, "nothing is plugged") {
 				t.Errorf("why = %q, want it to say the port is empty. An empty list and "+
-					"\"not cabled\" look identical to a reader otherwise.", trace.Why)
+					"\"not cabled\" look identical to a reader otherwise.", trace.Root.Why)
 			}
-			if trace.Complete {
+			if trace.Root.Outcome == OutcomeComplete {
 				t.Error("an unplugged port reported a complete path")
 			}
 		})
@@ -284,9 +318,14 @@ func TestUnpatchingAPanelBreaksTheRun(t *testing.T) {
 			if err != nil {
 				t.Fatalf("tracing: %v", err)
 			}
-			if end, ok := trace.End(); ok && end.InterfaceID == srvPort {
-				t.Error("the run still reaches the server after the panel was unpatched; " +
-					"a retired pass-through is one nobody can pass through")
+			// ANY LEAF, not "the" path: on a tree the honest question is
+			// whether any branch still reaches the server, not whether a
+			// single flattened chain does.
+			for _, leaf := range trace.Leaves() {
+				if leaf.Hop.InterfaceID == srvPort {
+					t.Error("the run still reaches the server after the panel was unpatched; " +
+						"a retired pass-through is one nobody can pass through")
+				}
 			}
 		})
 	}
@@ -305,3 +344,58 @@ func (s *SQLStore) assetOf(t *testing.T, ctx context.Context, name string) strin
 // timeoutAfter bounds the loop test, so a tracer that never returns fails the
 // suite instead of hanging it.
 func timeoutAfter() <-chan time.Time { return time.After(20 * time.Second) }
+
+// TestThePlantHoldsEveryStrandOfABreakoutInPositionOrder pins what
+// map[string]string could not hold.
+func TestThePlantHoldsEveryStrandOfABreakoutInPositionOrder(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			s, ctx := newStore(t, e)
+			site := mustAsset(t, s, ctx, domain.KindSite, "dc-a", nil)
+			pa := mustAsset(t, s, ctx, domain.KindPatchPanel, "panel-a", &site)
+			rear := mustPort(t, s, ctx, pa, "rear-1")
+
+			// Recorded out of order, with a gap, and named so that NAME order
+			// and POSITION order disagree: f-10 sorts before f-2 as text.
+			f10 := mustPort(t, s, ctx, pa, "f-10")
+			f2 := mustPort(t, s, ctx, pa, "f-2")
+			f7 := mustPort(t, s, ctx, pa, "f-7")
+			mustPatchAt(t, s, ctx, f10, rear, 10)
+			mustPatchAt(t, s, ctx, f2, rear, 2)
+			mustPatchAt(t, s, ctx, f7, rear, 7)
+
+			p, err := s.loadPlant(ctx)
+			if err != nil {
+				t.Fatalf("loading the plant: %v", err)
+			}
+
+			ends := p.through[rear]
+			if len(ends) != 3 {
+				t.Fatalf("the rear port holds %d strands, want 3. A map[string]string kept "+
+					"whichever row came back last, so eleven fibres of a twelve-fibre trunk "+
+					"were invisible to the tracer.", len(ends))
+			}
+			wantID := []string{f2, f7, f10}
+			wantPos := []int{2, 7, 10}
+			for i, got := range ends {
+				if got.other != wantID[i] || got.position != wantPos[i] {
+					t.Errorf("strand %d is %s at position %d, want %s at position %d -- "+
+						"ordered by position, not by insertion and not by name",
+						i, got.other, got.position, wantID[i], wantPos[i])
+				}
+				if !got.fromRear {
+					t.Errorf("strand %d is filed under the REAR port and does not say so; "+
+						"whether a hop is the far side of a breakout depends on it", i)
+				}
+			}
+			// The front side is still one-to-one, and knows which side it is.
+			for _, front := range wantID {
+				got := p.through[front]
+				if len(got) != 1 || got[0].other != rear || got[0].fromRear {
+					t.Errorf("front port %s holds %+v, want exactly one entry pointing at "+
+						"the rear and not flagged as the rear side", front, got)
+				}
+			}
+		})
+	}
+}
