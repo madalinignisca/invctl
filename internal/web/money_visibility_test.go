@@ -372,11 +372,25 @@ func TestEveryMoneyTemplateHasABehaviouralRoute(t *testing.T) {
 	}
 }
 
+// moneyRenderingFuncs are the template helpers that put a currency amount on a
+// page. EVERY one of them must be here, and TestTheCensusKnowsEveryMoneyHelper
+// below fails if render.go registers one this list has not heard of.
+//
+// It was a single name until 2026-09-05, when widening the power tariff to a
+// hundredth of a minor unit added `moneyPrecise` -- `money` assumes whole
+// minor units and would have rendered the new field 100x too large. That was
+// the right change and it silently halved this census's reach: a template
+// calling ONLY moneyPrecise renders currency and, until this list grew, was
+// invisible here. This whole test exists because price_movement.html shipped
+// with five money calls and zero CanSeeCosts, so a money renderer this census
+// cannot see is the exact door it was built to close.
+var moneyRenderingFuncs = []string{"money", "moneyPrecise"}
+
 // moneyRenderingTemplates walks web/templates/pages and web/templates/partials
 // and returns the set of files (relative to dir, forward-slash separated)
-// that contain at least one call to the `money` template function -- as
+// that contain at least one call to ANY helper in moneyRenderingFuncs -- as
 // either {{money .Field}} or {{.Field | money}}, both of which place an
-// *parse.IdentifierNode named "money" as a CommandNode's first Arg.
+// *parse.IdentifierNode named for the helper as a CommandNode's first Arg.
 //
 // PARSED, NOT GREPPED. A grep for "{{money" would also have to dodge
 // {{/* comments that mention money */}} and would miss {{.X | money}}; Go's
@@ -394,7 +408,17 @@ func moneyRenderingTemplates(dir string) (map[string]bool, error) {
 				return nil, err
 			}
 			for _, tree := range trees {
-				if tree.Root != nil && nodeCallsFunc(tree.Root, "money") {
+				if tree.Root == nil {
+					continue
+				}
+				hit := false
+				for _, fn := range moneyRenderingFuncs {
+					if nodeCallsFunc(tree.Root, fn) {
+						hit = true
+						break
+					}
+				}
+				if hit {
 					found[sub+"/"+filepath.Base(path)] = true
 					break
 				}
@@ -492,4 +516,48 @@ func nodeCallsFunc(n parse.Node, name string) bool {
 
 func branchCallsFunc(b parse.BranchNode, name string) bool {
 	return nodeCallsFunc(b.Pipe, name) || nodeCallsFunc(b.List, name) || nodeCallsFunc(b.ElseList, name)
+}
+
+// TestTheCensusKnowsEveryMoneyHelper fails when render.go registers a
+// currency-rendering helper that moneyRenderingFuncs has not heard of.
+//
+// WITHOUT THIS, THE CENSUS DEGRADES SILENTLY AND LOOKS FINE. It reports the
+// set of templates that render money; if a new helper is invisible to it, the
+// set simply comes back smaller and every assertion built on it still passes.
+// That is the same shape as the defect this file was written for --
+// price_movement.html rendering five money amounts behind no cost grant while
+// the tests that should have caught it were green.
+//
+// It reads render.go rather than taking a hand-written list on trust, for the
+// reason parseTemplateFile already gives: a second hand-list is the
+// maintenance burden these tests exist to remove.
+func TestTheCensusKnowsEveryMoneyHelper(t *testing.T) {
+	src, err := os.ReadFile(filepath.Join("render", "render.go"))
+	if err != nil {
+		t.Fatalf("reading render.go, which registers the template helpers: %v", err)
+	}
+	// Matches `r.funcs["name"] = moneySomethingFormatter(...)`. Keyed off the
+	// VALUE being a money formatter rather than the NAME containing "money",
+	// so a helper called something else that still formats currency is caught
+	// -- the name is the thing a person can get wrong.
+	re := regexp.MustCompile(`r\.funcs\["([^"]+)"\]\s*=\s*money\w*Formatter\(`)
+	matches := re.FindAllStringSubmatch(string(src), -1)
+	if len(matches) == 0 {
+		t.Fatal("found no money formatter registrations in render.go; either the " +
+			"registration shape changed and this guard is now blind, or the helpers " +
+			"moved -- either way the census cannot be trusted until this is fixed")
+	}
+
+	known := map[string]bool{}
+	for _, fn := range moneyRenderingFuncs {
+		known[fn] = true
+	}
+	for _, m := range matches {
+		if !known[m[1]] {
+			t.Errorf("render.go registers the money helper %q, which moneyRenderingFuncs "+
+				"does not list: every template calling only %q is invisible to the money "+
+				"census, so it could render currency to an ungranted viewer and every "+
+				"test here would stay green", m[1], m[1])
+		}
+	}
 }
