@@ -651,6 +651,9 @@ func (s *SQLStore) CreatePassThrough(ctx context.Context, permit domain.Permit, 
 				"two boxes are joined by a cable, not by a pass-through")
 			return ve
 		}
+		if err := requireUniqueRearPosition(ctx, t, p.RearInterfaceID, p.Position); err != nil {
+			return err
+		}
 
 		_, err := t.exec(ctx, `
 			INSERT INTO port_pass_through (id, front_interface_id, rear_interface_id,
@@ -663,6 +666,36 @@ func (s *SQLStore) CreatePassThrough(ctx context.Context, permit domain.Permit, 
 		}
 		return t.logCreate(ctx, "port_pass_through", p.ID, p)
 	})
+}
+
+// requireUniqueRearPosition enforces port_pass_through_rear_position_key with
+// a message a person can act on.
+//
+// SAME SHAPE AS requireUniqueSiblingName (assets.go), for the same reason:
+// port_pass_through_rear_position_key is the guarantee, and this is the
+// message. Without it, patching a second strand at a position already taken
+// arrives as translateWriteErr's ErrConflict, which the handler renders as a
+// bare 409 with no field named and the form the operator just filled in
+// thrown away -- worse on this form than on the asset one, because breakout
+// makes a rear-port collision the ORDINARY mistake: somebody adding a fourth
+// strand types the position the third one already used. CHECK-THEN-ACT,
+// deliberately: two concurrent patches can both pass this and the second
+// loses to the index, which is correct.
+func requireUniqueRearPosition(ctx context.Context, t *tx, rearInterfaceID string, position int) error {
+	var n int
+	if err := t.get(ctx, &n,
+		`SELECT COUNT(*) FROM port_pass_through
+		 WHERE rear_interface_id = ? AND position = ? AND lifecycle <> ?`,
+		rearInterfaceID, position, domain.LifecycleRetired); err != nil {
+		return fmt.Errorf("checking for a strand already at that position: %w", err)
+	}
+	if n == 0 {
+		return nil
+	}
+	ve := &domain.ValidationError{}
+	ve.Add("position", "this rear port already has a strand recorded at position %d — "+
+		"choose a position that is not already patched", position)
+	return ve
 }
 
 // RetirePassThrough unpatches a port.

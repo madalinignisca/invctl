@@ -885,26 +885,7 @@
     {{end}}
 
     {{if .IsAdmin}}
-    <form method="post" action="/assets/{{.Asset.ID}}/patch" style="margin-top:12px">
-      <input type="hidden" name="csrf_token" value="{{.CSRF}}">
-      <div class="field-row">
-        <div class="field">
-          <label for="pt-front">Front port</label>
-          <select id="pt-front" name="front_interface_id" required>
-            <option value="">Choose…</option>
-            {{range .Interfaces}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
-          </select>
-        </div>
-        <div class="field">
-          <label for="pt-rear">Rear port</label>
-          <select id="pt-rear" name="rear_interface_id" required>
-            <option value="">Choose…</option>
-            {{range .Interfaces}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
-          </select>
-        </div>
-      </div>
-      <div class="form-actions"><button type="submit" class="btn btn-sm">Patch through</button></div>
-    </form>
+    {{template "pass_through_form" .PassThroughForm}}
     {{end}}
   </div>
 </div>

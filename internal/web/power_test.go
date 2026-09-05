@@ -365,12 +365,13 @@ func TestTracingARunThroughTwoPanelsOnScreen(t *testing.T) {
 // port breaking out to two front ports renders both strands, each labelled
 // with its declared position.
 //
-// DRIVEN THROUGH THE FORM PARAMETER, NOT THE FORM FIELD: the patch form has no
-// position input yet (docs/panel-breakout-design.md's Decision C, Task 8 of
-// the plan), so this posts "position" directly, the way the handler already
-// accepts it. If Task 8 lands, this should be rewritten to drive the real
-// input -- a functional test that posts a field the UI cannot send proves the
-// handler works and nothing else.
+// DRIVEN THROUGH THE REAL FORM FIELD, since Task 8: id="pt-position" is
+// asserted present on the page before either patch is posted, so a browser
+// user -- not only this test's raw client -- can reach the second strand.
+// Before Task 8 the patch form had no position input at all, so every
+// pass-through a user could create was position 1 and the rear-port unique
+// index refused the second: the tracer could render a breakout nobody could
+// record, the same shape as this project's 404-on-a-button release.
 func TestTracingABreakoutOnScreen(t *testing.T) {
 	h := newHarness(t)
 	h.login("admin", "admin-password")
@@ -412,6 +413,16 @@ func TestTracingABreakoutOnScreen(t *testing.T) {
 	if rear == "" || f1 == "" || f2 == "" {
 		t.Fatal("the ports were not created through the forms")
 	}
+
+	// THE FIELD IS REACHABLE, NOT JUST THE HANDLER. Posting "position" proves
+	// CreatePassThrough works; it says nothing about whether a browser user
+	// could ever type it. This is the assertion Task 8 exists for.
+	assetPage := body(t, h.get("/assets/"+pa, false))
+	if !strings.Contains(assetPage, `id="pt-position"`) {
+		t.Fatalf("the patch form has no position field; a breakout recorded below "+
+			"this line could not have been entered through the UI:\n%s", assetPage)
+	}
+
 	patchAt(pa, f1, rear, 1)
 	patchAt(pa, f2, rear, 2)
 	if n := h.count(`SELECT COUNT(*) FROM port_pass_through WHERE lifecycle = 'active'`); n != 2 {
@@ -430,5 +441,33 @@ func TestTracingABreakoutOnScreen(t *testing.T) {
 	// further) -- the count line says so without implying a total.
 	if !strings.Contains(page, "2 ends") {
 		t.Errorf("the trace does not report 2 ends for a two-strand breakout:\n%s", page)
+	}
+
+	// A THIRD STRAND AT A POSITION ALREADY TAKEN is refused as 422 with the
+	// form partial re-rendered, not a bare 409 and not a silent no-op. This is
+	// the ordinary mistake breakout introduces: somebody recording a fourth
+	// strand types the position the third one already used.
+	f3 := port(pa, "f-3")
+	if f3 == "" {
+		t.Fatal("the third port was not created through the form")
+	}
+	resp := h.post("/assets/"+pa+"/patch", url.Values{
+		"csrf_token":         {h.csrfToken("/assets/" + pa)},
+		"front_interface_id": {f3}, "rear_interface_id": {rear},
+		"position": {"1"},
+	}, false)
+	dup := body(t, resp)
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("a duplicate (rear, position) returned %d, want 422:\n%s", resp.StatusCode, dup)
+	}
+	if !strings.Contains(dup, "already has a strand recorded at position 1") {
+		t.Errorf("the refusal does not name what is wrong: %s", dup)
+	}
+	if !strings.Contains(dup, `id="pt-position"`) {
+		t.Errorf("the refusal did not re-render the patch form: %s", dup)
+	}
+	if n := h.count(`SELECT COUNT(*) FROM port_pass_through WHERE lifecycle = 'active'`); n != 2 {
+		t.Fatalf("%d live pass-throughs after the refused duplicate, want still 2 -- "+
+			"a refusal that inserted anyway is a silent no-op wearing an error message", n)
 	}
 }
