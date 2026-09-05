@@ -399,3 +399,39 @@ func TestThePlantHoldsEveryStrandOfABreakoutInPositionOrder(t *testing.T) {
 		})
 	}
 }
+
+// TestPatchesAreListedInStrandOrderNotNameOrder defeats the old ordering
+// (front-port name) with a fixture built exactly to disagree with it: strand
+// 10 is named so it sorts before strand 2 as text. Grouped by rear port then
+// position is what lets somebody read a panel's own patching table off
+// against the physical trunk it represents.
+func TestPatchesAreListedInStrandOrderNotNameOrder(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			s, ctx := newStore(t, e)
+			site := mustAsset(t, s, ctx, domain.KindSite, "dc-a", nil)
+			pa := mustAsset(t, s, ctx, domain.KindPatchPanel, "panel-a", &site)
+			rear := mustPort(t, s, ctx, pa, "rear-1")
+
+			// Named so NAME order and POSITION order disagree: f-10 sorts
+			// before f-2 as text.
+			f10 := mustPort(t, s, ctx, pa, "f-10")
+			f2 := mustPort(t, s, ctx, pa, "f-2")
+			mustPatchAt(t, s, ctx, f10, rear, 10)
+			mustPatchAt(t, s, ctx, f2, rear, 2)
+
+			rows, err := s.PassThroughsFor(ctx, pa)
+			if err != nil {
+				t.Fatalf("listing pass-throughs: %v", err)
+			}
+			if len(rows) != 2 {
+				t.Fatalf("got %d rows, want 2", len(rows))
+			}
+			if rows[0].Position != 2 || rows[1].Position != 10 {
+				t.Errorf("positions came back %d, %d, want 2, 10 -- ordered by "+
+					"position, not by front-port name which would put f-10 first",
+					rows[0].Position, rows[1].Position)
+			}
+		})
+	}
+}

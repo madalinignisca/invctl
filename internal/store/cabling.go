@@ -602,10 +602,20 @@ const panelPatchSelect = `
 	JOIN interface r ON r.id = p.rear_interface_id`
 
 // PassThroughsFor lists the live patches inside one asset.
+//
+// GROUPED BY REAR PORT, THEN BY POSITION. It ordered by front-port name until
+// breakout arrived, which puts strand 10 before strand 2 the moment positions
+// mean anything -- and interleaves two trunks besides. This view is where
+// somebody stands in front of the panel and reads the list off against the
+// physical trunk, so the trunk has to be contiguous and its strands in order.
+// (r.name is still text-sorted, so rear-10 precedes rear-2. A panel has a
+// handful of rear ports and hundreds of strands; fixing text-sorted port names
+// is a separate problem from this one.)
 func (s *SQLStore) PassThroughsFor(ctx context.Context, assetID string) ([]PassThroughRow, error) {
 	var rows []PassThroughRow
 	err := s.read(ctx, &rows, panelPatchSelect+
-		` WHERE f.asset_id = ? AND p.lifecycle <> ? ORDER BY f.name`,
+		` WHERE f.asset_id = ? AND p.lifecycle <> ?
+		  ORDER BY r.name, p.position, f.name`,
 		assetID, domain.LifecycleRetired)
 	if err != nil {
 		return nil, fmt.Errorf("listing pass-throughs for %s: %w", assetID, err)
