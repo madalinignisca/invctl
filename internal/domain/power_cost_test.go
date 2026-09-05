@@ -14,21 +14,22 @@ import "testing"
 // truncates downward every time, always in the same direction, which is the
 // kind of error that survives review because it looks like rounding.
 //
-// Five assets of 1 VA each at 28 minor/kWh: per-asset arithmetic gives
-// divRound(1*730*28, 1000) = divRound(20440, 1000) = 20, five times = 100.
-// Summed first: divRound(5*730*28, 1000) = divRound(102200, 1000) = 102.
-// The two differ, which is what makes the test worth having.
+// Five assets of 1 VA each at 28 minor/kWh (2800 hundredths-of-a-minor-unit,
+// item 21's widened resolution): per-asset arithmetic gives
+// divRound(1*730*2800, 100000) = divRound(2044000, 100000) = 20, five times =
+// 100. Summed first: divRound(5*730*2800, 100000) = divRound(10220000, 100000)
+// = 102. The two differ, which is what makes the test worth having.
 func TestTheEstimateDividesOnceAtTheEnd(t *testing.T) {
 	summedFirst := PowerEstimate{
-		Draw:              DeclaredDraw{TotalVA: 5, Declaring: 5},
-		TariffMinorPerKWh: 28,
+		Draw:                        DeclaredDraw{TotalVA: 5, Declaring: 5},
+		TariffHundredthsMinorPerKWh: 2800,
 	}.MonthlyMinor()
 
 	var perAsset int64
 	for i := 0; i < 5; i++ {
 		perAsset += PowerEstimate{
-			Draw:              DeclaredDraw{TotalVA: 1},
-			TariffMinorPerKWh: 28,
+			Draw:                        DeclaredDraw{TotalVA: 1},
+			TariffHundredthsMinorPerKWh: 2800,
 		}.MonthlyMinor()
 	}
 
@@ -47,18 +48,18 @@ func TestThePowerEstimateArithmetic(t *testing.T) {
 	tests := []struct {
 		name        string
 		va          int64
-		tariff      int64
+		tariff      int64 // hundredths of a minor unit per kWh
 		wantMonthly int64
 		wantKWh     string
 	}{
-		// 900 VA, 730 h -> 657 kWh; at 28 minor/kWh -> 18,396 minor.
-		{"one dual-fed server", 900, 28, 18396, "657.0"},
-		{"nothing declared", 0, 28, 0, "0.0"},
+		// 900 VA, 730 h -> 657 kWh; at 28 minor/kWh (2800 hundredths) -> 18,396 minor.
+		{"one dual-fed server", 900, 2800, 18396, "657.0"},
+		{"nothing declared", 0, 2800, 0, "0.0"},
 		{"no tariff", 900, 0, 0, "657.0"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			e := PowerEstimate{Draw: DeclaredDraw{TotalVA: tc.va}, TariffMinorPerKWh: tc.tariff}
+			e := PowerEstimate{Draw: DeclaredDraw{TotalVA: tc.va}, TariffHundredthsMinorPerKWh: tc.tariff}
 			if got := e.MonthlyMinor(); got != tc.wantMonthly {
 				t.Errorf("MonthlyMinor = %d, want %d", got, tc.wantMonthly)
 			}
@@ -75,8 +76,8 @@ func TestAZeroTariffIsUnsetRatherThanFree(t *testing.T) {
 	if (PowerEstimate{Draw: DeclaredDraw{TotalVA: 900}}).Configured() {
 		t.Error("a zero tariff reported itself configured")
 	}
-	if !(PowerEstimate{TariffMinorPerKWh: 1}).Configured() {
-		t.Error("a one-minor-unit tariff reported itself unconfigured")
+	if !(PowerEstimate{TariffHundredthsMinorPerKWh: 1}).Configured() {
+		t.Error("a one-hundredth-of-a-minor-unit tariff reported itself unconfigured")
 	}
 }
 
@@ -88,7 +89,7 @@ func TestAZeroTariffIsUnsetRatherThanFree(t *testing.T) {
 // draws are hundreds of form entries. There was no test between the D5 case
 // (Configured() == false) and the positive case (both true) until this one.
 func TestAConfiguredTariffOverAnEmptyEstateHasNoFigure(t *testing.T) {
-	e := PowerEstimate{Draw: DeclaredDraw{TotalVA: 0}, TariffMinorPerKWh: 28}
+	e := PowerEstimate{Draw: DeclaredDraw{TotalVA: 0}, TariffHundredthsMinorPerKWh: 2800}
 	if !e.Configured() {
 		t.Fatal("Configured() is false with a tariff set; this test would prove nothing about HasFigure")
 	}
@@ -97,7 +98,7 @@ func TestAConfiguredTariffOverAnEmptyEstateHasNoFigure(t *testing.T) {
 			"would render a computed-looking EUR 0.00 on day one of every deployment")
 	}
 
-	positive := PowerEstimate{Draw: DeclaredDraw{TotalVA: 900}, TariffMinorPerKWh: 28}
+	positive := PowerEstimate{Draw: DeclaredDraw{TotalVA: 900}, TariffHundredthsMinorPerKWh: 2800}
 	if !positive.HasFigure() {
 		t.Error("HasFigure() is false with a tariff set and a real declared draw; " +
 			"the positive case must still render")
@@ -116,7 +117,7 @@ func TestAConfiguredTariffOverAnEmptyEstateHasNoFigure(t *testing.T) {
 // arithmetically a no-op, and this proves it bit-for-bit rather than trusting
 // the comment that says so.
 func TestAnUndeclaredPUEReproducesTheUnmultipliedFigureExactly(t *testing.T) {
-	e := PowerEstimate{Draw: DeclaredDraw{TotalVA: 900}, TariffMinorPerKWh: 28}
+	e := PowerEstimate{Draw: DeclaredDraw{TotalVA: 900}, TariffHundredthsMinorPerKWh: 2800}
 	if e.PUEDeclared() {
 		t.Fatal("PUEDeclared() is true with PUEHundredths left at zero")
 	}
@@ -132,15 +133,16 @@ func TestAnUndeclaredPUEReproducesTheUnmultipliedFigureExactly(t *testing.T) {
 // separation: the IT-load figure (MonthlyMinor) must be untouched by a
 // declared PUE, and the facility figure must reflect it.
 //
-// 900 VA, 730 h, 28 minor/kWh -> IT load 18,396 minor (657.0 kWh), as
-// TestThePowerEstimateArithmetic already pins. At PUE 1.40: facility kWh =
-// 657.0 * 1.4 = 919.8, facility cost = 18396 * 1.4 = 25,754.4 -> rounds to
-// 25754 (divRound rounds half away from zero on the combined numerator).
+// 900 VA, 730 h, 28 minor/kWh (2800 hundredths) -> IT load 18,396 minor
+// (657.0 kWh), as TestThePowerEstimateArithmetic already pins. At PUE 1.40:
+// facility kWh = 657.0 * 1.4 = 919.8, facility cost = 18396 * 1.4 = 25,754.4
+// -> rounds to 25754 (divRound rounds half away from zero on the combined
+// numerator).
 func TestADeclaredPUEMultipliesTheFacilityFigureOnly(t *testing.T) {
 	e := PowerEstimate{
-		Draw:              DeclaredDraw{TotalVA: 900},
-		TariffMinorPerKWh: 28,
-		PUEHundredths:     140,
+		Draw:                        DeclaredDraw{TotalVA: 900},
+		TariffHundredthsMinorPerKWh: 2800,
+		PUEHundredths:               140,
 	}
 	if !e.PUEDeclared() {
 		t.Fatal("PUEDeclared() is false with PUEHundredths = 140")
@@ -156,6 +158,26 @@ func TestADeclaredPUEMultipliesTheFacilityFigureOnly(t *testing.T) {
 	}
 	if got := e.FacilityKWhPerMonth(); got != "919.8" {
 		t.Errorf("FacilityKWhPerMonth() = %q, want \"919.8\"", got)
+	}
+}
+
+// TestTheTariffResolutionIsAHundredthOfAMinorUnit is item 21/22: the tariff
+// used to be whole minor units, so a real rate of 0.2847 could only be
+// entered as 28 and the resulting cost was systematically off. Widened to
+// hundredths of a minor unit, the exact rate is representable: 2847
+// (entered as "28.47") must produce a different, more accurate figure than
+// 2800 (entered as "28") over the identical declared load.
+func TestTheTariffResolutionIsAHundredthOfAMinorUnit(t *testing.T) {
+	rounded := PowerEstimate{Draw: DeclaredDraw{TotalVA: 900}, TariffHundredthsMinorPerKWh: 2800}
+	precise := PowerEstimate{Draw: DeclaredDraw{TotalVA: 900}, TariffHundredthsMinorPerKWh: 2847}
+
+	if rounded.MonthlyMinor() == precise.MonthlyMinor() {
+		t.Fatal("a rate of 28 and a rate of 28.47 produced the identical monthly figure; " +
+			"the extra digit of resolution is not reaching the arithmetic")
+	}
+	// 900*730*2847 = 1,870,479,000; divRound(that, 100000) = 18705.
+	if got := precise.MonthlyMinor(); got != 18705 {
+		t.Errorf("MonthlyMinor() at 28.47 minor/kWh = %d, want 18705", got)
 	}
 }
 

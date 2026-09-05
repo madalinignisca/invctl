@@ -53,11 +53,12 @@ type Config struct {
 	// produce totals that are wrong without looking wrong.
 	Currency string
 
-	// PowerTariffMinorPerKWh is the electricity rate, in the same minor units
-	// as every other amount here (docs/power-cost-design.md D1). Zero means no
-	// tariff is configured and the cost report says so, rather than rendering
-	// nothing -- an administrator who sees a blank section cannot tell "not
-	// configured" from "nothing to show" or "I lack the permission" (D5).
+	// PowerTariffHundredthsMinorPerKWh is the electricity rate, in hundredths
+	// of a minor unit (docs/power-cost-design.md D1, resolution widened by
+	// §4c.21). Zero means no tariff is configured and the cost report says
+	// so, rather than rendering nothing -- an administrator who sees a blank
+	// section cannot tell "not configured" from "nothing to show" or "I lack
+	// the permission" (D5).
 	//
 	// ONE RATE, IN CONFIG, and the alternatives were considered: a column on
 	// power_source is per-supply rather than per-contract and would give
@@ -69,11 +70,25 @@ type Config struct {
 	// IT CARRIES NO CURRENCY OF ITS OWN. Currency above is estate-wide; a
 	// second currency on one page is a bug, not a feature.
 	//
+	// RESOLUTION WIDENED BEFORE ANYTHING DEPLOYED (item 21): this used to be
+	// whole minor units, parsed with envInt64, so a real rate of 0.2847 could
+	// only be entered as 28 -- an error an order of magnitude larger than the
+	// truncation §4.3 was written to prevent, on the one variable a
+	// deployment sets exactly once and then never revisits.
+	// envDecimalHundredths already existed and was applied to the newer,
+	// less consequential PowerPUEHundredths; nothing was deployed yet and
+	// this was not documented in INSTALL.md, so widening it here was the
+	// cheapest this change will ever be. An operator who typed a whole
+	// number before ("28") gets the identical rate today -- envDecimalHundredths
+	// parses "28" to 2800, and the arithmetic that used to divide by 100 now
+	// divides by 100 twice, so nothing shifts for anyone who never needed the
+	// extra digit.
+	//
 	// A tariff of zero is treated as unset rather than as free electricity.
 	// Nobody has free electricity, and rendering EUR 0.00 beside "per month"
 	// as though it were computed is exactly the measured-looking figure this
 	// design refuses.
-	PowerTariffMinorPerKWh int64
+	PowerTariffHundredthsMinorPerKWh int64
 
 	// PowerPUEHundredths is the operator-declared facility Power Usage
 	// Effectiveness, in integer hundredths -- 140 for a PUE of 1.40
@@ -190,28 +205,28 @@ func Load() (*Config, error) {
 	// Collected rather than returned inline so an operator with two typos
 	// learns about both on the first start rather than one per restart.
 	var badBools []string
-	var badInts []string
+	var badTariffs []string
 	var badDecimals []string
 	cfg := &Config{
-		DBDriver:                    envOr("INV_DB_DRIVER", "sqlite"),
-		DBDSN:                       envOr("INV_DB_DSN", "file:invctl.db?_txlock=immediate"),
-		Listen:                      envOr("INV_LISTEN", ":8080"),
-		SessionTimeout:              envDuration("INV_SESSION_TIMEOUT", 12*time.Hour),
-		AdminUsers:                  splitList(os.Getenv("INV_ADMIN_USERS")),
-		Currency:                    envOr("INV_CURRENCY", "EUR"),
-		PowerTariffMinorPerKWh:      envInt64("INV_POWER_TARIFF_MINOR_PER_KWH", 0, &badInts),
-		PowerPUEHundredths:          envDecimalHundredths("INV_POWER_PUE", 0, &badDecimals),
-		AuthLocal:                   envBool("INV_AUTH_LOCAL", true, &badBools),
-		AuthLDAP:                    envBool("INV_AUTH_LDAP", false, &badBools),
-		SeedOnStart:                 envBool("INV_SEED", false, &badBools),
-		DevAdminPassword:            os.Getenv("INV_ADMIN_PASSWORD"),
-		AdminUsername:               envOr("INV_ADMIN_USERNAME", "admin"),
-		LogLevel:                    envOr("INV_LOG_LEVEL", "info"),
-		SecureCookies:               envBool("INV_SECURE_COOKIES", false, &badBools),
-		SeedObservations:            envBool("INV_SEED_OBSERVATIONS", false, &badBools),
-		SeedCompany:                 envBool("INV_SEED_COMPANY", false, &badBools),
-		SeedE2EProjectOwner:         envBool("INV_SEED_E2E_PROJECT_OWNER", false, &badBools),
-		SeedE2EProjectOwnerPassword: os.Getenv("INV_E2E_PROJECT_OWNER_PASSWORD"),
+		DBDriver:                         envOr("INV_DB_DRIVER", "sqlite"),
+		DBDSN:                            envOr("INV_DB_DSN", "file:invctl.db?_txlock=immediate"),
+		Listen:                           envOr("INV_LISTEN", ":8080"),
+		SessionTimeout:                   envDuration("INV_SESSION_TIMEOUT", 12*time.Hour),
+		AdminUsers:                       splitList(os.Getenv("INV_ADMIN_USERS")),
+		Currency:                         envOr("INV_CURRENCY", "EUR"),
+		PowerTariffHundredthsMinorPerKWh: envDecimalHundredths("INV_POWER_TARIFF_MINOR_PER_KWH", 0, &badTariffs),
+		PowerPUEHundredths:               envDecimalHundredths("INV_POWER_PUE", 0, &badDecimals),
+		AuthLocal:                        envBool("INV_AUTH_LOCAL", true, &badBools),
+		AuthLDAP:                         envBool("INV_AUTH_LDAP", false, &badBools),
+		SeedOnStart:                      envBool("INV_SEED", false, &badBools),
+		DevAdminPassword:                 os.Getenv("INV_ADMIN_PASSWORD"),
+		AdminUsername:                    envOr("INV_ADMIN_USERNAME", "admin"),
+		LogLevel:                         envOr("INV_LOG_LEVEL", "info"),
+		SecureCookies:                    envBool("INV_SECURE_COOKIES", false, &badBools),
+		SeedObservations:                 envBool("INV_SEED_OBSERVATIONS", false, &badBools),
+		SeedCompany:                      envBool("INV_SEED_COMPANY", false, &badBools),
+		SeedE2EProjectOwner:              envBool("INV_SEED_E2E_PROJECT_OWNER", false, &badBools),
+		SeedE2EProjectOwnerPassword:      os.Getenv("INV_E2E_PROJECT_OWNER_PASSWORD"),
 		LDAP: LDAPConfig{
 			URL:            os.Getenv("INV_LDAP_URL"),
 			BindDNTemplate: os.Getenv("INV_LDAP_BIND_DN"),
@@ -226,12 +241,13 @@ func Load() (*Config, error) {
 			"decides a security posture and the fallback is the permissive one",
 			strings.Join(badBools, ", "))
 	}
-	if len(badInts) > 0 {
-		return nil, fmt.Errorf("validating config: %s is not a whole number of minor "+
-			"currency units; a rate of 0.28 is written as 28. Refusing to start rather than "+
-			"falling back to a default, because the default renders as "+
-			"\"no tariff is configured\" on a page somebody has just configured",
-			strings.Join(badInts, ", "))
+	if len(badTariffs) > 0 {
+		return nil, fmt.Errorf("validating config: %s is not a decimal number of minor "+
+			"currency units; a rate of 0.28 is written as 28, and a rate of 0.2847 is written "+
+			"as 28.47. Refusing to start rather than falling back to a default, because the "+
+			"default renders as \"no tariff is configured\" on a page somebody has just "+
+			"configured",
+			strings.Join(badTariffs, ", "))
 	}
 	if len(badDecimals) > 0 {
 		return nil, fmt.Errorf("validating config: %s is not a decimal PUE; a facility PUE "+
@@ -317,10 +333,24 @@ func (c *Config) validate() error {
 				"Add the directory's CA to the host trust store instead", c.LDAP.URL)
 		}
 	}
-	if c.PowerTariffMinorPerKWh < 0 {
-		return fmt.Errorf("validating config: INV_POWER_TARIFF_MINOR_PER_KWH is %d; "+
+	if c.PowerTariffHundredthsMinorPerKWh < 0 {
+		return fmt.Errorf("validating config: INV_POWER_TARIFF_MINOR_PER_KWH is %s; "+
 			"a negative tariff would report the estate as earning money by being "+
-			"switched on", c.PowerTariffMinorPerKWh)
+			"switched on", formatHundredths(c.PowerTariffHundredthsMinorPerKWh))
+	}
+	// item 24: the argument for this guard was already written for
+	// PowerPUEHundredths -- an absurd value is far more likely a typo than a
+	// real tariff, and this is the only path an int64 large enough to matter
+	// could reach the money arithmetic (MonthlyMinor/FacilityMonthlyMinor).
+	// EUR 100/kWh is generously above any real-world electricity price this
+	// project has ever seen documented; a genuine deployment paying that
+	// would be a conversation, not a crash nobody can fix.
+	const maxTariffHundredthsMinorPerKWh = 10_000 // 100.00 minor units/kWh
+	if c.PowerTariffHundredthsMinorPerKWh > maxTariffHundredthsMinorPerKWh {
+		return fmt.Errorf("validating config: INV_POWER_TARIFF_MINOR_PER_KWH is %s minor "+
+			"units per kWh, which is above 100.00; refusing to start rather than showing a "+
+			"figure this implausible -- if this rate is genuine, raise the limit deliberately",
+			formatHundredths(c.PowerTariffHundredthsMinorPerKWh))
 	}
 	// D6: zero means undeclared and is handled entirely by the domain layer
 	// defaulting effectivePUEHundredths to 100 -- this must only skip the
@@ -477,29 +507,10 @@ func envBool(key string, fallback bool, bad *[]string) bool {
 	return parsed
 }
 
-// envInt64 parses an integer, recording anything it could not parse.
-//
-// Same posture as envBool: a value somebody typed and got wrong must not
-// degrade into the default. "0.28" is exactly the value an operator reaches
-// for here -- the variable is named MINOR units, so the answer is 28 -- and
-// silently taking 0 would render "no tariff is configured" on a page they had
-// just configured.
-func envInt64(key string, fallback int64, bad *[]string) int64 {
-	v := os.Getenv(key)
-	if v == "" {
-		return fallback
-	}
-	parsed, err := strconv.ParseInt(v, 10, 64)
-	if err != nil {
-		*bad = append(*bad, fmt.Sprintf("%s=%q", key, v))
-		return fallback
-	}
-	return parsed
-}
-
 // formatHundredths renders integer hundredths back as the decimal an
 // operator typed, e.g. 140 -> "1.40", for a validation message that speaks
-// the unit INV_POWER_PUE is actually read in rather than the internal one.
+// the unit INV_POWER_PUE (or, since item 21, INV_POWER_TARIFF_MINOR_PER_KWH)
+// is actually read in rather than the internal one.
 func formatHundredths(h int64) string {
 	sign := ""
 	if h < 0 {

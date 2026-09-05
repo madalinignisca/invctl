@@ -551,6 +551,11 @@ func TestDistinctAgentAndReaderTokensStartFine(t *testing.T) {
 // an unset tariff is what makes the cost report render D5's explanation
 // rather than a figure, and a default of anything else would put a number
 // nobody chose in front of a reader.
+//
+// Item 21 widened this from whole minor units to hundredths of a minor unit,
+// parsed the same way PUE already is (envDecimalHundredths): "28" still
+// means the identical rate it always did (2800 internally), and "28.47" is
+// now representable at all, which it never was before.
 func TestThePowerTariffIsUnsetByDefaultAndRefusesRubbish(t *testing.T) {
 	t.Run("unset", func(t *testing.T) {
 		pristineEnv(t)
@@ -558,27 +563,43 @@ func TestThePowerTariffIsUnsetByDefaultAndRefusesRubbish(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Load: %v", err)
 		}
-		if cfg.PowerTariffMinorPerKWh != 0 {
-			t.Errorf("tariff = %d, want 0 (unset)", cfg.PowerTariffMinorPerKWh)
+		if cfg.PowerTariffHundredthsMinorPerKWh != 0 {
+			t.Errorf("tariff = %d, want 0 (unset)", cfg.PowerTariffHundredthsMinorPerKWh)
 		}
 	})
 
-	t.Run("set", func(t *testing.T) {
+	t.Run("set to a whole minor unit, as before widening", func(t *testing.T) {
 		pristineEnv(t)
 		t.Setenv("INV_POWER_TARIFF_MINOR_PER_KWH", "28")
 		cfg, err := Load()
 		if err != nil {
 			t.Fatalf("Load: %v", err)
 		}
-		if cfg.PowerTariffMinorPerKWh != 28 {
-			t.Errorf("tariff = %d, want 28", cfg.PowerTariffMinorPerKWh)
+		if cfg.PowerTariffHundredthsMinorPerKWh != 2800 {
+			t.Errorf("tariff = %d, want 2800 (28.00 minor units) -- an operator who typed "+
+				"a whole number before widening must see the identical rate today",
+				cfg.PowerTariffHundredthsMinorPerKWh)
 		}
 	})
 
-	// The value an operator actually types when they read "per kWh" and think
-	// in major units. It must refuse to start, not quietly become zero and
-	// report itself unconfigured on a page they just configured.
-	for _, bad := range []string{"0.28", "28 cents", "-"} {
+	// The whole reason item 21 exists: a real rate with a fraction of a minor
+	// unit, unrepresentable before this widening.
+	t.Run("set to a fraction of a minor unit", func(t *testing.T) {
+		pristineEnv(t)
+		t.Setenv("INV_POWER_TARIFF_MINOR_PER_KWH", "28.47")
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if cfg.PowerTariffHundredthsMinorPerKWh != 2847 {
+			t.Errorf("tariff = %d, want 2847 (28.47 minor units)", cfg.PowerTariffHundredthsMinorPerKWh)
+		}
+	})
+
+	// Genuinely malformed input, not merely a value that used to be refused
+	// for being finer-grained than a whole minor unit -- "0.28" is now a
+	// legitimate (if absurdly tiny) rate, not a parse error.
+	for _, bad := range []string{"28 cents", "-", "twenty-eight"} {
 		t.Run("refuses "+bad, func(t *testing.T) {
 			pristineEnv(t)
 			t.Setenv("INV_POWER_TARIFF_MINOR_PER_KWH", bad)
@@ -593,6 +614,26 @@ func TestThePowerTariffIsUnsetByDefaultAndRefusesRubbish(t *testing.T) {
 		t.Setenv("INV_POWER_TARIFF_MINOR_PER_KWH", "-28")
 		if _, err := Load(); err == nil {
 			t.Fatal("Load accepted a negative tariff")
+		}
+	})
+
+	// item 24: the argument for this guard was already written for PowerPUE
+	// two functions away and applied only there. An absurd tariff is the
+	// only path an int64 large enough to matter could reach the money
+	// arithmetic.
+	t.Run("refuses an absurdly high rate", func(t *testing.T) {
+		pristineEnv(t)
+		t.Setenv("INV_POWER_TARIFF_MINOR_PER_KWH", "100.01")
+		if _, err := Load(); err == nil {
+			t.Fatal("Load accepted a tariff of 100.01 minor units per kWh, an implausible rate")
+		}
+	})
+
+	t.Run("accepts the boundary of the absurd-value guard", func(t *testing.T) {
+		pristineEnv(t)
+		t.Setenv("INV_POWER_TARIFF_MINOR_PER_KWH", "100.00")
+		if _, err := Load(); err != nil {
+			t.Fatalf("Load refused 100.00, the guard's own boundary: %v", err)
 		}
 	})
 }

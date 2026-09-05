@@ -29,7 +29,8 @@
   <div class="empty">
     <strong>No electricity figure: no tariff is configured.</strong>
     Set <code>INV_POWER_TARIFF_MINOR_PER_KWH</code> to the rate in minor units
-    per kWh — 28 for 0.28 — and this section shows what the declared load costs.
+    per kWh, to a hundredth of a minor unit — 28 for 0.28, or 28.47 for 0.2847
+    — and this section shows what the declared load costs.
   </div>
   {{else if not .HasFigure}}
   {{/* B1 / §4b.7: Configured tests the tariff ALONE, so a rate set over an
@@ -58,7 +59,7 @@
       <div class="stat-label">Electricity, estimated monthly</div>
       <div class="stat-value">{{money .MonthlyMinor}}</div>
       <div class="stat-note">
-        {{.KWhPerMonth}} kWh at {{money .TariffMinorPerKWh}} per kWh
+        {{.KWhPerMonth}} kWh at {{moneyPrecise .TariffHundredthsMinorPerKWh}} per kWh
       </div>
     </div>
     {{if .PUEDeclared}}
@@ -79,7 +80,7 @@
   </div>
   <div class="panel-body">
     <p>
-      An estimate from <strong>declared</strong> nameplate draw. Nothing in this system measures power: {{.Draw.Declaring}} of {{.Draw.Assets}} asset(s) that have a power input declared a draw, and {{.Draw.UndeclaredDraw}} live power input(s) have the supply path recorded but no number typed into it yet — a real gap somebody can go and close, <em>not</em> a claim that those inputs carry no power. There is deliberately <strong>no percentage</strong> next to either of those counts: asset kind is an open lookup set that grows over time, so no honest denominator exists to divide by, and a percentage that silently stopped counting a new kind would be worse than none. Power factor is assumed 1.0 (volt-amps treated as watts) over {{.HoursPerMonth}} hours a month, at a tariff of {{money .TariffMinorPerKWh}} per kWh entered in whole minor units — a real rate like 0.2847 is entered as 28, a systematic understatement of roughly 1.7% before anything else in this estimate is even considered.
+      An estimate from <strong>declared</strong> nameplate draw. Nothing in this system measures power: {{.Draw.Declaring}} of {{.Draw.Assets}} asset(s) that have a power input declared a draw, and {{.Draw.UndeclaredDraw}} live power input(s) have the supply path recorded but no number typed into it yet — a real gap somebody can go and close, <em>not</em> a claim that those inputs carry no power. There is deliberately <strong>no percentage</strong> next to either of those counts: asset kind is an open lookup set that grows over time, so no honest denominator exists to divide by, and a percentage that silently stopped counting a new kind would be worse than none. Power factor is assumed 1.0 (volt-amps treated as watts) over {{.HoursPerMonth}} hours a month, at a tariff of {{moneyPrecise .TariffHundredthsMinorPerKWh}} per kWh entered to a hundredth of a minor unit — a real rate like 0.2847 is entered as 28.47, not rounded to the nearest whole cent.
     </p>
     <p>
       {{if .Draw.UnmodelledSites}}{{.Draw.UnmodelledSites}} live site(s) carry no power model at all and are missing from this figure <strong>entirely</strong>, not merely undercounted.{{else}}No live site lacks a power panel — though a panel existing says nothing about whether any load behind it is declared; the count above is what answers that.{{end}}

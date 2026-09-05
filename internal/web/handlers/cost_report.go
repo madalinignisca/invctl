@@ -57,7 +57,7 @@ func (a *App) CostReport(w http.ResponseWriter, r *http.Request) {
 				a.serverError(w, r, err)
 				return
 			}
-			power = domain.PowerEstimate{Draw: draw, TariffMinorPerKWh: tariff, PUEHundredths: a.powerPUE()}
+			power = domain.PowerEstimate{Draw: draw, TariffHundredthsMinorPerKWh: tariff, PUEHundredths: a.powerPUE()}
 		}
 	}
 	a.Render.Respond(w, r, http.StatusOK, "cost_report", "cost_report", costReportPage{
@@ -90,7 +90,7 @@ func (a *App) powerTariff() int64 {
 	if a.Config == nil {
 		return 0
 	}
-	return a.Config.PowerTariffMinorPerKWh
+	return a.Config.PowerTariffHundredthsMinorPerKWh
 }
 
 // powerPUE is the operator-declared facility PUE (D6), or zero when nothing

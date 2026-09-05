@@ -118,8 +118,15 @@ type DeclaredDraw struct {
 // PowerEstimate is the declared draw plus the rate, and every assumption in
 // between. It carries no currency of its own -- Config.Currency is estate-wide.
 type PowerEstimate struct {
-	Draw              DeclaredDraw
-	TariffMinorPerKWh int64
+	Draw DeclaredDraw
+	// TariffHundredthsMinorPerKWh is the configured rate, in hundredths of a
+	// minor unit -- widened from whole minor units by item 21 before
+	// anything deployed, because a real rate like 0.2847 could otherwise
+	// only be entered as 28, an error an order of magnitude larger than the
+	// truncation §4.3 exists to prevent. The extra digit is folded into the
+	// same end-of-chain division MonthlyMinor already performs, the same
+	// technique effectivePUEHundredths uses for its own extra digit.
+	TariffHundredthsMinorPerKWh int64
 	// PUEHundredths is the operator-DECLARED facility Power Usage
 	// Effectiveness, in integer hundredths (140 = a PUE of 1.40) -- D6,
 	// added by the stage-7 review after §1 and §5 were found in
@@ -128,7 +135,7 @@ type PowerEstimate struct {
 	//
 	// ZERO MEANS UNDECLARED, not "PUE 0" -- a facility using less power than
 	// the load inside it is physically impossible, so zero can never be a
-	// real value and is free to mean "not set" the way TariffMinorPerKWh
+	// real value and is free to mean "not set" the way TariffHundredthsMinorPerKWh
 	// reuses zero for "no tariff". PUEDeclared reports which case this is;
 	// effectivePUEHundredths is what the arithmetic actually uses.
 	//
@@ -141,7 +148,7 @@ type PowerEstimate struct {
 // Configured reports whether a tariff is in force. Zero is unset rather than
 // free: nobody has free electricity, and rendering a computed-looking 0.00
 // is the measured-looking figure this design refuses.
-func (e PowerEstimate) Configured() bool { return e.TariffMinorPerKWh > 0 }
+func (e PowerEstimate) Configured() bool { return e.TariffHundredthsMinorPerKWh > 0 }
 
 // HasFigure is B1 (§4b.7): Configured tests the tariff ALONE, and a tariff
 // set over an estate with no declared draw prints a computed-looking 0.00 --
@@ -208,7 +215,7 @@ func (e PowerEstimate) HoursPerMonth() int { return PowerHoursPerMonth }
 // Overflow is not a risk at estate scale: a million VA at a EUR 1.00/kWh
 // tariff is 7.3e10, eight orders below int64's limit.
 func (e PowerEstimate) MonthlyMinor() int64 {
-	return divRound(e.Draw.TotalVA*PowerHoursPerMonth*e.TariffMinorPerKWh, 1000)
+	return divRound(e.Draw.TotalVA*PowerHoursPerMonth*e.TariffHundredthsMinorPerKWh, 1000*100)
 }
 
 // KWhPerMonthTenths is the energy behind the money, in tenths of a kWh.
@@ -247,8 +254,8 @@ func (e PowerEstimate) KWhPerMonth() string {
 // changes nothing" is a claim worth a test, not just a comment.
 func (e PowerEstimate) FacilityMonthlyMinor() int64 {
 	return divRound(
-		e.Draw.TotalVA*PowerHoursPerMonth*e.TariffMinorPerKWh*e.effectivePUEHundredths(),
-		1000*100)
+		e.Draw.TotalVA*PowerHoursPerMonth*e.TariffHundredthsMinorPerKWh*e.effectivePUEHundredths(),
+		1000*100*100)
 }
 
 // FacilityKWhPerMonthTenths is the energy behind FacilityMonthlyMinor, on the

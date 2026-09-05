@@ -273,10 +273,14 @@ func TestTheDirectionOfErrorIsStatedInBothDirectionsWithNoNetClaim(t *testing.T)
 	}
 }
 
-// TestTheTariffResolutionIsStatedBesideTheRate is W4 / §4b.14: whole minor
-// units per kWh means a real rate of 0.2847 is entered as 28, a systematic
-// ~1.7% understatement -- larger than the truncation §4.3 agonises over, and
-// nothing on the page said so before this.
+// TestTheTariffResolutionIsStatedBesideTheRate is W4 / §4b.14, REWORKED by
+// items 21/22. The original claim -- whole minor units per kWh means a real
+// rate of 0.2847 is entered as 28, "a systematic ~1.7% understatement" -- was
+// itself wrong: quantisation is +/- half a unit and its direction depends on
+// whether the operator truncated or rounded, which nothing told them, and it
+// was never systematic. Rather than state a wrong number more prominently,
+// item 21 widened the tariff's resolution before anything deployed, so the
+// page now says what precision IS kept, not what was lost.
 func TestTheTariffResolutionIsStatedBesideTheRate(t *testing.T) {
 	h := newHarnessWithTariff(t, 28)
 	h.login("admin", "admin-password")
@@ -284,11 +288,16 @@ func TestTheTariffResolutionIsStatedBesideTheRate(t *testing.T) {
 	page := body(t, h.get("/reports/cost", false))
 
 	if !strings.Contains(page, "0.2847") {
-		t.Error("the page does not name the concrete example rate (0.2847 entered as 28) " +
-			"that makes the resolution's cost concrete")
+		t.Error("the page does not name the concrete example rate (0.2847) that makes " +
+			"the resolution concrete")
 	}
-	if !strings.Contains(page, "whole minor units") {
-		t.Error("the page does not say the tariff's resolution is whole minor units per kWh")
+	if !strings.Contains(page, "hundredth of a minor unit") {
+		t.Error("the page does not say the tariff's resolution is a hundredth of a minor " +
+			"unit per kWh")
+	}
+	if strings.Contains(page, "1.7%") {
+		t.Error("the page still carries the wrong \"systematic ~1.7% understatement\" claim " +
+			"item 22 found unsupportable")
 	}
 }
 

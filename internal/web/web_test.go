@@ -356,11 +356,17 @@ func newHarnessTuned(t *testing.T, creds []config.AgentCredential, readerCreds [
 	}
 
 	cfg := &config.Config{
-		AdminUsers:             []string{"admin"},
-		AuthLocal:              true,
-		SecureCookies:          secure,
-		PowerTariffMinorPerKWh: tariffMinorPerKWh,
-		PowerPUEHundredths:     pueHundredths,
+		AdminUsers:    []string{"admin"},
+		AuthLocal:     true,
+		SecureCookies: secure,
+		// *100: every caller here still passes WHOLE minor units, the
+		// convention this harness was written against, and item 21 widened
+		// the config field to hundredths of a minor unit. Multiplying here
+		// keeps every existing newHarnessWithTariff(t, 28) call describing
+		// the identical rate rather than forcing every test in this package
+		// to be rewritten to pass hundredths directly.
+		PowerTariffHundredthsMinorPerKWh: tariffMinorPerKWh * 100,
+		PowerPUEHundredths:               pueHundredths,
 	}
 	authz := auth.NewAuthorizer(cfg.AdminUsers, st)
 
