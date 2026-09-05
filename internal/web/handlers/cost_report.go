@@ -57,7 +57,7 @@ func (a *App) CostReport(w http.ResponseWriter, r *http.Request) {
 				a.serverError(w, r, err)
 				return
 			}
-			power = domain.PowerEstimate{Draw: draw, TariffMinorPerKWh: tariff}
+			power = domain.PowerEstimate{Draw: draw, TariffMinorPerKWh: tariff, PUEHundredths: a.powerPUE()}
 		}
 	}
 	a.Render.Respond(w, r, http.StatusOK, "cost_report", "cost_report", costReportPage{
@@ -91,6 +91,17 @@ func (a *App) powerTariff() int64 {
 		return 0
 	}
 	return a.Config.PowerTariffMinorPerKWh
+}
+
+// powerPUE is the operator-declared facility PUE (D6), or zero when nothing
+// was declared. Same nil-Config guard as powerTariff, and the same reasoning:
+// App.Config is set by every real construction, nil is a programming error,
+// and "no PUE declared" is a truthful thing to say while somebody fixes it.
+func (a *App) powerPUE() int64 {
+	if a.Config == nil {
+		return 0
+	}
+	return a.Config.PowerPUEHundredths
 }
 
 // SupplierReport answers the third of the CEO's questions: which suppliers raise

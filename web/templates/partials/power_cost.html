@@ -31,10 +31,27 @@
     Set <code>INV_POWER_TARIFF_MINOR_PER_KWH</code> to the rate in minor units
     per kWh — 28 for 0.28 — and this section shows what the declared load costs.
   </div>
+  {{else if not .HasFigure}}
+  {{/* B1 / §4b.7: Configured tests the tariff ALONE, so a rate set over an
+       estate with no declared draw used to fall through to the figure below
+       and print EUR 0.00 -- a computed-looking zero on the FIRST DAY of every
+       deployment, since the tariff is one environment variable and the draws
+       are hundreds of form entries. D3's own last sentence already required
+       this branch and it went unbuilt the first time: "if nothing at all
+       declares a draw, say that in words rather than showing a zero." No
+       money marker here -- this branch never calls the money helper, on
+       purpose, the same reason the D5 branch above does not. */}}
+  <div class="empty">
+    <strong>A tariff is configured, but nothing in the estate currently
+    declares a power draw.</strong> Add at least one asset's power input
+    under its Power panel to see a figure here — an amount would otherwise
+    be a computed-looking zero, not a real one.
+  </div>
   {{else}}
   {{/* Item 3 marker (see asset_detail.html's comment). In the branch that
        actually renders an amount, not the panel unconditionally -- a
-       deployment with no tariff never shows a marker here, on purpose. */}}
+       deployment with no tariff, or one with nothing declared, never shows
+       a marker here, on purpose. */}}
   <span data-money-marker="partials/power_cost.html" hidden></span>
   <div class="stat-row">
     <div class="stat">
@@ -44,21 +61,33 @@
         {{.KWhPerMonth}} kWh at {{money .TariffMinorPerKWh}} per kWh
       </div>
     </div>
+    {{if .PUEDeclared}}
+    {{/* D6 / §4b.11: shown ONLY when an operator declared a PUE -- an unset
+         one is a no-op multiplier and FacilityMonthlyMinor would print the
+         identical figure again beside itself, which teaches a reader nothing
+         and invites exactly the two-currency-totals misreading §2.4 already
+         guards against on this page. */}}
+    <div class="stat">
+      <div class="stat-label">Facility, including PUE {{.PUE}}</div>
+      <div class="stat-value">{{money .FacilityMonthlyMinor}}</div>
+      <div class="stat-note">
+        {{.FacilityKWhPerMonth}} kWh — PUE {{.PUE}} is <strong>declared</strong>,
+        not measured, the same posture as the tariff above
+      </div>
+    </div>
+    {{end}}
   </div>
   <div class="panel-body">
     <p>
-      An estimate from <strong>declared</strong> nameplate draw. Nothing in this
-      system measures power: {{.Draw.Declaring}} asset(s) contributed a declared
-      draw, and {{.Draw.UndeclaredDraw}} live power input(s) record no draw at
-      all — a real gap, not counted in the figure above. Power factor is
-      assumed 1.0 (volt-amps treated as watts) over {{.HoursPerMonth}} hours a
-      month.
+      An estimate from <strong>declared</strong> nameplate draw. Nothing in this system measures power: {{.Draw.Declaring}} asset(s) contributed a declared draw, and {{.Draw.UndeclaredDraw}} live power input(s) have the supply path recorded but no number typed into it yet — a real gap somebody can go and close, <em>not</em> a claim that those inputs carry no power. Power factor is assumed 1.0 (volt-amps treated as watts) over {{.HoursPerMonth}} hours a month, at a tariff of {{money .TariffMinorPerKWh}} per kWh entered in whole minor units — a real rate like 0.2847 is entered as 28, a systematic understatement of roughly 1.7% before anything else in this estimate is even considered.
     </p>
     <p>
-      <strong>Not comparable to an all-in hosting quote.</strong> It excludes
-      loss in the UPS and distribution above each declared input, and excludes
-      cooling and other facility overhead — a hosting price bundles all of
-      those in. Add them before comparing.
+      {{if .Draw.UnmodelledSites}}{{.Draw.UnmodelledSites}} live site(s) carry no power model at all and are missing from this figure <strong>entirely</strong>, not merely undercounted.{{else}}Every live site carries at least some power model.{{end}}
+      There is deliberately <strong>no percentage</strong> next to any of these numbers: asset kind is an open lookup set that grows over time, so no honest denominator exists to divide by, and a percentage that silently stopped counting a new kind would be worse than none. Two things push the figure above <strong>low</strong>, in addition to the gaps already named: a chassis wired with genuinely independent power rails is counted once, at its larger side, not summed (accepted as the rarer and smaller error); and any unmodelled site named above is not in the total at all.
+    </p>
+    <p>
+      <strong>Not comparable to an all-in hosting quote.</strong> It excludes loss in the UPS and distribution above each declared input, and excludes cooling and other facility overhead — a hosting price bundles all of those in.
+      {{if .PUEDeclared}}The facility figure above adds back the declared PUE, but the estimate is still not comparable to a hosting quote without also adding UPS and distribution loss.{{else}}Add them before comparing — declaring <code>INV_POWER_PUE</code> adds back the facility share.{{end}}
     </p>
   </div>
   {{end}}

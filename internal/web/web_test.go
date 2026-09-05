@@ -146,7 +146,16 @@ func newSecureHarness(t *testing.T) *harness {
 // every existing test keeps describing the deployment it was written against.
 func newHarnessWithTariff(t *testing.T, minorPerKWh int64) *harness {
 	t.Helper()
-	return newHarnessTuned(t, testAgentCredentials(), nil, false, minorPerKWh)
+	return newHarnessTuned(t, testAgentCredentials(), nil, false, minorPerKWh, 0)
+}
+
+// newHarnessWithTariffAndPUE is newHarnessWithTariff with D6's second knob
+// set too -- an operator-declared facility PUE, in integer hundredths (140
+// for 1.40). Needed by exactly one caller (TestADeclaredPUEShowsBothFigures)
+// so the facility-figure branch has something to render.
+func newHarnessWithTariffAndPUE(t *testing.T, minorPerKWh, pueHundredths int64) *harness {
+	t.Helper()
+	return newHarnessTuned(t, testAgentCredentials(), nil, false, minorPerKWh, pueHundredths)
 }
 
 // newHarnessWithoutAgents builds the same deployment with no monitoring
@@ -283,16 +292,17 @@ func webTemplate(t *testing.T) (string, *seed.Refs) {
 
 func newHarnessSecure(t *testing.T, creds []config.AgentCredential, readerCreds []config.ReaderCredential, secure bool) *harness {
 	t.Helper()
-	return newHarnessTuned(t, creds, readerCreds, secure, 0)
+	return newHarnessTuned(t, creds, readerCreds, secure, 0, 0)
 }
 
-// newHarnessTuned is newHarnessSecure with one more knob: an electricity
-// tariff, needed by exactly one caller (newHarnessWithTariff) so the
-// power-cost section has a rate to render a figure for. Every other entry
-// point above stays a thin wrapper passing 0 -- "no tariff configured" is
-// the deployment every other test in this package was written against, and
-// this rename must not move that default out from under them.
-func newHarnessTuned(t *testing.T, creds []config.AgentCredential, readerCreds []config.ReaderCredential, secure bool, tariffMinorPerKWh int64) *harness {
+// newHarnessTuned is newHarnessSecure with two more knobs: an electricity
+// tariff, needed by newHarnessWithTariff so the power-cost section has a
+// rate to render a figure for, and a facility PUE (D6), needed by
+// newHarnessWithTariffAndPUE. Every other entry point above stays a thin
+// wrapper passing 0 for both -- "no tariff, no PUE" is the deployment every
+// other test in this package was written against, and this rename must not
+// move that default out from under them.
+func newHarnessTuned(t *testing.T, creds []config.AgentCredential, readerCreds []config.ReaderCredential, secure bool, tariffMinorPerKWh, pueHundredths int64) *harness {
 	t.Helper()
 
 	template, refs := webTemplate(t)
@@ -350,6 +360,7 @@ func newHarnessTuned(t *testing.T, creds []config.AgentCredential, readerCreds [
 		AuthLocal:              true,
 		SecureCookies:          secure,
 		PowerTariffMinorPerKWh: tariffMinorPerKWh,
+		PowerPUEHundredths:     pueHundredths,
 	}
 	authz := auth.NewAuthorizer(cfg.AdminUsers, st)
 

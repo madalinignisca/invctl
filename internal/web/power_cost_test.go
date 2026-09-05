@@ -128,6 +128,168 @@ func TestTheEstateTotalIsUnchangedByThePowerFigure(t *testing.T) {
 	}
 }
 
+// TestAConfiguredTariffOverAnEmptyEstateSaysSoInWords is B1 (§4b.7) at the
+// web layer. Configured tests the tariff ALONE, so before this fix the page
+// fell through to the figure branch with TotalVA == 0 and printed a
+// computed-looking "€0.00" -- on the FIRST DAY of every deployment, since
+// the tariff is one environment variable and the draws are hundreds of form
+// entries. There was no test between TestThePowerSectionSaysWhyItIsEmpty-
+// WithNoTariff (no tariff at all) and TestThePowerFigureAppearsWhenATariff-
+// IsConfigured (tariff AND a real draw) -- this is the one the review found
+// missing.
+func TestAConfiguredTariffOverAnEmptyEstateSaysSoInWords(t *testing.T) {
+	h := newHarnessWithTariff(t, 28)
+	// Wipe every declared draw so DeclaredPowerDraw's TotalVA is exactly
+	// zero, with a tariff still configured -- the state D3's own last
+	// sentence names and the state B1 exists to fix.
+	h.exec(`UPDATE power_input SET draw_va = NULL`)
+	h.login("admin", "admin-password")
+
+	page := body(t, h.get("/reports/cost", false))
+
+	if strings.Contains(page, "No electricity figure: no tariff is configured.") {
+		t.Fatal("a tariff IS configured; D5's unconfigured message must not be the one shown")
+	}
+	if strings.Contains(page, "Electricity, estimated monthly") {
+		t.Error("the figure's own stat-row label rendered even though nothing declares a draw; " +
+			"HasFigure must gate on both Configured() and a non-zero declared total")
+	}
+	if !strings.Contains(page, "nothing in the estate currently") &&
+		!strings.Contains(strings.ToLower(page), "nothing") {
+		t.Error("the page does not say, in words, that nothing declares a draw")
+	}
+}
+
+// TestTheCoverageSentenceSaysWhatTheGapActuallyIs is V1: "record no draw at
+// all" reads two ways, and the WRONG one is plausible -- "this input carries
+// no power" -- when the correct reading is "somebody recorded the supply
+// path but not the number". Spec D3 states the correct reading outright; the
+// template must say it, not hint at it.
+func TestTheCoverageSentenceSaysWhatTheGapActuallyIs(t *testing.T) {
+	h := newHarnessWithTariff(t, 28)
+	h.login("admin", "admin-password")
+
+	page := body(t, h.get("/reports/cost", false))
+
+	if !strings.Contains(page, "supply path recorded but no number") {
+		t.Error("the coverage sentence does not say a gap means the supply path was " +
+			"recorded but no number was typed in -- the comfortable, wrong reading " +
+			"(\"this input carries no power\") is exactly what this wording must rule out")
+	}
+	if strings.Contains(page, "record no draw at all") {
+		t.Error("the ambiguous phrasing V1 found is still present verbatim")
+	}
+}
+
+// TestTheCoverageSentenceExplainsWhyThereIsNoPercentage is V2/B3: the reader
+// is trained by the three rows above (Priced/Coverage%/Unpriced) to expect a
+// ratio, and this section renders a bare count with no denominator. It must
+// say why, not just omit the ratio silently.
+func TestTheCoverageSentenceExplainsWhyThereIsNoPercentage(t *testing.T) {
+	h := newHarnessWithTariff(t, 28)
+	h.login("admin", "admin-password")
+
+	page := body(t, h.get("/reports/cost", false))
+
+	if !strings.Contains(page, "no percentage") && !strings.Contains(page, "no honest denominator") {
+		t.Error("the page never explains why there is no coverage percentage beside " +
+			"this figure, unlike the three rows above it")
+	}
+	if !strings.Contains(page, "open lookup set") && !strings.Contains(page, "open set") {
+		t.Error("the reason given for no percentage does not name the actual cause " +
+			"(asset.kind is an open lookup set) -- D3's own cited reasoning")
+	}
+}
+
+// TestUnmodelledSitesAppearsBesideTheFigure is B3 / §4b.9. D3's amendment
+// over-generalised its own objection and dropped this exact count from the
+// page; the fixture already carries an unmodelled site or two through the
+// seed's own topology, but this test forces the count itself so it does not
+// depend on incidental seed shape.
+func TestUnmodelledSitesAppearsBesideTheFigure(t *testing.T) {
+	h := newHarnessWithTariff(t, 28)
+	// Add one live site with no power panel at all, directly -- the shape
+	// UnmodelledSites exists to count.
+	h.exec(`INSERT INTO asset (id, kind, name, lifecycle, created_at, updated_at, row_version)
+	        VALUES (?, ?, ?, ?, ?, ?, 1)`,
+		"01a06f55-0000-7000-8000-000000000abc", "site", "unmodelled-site-fixture",
+		"active", h.store.Now().UTC().Format("2006-01-02T15:04:05Z"),
+		h.store.Now().UTC().Format("2006-01-02T15:04:05Z"))
+	h.login("admin", "admin-password")
+
+	page := body(t, h.get("/reports/cost", false))
+
+	if !strings.Contains(page, "live site(s) carry no power model at all") {
+		t.Error("the page does not carry the UnmodelledSites count beside the electricity figure")
+	}
+	if !strings.Contains(page, "missing from this figure") && !strings.Contains(page, "entirely") {
+		t.Error("the page does not say the unmodelled site is missing entirely, not merely undercounted")
+	}
+}
+
+// TestTheDirectionOfErrorIsStatedOnThePage is W3 / §4b.10: two things
+// understate the IT-load figure and neither reached the page before this --
+// the independent-rail chassis §2.1 accepted, and an unmodelled site.
+// powerUtilisation already appends "and N of its inputs declare no draw at
+// all" for the analogous over-allocation finding; this is the same posture
+// applied to the money page.
+func TestTheDirectionOfErrorIsStatedOnThePage(t *testing.T) {
+	h := newHarnessWithTariff(t, 28)
+	h.login("admin", "admin-password")
+
+	page := body(t, h.get("/reports/cost", false))
+
+	if !strings.Contains(strings.ToLower(page), "low") {
+		t.Error("the page never states the figure reads LOW, which is the direction of " +
+			"every unmodelled gap it names")
+	}
+	if !strings.Contains(page, "independent") {
+		t.Error("the page does not name the independent-rail chassis as a source of " +
+			"understatement (§2.1's accepted cost)")
+	}
+}
+
+// TestTheTariffResolutionIsStatedBesideTheRate is W4 / §4b.14: whole minor
+// units per kWh means a real rate of 0.2847 is entered as 28, a systematic
+// ~1.7% understatement -- larger than the truncation §4.3 agonises over, and
+// nothing on the page said so before this.
+func TestTheTariffResolutionIsStatedBesideTheRate(t *testing.T) {
+	h := newHarnessWithTariff(t, 28)
+	h.login("admin", "admin-password")
+
+	page := body(t, h.get("/reports/cost", false))
+
+	if !strings.Contains(page, "0.2847") {
+		t.Error("the page does not name the concrete example rate (0.2847 entered as 28) " +
+			"that makes the resolution's cost concrete")
+	}
+	if !strings.Contains(page, "whole minor units") {
+		t.Error("the page does not say the tariff's resolution is whole minor units per kWh")
+	}
+}
+
+// TestADeclaredPUEShowsBothFigures is D6 / §4b.11. Unset must change nothing
+// (proved at the domain layer by TestAnUndeclaredPUEReproducesTheUnmultiplied-
+// FigureExactly); this is the positive control at the page layer -- set, it
+// must show BOTH the IT-load figure and the facility figure, and state the
+// PUE is declared, not measured.
+func TestADeclaredPUEShowsBothFigures(t *testing.T) {
+	h := newHarnessWithTariffAndPUE(t, 28, 140)
+	h.login("admin", "admin-password")
+
+	page := body(t, h.get("/reports/cost", false))
+
+	if !strings.Contains(page, "Electricity, estimated monthly") {
+		t.Fatal("the IT-load figure is missing when a PUE is declared")
+	}
+	if !strings.Contains(page, "Facility, including PUE 1.40") {
+		t.Error("the facility figure's label, naming the PUE in force, is missing")
+	}
+	if !strings.Contains(page, "declared") || !strings.Contains(page, "not measured") {
+		t.Error("the page does not say the PUE is declared, not measured")
+	}
+}
+
 // statValue reads one figure out of the estate's stat row by its LABEL, which
 // is also why the power section must not reuse those labels: two figures under
 // one label on one page is the misreading this design is arranged against, and
