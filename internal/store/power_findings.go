@@ -304,15 +304,36 @@ func (s *SQLStore) powerCoverage(ctx context.Context, report *PowerReport) error
 		domain.LifecycleRetired); err != nil {
 		return fmt.Errorf("counting panels with no supply: %w", err)
 	}
-	if err := s.readOne(ctx, &report.UnmodelledSites, `
+	n, err := s.unmodelledSites(ctx)
+	if err != nil {
+		return err
+	}
+	report.UnmodelledSites = n
+	return nil
+}
+
+// unmodelledSites counts live sites with no live power panel at all --
+// factored out of powerCoverage above so DeclaredPowerDraw (power_cost.go)
+// can carry the identical count without a second copy of this query. B3
+// (§4b.9) found the cost report had dropped this exact fact after D3's
+// amendment over-generalised its own objection to a DIFFERENT allowlist
+// shape; the query stays here, next to the report it was written for, and
+// power_cost.go calls it rather than restating it.
+//
+// Not "assets with no input" -- almost nothing in a rack has its own input
+// modelled and never will; the question worth asking is whether a LOCATION
+// has any power model behind it at all.
+func (s *SQLStore) unmodelledSites(ctx context.Context) (int, error) {
+	var n int
+	if err := s.readOne(ctx, &n, `
 		SELECT COUNT(*) FROM asset a
 		WHERE a.kind = ? AND a.lifecycle <> ?
 		  AND NOT EXISTS (SELECT 1 FROM power_panel p
 		                  WHERE p.site_id = a.id AND p.lifecycle <> ?)`,
 		domain.KindSite, domain.LifecycleRetired, domain.LifecycleRetired); err != nil {
-		return fmt.Errorf("counting sites with no power model: %w", err)
+		return 0, fmt.Errorf("counting sites with no power model: %w", err)
 	}
-	return nil
+	return n, nil
 }
 
 // AssetsLosingPower resolves a set of failed feeds to the assets that actually

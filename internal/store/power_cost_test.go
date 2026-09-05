@@ -252,3 +252,45 @@ func TestThePowerFigureIsNotInTheEstateTotals(t *testing.T) {
 		})
 	}
 }
+
+// TestDeclaredPowerDrawCarriesUnmodelledSites is B3 / §4b.9. D3's amendment
+// over-generalised its own objection and dropped this exact count from the
+// cost figure; it is reused from PowerFindings' powerCoverage rather than
+// reimplemented, so this test also pins that the two never disagree.
+func TestDeclaredPowerDrawCarriesUnmodelledSites(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			s, ctx := newStore(t, e)
+
+			// One site with a full power model.
+			modelled := mustAsset(t, s, ctx, domain.KindSite, "dc-a", nil)
+			panel := mustPanel(t, s, ctx, modelled, "panel-1")
+			feed := mustFeed(t, s, ctx, panel, "F1", 230, 32)
+			srv := mustAsset(t, s, ctx, domain.KindServer, "srv-1", &modelled)
+			mustInput(t, s, ctx, srv, feed, "A", intPtr(900))
+
+			// Two sites with no power panel at all.
+			mustAsset(t, s, ctx, domain.KindSite, "dc-b", nil)
+			mustAsset(t, s, ctx, domain.KindSite, "dc-c", nil)
+
+			draw, err := s.DeclaredPowerDraw(ctx)
+			if err != nil {
+				t.Fatalf("summing declared draw: %v", err)
+			}
+			if draw.UnmodelledSites != 2 {
+				t.Errorf("UnmodelledSites = %d, want 2 -- one of three sites carries a power model",
+					draw.UnmodelledSites)
+			}
+
+			report, err := s.PowerFindings(ctx)
+			if err != nil {
+				t.Fatalf("PowerFindings: %v", err)
+			}
+			if report.UnmodelledSites != draw.UnmodelledSites {
+				t.Errorf("PowerFindings.UnmodelledSites = %d but DeclaredPowerDraw's is %d; "+
+					"B3 requires the cost figure to REUSE powerCoverage's existing computation, "+
+					"not run a second copy of it that could drift", report.UnmodelledSites, draw.UnmodelledSites)
+			}
+		})
+	}
+}

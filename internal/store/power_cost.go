@@ -40,6 +40,17 @@ import (
 //     "the whole load recorded twice", so no aggregation over this column can
 //     tell them apart; the information is not there to be recovered.
 //
+//     THE FALSIFIER, FOR A MAINTAINER UNDER TIME PRESSURE (V3): change MAX to
+//     SUM here and TestTwoInputsOnOneAssetCountOnce (this package) and
+//     TestTheFixtureCountsADualFedServerOnce (internal/seed) both go red --
+//     the latter reports the seeded estate's total moving from 5320 to 4420
+//     VA when hv-02's SECOND 900 VA input is retired, which only happens if
+//     the query was SUMMING both of hv-02's inputs into the total rather than
+//     taking their max (verified by hand: reverting MAX to SUM and re-running
+//     produces exactly that failure). Checking whether a change is CAUGHT is
+//     faster than re-reading this paragraph; that is the point of naming the
+//     tests here rather than only arguing the case.
+//
 //  2. AN ASSET INSIDE A DRAWING ASSET CONTRIBUTES NOTHING. power_input.asset_id
 //     has no kind restriction, so a VM can declare its own input through the
 //     same form every asset gets. A hypervisor at 900 and a VM inside it at 100
@@ -62,9 +73,14 @@ import (
 // kind added later with no diagnostic; the adjacent PowerFindings report
 // already settled this the same way (powerCoverage's UndeclaredDraw).
 //
-// ONE QUERY, NOT TWO. Both counts and the total come out of the same scan, so
-// they cannot disagree -- two statements could straddle a concurrent write and
-// report a figure that does not match its own coverage counts.
+// THE TOTAL AND ITS TWO COUNTS COME OUT OF ONE SCAN, so they cannot disagree
+// with EACH OTHER -- two statements could straddle a concurrent write and
+// report a figure that does not match its own coverage counts. UnmodelledSites
+// is a second, independent query (unmodelledSites, power_findings.go) answering
+// an unrelated question -- how much of the estate has no power model to begin
+// with, not how much of what IS modelled declared a number -- so it carries no
+// such consistency obligation with the first three, and B3 asks for it to be
+// the SAME query powerCoverage already runs rather than a second copy of it.
 func (s *SQLStore) DeclaredPowerDraw(ctx context.Context) (domain.DeclaredDraw, error) {
 	var row struct {
 		TotalVA        int64 `db:"total_va"`
@@ -116,9 +132,16 @@ func (s *SQLStore) DeclaredPowerDraw(ctx context.Context) (domain.DeclaredDraw, 
 	if err != nil {
 		return domain.DeclaredDraw{}, fmt.Errorf("summing the estate's declared power draw: %w", err)
 	}
+
+	unmodelled, err := s.unmodelledSites(ctx)
+	if err != nil {
+		return domain.DeclaredDraw{}, err
+	}
+
 	return domain.DeclaredDraw{
-		TotalVA:        row.TotalVA,
-		Declaring:      row.Declaring,
-		UndeclaredDraw: row.UndeclaredDraw,
+		TotalVA:         row.TotalVA,
+		Declaring:       row.Declaring,
+		UndeclaredDraw:  row.UndeclaredDraw,
+		UnmodelledSites: unmodelled,
 	}, nil
 }
