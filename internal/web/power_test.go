@@ -11,6 +11,7 @@ package web_test
 import (
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -357,5 +358,77 @@ func TestTracingARunThroughTwoPanelsOnScreen(t *testing.T) {
 	}
 	if !strings.Contains(page, "through the panel") {
 		t.Error("the trace does not distinguish a panel hop from a cable hop")
+	}
+}
+
+// TestTracingABreakoutOnScreen is WP-B4 end to end through the forms: a rear
+// port breaking out to two front ports renders both strands, each labelled
+// with its declared position.
+//
+// DRIVEN THROUGH THE FORM PARAMETER, NOT THE FORM FIELD: the patch form has no
+// position input yet (docs/panel-breakout-design.md's Decision C, Task 8 of
+// the plan), so this posts "position" directly, the way the handler already
+// accepts it. If Task 8 lands, this should be rewritten to drive the real
+// input -- a functional test that posts a field the UI cannot send proves the
+// handler works and nothing else.
+func TestTracingABreakoutOnScreen(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	site := h.lookup(`SELECT id FROM asset WHERE kind = 'site' LIMIT 1`)
+	mk := func(kind, name string) string {
+		resp := h.post("/assets", url.Values{
+			"csrf_token": {h.csrfToken("/assets")}, "name": {name},
+			"kind": {kind}, "parent_id": {site},
+		}, false)
+		resp.Body.Close()
+		return h.lookup(`SELECT id FROM asset WHERE name = ?`, name)
+	}
+	port := func(assetID, name string) string {
+		resp := h.post("/assets/"+assetID+"/interfaces", url.Values{
+			"csrf_token": {h.csrfToken("/assets/" + assetID)},
+			"name":       {name}, "form_factor": {"rj45"},
+		}, false)
+		resp.Body.Close()
+		return h.lookup(`SELECT id FROM interface WHERE asset_id = ? AND name = ?`, assetID, name)
+	}
+	patchAt := func(assetID, front, rear string, position int) {
+		resp := h.post("/assets/"+assetID+"/patch", url.Values{
+			"csrf_token":         {h.csrfToken("/assets/" + assetID)},
+			"front_interface_id": {front}, "rear_interface_id": {rear},
+			"position": {strconv.Itoa(position)},
+		}, false)
+		code := resp.StatusCode
+		resp.Body.Close()
+		if code != http.StatusSeeOther {
+			t.Fatalf("patching at position %d returned %d, want 303", position, code)
+		}
+	}
+
+	pa := mk("patch_panel", "breakout-panel-a")
+	rear := port(pa, "rear-1")
+	f1 := port(pa, "f-1")
+	f2 := port(pa, "f-2")
+	if rear == "" || f1 == "" || f2 == "" {
+		t.Fatal("the ports were not created through the forms")
+	}
+	patchAt(pa, f1, rear, 1)
+	patchAt(pa, f2, rear, 2)
+	if n := h.count(`SELECT COUNT(*) FROM port_pass_through WHERE lifecycle = 'active'`); n != 2 {
+		t.Fatalf("%d live pass-throughs, want 2", n)
+	}
+
+	page := body(t, h.get("/interfaces/"+rear+"/trace", false))
+	for _, want := range []string{"f-1", "f-2", "strand 1", "strand 2"} {
+		if !strings.Contains(page, want) {
+			t.Errorf("the trace does not show %q; a rear port that breaks out to two "+
+				"front ports must render BOTH strands, each labelled with its declared "+
+				"position:\n%s", want, page)
+		}
+	}
+	// Two ends, both unpatched at the front (neither f-1 nor f-2 leads anywhere
+	// further) -- the count line says so without implying a total.
+	if !strings.Contains(page, "2 ends") {
+		t.Errorf("the trace does not report 2 ends for a two-strand breakout:\n%s", page)
 	}
 }
