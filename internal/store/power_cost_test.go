@@ -9,6 +9,7 @@
 package store
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/madalinignisca/invctl/internal/domain"
@@ -205,6 +206,107 @@ func TestLifecycleGatesTheAssetAndTheInputAndNothingElse(t *testing.T) {
 			if draw.TotalVA != 450 {
 				t.Errorf("TotalVA = %d, want 450 -- a retired input drops out, a retired "+
 					"feed under a running server does not", draw.TotalVA)
+			}
+		})
+	}
+}
+
+// TestDeclaredPowerDrawCarriesAssetsAsAComparator is R3/item 17. Declaring
+// alone cannot distinguish "an estate with no power inputs at all" from "an
+// estate full of power inputs that nobody has priced" -- Assets (live assets
+// with at least one live power input, regardless of whether it declares a
+// draw) is the comparator that can, and it must be the IDENTICAL count
+// PowerFindings reports, not a second copy of it that could drift.
+func TestDeclaredPowerDrawCarriesAssetsAsAComparator(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			s, ctx := newStore(t, e)
+			site := mustAsset(t, s, ctx, domain.KindSite, "dc-a", nil)
+			panel := mustPanel(t, s, ctx, site, "panel-1")
+			feed := mustFeed(t, s, ctx, panel, "F1", 230, 32)
+
+			declared := mustAsset(t, s, ctx, domain.KindServer, "srv-1", &site)
+			mustInput(t, s, ctx, declared, feed, "A", intPtr(450))
+
+			// Has an input, but no number typed in yet.
+			silent := mustAsset(t, s, ctx, domain.KindServer, "srv-2", &site)
+			mustInput(t, s, ctx, silent, feed, "A", nil)
+
+			// No input at all -- must not count towards Assets either.
+			mustAsset(t, s, ctx, domain.KindServer, "srv-3", &site)
+
+			draw, err := s.DeclaredPowerDraw(ctx)
+			if err != nil {
+				t.Fatalf("summing declared draw: %v", err)
+			}
+			if draw.Assets != 2 {
+				t.Errorf("Assets = %d, want 2 -- two assets carry a power input, whether or "+
+					"not it declares a draw; the third has no input row at all", draw.Assets)
+			}
+			if draw.Declaring != 1 {
+				t.Errorf("Declaring = %d, want 1", draw.Declaring)
+			}
+
+			report, err := s.PowerFindings(ctx)
+			if err != nil {
+				t.Fatalf("PowerFindings: %v", err)
+			}
+			if report.Assets != draw.Assets {
+				t.Errorf("PowerReport.Assets = %d but DeclaredPowerDraw.Assets = %d; the cost "+
+					"figure must REUSE the same comparator PowerFindings already computes, not a "+
+					"second copy of it that could drift", report.Assets, draw.Assets)
+			}
+		})
+	}
+}
+
+// TestAFourthStateThreeGreenCoverageSignalsOverABarelyModelledEstate is the
+// scenario the round-2 review found: one server declares a draw, several more
+// assets have NO power_input row at all, and the site already has a panel
+// (panels get created early, inputs late in a real rollout). TotalVA > 0 so a
+// real figure renders, UndeclaredDraw is 0 -- it counts input ROWS with a
+// NULL draw_va, and an asset with no input row produces no row to count -- and
+// UnmodelledSites is 0. Only Assets, compared against Declaring, exposes that
+// the estate is barely modelled at all.
+func TestAFourthStateThreeGreenCoverageSignalsOverABarelyModelledEstate(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			s, ctx := newStore(t, e)
+			site := mustAsset(t, s, ctx, domain.KindSite, "dc-a", nil)
+			panel := mustPanel(t, s, ctx, site, "panel-1")
+			feed := mustFeed(t, s, ctx, panel, "F1", 230, 32)
+
+			declared := mustAsset(t, s, ctx, domain.KindServer, "srv-1", &site)
+			mustInput(t, s, ctx, declared, feed, "A", intPtr(450))
+
+			// Four more assets, no power_input row at all -- the shape almost
+			// every rack is in for months after the panels go in.
+			for i := 2; i <= 5; i++ {
+				mustAsset(t, s, ctx, domain.KindServer, fmt.Sprintf("srv-%d", i), &site)
+			}
+
+			draw, err := s.DeclaredPowerDraw(ctx)
+			if err != nil {
+				t.Fatalf("summing declared draw: %v", err)
+			}
+			if draw.TotalVA == 0 {
+				t.Fatal("TotalVA is 0; this test would prove nothing about a figure that " +
+					"renders over a barely-modelled estate")
+			}
+			if draw.UndeclaredDraw != 0 {
+				t.Fatalf("UndeclaredDraw = %d, want 0 -- an asset with no input row produces "+
+					"no row for this count to see", draw.UndeclaredDraw)
+			}
+			if draw.UnmodelledSites != 0 {
+				t.Fatalf("UnmodelledSites = %d, want 0 -- the one site has a panel", draw.UnmodelledSites)
+			}
+			if draw.Assets != 1 {
+				t.Errorf("Assets = %d, want 1 -- exactly one of five assets carries a power "+
+					"input at all, which UndeclaredDraw and UnmodelledSites both miss", draw.Assets)
+			}
+			if draw.Declaring != draw.Assets {
+				t.Errorf("Declaring (%d) != Assets (%d); in THIS fixture every asset with an "+
+					"input also declared a draw, so the two must agree", draw.Declaring, draw.Assets)
 			}
 		})
 	}

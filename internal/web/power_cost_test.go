@@ -154,8 +154,15 @@ func TestAConfiguredTariffOverAnEmptyEstateSaysSoInWords(t *testing.T) {
 		t.Error("the figure's own stat-row label rendered even though nothing declares a draw; " +
 			"HasFigure must gate on both Configured() and a non-zero declared total")
 	}
-	if !strings.Contains(page, "nothing in the estate currently") &&
-		!strings.Contains(strings.ToLower(page), "nothing") {
+	// NOT "|| Contains(lower(page), \"nothing\")" -- the panel note "nothing
+	// here is measured" (power_cost.html's heading) renders on EVERY branch
+	// of this section, so that fallback made the assertion a tautology: !B is
+	// never true, so the whole condition can never fire. Verified by hand
+	// (round-2 review, R6b): deleting this exact sentence from the template
+	// left the assertion green. "nothing in the estate currently" is specific
+	// enough to fail on its own -- it names the sentence, not any mention of
+	// the word "nothing" anywhere on the page.
+	if !strings.Contains(page, "nothing in the estate currently") {
 		t.Error("the page does not say, in words, that nothing declares a draw")
 	}
 }
@@ -227,25 +234,42 @@ func TestUnmodelledSitesAppearsBesideTheFigure(t *testing.T) {
 	}
 }
 
-// TestTheDirectionOfErrorIsStatedOnThePage is W3 / §4b.10: two things
-// understate the IT-load figure and neither reached the page before this --
-// the independent-rail chassis §2.1 accepted, and an unmodelled site.
-// powerUtilisation already appends "and N of its inputs declare no draw at
-// all" for the analogous over-allocation finding; this is the same posture
-// applied to the money page.
-func TestTheDirectionOfErrorIsStatedOnThePage(t *testing.T) {
+// TestTheDirectionOfErrorIsStatedInBothDirectionsWithNoNetClaim is R2/item 15,
+// replacing the round-1 test the round-2 review found could never fail:
+// Contains(ToLower(page), "low") matched cost_report.html's unconditional
+// "the figures BELOW" wherever this section is embedded, so the check passed
+// even with the whole direction sentence deleted (verified: R6a in the
+// findings). It also asserted a direction ("reads low") the estimate had not
+// earned -- nameplate draw assumed at 100% duty is the single largest term in
+// the whole estimate and runs the OTHER way, and it appeared nowhere on the
+// page before this. The fix names both sides and claims neither.
+func TestTheDirectionOfErrorIsStatedInBothDirectionsWithNoNetClaim(t *testing.T) {
 	h := newHarnessWithTariff(t, 28)
 	h.login("admin", "admin-password")
 
 	page := body(t, h.get("/reports/cost", false))
 
-	if !strings.Contains(strings.ToLower(page), "low") {
-		t.Error("the page never states the figure reads LOW, which is the direction of " +
-			"every unmodelled gap it names")
+	if !strings.Contains(page, "Pushes it high") {
+		t.Error("the page does not name what pushes the figure high")
+	}
+	if !strings.Contains(page, "100% duty") {
+		t.Error("the page's high-side list omits nameplate-at-full-duty, the single " +
+			"largest term in the whole estimate")
+	}
+	if !strings.Contains(page, "Pushes it low") {
+		t.Error("the page does not name what pushes the figure low")
 	}
 	if !strings.Contains(page, "independent") {
 		t.Error("the page does not name the independent-rail chassis as a source of " +
 			"understatement (§2.1's accepted cost)")
+	}
+	if !strings.Contains(page, "net direction is") && !strings.Contains(page, "nobody knows") {
+		t.Error("the page does not state that the net direction of the figure is unknown")
+	}
+	// The specific defect this round found: an unearned floor, asserted in
+	// bold, that a reader could act on by buying a hosting quote.
+	if strings.Contains(page, "reads low") || strings.Contains(page, "reads LOW") {
+		t.Error("the page still asserts an unearned direction for the figure")
 	}
 }
 
@@ -287,6 +311,71 @@ func TestADeclaredPUEShowsBothFigures(t *testing.T) {
 	}
 	if !strings.Contains(page, "declared") || !strings.Contains(page, "not measured") {
 		t.Error("the page does not say the PUE is declared, not measured")
+	}
+}
+
+// TestADeclaredPUECaveatDoesNotDoubleCountUPSAndDistribution is R1/item 16.
+// PUE is Total Facility Energy / IT Equipment Energy, and IT equipment energy
+// is measured at the UPS/PDU OUTPUT -- so UPS conversion loss and distribution
+// loss sit in the NUMERATOR, inside the multiplier, along with cooling.
+// Instructing a reader who declared a PUE to add those losses again is a
+// double-count on the number a keep-or-move decision is made from.
+func TestADeclaredPUECaveatDoesNotDoubleCountUPSAndDistribution(t *testing.T) {
+	h := newHarnessWithTariffAndPUE(t, 28, 140)
+	h.login("admin", "admin-password")
+
+	page := body(t, h.get("/reports/cost", false))
+
+	if !strings.Contains(page, "already includes") {
+		t.Error("with a PUE declared, the page does not say the facility figure already " +
+			"includes UPS, distribution and cooling")
+	}
+	if strings.Contains(page, "Add them before comparing") {
+		t.Error("with a PUE declared, the page still instructs adding UPS and distribution " +
+			"loss again -- exactly the double-count R1 exists to remove")
+	}
+}
+
+// TestWithNoPUETheExclusionListStandsUnchanged is the negative half of R1:
+// §2.3's original instruction (add UPS/distribution/cooling before comparing)
+// is correct when nothing was declared, and must not be touched by D6.
+func TestWithNoPUETheExclusionListStandsUnchanged(t *testing.T) {
+	h := newHarnessWithTariff(t, 28) // no PUE declared
+	h.login("admin", "admin-password")
+
+	page := body(t, h.get("/reports/cost", false))
+
+	if !strings.Contains(page, "Add them before comparing") {
+		t.Error("with no PUE declared, the page no longer tells the reader to add UPS and " +
+			"distribution loss before comparing")
+	}
+	if strings.Contains(page, "already includes") {
+		t.Error("with no PUE declared, the page claims a facility figure already includes " +
+			"UPS/distribution/cooling that was never computed")
+	}
+}
+
+// TestTheCoverageComparatorIsAssetsWithAnInputNotJustDeclaring is R3/item 17.
+// Model the fourth state the round-2 review found: one asset declares a draw,
+// and several more have a power input recorded with no draw typed in yet --
+// Declaring alone cannot distinguish "most assets have no input at all" from
+// "most assets have an input and just haven't been priced", and only a
+// comparator against Assets (live assets with an input, full stop) can. The
+// false "Every live site carries at least some power model" all-clear must
+// also be gone -- a panel at every site says nothing about declared load.
+func TestTheCoverageComparatorIsAssetsWithAnInputNotJustDeclaring(t *testing.T) {
+	h := newHarnessWithTariff(t, 28)
+	h.login("admin", "admin-password")
+
+	page := body(t, h.get("/reports/cost", false))
+
+	if strings.Contains(page, "Every live site carries at least some power model.") {
+		t.Error("the false all-clear sentence is still on the page -- a panel at every site " +
+			"says nothing about whether any load behind it is declared")
+	}
+	if !strings.Contains(page, "asset(s) that have a power input declared a draw") {
+		t.Error("the coverage sentence does not name Assets (live assets with a power input) " +
+			"as the comparator for Declaring")
 	}
 }
 

@@ -79,15 +79,25 @@
   </div>
   <div class="panel-body">
     <p>
-      An estimate from <strong>declared</strong> nameplate draw. Nothing in this system measures power: {{.Draw.Declaring}} asset(s) contributed a declared draw, and {{.Draw.UndeclaredDraw}} live power input(s) have the supply path recorded but no number typed into it yet — a real gap somebody can go and close, <em>not</em> a claim that those inputs carry no power. Power factor is assumed 1.0 (volt-amps treated as watts) over {{.HoursPerMonth}} hours a month, at a tariff of {{money .TariffMinorPerKWh}} per kWh entered in whole minor units — a real rate like 0.2847 is entered as 28, a systematic understatement of roughly 1.7% before anything else in this estimate is even considered.
+      An estimate from <strong>declared</strong> nameplate draw. Nothing in this system measures power: {{.Draw.Declaring}} of {{.Draw.Assets}} asset(s) that have a power input declared a draw, and {{.Draw.UndeclaredDraw}} live power input(s) have the supply path recorded but no number typed into it yet — a real gap somebody can go and close, <em>not</em> a claim that those inputs carry no power. There is deliberately <strong>no percentage</strong> next to either of those counts: asset kind is an open lookup set that grows over time, so no honest denominator exists to divide by, and a percentage that silently stopped counting a new kind would be worse than none. Power factor is assumed 1.0 (volt-amps treated as watts) over {{.HoursPerMonth}} hours a month, at a tariff of {{money .TariffMinorPerKWh}} per kWh entered in whole minor units — a real rate like 0.2847 is entered as 28, a systematic understatement of roughly 1.7% before anything else in this estimate is even considered.
     </p>
     <p>
-      {{if .Draw.UnmodelledSites}}{{.Draw.UnmodelledSites}} live site(s) carry no power model at all and are missing from this figure <strong>entirely</strong>, not merely undercounted.{{else}}Every live site carries at least some power model.{{end}}
-      There is deliberately <strong>no percentage</strong> next to any of these numbers: asset kind is an open lookup set that grows over time, so no honest denominator exists to divide by, and a percentage that silently stopped counting a new kind would be worse than none. Two things push the figure above <strong>low</strong>, in addition to the gaps already named: a chassis wired with genuinely independent power rails is counted once, at its larger side, not summed (accepted as the rarer and smaller error); and any unmodelled site named above is not in the total at all.
+      {{if .Draw.UnmodelledSites}}{{.Draw.UnmodelledSites}} live site(s) carry no power model at all and are missing from this figure <strong>entirely</strong>, not merely undercounted.{{else}}No live site lacks a power panel — though a panel existing says nothing about whether any load behind it is declared; the count above is what answers that.{{end}}
     </p>
     <p>
-      <strong>Not comparable to an all-in hosting quote.</strong> It excludes loss in the UPS and distribution above each declared input, and excludes cooling and other facility overhead — a hosting price bundles all of those in.
-      {{if .PUEDeclared}}The facility figure above adds back the declared PUE, but the estimate is still not comparable to a hosting quote without also adding UPS and distribution loss.{{else}}Add them before comparing — declaring <code>INV_POWER_PUE</code> adds back the facility share.{{end}}
+      <strong>Which way this figure is wrong: nobody knows, and that is the answer.</strong>
+      Errors run in both directions, and the net direction is <strong>unknown</strong> — do not read this figure as a lower bound on the real bill any more than as an upper one.
+    </p>
+    <ul>
+      <li><strong>Pushes it high:</strong> nameplate draw is assumed at 100% duty, all month — a server typically drawing a third of its rated capacity is overstated roughly threefold, the single largest term in this estimate. And for any asset whose declared draw is what it passes on to something downstream rather than its own overhead, everything behind it is counted again (§2.2 — the draw hint on the asset form exists to prevent this, not to guarantee it).</li>
+      <li><strong>Pushes it low:</strong> a chassis wired with genuinely independent power rails is counted once, at its larger side, not summed (accepted as the rarer and smaller error); any unmodelled site named above is not in the total at all; and any asset that declares no draw is invisible to it entirely.</li>
+    </ul>
+    <p>
+      {{if .PUEDeclared}}
+      <strong>The facility figure already includes UPS, distribution and cooling.</strong> PUE is measured at the UPS/PDU output, so those losses sit in its numerator alongside cooling — adding them again on top of the facility figure would double-count them on the one number a keep-or-move decision is made from.
+      {{else}}
+      <strong>Not comparable to an all-in hosting quote.</strong> It excludes loss in the UPS and distribution above each declared input, and excludes cooling and other facility overhead — a hosting price bundles all of those in. Add them before comparing — declaring <code>INV_POWER_PUE</code> adds back the facility share.
+      {{end}}
     </p>
   </div>
   {{end}}

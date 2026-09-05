@@ -148,7 +148,19 @@ func (s *SQLStore) PowerFindings(ctx context.Context) (*PowerReport, error) {
 		}
 		byAsset[l.AssetID] = append(byAsset[l.AssetID], l)
 	}
-	report.Assets = len(byAsset)
+	// Not len(byAsset) any more -- assetsWithPowerInput runs the identical
+	// definition ("live assets with at least one live power input, feed and
+	// panel") as its own SQL statement, factored out exactly like
+	// unmodelledSites was, so DeclaredPowerDraw (power_cost.go) can carry the
+	// SAME comparator rather than inventing a second definition of "modelled"
+	// (§4c.17). This costs one extra round trip PowerFindings did not used to
+	// make; single source of truth for a count two different reports quote
+	// against each other is worth it.
+	assets, err := s.assetsWithPowerInput(ctx)
+	if err != nil {
+		return nil, err
+	}
+	report.Assets = assets
 
 	workload, err := s.powerWorkload(ctx, order)
 	if err != nil {
@@ -332,6 +344,31 @@ func (s *SQLStore) unmodelledSites(ctx context.Context) (int, error) {
 		                  WHERE p.site_id = a.id AND p.lifecycle <> ?)`,
 		domain.KindSite, domain.LifecycleRetired, domain.LifecycleRetired); err != nil {
 		return 0, fmt.Errorf("counting sites with no power model: %w", err)
+	}
+	return n, nil
+}
+
+// assetsWithPowerInput counts live assets carrying at least one live power
+// input on a live feed under a live panel -- exactly the join PowerFindings
+// already runs to build byAsset, factored out here for the same reason
+// unmodelledSites was: so DeclaredPowerDraw (power_cost.go) can carry the
+// IDENTICAL count as a comparator rather than a second, possibly-drifting
+// definition of "modelled" (§4c.17). "3 of 47 assets that have a power input
+// declared a draw" only means what it says if both halves of that sentence
+// come from the same query.
+func (s *SQLStore) assetsWithPowerInput(ctx context.Context) (int, error) {
+	var n int
+	if err := s.readOne(ctx, &n, `
+		SELECT COUNT(DISTINCT i.asset_id)
+		FROM power_input i
+		JOIN asset a       ON a.id = i.asset_id
+		JOIN power_feed f  ON f.id = i.feed_id
+		JOIN power_panel p ON p.id = f.panel_id
+		WHERE i.lifecycle <> ? AND a.lifecycle <> ?
+		  AND f.lifecycle <> ? AND p.lifecycle <> ?`,
+		domain.LifecycleRetired, domain.LifecycleRetired,
+		domain.LifecycleRetired, domain.LifecycleRetired); err != nil {
+		return 0, fmt.Errorf("counting assets with a power input: %w", err)
 	}
 	return n, nil
 }

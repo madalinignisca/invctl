@@ -94,6 +94,25 @@ type DeclaredDraw struct {
 	// not "33% coverage", it is a figure covering a third of the estate,
 	// wrong in the direction that makes staying look cheap.
 	UnmodelledSites int
+	// Assets is PowerReport.Assets (internal/store/power_findings.go): live
+	// assets carrying at least one live power input, full stop -- REGARDLESS
+	// of whether any of those inputs declared a draw. Added by the round-2
+	// re-review (§4c.17) after it found a fourth render state the three
+	// counts above cannot detect: model one rack where a single server
+	// declares a draw and two hundred other assets have no power_input row
+	// at all (every site already has a panel; panels get created early,
+	// inputs late). TotalVA > 0 so a real figure renders, UndeclaredDraw is
+	// 0 -- it counts input ROWS with a NULL draw_va, and an asset with no
+	// input row produces no row to count -- and UnmodelledSites is 0. The
+	// page would print money under three green coverage signals over an
+	// estate that is half a percent modelled.
+	//
+	// Declaring is a subset of Assets, never the other way round, and the
+	// page reports it as "N of M assets that have a power input declared a
+	// draw" -- a real ratio, unlike the ones D3 refuses, because both halves
+	// come from the identical query (assetsWithPowerInput, reused rather
+	// than reimplemented, the same precedent UnmodelledSites already set).
+	Assets int
 }
 
 // PowerEstimate is the declared draw plus the rate, and every assumption in

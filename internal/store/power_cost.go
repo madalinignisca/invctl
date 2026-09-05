@@ -138,10 +138,19 @@ func (s *SQLStore) DeclaredPowerDraw(ctx context.Context) (domain.DeclaredDraw, 
 		return domain.DeclaredDraw{}, err
 	}
 
+	// §4c.17: the SAME query PowerFindings uses for PowerReport.Assets, not a
+	// second definition of "modelled" -- see assetsWithPowerInput's own
+	// comment for why a fourth render state needed this.
+	assets, err := s.assetsWithPowerInput(ctx)
+	if err != nil {
+		return domain.DeclaredDraw{}, err
+	}
+
 	return domain.DeclaredDraw{
 		TotalVA:         row.TotalVA,
 		Declaring:       row.Declaring,
 		UndeclaredDraw:  row.UndeclaredDraw,
 		UnmodelledSites: unmodelled,
+		Assets:          assets,
 	}, nil
 }
