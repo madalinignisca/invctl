@@ -372,14 +372,53 @@ func (p *plant) expand(n *TraceNode, current, previous string, visited map[strin
 
 	// Then through the panel we just arrived at -- EVERY strand of it. This is
 	// the one line of the successor rule that changed.
-	var strands []passThroughEnd
+	//
+	// EVERY STRAND GETS A NODE, INCLUDING ONE THAT LOOPS. Three cases, and the
+	// middle one is a defect this code shipped with until a review built the
+	// fixture that caught it:
+	//
+	//   the way we came    skipped in silence -- it is not a continuation
+	//   an ancestor of     A GENUINE LOOP. It gets a leaf saying so.
+	//     this branch
+	//   anything else      followed
+	//
+	// The first version filtered the visited ones out and only reported a loop
+	// when NOTHING was left to follow. So a rear port with one good strand and
+	// one that loops reported the good one and dropped the other entirely --
+	// no node, no leaf, no outcome, not counted, not charged to the budget. A
+	// trunk short one strand with nothing saying so, which is the exact silent
+	// shortening §2.3 and the node budget exist to prevent, arriving through
+	// the one path neither of them watched. Reachable with ordinary breakout:
+	// any rear port with two recorded positions where one is mis-patched.
+	var strands, loops []passThroughEnd
 	for _, e := range p.through[current] {
-		if !visited[e.other] {
+		switch {
+		case e.other == previous:
+			// How we got here. Not a loop and not a continuation.
+		case visited[e.other]:
+			loops = append(loops, e)
+		default:
 			strands = append(strands, e)
 		}
 	}
-	if len(strands) > 0 {
-		b.spend(len(strands))
+	if len(strands)+len(loops) > 0 {
+		b.spend(len(strands) + len(loops))
+		for _, e := range loops {
+			child := &TraceNode{}
+			if e.fromRear {
+				child.Position = e.position
+			}
+			if info, known := p.iface[e.other]; known {
+				child.Hop = TraceHop{
+					Kind: HopPanel, AssetID: info.assetID, AssetName: info.assetName,
+					AssetKind: info.assetKind, InterfaceID: e.other, Interface: info.name,
+				}
+			} else {
+				child.Hop = TraceHop{Kind: HopPanel, InterfaceID: e.other}
+			}
+			child.leaf(OutcomeLooped, "the path loops back on itself — something is patched into its own run")
+			n.Children = append(n.Children, child)
+		}
 		for _, e := range strands {
 			child := &TraceNode{}
 			// Position labels the far side of a BREAKOUT: the parent was the
