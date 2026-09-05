@@ -79,6 +79,21 @@ type DeclaredDraw struct {
 	// NO RATIO AGAINST EVERY LIVE ASSET, and no asset.kind allowlist anywhere
 	// near this figure -- see the type comment.
 	UndeclaredDraw int
+	// UnmodelledSites is how many LIVE sites carry no power panel at all --
+	// added by the stage-7 review (§4b.9), after D3's amendment over-
+	// generalised its own objection and dropped it. D3 refuses a hand-listed
+	// `kind IN (...)` allowlist because asset_kind is an open lookup table
+	// that grows by INSERT; `a.kind = ?` against the single, closed
+	// domain.KindSite is not that shape, and it is the ONE count that answers
+	// how much of the estate this figure could not see at all. Reused, not
+	// reimplemented -- internal/store/power_findings.go's powerCoverage
+	// computes the identical fact for PowerReport.UnmodelledSites, and this
+	// runs the same query rather than a second copy of it.
+	//
+	// Deliberately still not a ratio: three sites with one power-modelled is
+	// not "33% coverage", it is a figure covering a third of the estate,
+	// wrong in the direction that makes staying look cheap.
+	UnmodelledSites int
 }
 
 // PowerEstimate is the declared draw plus the rate, and every assumption in
@@ -86,12 +101,72 @@ type DeclaredDraw struct {
 type PowerEstimate struct {
 	Draw              DeclaredDraw
 	TariffMinorPerKWh int64
+	// PUEHundredths is the operator-DECLARED facility Power Usage
+	// Effectiveness, in integer hundredths (140 = a PUE of 1.40) -- D6,
+	// added by the stage-7 review after §1 and §5 were found in
+	// contradiction (§1 promised a keep-or-move figure; §5 forbade the one
+	// multiplier that makes one comparable to a hosting quote).
+	//
+	// ZERO MEANS UNDECLARED, not "PUE 0" -- a facility using less power than
+	// the load inside it is physically impossible, so zero can never be a
+	// real value and is free to mean "not set" the way TariffMinorPerKWh
+	// reuses zero for "no tariff". PUEDeclared reports which case this is;
+	// effectivePUEHundredths is what the arithmetic actually uses.
+	//
+	// Never invented, never defaulted from site metadata, never implied to be
+	// measured -- it is declared exactly as the tariff is (docs/power-cost-
+	// design.md §5's "No invented PUE", amended for D6).
+	PUEHundredths int64
 }
 
 // Configured reports whether a tariff is in force. Zero is unset rather than
 // free: nobody has free electricity, and rendering a computed-looking 0.00
 // is the measured-looking figure this design refuses.
 func (e PowerEstimate) Configured() bool { return e.TariffMinorPerKWh > 0 }
+
+// HasFigure is B1 (§4b.7): Configured tests the tariff ALONE, and a tariff
+// set over an estate with no declared draw prints a computed-looking 0.00 --
+// day one of every real deployment, because the tariff is one environment
+// variable and the draws are hundreds of form entries. D3's own last sentence
+// already required this and it was not built the first time: "if nothing at
+// all declares a draw, say that in words rather than showing a zero."
+//
+// The template branches on this, not on Configured, before it renders an
+// amount.
+func (e PowerEstimate) HasFigure() bool { return e.Configured() && e.Draw.TotalVA > 0 }
+
+// PUEDeclared reports whether an operator declared a facility PUE. Unset
+// must render EXACTLY today's output -- this is what lets the template show
+// the facility figure only when there is a second assumption behind it to
+// name.
+func (e PowerEstimate) PUEDeclared() bool { return e.PUEHundredths > 0 }
+
+// effectivePUEHundredths is what the arithmetic actually multiplies by: the
+// declared value, or 100 (a no-op PUE of 1.0) when nothing was declared. This
+// is the one place "undeclared" turns into a number -- everywhere else it
+// stays a question ("PUEDeclared?") so nothing downstream can mistake an
+// unset PUE for a declared 1.0.
+func (e PowerEstimate) effectivePUEHundredths() int64 {
+	if e.PUEHundredths <= 0 {
+		return 100
+	}
+	return e.PUEHundredths
+}
+
+// PUE renders the declared multiplier for the page, e.g. "1.40". Operators
+// know a PUE as a decimal, not as hundredths -- the same reason the tariff is
+// entered in whole minor units rather than the reverse.
+func (e PowerEstimate) PUE() string {
+	h := e.effectivePUEHundredths()
+	return strconv.FormatInt(h/100, 10) + "." + pad2(h%100)
+}
+
+func pad2(n int64) string {
+	if n < 10 {
+		return "0" + strconv.FormatInt(n, 10)
+	}
+	return strconv.FormatInt(n, 10)
+}
 
 // HoursPerMonth exposes the multiplier to the template, so the page can state
 // it rather than imply it.
@@ -135,5 +210,39 @@ func (e PowerEstimate) KWhPerMonthTenths() int64 {
 // arranged against is a reader adding a derived figure to a declared one.
 func (e PowerEstimate) KWhPerMonth() string {
 	tenths := e.KWhPerMonthTenths()
+	return strconv.FormatInt(tenths/10, 10) + "." + strconv.FormatInt(tenths%10, 10)
+}
+
+// FacilityMonthlyMinor is D6's second figure: the IT-load estimate above,
+// multiplied by the declared PUE, for a facility-inclusive comparison against
+// a hosting quote.
+//
+// THE PUE IS FOLDED INTO THE SAME END-OF-CHAIN DIVISION, not applied as a
+// second division over an already-rounded MonthlyMinor -- §4.3's one-division
+// property (sum raw VA first, divide once) would otherwise be reintroduced by
+// the back door the moment a second assumption was added. Multiplying the
+// numerator by effectivePUEHundredths and the divisor by 100 is arithmetically
+// identical to dividing by 100 twice, so an undeclared PUE (effective 100,
+// i.e. 1.00) reproduces MonthlyMinor's result bit-for-bit -- verified in
+// TestAnUndeclaredPUEReproducesTheUnmultipliedFigureExactly, because "unset
+// changes nothing" is a claim worth a test, not just a comment.
+func (e PowerEstimate) FacilityMonthlyMinor() int64 {
+	return divRound(
+		e.Draw.TotalVA*PowerHoursPerMonth*e.TariffMinorPerKWh*e.effectivePUEHundredths(),
+		1000*100)
+}
+
+// FacilityKWhPerMonthTenths is the energy behind FacilityMonthlyMinor, on the
+// same one-division footing as KWhPerMonthTenths.
+func (e PowerEstimate) FacilityKWhPerMonthTenths() int64 {
+	return divRound(
+		e.Draw.TotalVA*PowerHoursPerMonth*10*e.effectivePUEHundredths(),
+		1000*100)
+}
+
+// FacilityKWhPerMonth renders the facility energy figure for the page, in the
+// same "6570.0" shape as KWhPerMonth.
+func (e PowerEstimate) FacilityKWhPerMonth() string {
+	tenths := e.FacilityKWhPerMonthTenths()
 	return strconv.FormatInt(tenths/10, 10) + "." + strconv.FormatInt(tenths%10, 10)
 }
