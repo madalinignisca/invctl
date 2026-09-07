@@ -243,6 +243,66 @@ func TestTheOverviewFindsAllOfIt(t *testing.T) {
 	})
 }
 
+// TestLosingAnAccessPointEmptiesTheSSIDThatOnlyLivedOnIt. WP-F1's structure
+// finding, and the reason warehouse-scan is deliberately on ap-2 alone: an
+// SSID that lives on one AP demonstrates "emptied" the moment that one AP
+// goes down, while corp -- on both APs -- only demonstrates "reduced to one".
+func TestLosingAnAccessPointEmptiesTheSSIDThatOnlyLivedOnIt(t *testing.T) {
+	eachEngine(t, func(t *testing.T, f *fixture) {
+		res := simulateLoss(t, f, "ap-2")
+
+		// BY NAME, not by counting -- TestLosingASwitchEmptiesTheVLANThatOnlyLivedOnIt's
+		// comment explains why "at least one emptied and at least one reduced"
+		// is the weaker, wrong assertion: it is satisfied by any arrangement
+		// that happens to produce both, and a later seed edit that quietly
+		// stops demonstrating the fixture's own claim would pass it anyway.
+		state := map[string]int{}
+		for _, s := range res.Structures {
+			if s.Kind == impact.StructureWLAN {
+				state[s.Name] = s.Remaining
+			}
+		}
+		if r, ok := state["warehouse-scan"]; !ok || r != 0 {
+			t.Errorf("warehouse-scan is %v after losing ap-2, want emptied. It lives on "+
+				"that access point alone precisely so this finding has something to find",
+				stateOf(state, "warehouse-scan"))
+		}
+		if r, ok := state["corp"]; !ok || r != 1 {
+			t.Errorf("corp is %v after losing ap-2, want one AP left. It is on both access "+
+				"points precisely so this finding has something to find",
+				stateOf(state, "corp"))
+		}
+	})
+}
+
+// TestTheFixtureHasAnSSIDOnOneAPAndOneOnSeveral. No outage needed: an SSID on
+// one AP is a standing single point of failure the redundancy page reports
+// permanently (docs/wireless-design.md §2.2), and the fixture has to be able
+// to show the difference between that and an SSID with real redundancy.
+func TestTheFixtureHasAnSSIDOnOneAPAndOneOnSeveral(t *testing.T) {
+	eachEngine(t, func(t *testing.T, f *fixture) {
+		wlans, err := f.store.ListWirelessLANs(f.ctx)
+		if err != nil {
+			t.Fatalf("listing wireless lans: %v", err)
+		}
+		counts := map[string]int{}
+		for _, w := range wlans {
+			counts[w.SSID] = w.AssetCount
+		}
+		if counts["warehouse-scan"] != 1 {
+			t.Errorf("warehouse-scan is on %d access point(s), want exactly 1 -- the "+
+				"standing single point of failure this fixture is meant to demonstrate",
+				counts["warehouse-scan"])
+		}
+		for _, ssid := range []string{"corp", "guest"} {
+			if counts[ssid] < 2 {
+				t.Errorf("%s is on %d access point(s), want at least 2, so the fixture can "+
+					"show the difference from warehouse-scan's single AP", ssid, counts[ssid])
+			}
+		}
+	})
+}
+
 // stateOf renders a VLAN's post-outage state for an error message: how many
 // assets are left, or that it was not reported at all -- which are different
 // failures and read identically as a bare integer.

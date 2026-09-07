@@ -70,6 +70,23 @@ footnote.
 
 ### Added
 
+- **Wireless LANs.** A new `/wireless` page declares SSIDs — name, security
+  mode, an optional scope (site, rack, cluster — any asset), an optional VLAN
+  and an optional service that authenticates it — and radios (a new
+  `interface` form factor: `radio_2g4`, `radio_5g`, `radio_6g`) broadcast
+  them from an asset's own page or from the SSID's own radio picker. An SSID
+  is modelled as a structure, the same shape a VLAN or a first-hop redundancy
+  group already uses, so the impact simulator picks it up for free: taking
+  down every access point carrying an SSID reports it **emptied**, and taking
+  down all but one reports it **reduced to one**. An SSID's authenticating
+  service (`auth_service_id`) is recorded and rendered only — nothing derives
+  from it, and losing that service does not empty the SSID's structure,
+  because existing clients stay associated. There is no channel column of any
+  kind (deliberately — see `docs/wireless-design.md` §2.6) and no field that
+  accepts a passphrase: a wireless LAN's `psk_ref` is a path to where the key
+  lives, exactly like `identity.secret_ref`, and the audit trail records only
+  that it changed, never what to.
+
 - **Project owners can now write `dependency`, `link` and `asset_cost` rows,
   scoped by subject rather than by project directly.** Each is authorized by
   a narrow, per-row check against the caller's own permit — never by a

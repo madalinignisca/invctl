@@ -295,6 +295,14 @@ var RedactedFields = map[string]bool{
 	// something worse than a path into a field, so the audit trail must not be
 	// the place that keeps it forever.
 	"key_ref": true,
+	// A wireless network's pre-shared key REFERENCE. Same rule as secret_ref
+	// and key_ref, and the same reason: it is a path to something secret, and a
+	// complete, permanent, widely-readable map of where every credential lives
+	// is a reconnaissance gift. There is deliberately no passphrase column --
+	// docs/wireless-design.md §2.5 -- so this is the only wireless field that
+	// could ever carry a lead, and change_log records THAT it changed and never
+	// what to.
+	"psk_ref": true,
 }
 
 // RedactedFieldsByEntity covers columns that are sensitive only on certain

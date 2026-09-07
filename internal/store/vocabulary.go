@@ -48,6 +48,10 @@ const (
 	vocabCostKind            = "cost_kind"
 	vocabResponsibilityRole  = "responsibility_role"
 	vocabStorageKind         = "storage_kind"
+	// vocabWirelessSecurity, migration 00061 (WP-F1). D3: nothing branches on
+	// a security mode, so it is a domain vocabulary like the ten above it and
+	// not a behavioural TEXT+CHECK enum.
+	vocabWirelessSecurity = "wireless_security"
 )
 
 // VocabularyTerm is one row of a lookup table.
@@ -94,6 +98,7 @@ var vocabularyQueries = map[string]string{
 	vocabCostKind:            `SELECT code, label, sort_order, description FROM cost_kind ORDER BY sort_order, code`,
 	vocabResponsibilityRole:  `SELECT code, label, sort_order, description FROM responsibility_role ORDER BY sort_order, code`,
 	vocabStorageKind:         `SELECT code, label, sort_order, description FROM storage_kind ORDER BY sort_order, code`,
+	vocabWirelessSecurity:    `SELECT code, label, sort_order, description FROM wireless_security ORDER BY sort_order, code`,
 }
 
 // StorageKinds returns the storage replication vocabulary in display order.
@@ -158,6 +163,12 @@ func (s *SQLStore) ContainerEngines(ctx context.Context) ([]VocabularyTerm, erro
 // half the code reads, and it is a CHECK with a Go constant set.
 func (s *SQLStore) CostKinds(ctx context.Context) ([]VocabularyTerm, error) {
 	return s.listVocabulary(ctx, vocabCostKind)
+}
+
+// WirelessSecurities returns the wireless_lan.security vocabulary in display
+// order (D3).
+func (s *SQLStore) WirelessSecurities(ctx context.Context) ([]VocabularyTerm, error) {
+	return s.listVocabulary(ctx, vocabWirelessSecurity)
 }
 
 func (s *SQLStore) listVocabulary(ctx context.Context, table string) ([]VocabularyTerm, error) {

@@ -100,6 +100,11 @@ var navGroups = []NavGroup{
 		{Label: "Circuits", Href: "/circuits", Nav: "circuits"},
 		{Label: "Overlays", Href: "/overlays", Nav: "l2vpn"},
 		{Label: "Redundancy", Href: "/redundancy", Nav: "fhrp"},
+		// An SSID is a broadcast domain that lives on network hardware, not a
+		// prefix or a number -- so it sits here rather than under Addressing,
+		// after Redundancy for the same reason overlays and first-hop
+		// redundancy sit together: both are network-layer structures.
+		{Label: "Wireless", Href: "/wireless", Nav: "wireless"},
 	}},
 	{Label: "Addressing", Links: []NavLink{
 		{Label: "Prefixes", Href: "/prefixes", Nav: "prefixes"},

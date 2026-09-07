@@ -570,6 +570,7 @@ var entityScope = map[string]ScopeClass{
 	"cost_kind":             ScopeEstateConfig,
 	"responsibility_role":   ScopeEstateConfig,
 	"storage_kind":          ScopeEstateConfig,
+	"wireless_security":     ScopeEstateConfig,
 	// The retention prune's own audit entries (rule 10): an administrator's
 	// maintenance action against the whole estate, not any one project's.
 	"observed_transition":   ScopeEstateConfig,
@@ -617,6 +618,11 @@ var entityScope = map[string]ScopeClass{
 	"service_instance":    ScopeSubjectDerived,
 	"vlan":                ScopeTopology,
 	"vlan_group":          ScopeTopology,
+	// wireless_lan is a Structure, D1: no different from vlan/fhrp_group/l2vpn
+	// above it, and interface_wlan gets NO entry here, deliberately, matching
+	// interface_vlan -- membership is never its own change_log entity_type, it
+	// audits under "interface" (D7).
+	"wireless_lan": ScopeTopology,
 }
 
 // ScopeClassOf returns entityType's class, or "" (the zero ScopeClass, which

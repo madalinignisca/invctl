@@ -132,9 +132,24 @@ func TestEveryConnectiveTableIsAccountedForInTheImpactGraph(t *testing.T) {
 	}
 	// FROM and JOIN both count. Reading only FROM is how a hand audit missed
 	// circuit_termination, which the circuit-edge query reaches by JOIN.
+	//
+	// COMMENTS ARE STRIPPED FIRST, and until 2026-09-07 they were not. This
+	// scanned the file's raw bytes, so a table named in ANY comment counted as
+	// loaded -- `// FROM wireless_lan` satisfied the audit as completely as the
+	// query did. That is the exact failure this audit exists to prevent, in the
+	// audit: its own header promises "a new edge type cannot be added quietly",
+	// and a prose mention was enough to add one quietly.
+	//
+	// Found by mutation: commenting out a real FROM clause left the test GREEN,
+	// because the commented-out line still contained the words.
+	//
+	// Go comments and SQL `--` comments both go, in that order. The SQL kind
+	// matters as much: these queries carry line comments inside their backtick
+	// strings, and one of them naming a table would be the same hole one layer
+	// down.
 	touched := map[string]bool{}
 	for _, m := range regexp.MustCompile(`(?i)\b(?:FROM|JOIN)\s+([a-z_][a-z0-9_]*)`).
-		FindAllStringSubmatch(string(loader), -1) {
+		FindAllStringSubmatch(withoutComments(string(loader)), -1) {
 		touched[strings.ToLower(m[1])] = true
 	}
 
@@ -190,4 +205,42 @@ func TestEveryConnectiveTableIsAccountedForInTheImpactGraph(t *testing.T) {
 				"that no longer exists.", table)
 		}
 	}
+}
+
+// withoutComments removes Go and SQL comments so a table named in prose cannot
+// masquerade as a table the loader reads.
+//
+// Deliberately crude: it does not track whether a `//` sits inside a string
+// literal, because a Go string containing `//` in this file would be a URL or a
+// path and neither is followed by a table name. Erring toward removing too much
+// is the safe direction for this audit -- a table wrongly considered UNtouched
+// fails loudly and gets looked at, whereas a table wrongly considered touched
+// is the silent pass this whole guard exists to refuse.
+func withoutComments(src string) string {
+	// Block comments first: they can contain anything, including line comments.
+	for {
+		start := strings.Index(src, "/*")
+		if start < 0 {
+			break
+		}
+		end := strings.Index(src[start+2:], "*/")
+		if end < 0 {
+			src = src[:start]
+			break
+		}
+		src = src[:start] + " " + src[start+2+end+2:]
+	}
+	var b strings.Builder
+	for _, line := range strings.Split(src, "\n") {
+		if i := strings.Index(line, "//"); i >= 0 {
+			line = line[:i]
+		}
+		// SQL line comments, which live inside the backtick query strings.
+		if i := strings.Index(line, "--"); i >= 0 {
+			line = line[:i]
+		}
+		b.WriteString(line)
+		b.WriteByte('\n')
+	}
+	return b.String()
 }

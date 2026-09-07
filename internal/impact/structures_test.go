@@ -28,6 +28,13 @@ func structureFixture() []Structure {
 		// An overlay terminating on both switches.
 		{Kind: StructureL2VPN, ID: "o1", Name: "prod-stretch",
 			AssetIDs: []string{"sw-a", "sw-b"}},
+		// An SSID on two access points. Fourth kind, WP-F1 -- and it goes in
+		// the SHARED fixture rather than a test of its own so that every
+		// property already asserted here (emptied, reduced, sorted
+		// worst-first, a detail sentence, a working href) covers it without
+		// being rewritten.
+		{Kind: StructureWLAN, ID: "w1", Name: "corp",
+			AssetIDs: []string{"sw-a", "sw-b"}},
 	}
 }
 
@@ -45,7 +52,7 @@ func findingFor(t *testing.T, out []StructureFinding, name string) (StructureFin
 func TestLosingEveryPortEmptiesTheStructure(t *testing.T) {
 	out := analyseStructures(structureFixture(), map[string]bool{"sw-a": true, "sw-b": true})
 
-	for _, name := range []string{"workloads", "transit", "prod-stretch"} {
+	for _, name := range []string{"workloads", "transit", "prod-stretch", "corp"} {
 		f, ok := findingFor(t, out, name)
 		if !ok {
 			t.Errorf("%s is not reported, but every asset holding a member is down", name)

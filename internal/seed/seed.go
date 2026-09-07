@@ -63,6 +63,10 @@ type Refs struct {
 	// VLANs by name, so the phases that put ports in them and terminate
 	// overlays into them need no second lookup.
 	VLANs map[string]string // name -> id
+	// WirelessLANs by SSID (WP-F1), the same reuse the VLAN map above already
+	// established: nothing here needs it today, but a later phase reaching
+	// for "which id is `corp`" should not have to add a second lookup either.
+	WirelessLANs map[string]string // ssid -> id
 	// The hardware catalogue and the power chain.
 	Manufacturers map[string]string // code -> id
 	DeviceTypes   map[string]string // model -> id
@@ -120,6 +124,7 @@ func Load(ctx context.Context, s *store.SQLStore) (*Refs, error) {
 			Routes:       map[string]string{},
 			NetGroups:    map[string]string{},
 			VLANs:        map[string]string{},
+			WirelessLANs: map[string]string{},
 
 			Manufacturers: map[string]string{},
 			DeviceTypes:   map[string]string{},

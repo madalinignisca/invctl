@@ -1155,8 +1155,11 @@ func TestNoWriteRouteIsReachableWithNoSessionAtAll(t *testing.T) {
 	// "> 0" would not catch the census quietly shrinking by one route that
 	// stopped being walked. Update this deliberately if the route count
 	// genuinely changes; do not let it drift unnoticed. 181 -> 182: Task 5
-	// added POST /views/{id}/rename to the self registrar.
-	const pinnedNoSessionRouteCount = 182
+	// added POST /views/{id}/rename to the self registrar. 182 -> 186:
+	// WP-F1 Task 7 added POST /wireless, /wireless/{id}/retire,
+	// /wireless/{id}/radios and /wireless/{id}/radios/{ifaceID}/remove to the
+	// write registrar.
+	const pinnedNoSessionRouteCount = 186
 
 	for _, eng := range boundaryEngines(t) {
 		t.Run(eng.name, func(t *testing.T) {

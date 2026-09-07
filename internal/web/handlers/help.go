@@ -82,6 +82,9 @@ func (a *App) vocabTopics() []struct {
 		{"container_engine", "Container engines",
 			"Which engine runs a container instance.",
 			func(r *http.Request) ([]store.VocabularyTerm, error) { return a.Store.ContainerEngines(r.Context()) }},
+		{"wireless_security", "Wireless security modes",
+			"What protects an SSID's air interface. A domain vocabulary, not a behavioural enum (D3) -- nothing in the engine branches on it yet, so a new mode arrives as a row rather than a release.",
+			func(r *http.Request) ([]store.VocabularyTerm, error) { return a.Store.WirelessSecurities(r.Context()) }},
 	}
 }
 

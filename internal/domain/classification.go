@@ -444,6 +444,30 @@ var DeclaredColumns = map[string][]string{
 	},
 	// A set table, replaced wholesale with its interface and audited on it.
 	"interface_vlan": {"interface_id", "vlan_id", "mode"},
+	// Wireless, migration 00061. Declared throughout: an SSID exists because
+	// somebody configured it, a security mode because somebody chose it, and a
+	// radio broadcasts an SSID because somebody put it there. An AP can REPORT
+	// its operating channel, its transmit power, RSSI and its associated-client
+	// count -- all observed state about the radio, all a different fact from
+	// anything declared here, and the disagreement between a planned channel and
+	// an operating one is the finding. F1 records NEITHER half of channel on
+	// purpose (docs/wireless-design.md §2.6): a lone declared column is the trap,
+	// because the pair is what makes the disagreement sayable.
+	//
+	// psk_ref is declared and is also in domain.RedactedFields -- classification
+	// decides the AUDIT obligation, redaction decides what the entry may contain.
+	// The two are independent and both apply.
+	"wireless_lan": {
+		"id", "name", "ssid", "security", "scope_asset_id", "vlan_id",
+		"auth_service_id", "psk_ref", "notes", "lifecycle",
+		"created_at", "updated_at", "row_version",
+	},
+	// A vocabulary, like the seven 00004 created and for the same reason: a
+	// lookup row is somebody asserting that a kind of thing exists in this
+	// estate. Nothing observes it.
+	"wireless_security": {"code", "label", "sort_order", "description"},
+	// A set table, replaced wholesale with its interface and audited on it.
+	"interface_wlan": {"interface_id", "wireless_lan_id"},
 	// A reservation is declared: somebody set the space aside. Nothing observes
 	// a DHCP pool -- a lease server knows what it has issued, and that would be
 	// observed state about ADDRESSES, a different fact from the reservation
