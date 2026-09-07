@@ -303,6 +303,42 @@
   {{end}}
 </div>
 
+{{/* Radios (WP-F1 Task 7b). Rendered only when this asset has at least one
+     radio-form-factor interface -- an estate with no wireless never sees an
+     empty panel, and the handler skips the query entirely for the same
+     reason. This answers "what is this AP broadcasting", which the flat
+     Interfaces table above cannot: it lists ports, not what is on the air. */}}
+{{if .Radios}}
+<div class="panel">
+  <div class="panel-head">
+    <h2>Radios</h2>
+    <span class="panel-note">What this asset broadcasts, and where to manage it</span>
+  </div>
+  <div class="scroll-x">
+    <table>
+      <thead><tr><th>Radio</th><th>Form factor</th><th>SSIDs</th></tr></thead>
+      <tbody>
+        {{range .Radios}}
+        <tr>
+          <td class="mono">{{.InterfaceName}} {{if not .Enabled}}<span class="pill pill-muted" title="Administratively down">disabled</span>{{end}}</td>
+          <td class="mono" style="font-size:12px">{{.FormFactor}}</td>
+          <td>
+            {{if .SSIDs}}
+            {{range .SSIDs}}<span class="pill pill-info">{{.}}</span> {{end}}
+            {{else}}
+            {{/* A radio broadcasting nothing is a finding, not a gap in this
+                 table -- see internal/store/wireless.go's ListAssetRadios. */}}
+            <span class="util-full" title="This radio is declared and broadcasts nothing">idle</span>
+            {{end}}
+          </td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+</div>
+{{end}}
+
 {{template "deployed_certificates" .}}
 
 {{if .AssetEdit}}

@@ -454,6 +454,67 @@ func (s *SQLStore) listInterfaceWLANSSIDs(ctx context.Context, interfaceID strin
 	return ssids, nil
 }
 
-// AssetRadio, ListAssetRadios and the wireless HTTP surface belong to
-// WP-F1 Task 7/7b (UI) and are deliberately not part of this file -- this
-// work package stops at Task 6, the impact-graph join.
+// ---------- the radios panel on an asset (WP-F1 Task 7b) ----------
+
+// AssetRadio is one radio on an asset, with the SSIDs it broadcasts.
+type AssetRadio struct {
+	InterfaceID   string `db:"interface_id"`
+	InterfaceName string `db:"interface_name"`
+	FormFactor    string `db:"form_factor"`
+	Enabled       bool   `db:"enabled"`
+	// SSIDs is what this radio broadcasts, joined for display. Composed in Go
+	// from one row per membership rather than with a SQL aggregate: neither
+	// engine has a portable string aggregation, and this is the same reason
+	// loadStructures composes its scoped names in Go (internal/store/graph.go).
+	SSIDs []string
+}
+
+// ListAssetRadios returns every radio-form-factor interface on an asset, each
+// with what it broadcasts.
+//
+// A LEFT JOIN, not an inner one, so a radio broadcasting nothing still
+// appears -- a radio with no SSID is a finding an operator should see on the
+// asset's own page, not a row this query hides because nothing joined to it.
+// One row per (interface, wireless_lan); RESULT ROWS ARE FOLDED IN GO below.
+func (s *SQLStore) ListAssetRadios(ctx context.Context, assetID string) ([]AssetRadio, error) {
+	var rows []struct {
+		InterfaceID   string  `db:"interface_id"`
+		InterfaceName string  `db:"interface_name"`
+		FormFactor    string  `db:"form_factor"`
+		Enabled       bool    `db:"enabled"`
+		SSID          *string `db:"ssid"`
+	}
+	err := s.read(ctx, &rows, `
+		SELECT i.id AS interface_id, i.name AS interface_name, i.form_factor, i.enabled,
+		       w.ssid
+		FROM interface i
+		LEFT JOIN interface_wlan iw ON iw.interface_id = i.id
+		LEFT JOIN wireless_lan w ON w.id = iw.wireless_lan_id
+		WHERE i.asset_id = ? AND i.form_factor LIKE 'radio%'
+		ORDER BY i.name, w.ssid`, assetID)
+	if err != nil {
+		return nil, fmt.Errorf("listing radios on asset %s: %w", assetID, err)
+	}
+
+	order := make([]string, 0, len(rows))
+	byID := make(map[string]*AssetRadio, len(rows))
+	for _, r := range rows {
+		radio, ok := byID[r.InterfaceID]
+		if !ok {
+			radio = &AssetRadio{
+				InterfaceID: r.InterfaceID, InterfaceName: r.InterfaceName,
+				FormFactor: r.FormFactor, Enabled: r.Enabled,
+			}
+			byID[r.InterfaceID] = radio
+			order = append(order, r.InterfaceID)
+		}
+		if r.SSID != nil {
+			radio.SSIDs = append(radio.SSIDs, *r.SSID)
+		}
+	}
+	out := make([]AssetRadio, 0, len(order))
+	for _, id := range order {
+		out = append(out, *byID[id])
+	}
+	return out, nil
+}

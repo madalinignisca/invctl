@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 
 	"github.com/justinas/nosurf"
 
@@ -414,7 +415,12 @@ type assetDetailPage struct {
 	Ancestors   []domain.Asset
 	Children    []store.AssetRow
 	Interfaces  []interfaceRowData
-	Instances   []store.InstanceRow
+	// Radios is this asset's wireless interfaces and what each broadcasts
+	// (WP-F1 Task 7b). Nil rather than empty for an asset with no radio-form-
+	// factor interface -- asset_detail.html renders the panel only {{if
+	// .Radios}}, so an estate with no wireless pays no query at all for it.
+	Radios    []store.AssetRadio
+	Instances []store.InstanceRow
 	// Health is what the estate reports about this asset, with staleness
 	// applied and any operator override alongside it -- never merged into it.
 	Health *store.EntityHealth
@@ -556,6 +562,23 @@ func (a *App) renderAssetDetail(w http.ResponseWriter, r *http.Request, status i
 	if err != nil {
 		a.serverError(w, r, err)
 		return
+	}
+	// Radios (WP-F1 Task 7b). Skipped entirely when the asset has no
+	// radio-form-factor interface, so an estate with no wireless pays
+	// nothing -- the same "form_factor LIKE 'radio%'" test ListRadioOptions
+	// and ListAssetRadios both use, checked here in Go against the interfaces
+	// already read rather than with a second round trip just to decide
+	// whether to make a third.
+	var radios []store.AssetRadio
+	for _, ifc := range interfaces {
+		if strings.HasPrefix(ifc.FormFactor, "radio") {
+			radios, err = a.Store.ListAssetRadios(r.Context(), id)
+			if err != nil {
+				a.serverError(w, r, err)
+				return
+			}
+			break
+		}
 	}
 	instances, err := a.Store.ListInstancesByHost(r.Context(), id)
 	if err != nil {
@@ -859,6 +882,7 @@ func (a *App) renderAssetDetail(w http.ResponseWriter, r *http.Request, status i
 		Ancestors:       ancestors,
 		Children:        children,
 		Interfaces:      interfaceRowsFor(interfaces, assetBase.CanWriteEntity, id),
+		Radios:          radios,
 		Instances:       instances,
 		Health:          health,
 		InstanceHealth:  instanceHealth,
