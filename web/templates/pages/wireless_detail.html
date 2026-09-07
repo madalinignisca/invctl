@@ -21,7 +21,7 @@
   <div class="panel-head"><h2>Declared</h2></div>
   <div class="panel-body">
     <div class="stat-row">
-      <div class="stat"><div class="k">Security</div><div class="v">{{.WLAN.Security}}</div></div>
+      <div class="stat"><div class="k">Security</div><div class="v">{{.SecurityLabel}}</div></div>
       <div class="stat"><div class="k">Scope</div><div class="v">{{if .WLAN.ScopeAssetID}}<a href="/assets/{{deref .WLAN.ScopeAssetID}}">scoped</a>{{else}}estate-wide{{end}}</div></div>
       <div class="stat"><div class="k">VLAN</div><div class="v">{{if .WLAN.VLANID}}<a href="/vlans/{{deref .WLAN.VLANID}}">assigned</a>{{else}}—{{end}}</div></div>
       <div class="stat"><div class="k">Auth service</div><div class="v">{{if .WLAN.AuthServiceID}}<a href="/services/{{deref .WLAN.AuthServiceID}}">assigned</a>{{else}}—{{end}}</div></div>

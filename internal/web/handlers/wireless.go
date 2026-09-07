@@ -107,6 +107,23 @@ func (a *App) WirelessDetail(w http.ResponseWriter, r *http.Request) {
 		a.serverError(w, r, err)
 		return
 	}
+	// The security mode's LABEL, not its code. GetWirelessLAN returns the
+	// domain row, which carries `wpa2_personal`; the list page joins
+	// wireless_security for the readable form and this page showed the code
+	// beside it. One vocabulary read rather than widening GetWirelessLAN's
+	// return, since every other caller of it wants the domain value.
+	securities, err := a.Store.WirelessSecurities(r.Context())
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
+	securityLabel := wlan.Security
+	for _, term := range securities {
+		if term.Code == wlan.Security {
+			securityLabel = term.Label
+			break
+		}
+	}
 	base := a.base(r, "Wireless — "+wlan.SSID, "wireless")
 	// Options is FILTERED to radios on assets the caller may write, the same
 	// reasoning and the same helper vlan_detail.html's port picker uses
@@ -119,18 +136,20 @@ func (a *App) WirelessDetail(w http.ResponseWriter, r *http.Request) {
 	writable := writableInterfaceOptions(base, options)
 	a.Render.Page(w, http.StatusOK, "wireless_detail", struct {
 		Base
-		WLAN   *domain.WirelessLAN
-		Radios wlanRadioRows
+		WLAN          *domain.WirelessLAN
+		SecurityLabel string
+		Radios        wlanRadioRows
 		// Options is the picker's contents; OptionsHint explains why it is
 		// shorter than the estate's full radio count, the same fix-b item 2
 		// pattern every other filtered picker on this codebase carries.
 		Options     []store.InterfaceOption
 		OptionsHint string
 	}{
-		Base:    base,
-		WLAN:    wlan,
-		Radios:  wlanRadioRowsFor(radios, base.CanWriteEntity),
-		Options: writable,
+		Base:          base,
+		WLAN:          wlan,
+		SecurityLabel: securityLabel,
+		Radios:        wlanRadioRowsFor(radios, base.CanWriteEntity),
+		Options:       writable,
 		OptionsHint: pickerHint(len(writable), len(options),
 			"There are no radios in the estate yet.",
 			"Every radio belongs to an asset you do not own.",
