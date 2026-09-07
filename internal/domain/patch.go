@@ -17,7 +17,11 @@ type PassThrough struct {
 	FrontInterfaceID string `db:"front_interface_id"`
 	RearInterfaceID  string `db:"rear_interface_id"`
 	// Position is which slot of the rear port this front port takes. 1 for
-	// every 1:1 panel, which is all of them until breakout arrives in WP-B4.
+	// an ordinary panel; a rear port that breaks out has one row per strand,
+	// numbered as the trunk is numbered. The tracer reads it: internal/store/
+	// cabling.go's walk continues into EVERY strand recorded on a rear port,
+	// in position order. Declared, never derived and never renumbered --
+	// strand 7 stays strand 7 when strand 6 is unpatched.
 	Position   int    `db:"position"`
 	Lifecycle  string `db:"lifecycle"`
 	CreatedAt  string `db:"created_at"`

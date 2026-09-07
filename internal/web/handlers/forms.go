@@ -335,6 +335,16 @@ type linkFormData struct {
 	TargetHint string
 }
 
+type passThroughFormData struct {
+	Base
+	AssetID string
+	Errors  map[string]string
+	// Interfaces is this asset's own ports, offered as both the front and the
+	// rear choice -- a pass-through is what one panel does between two of its
+	// own ports (CreatePassThrough enforces "both ends on one asset").
+	Interfaces []store.InterfaceRow
+}
+
 type prefixFormData struct {
 	Base
 	Errors       map[string]string
@@ -676,6 +686,22 @@ func (a *App) newLinkForm(r *http.Request, assetID string, errs map[string]strin
 			"There are no unpatched ports in the estate yet.",
 			"There is nothing here you can cable to -- every unpatched port belongs to an asset you don't own.",
 			"Showing %d of %d ports -- the rest belong to assets you don't own."),
+	}
+}
+
+// newPassThroughForm builds the "patch through" panel. UNFILTERED, unlike
+// newLinkForm's front-side picker: a front port already used by one
+// pass-through and a rear port already carrying other strands are both still
+// valid choices here -- the front-port unique index and the rear-position
+// unique index are what refuse an actual collision, and requireUniqueRearPosition
+// (cabling.go) is what turns that refusal into a message on this form rather
+// than a bare 409.
+func (a *App) newPassThroughForm(r *http.Request, assetID string, errs map[string]string, interfaces []store.InterfaceRow) passThroughFormData {
+	return passThroughFormData{
+		Base:       a.base(r, "Assets", "assets"),
+		AssetID:    assetID,
+		Errors:     orEmpty(errs),
+		Interfaces: interfaces,
 	}
 }
 

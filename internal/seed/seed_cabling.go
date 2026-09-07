@@ -41,6 +41,7 @@ import (
 func (b *builder) companyCabling() {
 	b.patchPanel()
 	b.patchLeads()
+	b.panelBreakout()
 }
 
 // patchPanel is the front-ported panel at the top of the shallow cabinet.
@@ -197,6 +198,115 @@ func (b *builder) patchLeads() {
 		link.LengthM = num(l.lengthM)
 		if err := b.store.CreateLink(b.ctx, Permit, link); err != nil {
 			b.fail(fmt.Errorf("seeding patch lead %d: %w", i+1, err))
+			return
+		}
+	}
+}
+
+// panelBreakout adds two small panels demonstrating what pp-a2-1 does not: a
+// rear port with something recorded behind it.
+//
+// WITHOUT THIS THE DEMO ESTATE CANNOT SHOW A TRACE THROUGH A PANEL, LET ALONE
+// A BREAKOUT (docs/panel-breakout-design.md §4 item 8). pp-a2-1's 24 leads run
+// straight from the panel's own ports to a host -- nothing on it is a
+// pass-through -- so before this, port_pass_through had zero rows anywhere in
+// the seed and neither a demo nor Task 10's E2E spec had a panel to point at.
+//
+// ONE PANEL PER CASE, which is the distinction the whole work package exists
+// to draw: an ordinary 1:1 run, and a rear port that breaks out. Both ends of
+// a pass-through must be on ONE asset (CreatePassThrough enforces it), so each
+// panel gets its own front and rear ports rather than sharing pp-a2-1's.
+//
+// ONLY RECORDED POSITIONS, per corrected D4: pp-a2-3's rear port genuinely has
+// three strands patched, at 1, 5 and 12 -- a gap, not a count of the trunk.
+// Nothing here invents what a ninth or a fourth strand would be, because
+// nothing recorded one.
+func (b *builder) panelBreakout() {
+	b.onePanelRun("pp-a2-2", "1:1 patch panel — one recorded strand, the ordinary case", []int{1})
+	b.onePanelRun("pp-a2-3", "breakout patch panel — a trunk with three recorded strands", []int{1, 5, 12})
+}
+
+// onePanelRun builds one small panel with a rear port and, for each entry in
+// positions, a front port pass-through recorded at that position. front ports
+// are named front-01 etc. so the number in the name and the recorded position
+// can legitimately differ -- the seed does not want to look like Position is
+// an index (D5).
+func (b *builder) onePanelRun(name, note string, positions []int) {
+	if !b.ok() {
+		return
+	}
+	// Topping up: b.asset already skips the asset itself, but the ports and
+	// pass-through rows need their own check -- b.interfaceIDs is populated by
+	// a fresh Load and empty on a top-up, so a check against it alone would
+	// report "not there" for a port that exists and collide on the insert. The
+	// same reasoning patchLeads uses above.
+	b.asset(domain.KindPatchPanel, name, "rack-a2", []string{"dev"}, func(a *domain.Asset) {
+		a.Attrs = fmt.Sprintf(`{"note":%q}`, note)
+	})
+	// Priced like pp-a2-1, and for the same reason -- the cost report counts
+	// what is NOT priced, so an unpriced panel here would be another gap
+	// rather than the demonstration this phase exists to be.
+	b.assetCosts([]costLine{
+		{name, "acquisition", domain.CostOnce, 40, -600, "small patch panel — approximate"},
+	})
+	if !b.ok() {
+		return
+	}
+	panelID, ok := b.refs.Assets[name]
+	if !ok {
+		return
+	}
+	existing, err := b.store.ListInterfaces(b.ctx, panelID)
+	if err != nil {
+		b.fail(fmt.Errorf("reading %s's ports: %w", name, err))
+		return
+	}
+	if len(existing) > 0 {
+		// Already patched on a previous run: leave the panel alone rather than
+		// record a subset and leave it half-wired.
+		for _, p := range existing {
+			b.interfaceIDs[name+"/"+p.Name] = p.ID
+		}
+		return
+	}
+
+	newPort := func(portName string) string {
+		if !b.ok() {
+			return ""
+		}
+		iface, err := domain.NewInterface(store.NewID(), panelID, portName, "rj45")
+		if err != nil {
+			b.fail(fmt.Errorf("building %s/%s: %w", name, portName, err))
+			return ""
+		}
+		if err := b.store.CreateInterface(b.ctx, Permit, iface); err != nil {
+			b.fail(fmt.Errorf("seeding %s/%s: %w", name, portName, err))
+			return ""
+		}
+		b.interfaceIDs[name+"/"+portName] = iface.ID
+		return iface.ID
+	}
+
+	rearID := newPort("rear-1")
+	for i, position := range positions {
+		if !b.ok() {
+			return
+		}
+		frontID := newPort(fmt.Sprintf("front-%02d", i+1))
+		if rearID == "" || frontID == "" {
+			return
+		}
+		p, err := domain.NewPassThrough(store.NewID(), domain.PassThroughSpec{
+			FrontInterfaceID: frontID,
+			RearInterfaceID:  rearID,
+			Position:         position,
+		}, b.now)
+		if err != nil {
+			b.fail(fmt.Errorf("building the pass-through at %s position %d: %w", name, position, err))
+			return
+		}
+		if err := b.store.CreatePassThrough(b.ctx, Permit, p); err != nil {
+			b.fail(fmt.Errorf("seeding the pass-through at %s position %d: %w", name, position, err))
 			return
 		}
 	}

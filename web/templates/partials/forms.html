@@ -790,6 +790,46 @@
 {{end}}
 
 
+{{define "pass_through_form"}}
+<form id="pass-through-form" method="post" action="/assets/{{.AssetID}}/patch"
+      hx-post="/assets/{{.AssetID}}/patch" hx-target="#pass-through-form" hx-swap="outerHTML"
+      style="margin-top:12px">
+  <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+  <div class="field-row">
+    <div class="field">
+      <label for="pt-front">Front port</label>
+      <select id="pt-front" name="front_interface_id" required>
+        <option value="">Choose…</option>
+        {{range .Interfaces}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
+      </select>
+      {{with index .Errors "front_interface_id"}}<div class="field-error">{{.}}</div>{{end}}
+    </div>
+    <div class="field">
+      <label for="pt-rear">Rear port</label>
+      <select id="pt-rear" name="rear_interface_id" required>
+        <option value="">Choose…</option>
+        {{range .Interfaces}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
+      </select>
+      {{with index .Errors "rear_interface_id"}}<div class="field-error">{{.}}</div>{{end}}
+    </div>
+    <div class="field">
+      <label for="pt-position">Strand</label>
+      <input id="pt-position" class="mono {{if index .Errors "position"}}invalid{{end}}"
+             type="number" name="position" min="1" value="1" style="width:6em">
+      {{with index .Errors "position"}}<div class="field-error">{{.}}</div>{{end}}
+      <p class="field-note">
+        Which hole of the rear port this front port is behind. Leave it at 1
+        for an ordinary panel. A twelve-fibre trunk that breaks out is one
+        row per strand, numbered as the trunk is numbered -- strand 7 stays
+        strand 7 whether or not 6 is patched.
+      </p>
+    </div>
+  </div>
+  <div class="form-actions"><button type="submit" class="btn btn-sm">Patch through</button></div>
+</form>
+{{end}}
+
+
 {{define "prefix_form"}}
 <form id="prefix-form" class="panel" method="post" action="/prefixes"
       hx-post="/prefixes" hx-target="#prefix-form" hx-swap="outerHTML">

@@ -517,8 +517,9 @@ var DeclaredColumns = map[string][]string{
 	},
 	"responsibility_role": {"code", "label", "sort_order", "description"},
 	// What a patch panel does (migration 00028). Declared: somebody patched it.
-	// `position` anticipates breakout in WP-B4 and is 1 for every 1:1 panel,
-	// which is all of them until then.
+	// `position` classifies the same way whether the panel is a plain 1:1 or a
+	// breakout: WP-B4's tracer reads it, but it does not change what recorded
+	// it or who may.
 	"port_pass_through": {
 		"id", "front_interface_id", "rear_interface_id", "position",
 		"lifecycle", "created_at", "updated_at",

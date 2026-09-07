@@ -11,6 +11,7 @@ package web_test
 import (
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -357,5 +358,116 @@ func TestTracingARunThroughTwoPanelsOnScreen(t *testing.T) {
 	}
 	if !strings.Contains(page, "through the panel") {
 		t.Error("the trace does not distinguish a panel hop from a cable hop")
+	}
+}
+
+// TestTracingABreakoutOnScreen is WP-B4 end to end through the forms: a rear
+// port breaking out to two front ports renders both strands, each labelled
+// with its declared position.
+//
+// DRIVEN THROUGH THE REAL FORM FIELD, since Task 8: id="pt-position" is
+// asserted present on the page before either patch is posted, so a browser
+// user -- not only this test's raw client -- can reach the second strand.
+// Before Task 8 the patch form had no position input at all, so every
+// pass-through a user could create was position 1 and the rear-port unique
+// index refused the second: the tracer could render a breakout nobody could
+// record, the same shape as this project's 404-on-a-button release.
+func TestTracingABreakoutOnScreen(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	site := h.lookup(`SELECT id FROM asset WHERE kind = 'site' LIMIT 1`)
+	mk := func(kind, name string) string {
+		resp := h.post("/assets", url.Values{
+			"csrf_token": {h.csrfToken("/assets")}, "name": {name},
+			"kind": {kind}, "parent_id": {site},
+		}, false)
+		resp.Body.Close()
+		return h.lookup(`SELECT id FROM asset WHERE name = ?`, name)
+	}
+	port := func(assetID, name string) string {
+		resp := h.post("/assets/"+assetID+"/interfaces", url.Values{
+			"csrf_token": {h.csrfToken("/assets/" + assetID)},
+			"name":       {name}, "form_factor": {"rj45"},
+		}, false)
+		resp.Body.Close()
+		return h.lookup(`SELECT id FROM interface WHERE asset_id = ? AND name = ?`, assetID, name)
+	}
+	patchAt := func(assetID, front, rear string, position int) {
+		resp := h.post("/assets/"+assetID+"/patch", url.Values{
+			"csrf_token":         {h.csrfToken("/assets/" + assetID)},
+			"front_interface_id": {front}, "rear_interface_id": {rear},
+			"position": {strconv.Itoa(position)},
+		}, false)
+		code := resp.StatusCode
+		resp.Body.Close()
+		if code != http.StatusSeeOther {
+			t.Fatalf("patching at position %d returned %d, want 303", position, code)
+		}
+	}
+
+	pa := mk("patch_panel", "breakout-panel-a")
+	rear := port(pa, "rear-1")
+	f1 := port(pa, "f-1")
+	f2 := port(pa, "f-2")
+	if rear == "" || f1 == "" || f2 == "" {
+		t.Fatal("the ports were not created through the forms")
+	}
+
+	// THE FIELD IS REACHABLE, NOT JUST THE HANDLER. Posting "position" proves
+	// CreatePassThrough works; it says nothing about whether a browser user
+	// could ever type it. This is the assertion Task 8 exists for.
+	assetPage := body(t, h.get("/assets/"+pa, false))
+	if !strings.Contains(assetPage, `id="pt-position"`) {
+		t.Fatalf("the patch form has no position field; a breakout recorded below "+
+			"this line could not have been entered through the UI:\n%s", assetPage)
+	}
+
+	patchAt(pa, f1, rear, 1)
+	patchAt(pa, f2, rear, 2)
+	if n := h.count(`SELECT COUNT(*) FROM port_pass_through WHERE lifecycle = 'active'`); n != 2 {
+		t.Fatalf("%d live pass-throughs, want 2", n)
+	}
+
+	page := body(t, h.get("/interfaces/"+rear+"/trace", false))
+	for _, want := range []string{"f-1", "f-2", "strand 1", "strand 2"} {
+		if !strings.Contains(page, want) {
+			t.Errorf("the trace does not show %q; a rear port that breaks out to two "+
+				"front ports must render BOTH strands, each labelled with its declared "+
+				"position:\n%s", want, page)
+		}
+	}
+	// Two ends, both unpatched at the front (neither f-1 nor f-2 leads anywhere
+	// further) -- the count line says so without implying a total.
+	if !strings.Contains(page, "2 ends") {
+		t.Errorf("the trace does not report 2 ends for a two-strand breakout:\n%s", page)
+	}
+
+	// A THIRD STRAND AT A POSITION ALREADY TAKEN is refused as 422 with the
+	// form partial re-rendered, not a bare 409 and not a silent no-op. This is
+	// the ordinary mistake breakout introduces: somebody recording a fourth
+	// strand types the position the third one already used.
+	f3 := port(pa, "f-3")
+	if f3 == "" {
+		t.Fatal("the third port was not created through the form")
+	}
+	resp := h.post("/assets/"+pa+"/patch", url.Values{
+		"csrf_token":         {h.csrfToken("/assets/" + pa)},
+		"front_interface_id": {f3}, "rear_interface_id": {rear},
+		"position": {"1"},
+	}, false)
+	dup := body(t, resp)
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("a duplicate (rear, position) returned %d, want 422:\n%s", resp.StatusCode, dup)
+	}
+	if !strings.Contains(dup, "already has a strand recorded at position 1") {
+		t.Errorf("the refusal does not name what is wrong: %s", dup)
+	}
+	if !strings.Contains(dup, `id="pt-position"`) {
+		t.Errorf("the refusal did not re-render the patch form: %s", dup)
+	}
+	if n := h.count(`SELECT COUNT(*) FROM port_pass_through WHERE lifecycle = 'active'`); n != 2 {
+		t.Fatalf("%d live pass-throughs after the refused duplicate, want still 2 -- "+
+			"a refusal that inserted anyway is a silent no-op wearing an error message", n)
 	}
 }

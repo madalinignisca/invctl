@@ -52,6 +52,22 @@ footnote.
   figure anywhere else. `service_cost`, `project_cost` and `circuit_cost`
   are unaffected — those stay Administrator-only regardless of the grant.
 
+### Changed
+
+- **Tracing a cable through a patch panel now shows every recorded strand of
+  a breakout, not one.** A trunk that lands on a rear port and fans out to
+  several front ports used to report whichever pass-through the query
+  happened to read last; the trace page now follows every strand and reports
+  a per-end outcome for each — reaching a far end, looping back on itself, or
+  stopping short — instead of a single complete/incomplete verdict for the
+  whole run. Only strands that have actually been patched appear: nothing
+  records how many positions a rear port physically has, so the count shown
+  is never a claim about the size of the trunk. No action required, no
+  migration — `port_pass_through.position` already existed and is simply
+  read now. The patch form on an asset's page also gained a "strand"
+  (position) field, so a breakout can be recorded through the UI rather than
+  only through the API.
+
 ### Added
 
 - **Project owners can now write `dependency`, `link` and `asset_cost` rows,

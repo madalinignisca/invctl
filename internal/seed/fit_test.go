@@ -259,3 +259,56 @@ func TestOrdinaryRearToRearCablingIsSilent(t *testing.T) {
 		}
 	})
 }
+
+// TestTheDemoEstateHasAPanelBreakoutToTrace pins WP-B4 spec §4 item 8: before
+// panelBreakout, port_pass_through had zero rows anywhere in the seed, so
+// neither a demo nor an E2E spec had a panel to point at. pp-a2-1's 24 leads
+// are cables straight to a host -- nothing on it is a pass-through.
+func TestTheDemoEstateHasAPanelBreakoutToTrace(t *testing.T) {
+	seed.CompanyEstate = true
+	t.Cleanup(func() { seed.CompanyEstate = false })
+
+	eachEngine(t, func(t *testing.T, f *fixture) {
+		oneToOne, ok := f.refs.Assets["pp-a2-2"]
+		if !ok {
+			t.Fatal("no pp-a2-2 (the 1:1 panel) in the estate")
+		}
+		rows, err := f.store.PassThroughsFor(f.ctx, oneToOne)
+		if err != nil {
+			t.Fatalf("listing pp-a2-2's pass-throughs: %v", err)
+		}
+		if len(rows) != 1 || rows[0].Position != 1 {
+			t.Fatalf("pp-a2-2 holds %+v, want exactly one strand at position 1", rows)
+		}
+
+		breakout, ok := f.refs.Assets["pp-a2-3"]
+		if !ok {
+			t.Fatal("no pp-a2-3 (the breakout panel) in the estate")
+		}
+		rows, err = f.store.PassThroughsFor(f.ctx, breakout)
+		if err != nil {
+			t.Fatalf("listing pp-a2-3's pass-throughs: %v", err)
+		}
+		wantPositions := []int{1, 5, 12}
+		if len(rows) != len(wantPositions) {
+			t.Fatalf("pp-a2-3 holds %d strands, want %d -- only recorded positions may "+
+				"appear (D4), not a count of any trunk", len(rows), len(wantPositions))
+		}
+		for i, want := range wantPositions {
+			if rows[i].Position != want {
+				t.Errorf("strand %d is position %d, want %d, in order", i, rows[i].Position, want)
+			}
+		}
+
+		// The rear port traces, and every strand shows up as its own leaf --
+		// the point of the whole work package, demonstrated rather than only
+		// asserted against a synthetic fixture.
+		trace, err := f.store.TracePath(f.ctx, rows[0].RearInterfaceID)
+		if err != nil {
+			t.Fatalf("tracing pp-a2-3's rear port: %v", err)
+		}
+		if len(trace.Root.Children) != 3 {
+			t.Fatalf("tracing the rear port found %d strands, want 3", len(trace.Root.Children))
+		}
+	})
+}

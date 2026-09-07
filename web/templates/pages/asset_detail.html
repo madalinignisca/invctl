@@ -856,14 +856,25 @@
   <div class="panel-body">
     {{if .PassThroughs}}
     <table class="grid">
-      <thead><tr><th>Front</th><th>Rear</th><th></th></tr></thead>
+      <thead><tr><th>Front</th><th>Rear</th><th>Strand</th><th></th></tr></thead>
       <tbody>
         {{range .PassThroughs}}
         <tr>
           <td class="mono">{{.FrontName}}</td>
           <td class="mono">{{.RearName}}</td>
+          <td class="mono">{{.Position}}</td>
           <td class="row-actions">
-            <a class="btn btn-sm" href="/interfaces/{{.FrontInterfaceID}}/trace">Trace</a>
+            {{/* TWO ENTRY POINTS, AND THE REAR ONE IS THE POINT OF BREAKOUT.
+                 Tracing from the FRONT follows this one strand outward, which
+                 is the 1:1 question and was the only link here until WP-B4.
+                 Tracing from the REAR is what fans out into every strand of
+                 the trunk at once -- and without a link to it the breakout
+                 tracer had no route from the UI at all, which the E2E suite
+                 hit and had to work around by clicking two rows. A feature
+                 reachable only by typing a URL is the shape of the release
+                 that shipped a 404 on a button with every test green. */}}
+            <a class="btn btn-sm" href="/interfaces/{{.FrontInterfaceID}}/trace">Trace strand</a>
+            <a class="btn btn-sm" href="/interfaces/{{.RearInterfaceID}}/trace">Trace trunk</a>
             {{/* port_pass_through is ScopeTopology -- Administrator-only, the
                  same as power_input above. */}}
             {{if $.IsAdmin}}
@@ -885,26 +896,7 @@
     {{end}}
 
     {{if .IsAdmin}}
-    <form method="post" action="/assets/{{.Asset.ID}}/patch" style="margin-top:12px">
-      <input type="hidden" name="csrf_token" value="{{.CSRF}}">
-      <div class="field-row">
-        <div class="field">
-          <label for="pt-front">Front port</label>
-          <select id="pt-front" name="front_interface_id" required>
-            <option value="">Choose…</option>
-            {{range .Interfaces}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
-          </select>
-        </div>
-        <div class="field">
-          <label for="pt-rear">Rear port</label>
-          <select id="pt-rear" name="rear_interface_id" required>
-            <option value="">Choose…</option>
-            {{range .Interfaces}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
-          </select>
-        </div>
-      </div>
-      <div class="form-actions"><button type="submit" class="btn btn-sm">Patch through</button></div>
-    </form>
+    {{template "pass_through_form" .PassThroughForm}}
     {{end}}
   </div>
 </div>
