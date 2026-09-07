@@ -48,9 +48,9 @@ var vocabularyReaders = []struct {
 	// silently truncated seed is caught rather than a shorter dropdown.
 	count int
 }{
-	{"asset_kind", (*SQLStore).AssetKinds, domain.AssetKinds, 13},
+	{"asset_kind", (*SQLStore).AssetKinds, domain.AssetKinds, 14},
 	{"service_kind", (*SQLStore).ServiceKinds, domain.ServiceKinds, 14},
-	{"interface_form_factor", (*SQLStore).InterfaceFormFactors, domain.FormFactors, 9},
+	{"interface_form_factor", (*SQLStore).InterfaceFormFactors, domain.FormFactors, 12},
 	{"environment_role", (*SQLStore).EnvironmentRoles, domain.EnvRoles, 6},
 	{"ip_address_role", (*SQLStore).IPAddressRoles, domain.IPRoles, 5},
 	{"data_class", (*SQLStore).DataClassVocabulary, domain.DataClasses, 7},

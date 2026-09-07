@@ -20,6 +20,12 @@ const (
 	FFVirtual  = "virtual"
 	FFLAG      = "lag"
 	FFLoopback = "loopback"
+	// Radio form factors, migration 00061 (WP-F1). Three rather than one: an
+	// AP has separate radios per band that fail and are disabled independently,
+	// and "which band is `guest` on here" is a question the estate asks.
+	FFRadio2G4 = "radio_2g4"
+	FFRadio5G  = "radio_5g"
+	FFRadio6G  = "radio_6g"
 )
 
 // FormFactors are the form factors this code knows by name. It is NOT the
@@ -31,7 +37,7 @@ const (
 // this vocabulary became a table.
 var FormFactors = []string{
 	FFRJ45, FFSFP, FFSFPPlus, FFSFP28, FFQSFPPlus, FFQSFP28,
-	FFVirtual, FFLAG, FFLoopback,
+	FFVirtual, FFLAG, FFLoopback, FFRadio2G4, FFRadio5G, FFRadio6G,
 }
 
 // Interface is a port on an asset.

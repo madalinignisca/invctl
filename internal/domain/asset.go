@@ -109,6 +109,11 @@ const (
 	KindK8sNode    = "k8s_node"
 	KindBridge     = "bridge"
 	KindStorage    = "storage"
+	// KindAccessPoint, migration 00061 (WP-F1). An AP forwards frames and runs
+	// nothing (can_host_instances FALSE) and is a network element that can be
+	// the subject of a net_attachment (is_attachable TRUE) -- same shape as
+	// KindBridge, one row up.
+	KindAccessPoint = "access_point"
 )
 
 // AssetKinds are the asset kinds this code knows by name. It is NOT the
@@ -129,7 +134,7 @@ const (
 var AssetKinds = []string{
 	KindSite, KindRack, KindPDU, KindFirewall, KindSwitch, KindPatchPanel,
 	KindServer, KindHypervisor, KindCluster, KindVM, KindK8sNode, KindBridge,
-	KindStorage,
+	KindStorage, KindAccessPoint,
 }
 
 // Lifecycle values. Nothing is ever hard-deleted (HANDOVER §3.7); retirement
