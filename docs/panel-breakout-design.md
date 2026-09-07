@@ -383,3 +383,10 @@ responsible", and `impact.Request` carries only `DownAssetIDs` and
 `CutCircuitIDs`. A cable failing concludes nothing today. That is a gap in B3,
 not something this work introduces, and it should be recorded as such rather
 than absorbed silently into B4.
+
+**Recorded 2026-09-07** in `docs/ROADMAP.md`, whose B3 entry now reads "TRACER
+DONE, ENGINE HALF NOT DELIVERED" and keeps the undelivered sentence struck
+through rather than deleted, so the promise stays visible. The entry also
+carries why reviving it is a spec rather than a patch: `link` is deliberately
+not a reachability edge, and adding it to the impact graph would be a second,
+disagreeing answer to a question `net_attachment` already answers.
