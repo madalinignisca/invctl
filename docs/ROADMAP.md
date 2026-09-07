@@ -331,10 +331,28 @@ point at it — that is a reconciliation moment, not an error.
 Read-only, scoped tokens, keyset pagination matching the change log. Shapes for
 Ansible inventory and observability joins. No write routes.
 
-**WP-A3 · Type-and-template mechanism** — S — **DONE**
-Generic "a type carries component templates; instantiating creates them". Later
+**WP-A3 · Type-and-template mechanism** — S — **NOT BUILT** (was marked DONE)
+~~Generic "a type carries component templates; instantiating creates them". Later
 type edits do **not** rewrite existing instances — report drift as a finding
-instead, since nobody declared that change.
+instead, since nobody declared that change.~~
+
+**NOT BUILT. Corrected 2026-09-07**, found while specifying F1, which depends on
+it. There is no component-template table in any migration on either engine, no
+module or module-bay or inventory-item table, and no identifier in the tree
+matching `instantiat` outside this document's own prose. `00022_device_types.sql`
+creates `manufacturer`, `device_type` and an `asset.device_type_id` column, and
+nothing template-shaped.
+
+**This is the third entry found closed with its scope unbuilt**, after WP-B3 and
+WP-C1 below. The 2026-08-17 marker pass verified "the tables the package would
+have created, the routes it would have registered, and the navigation entry it
+would have added" — a check that confirms a package's *first* paragraph and
+cannot see its second.
+
+**The appendix already argued against building it**, and that argument stands:
+extract the mechanism when a second caller appears, not before. So this is a
+correction to the marker, not new work to schedule. F1 builds what it needs
+concretely, which is what the appendix recommends.
 
 *See the appendix: there is a standing argument for building this concretely
 inside WP-C1 and extracting it when WP-B1 arrives, rather than up front.*
@@ -392,10 +410,13 @@ position and capacity, not new impact behaviour.
 
 ### Group C — Physical: hardware catalogue
 
-**WP-C1 · Manufacturers, device types, module types** — M — **DONE**
-Model, height, full-depth, part number, EOL and end-of-support dates. Component
-templates for interfaces, ports, outlets, inputs. Modules, module bays, inventory
-items, serial tracking.
+**WP-C1 · Manufacturers, device types, module types** — M — **CATALOGUE DONE, TEMPLATES AND MODULES NOT BUILT**
+Model, height, full-depth, part number, EOL and end-of-support dates — **done**,
+on `device_type`. Serial tracking — **done**, `asset.serial` since `00001_core`.
+~~Component templates for interfaces, ports, outlets, inputs. Modules, module
+bays, inventory items.~~ **NOT BUILT, corrected 2026-09-07**, verified the same
+way as A3: no such table exists on either engine, and no code instantiates one.
+"Module types" in this entry's own title has no table either.
 
 Engine: expiry resolves an asset's support date from its type when the asset has
 none — **and says which source it used.** Provenance, not silent inference. Search
@@ -615,10 +636,34 @@ quorum services, one layer down.
 
 ### Group F — Wireless
 
-**WP-F1 · Wireless LANs and links** — M — depends: A3 light
-Wireless LANs, groups, links between interfaces, authentication attributes. Links
-are reachability edges like cables; a wireless bridge is a single point of failure
-worth simulating.
+**WP-F1 · Wireless LANs and links** — M — depends: nothing that exists
+Wireless LANs, groups, links between interfaces, authentication attributes.
+~~Links are reachability edges like cables; a wireless bridge is a single point
+of failure worth simulating.~~
+
+**Both halves of that second sentence were wrong and are corrected 2026-09-07**,
+before any code, in `docs/wireless-design.md`:
+
+- **Cables are not reachability edges.** `link` is deliberately excluded from the
+  impact graph, with the reason recorded beside the exclusion in
+  `graph_coverage_test.go`: reachability is modelled at forwarder-group level,
+  and *"a cable genuinely cannot tell you which way traffic flows, so it is
+  declared rather than guessed"*. A radio cannot either.
+- **Nothing cable-like can be simulated as a failure today.** `impact.Request`
+  accepts `DownAssetIDs` and `CutCircuitIDs` and nothing else — the same gap
+  WP-B3's undelivered engine half left.
+
+The dependency line said **"A3 light"**, a phrase that appears exactly once in
+this repository, here, with no definition anywhere and no recorded decision
+behind it. A3 is not built (above), so F1 depended on an undefined subset of an
+unbuilt package. It builds what it needs concretely instead, per the appendix.
+
+**A wireless LAN is modelled as a `Structure`**, the shape VLANs, FHRP groups and
+overlays already use — an SSID is a named L2 domain whose members are ports, and
+`interface_vlan`'s own migration makes the argument for it: *"two access ports in
+VLAN 30 are in one broadcast domain whether or not anybody drew a cable between
+them, and that is a fact no cable trace can produce."* An SSID on six APs is
+exactly that fact.
 
 ---
 
