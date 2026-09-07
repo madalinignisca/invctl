@@ -636,7 +636,7 @@ quorum services, one layer down.
 
 ### Group F — Wireless
 
-**WP-F1 · Wireless LANs and links** — M — depends: nothing that exists
+**WP-F1 · Wireless LANs and links** — M — depends: nothing that exists — **DONE**
 Wireless LANs, groups, links between interfaces, authentication attributes.
 ~~Links are reachability edges like cables; a wireless bridge is a single point
 of failure worth simulating.~~
@@ -664,6 +664,41 @@ overlays already use — an SSID is a named L2 domain whose members are ports, a
 VLAN 30 are in one broadcast domain whether or not anybody drew a cable between
 them, and that is a fact no cable trace can produce."* An SSID on six APs is
 exactly that fact.
+
+**What shipped**, per `docs/superpowers/plans/2026-09-07-wireless-lans.md` and
+`docs/wireless-design.md`: migration 00061 (`wireless_security` vocabulary,
+`wireless_lan`, `interface_wlan`, three radio form factors, the
+`access_point` asset kind); `domain.WirelessLAN`/`InterfaceWLAN`; store CRUD,
+retire, and `SetInterfaceWLANs` with its audit fold onto the radio interface
+(D7 — the fourth structure join's set-table membership is folded into the
+owning interface's `change_log` entry, not left silent); the fourth
+`loadStructures` join and `impact.StructureWLAN`; a `/wireless` list and
+detail page and a radios panel on an asset's own page, both `CanWrite`-gated
+like every other topology surface; and a seed carrying two access points with
+three radios each — `corp` and `guest` reduced-to-one and emptied
+respectively, `warehouse-scan` a standing single point of failure on one AP —
+so both structure findings have something to find in the demo.
+
+**What explicitly did not ship, and why (docs/wireless-design.md §5):**
+- **No point-to-point wireless bridge as a cut target.** It is genuinely
+  link-shaped, and making it simulatable needs `impact.Request` to accept a
+  cut edge that is not a circuit — WP-B3's undelivered engine half, named
+  rather than half-built.
+- **No observed wireless state** — no RSSI, no channel-in-use, no client
+  counts, no band steering. Channel is the instructive absence: a *planned*
+  channel would be declared and an *operating* channel observed, and F1
+  records neither, deliberately, so a later work package cannot collapse the
+  pair into one column and destroy the finding their disagreement is.
+- **No `link` rows.** A radio serves many clients; `CreateLink` refuses a
+  port's second cable, which is right for a cable and wrong for a radio.
+- **No authentication profile entity, and no SSID-as-service-consumer.**
+  `wireless_lan.auth_service_id` records which service authenticates an SSID
+  and derives nothing from it (D5) — if the RADIUS service dies the SSID does
+  not stop being broadcast. Making an SSID a general consumer of services
+  needs `dependency` to accept a non-service consumer, a polymorphic
+  reference this codebase has avoided everywhere.
+- **No channel planning, no RF survey, no coverage map, no AP-model
+  templates.** An inventory records what somebody declared.
 
 ---
 

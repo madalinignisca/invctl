@@ -10,7 +10,17 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 # Wireless LANs — design
 
-**Status: DRAFT 2026-09-07, challenged and amended; D5 was wrong.** WP-F1's roadmap entry read:
+**Status: BUILT 2026-09-07.** All nine tasks in
+`docs/superpowers/plans/2026-09-07-wireless-lans.md` are delivered: the
+migration, the domain type, the store (CRUD, retire, `SetInterfaceWLANs` and
+its audit fold), the fourth structure join, the `/wireless` UI, the radios
+panel on an asset, and the seed. `docs/ROADMAP.md`'s WP-F1 entry records what
+shipped and what was deliberately left out (§5). What follows is the design
+as challenged and amended before any of it was built; it is left as written
+rather than rewritten around the finished code, the way §7 strikes through
+rather than deletes.
+
+WP-F1's roadmap entry read:
 
 > Wireless LANs, groups, links between interfaces, authentication attributes.
 > Links are reachability edges like cables; a wireless bridge is a single point
@@ -209,6 +219,23 @@ Seeded vocabulary rows, not a migration: `radio_2g4`, `radio_5g`, `radio_6g`.
 Three rather than one because an AP has separate radios per band that fail and
 are disabled independently, and because "which band is `guest` on here" is a
 question the estate asks. §2.3.
+
+~~Seeded vocabulary rows, not a migration~~ — **corrected in the implementation
+plan's "Decisions this plan cannot take" §B**: "data, not a migration" turned
+out to be mechanically impossible, because goose never re-runs `00004` and
+`internal/seed` cannot write a declared vocabulary row without either skipping
+its `change_log` obligation or breaking the "migrations are the one exception"
+rule. What shipped is data as `INSERT` statements **inside migration 00061**
+— no table rebuilt, no `CHECK` widened, nothing recompiled, exactly the move
+`00006_bridge_kind.sql` already made for `bridge`. The three form factors are
+still vocabulary rows in every sense that matters; only their delivery
+mechanism differs from what this line originally said.
+
+**Decision A, "is `access_point` an asset kind" — resolved YES.** Migration
+00061 also seeds `asset_kind = 'access_point'` (`can_host_instances FALSE`,
+`is_attachable TRUE`), for the reason "Decisions this plan cannot take" §A
+gives: without it, Task 8's seed would have had to call two access points
+`switch`, putting a lie in the demo fixture its own tests then assert against.
 
 ### D3. Security mode is a DOMAIN VOCABULARY, not a behavioural enum — **decided**
 
