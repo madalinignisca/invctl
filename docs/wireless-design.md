@@ -169,10 +169,17 @@ accepts a key, only a reference to one.
 
 ### 2.6 Declared and observed collide harder here than anywhere
 
-An SSID, its security mode, its VLAN mapping and a **planned** channel are
-declared: somebody decided them. A radio's *operating* channel, its transmit
-power as reported, RSSI and associated-client counts are observed — high-churn
-telemetry nobody decided.
+An SSID, its security mode and its VLAN mapping are declared: somebody decided
+them. A radio's operating channel, its transmit power as reported, RSSI and
+associated-client counts are observed — high-churn telemetry nobody decided.
+
+**Channel is the instructive case and F1 has NEITHER half of it.** A *planned*
+channel would be declared and an *operating* channel observed, and they are two
+columns that must sit beside each other — which is exactly the rule below. F1
+records no channel at all: not planned, not operating. When channel planning
+arrives it brings both halves and the disagreement between them, which is the
+finding. Adding only the declared half now would build the trap this section
+exists to describe.
 
 `docs/AUDIT.md` has answered this shape five times (VLANs, FHRP, L2VPN,
 circuits, certificates) and always identically: *the disagreement between the
@@ -295,30 +302,103 @@ Exactly `interface_vlan`'s contract:
 > rule applies — the parent's `change_log` entry must record the change, or a
 > port moving from VLAN 10 to VLAN 20 produces no diff at all."
 
-The set folds into the interface's audited value. **This has gone wrong three
-times in this codebase already** — CLAUDE.md records that a set replacement
-produced no audit entry at all on three separate occasions, twice for rows that
-decide audit scope — so the fold is a build item with its own test, not a
-detail.
+The set folds into the interface's audited value.
+
+**This has gone wrong FOUR times, and the fourth was in the VLAN code this
+design copies.** `internal/store/vlans.go` says so at the site:
+
+> "It was made a fourth time here, and the test caught it — see
+> `interfaceVLANAudit` for exactly how."
+
+So "follow `SetInterfaceVLANs`" is not sufficient instruction, because
+`SetInterfaceVLANs` got it wrong first. **Here is the mechanism.**
+
+`diffJSON` compares every **`db`-tagged** field of the audited value and ignores
+the rest. Writing membership to `interface_wlan` changes no column of the
+`interface` row, so an audit that diffs the plain `domain.Interface` compares a
+row that did not change and records **silence** — the port moved from one SSID
+to another and `change_log` says nothing happened.
+
+The fix is an audit struct that embeds the interface and adds the membership as
+**`db`-tagged fields**, so the membership is part of what `diffJSON` compares:
+
+```go
+type interfaceWLANAudit struct {
+	domain.Interface
+	WirelessLANs string `db:"wireless_lans"`   // db, NOT json
+}
+```
+
+`vlans.go` names the exact trap:
+
+> "**THE `db` TAGS ARE THE WHOLE POINT**, and leaving them off is how this went
+> wrong the first time. `diffJSON` compares every db-TAGGED field and ignores
+> the rest, so an audit struct whose membership fields carried only json tags
+> diffed nothing but the interface id — which never changes."
+
+**And the value is a readable string, not ids.** `interfaceVLANAudit` stores
+VIDs joined with commas rather than row UUIDs, for the reason `assetAudit`
+gives: *"an audit entry is read by people, and 'untagged 30, tagged 40,99' is a
+sentence where three UUIDs are a lookup exercise."* SSID names, sorted and
+joined, for the same reason.
 
 ## 4. What gets built
 
-1. **Migration** (paired sqlite/postgres, or `shared/`): `wireless_lan` —
-   `id`, `name`, `ssid`, `security` → `wireless_security(code)`,
-   `scope_asset_id` → `asset(id)` nullable, `vlan_id` → `vlan(id)` nullable,
-   `auth_service_id` → `service(id)` nullable (D5), `psk_ref`, `notes`,
-   `lifecycle`, `created_at`, `updated_at`, `row_version`.
-   Plus `wireless_security` seeded with `open`, `wpa2_personal`,
+1. **Migration** (paired sqlite/postgres, or `shared/`). Spelled out because
+   the review found §4 under-specified enough to ship an under-constrained
+   schema — the index strategy in particular was left to be reverse-engineered
+   from `00031_vlans.sql`.
+
+   `wireless_security` — `code TEXT PRIMARY KEY`, `label TEXT NOT NULL`,
+   matching the other vocabulary lookups. Seeded `open`, `wpa2_personal`,
    `wpa2_enterprise`, `wpa3_personal`, `wpa3_enterprise`, `wpa3_transition`.
-   Plus `interface_wlan` — `(interface_id, wireless_lan_id)` primary key.
-   **`ssid` is not unique**: the same SSID at two sites is two rows, which is
-   the point of D6.
+   No behaviour column yet (D3).
+
+   `wireless_lan` —
+   `id TEXT PRIMARY KEY`; `name TEXT NOT NULL`; `ssid TEXT NOT NULL`;
+   `security TEXT NOT NULL REFERENCES wireless_security(code)`;
+   `scope_asset_id TEXT REFERENCES asset(id)` nullable;
+   `vlan_id TEXT REFERENCES vlan(id)` nullable;
+   `auth_service_id TEXT REFERENCES service(id)` nullable;
+   `psk_ref TEXT` nullable; `notes TEXT` nullable;
+   `lifecycle TEXT NOT NULL DEFAULT 'active' CHECK (lifecycle IN (…))`;
+   `created_at`/`updated_at TEXT NOT NULL`; `row_version INTEGER NOT NULL DEFAULT 1`.
+   Timestamps and ids come from Go, never the database.
+
+   **No `ON DELETE CASCADE` on any of the three optional references.** A site,
+   a VLAN or a service is soft-retired, never deleted, so a cascade here would
+   be a rule that can never fire pretending to be a safety net.
+
+   Indexes, mirroring the VLAN model rather than leaving it to be noticed:
+   - `UNIQUE (ssid, scope_asset_id) WHERE lifecycle <> 'retired'` — **`ssid`
+     alone is deliberately not unique** (D6: the same SSID at two sites is two
+     rows), but the same SSID twice in one scope is a duplicate, not a fact.
+     NULL scope is estate-wide and unique there. *Note the engines differ on
+     NULL in a unique index; if the partial index cannot express this
+     identically on both, say so rather than shipping two behaviours.*
+   - `idx_wireless_lan_scope ON wireless_lan(scope_asset_id)`
+   - `idx_wireless_lan_vlan ON wireless_lan(vlan_id)`
+
+   `interface_wlan` — `interface_id TEXT NOT NULL REFERENCES interface(id) ON
+   DELETE CASCADE`, `wireless_lan_id TEXT NOT NULL REFERENCES wireless_lan(id)`,
+   `PRIMARY KEY (interface_id, wireless_lan_id)`, plus
+   `idx_interface_wlan_lan ON interface_wlan(wireless_lan_id)` for the
+   structure join. Cascade on the interface only, matching `interface_vlan`:
+   the membership has no life without its port.
 2. **Three form-factor seed rows** (D2) — data, no migration.
-3. **`domain.WirelessLAN`** with a constructor that validates, and `psk_ref`
-   added to `domain.RedactedFields` (D4).
-4. **Column classification** — every new column in `docs/AUDIT.md`'s table
-   **and** `internal/domain/classification.go`. All declared (§2.6).
-   `TestEveryColumnIsClassified` fails the build otherwise, in both directions.
+3. **`domain.WirelessLAN`** and `NewWirelessLAN`, validating: `name` and `ssid`
+   required and trimmed; `security` present in the vocabulary (checked in the
+   store via `requireVocabulary`, as form factors are); `lifecycle` defaulted
+   and in the constant set. **`psk_ref` is never required** — an estate may
+   record an SSID without recording where its secret lives, and demanding one
+   is how a passphrase ends up pasted into the field (§2.5). No cross-field
+   rule tying `psk_ref` to a security mode, for the same reason.
+   `psk_ref` joins `domain.RedactedFields` beside `secret_ref` and `key_ref` (D4).
+4. **Column classification** — every new column listed individually in
+   `docs/AUDIT.md`'s table **and** in `internal/domain/classification.go`, for
+   all three tables. All declared (§2.6). `TestEveryColumnIsClassified` reads
+   the live schema on both engines and fails in both directions: an
+   unclassified column, and a classified column that no longer exists.
 5. **Store**: CRUD, soft-retire, and `SetInterfaceWLANs` following
    `SetInterfaceVLANs` and `SetClusterMembers` — wholesale replace inside the
    parent's transaction, folded into the parent's audited value (D7).
