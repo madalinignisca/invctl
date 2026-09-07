@@ -112,16 +112,26 @@ type respondCall struct {
 // A computed name is skipped rather than failed. Nothing in this package
 // computes one today, and a rule against it would be inventing a convention
 // this test was not asked to enforce.
+// GLOBBED AND PARSED PER FILE rather than parser.ParseDir, which staticcheck
+// rejects as deprecated since Go 1.25 because it ignores build tags when
+// grouping files into packages. That grouping is the only thing ParseDir added
+// here and this scan never used it -- every Respond call is wanted wherever it
+// sits. The suggested replacement, golang.org/x/tools/go/packages, would be a
+// new dependency for a convenience this does not need.
 func respondPartialArgs(dir string) ([]respondCall, error) {
-	fset := token.NewFileSet()
-	pkgs, err := parser.ParseDir(fset, dir, nil, parser.ParseComments)
+	paths, err := filepath.Glob(filepath.Join(dir, "*.go"))
 	if err != nil {
 		return nil, err
 	}
 
+	fset := token.NewFileSet()
 	var out []respondCall
-	for _, pkg := range pkgs {
-		for path, file := range pkg.Files {
+	for _, path := range paths {
+		file, err := parser.ParseFile(fset, path, nil, parser.ParseComments)
+		if err != nil {
+			return nil, err
+		}
+		{
 			ast.Inspect(file, func(n ast.Node) bool {
 				call, ok := n.(*ast.CallExpr)
 				if !ok {
