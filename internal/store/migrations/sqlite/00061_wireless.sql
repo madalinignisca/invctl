@@ -188,15 +188,30 @@ INSERT INTO interface_form_factor (code, label, sort_order, description) VALUES
 -- CreateInstance refuses it on this column. is_attachable TRUE -- an AP is a
 -- network element and can be the subject of a net_attachment, which is what
 -- makes declaring one POSSIBLE for an estate where an AP lands somewhere its
--- parent switch does not. sort_order 55 puts it between switch (50) and
+-- parent switch does not. sort_order 58 puts it between switch (50) and
 -- patch_panel (60): the ordering is containment, and an AP hangs off a switch.
+-- (55 and 52 were tried first and both collide with the literal 55
+-- vocabulary_test.go's TestVocabularyValueAddedAsDataIsUsableImmediately
+-- inserts on the fly to prove a value added as data sorts correctly: any
+-- sort_order strictly between switch's 50 and that test's 55 lands between
+-- them and breaks the adjacency the test checks. 58 stays in the "between
+-- switch and patch_panel" band while sitting after the test's own
+-- insertion point.)
+--
+-- description is set in the same INSERT rather than left to a later UPDATE,
+-- unlike 00006_bridge_kind.sql's `bridge`: 00007_vocabulary_descriptions.sql
+-- (which added the column and backfilled `bridge`) already ran by the time
+-- this migration does, so a value inserted here with no description would
+-- fail TestEveryVocabularyTermHasADescription rather than being caught by a
+-- later migration the way `bridge` was.
 --
 -- SHIPS HERE, NOT AS ITS OWN MIGRATION: §4 named the gap ("`asset_kind` has
 -- twelve and none is an access point") and the demo fixture asks for two APs,
 -- so leaving this out would force the seed to call them switches -- a lie its
 -- own tests then assert against. docs/wireless-design.md, corrected 2026-09-07.
-INSERT INTO asset_kind (code, label, sort_order, can_host_instances, is_attachable)
-VALUES ('access_point', 'Access point', 55, FALSE, TRUE);
+INSERT INTO asset_kind (code, label, sort_order, can_host_instances, is_attachable, description)
+VALUES ('access_point', 'Access point', 58, FALSE, TRUE,
+        'A wireless access point. Forwards frames and runs nothing, so it hangs off a switch the way a bridge hangs off a hypervisor.');
 
 -- +goose Down
 DELETE FROM asset_kind WHERE code = 'access_point';
