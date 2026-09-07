@@ -297,6 +297,26 @@ func countEstate(t *testing.T, f *fixture) map[string]int {
 		t.Fatalf("listing device types: %v", err)
 	}
 	out["device types"] = len(types)
+
+	// WIRELESS IS COUNTED HERE OR IT IS NOT COUNTED AT ALL. wirelessLANs()
+	// joined TopUp's phase list on 2026-09-07, and the whole-estate assertion
+	// above is what holds it to the idempotency bar this list sets -- but only
+	// for the things this function looks at. A phase whose rows nothing counts
+	// can duplicate them freely with every test still green, which is exactly
+	// how it would go unnoticed: the demo would gain a second `corp` on each
+	// redeploy and no suite would say so.
+	wlans, err := f.store.ListWirelessLANs(f.ctx)
+	if err != nil {
+		t.Fatalf("listing wireless LANs: %v", err)
+	}
+	out["wireless lans"] = len(wlans)
+	for _, w := range wlans {
+		radios, err := f.store.ListWLANRadios(f.ctx, w.ID)
+		if err != nil {
+			t.Fatalf("listing radios on %s: %v", w.SSID, err)
+		}
+		out["wireless memberships"] += len(radios)
+	}
 	return out
 }
 

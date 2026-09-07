@@ -313,6 +313,17 @@ func (b *builder) wirelessLANs() {
 			b.fail(fmt.Errorf("seeding radio %s: unknown asset %s", r.name, r.asset))
 			return
 		}
+		// TOP-UP: a radio already on this asset is left alone and its id is
+		// recorded, so the phases below find it. CreateInterface would
+		// otherwise collide on UNIQUE (asset_id, name) and take the whole
+		// top-up down with it.
+		if existingID, found, err := b.existingInterface(assetID, r.name); err != nil {
+			b.fail(fmt.Errorf("looking for radio %s/%s: %w", r.asset, r.name, err))
+			return
+		} else if found {
+			b.interfaceIDs[r.asset+"/"+r.name] = existingID
+			continue
+		}
 		iface, err := domain.NewInterface(store.NewID(), assetID, r.name, r.formFactor)
 		if err != nil {
 			b.fail(fmt.Errorf("building radio %s/%s: %w", r.asset, r.name, err))
@@ -343,9 +354,29 @@ func (b *builder) wirelessLANs() {
 		{"Guest", "guest", "open", "production-workloads", "", ""},
 		{"Warehouse scanners", "warehouse-scan", "wpa2_personal", "", "", ""},
 	}
+	// Read once rather than per spec: three lookups against a table this phase
+	// is about to write to would each see a different estate.
+	existingWLANs, err := b.store.ListWirelessLANs(b.ctx)
+	if err != nil {
+		b.fail(fmt.Errorf("reading the wireless LANs already present: %w", err))
+		return
+	}
+	bySSID := make(map[string]string, len(existingWLANs))
+	for _, row := range existingWLANs {
+		bySSID[row.SSID] = row.ID
+	}
+
 	for _, s := range specs {
 		if !b.ok() {
 			return
+		}
+		// TOP-UP: an SSID already recorded keeps whatever somebody set on it.
+		// Creating it again would collide on the partial unique index over
+		// (ssid, scope_asset_id) -- these are all estate-wide, so they land in
+		// the NULL-scope half of it.
+		if id, exists := bySSID[s.ssid]; exists {
+			b.refs.WirelessLANs[s.ssid] = id
+			continue
 		}
 		w, err := domain.NewWirelessLAN(store.NewID(), s.name, s.ssid, s.security, nil)
 		if err != nil {
@@ -405,6 +436,21 @@ func (b *builder) wirelessLANs() {
 		if err != nil {
 			b.fail(fmt.Errorf("reading wireless membership: %w", err))
 			return
+		}
+		// TOP-UP: already a member is nothing to do. Appending regardless would
+		// send SetInterfaceWLANs a list with the pair twice, colliding on the
+		// (interface_id, wireless_lan_id) primary key -- and, worse, a write
+		// that changed nothing would still be a change_log entry saying the
+		// port moved when it did not.
+		alreadyMember := false
+		for _, existing := range current {
+			if existing.WirelessLANID == wlanID {
+				alreadyMember = true
+				break
+			}
+		}
+		if alreadyMember {
+			continue
 		}
 		current = append(current, domain.InterfaceWLAN{InterfaceID: ifaceID, WirelessLANID: wlanID})
 		if err := b.store.SetInterfaceWLANs(b.ctx, Permit, ifaceID, current); err != nil {
