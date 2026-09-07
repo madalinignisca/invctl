@@ -143,10 +143,57 @@ func (r *Renderer) Partial(w http.ResponseWriter, status int, name string, data 
 // every route working with JavaScript disabled and makes deep links valid.
 func (r *Renderer) Respond(w http.ResponseWriter, req *http.Request, status int, page, partial string, data any) {
 	if IsHTMX(req) && partial != "" {
-		r.Partial(w, status, partial, data)
+		r.pagePartial(w, status, page, partial, data)
 		return
 	}
 	r.Page(w, status, page, data)
+}
+
+// pagePartial renders one {{define}} out of a PAGE's own template set.
+//
+// IT IS NOT Partial, AND THE DIFFERENCE WAS A LATENT 500 ON ELEVEN ROUTES.
+// Partial executes against r.partials, which parse() builds from
+// templates/partials/*.html and nothing else. But the swappable region of a
+// page is conventionally declared inside the page file next to the markup that
+// uses it -- {{define "cost_report"}} lives in pages/cost_report.html, and
+// eleven handlers named a region of that kind. None of them was in r.partials,
+// so every one answered "no such template" and therefore 500 to any request
+// carrying HX-Request: true.
+//
+// Nothing had ever sent one: the nav rail is plain hrefs, no hx-boost, and the
+// forms on the affected pages are plain method="post". So the whole class sat
+// unreachable and silent, one attribute away from breaking eleven routes at
+// once for somebody with no reason to suspect a handler.
+//
+// r.pages[page] is the right set to execute against and not merely a
+// convenient one: parse() builds it from the layout, EVERY partial, and the
+// page file, so it resolves a page-level define and a shared partial alike,
+// and it does so per page -- two pages may each define "rows" without one
+// silently rendering the other's, which a single flattened namespace would
+// allow. Respond is the only caller because it is the only place that knows
+// both names.
+func (r *Renderer) pagePartial(w http.ResponseWriter, status int, page, partial string, data any) {
+	if r.dev {
+		if err := r.parse(); err != nil {
+			r.serverError(w, fmt.Errorf("reparsing templates: %w", err))
+			return
+		}
+	}
+	ts, ok := r.pages[page]
+	if !ok {
+		r.serverError(w, fmt.Errorf("rendering partial %s: no such page %q", partial, page))
+		return
+	}
+	// Buffered for the reason Page gives: a template error halfway through
+	// would otherwise be a 200 carrying half a fragment.
+	var buf bytes.Buffer
+	if err := ts.ExecuteTemplate(&buf, partial, data); err != nil {
+		r.serverError(w, fmt.Errorf("rendering partial %s of page %s: %w", partial, page, err))
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(status)
+	writeBuffered(w, &buf)
 }
 
 // IsHTMX reports whether the request came from HTMX.
