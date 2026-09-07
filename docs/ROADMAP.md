@@ -362,14 +362,41 @@ analysis is the part worth sizing around.*
 **WP-B2 · Front and rear ports, pass-through** — M — **DONE**
 Port position mapping on patch panels and similar passive gear.
 
-**WP-B3 · Cables and path tracing** — L — **DONE**
+**WP-B3 · Cables and path tracing** — L — **TRACER DONE, ENGINE HALF NOT DELIVERED**
 Cable with two terminations; a tracer that walks pass-through hops end to end.
 Explicit hop limit, cycle guard, and a test asserting termination on a
 deliberately malformed patch field — this is where these systems get slow and
-subtly wrong.
+subtly wrong. All of that is delivered, and WP-B4 extended it to breakout.
 
-Engine: a cable or panel becomes a failure target; partitioned findings gain the
-specific hop responsible.
+~~Engine: a cable or panel becomes a failure target; partitioned findings gain
+the specific hop responsible.~~ **NOT BUILT. Recorded 2026-09-07**, found while
+specifying B4 and verified again before writing this down: `impact.Request`
+(`internal/impact/engine.go:26-43`) accepts `DownAssetIDs` and `CutCircuitIDs`
+and nothing else. There is no `CutLinkIDs` and no equivalent, so **cutting a
+cable concludes nothing today** — an operator's only recourse is to down an
+asset, which is a different question and a blunter one.
+
+This entry read **DONE** for weeks with half of it unbuilt, which is worth as
+much attention as the gap itself: a work package that delivers its first
+paragraph and not its second still closes, because nothing checks the second.
+
+Reviving it is not a small job and it is not merely wiring. `link` is
+deliberately **not** a reachability edge — `internal/store/graph_coverage_test.go`
+records the reason with the exclusion, that `docs/reachability-design.md` models
+reachability at forwarder-group level and *"a cable genuinely cannot tell you
+which way traffic flows, so it is declared rather than guessed"*. Adding `link`
+to the impact graph would be a second, disagreeing answer to a question
+`net_attachment` already answers. So a cable-as-failure-target has to be
+designed against that decision rather than around it, which is a spec, not a
+patch.
+
+*The other three closed work packages that promise an engine change were
+checked at the same time and all three delivered:* B1's feed is simulatable
+(`PowerFeedImpact` → `AssetsLosingPower`), E2's HA semantics are in
+`impact/clusters.go`'s `applyClusterHA`, and C1's expiry resolves a support
+date from the device type **and says which source it used** — `EOLSource`
+distinguishes `EOLFromAsset` from `EOLFromDeviceType`, which is the provenance
+that entry asked for. B3 is the only one.
 
 **WP-B4 · Cable profiles and bundles** — L — depends: B3 — **PANEL BREAKOUT DONE, CABLES AND BUNDLES NOT STARTED**
 Panel breakout is delivered: `docs/panel-breakout-design.md` and
