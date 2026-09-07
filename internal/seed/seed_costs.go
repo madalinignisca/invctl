@@ -106,6 +106,14 @@ func (b *builder) costs() {
 		{"fw-edge-2", "acquisition", domain.CostOnce, 3100, -1800, ""},
 		{"fw-edge-1", "support", domain.CostYearly, 610, -1800, "lapsed; renewal quoted, not taken"},
 
+		// The two access points (WP-F1). Modest, in support, and otherwise
+		// unremarkable -- the wireless fixture's point is the structure
+		// findings, not the money, so these two lines exist only to keep
+		// TestEveryPricedKindOfAssetCarriesAFigure honest rather than to add
+		// anything to the ownership story above.
+		{"ap-1", "acquisition", domain.CostOnce, 340, -300, "tri-radio"},
+		{"ap-2", "acquisition", domain.CostOnce, 340, -300, "tri-radio"},
+
 		// The stranded box, owned by observability. A small, unremarkable
 		// number attached to a host that cannot reach anything -- which is what
 		// makes it worth seeing next to the reachability finding.

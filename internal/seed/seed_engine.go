@@ -36,6 +36,9 @@ import (
 //	transit VLAN 99 ports on sw-core-1 only        -> EMPTIED by losing it
 //	site-stretch   one termination                 -> an overlay connecting nothing
 //	TN-DEMO-1      one end recorded                -> a circuit half known
+//	corp            two APs                        -> reduced to one by losing one
+//	guest           two APs                        -> EMPTIED by losing both
+//	warehouse-scan  one AP                         -> a standing single point of failure
 //
 // If somebody removes a rule, the fixture stops demonstrating it and the tests
 // in seed_engine_test.go say so.
@@ -48,6 +51,7 @@ func (b *builder) engineEdges() {
 	b.vlanMembership()
 	b.firstHopRedundancy()
 	b.overlayAndCircuit()
+	b.wirelessLANs()
 }
 
 // virtualisationCluster makes the three hypervisors carry each other.
@@ -256,6 +260,157 @@ func (b *builder) overlayAndCircuit() {
 		}
 		if err := b.store.CreateCircuitTermination(b.ctx, Permit, t); err != nil {
 			b.fail(fmt.Errorf("seeding circuit end: %w", err))
+		}
+	}
+}
+
+// wirelessLANs gives WP-F1's structure kind two access points, three radios
+// each -- which is what makes D2's "three, not one" visible in the demo --
+// and three SSIDs arranged so BOTH structure findings have something to
+// find, exactly as vlanMembership arranges VLAN 99 and firstHopRedundancy
+// arranges gw-transit/gw-prod above.
+//
+//	corp on ap-1/radio_5g and ap-2/radio_5g   -> losing one AP reduces it to one
+//	guest on radio_2g4+radio_5g of both APs   -> losing both APs EMPTIES it
+//	warehouse-scan on ap-2/radio_2g4 alone    -> a standing single point of
+//	                                              failure, not a consequence of
+//	                                              this outage (§2.2)
+//
+// ap-2/radio_2g4 broadcasts BOTH guest and warehouse-scan on purpose: one
+// radio serving several SSIDs is the ordinary case (§2.4) and is the reason
+// this is not a `link` row. Both APs' radio_6g stay unused, which is its own
+// small finding -- a declared radio broadcasting nothing -- visible on the
+// asset's own Radios panel (Task 7b).
+func (b *builder) wirelessLANs() {
+	if !b.ok() {
+		return
+	}
+
+	// Two access points under the Oslo site, alongside the switches that
+	// already live in rack-a1/rack-b1 -- an AP is estate hardware like any
+	// other, not a special case that needs its own site.
+	b.asset(domain.KindAccessPoint, "ap-1", "dc-oslo", []string{"prod"}, nil)
+	b.asset(domain.KindAccessPoint, "ap-2", "dc-oslo", []string{"prod"}, nil)
+	if !b.ok() {
+		return
+	}
+
+	type radioSpec struct{ asset, name, formFactor string }
+	radios := []radioSpec{
+		{"ap-1", "radio-2g4", domain.FFRadio2G4},
+		{"ap-1", "radio-5g", domain.FFRadio5G},
+		{"ap-1", "radio-6g", domain.FFRadio6G},
+		{"ap-2", "radio-2g4", domain.FFRadio2G4},
+		{"ap-2", "radio-5g", domain.FFRadio5G},
+		{"ap-2", "radio-6g", domain.FFRadio6G},
+	}
+	for _, r := range radios {
+		if !b.ok() {
+			return
+		}
+		assetID, ok := b.refs.Assets[r.asset]
+		if !ok {
+			b.fail(fmt.Errorf("seeding radio %s: unknown asset %s", r.name, r.asset))
+			return
+		}
+		iface, err := domain.NewInterface(store.NewID(), assetID, r.name, r.formFactor)
+		if err != nil {
+			b.fail(fmt.Errorf("building radio %s/%s: %w", r.asset, r.name, err))
+			return
+		}
+		if err := b.store.CreateInterface(b.ctx, Permit, iface); err != nil {
+			b.fail(fmt.Errorf("seeding radio %s/%s: %w", r.asset, r.name, err))
+			return
+		}
+		b.interfaceIDs[r.asset+"/"+r.name] = iface.ID
+	}
+	if !b.ok() {
+		return
+	}
+
+	// Three SSIDs. corp gets BOTH a psk_ref and wpa2_enterprise -- an odd
+	// real-world pairing, deliberate here so the demo shows every declared
+	// wireless field on screen at once (§4 item 8): NewWirelessLAN ties
+	// neither to the other (D4/§2.5's "no cross-field rule"), so recording
+	// both on one row is a legitimate state, not a validation gap.
+	type wlanSpec struct {
+		name, ssid, security string
+		vlan, authService    string // vlan/authService are ref names; "" means unset
+		pskRef               string
+	}
+	specs := []wlanSpec{
+		{"Corp", "corp", "wpa2_enterprise", "", "sso", "kv/demo/wifi/corp/psk"},
+		{"Guest", "guest", "open", "production-workloads", "", ""},
+		{"Warehouse scanners", "warehouse-scan", "wpa2_personal", "", "", ""},
+	}
+	for _, s := range specs {
+		if !b.ok() {
+			return
+		}
+		w, err := domain.NewWirelessLAN(store.NewID(), s.name, s.ssid, s.security, nil)
+		if err != nil {
+			b.fail(fmt.Errorf("building wireless lan %s: %w", s.ssid, err))
+			return
+		}
+		if s.vlan != "" {
+			if vlanID, ok := b.refs.VLANs[s.vlan]; ok {
+				w.VLANID = &vlanID
+			}
+		}
+		if s.authService != "" {
+			if svcID, ok := b.refs.Services[s.authService]; ok {
+				w.AuthServiceID = &svcID
+			}
+		}
+		if s.pskRef != "" {
+			w.PSKRef = str(s.pskRef)
+		}
+		if err := b.store.CreateWirelessLAN(b.ctx, Permit, w); err != nil {
+			b.fail(fmt.Errorf("seeding wireless lan %s: %w", s.ssid, err))
+			return
+		}
+		b.refs.WirelessLANs[s.ssid] = w.ID
+	}
+	if !b.ok() {
+		return
+	}
+
+	// Membership, radio by radio, THROUGH ListInterfaceWLANMembers ->
+	// append -> SetInterfaceWLANs -- never a direct INSERT, which would skip
+	// the audit fold (D7). Same shape as vlanMembership above.
+	type member struct{ asset, radio, ssid string }
+	for _, m := range []member{
+		{"ap-1", "radio-5g", "corp"},
+		{"ap-2", "radio-5g", "corp"},
+		{"ap-1", "radio-2g4", "guest"},
+		{"ap-1", "radio-5g", "guest"},
+		{"ap-2", "radio-2g4", "guest"},
+		{"ap-2", "radio-5g", "guest"},
+		{"ap-2", "radio-2g4", "warehouse-scan"},
+	} {
+		if !b.ok() {
+			return
+		}
+		wlanID, ok := b.refs.WirelessLANs[m.ssid]
+		if !ok {
+			b.fail(fmt.Errorf("seeding wireless membership: unknown wireless lan %s", m.ssid))
+			return
+		}
+		ifaceID, ok := b.interfaceIDs[m.asset+"/"+m.radio]
+		if !ok {
+			b.fail(fmt.Errorf("seeding wireless membership: unknown radio %s/%s", m.asset, m.radio))
+			return
+		}
+		current, err := b.store.ListInterfaceWLANMembers(b.ctx, ifaceID)
+		if err != nil {
+			b.fail(fmt.Errorf("reading wireless membership: %w", err))
+			return
+		}
+		current = append(current, domain.InterfaceWLAN{InterfaceID: ifaceID, WirelessLANID: wlanID})
+		if err := b.store.SetInterfaceWLANs(b.ctx, Permit, ifaceID, current); err != nil {
+			b.fail(fmt.Errorf("seeding wireless membership for %s/%s on %s: %w",
+				m.asset, m.radio, m.ssid, err))
+			return
 		}
 	}
 }
