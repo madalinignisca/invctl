@@ -73,6 +73,36 @@ jobs:
           go mod tidy
           git diff --exit-code go.mod go.sum
 
+  # TWO JOBS, NOT TWO STEPS, and the difference is the whole point of the split.
+  #
+  # These were one job until 2026-09-07, with the race run as a second step. The
+  # comment on that step said the two were kept apart because "the race detector
+  # is slow enough that folding it in would make the fast signal wait for the
+  # slow one, and both are worth having" -- which was the right intent and was
+  # not what separate STEPS buy. Steps run in sequence and report as one check,
+  # so the plain run's result was invisible until the race run finished and the
+  # fast signal waited for the slow one exactly as the comment set out to avoid.
+  #
+  # Measured on run 34136919507 before the split:
+  #
+  #     test (both engines)        1372s
+  #     test -race (both engines)  3845s
+  #     everything else              47s
+  #
+  # So an ordinary broken test took 87 minutes to surface, 74% of it spent
+  # proving something unrelated to the failure. As two jobs they start together:
+  # the same runner minutes, an ordinary failure visible in about 24 minutes,
+  # and the whole gate done in about 65 rather than 87.
+  #
+  # It also makes the two failures distinguishable at a glance. "tests failed"
+  # and "a data race was detected" are different problems with different fixes,
+  # and they were one red check.
+  #
+  # THE DUPLICATION IS DELIBERATE. Both jobs carry the same service block and
+  # the same env, because a matrix over `-race` would express the shared half
+  # once and then need `if` guards on the timeout, the job name and the cache
+  # key -- more machinery than the four lines it would save, and harder to read
+  # in the place people read it, which is a failing check's log.
   test:
     runs-on: ubuntu-latest
     services:
@@ -103,7 +133,6 @@ jobs:
       - name: build
         run: CGO_ENABLED=0 go build ./...
 
-
       # THE TIMEOUT IS EXPLICIT BECAUSE GO'S DEFAULT IS TEN MINUTES AND THIS
       # SUITE GENUINELY TAKES LONGER. It runs every store test twice -- SQLite
       # in memory and PostgreSQL over a socket -- which is the project's central
@@ -119,9 +148,39 @@ jobs:
       - name: test (both engines)
         run: go test ./... -count=1 -timeout 30m
 
-      # Separate from the plain run: the race detector is slow enough that
-      # folding it in would make the fast signal wait for the slow one, and both
-      # are worth having.
-      # The race detector multiplies the above, so it gets more room again.
+  test-race:
+    runs-on: ubuntu-latest
+    services:
+      # Identical to `test` above, deliberately -- see that job's header for why
+      # this is duplicated rather than shared through a matrix.
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: invctl
+          POSTGRES_PASSWORD: invctl
+          POSTGRES_DB: invctl
+        ports: ["5433:5432"]
+        options: >-
+          --health-cmd "pg_isready -U invctl"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      INV_TEST_POSTGRES_DSN: postgres://invctl:invctl@127.0.0.1:5433/invctl?sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # NO `build` STEP HERE. `test` above already proves the tree compiles, and
+      # this job's own compile happens under -race anyway, so a plain build
+      # would be a third compile of the same code proving nothing the other two
+      # do not.
+
+      # The race detector instruments every memory access, so it costs roughly
+      # 2.8x the plain run on this suite (3845s against 1372s, measured) and
+      # gets proportionally more room. `make test-race` is the same command.
       - name: test -race (both engines)
         run: go test -race ./... -count=1 -timeout 60m
