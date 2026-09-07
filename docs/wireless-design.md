@@ -10,7 +10,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 # Wireless LANs — design
 
-**Status: DRAFT 2026-09-07, awaiting challenge.** WP-F1's roadmap entry read:
+**Status: DRAFT 2026-09-07, challenged and amended; D5 was wrong.** WP-F1's roadmap entry read:
 
 > Wireless LANs, groups, links between interfaces, authentication attributes.
 > Links are reachability edges like cables; a wireless bridge is a single point
@@ -217,22 +217,59 @@ must be a behaviour column on the lookup row** — the `asset_kind.can_host_inst
 and `environment_role.is_transit` pattern — and never a hardcoded set in Go.
 Writing that down here is the whole point of the 00004 caveat.
 
+**Expect that to happen**, and it is not a reason to pre-empt it: "an open SSID
+exists in this estate" is a plausible near-term finding, and the day it is
+wanted, `wireless_security` gains an `is_open` column and the finding reads it.
+That is a migration on a lookup table with six rows, which is cheap. Guessing at
+the behaviour column now, before anything reads it, is how the 00004 caveat says
+these go wrong in the other direction.
+
 ### D4. A PSK is a reference, never a value — **decided**
 
 `psk_ref` holds a path, joins `domain.RedactedFields` beside `secret_ref` and
 `key_ref`, and the audit records *that* it changed and never what to. There is
 no passphrase column and there will not be one. §2.5.
 
-### D5. Enterprise authentication is a `dependency`, not a new table — **decided**
+### D5. Enterprise auth is a nullable reference to a service — **CORRECTED 2026-09-07**
 
-An 802.1X SSID authenticates against a RADIUS service. This estate already
-models "this thing needs that service" as `dependency`, with a data
-classification, an auth method and a two-ended permit. Inventing a
-`wireless_auth_profile` table would be a second, narrower answer to a question
-`dependency` answers generally.
+The first draft said an enterprise WLAN should declare a `dependency` on the
+RADIUS service, on the reasoning that this estate already models "this thing
+needs that service" generally and a wireless-specific table would be a second,
+narrower answer.
 
-So an enterprise WLAN declares a dependency on the RADIUS `service` like
-anything else does, and F1 adds no authentication entity at all.
+**That is impossible, and the challenge round caught it.**
+`00004_dependencies.sql` begins:
+
+```sql
+CREATE TABLE dependency (
+  id                   TEXT PRIMARY KEY,
+  consumer_service_id  TEXT NOT NULL REFERENCES service(id) ON DELETE CASCADE,
+```
+
+**A dependency's consumer must BE a service.** A wireless LAN is not one, so it
+can never be the consumer end of a dependency row.
+
+The reasoning that produced it was sound as far as it went, and stopped one link
+short: `dependency` does model "needs that service", and it even carries
+`identity_id` and `auth_method`, which is what made it look purpose-built. What
+went unchecked was the *other* end — what a consumer is allowed to be.
+
+**Decision: `wireless_lan.auth_service_id`, a nullable reference to
+`service(id)`.** The same shape as `vlan_id` beside it. It records the fact the
+roadmap asked for — *this SSID authenticates against that service* — with no new
+entity, no polymorphic consumer, and no change to `dependency`.
+
+**It is deliberately NOT an impact edge, and the distinction is real.** If the
+RADIUS service dies, the SSID does not stop being broadcast: existing clients
+stay associated and the structure is not emptied. New authentications fail,
+which is a different outage with a different blast radius, and claiming
+otherwise would put a wrong edge in the graph. So this column is recorded and
+rendered, and nothing derives from it.
+
+**What is genuinely deferred**: making an SSID a first-class consumer of
+services in general. That needs `dependency` to accept a non-service consumer —
+a polymorphic reference, which is the one join shape this codebase has avoided
+everywhere — and it is an architecture decision, not a column.
 
 ### D6. Scope is an asset, reusing the VLAN trick — **decided**
 
@@ -269,7 +306,8 @@ detail.
 1. **Migration** (paired sqlite/postgres, or `shared/`): `wireless_lan` —
    `id`, `name`, `ssid`, `security` → `wireless_security(code)`,
    `scope_asset_id` → `asset(id)` nullable, `vlan_id` → `vlan(id)` nullable,
-   `psk_ref`, `notes`, `lifecycle`, `created_at`, `updated_at`, `row_version`.
+   `auth_service_id` → `service(id)` nullable (D5), `psk_ref`, `notes`,
+   `lifecycle`, `created_at`, `updated_at`, `row_version`.
    Plus `wireless_security` seeded with `open`, `wpa2_personal`,
    `wpa2_enterprise`, `wpa3_personal`, `wpa3_enterprise`, `wpa3_transition`.
    Plus `interface_wlan` — `(interface_id, wireless_lan_id)` primary key.
@@ -295,8 +333,12 @@ detail.
    carrying a third SSID alone — so the *reduced to one* finding has something
    to find and the demo shows both states.
 9. **Tests**, and the first two are the ones that would otherwise rot:
-   - moving a radio between SSIDs produces a **`change_log` diff on the
-     interface** (D7 — the failure this codebase has had three times)
+   - `TestMovingARadioBetweenSSIDsAuditsTheInterface` — moving a radio from one
+     SSID to another produces a **`change_log` diff on the interface** (D7 — the
+     failure this codebase has had three times). Named here so a reviewer can
+     check that the test exercises the fold rather than merely existing: it must
+     fail when the membership is written without folding into the interface's
+     audited value, not merely when the write itself breaks.
    - `psk_ref` is redacted in both `snapshotJSON` and `diffJSON`, and a rotation
      is still **visible as having happened** — `TestSnapshotRedactsSecretRef`
      asserts both directions and this must too
@@ -318,7 +360,11 @@ detail.
   no band steering. §2.6: those arrive beside the declared columns, never as a
   reinterpretation of them.
 - **No `link` rows.** §2.4.
-- **No authentication profile entity.** D5 — that is a `dependency`.
+- **No authentication profile entity, and no SSID-as-service-consumer.** D5:
+  `auth_service_id` records which service authenticates an SSID and derives
+  nothing from it. Making an SSID a general consumer of services needs
+  `dependency` to accept a non-service consumer — a polymorphic reference this
+  codebase has avoided everywhere — and that is an architecture decision.
 - **No channel planning, no RF survey, no coverage map.** An inventory records
   what somebody declared; a coverage map is a measurement and a different
   product.
