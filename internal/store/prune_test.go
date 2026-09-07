@@ -732,6 +732,19 @@ func TestTheOnlyFactDeletingStatementIsThePrune(t *testing.T) {
 			tables: []string{"interface_vlan"},
 			reason: "interface_vlan: the set of VLANs a port is in, replaced wholesale",
 		},
+		// interface_wlan holds the CURRENT set of SSIDs a radio broadcasts,
+		// which the radio owns. Replaced wholesale inside the interface's
+		// transaction, and auditedInterfaceWLANs puts the SSID NAMES into the
+		// audited value so the replacement cannot produce an empty diff -- a
+		// radio moving from `corp` to `guest` with no entry in change_log
+		// would be the FIFTH time this codebase made that exact mistake.
+		//
+		// The SSIDs themselves are soft-retired like every other entity, and
+		// RetireWirelessLAN refuses while any radio still broadcasts one.
+		"internal/store/wireless.go": {
+			tables: []string{"interface_wlan"},
+			reason: "interface_wlan: the set of SSIDs a radio broadcasts, replaced wholesale",
+		},
 		// fhrp_member: the routers in a redundancy group. Same rule, fifth time:
 		// replaced wholesale inside the group's transaction, folded into the
 		// group's audited value by auditedFHRPGroup.

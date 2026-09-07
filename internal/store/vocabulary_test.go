@@ -511,6 +511,7 @@ func TestEveryVocabularyTermHasADescription(t *testing.T) {
 				{"ip_address_role", s.IPAddressRoles},
 				{"data_class", s.DataClassVocabulary},
 				{"container_engine", s.ContainerEngines},
+			{"wireless_security", s.WirelessSecurities},
 			} {
 				terms, err := v.read(ctx)
 				if err != nil {
