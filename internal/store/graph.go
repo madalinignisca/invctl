@@ -569,7 +569,8 @@ func (s *SQLStore) Simulate(ctx context.Context, req impact.Request) (impact.Res
 }
 
 // loadStructures reads the declared things that exist only because ports on
-// assets belong to them: VLANs, first-hop redundancy groups, overlays.
+// assets belong to them: VLANs, first-hop redundancy groups, overlays, and
+// (WP-F1) wireless LANs.
 //
 // WP-I1. Each of these arrived as a work package with a model, a page and its
 // own findings, and none reached the impact engine -- so simulating the loss of
@@ -655,6 +656,54 @@ func (s *SQLStore) loadStructures(ctx context.Context) ([]impact.Structure, erro
 		return nil, fmt.Errorf("loading overlay terminations for the graph: %w", err)
 	}
 	collect(overlays)
+
+	// A wireless LAN's members are the radios broadcasting it (WP-F1).
+	//
+	// The FOURTH kind, and the argument for it is interface_vlan's,
+	// unchanged: two laptops on `corp` are in one broadcast domain and no
+	// cable joins them, so this is a fact no cable trace can produce. It is
+	// deliberately NOT a link row and NOT a net_uplink -- a radio cannot tell
+	// you which way traffic flows any more than a cable can, and
+	// docs/reachability-design.md already answers that question at
+	// forwarder-group level.
+	//
+	// SCOPED NAMES, composed in Go rather than in SQL. The same SSID at two
+	// sites is two structures (D6), and two findings both reading "guest"
+	// would be unreadable in the exact moment they matter. The concatenation
+	// is done here rather than with `||` because string concatenation is one
+	// more thing two engines could disagree about for no gain.
+	var wlanRows []struct {
+		ID        string  `db:"id"`
+		SSID      string  `db:"ssid"`
+		ScopeName *string `db:"scope_name"`
+		AssetID   string  `db:"asset_id"`
+	}
+	err = s.read(ctx, &wlanRows, `
+		SELECT w.id, w.ssid, a.name AS scope_name, i.asset_id
+		FROM wireless_lan w
+		JOIN interface_wlan iw ON iw.wireless_lan_id = w.id
+		JOIN interface i ON i.id = iw.interface_id
+		LEFT JOIN asset a ON a.id = w.scope_asset_id
+		WHERE w.lifecycle <> 'retired'
+		ORDER BY w.ssid, i.asset_id`)
+	if err != nil {
+		return nil, fmt.Errorf("loading wireless membership for the graph: %w", err)
+	}
+	wlans := make([]memberRow, 0, len(wlanRows))
+	for _, r := range wlanRows {
+		name := r.SSID
+		if r.ScopeName != nil && *r.ScopeName != "" {
+			name = *r.ScopeName + " / " + r.SSID
+		}
+		wlans = append(wlans, memberRow{
+			Kind: "wlan", ID: r.ID, Name: name, AssetID: r.AssetID,
+		})
+	}
+	// No lifecycle filter on the interface or the asset, matching the three
+	// queries above: a member port on a retired asset still contributes,
+	// because the engine's down set is what decides survival and filtering
+	// here would hide a member the simulation is meant to count.
+	collect(wlans)
 
 	out := make([]impact.Structure, 0, len(order))
 	for _, id := range order {

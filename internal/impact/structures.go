@@ -37,10 +37,16 @@ import (
 // Take the assets away and the structure is still declared and no longer real.
 
 // Structure kinds.
+//
+// StructureWLAN is the fourth kind, WP-F1: a wireless LAN is a Structure
+// (D1) for the identical reason a VLAN is one -- an SSID broadcast by six
+// access points is a fact no cable trace can produce, and taking every
+// carrier down is exactly the case analyseStructures already reports.
 const (
 	StructureVLAN  = "vlan"
 	StructureFHRP  = "fhrp"
 	StructureL2VPN = "l2vpn"
+	StructureWLAN  = "wlan"
 )
 
 // Structure is a declared thing that depends on ports living on assets.
@@ -137,6 +143,9 @@ func emptiedDetail(kind string, total int) string {
 			"(all %d are down)", total)
 	case StructureL2VPN:
 		return fmt.Sprintf("nothing terminates into it any more (all %d ends are down)", total)
+	case StructureWLAN:
+		return fmt.Sprintf("nothing is broadcasting it any more (all %d access points "+
+			"carrying it are down)", total)
 	default:
 		return "nothing left"
 	}
@@ -153,6 +162,9 @@ func reducedDetail(kind string, total int) string {
 	case StructureL2VPN:
 		return fmt.Sprintf("one end left of %d — the overlay connects nothing to "+
 			"anything", total)
+	case StructureWLAN:
+		return fmt.Sprintf("one access point left of %d — the SSID is on the air in one "+
+			"place and does not survive the next failure", total)
 	default:
 		return "one left"
 	}
@@ -166,6 +178,8 @@ func structureHref(kind, id string) string {
 		return "/redundancy/" + id
 	case StructureL2VPN:
 		return "/overlays/" + id
+	case StructureWLAN:
+		return "/wireless/" + id
 	default:
 		return ""
 	}
