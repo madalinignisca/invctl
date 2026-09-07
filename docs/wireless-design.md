@@ -177,6 +177,30 @@ certificate rule generalises to a passphrase word for word:
 A `passphrase TEXT` column is that column. This design has **no** field that
 accepts a key, only a reference to one.
 
+**AND THE REFERENCE IS NOT RENDERED EITHER — corrected 2026-09-07.** The first
+implementation printed `psk_ref` in full on the detail page, reasoning that a
+path is not a secret. That is true, and it is the wrong question: it applies
+half of `secret_ref`'s precedent — the audit half — and skips the disclosure
+half the same precedent answers two documents over.
+
+`identity.secret_ref` is a path too, and `docs/DECISIONS.md` records that it
+*"appears in no template at all. The asymmetry is deliberate."*
+`docs/rbac-design.md` gives the reason:
+
+> "Exposing every integration path in the estate to every authenticated reader
+> is a larger disclosure than the rest of the inventory … This is the boundary
+> between **'the inventory is not a secret' and 'the way in is'**."
+
+A PSK reference is the way in to a wireless network, and these pages are
+readable by every authenticated session including read-only ones.
+
+**So the UI says exactly what the audit says.** `AUDIT.md` rule 12 requires
+`change_log` to record *that* a secret reference changed and never what to; the
+page records *that* one exists and never what it is. **Both directions are
+pinned by a test**, because withholding the path must not also withhold whether
+there is one — an operator who cannot tell a redacted reference from a missing
+one has been given a worse answer than either.
+
 ### 2.6 Declared and observed collide harder here than anywhere
 
 An SSID, its security mode and its VLAN mapping are declared: somebody decided

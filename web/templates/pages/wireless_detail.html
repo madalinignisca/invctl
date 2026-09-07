@@ -26,14 +26,22 @@
       <div class="stat"><div class="k">VLAN</div><div class="v">{{if .WLAN.VLANID}}<a href="/vlans/{{deref .WLAN.VLANID}}">assigned</a>{{else}}—{{end}}</div></div>
       <div class="stat"><div class="k">Auth service</div><div class="v">{{if .WLAN.AuthServiceID}}<a href="/services/{{deref .WLAN.AuthServiceID}}">assigned</a>{{else}}—{{end}}</div></div>
     </div>
-    {{/* psk_ref rendered as PLAIN TEXT, never as a link, and with no reveal
-         control -- there is nothing to reveal. It is a reference to where
-         the key lives (docs/wireless-design.md D4), and the audit trail
-         records only THAT it changed (docs/AUDIT.md rule 12), so this page
-         must not treat it as anything more sensitive than a path either. */}}
-    {{if .WLAN.PSKRef}}
-    <div class="field-hint" style="margin-top:8px">PSK reference: <span class="mono">{{deref .WLAN.PSKRef}}</span></div>
-    {{end}}
+    {{/* THE PATH ITSELF IS NOT RENDERED, only whether one is recorded.
+         Corrected 2026-09-07: this page printed the value, on the reasoning
+         that a path is not a secret. True, and the wrong question --
+         identity.secret_ref is a path too and docs/DECISIONS.md records that
+         it "appears in no template at all. The asymmetry is deliberate."
+         docs/rbac-design.md says why: "Exposing every integration path in the
+         estate to every authenticated reader is a larger disclosure than the
+         rest of the inventory ... the boundary between 'the inventory is not
+         a secret' and 'the way in is'." A PSK reference is the way in to a
+         wireless network, and this page is readable by every session.
+         So the UI says what the audit says (AUDIT.md rule 12): THAT there is
+         one, never what it is. An operator who needs the path reads it from
+         the vault they already have to authenticate to. */}}
+    <div class="field-hint" style="margin-top:8px">
+      PSK reference: {{if .WLAN.PSKRef}}recorded{{else}}not recorded{{end}}
+    </div>
   </div>
 </div>
 

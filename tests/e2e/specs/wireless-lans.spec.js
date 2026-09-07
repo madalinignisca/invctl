@@ -34,11 +34,13 @@
 //      Both structure findings depend on this exact shape, so asserting it
 //      here catches a seed change a store test alone might not.
 //   4. NOTHING this design forbids ever renders on a wireless page (D4,
-//      §2.6): no PSK/passphrase input (`psk_ref` is a plain-text path,
-//      never a secret -- there is nothing to reveal), and no channel, band,
-//      frequency or RSSI field of any kind -- F1 declares only, and channel
-//      planning is explicitly deferred (§2.6: "Adding only the declared
-//      half now would build the trap this section exists to describe").
+//      §2.6): no PSK/passphrase input, NO PSK PATH VALUE -- the page says
+//      only whether one is recorded, because identity.secret_ref is a path
+//      too and appears in no template at all, deliberately, since "exposing
+//      every integration path in the estate to every authenticated reader is
+//      a larger disclosure than the rest of the inventory" (rbac-design.md)
+//      -- and no channel, band, frequency or RSSI field of any kind, since
+//      F1 declares only and channel planning is explicitly deferred.
 //      These are absence claims; each is written so it would fail if such
 //      a field were added -- see the mutation this spec was proven against.
 //
@@ -226,16 +228,31 @@ describe('wireless LANs', () => {
       await assertPageClean(href, `/wireless/{id} (${ssid})`);
     }
 
-    // psk_ref itself is rendered as PLAIN TEXT precisely because it is a
-    // path and not a secret (wireless_detail.html's own comment) -- corp is
-    // the one SSID seeded with a psk_ref, so its detail page is where a
-    // regression toward `type="password"` would actually show up.
+    // THE PSK PATH MUST NOT RENDER, only whether one is recorded. corp is the
+    // one SSID seeded with a psk_ref, so its detail page is the only place the
+    // value could leak, and this is the assertion that would catch it coming
+    // back. A path is not a secret -- and identity.secret_ref is a path too,
+    // and appears in no template at all, deliberately: "exposing every
+    // integration path in the estate to every authenticated reader is a larger
+    // disclosure than the rest of the inventory ... the boundary between 'the
+    // inventory is not a secret' and 'the way in is'" (docs/rbac-design.md).
+    // This page is readable by every session.
     await page.goto('/wireless', { waitUntil: 'networkidle' });
     const corpHref = await page.locator('table tbody tr a:text-is("corp")').first().getAttribute('href');
     await page.goto(corpHref, { waitUntil: 'networkidle' });
+    const corpBody = await page.locator('body').innerText();
+    expect(
+      corpBody.includes('kv/demo/wifi/corp/psk'),
+      'the seeded PSK path leaked to the page; it is the way in to this network and ' +
+        'every authenticated session can read this page (rbac-design.md, DECISIONS.md)',
+    ).toBe(false);
+    // But the page must still say a reference EXISTS -- silence would be
+    // indistinguishable from an SSID nobody has recorded one for, which is the
+    // same both-directions rule TestSnapshotRedactsSecretRef holds the audit to.
     await expect(
-      page.getByText('kv/demo/wifi/corp/psk', { exact: false }),
-      'the seeded PSK reference should render as a plain visible path, not be hidden behind a masked field',
+      page.getByText('PSK reference: recorded', { exact: false }),
+      'the page hides the path but must still say one is recorded, or an operator ' +
+        'cannot tell a redacted reference from a missing one',
     ).toBeVisible();
   });
 });
