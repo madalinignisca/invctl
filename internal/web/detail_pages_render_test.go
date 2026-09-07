@@ -59,6 +59,7 @@ func TestEveryDetailPageRenders(t *testing.T) {
 		{"vlan", "/vlans/", `SELECT id FROM vlan LIMIT 1`},
 		{"overlay", "/overlays/", `SELECT id FROM l2vpn LIMIT 1`},
 		{"redundancy", "/redundancy/", `SELECT id FROM fhrp_group LIMIT 1`},
+		{"wireless_lan", "/wireless/", `SELECT id FROM wireless_lan LIMIT 1`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			id := h.lookup(tc.query)

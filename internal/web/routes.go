@@ -205,6 +205,8 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	read("GET /redundancy/{id}", app.FHRPDetail)
 	read("GET /vlans/{id}", app.VLANDetail)
 	read("GET /network", app.NetworkList)
+	read("GET /wireless", app.WirelessList)
+	read("GET /wireless/{id}", app.WirelessDetail)
 
 	// Authenticated writes. Every non-GET route goes through RequireWrite,
 	// and the whole mux is wrapped in CSRF below.
@@ -511,6 +513,10 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	write("POST /vlans/{id}/retire", app.VLANRetire)
 	write("POST /vlans/{id}/ports", app.VLANPortAdd)
 	write("POST /vlans/{id}/ports/{ifaceID}/remove", app.VLANPortRemove)
+	write("POST /wireless", app.WirelessCreate)
+	write("POST /wireless/{id}/retire", app.WirelessRetire)
+	write("POST /wireless/{id}/radios", app.WirelessRadioAdd)
+	write("POST /wireless/{id}/radios/{ifaceID}/remove", app.WirelessRadioRemove)
 	write("POST /ip-ranges", app.IPRangeCreate)
 	write("POST /ip-ranges/{id}/retire", app.IPRangeRetire)
 

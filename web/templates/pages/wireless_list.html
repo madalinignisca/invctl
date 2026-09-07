@@ -1,0 +1,137 @@
+{{/*
+  invctl — infrastructure inventory
+  Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+
+  Licensed under the GNU Affero General Public License, version 3 only —
+  no later version applies. See LICENSE for the full text.
+
+  SPDX-License-Identifier: AGPL-3.0-only
+*/}}
+{{define "content"}}
+<div class="page-head">
+  <div class="eyebrow">Wireless</div>
+  <h1>Wireless LANs</h1>
+  <p class="lede">
+    An SSID broadcast by several access points is one broadcast domain, whether
+    or not a cable joins the laptops on it — an SSID with <strong>no radios</strong>
+    is a declared record and not yet on the air anywhere.
+  </p>
+</div>
+
+<div class="panel">
+  <div class="panel-head">
+    <h2>{{pluralise (len .WLANs) "SSID" "SSIDs"}}</h2>
+    <span class="panel-note">An SSID is only unique within its scope</span>
+  </div>
+  {{if .WLANs}}
+  <div class="scroll-x">
+    <table>
+      <thead><tr><th>SSID</th><th>Name</th><th>Scope</th><th>Security</th><th>VLAN</th><th>Auth service</th><th class="num">Radios</th><th class="num">APs</th>{{if .IsAdmin}}<th></th>{{end}}</tr></thead>
+      <tbody>
+        {{range .WLANs}}
+        <tr>
+          <td class="mono"><a href="/wireless/{{.ID}}">{{.SSID}}</a></td>
+          <td>{{.Name}}</td>
+          <td>{{if .ScopeAssetName}}{{.ScopeAssetName}}{{else}}<span class="util-note">estate-wide</span>{{end}}</td>
+          <td>{{if .SecurityLabel}}{{.SecurityLabel}}{{else}}—{{end}}</td>
+          <td>{{if .VLANName}}{{.VLANName}}{{if .VLANVID}} <span class="pill pill-muted">{{derefInt .VLANVID}}</span>{{end}}{{else}}—{{end}}</td>
+          <td>{{if .AuthServiceName}}{{.AuthServiceName}}{{else}}—{{end}}</td>
+          <td class="num">
+            {{if .RadioCount}}{{.RadioCount}}
+            {{else}}<span class="util-full" title="Nothing broadcasts this SSID, so it is a record rather than a broadcast domain">0</span>{{end}}
+          </td>
+          <td class="num">{{.AssetCount}}</td>
+          {{if $.IsAdmin}}
+          <td style="white-space:nowrap">
+            <form method="post" action="/wireless/{{.ID}}/retire" style="display:inline">
+              <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+              <button class="btn btn-sm btn-danger" type="submit">Withdraw</button>
+            </form>
+          </td>
+          {{end}}
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{else}}
+  <div class="empty"><strong>No wireless LANs declared.</strong>An access point may already be radiating a network; declaring the SSID is what lets the estate answer "who broadcasts this".</div>
+  {{end}}
+</div>
+
+{{if .IsAdmin}}
+<form id="wireless-form" class="panel" method="post" action="/wireless"
+      hx-post="/wireless" hx-target="#wireless-form" hx-swap="outerHTML">
+  <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+  <div class="panel-head"><h2>Declare a wireless LAN</h2></div>
+  <div class="panel-body">
+    <div class="field-row">
+      <div class="field">
+        <label for="wireless-ssid">SSID</label>
+        <input id="wireless-ssid" class="mono {{if index .FormData.Errors "ssid"}}invalid{{end}}"
+               type="text" name="ssid" placeholder="corp" required>
+        {{with index .FormData.Errors "ssid"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="wireless-name">Name</label>
+        <input id="wireless-name" class="{{if index .FormData.Errors "name"}}invalid{{end}}"
+               type="text" name="name" placeholder="Corp Wi-Fi" required>
+        {{with index .FormData.Errors "name"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="wireless-security">Security</label>
+        <select id="wireless-security" name="security" required>
+          {{range .FormData.Securities}}<option value="{{.Code}}">{{.Label}}</option>{{end}}
+        </select>
+      </div>
+      <div class="field">
+        <label for="wireless-scope">Scope</label>
+        <select id="wireless-scope" name="scope_asset_id">
+          <option value="">Estate-wide</option>
+          {{range .FormData.Assets}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
+        </select>
+        <div class="field-hint">Where this SSID applies — a site, a rack, a cluster. Two estates can both broadcast `guest`.</div>
+      </div>
+    </div>
+    <div class="field-row">
+      <div class="field">
+        <label for="wireless-vlan">VLAN</label>
+        <select id="wireless-vlan" name="vlan_id">
+          <option value="">—</option>
+          {{range .FormData.VLANs}}<option value="{{.ID}}">{{.Name}} ({{.VID}})</option>{{end}}
+        </select>
+        <div class="field-hint">Which broadcast domain a client lands in once associated.</div>
+      </div>
+      <div class="field">
+        <label for="wireless-auth">Auth service</label>
+        <select id="wireless-auth" name="auth_service_id">
+          <option value="">—</option>
+          {{range .FormData.Services}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
+        </select>
+        <div class="field-hint">
+          Recorded and rendered only — nothing derives from it. If this service
+          dies, existing clients stay associated; the SSID does not stop
+          broadcasting (docs/wireless-design.md D5).
+        </div>
+      </div>
+      <div class="field">
+        <label for="wireless-psk">PSK reference</label>
+        <input id="wireless-psk" class="mono" type="text" name="psk_ref"
+               placeholder="kv/prod/wifi/corp/psk">
+        {{/* THIS LOOKS LIKE A PASSWORD FIELD AND MUST NOT BE ONE. psk_ref is a
+             PATH to where the key lives, never the key itself
+             (docs/wireless-design.md §2.5, D4) -- so this is a plain text
+             input, not type="password", and there is no reveal control on
+             the detail page because there is nothing to reveal. */}}
+        <div class="field-hint">A path to where the key lives. Never the passphrase itself.</div>
+      </div>
+      <div class="field">
+        <label for="wireless-notes">Notes</label>
+        <input id="wireless-notes" type="text" name="notes">
+      </div>
+    </div>
+    <button class="btn btn-primary" type="submit">Declare wireless LAN</button>
+  </div>
+</form>
+{{end}}
+{{end}}
