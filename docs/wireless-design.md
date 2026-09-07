@@ -370,12 +370,17 @@ joined, for the same reason.
    be a rule that can never fire pretending to be a safety net.
 
    Indexes, mirroring the VLAN model rather than leaving it to be noticed:
-   - `UNIQUE (ssid, scope_asset_id) WHERE lifecycle <> 'retired'` — **`ssid`
-     alone is deliberately not unique** (D6: the same SSID at two sites is two
+   - **TWO partial unique indexes, not one** — corrected 2026-09-07. `ssid`
+     alone is deliberately not unique (D6: the same SSID at two sites is two
      rows), but the same SSID twice in one scope is a duplicate, not a fact.
-     NULL scope is estate-wide and unique there. *Note the engines differ on
-     NULL in a unique index; if the partial index cannot express this
-     identically on both, say so rather than shipping two behaviours.*
+     The draft flagged this as a place the engines might differ. **They do not**
+     — both treat NULLs as distinct, so a single
+     `UNIQUE (ssid, scope_asset_id) WHERE lifecycle <> 'retired'` constrains
+     nothing at all for the estate-wide rows where `scope_asset_id IS NULL`,
+     identically and wrongly on both. `00031_vlans.sql` hit this exact case.
+     So: one index `WHERE scope_asset_id IS NOT NULL`, one
+     `WHERE scope_asset_id IS NULL`, and a test that fails under the
+     single-index form.
    - `idx_wireless_lan_scope ON wireless_lan(scope_asset_id)`
    - `idx_wireless_lan_vlan ON wireless_lan(vlan_id)`
 
@@ -385,7 +390,22 @@ joined, for the same reason.
    `idx_interface_wlan_lan ON interface_wlan(wireless_lan_id)` for the
    structure join. Cascade on the interface only, matching `interface_vlan`:
    the membership has no life without its port.
-2. **Three form-factor seed rows** (D2) — data, no migration.
+2. **Three form-factor rows and one asset kind**, as `INSERT`s **inside the
+   migration** — corrected 2026-09-07, planning found the original wording
+   mechanically impossible.
+
+   D2 said the radio form factors were "data, not a migration". They are not
+   schema, but they must still ship in one: goose never re-runs `00004`, so
+   rows added there would never apply, and `internal/seed` is barred because
+   vocabulary tables are classified **declared** and therefore owe a
+   `change_log` row that the seeder does not write. `00006_bridge_kind.sql` is
+   the precedent for exactly this and its reasoning is the same.
+
+   Also `asset_kind = 'access_point'`. §1 named its absence and §4 then failed
+   to add it, while item 8 asks the seed for two APs — so the fixture would have
+   had to call them switches, putting a lie in the demo that its own tests then
+   assert against. `can_host_instances FALSE`, `is_attachable TRUE`, following
+   `bridge`.
 3. **`domain.WirelessLAN`** and `NewWirelessLAN`, validating: `name` and `ssid`
    required and trimmed; `security` present in the vocabulary (checked in the
    store via `requireVocabulary`, as form factors are); `lifecycle` defaulted
@@ -403,10 +423,15 @@ joined, for the same reason.
    `SetInterfaceVLANs` and `SetClusterMembers` — wholesale replace inside the
    parent's transaction, folded into the parent's audited value (D7).
 6. **`loadStructures` gains a fourth join**, `wireless_lan` via
-   `interface_wlan` → the asset holding each radio. This is also what keeps
-   `TestEveryConnectiveTableIsAccountedForInTheImpactGraph` green:
-   `interface_wlan` has two foreign keys, so it must either be joined in
-   `graph.go` or listed with a reason. It is joined.
+   `interface_wlan` → the asset holding each radio.
+
+   This is also what keeps `TestEveryConnectiveTableIsAccountedForInTheImpactGraph`
+   green — **for BOTH new tables, which the draft got half right.** It named
+   `interface_wlan`'s two foreign keys. `wireless_lan` has **four**
+   (`wireless_security`, `asset`, `vlan`, `service`), so it is a connective
+   table by that test's definition too and must appear after a `FROM` or `JOIN`
+   in `graph.go` as well. The planned query covers both; a query that reached
+   `wireless_lan` only through a subquery or a second call would not.
 7. **UI**: a wireless LAN list and detail, the SSID's radios, and a radios
    panel on an asset. `CanWrite` gated like every other topology surface.
 8. **Seed**: an estate with two APs carrying `corp` and `guest`, and one AP
@@ -427,6 +452,17 @@ joined, for the same reason.
    - an SSID that had one AP and still has one is **not** reported (§2.2)
    - the same SSID name scoped to two sites is two structures, not one
    - dual-engine, as everything is
+
+### D8. No new permit minter — **added 2026-09-07**
+
+`SetInterfaceWLANs` is a write to the **interface**, so it reuses
+`authorizeInterfaceSubject`, which is already listed in `storePermitMinters`.
+`permitMinterBudget` does not move and this work package does not trip the
+auth-review-and-sign-off requirement that widening the permit surface carries.
+
+**An implementer reaching for an `authorizeWirelessSubject` is a stop-and-ask,
+not a refactor.** A new minter means a new answer to "who may write this", and
+this design deliberately has the same answer as every other interface write.
 
 ## 5. What this explicitly does not do
 
