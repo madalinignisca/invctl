@@ -519,6 +519,11 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	write("POST /vlans/{id}/ports", app.VLANPortAdd)
 	write("POST /vlans/{id}/ports/{ifaceID}/remove", app.VLANPortRemove)
 	write("POST /wireless", app.WirelessCreate)
+	// Correcting one. Same gap VLANs had until this morning: the store's
+	// UpdateWirelessLAN shipped with WP-F1 and nothing reached it, so an SSID
+	// created before its VLAN existed could never gain one -- a top-up skips
+	// what it already created, deliberately, and there was no other door.
+	write("POST /wireless/{id}", app.WirelessUpdate)
 	write("POST /wireless/{id}/retire", app.WirelessRetire)
 	write("POST /wireless/{id}/radios", app.WirelessRadioAdd)
 	write("POST /wireless/{id}/radios/{ifaceID}/remove", app.WirelessRadioRemove)

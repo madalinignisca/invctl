@@ -20,7 +20,10 @@ import (
 // shape exactly so the two topology surfaces read the same way.
 type wirelessListPage struct {
 	Base
-	WLANs    []store.WirelessLANRow
+	WLANs []store.WirelessLANRow
+	// Edit is set only when a correction was refused; see editState. Every
+	// method on it is nil-safe, so the template calls through it unguarded.
+	Edit     *editState
 	FormData wirelessFormData
 }
 
@@ -48,10 +51,11 @@ func (a *App) newWirelessForm(r *http.Request, errs map[string]string, securitie
 
 // WirelessList renders every declared SSID.
 func (a *App) WirelessList(w http.ResponseWriter, r *http.Request) {
-	a.renderWireless(w, r, http.StatusOK, nil)
+	a.renderWireless(w, r, http.StatusOK, nil, nil)
 }
 
-func (a *App) renderWireless(w http.ResponseWriter, r *http.Request, status int, errs map[string]string) {
+func (a *App) renderWireless(w http.ResponseWriter, r *http.Request, status int,
+	errs map[string]string, edit *editState) {
 	wlans, err := a.Store.ListWirelessLANs(r.Context())
 	if err != nil {
 		a.serverError(w, r, err)
@@ -77,9 +81,16 @@ func (a *App) renderWireless(w http.ResponseWriter, r *http.Request, status int,
 		a.serverError(w, r, err)
 		return
 	}
+	base := a.base(r, "Wireless", "wireless")
+	// A refused correction reopens the row it was refused on, rather than
+	// collapsing it and making the operator find it again.
+	if edit != nil {
+		base.EditRow = edit.ID
+	}
 	a.Render.Page(w, status, "wireless_list", wirelessListPage{
-		Base:     a.base(r, "Wireless", "wireless"),
+		Base:     base,
 		WLANs:    wlans,
+		Edit:     edit,
 		FormData: a.newWirelessForm(r, errs, securities, vlans, services, assets),
 	})
 }
@@ -226,11 +237,73 @@ func (a *App) WirelessCreate(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		a.renderWireless(w, r, http.StatusUnprocessableEntity, messages)
+		a.renderWireless(w, r, http.StatusUnprocessableEntity, messages, nil)
 		return
 	}
 
 	a.setFlash(r, "success", "Wireless LAN "+wlan.SSID+" declared.")
+	render.Redirect(w, r, "/wireless")
+}
+
+// WirelessUpdate corrects an SSID's declared configuration.
+//
+// UpdateWirelessLAN HAS BEEN IN THE STORE SINCE WP-F1 SHIPPED THIS MORNING,
+// complete and unreachable -- validating, checking the security vocabulary,
+// guarding on row_version, writing its change_log entry and reindexing for
+// search -- with no route, no handler and no form. So an SSID could be
+// declared, gain and lose radios, and be withdrawn, and never corrected.
+//
+// THIS IS THE SAME GAP WP-F1 FOUND IN VLANs AND FIXED THREE HOURS EARLIER,
+// reproduced in the feature that found it. Worth stating plainly rather than
+// quietly closing: the create/retire pair is what gets built, and the
+// correction path is what gets forgotten, and knowing that is the only reason
+// anybody checks.
+//
+// It surfaced on the demo. A top-up creates an SSID once and then skips it --
+// deliberately, so it never clobbers what somebody set -- which means an SSID
+// created before its VLAN existed can never gain one from a later top-up. The
+// data was correctable and there was no way to correct it, exactly as with the
+// VLANs whose names it needed.
+//
+// Copy-then-overwrite, like VLANUpdate: UpdateWirelessLAN writes every column,
+// so building a fresh row from the form would blank whatever the form omits.
+func (a *App) WirelessUpdate(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Could not read that form.", http.StatusBadRequest)
+		return
+	}
+	existing, err := a.Store.GetWirelessLAN(r.Context(), r.PathValue("id"))
+	if err != nil {
+		a.handleStoreError(w, r, err)
+		return
+	}
+
+	updated := *existing
+	updated.Name = formValue(r, "name")
+	updated.SSID = formValue(r, "ssid")
+	updated.Security = formValue(r, "security")
+	updated.ScopeAssetID = optionalString(r, "scope_asset_id")
+	updated.VLANID = optionalString(r, "vlan_id")
+	updated.AuthServiceID = optionalString(r, "auth_service_id")
+	updated.PSKRef = optionalString(r, "psk_ref")
+	updated.Notes = optionalString(r, "notes")
+	updated.RowVersion = submittedVersion(r, updated.RowVersion)
+
+	if err := a.Store.UpdateWirelessLAN(r.Context(), a.permit(r), &updated); err != nil {
+		messages, ok := refusalMessages(err, map[string]string{
+			"ssid": "that SSID is already declared in this scope",
+		})
+		if !ok {
+			a.handleStoreError(w, r, err)
+			return
+		}
+		a.renderWireless(w, r, refusalStatus(err),
+			nil, rejected(r, existing.ID, messages,
+				"name", "ssid", "security", "scope_asset_id", "vlan_id",
+				"auth_service_id", "psk_ref", "notes"))
+		return
+	}
+	a.setFlash(r, "success", "SSID "+updated.SSID+" updated.")
 	render.Redirect(w, r, "/wireless")
 }
 

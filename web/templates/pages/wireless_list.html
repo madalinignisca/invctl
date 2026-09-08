@@ -29,6 +29,69 @@
       <thead><tr><th>SSID</th><th>Name</th><th>Scope</th><th>Security</th><th>VLAN</th><th>Auth service</th><th class="num">Radios</th><th class="num">APs</th>{{if .IsAdmin}}<th></th>{{end}}</tr></thead>
       <tbody>
         {{range .WLANs}}
+        {{/* CORRECTING one. The store's UpdateWirelessLAN shipped with WP-F1
+             and nothing reached it until this row existed, so an SSID
+             declared before its VLAN did could never gain one -- a top-up
+             creates an SSID once and then skips it, deliberately, so it never
+             clobbers what somebody set.
+
+             $.Edit is nil unless a correction was refused; every editState
+             method is nil-safe, so .Value falls through to the stored value.
+             psk_ref is edited here and NEVER displayed as a value elsewhere:
+             it is a path, and a map of credential paths readable by every
+             session is the disclosure docs/rbac-design.md draws the line at.
+             An Administrator correcting one is a different act from every
+             reader seeing it. */}}
+        {{if and $.IsAdmin (eq .ID $.EditRow)}}
+        <tr class="row-editing">
+          <td><input form="wl-{{.ID}}" class="mono {{if $.Edit.Err "ssid"}}invalid{{end}}" type="text"
+                     name="ssid" value="{{$.Edit.Value "ssid" .SSID}}" aria-label="SSID" required style="width:10em">
+              {{with $.Edit.Err "ssid"}}<div class="field-error">{{.}}</div>{{end}}</td>
+          <td><input form="wl-{{.ID}}" type="text" name="name" value="{{$.Edit.Value "name" .Name}}"
+                     aria-label="Name" required style="width:10em"></td>
+          <td>
+            {{$sc := $.Edit.Value "scope_asset_id" (deref .ScopeAssetID)}}
+            <select form="wl-{{.ID}}" name="scope_asset_id" aria-label="Scope">
+              <option value="">estate-wide</option>
+              {{range $.FormData.Assets}}<option value="{{.ID}}" {{if eq .ID $sc}}selected{{end}}>{{.Name}}</option>{{end}}
+            </select>
+          </td>
+          <td>
+            {{$sec := $.Edit.Value "security" .Security}}
+            <select form="wl-{{.ID}}" name="security" aria-label="Security" required>
+              {{range $.FormData.Securities}}<option value="{{.Code}}" {{if eq .Code $sec}}selected{{end}}>{{.Label}}</option>{{end}}
+            </select>
+          </td>
+          <td>
+            {{$vl := $.Edit.Value "vlan_id" (deref .VLANID)}}
+            <select form="wl-{{.ID}}" name="vlan_id" aria-label="VLAN">
+              <option value="">—</option>
+              {{range $.FormData.VLANs}}<option value="{{.ID}}" {{if eq .ID $vl}}selected{{end}}>{{.VID}} · {{.Name}}</option>{{end}}
+            </select>
+          </td>
+          <td>
+            {{$svc := $.Edit.Value "auth_service_id" (deref .AuthServiceID)}}
+            <select form="wl-{{.ID}}" name="auth_service_id" aria-label="Auth service">
+              <option value="">—</option>
+              {{range $.FormData.Services}}<option value="{{.ID}}" {{if eq .ID $svc}}selected{{end}}>{{.Code}}</option>{{end}}
+            </select>
+          </td>
+          <td class="num">{{.RadioCount}}</td>
+          <td class="num">{{.AssetCount}}</td>
+          <td style="white-space:nowrap">
+            <form id="wl-{{.ID}}" method="post" action="/wireless/{{.ID}}" style="display:inline">
+              <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+              <input type="hidden" name="row_version" value="{{$.Edit.Value "row_version" (itoa .RowVersion)}}">
+              {{/* Carried, not shown: dropping either would blank it on save,
+                   because UpdateWirelessLAN writes every column. */}}
+              <input type="hidden" name="psk_ref" value="{{$.Edit.Value "psk_ref" (deref .PSKRef)}}">
+              <input type="hidden" name="notes" value="{{$.Edit.Value "notes" (deref .Notes)}}">
+              <button class="btn btn-sm btn-primary" type="submit">Save</button>
+            </form>
+            <a class="btn btn-sm" href="/wireless">Cancel</a>
+          </td>
+        </tr>
+        {{else}}
         <tr>
           <td class="mono"><a href="/wireless/{{.ID}}">{{.SSID}}</a></td>
           <td>{{.Name}}</td>
@@ -43,6 +106,7 @@
           <td class="num">{{.AssetCount}}</td>
           {{if $.IsAdmin}}
           <td style="white-space:nowrap">
+            <a class="btn btn-sm" href="/wireless?edit={{.ID}}">Edit</a>
             <form method="post" action="/wireless/{{.ID}}/retire" style="display:inline">
               <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
               <button class="btn btn-sm btn-danger" type="submit">Withdraw</button>
@@ -50,6 +114,7 @@
           </td>
           {{end}}
         </tr>
+        {{end}}
         {{end}}
       </tbody>
     </table>
