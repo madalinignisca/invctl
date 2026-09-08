@@ -29,6 +29,7 @@ POST /assets/{id}/parent | AssetReparent | write | true
 POST /assets/{id}/patch | PassThroughCreate | write | true
 POST /assets/{id}/patch/{patchID}/retire | PassThroughRetire | write | true
 POST /assets/{id}/power | PowerInputCreate | write | true
+POST /assets/{id}/power/{inputID} | PowerInputUpdate | write | true
 POST /assets/{id}/power/{inputID}/retire | PowerInputRetire | write | true
 POST /assets/{id}/retire | AssetRetire | write | true
 POST /assets/{id}/storage | AssetStorageClaim | write | true
@@ -102,11 +103,13 @@ POST /overrides | HealthOverrideCreate | write | true
 POST /overrides/{id} | HealthOverrideAmend | write | true
 POST /overrides/{id}/clear | HealthOverrideClear | write | true
 POST /power/feeds | PowerFeedCreate | write | true
+POST /power/feeds/{id} | PowerFeedUpdate | write | true
 POST /power/feeds/{id}/retire | PowerFeedRetire | write | true
 POST /power/panels | PowerPanelCreate | write | true
 POST /power/panels/{id} | PowerPanelUpdate | write | true
 POST /power/panels/{id}/retire | PowerPanelRetire | write | true
 POST /power/sources | PowerSourceCreate | write | true
+POST /power/sources/{id} | PowerSourceUpdate | write | true
 POST /power/sources/{id}/retire | PowerSourceRetire | write | true
 POST /prefixes | PrefixCreate | write | true
 POST /prefixes/{id} | PrefixUpdate | write | true

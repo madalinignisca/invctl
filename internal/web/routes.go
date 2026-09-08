@@ -347,14 +347,17 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	write("POST /assets/{id}/patch", app.PassThroughCreate)
 	write("POST /assets/{id}/patch/{patchID}/retire", app.PassThroughRetire)
 	write("POST /assets/{id}/power", app.PowerInputCreate)
+	write("POST /assets/{id}/power/{inputID}", app.PowerInputUpdate)
 	write("POST /assets/{id}/power/{inputID}/retire", app.PowerInputRetire)
 
 	write("POST /power/sources", app.PowerSourceCreate)
+	write("POST /power/sources/{id}", app.PowerSourceUpdate)
 	write("POST /power/sources/{id}/retire", app.PowerSourceRetire)
 	write("POST /power/panels", app.PowerPanelCreate)
 	write("POST /power/panels/{id}", app.PowerPanelUpdate)
 	write("POST /power/panels/{id}/retire", app.PowerPanelRetire)
 	write("POST /power/feeds", app.PowerFeedCreate)
+	write("POST /power/feeds/{id}", app.PowerFeedUpdate)
 	write("POST /power/feeds/{id}/retire", app.PowerFeedRetire)
 
 	write("POST /catalogue/manufacturers", app.ManufacturerCreate)

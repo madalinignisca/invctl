@@ -172,6 +172,47 @@
         <thead><tr><th>Site</th><th>Panel</th><th>Feed</th><th>Rating</th><th>Allocated</th><th>Inputs</th><th></th></tr></thead>
         <tbody>
           {{range .Feeds}}
+          {{/* CORRECTING one. The rating is the denominator of every capacity
+               finding on this board, and until this row existed a mistyped
+               amperage could only be fixed by retiring the feed -- which is
+               what the inputs hang off, so one digit cost every connection on
+               it. The panel is NOT offered: UpdatePowerFeed pins it from the
+               stored row, so a picker here would be ignored in silence. */}}
+          {{if and $.IsAdmin (eq .ID $.EditRow)}}
+          <tr class="row-editing">
+            <td>{{.SiteName}}</td>
+            <td class="mono">{{.PanelName}}</td>
+            <td><input form="feed-{{.ID}}" class="mono" type="text" name="name" value="{{.Name}}"
+                       aria-label="Feed name" required style="width:8em"></td>
+            <td>
+              <input form="feed-{{.ID}}" type="number" name="voltage" value="{{derefInt .Voltage}}"
+                     min="1" aria-label="Voltage" style="width:5em"> V
+              <input form="feed-{{.ID}}" type="number" name="amperage" value="{{derefInt .Amperage}}"
+                     min="1" aria-label="Amperage" style="width:5em"> A
+              <select form="feed-{{.ID}}" name="phase" aria-label="Phase">
+                <option value="">—</option>
+                {{$ph := deref .Phase}}
+                {{range $.Phases}}<option value="{{.}}" {{if eq . $ph}}selected{{end}}>{{.}}</option>{{end}}
+              </select>
+            </td>
+            <td>
+              <input form="feed-{{.ID}}" type="number" name="max_utilisation" value="{{.MaxUtilisation}}"
+                     min="1" max="100" aria-label="Maximum utilisation" style="width:5em"> %
+            </td>
+            <td>{{.Inputs}}</td>
+            <td class="row-actions" style="white-space:nowrap">
+              <form id="feed-{{.ID}}" method="post" action="/power/feeds/{{.ID}}" style="display:inline">
+                <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+                <input type="hidden" name="row_version" value="{{.RowVersion}}">
+                {{/* Carried, not shown: UpdatePowerFeed writes every column,
+                     so dropping this would blank the note on save. */}}
+                <input type="hidden" name="notes" value="{{deref .Notes}}">
+                <button class="btn btn-sm btn-primary" type="submit">Save</button>
+              </form>
+              <a class="btn btn-sm" href="/power">Cancel</a>
+            </td>
+          </tr>
+          {{else}}
           <tr>
             <td>{{.SiteName}}</td>
             <td class="mono">{{.PanelName}}</td>
@@ -182,6 +223,7 @@
             <td class="row-actions">
               <a class="btn btn-sm" href="/power/feeds/{{.ID}}/impact">If it fails</a>
               {{if $.IsAdmin}}
+              <a class="btn btn-sm" href="/power?edit={{.ID}}">Edit</a>
               <form method="post" action="/power/feeds/{{.ID}}/retire" style="display:inline">
                 <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
                 <button class="btn btn-sm" type="submit">Withdraw</button>
@@ -189,6 +231,7 @@
               {{end}}
             </td>
           </tr>
+          {{end}}
           {{end}}
         </tbody>
       </table>
@@ -209,6 +252,51 @@
         <thead><tr><th>Site</th><th>Supply</th><th>Kind</th><th>Fed by</th><th>Panels</th><th></th></tr></thead>
         <tbody>
           {{range .Sources}}
+          {{/* CORRECTING one. "Fed by" is the field that decides whether two
+               boards are genuinely independent -- a supply entered with no
+               parent makes an A/B pair look redundant when one UPS carries
+               both, which is the single question this page exists to answer.
+               The site is NOT offered: UpdatePowerSource pins it. A cycle is
+               refused by requireNoSupplyCycle in the store, so the picker can
+               list every other supply without re-deriving that here. */}}
+          {{if and $.IsAdmin (eq .ID $.EditRow)}}
+          {{$row := .}}
+          <tr class="row-editing">
+            <td>{{.SiteName}}</td>
+            <td><input form="src-{{.ID}}" class="mono" type="text" name="name" value="{{.Name}}"
+                       aria-label="Supply name" required style="width:10em"></td>
+            <td>
+              <select form="src-{{.ID}}" name="kind" aria-label="Kind" required>
+                {{range $.Kinds}}<option value="{{.}}" {{if eq . $row.Kind}}selected{{end}}>{{title .}}</option>{{end}}
+              </select>
+            </td>
+            <td>
+              <select form="src-{{.ID}}" name="parent_id" aria-label="Fed by">
+                <option value="">top of the chain</option>
+                {{range $.Sources}}
+                  {{if ne .ID $row.ID}}
+                  <option value="{{.ID}}" {{if eq (deref $row.ParentID) .ID}}selected{{end}}>{{.Name}}</option>
+                  {{end}}
+                {{end}}
+              </select>
+            </td>
+            <td>{{.Panels}}</td>
+            <td class="row-actions" style="white-space:nowrap">
+              <form id="src-{{.ID}}" method="post" action="/power/sources/{{.ID}}" style="display:inline">
+                <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+                <input type="hidden" name="row_version" value="{{.RowVersion}}">
+                {{/* Carried, not shown: UpdatePowerSource writes every column.
+                     asset_id especially -- it is how a UPS's battery
+                     end-of-life reaches the expiry report, and blanking it
+                     here would quietly drop that asset off it. */}}
+                <input type="hidden" name="asset_id" value="{{deref .AssetID}}">
+                <input type="hidden" name="notes" value="{{deref .Notes}}">
+                <button class="btn btn-sm btn-primary" type="submit">Save</button>
+              </form>
+              <a class="btn btn-sm" href="/power">Cancel</a>
+            </td>
+          </tr>
+          {{else}}
           <tr>
             <td>{{.SiteName}}</td>
             <td class="mono">{{.Name}}</td>
@@ -217,6 +305,9 @@
             <td>{{.Panels}}</td>
             <td class="row-actions">
               <a class="btn btn-sm" href="/power/sources/{{.ID}}/impact">If it fails</a>
+              {{if $.IsAdmin}}
+              <a class="btn btn-sm" href="/power?edit={{.ID}}">Edit</a>
+              {{end}}
               {{if and $.IsAdmin (not .Panels) (not .Children)}}
               <form method="post" action="/power/sources/{{.ID}}/retire" style="display:inline">
                 <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
@@ -225,6 +316,7 @@
               {{end}}
             </td>
           </tr>
+          {{end}}
           {{end}}
         </tbody>
       </table>

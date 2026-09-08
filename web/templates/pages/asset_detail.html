@@ -612,6 +612,40 @@
       <thead><tr><th>Input</th><th>Feed</th><th>Panel</th><th>Draw</th><th></th></tr></thead>
       <tbody>
         {{range .PowerInputs}}
+        {{/* CORRECTING one. WP-I2's review recorded that "correcting a number
+             means Disconnect-and-re-add", which left D7's convergence claim --
+             that a declared draw improves as operators refine it -- resting on
+             a UI that could not refine anything. The cost report multiplies
+             this column, so a mistyped nameplate became money.
+
+             ?power= rather than ?edit=: this page spends EditRow on the asset
+             itself, and opening an input must not close the asset's own form. */}}
+        {{if and $.IsAdmin (eq .ID $.PowerEdit)}}
+        <tr class="row-editing">
+          <td><input form="pi-{{.ID}}" class="mono" type="text" name="name" value="{{.Name}}"
+                     aria-label="Input name" required style="width:6em"></td>
+          <td colspan="2">
+            {{$row := .}}
+            <select form="pi-{{.ID}}" name="feed_id" aria-label="Feed" required>
+              {{range $.PowerFeeds}}<option value="{{.ID}}" {{if eq .ID $row.FeedID}}selected{{end}}>{{.SiteName}} / {{.PanelName}} / {{.Name}}</option>{{end}}
+            </select>
+          </td>
+          <td>
+            <input form="pi-{{.ID}}" type="number" name="draw_va" value="{{derefInt .DrawVA}}"
+                   min="0" aria-label="Draw in volt-amps" style="width:6em"> VA
+          </td>
+          <td class="row-actions" style="white-space:nowrap">
+            <form id="pi-{{.ID}}" method="post" action="/assets/{{$.Asset.ID}}/power/{{.ID}}" style="display:inline">
+              <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+              <input type="hidden" name="row_version" value="{{.RowVersion}}">
+              {{/* Carried, not shown: UpdatePowerInput writes every column. */}}
+              <input type="hidden" name="notes" value="{{deref .Notes}}">
+              <button class="btn btn-sm btn-primary" type="submit">Save</button>
+            </form>
+            <a class="btn btn-sm" href="/assets/{{$.Asset.ID}}">Cancel</a>
+          </td>
+        </tr>
+        {{else}}
         <tr>
           <td class="mono">{{.Name}}</td>
           <td class="mono">{{.FeedName}}</td>
@@ -621,6 +655,7 @@
             {{/* power_input is ScopeTopology, not extended to a project owner
                  (1.0 item 1's scope) -- Administrator-only. */}}
             {{if $.IsAdmin}}
+            <a class="btn btn-sm" href="/assets/{{$.Asset.ID}}?power={{.ID}}">Edit</a>
             <form method="post" action="/assets/{{$.Asset.ID}}/power/{{.ID}}/retire" style="display:inline">
               <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
               <button class="btn btn-sm" type="submit">Disconnect</button>
@@ -628,6 +663,7 @@
             {{end}}
           </td>
         </tr>
+        {{end}}
         {{end}}
       </tbody>
     </table>

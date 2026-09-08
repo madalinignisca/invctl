@@ -449,6 +449,14 @@ type assetDetailPage struct {
 	// Where it takes power from, and the feeds it could take it from.
 	PowerInputs []store.PowerInputRow
 	PowerFeeds  []store.PowerFeedRow
+	// PowerEdit is the id of the power input opened for correction, from its
+	// OWN query parameter rather than Base.EditRow.
+	//
+	// This page already spends EditRow on the asset itself, and customfields.go
+	// records why a second editor gets its own key rather than sharing that
+	// one: opening the power row must not close the asset form, and the two
+	// are different verbs on different entities that happen to share a page.
+	PowerEdit string
 	// Elevation is set only for a rack: what is mounted in it and where.
 	Elevation *store.RackElevation
 	// Fit is set only for a rack: whether what is in it physically fits, what
@@ -869,6 +877,7 @@ func (a *App) renderAssetDetail(w http.ResponseWriter, r *http.Request, status i
 		PassThroughs:    passThroughs,
 		PowerInputs:     powerInputs,
 		PowerFeeds:      powerFeeds,
+		PowerEdit:       r.URL.Query().Get("power"),
 		Edit:            edit,
 		AssetEdit:       assetEdit,
 		CustomFields:    customFields,
