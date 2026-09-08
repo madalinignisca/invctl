@@ -71,6 +71,7 @@ POST /custom-fields/{id} | CustomFieldUpdate | write | true
 POST /custom-fields/{id}/options | CustomFieldOptions | write | true
 POST /custom-fields/{id}/restore | CustomFieldRestore | write | true
 POST /custom-fields/{id}/retire | CustomFieldRetire | write | true
+POST /dependencies/{id} | DependencyUpdate | write | true
 POST /dependencies/{id}/retire | DependencyRetire | write | true
 POST /dependencies/{id}/verify | DependencyVerify | write | true
 POST /endpoints/{id} | EndpointUpdate | write | true

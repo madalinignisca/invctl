@@ -466,6 +466,7 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	write("POST /overrides", app.HealthOverrideCreate)
 	write("POST /overrides/{id}", app.HealthOverrideAmend)
 	write("POST /overrides/{id}/clear", app.HealthOverrideClear)
+	write("POST /dependencies/{id}", app.DependencyUpdate)
 	write("POST /dependencies/{id}/retire", app.DependencyRetire)
 	write("POST /dependencies/{id}/verify", app.DependencyVerify)
 

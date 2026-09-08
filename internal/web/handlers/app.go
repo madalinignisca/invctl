@@ -247,6 +247,19 @@ func (e *editState) Err(field string) string {
 	return e.Errors[field]
 }
 
+// editFor returns e only when it belongs to the row named by id.
+//
+// A page can carry one refusal at a time, and several editors -- an endpoint's
+// correction and a dependency's live on the same page. Handing a dependency
+// row the refusal from an endpoint save would redraw it with another form's
+// values in its fields.
+func editFor(e *editState, id string) *editState {
+	if e == nil || id == "" || e.ID != id {
+		return nil
+	}
+	return e
+}
+
 // rejected builds the state for a form that was refused, capturing exactly the
 // fields the caller names. Only named fields are captured: a form post carries
 // the CSRF token too, and nothing rejected should be echoed back untouched.

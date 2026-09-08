@@ -422,6 +422,24 @@ func (a *App) renderServiceDetail(w http.ResponseWriter, r *http.Request, status
 		return
 	}
 
+	up := depRows(upstream, classes, "upstream", b.CSRF, b.IsAdmin, b.CanWriteEntity)
+	down := depRows(downstream, classes, "downstream", b.CSRF, b.IsAdmin, b.CanWriteEntity)
+	// The dependency correction form opens on ?dep=, its own key: this page
+	// already spends EditRow on the service itself AND on an endpoint row, and
+	// customfields.go records why a further editor gets its own rather than
+	// overloading it. A refused correction wins over the query string, so the
+	// operator is looking at what they typed.
+	depEdit := r.URL.Query().Get("dep")
+	if edit != nil && edit.Multi["data_class"] != nil {
+		depEdit = edit.ID
+	}
+	openDepEditor([][]depRowData{up, down}, depEdit, &depEditForm{
+		Natures:      domain.Natures,
+		ClassOptions: classOptions,
+		Identities:   identities,
+		Edit:         editFor(edit, depEdit),
+	})
+
 	a.Render.Page(w, status, "service_detail", serviceDetailPage{
 		Providers:      providers,
 		CustomFields:   customFields,
@@ -436,8 +454,8 @@ func (a *App) renderServiceDetail(w http.ResponseWriter, r *http.Request, status
 		Instances:      instances,
 		Endpoints:      endpoints,
 		Routes:         routes,
-		Upstream:       depRows(upstream, classes, "upstream", b.CSRF, b.IsAdmin, b.CanWriteEntity),
-		Downstream:     depRows(downstream, classes, "downstream", b.CSRF, b.IsAdmin, b.CanWriteEntity),
+		Upstream:       up,
+		Downstream:     down,
 		InstanceHealth: instanceHealth,
 		Timeline:       timeline,
 		InstanceForm:   a.newInstanceForm(r, id, nil, hostable),
