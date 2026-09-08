@@ -1159,7 +1159,7 @@ func TestNoWriteRouteIsReachableWithNoSessionAtAll(t *testing.T) {
 	// WP-F1 Task 7 added POST /wireless, /wireless/{id}/retire,
 	// /wireless/{id}/radios and /wireless/{id}/radios/{ifaceID}/remove to the
 	// write registrar.
-	const pinnedNoSessionRouteCount = 186
+	const pinnedNoSessionRouteCount = 187
 
 	for _, eng := range boundaryEngines(t) {
 		t.Run(eng.name, func(t *testing.T) {

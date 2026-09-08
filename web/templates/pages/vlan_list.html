@@ -30,6 +30,53 @@
       <thead><tr><th class="num">VID</th><th>Name</th><th>Group</th><th>Environment</th><th>Role</th><th class="num">Networks</th><th class="num">Ports</th>{{if .IsAdmin}}<th></th>{{end}}</tr></thead>
       <tbody>
         {{range .VLANs}}
+        {{/* CORRECTING one, rather than withdrawing it and declaring another.
+             The store's UpdateVLAN existed from the start and nothing called
+             it, so a mistyped name cost the VLAN its ports and its history to
+             fix. Administrator-only because vlan is ScopeTopology, the same
+             grant the Withdraw button below already asks for.
+
+             $.Edit is nil unless a correction was REFUSED; every editState
+             method checks for a nil receiver, so .Value falls through to the
+             stored value and .Err to empty. */}}
+        {{if and $.IsAdmin (eq .ID $.EditRow)}}
+        <tr class="row-editing">
+          <td class="num"><input form="vlan-{{.ID}}" class="num {{if $.Edit.Err "vid"}}invalid{{end}}" type="number"
+                     name="vid" value="{{$.Edit.Value "vid" (itoa .VID)}}" aria-label="VLAN ID"
+                     min="1" max="4094" required style="width:5em">
+              {{with $.Edit.Err "vid"}}<div class="field-error">{{.}}</div>{{end}}</td>
+          <td><input form="vlan-{{.ID}}" type="text" name="name" value="{{$.Edit.Value "name" .Name}}"
+                     aria-label="Name" required style="width:12em">
+              {{with $.Edit.Err "name"}}<div class="field-error">{{.}}</div>{{end}}</td>
+          <td>
+            {{$g := $.Edit.Value "group_id" (deref .GroupID)}}
+            <select form="vlan-{{.ID}}" name="group_id" aria-label="Group">
+              <option value="">estate-wide</option>
+              {{range $.Groups}}<option value="{{.ID}}" {{if eq .ID $g}}selected{{end}}>{{.Name}}</option>{{end}}
+            </select>
+          </td>
+          <td>
+            {{$env := $.Edit.Value "environment_id" (deref .EnvironmentID)}}
+            <select form="vlan-{{.ID}}" name="environment_id" aria-label="Environment">
+              <option value="">—</option>
+              {{range $.FormData.Environments}}<option value="{{.ID}}" {{if eq .ID $env}}selected{{end}}>{{.Code}}</option>{{end}}
+            </select>
+          </td>
+          <td><input form="vlan-{{.ID}}" type="text" name="role" value="{{$.Edit.Value "role" (deref .Role)}}"
+                     aria-label="Role" style="width:8em"></td>
+          <td class="num">{{.PrefixCount}}</td>
+          <td class="num">{{.PortCount}}</td>
+          <td style="white-space:nowrap">
+            <form id="vlan-{{.ID}}" method="post" action="/vlans/{{.ID}}" style="display:inline">
+              <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+              <input type="hidden" name="row_version" value="{{$.Edit.Value "row_version" (itoa .RowVersion)}}">
+              <input type="hidden" name="description" value="{{$.Edit.Value "description" (deref .Description)}}">
+              <button class="btn btn-sm btn-primary" type="submit">Save</button>
+            </form>
+            <a class="btn btn-sm" href="/vlans">Cancel</a>
+          </td>
+        </tr>
+        {{else}}
         <tr>
           <td class="num"><a href="/vlans/{{.ID}}">{{.VID}}</a></td>
           <td>{{.Name}}</td>
@@ -47,6 +94,7 @@
           </td>
           {{if $.IsAdmin}}
           <td style="white-space:nowrap">
+            <a class="btn btn-sm" href="/vlans?edit={{.ID}}">Edit</a>
             <form method="post" action="/vlans/{{.ID}}/retire" style="display:inline">
               <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
               <button class="btn btn-sm btn-danger" type="submit">Withdraw</button>
@@ -54,6 +102,7 @@
           </td>
           {{end}}
         </tr>
+        {{end}}
         {{end}}
       </tbody>
     </table>

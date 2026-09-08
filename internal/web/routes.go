@@ -510,6 +510,11 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	write("POST /redundancy/{id}/members", app.FHRPMemberAdd)
 	write("POST /redundancy/{id}/members/{ifaceID}/remove", app.FHRPMemberRemove)
 	write("POST /vlans", app.VLANCreate)
+	// Correcting one. The store has had UpdateVLAN since VLANs arrived and
+	// nothing reached it, so a mistyped name could only be fixed by
+	// withdrawing the VLAN and declaring another -- losing its ports and its
+	// history to fix a typo.
+	write("POST /vlans/{id}", app.VLANUpdate)
 	write("POST /vlans/{id}/retire", app.VLANRetire)
 	write("POST /vlans/{id}/ports", app.VLANPortAdd)
 	write("POST /vlans/{id}/ports/{ifaceID}/remove", app.VLANPortRemove)
