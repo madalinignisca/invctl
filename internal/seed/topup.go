@@ -209,6 +209,25 @@ func (b *builder) hydrate() error {
 	for _, g := range groups {
 		b.refs.NetGroups[g.Code] = g.ID
 	}
+	// SERVICES, keyed by code the way seed_services.go writes them. Without
+	// this, wirelessLANs() cannot resolve corp's RADIUS reference and the SSID
+	// arrives with no auth service -- silently, because reading a map that was
+	// never filled returns the zero value rather than failing. Found on the
+	// live demo AFTER the phase shipped: the SSIDs were all there and the
+	// reference was not, which is exactly the "both estates look plausible"
+	// shape this file's VLAN comment below describes.
+	//
+	// IncludeRetired for the same reason ListAssets uses it: a retired service
+	// still holds its code, and not seeing it is how a phase decides to create
+	// a second one.
+	services, err := b.store.ListServices(b.ctx, store.ServiceFilter{IncludeRetired: true})
+	if err != nil {
+		return fmt.Errorf("services: %w", err)
+	}
+	for _, svc := range services {
+		b.refs.Services[svc.Code] = svc.ID
+	}
+
 	// VLANs, so wirelessLANs() can attach the guest SSID to the same broadcast
 	// domain a fresh Load gives it. Reading a nil map would not have panicked
 	// -- it would have silently produced a guest network with no VLAN on every

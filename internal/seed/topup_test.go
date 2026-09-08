@@ -521,3 +521,53 @@ func TestTheCapacityPhaseFindsItsClusterAfterARename(t *testing.T) {
 		}
 	})
 }
+
+// TestHydrateFillsEveryRefAPhaseReads is the test the live demo needed and
+// nothing here provided.
+//
+// countEstate above holds the phases to "adds nothing on a second run", which
+// is about ROW COUNTS. It cannot see a phase that created its rows and failed
+// to link them: the counts are identical whether or not corp found its RADIUS
+// service, so a missing reference passes every assertion in this file.
+//
+// THAT SHIPPED. wirelessLANs() joined the phase list, ran against the live demo
+// and produced three SSIDs with no auth service and no VLAN -- because hydrate()
+// filled neither map, and reading a map that was never filled returns the zero
+// value rather than failing. The phase asks `if id, ok := refs.X[name]; ok`,
+// finds nothing, and quietly leaves the field nil. Both estates look plausible.
+//
+// So this asserts the OTHER half of a top-up: not that it added the right
+// number of things, but that it could see the things it needed to point at.
+// Keyed exactly as the writers key them -- service by code
+// (seed_services.go), VLAN by name (seed.go) -- because a hydration keyed
+// differently from the lookup is the same silent miss wearing a different hat.
+func TestHydrateFillsEveryRefAPhaseReads(t *testing.T) {
+	seed.CompanyEstate = true
+	t.Cleanup(func() { seed.CompanyEstate = false })
+
+	eachEngine(t, func(t *testing.T, f *fixture) {
+		refs, err := seed.TopUp(f.ctx, f.store)
+		if err != nil {
+			t.Fatalf("topping up: %v", err)
+		}
+
+		// One name per map that a phase in TopUp's list dereferences, taken
+		// from what the fixture actually contains rather than invented.
+		for _, want := range []struct {
+			what, key string
+			in        map[string]string
+		}{
+			{"service", "sso", refs.Services},
+			{"vlan", "production-workloads", refs.VLANs},
+			{"asset", "hv-01", refs.Assets},
+			{"environment", "prod", refs.Environments},
+		} {
+			if id := want.in[want.key]; id == "" {
+				t.Errorf("hydrate did not find the %s %q. A phase that dereferences this "+
+					"map gets the zero value and leaves its field unset -- no error, no "+
+					"failed row, just an estate quietly missing a link that a freshly "+
+					"seeded one has", want.what, want.key)
+			}
+		}
+	})
+}
