@@ -66,7 +66,15 @@ func TopUp(ctx context.Context, s *store.SQLStore) (*Refs, error) {
 			DeviceTypes:   map[string]string{},
 			PowerSources:  map[string]string{},
 			PowerPanels:   map[string]string{},
-			PowerFeeds:    map[string]string{},
+			// VLANs and WirelessLANs arrived with wirelessLANs() joining the
+			// phase list. Load has always built both; TopUp had neither,
+			// because until then no phase here touched them -- and a phase
+			// that WRITES to one of these maps panics on the nil rather than
+			// misbehaving quietly, which is how this surfaced on the first
+			// run of the existing whole-estate test.
+			VLANs:        map[string]string{},
+			WirelessLANs: map[string]string{},
+			PowerFeeds:   map[string]string{},
 		},
 	}
 	if err := b.hydrate(); err != nil {
@@ -94,6 +102,18 @@ func TopUp(ctx context.Context, s *store.SQLStore) (*Refs, error) {
 	// a renewal whose effective date is already in force is skipped rather than
 	// stacked on top.
 	b.companyMoney()
+	// WP-F1's wireless estate. It joins this list because it is idempotent in
+	// all three of its halves -- b.asset skips a name that exists, the SSID
+	// loop skips an ssid already recorded, and the membership loop skips a
+	// radio already on that SSID -- and NOT merely because it is new, which is
+	// the bar this list sets.
+	//
+	// It was missing when the demo was redeployed on 2026-09-07: the schema
+	// arrived, the vocabulary arrived with the migration, and the estate had no
+	// SSIDs because Load refuses a populated database and nothing here offered
+	// the other route. A fixture a running demo cannot reach is a fixture that
+	// only ever appears on a machine somebody reset.
+	b.wirelessLANs()
 
 	if b.err != nil {
 		return nil, b.err
@@ -189,6 +209,19 @@ func (b *builder) hydrate() error {
 	for _, g := range groups {
 		b.refs.NetGroups[g.Code] = g.ID
 	}
+	// VLANs, so wirelessLANs() can attach the guest SSID to the same broadcast
+	// domain a fresh Load gives it. Reading a nil map would not have panicked
+	// -- it would have silently produced a guest network with no VLAN on every
+	// topped-up demo and none anywhere else, which is the kind of difference
+	// nobody finds because both estates look plausible.
+	vlans, err := b.store.ListVLANs(b.ctx)
+	if err != nil {
+		return fmt.Errorf("vlans: %w", err)
+	}
+	for _, v := range vlans {
+		b.refs.VLANs[v.Name] = v.ID
+	}
+
 	return nil
 }
 
@@ -325,4 +358,25 @@ func hasCost(existing []store.CostRow, line costLine) bool {
 		}
 	}
 	return false
+}
+
+// existingInterface finds a port by name on an asset, for the phases that must
+// not recreate one.
+//
+// A LOOKUP RATHER THAN A HYDRATED MAP, unlike assets and services. hydrate()
+// fills b.refs from tables whose rows are few and named estate-wide; interfaces
+// are neither -- every asset has several, "eth0" is not unique across the
+// estate, and loading all of them to place three radios would read the whole
+// port inventory to answer a question about two access points.
+func (b *builder) existingInterface(assetID, name string) (string, bool, error) {
+	rows, err := b.store.ListInterfaces(b.ctx, assetID)
+	if err != nil {
+		return "", false, err
+	}
+	for _, row := range rows {
+		if row.Name == name {
+			return row.ID, true, nil
+		}
+	}
+	return "", false, nil
 }
