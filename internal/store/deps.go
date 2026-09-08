@@ -660,9 +660,16 @@ func (s *SQLStore) UpdateDependency(ctx context.Context, p domain.Permit, d *dom
 	// method could flip a withdrawn edge back to active with no retire guard
 	// and no change_log entry naming a re-declaration, which is exactly the
 	// silent revival UpdateInstance's own comment on the withdrawn-placement
-	// guard exists to prevent one level up. There is no HTTP route reaching
-	// UpdateDependency as a non-administrator today; WP-1.1 item 1 is what
-	// makes that reachable, so the store is what has to hold the line.
+	// guard exists to prevent one level up.
+	//
+	// THERE IS A ROUTE NOW. This said "no HTTP route reaches UpdateDependency
+	// as a non-administrator today; WP-1.1 item 1 is what makes that
+	// reachable, so the store is what has to hold the line." POST
+	// /dependencies/{id} arrived 2026-09-08, gated on the same two-ended
+	// predicate, and the line held: DependencyUpdate sends none of these three
+	// columns because the store was already carrying them over regardless.
+	// The handler is narrow BECAUSE this was here first, which is the order
+	// that argument is supposed to run in.
 	d.VerifiedBy = before.VerifiedBy
 	d.VerifiedAt = before.VerifiedAt
 	d.Lifecycle = before.Lifecycle
@@ -691,8 +698,11 @@ func (s *SQLStore) UpdateDependency(ctx context.Context, p domain.Permit, d *dom
 	}
 
 	return s.writeSerializable(ctx, depPermit, func(t *tx) error {
-		// Re-pointing an edge is declaring it, so it faces the same check. No
-		// route reaches this today; that is not a reason to leave the hole.
+		// Re-pointing an edge is declaring it, so it faces the same check.
+		// STILL no route re-points one -- DependencyUpdate (2026-09-08) carries
+		// all three subject columns from the stored row rather than offering
+		// them -- and that is still not a reason to leave the hole: the
+		// handler's narrowness is a choice somebody can revisit, this is not.
 		if err := requireLiveProvider(ctx, t, d.ProviderEndpointID, d.ProviderRouteID); err != nil {
 			return err
 		}
