@@ -189,6 +189,7 @@ POST /vlans/{id}/ports/{ifaceID}/remove | VLANPortRemove | write | true
 POST /vlans/{id}/retire | VLANRetire | write | true
 POST /vocabularies | VocabularyUpsert | write | true
 POST /wireless | WirelessCreate | write | true
+POST /wireless/{id} | WirelessUpdate | write | true
 POST /wireless/{id}/radios | WirelessRadioAdd | write | true
 POST /wireless/{id}/radios/{ifaceID}/remove | WirelessRadioRemove | write | true
 POST /wireless/{id}/retire | WirelessRetire | write | true
