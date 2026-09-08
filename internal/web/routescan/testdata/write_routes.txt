@@ -83,6 +83,7 @@ POST /instances/{id} | InstanceUpdate | write | true
 POST /instances/{id}/retire | InstanceRetire | write | true
 POST /interfaces/{id} | InterfaceUpdate | write | true
 POST /ip-ranges | IPRangeCreate | write | true
+POST /ip-ranges/{id} | IPRangeUpdate | write | true
 POST /ip-ranges/{id}/retire | IPRangeRetire | write | true
 POST /links | LinkCreate | write | true
 POST /links/{id}/retire | LinkRetire | write | true

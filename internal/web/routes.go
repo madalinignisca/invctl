@@ -531,6 +531,7 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	write("POST /wireless/{id}/radios", app.WirelessRadioAdd)
 	write("POST /wireless/{id}/radios/{ifaceID}/remove", app.WirelessRadioRemove)
 	write("POST /ip-ranges", app.IPRangeCreate)
+	write("POST /ip-ranges/{id}", app.IPRangeUpdate)
 	write("POST /ip-ranges/{id}/retire", app.IPRangeRetire)
 
 	write("POST /network/groups", app.NetworkGroupCreate)

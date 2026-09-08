@@ -1161,8 +1161,9 @@ func TestNoWriteRouteIsReachableWithNoSessionAtAll(t *testing.T) {
 	// write registrar. 186 -> 188: POST /vlans/{id} and POST /wireless/{id},
 	// the two correction paths found missing on the demo. 188 -> 191: the
 	// power chain's own three -- POST /power/feeds/{id},
-	// /power/sources/{id} and /assets/{id}/power/{inputID}.
-	const pinnedNoSessionRouteCount = 191
+	// /power/sources/{id} and /assets/{id}/power/{inputID}. 191 -> 192:
+	// POST /ip-ranges/{id}.
+	const pinnedNoSessionRouteCount = 192
 
 	for _, eng := range boundaryEngines(t) {
 		t.Run(eng.name, func(t *testing.T) {

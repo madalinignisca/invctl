@@ -61,6 +61,58 @@ func (a *App) IPRangeCreate(w http.ResponseWriter, r *http.Request) {
 	render.Redirect(w, r, "/prefixes")
 }
 
+// IPRangeUpdate corrects a reservation's bounds or its purpose.
+//
+// A RESERVATION IS A CLAIM ON SPACE THE ALLOCATOR WILL NEVER OFFER, so a
+// mistyped bound is not a cosmetic error: too wide and addresses nobody holds
+// are withheld for ever, too narrow and the allocator hands out an address a
+// DHCP pool or a load balancer is already using. Until this route existed the
+// only fix was to withdraw the reservation and declare another -- which
+// returns the whole span to the allocator in the gap between the two, exactly
+// where a fresh allocation can land in the middle of the range being repaired.
+//
+// SetBounds rather than a field assignment, for the reason PrefixUpdate uses
+// SetCIDR: the text is the label and the bytes are what every containment
+// question is answered from, so all four columns are rewritten together or the
+// reservation covers a span nobody can see.
+//
+// Built from the stored row so that vrf_id survives -- the form does not carry
+// it, and UpdateIPRange writes every column.
+func (a *App) IPRangeUpdate(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Could not read that form.", http.StatusBadRequest)
+		return
+	}
+	existing, err := a.Store.GetIPRange(r.Context(), r.PathValue("id"))
+	if err != nil {
+		a.handleStoreError(w, r, err)
+		return
+	}
+
+	updated := *existing
+	updated.Role = optionalString(r, "role")
+	updated.Description = optionalString(r, "description")
+	updated.RowVersion = submittedVersion(r, updated.RowVersion)
+	err = updated.SetBounds(formValue(r, "start_text"), formValue(r, "end_text"))
+	if err == nil {
+		err = a.Store.UpdateIPRange(r.Context(), a.permit(r), &updated)
+	}
+	if err != nil {
+		messages, ok := refusalMessages(err, map[string]string{
+			"start_text": "a reservation with exactly those bounds already exists",
+		})
+		if !ok {
+			a.handleStoreError(w, r, err)
+			return
+		}
+		a.renderPrefixes(w, r, refusalStatus(err),
+			rejected(r, existing.ID, messages, "start_text", "end_text", "role", "description"))
+		return
+	}
+	a.setFlash(r, "success", "Reservation updated.")
+	render.Redirect(w, r, "/prefixes")
+}
+
 // IPRangeRetire withdraws a reservation, returning its space to the allocator.
 func (a *App) IPRangeRetire(w http.ResponseWriter, r *http.Request) {
 	if err := a.Store.RetireIPRange(r.Context(), a.permit(r), r.PathValue("id")); err != nil {
