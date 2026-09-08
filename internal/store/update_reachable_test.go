@@ -35,6 +35,30 @@ import (
 // An empty map is not a reason to delete the mechanism -- the test below still
 // fails on any new unreachable Update method, and this is where the next one
 // gets justified in writing or, better, refused.
+//
+// EMPTY DOES NOT MEAN THE WRITE SURFACE IS COMPLETE, and reading it that way is
+// the mistake this paragraph exists to prevent. The population below is built
+// from storeUpdateMethods -- existing `func (s *SQLStore) Update…` declarations
+// -- so it can only ever report on corrections somebody already wrote. AN
+// ENTITY WITH NO Update* METHOD AT ALL CONTRIBUTES NOTHING AND PASSES IN
+// SILENCE. Verified in the tree on 2026-09-08, after the six landed:
+//
+//   - Provider has CreateProvider, a live POST /providers, and no update and no
+//     retire method of any kind. A supplier typed wrong stays wrong for ever --
+//     and CircuitUpdate now offers a picker for it.
+//   - NetAnchor has neither, and this codebase's own domain comment calls a
+//     misplaced anchor "the single highest-leverage wrong row in this model".
+//   - The net_* family has five create routes and zero retire routes, while
+//     RetireNetGroup, RetireNetGroupMember and RetireNetUplink sit in reach.go
+//     with no caller. This test never looked: it scans only Update*.
+//
+// It is blind the other way too -- AmendHealthOverride is a real, routed
+// correction path the Update prefix will never match. What this checks is a
+// naming convention with a capability behind it, not the capability itself.
+//
+// The complementary census -- enumerate Create*, require an Update*/Retire* or
+// a named exemption -- is not written. It would fail today with roughly a dozen
+// entries, several of them damaging. That is the next piece of this work.
 var correctionPathsNotYetBuilt = map[string]string{}
 
 // TestEveryUpdateMethodIsReachable fails when a store method written to correct

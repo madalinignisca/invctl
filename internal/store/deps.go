@@ -673,6 +673,18 @@ func (s *SQLStore) UpdateDependency(ctx context.Context, p domain.Permit, d *dom
 	d.VerifiedBy = before.VerifiedBy
 	d.VerifiedAt = before.VerifiedAt
 	d.Lifecycle = before.Lifecycle
+	// AND source, for the same reason, added 2026-09-08. CheckProvenanceWrite
+	// above stops an AGENT actor asserting `declared`; it does not stop a user
+	// actor rewriting an existing edge's provenance to anything else, and rule
+	// 7 calls laundering an established discovered edge the cheaper of the two
+	// attacks. Until this line, that was held off by two facts about callers --
+	// DependencyUpdate never reads a source field, and this route is
+	// session-authenticated so no machine credential reaches it -- rather than
+	// by the store. Every other column in this block is pinned precisely
+	// because "no caller does that today" is not the argument this method
+	// makes. Flipping provenance deliberately is VerifyDependency's job, which
+	// derives the attestation from the actor instead of accepting it.
+	d.Source = before.Source
 	d.CreatedAt = before.CreatedAt
 	d.UpdatedAt = domain.FormatTime(s.now())
 

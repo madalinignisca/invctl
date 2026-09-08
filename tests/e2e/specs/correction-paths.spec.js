@@ -153,10 +153,21 @@ describe(describeTitle, () => {
     // Edit on the page is none of them reliably. Dependency rows carry
     // id="dep-<id>" (partials/rows.html), which is the only stable way to say
     // "an edge, in either panel".
+    //
+    // NO RUNTIME SKIP HERE, DELIBERATELY. An earlier version of this read
+    // `if (count === 0) test.skip(...)`, which is the anti-pattern CLAUDE.md
+    // names outright: a regression that removed the Edit control from every
+    // dependency row -- PRECISELY the class this spec exists to catch -- would
+    // have made the precondition false and turned the failure into a silent
+    // pass, for ever. The absence of an editable dependency row is a failure
+    // of this suite's fixture expectations (docs/E2E.md, "the demo estate"),
+    // and it is stated as one.
     const depEdit = page.locator('tr[id^="dep-"] a:text-is("Edit")').first();
-    if ((await depEdit.count()) === 0) {
-      test.skip(true, 'this service has no writable dependency row to correct');
-    }
+    await expect(depEdit,
+      'no dependency row on this service offers Edit. Either the seed has no ' +
+      'dependency here (a fixture problem -- see docs/E2E.md) or the Edit ' +
+      'control has been lost from the row, which is the regression this spec ' +
+      'exists to catch. Both are failures; neither is a reason to skip.').toBeVisible();
     await depEdit.click();
     await page.waitForLoadState('networkidle');
 

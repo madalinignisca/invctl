@@ -141,25 +141,50 @@ func TestCorrectingAReservationKeepsItsVRF(t *testing.T) {
 	}
 }
 
-// TestOnlyAnAdministratorCanCorrectAReservation.
+// TestOnlyAnAdministratorCanCorrectAReservation, at both layers.
+//
+// AN OBSERVER-ONLY TEST WOULD PROVE THE WEAKER CLAIM. This route sits under
+// the generic `write` registrar, so RequireWrite refuses an Observer on
+// CanWrite before the handler runs -- the same refusal an entity of ANY scope
+// would produce. A project owner has CanWrite = true, passes the middleware,
+// and is refused by the store's permit.Covers against ip_range's ScopeTopology.
+// The two refusals carry different statuses, which is what makes the layer
+// assertable: 403 at the door, 404 inside.
 func TestOnlyAnAdministratorCanCorrectAReservation(t *testing.T) {
 	h := newHarness(t)
 	h.login("admin", "admin-password")
 	id := h.reserve(t, "10.240.8.10", "10.240.8.99", "dhcp")
+	version := h.lookup(`SELECT row_version FROM ip_range WHERE id = ?`, id)
+	project := h.lookup(`SELECT id FROM project WHERE lifecycle = 'active' ORDER BY id LIMIT 1`)
 
-	viewer := newHarness(t)
-	viewer.login("viewer", "viewer-password")
-	resp := viewer.post("/ip-ranges/"+id, url.Values{
-		"csrf_token":  {viewer.csrfToken("/prefixes")},
-		"start_text":  {"10.240.8.10"},
-		"end_text":    {"10.240.8.200"},
-		"row_version": {h.lookup(`SELECT row_version FROM ip_range WHERE id = ?`, id)},
-	}, false)
-	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusSeeOther {
-		t.Error("an Observer corrected a reservation")
+	attempt := func(t *testing.T, who *harness, end string, wantStatus int) {
+		t.Helper()
+		resp := who.post("/ip-ranges/"+id, url.Values{
+			"csrf_token":  {who.csrfToken("/prefixes")},
+			"start_text":  {"10.240.8.10"},
+			"end_text":    {end},
+			"row_version": {version},
+		}, false)
+		defer resp.Body.Close()
+		if resp.StatusCode != wantStatus {
+			t.Errorf("got %d, want %d -- the refusal came from a different layer than "+
+				"this test is asserting", resp.StatusCode, wantStatus)
+		}
+		if got := h.lookup(`SELECT end_text FROM ip_range WHERE id = ?`, id); got == end {
+			t.Error("the correction reached the database despite the refusal")
+		}
 	}
-	if got := h.lookup(`SELECT end_text FROM ip_range WHERE id = ?`, id); got == "10.240.8.200" {
-		t.Error("an Observer's correction reached the database despite the refusal")
-	}
+
+	t.Run("observer", func(t *testing.T) {
+		viewer := newHarness(t)
+		viewer.login("viewer", "viewer-password")
+		attempt(t, viewer, "10.240.8.200", http.StatusForbidden)
+	})
+
+	t.Run("project owner", func(t *testing.T) {
+		owner := newHarness(t)
+		mustWebProjectOwner(t, owner, "po-range", "po-range-password", project)
+		owner.login("po-range", "po-range-password")
+		attempt(t, owner, "10.240.8.201", http.StatusNotFound)
+	})
 }

@@ -69,3 +69,53 @@ func TestUpdateDependencyCannotForgeAttestationOrLifecycle(t *testing.T) {
 		})
 	}
 }
+
+// TestUpdateDependencyCannotRewriteProvenance is the fourth column in that same
+// carry-over block, added 2026-09-08 when the first HTTP route to reach this
+// method landed.
+//
+// `source` was the one field in the group that was NOT pinned. CheckProvenanceWrite
+// stops an AGENT actor asserting `declared`; it does nothing about a user actor
+// rewriting an ESTABLISHED edge's provenance, which docs/AUDIT.md rule 7 calls
+// the cheaper of the two attacks precisely because the edge already looks real.
+//
+// Until the route existed, that was held off by facts about callers rather than
+// by the store — and "no caller does that today" is exactly the argument this
+// method's own comment refuses to rely on for verified_by and lifecycle.
+func TestUpdateDependencyCannotRewriteProvenance(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			s, ctx := newStore(t, e)
+			svc := mustService(t, s, ctx, "provenance-svc")
+			ep := mustEndpoint(t, s, ctx, svc, "sock", 9102)
+
+			d, err := domain.NewDependency(NewID(), newDependencySpec(svc, ep), s.Now())
+			if err != nil {
+				t.Fatalf("building the dependency: %v", err)
+			}
+			// An edge the estate reported about itself, not one a person drew.
+			d.Source = domain.SourceDiscoveredNetstat
+			if err := s.CreateDependency(ctx, testPermit, d, nil); err != nil {
+				t.Fatalf("creating the discovered dependency: %v", err)
+			}
+
+			laundered := *d
+			laundered.Source = domain.SourceDeclared
+
+			if err := s.UpdateDependency(ctx, testPermit, &laundered, nil); err != nil {
+				t.Fatalf("UpdateDependency with a rewritten source: %v", err)
+			}
+
+			after, err := s.GetDependency(ctx, d.ID)
+			if err != nil {
+				t.Fatalf("re-reading the dependency: %v", err)
+			}
+			if after.Source != domain.SourceDiscoveredNetstat {
+				t.Errorf("UpdateDependency persisted source = %q, want %q. A discovered "+
+					"edge relabelled as declared reads as something a person asserted, "+
+					"and the impact engine and the audit trail both believe it",
+					after.Source, domain.SourceDiscoveredNetstat)
+			}
+		})
+	}
+}

@@ -251,6 +251,17 @@ func TestCorrectingAPowerInputIsAudited(t *testing.T) {
 // TestOnlyAnAdministratorCanCorrectThePowerChain. Every power table is
 // ScopeTopology -- the same grant Withdraw on these rows already asks for, and
 // the reason a project owner sees no Edit link on them.
+//
+// A PROJECT OWNER IS THE CASE THAT ACTUALLY PROVES THIS, and the first version
+// of this test used only an Observer, which proved something much weaker.
+// These routes are registered under the generic `write` registrar, so
+// RequireWrite refuses an Observer on CanWrite before the handler -- let alone
+// the store's scope check -- is ever reached. The identical refusal would
+// happen if power_feed were ScopeProjectLinked, so an Observer-only test says
+// "you must be a writer", not "you must be an Administrator", however it is
+// named. A project owner has CanWrite = true and IsAdmin = false: they pass
+// the middleware, reach the store, and are refused by permit.Covers against
+// entityScope. That is the ScopeTopology claim, and nothing tested it.
 func TestOnlyAnAdministratorCanCorrectThePowerChain(t *testing.T) {
 	h := newHarness(t)
 	h.login("admin", "admin-password")
@@ -258,24 +269,54 @@ func TestOnlyAnAdministratorCanCorrectThePowerChain(t *testing.T) {
 	site := h.lookup(`SELECT id FROM asset WHERE kind = 'site' LIMIT 1`)
 	panel := h.addPanel(t, site, "rbac-board")
 	feed := h.addFeed(t, panel, "rbac-feed")
+	version := h.lookup(`SELECT row_version FROM power_feed WHERE id = ?`, feed)
+	project := h.lookup(`SELECT id FROM project WHERE lifecycle = 'active' ORDER BY id LIMIT 1`)
 
-	viewer := newHarness(t)
-	viewer.login("viewer", "viewer-password")
-	resp := viewer.post("/power/feeds/"+feed, url.Values{
-		"csrf_token":      {viewer.csrfToken("/power")},
-		"name":            {"taken-over"},
-		"voltage":         {"230"},
-		"amperage":        {"63"},
-		"max_utilisation": {"80"},
-		"row_version":     {h.lookup(`SELECT row_version FROM power_feed WHERE id = ?`, feed)},
-	}, false)
-	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusSeeOther {
-		t.Error("an Observer corrected a power feed; power_feed is ScopeTopology")
+	// wantStatus pins WHICH LAYER refused, not merely that something did.
+	// The two are different numbers and that is the whole point: 403 is
+	// middleware.RequireWrite answering CanWrite, 404 is the store's
+	// permit.Covers refusing a row the caller may not see. A test that
+	// accepted "any non-303" could not tell them apart, and would pass
+	// unchanged if the store's scope check were deleted outright.
+	attempt := func(t *testing.T, who *harness, name string, wantStatus int) {
+		t.Helper()
+		resp := who.post("/power/feeds/"+feed, url.Values{
+			"csrf_token":      {who.csrfToken("/power")},
+			"name":            {name},
+			"voltage":         {"230"},
+			"amperage":        {"63"},
+			"max_utilisation": {"80"},
+			"row_version":     {version},
+		}, false)
+		defer resp.Body.Close()
+		if resp.StatusCode != wantStatus {
+			t.Errorf("%s got %d, want %d -- the refusal came from a different layer "+
+				"than this test is asserting", name, resp.StatusCode, wantStatus)
+		}
+		if got := h.lookup(`SELECT name FROM power_feed WHERE id = ?`, feed); got == name {
+			t.Errorf("%s's correction reached the database despite the refusal", name)
+		}
 	}
-	if got := h.lookup(`SELECT name FROM power_feed WHERE id = ?`, feed); got == "taken-over" {
-		t.Error("an Observer's correction reached the database despite the refusal")
-	}
+
+	t.Run("observer", func(t *testing.T) {
+		viewer := newHarness(t)
+		viewer.login("viewer", "viewer-password")
+		// Stopped at the door: CanWrite is false, so the handler never runs.
+		attempt(t, viewer, "observer-took-over", http.StatusForbidden)
+	})
+
+	// The one that reaches the store. Refused by permit.Covers, not by
+	// middleware -- which is the whole difference this test exists to state.
+	t.Run("project owner", func(t *testing.T) {
+		owner := newHarness(t)
+		mustWebProjectOwner(t, owner, "po-power", "po-power-password", project)
+		owner.login("po-power", "po-power-password")
+		// Through the door and refused inside: CanWrite is TRUE for a project
+		// owner, so RequireWrite lets them past and permit.Covers is what
+		// says no -- 404 rather than 403, because a row outside your scope
+		// does not exist for you.
+		attempt(t, owner, "owner-took-over", http.StatusNotFound)
+	})
 }
 
 func (h *harness) addSource(t *testing.T, siteID, name, kind string) string {
