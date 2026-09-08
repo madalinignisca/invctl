@@ -48,6 +48,7 @@ POST /certificates/{id}/retire | CertificateRetire | write | true
 POST /certificates/{id}/services | CertificateDeployService | write | true
 POST /certificates/{id}/services/{serviceID}/retire | CertificateUndeployService | write | true
 POST /circuits | CircuitCreate | write | true
+POST /circuits/{id} | CircuitUpdate | write | true
 POST /circuits/{id}/costs | CostAddToCircuit | writeCost | true
 POST /circuits/{id}/costs/{costID} | CostEditOnCircuit | writeCost | true
 POST /circuits/{id}/costs/{costID}/reprice | CostRepriceOnCircuit | writeCost | true

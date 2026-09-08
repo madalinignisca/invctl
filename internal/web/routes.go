@@ -481,6 +481,7 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	write("POST /clusters/{id}/hosts", app.ClusterSetHosts)
 	write("POST /clusters/{id}/retire", app.ClusterRetire)
 	write("POST /circuits", app.CircuitCreate)
+	write("POST /circuits/{id}", app.CircuitUpdate)
 	write("POST /circuits/{id}/retire", app.CircuitRetire)
 
 	// Journal entries, on whatever page somebody is standing on. One route set
