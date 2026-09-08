@@ -184,6 +184,12 @@ func (b Base) CanWriteEntity(entityType, id string) bool {
 // field that failed to render must not break a save. That is only safe because
 // TestEveryEditFormCarriesItsVersion enumerates the forms and fails if one
 // stops emitting it, so the fallback cannot quietly become the normal path.
+//
+// THAT TEST WAS CITED HERE FOR MONTHS BEFORE IT EXISTED. The reasoning above is
+// right and nothing enforced it, so every edit form's concurrency guard rested
+// on this sentence. It is real now (internal/web/edit_form_version_test.go),
+// found while adding six correction forms at once -- the moment its absence
+// would have cost something.
 func submittedVersion(r *http.Request, stored int) int {
 	raw := formValue(r, domain.VersionField)
 	if raw == "" {
