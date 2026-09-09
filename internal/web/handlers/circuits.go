@@ -43,7 +43,10 @@ type circuitListPage struct {
 	Base
 	Circuits  []store.CircuitRow
 	Providers []store.ProviderRow
-	Errors    map[string]string
+	// Edit is set only when a correction was refused; every editState method
+	// is nil-safe, so the template calls through it unguarded.
+	Edit   *editState
+	Errors map[string]string
 }
 
 // ColumnOptions lists the circuits table's configurable columns, in header
@@ -61,10 +64,11 @@ func (circuitListPage) ColumnOptions() []ColumnOption {
 
 // CircuitList renders every contracted connection.
 func (a *App) CircuitList(w http.ResponseWriter, r *http.Request) {
-	a.renderCircuits(w, r, http.StatusOK, nil)
+	a.renderCircuits(w, r, http.StatusOK, nil, nil)
 }
 
-func (a *App) renderCircuits(w http.ResponseWriter, r *http.Request, status int, errs map[string]string) {
+func (a *App) renderCircuits(w http.ResponseWriter, r *http.Request, status int,
+	errs map[string]string, edit *editState) {
 	circuits, err := a.Store.ListCircuits(r.Context())
 	if err != nil {
 		a.serverError(w, r, err)
@@ -79,10 +83,17 @@ func (a *App) renderCircuits(w http.ResponseWriter, r *http.Request, status int,
 		render.CSV(w, r, store.ExportCircuits(circuits), a.Store.Now())
 		return
 	}
+	base := a.base(r, "Circuits", "circuits")
+	// A refused correction reopens the row it was refused on, whatever the
+	// query string said -- renderPrefixes and renderVLANs do the same.
+	if edit != nil {
+		base.EditRow = edit.ID
+	}
 	a.Render.Page(w, status, "circuit_list", circuitListPage{
-		Base:      a.base(r, "Circuits", "circuits"),
+		Base:      base,
 		Circuits:  circuits,
 		Providers: providers,
+		Edit:      edit,
 		Errors:    orEmpty(errs),
 	})
 }
@@ -221,7 +232,7 @@ func (a *App) CircuitCreate(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		a.renderCircuits(w, r, http.StatusUnprocessableEntity, messages)
+		a.renderCircuits(w, r, http.StatusUnprocessableEntity, messages, nil)
 		return
 	}
 	a.setFlash(r, "success", "Circuit "+circuit.CID+" recorded.")
@@ -397,10 +408,80 @@ func (a *App) ProviderCreate(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		a.renderCircuits(w, r, http.StatusUnprocessableEntity, messages)
+		a.renderCircuits(w, r, http.StatusUnprocessableEntity, messages, nil)
 		return
 	}
 	a.setFlash(r, "success", "Provider "+p.Name+" recorded.")
+	render.Redirect(w, r, "/circuits")
+}
+
+// ProviderUpdate corrects a carrier.
+//
+// THE ONLY ENTITY WITH A LIVE CREATE ROUTE AND NO REPAIR AT ALL, until now.
+// `name` is what somebody reads down the phone during an outage, `account_ref`
+// is what they quote when they get through, and `portal_url` is where they go
+// first -- the three-in-the-morning fields, none of which could be fixed. Found
+// by the write-surface census, which keys on creation exactly because the
+// reachability guard cannot see an entity that has no Update method to be
+// unreachable.
+//
+// Copy-then-overwrite, PrefixUpdate's shape: UpdateProvider writes every
+// column, so building a fresh Provider from the form would blank whatever the
+// form does not carry.
+func (a *App) ProviderUpdate(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Could not read that form.", http.StatusBadRequest)
+		return
+	}
+	existing, err := a.Store.GetProvider(r.Context(), r.PathValue("id"))
+	if err != nil {
+		a.handleStoreError(w, r, err)
+		return
+	}
+
+	updated := existing.Provider
+	updated.Name = formValue(r, "name")
+	updated.AccountRef = optionalString(r, "account_ref")
+	updated.PortalURL = optionalString(r, "portal_url")
+	updated.Description = optionalString(r, "description")
+	updated.RowVersion = submittedVersion(r, updated.RowVersion)
+
+	if err := a.Store.UpdateProvider(r.Context(), a.permit(r), &updated); err != nil {
+		messages, ok := refusalMessages(err, map[string]string{
+			"name": "a provider with that name already exists",
+		})
+		if !ok {
+			a.handleStoreError(w, r, err)
+			return
+		}
+		a.renderCircuits(w, r, refusalStatus(err), messages,
+			rejected(r, existing.ID, messages, "name", "account_ref", "portal_url", "description"))
+		return
+	}
+	a.setFlash(r, "success", "Provider "+updated.Name+" updated.")
+	render.Redirect(w, r, "/circuits")
+}
+
+// ProviderRetire withdraws a carrier, refusing while circuits still hang off it.
+//
+// The refusal is the useful part, and it is the store's: a withdrawn supplier
+// under a live circuit is not a tidy-up, because circuit.provider_id is NOT
+// NULL and every circuit page would go on rendering a carrier nobody deals with
+// any more. Move the circuits first -- the same order the real-world act
+// happens in.
+func (a *App) ProviderRetire(w http.ResponseWriter, r *http.Request) {
+	if err := a.Store.RetireProvider(r.Context(), a.permit(r), r.PathValue("id")); err != nil {
+		if isConflict(err) {
+			a.setFlash(r, "error", "That provider still carries live circuits. "+
+				"Move them to another supplier first — withdrawing it would leave "+
+				"them pointing at a carrier the estate says is gone.")
+			render.Redirect(w, r, "/circuits")
+			return
+		}
+		a.handleStoreError(w, r, err)
+		return
+	}
+	a.setFlash(r, "success", "Provider withdrawn.")
 	render.Redirect(w, r, "/circuits")
 }
 

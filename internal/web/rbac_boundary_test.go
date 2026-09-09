@@ -1163,8 +1163,10 @@ func TestNoWriteRouteIsReachableWithNoSessionAtAll(t *testing.T) {
 	// power chain's own three -- POST /power/feeds/{id},
 	// /power/sources/{id} and /assets/{id}/power/{inputID}. 191 -> 192:
 	// POST /ip-ranges/{id}. 192 -> 194: POST /circuits/{id} and
-	// POST /dependencies/{id}.
-	const pinnedNoSessionRouteCount = 194
+	// POST /dependencies/{id}. 194 -> 196: POST /providers/{id} and
+	// /providers/{id}/retire -- the last entity with a create route and no
+	// repair at all.
+	const pinnedNoSessionRouteCount = 196
 
 	for _, eng := range boundaryEngines(t) {
 		t.Run(eng.name, func(t *testing.T) {

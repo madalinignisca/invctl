@@ -140,6 +140,8 @@ POST /projects/{projectID}/assets/new | AssetCreateInProject | write | true
 POST /projects/{projectID}/circuits/new | CircuitCreateInProject | write | true
 POST /projects/{projectID}/services/new | ServiceCreateInProject | write | true
 POST /providers | ProviderCreate | write | true
+POST /providers/{id} | ProviderUpdate | write | true
+POST /providers/{id}/retire | ProviderRetire | write | true
 POST /redundancy | FHRPCreate | write | true
 POST /redundancy/{id}/journal | JournalCreate | write | true
 POST /redundancy/{id}/journal/{noteID} | JournalUpdate | write | true

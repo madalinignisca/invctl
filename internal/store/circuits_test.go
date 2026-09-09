@@ -12,6 +12,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -533,6 +534,80 @@ func TestAPermitIsUnchangedByARolledBackTransaction(t *testing.T) {
 				t.Fatalf("the permit itself changed across a rolled-back/retried transaction.\n"+
 					"before: %+v\nafter:  %+v\n"+
 					"scopedPermit must carry no mutable state -- see its doc comment.", before, after)
+			}
+		})
+	}
+}
+
+// TestUpdateProviderCannotLogAWithdrawalThatDidNotHappen guards the audit
+// trail, which is what `p.Lifecycle = before.Lifecycle` actually protects.
+//
+// THE FIRST VERSION OF THIS TEST ASSERTED THE WRONG PROPERTY. It checked that a
+// submitted lifecycle did not reach the database -- and it cannot, because
+// UpdateProvider's UPDATE statement does not name the lifecycle column at all,
+// so the test passed with the carry-over deleted and proved nothing. The
+// mutation is what said so.
+//
+// What the carry-over is for is `logUpdate`, which diffs the before and after
+// STRUCTS. Without it, a caller submitting lifecycle = 'retired' writes a
+// change_log entry recording a withdrawal while the row stays active: an audit
+// trail that says somebody withdrew a carrier nobody withdrew. RetireIPRange
+// names the same failure from the other direction -- "a second audit entry
+// would claim a withdrawal that did not happen".
+func TestUpdateProviderCannotLogAWithdrawalThatDidNotHappen(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			s, ctx := newStore(t, e)
+			id := mustProvider(t, s, ctx, "carry-the-line")
+
+			before, err := s.GetProvider(ctx, id)
+			if err != nil {
+				t.Fatalf("loading the provider: %v", err)
+			}
+			if before.Lifecycle != domain.LifecycleActive {
+				t.Fatalf("a fresh provider is %q, want active", before.Lifecycle)
+			}
+
+			// A REAL change alongside the forged one, so an update is genuinely
+			// logged and there is a diff to inspect. Submitting only the
+			// lifecycle produces no diff at all once the carry-over is in place
+			// -- correct behaviour, and it would leave this test asserting over
+			// an empty set.
+			forged := before.Provider
+			forged.Name = "carry-the-line renamed"
+			forged.Lifecycle = domain.LifecycleRetired
+			if err := s.UpdateProvider(ctx, testPermit, &forged); err != nil {
+				t.Fatalf("UpdateProvider with a submitted lifecycle: %v", err)
+			}
+
+			after, err := s.GetProvider(ctx, id)
+			if err != nil {
+				t.Fatalf("re-reading the provider: %v", err)
+			}
+			if after.Lifecycle != domain.LifecycleActive {
+				t.Errorf("the row is %q, want active", after.Lifecycle)
+			}
+
+			// The audit is the claim under test.
+			// UPDATE entries only. A create's snapshot naturally contains
+			// "lifecycle":"active" -- the first version of this checked every
+			// entry and failed on that, which would have made the test unusable
+			// rather than wrong, but is the same class of sloppiness.
+			var diffs []string
+			if err := s.DB().Reader.Select(&diffs, s.DB().Reader.Rebind(
+				`SELECT COALESCE(diff, '') FROM change_log
+				  WHERE entity_id = ? AND action = 'update'`), id); err != nil {
+				t.Fatalf("reading the change log: %v", err)
+			}
+			if len(diffs) == 0 {
+				t.Fatal("no update was logged at all, so this test is checking nothing")
+			}
+			for _, d := range diffs {
+				if strings.Contains(d, "lifecycle") {
+					t.Errorf("change_log records a lifecycle change for a provider that "+
+						"is still active: %s\nThe audit trail now says somebody withdrew "+
+						"a carrier nobody withdrew.", d)
+				}
 			}
 		})
 	}
