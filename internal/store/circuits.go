@@ -264,6 +264,118 @@ func (s *SQLStore) ListProviders(ctx context.Context) ([]ProviderRow, error) {
 	return rows, nil
 }
 
+// GetProvider loads one carrier, with how many live circuits hang off it.
+func (s *SQLStore) GetProvider(ctx context.Context, id string) (*ProviderRow, error) {
+	var row ProviderRow
+	err := s.readOne(ctx, &row, `
+		SELECT p.*,
+		       (SELECT COUNT(*) FROM circuit c
+		         WHERE c.provider_id = p.id AND c.lifecycle <> 'retired') AS circuit_count
+		FROM provider p
+		WHERE p.id = ?`, id)
+	if err != nil {
+		return nil, fmt.Errorf("getting provider %s: %w", id, err)
+	}
+	return &row, nil
+}
+
+// UpdateProvider corrects a carrier.
+//
+// A SUPPLIER WAS THE ONLY ENTITY IN THIS SYSTEM WITH A LIVE CREATE ROUTE AND NO
+// REPAIR OF ANY KIND -- no correction, no withdrawal -- so a name typed wrong
+// was wrong for ever, and WP-1.2's CircuitUpdate then shipped a picker pointing
+// at it. Found by the write-surface census (write_surface_test.go), which keys
+// on creation precisely because the reachability guard could not see an entity
+// that had no Update method to be unreachable.
+//
+// WHAT A WRONG ONE COSTS. `provider.name` is what somebody reads down the phone
+// during an outage, and `account_ref` is the reference they quote when they get
+// through. `portal_url` is where they go first. All three are the three-in-the-
+// morning fields, and none of them could be fixed.
+//
+// The unique index is partial -- `provider_name_key ... WHERE lifecycle <>
+// 'retired'` -- so renaming onto a live carrier's name is refused while
+// reusing a withdrawn one's is allowed, which is the behaviour somebody
+// re-signing with a former supplier actually wants.
+func (s *SQLStore) UpdateProvider(ctx context.Context, permit domain.Permit, p *domain.Provider) error {
+	if err := p.Validate(); err != nil {
+		return err
+	}
+	before, err := s.GetProvider(ctx, p.ID)
+	if err != nil {
+		return err
+	}
+	// Lifecycle is carried from the stored row, never taken from the caller --
+	// the same rule UpdateDependency applies to verified_by and lifecycle.
+	// RetireProvider is the only thing allowed to withdraw one, and it refuses
+	// while circuits still hang off it; accepting a lifecycle here would route
+	// around that guard entirely.
+	p.Lifecycle = before.Lifecycle
+	p.CreatedAt = before.CreatedAt
+	at := domain.FormatTime(s.now())
+	p.UpdatedAt = &at
+
+	return s.write(ctx, permit, func(t *tx) error {
+		res, err := t.exec(ctx, `
+			UPDATE provider SET name = ?, account_ref = ?, portal_url = ?,
+			                    description = ?, updated_at = ?,
+			                    row_version = row_version + 1
+			WHERE id = ? AND row_version = ?`,
+			p.Name, p.AccountRef, p.PortalURL, p.Description, at, p.ID, p.RowVersion)
+		if err != nil {
+			return translateWriteErr(err, "updating provider")
+		}
+		if err := requireVersion(res, "provider", p.ID, &p.RowVersion); err != nil {
+			return err
+		}
+		return t.logUpdate(ctx, "provider", p.ID, &before.Provider, p)
+	})
+}
+
+// RetireProvider withdraws a carrier, refusing while circuits still hang off it.
+//
+// REFUSED RATHER THAN CASCADED, the same shape as RetirePowerFeed. A withdrawn
+// supplier under a live circuit is not a tidy-up, it is a circuit whose
+// supplier the estate says is gone -- and `circuit.provider_id` is NOT NULL, so
+// the row keeps pointing at it and every circuit page renders a carrier nobody
+// deals with any more. The operator moves the circuits first, which is the
+// same order the real-world act happens in.
+func (s *SQLStore) RetireProvider(ctx context.Context, permit domain.Permit, id string) error {
+	before, err := s.GetProvider(ctx, id)
+	if err != nil {
+		return err
+	}
+	if before.Lifecycle == domain.LifecycleRetired {
+		// Already withdrawn: a second audit entry would claim a withdrawal
+		// that did not happen. RetireIPRange and RetireCircuit both do this.
+		return nil
+	}
+	if before.CircuitCount > 0 {
+		return fmt.Errorf("provider %s still carries %d live %s: %w",
+			before.Name, before.CircuitCount,
+			pluralWord(before.CircuitCount, "circuit", "circuits"), domain.ErrConflict)
+	}
+	at := domain.FormatTime(s.now())
+	after := before.Provider
+	after.Lifecycle = domain.LifecycleRetired
+	after.UpdatedAt = &at
+
+	return s.write(ctx, permit, func(t *tx) error {
+		res, err := t.exec(ctx, `
+			UPDATE provider SET lifecycle = 'retired', updated_at = ?,
+			                    row_version = row_version + 1
+			WHERE id = ? AND row_version = ?`, at, id, before.RowVersion)
+		if err != nil {
+			return translateWriteErr(err, "retiring provider")
+		}
+		v := before.RowVersion
+		if err := requireVersion(res, "provider", id, &v); err != nil {
+			return err
+		}
+		return t.logUpdate(ctx, "provider", id, &before.Provider, &after)
+	})
+}
+
 // CreateProvider declares a carrier.
 //
 // provider is classified domain.ScopeEstateConfig, not project-linked -- a

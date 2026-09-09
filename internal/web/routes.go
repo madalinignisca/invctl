@@ -502,6 +502,8 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	writeCost("POST /circuits/{id}/costs/{costID}/retire", app.CostRetireOnCircuit)
 	writeCost("POST /circuits/{id}/costs/{costID}/reprice", app.CostRepriceOnCircuit)
 	write("POST /providers", app.ProviderCreate)
+	write("POST /providers/{id}", app.ProviderUpdate)
+	write("POST /providers/{id}/retire", app.ProviderRetire)
 	write("POST /overlays", app.L2VPNCreate)
 	write("POST /overlays/{id}/retire", app.L2VPNRetire)
 	write("POST /overlays/{id}/terminations", app.L2VPNAttach)

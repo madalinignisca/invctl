@@ -115,10 +115,12 @@ var writeSurfaceByDesign = map[string]string{
 // way to correct or withdraw it, and that is the thing this test exists to make
 // somebody say out loud.
 var writeSurfaceGaps = map[string]string{
+	// Provider was the first entry here and is the first one gone: it was the
+	// only entity in the system with a live create route and no repair of any
+	// kind. This test is what found it, and this test is what said to delete
+	// the entry once POST /providers/{id} and /retire existed.
+	//
 	// --- reachable, and the row carries attributes somebody typed ---
-	"Provider": "NEITHER. A supplier has a live create route and no correction " +
-		"and no withdrawal of any kind, so a name typed wrong is wrong for ever " +
-		"-- and CircuitUpdate now offers a picker for it. The worst entry here.",
 	"NetAnchor": "no correction. internal/domain's own comment calls a misplaced " +
 		"anchor \"the single highest-leverage wrong row in this model -- one row " +
 		"silently changes every external-reachability verdict in the estate\".",

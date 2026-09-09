@@ -94,15 +94,68 @@
   {{if .Providers}}
   <div class="scroll-x">
     <table>
-      <thead><tr><th>Name</th><th>Account</th><th>Portal</th><th class="num">Circuits</th></tr></thead>
+      <thead><tr><th>Name</th><th>Account</th><th>Portal</th><th class="num">Circuits</th>{{if .IsAdmin}}<th></th>{{end}}</tr></thead>
       <tbody>
         {{range .Providers}}
+        {{/* CORRECTING one. A supplier was the ONLY entity in this system with
+             a live create route and no repair of any kind -- no correction and
+             no withdrawal -- so a name typed wrong was wrong for ever, and the
+             circuit correction form then shipped a picker pointing at it.
+             Found by the write-surface census (write_surface_test.go).
+
+             These are the three-in-the-morning fields: the name is what you
+             read down the phone, the account reference is what you quote when
+             you get through, and the portal is where you go first. */}}
+        {{if and $.IsAdmin (eq .ID $.EditRow)}}
+        <tr class="row-editing">
+          <td><input form="prov-{{.ID}}" class="{{if $.Edit.Err "name"}}invalid{{end}}" type="text"
+                     name="name" value="{{$.Edit.Value "name" .Name}}"
+                     aria-label="Provider name" required style="width:12em">
+              {{with $.Edit.Err "name"}}<div class="field-error">{{.}}</div>{{end}}</td>
+          <td><input form="prov-{{.ID}}" class="mono" type="text" name="account_ref"
+                     value="{{$.Edit.Value "account_ref" (deref .AccountRef)}}"
+                     aria-label="Account reference" style="width:10em">
+              <div class="field-hint">A reference, never a person.</div></td>
+          <td><input form="prov-{{.ID}}" type="url" name="portal_url"
+                     value="{{$.Edit.Value "portal_url" (deref .PortalURL)}}"
+                     aria-label="Portal URL" style="width:14em"></td>
+          <td class="num">{{.CircuitCount}}</td>
+          <td style="white-space:nowrap">
+            <form id="prov-{{.ID}}" method="post" action="/providers/{{.ID}}" style="display:inline">
+              <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+              <input type="hidden" name="row_version" value="{{$.Edit.Value "row_version" (itoa .RowVersion)}}">
+              {{/* Carried, not shown: UpdateProvider writes every column, so
+                   dropping this would blank the description on save. */}}
+              <input type="hidden" name="description" value="{{$.Edit.Value "description" (deref .Description)}}">
+              <button class="btn btn-sm btn-primary" type="submit">Save</button>
+            </form>
+            <a class="btn btn-sm" href="/circuits">Cancel</a>
+          </td>
+        </tr>
+        {{else}}
         <tr>
           <td>{{.Name}}</td>
           <td class="mono">{{if .AccountRef}}{{deref .AccountRef}}{{else}}—{{end}}</td>
           <td>{{if .PortalURL}}<a href="{{deref .PortalURL}}" rel="noreferrer noopener">portal</a>{{else}}—{{end}}</td>
           <td class="num">{{.CircuitCount}}</td>
+          {{if $.IsAdmin}}
+          <td style="white-space:nowrap">
+            <a class="btn btn-sm" href="/circuits?edit={{.ID}}">Edit</a>
+            {{/* Withdrawal is offered only when nothing hangs off it. The store
+                 refuses either way -- circuit.provider_id is NOT NULL, so a
+                 withdrawn carrier under a live circuit would go on rendering on
+                 every one of their pages -- and this keeps the button from
+                 being offered-and-refused. */}}
+            {{if not .CircuitCount}}
+            <form method="post" action="/providers/{{.ID}}/retire" style="display:inline">
+              <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+              <button class="btn btn-sm btn-danger" type="submit">Withdraw</button>
+            </form>
+            {{end}}
+          </td>
+          {{end}}
         </tr>
+        {{end}}
         {{end}}
       </tbody>
     </table>
