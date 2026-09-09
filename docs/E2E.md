@@ -126,10 +126,47 @@ matters:
   of skipping or running -- see the spec's own header for why that
   combination specifically must not be treated as "probably fine".
 
+- **`correction-paths.spec.js`** uses the same positive opt-in as
+  `saved-views.spec.js`, for the same reason: a correction writes an
+  append-only `change_log` row that can never be removed, and changes a real
+  figure on whatever instance it ran against.
+
 If a future spec needs to exercise a mutation, follow whichever of these two
 shapes actually fits what it writes, state the constraint loudly at the top
 of that spec (not assumed), and never write against a shared or public
 instance.
+
+## Why `correction-paths.spec.js` exists, and what only a browser can say
+
+The six correction paths added 2026-09-08 all render as **row editors**, and a
+row editor puts its inputs in the table cells they belong under rather than
+inside the `<form>` element:
+
+```html
+<td><input form="feed-abc" name="amperage" ...></td>
+...
+<td><form id="feed-abc" method="post" action="/power/feeds/abc"> ... </td>
+```
+
+That is HTML5 form association, and **the browser is what performs it**. Every
+Go test for these routes posts a hand-built payload straight at the handler, so
+if `form="feed-abc"` were misspelled, pointed at another row's id, or ignored,
+the submission would carry only the hidden inputs physically nested inside the
+`<form>` -- and every one of those Go tests would still pass. The save would
+appear to work and silently blank the fields it did not carry, because these
+`Update` methods write every column.
+
+This was verified rather than assumed: pointing the amperage input at a
+nonexistent form id leaves `go test ./internal/web/` fully green and fails this
+spec on the exact claim. It is the same shape as the 404-on-a-button this
+project has shipped before -- the route is reachable and the handler is right,
+and the markup does not deliver the fields.
+
+The second test covers the case only a browser decides: a checkbox group with
+every box unticked submits **no key at all**, and the handler has to read that
+absence as "replace the set with nothing". Reading it as "leave them alone"
+makes removing the last data class impossible, silently -- which is what it did
+until the test that unticks was written.
 
 ## Where the ownership report's mutation is covered instead
 

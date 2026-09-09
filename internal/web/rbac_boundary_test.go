@@ -1158,8 +1158,13 @@ func TestNoWriteRouteIsReachableWithNoSessionAtAll(t *testing.T) {
 	// added POST /views/{id}/rename to the self registrar. 182 -> 186:
 	// WP-F1 Task 7 added POST /wireless, /wireless/{id}/retire,
 	// /wireless/{id}/radios and /wireless/{id}/radios/{ifaceID}/remove to the
-	// write registrar.
-	const pinnedNoSessionRouteCount = 188
+	// write registrar. 186 -> 188: POST /vlans/{id} and POST /wireless/{id},
+	// the two correction paths found missing on the demo. 188 -> 191: the
+	// power chain's own three -- POST /power/feeds/{id},
+	// /power/sources/{id} and /assets/{id}/power/{inputID}. 191 -> 192:
+	// POST /ip-ranges/{id}. 192 -> 194: POST /circuits/{id} and
+	// POST /dependencies/{id}.
+	const pinnedNoSessionRouteCount = 194
 
 	for _, eng := range boundaryEngines(t) {
 		t.Run(eng.name, func(t *testing.T) {

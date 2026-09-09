@@ -641,3 +641,23 @@ That the fix round reproduced the defect it was fixing, in prose, is the most
 useful thing this document records. **On this feature the prose is the product**
 — the number is four multiplications; everything that makes it safe to act on is
 a sentence.
+
+### The seventh instance, closed 2026-09-08
+
+Round two also recorded, and did not act on, that **`draw_va` could not be
+corrected**: the only way to change a number was to disconnect the input and
+add it again. That observation was written down and left as a caveat, which
+made it the same defect one level up — reasoning carried to a note rather than
+to a change.
+
+It matters here specifically because this document's case for the figure being
+*worth publishing at all* is that declared load improves as operators refine
+it. A UI with no way to refine anything does not converge; it fossilises
+whatever was typed first, and this page multiplies that into money. The
+coverage count says how many assets declared a figure. Nothing said, and
+nothing could have said, how many of those figures were still the first guess.
+
+`POST /assets/{id}/power/{inputID}` closes it, with the feed picker beside the
+draw so "it is plugged into the other one" is a correction rather than a
+reconnection. The convergence claim is now supported by a control instead of by
+this paragraph.

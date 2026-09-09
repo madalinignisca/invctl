@@ -89,11 +89,11 @@ func (a *App) renderCircuits(w http.ResponseWriter, r *http.Request, status int,
 
 // CircuitDetail shows one circuit, both its ends and what it costs.
 func (a *App) CircuitDetail(w http.ResponseWriter, r *http.Request) {
-	a.renderCircuitDetail(w, r, r.PathValue("id"), http.StatusOK, nil)
+	a.renderCircuitDetail(w, r, r.PathValue("id"), http.StatusOK, nil, nil)
 }
 
 func (a *App) renderCircuitDetail(w http.ResponseWriter, r *http.Request, id string,
-	status int, errs map[string]string) {
+	status int, errs map[string]string, edit *editState) {
 
 	circuit, err := a.Store.GetCircuit(r.Context(), id)
 	if err != nil {
@@ -109,6 +109,11 @@ func (a *App) renderCircuitDetail(w http.ResponseWriter, r *http.Request, id str
 	// assets.go): price_movement_panel is entirely money, so a viewer without
 	// the grant gets neither the query nor the render.
 	base := a.base(r, circuit.CID, "circuits")
+	// A refused correction reopens the form it was refused on, whatever the
+	// query string said -- renderPrefixes and the asset page do the same.
+	if edit != nil {
+		base.EditRow = edit.ID
+	}
 	var movement []store.PriceSeries
 	if base.CanSeeCosts {
 		movement, err = a.Store.PriceMovementForCircuit(r.Context(), id)
@@ -162,6 +167,13 @@ func (a *App) renderCircuitDetail(w http.ResponseWriter, r *http.Request, id str
 		Sides        []string
 		Providers    []store.ProviderRow
 		Errors       map[string]string
+		// Editing is true when the correction form is open. Gated on
+		// CanWriteEntity for THIS circuit rather than on .CanWrite: a circuit
+		// is project-linked, so its owner may correct it while .CanWrite alone
+		// is still false for every project owner -- the same reasoning as the
+		// asset page's canWriteAsset (assets.go).
+		Editing bool
+		Edit    *editState
 	}{
 		Base:         base,
 		Circuit:      circuit,
@@ -176,6 +188,8 @@ func (a *App) renderCircuitDetail(w http.ResponseWriter, r *http.Request, id str
 		Sides:        domain.CircuitSides,
 		Providers:    providers,
 		Errors:       orEmpty(errs),
+		Editing:      base.CanWriteEntity("circuit", circuit.ID) && base.EditRow == circuit.ID,
+		Edit:         edit,
 	})
 }
 
@@ -283,6 +297,74 @@ func (a *App) renderCircuitCreateInProjectForm(w http.ResponseWriter, r *http.Re
 	})
 }
 
+// CircuitUpdate corrects a circuit's identifier, supplier or commitment.
+//
+// A CIRCUIT IS A FAILURE TARGET, not a record. Its terminations are what make
+// "simulate cutting this" answer anything, and its impact history is what a
+// person reads during the incident. Retire-and-redeclare -- the only fix before
+// this route -- throws both away to correct a typed digit: the new circuit has
+// no ends until somebody lands them again, and the change log for the old one
+// stops at a cessation that never happened.
+//
+// THE CID IS THE FIELD WITH TEETH. It is the string somebody reads down the
+// phone to the supplier at three in the morning, and it is what the search
+// index titles this circuit by -- so a wrong one is not merely untidy, it is
+// unfindable. The store refuses a duplicate within a provider, so a correction
+// onto an existing identifier is caught rather than accepted.
+//
+// contract_end is offered because it drives the expiry report: a circuit
+// auto-renewing at a rate nobody checked is the failure that report exists to
+// prevent, and a date entered wrong silences it.
+func (a *App) CircuitUpdate(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Could not read that form.", http.StatusBadRequest)
+		return
+	}
+	id := r.PathValue("id")
+	existing, err := a.Store.GetCircuit(r.Context(), id)
+	if err != nil {
+		a.handleStoreError(w, r, err)
+		return
+	}
+
+	nums := optionalNumbers(r)
+	updated := *existing
+	updated.CID = formValue(r, "cid")
+	// submittedString's rule, spelled out because provider_id is a required
+	// column: an empty picker means "not rendered", never "this circuit has no
+	// supplier". A circuit with no provider is not a state the domain has.
+	if v := formValue(r, "provider_id"); v != "" {
+		updated.ProviderID = v
+	}
+	updated.ServiceType = optionalString(r, "service_type")
+	updated.CommitMbps = nums.opt("commit_mbps")
+	updated.InstallDate = optionalString(r, "install_date")
+	updated.ContractEnd = optionalString(r, "contract_end")
+	updated.Description = optionalString(r, "description")
+	updated.RowVersion = submittedVersion(r, updated.RowVersion)
+
+	if msgs := nums.messages(); msgs != nil {
+		err = domain.NewValidationFrom(msgs)
+	} else {
+		err = a.Store.UpdateCircuit(r.Context(), a.permit(r), &updated)
+	}
+	if err != nil {
+		messages, ok := refusalMessages(err, map[string]string{
+			"cid": "that provider already has a circuit with that identifier",
+		})
+		if !ok {
+			a.handleStoreError(w, r, err)
+			return
+		}
+		a.renderCircuitDetail(w, r, id, refusalStatus(err), messages,
+			rejected(r, id, messages, "cid", "provider_id", "service_type",
+				"commit_mbps", "install_date", "contract_end", "description"))
+		return
+	}
+	a.setFlash(r, "success", "Circuit "+updated.CID+" updated.")
+	render.Redirect(w, r, "/circuits/"+id)
+}
+
 // CircuitRetire ceases a circuit.
 func (a *App) CircuitRetire(w http.ResponseWriter, r *http.Request) {
 	if err := a.Store.RetireCircuit(r.Context(), a.permit(r), r.PathValue("id")); err != nil {
@@ -343,7 +425,7 @@ func (a *App) CircuitLand(w http.ResponseWriter, r *http.Request) {
 			}
 			messages = map[string]string{"side": "that end of this circuit is already recorded"}
 		}
-		a.renderCircuitDetail(w, r, id, http.StatusUnprocessableEntity, messages)
+		a.renderCircuitDetail(w, r, id, http.StatusUnprocessableEntity, messages, nil)
 		return
 	}
 	a.setFlash(r, "success", "Circuit end recorded.")

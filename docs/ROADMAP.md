@@ -70,9 +70,14 @@ that, all gated on exactly the predicate the store enforces:
 
 - **Row controls.** A dependency row's Retire/Verify now render when the
   caller's permit covers the consumer service AND the provider's owning
-  service. (There is no Edit control on a dependency row and no route
+  service. ~~(There is no Edit control on a dependency row and no route
   reaches `UpdateDependency` — an earlier version of this entry claimed
-  Edit too; it did not exist.) No store change was needed:
+  Edit too; it did not exist.)~~ **Edit exists now, added 2026-09-08** with
+  the other five correction paths: `POST /dependencies/{id}`, gated on the
+  same two-ended predicate as Retire and Verify. The form deliberately
+  offers neither re-pointing nor `source`, so the seizure and
+  provenance-laundering surfaces the store guards are not opened by it.
+  No store change was needed:
   `DependencyRow.ProviderSvc` was already resolved by the list query
   through both the endpoint and the route-to-frontend-endpoint paths — the
   same derivation `authorizeDependencySubjects` performs. The doc comment

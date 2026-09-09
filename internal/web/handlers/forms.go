@@ -810,6 +810,33 @@ type depRowData struct {
 	// the identity carries no secret_ref -- both render as "—", the same as
 	// every other absent field on this row.
 	SecretRef string
+	// EditForm is non-nil on exactly the one row opened for correction, and
+	// carries the vocabularies that row's inputs need.
+	//
+	// A POINTER ON THE ROW rather than fields on the page, because
+	// dependency_row is rendered STANDALONE after a verify -- the partial has
+	// no page around it to reach through, and a partial that only works when
+	// its parent has already rendered is the thing CLAUDE.md's template rule
+	// forbids. Nil on every other row, which is all of them almost always.
+	EditForm *depEditForm
+}
+
+// depEditForm is one dependency's correction form.
+//
+// WHAT IT DELIBERATELY DOES NOT OFFER: the consumer, the provider, the source
+// and the verification. Re-pointing an edge is declaring a different edge, not
+// correcting this one -- and the store guards it with two separate subject
+// authorizations precisely because moving an edge is a seizure risk rather
+// than a typo fix. `source` stays as stored because flipping discovered to
+// declared is what VerifyDependency exists for, and it derives verified_by
+// from the actor instead of accepting it. Offering either here would put a
+// provenance-laundering control on a routine correction form.
+type depEditForm struct {
+	Natures      []string
+	ClassOptions []store.VocabularyTerm
+	Identities   []domain.Identity
+	// Edit is the refused submission, or nil. Every accessor is nil-safe.
+	Edit *editState
 }
 
 // depRows decorates dependency rows for rendering. covers is the caller's
@@ -866,6 +893,28 @@ func depRows(deps []store.DependencyRow, classes map[string][]string, direction,
 		out[i].ShowActions = anyWritable
 	}
 	return out
+}
+
+// openDepEditor attaches form to the one row the operator opened, and reports
+// whether it found it.
+//
+// Only a row whose CanWrite is already true can open: that flag is the
+// two-ended answer (consumer AND provider), the same rule the store enforces
+// in authorizeDependencySubjects, so a row that cannot be written must not
+// render a form that would be refused on submit.
+func openDepEditor(tables [][]depRowData, id string, form *depEditForm) bool {
+	if id == "" {
+		return false
+	}
+	for _, rows := range tables {
+		for i := range rows {
+			if rows[i].Dep.ID == id && rows[i].CanWrite {
+				rows[i].EditForm = form
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // canWriteDependency is the one place a dependency's two-ended write rule is

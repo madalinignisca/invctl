@@ -347,14 +347,17 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	write("POST /assets/{id}/patch", app.PassThroughCreate)
 	write("POST /assets/{id}/patch/{patchID}/retire", app.PassThroughRetire)
 	write("POST /assets/{id}/power", app.PowerInputCreate)
+	write("POST /assets/{id}/power/{inputID}", app.PowerInputUpdate)
 	write("POST /assets/{id}/power/{inputID}/retire", app.PowerInputRetire)
 
 	write("POST /power/sources", app.PowerSourceCreate)
+	write("POST /power/sources/{id}", app.PowerSourceUpdate)
 	write("POST /power/sources/{id}/retire", app.PowerSourceRetire)
 	write("POST /power/panels", app.PowerPanelCreate)
 	write("POST /power/panels/{id}", app.PowerPanelUpdate)
 	write("POST /power/panels/{id}/retire", app.PowerPanelRetire)
 	write("POST /power/feeds", app.PowerFeedCreate)
+	write("POST /power/feeds/{id}", app.PowerFeedUpdate)
 	write("POST /power/feeds/{id}/retire", app.PowerFeedRetire)
 
 	write("POST /catalogue/manufacturers", app.ManufacturerCreate)
@@ -463,6 +466,7 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	write("POST /overrides", app.HealthOverrideCreate)
 	write("POST /overrides/{id}", app.HealthOverrideAmend)
 	write("POST /overrides/{id}/clear", app.HealthOverrideClear)
+	write("POST /dependencies/{id}", app.DependencyUpdate)
 	write("POST /dependencies/{id}/retire", app.DependencyRetire)
 	write("POST /dependencies/{id}/verify", app.DependencyVerify)
 
@@ -478,6 +482,7 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	write("POST /clusters/{id}/hosts", app.ClusterSetHosts)
 	write("POST /clusters/{id}/retire", app.ClusterRetire)
 	write("POST /circuits", app.CircuitCreate)
+	write("POST /circuits/{id}", app.CircuitUpdate)
 	write("POST /circuits/{id}/retire", app.CircuitRetire)
 
 	// Journal entries, on whatever page somebody is standing on. One route set
@@ -528,6 +533,7 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	write("POST /wireless/{id}/radios", app.WirelessRadioAdd)
 	write("POST /wireless/{id}/radios/{ifaceID}/remove", app.WirelessRadioRemove)
 	write("POST /ip-ranges", app.IPRangeCreate)
+	write("POST /ip-ranges/{id}", app.IPRangeUpdate)
 	write("POST /ip-ranges/{id}/retire", app.IPRangeRetire)
 
 	write("POST /network/groups", app.NetworkGroupCreate)

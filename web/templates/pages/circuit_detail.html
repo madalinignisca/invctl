@@ -19,7 +19,79 @@
 
 <div style="margin-bottom:18px">
   <a class="btn btn-primary" href="/circuits/{{.Circuit.ID}}/impact">Simulate cutting this</a>
+  {{if .CanWriteEntity "circuit" .Circuit.ID}}
+  <a class="btn" href="/circuits/{{.Circuit.ID}}?edit={{.Circuit.ID}}">Correct these details</a>
+  {{end}}
 </div>
+
+{{/* CORRECTING the circuit itself. A circuit is a failure target rather than
+     a record: its terminations are what make "simulate cutting this" answer
+     anything, and its impact history is what somebody reads during the
+     incident. Retire-and-redeclare -- the only fix before this form -- threw
+     both away to correct a typed digit.
+
+     Gated on CanWriteEntity for THIS circuit, not on .IsAdmin: a circuit is
+     project-linked, so its owner may correct it. The terminations table above
+     stays Administrator-only because circuit_termination is ScopeTopology. */}}
+{{if .Editing}}
+<form class="panel" method="post" action="/circuits/{{.Circuit.ID}}">
+  <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+  <input type="hidden" name="row_version" value="{{.Edit.Value "row_version" (itoa .Circuit.RowVersion)}}">
+  <div class="panel-head"><h2>Correct this circuit</h2></div>
+  <div class="panel-body">
+    <div class="field-row">
+      <div class="field">
+        <label for="c-cid">Identifier</label>
+        <input id="c-cid" class="mono {{if .Edit.Err "cid"}}invalid{{end}}" type="text" name="cid"
+               value="{{.Edit.Value "cid" .Circuit.CID}}" required>
+        {{with .Edit.Err "cid"}}<div class="field-error">{{.}}</div>{{end}}
+        <div class="field-hint">What you read down the phone to the supplier. The search index titles this circuit by it.</div>
+      </div>
+      <div class="field">
+        <label for="c-provider">Supplier</label>
+        {{$pv := .Edit.Value "provider_id" .Circuit.ProviderID}}
+        <select id="c-provider" name="provider_id" required>
+          {{range .Providers}}<option value="{{.ID}}" {{if eq .ID $pv}}selected{{end}}>{{.Name}}</option>{{end}}
+        </select>
+        {{with .Edit.Err "provider_id"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="c-type">Service type</label>
+        <input id="c-type" type="text" name="service_type"
+               value="{{.Edit.Value "service_type" (deref .Circuit.ServiceType)}}">
+      </div>
+    </div>
+    <div class="field-row">
+      <div class="field">
+        <label for="c-commit">Commit (Mb)</label>
+        <input id="c-commit" class="{{if .Edit.Err "commit_mbps"}}invalid{{end}}" type="number" name="commit_mbps"
+               min="0" value="{{.Edit.Value "commit_mbps" (derefInt .Circuit.CommitMbps)}}">
+        {{with .Edit.Err "commit_mbps"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="c-install">Installed</label>
+        <input id="c-install" type="date" name="install_date"
+               value="{{.Edit.Value "install_date" (deref .Circuit.InstallDate)}}">
+      </div>
+      <div class="field">
+        <label for="c-end">Contract ends</label>
+        <input id="c-end" type="date" name="contract_end"
+               value="{{.Edit.Value "contract_end" (deref .Circuit.ContractEnd)}}">
+        <div class="field-hint">Nothing stops working on the day — this is what puts the circuit on the expiry report before it auto-renews at a rate nobody checked.</div>
+      </div>
+    </div>
+    <div class="field">
+      <label for="c-desc">Description</label>
+      <input id="c-desc" type="text" name="description"
+             value="{{.Edit.Value "description" (deref .Circuit.Description)}}">
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-primary" type="submit">Save</button>
+      <a class="btn" href="/circuits/{{.Circuit.ID}}">Cancel</a>
+    </div>
+  </div>
+</form>
+{{end}}
 
 <div class="stat-row">
   <div class="stat"><div class="k">Commit</div><div class="v">{{if .Circuit.CommitMbps}}{{derefInt .Circuit.CommitMbps}}<span style="font-size:13px"> Mb</span>{{else}}—{{end}}</div></div>

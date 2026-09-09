@@ -660,12 +660,31 @@ func (s *SQLStore) UpdateDependency(ctx context.Context, p domain.Permit, d *dom
 	// method could flip a withdrawn edge back to active with no retire guard
 	// and no change_log entry naming a re-declaration, which is exactly the
 	// silent revival UpdateInstance's own comment on the withdrawn-placement
-	// guard exists to prevent one level up. There is no HTTP route reaching
-	// UpdateDependency as a non-administrator today; WP-1.1 item 1 is what
-	// makes that reachable, so the store is what has to hold the line.
+	// guard exists to prevent one level up.
+	//
+	// THERE IS A ROUTE NOW. This said "no HTTP route reaches UpdateDependency
+	// as a non-administrator today; WP-1.1 item 1 is what makes that
+	// reachable, so the store is what has to hold the line." POST
+	// /dependencies/{id} arrived 2026-09-08, gated on the same two-ended
+	// predicate, and the line held: DependencyUpdate sends none of these three
+	// columns because the store was already carrying them over regardless.
+	// The handler is narrow BECAUSE this was here first, which is the order
+	// that argument is supposed to run in.
 	d.VerifiedBy = before.VerifiedBy
 	d.VerifiedAt = before.VerifiedAt
 	d.Lifecycle = before.Lifecycle
+	// AND source, for the same reason, added 2026-09-08. CheckProvenanceWrite
+	// above stops an AGENT actor asserting `declared`; it does not stop a user
+	// actor rewriting an existing edge's provenance to anything else, and rule
+	// 7 calls laundering an established discovered edge the cheaper of the two
+	// attacks. Until this line, that was held off by two facts about callers --
+	// DependencyUpdate never reads a source field, and this route is
+	// session-authenticated so no machine credential reaches it -- rather than
+	// by the store. Every other column in this block is pinned precisely
+	// because "no caller does that today" is not the argument this method
+	// makes. Flipping provenance deliberately is VerifyDependency's job, which
+	// derives the attestation from the actor instead of accepting it.
+	d.Source = before.Source
 	d.CreatedAt = before.CreatedAt
 	d.UpdatedAt = domain.FormatTime(s.now())
 
@@ -691,8 +710,11 @@ func (s *SQLStore) UpdateDependency(ctx context.Context, p domain.Permit, d *dom
 	}
 
 	return s.writeSerializable(ctx, depPermit, func(t *tx) error {
-		// Re-pointing an edge is declaring it, so it faces the same check. No
-		// route reaches this today; that is not a reason to leave the hole.
+		// Re-pointing an edge is declaring it, so it faces the same check.
+		// STILL no route re-points one -- DependencyUpdate (2026-09-08) carries
+		// all three subject columns from the stored row rather than offering
+		// them -- and that is still not a reason to leave the hole: the
+		// handler's narrowness is a choice somebody can revisit, this is not.
 		if err := requireLiveProvider(ctx, t, d.ProviderEndpointID, d.ProviderRouteID); err != nil {
 			return err
 		}

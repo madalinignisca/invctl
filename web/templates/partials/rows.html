@@ -10,6 +10,91 @@
 {{/* One dependency, in either panel. Swapped on its own after a verify, so
      the row updates without reloading the page around it. */}}
 {{define "dependency_row"}}
+{{if .EditForm}}
+{{/* CORRECTING one. `nature` is what the impact engine reasons over, so a
+     wrong one is a wrong answer at three in the morning rather than a wrong
+     label: an edge marked hard takes its consumer down with the provider,
+     optional does not. Retire-and-redraw, the only fix before this row, loses
+     the verification somebody attested to.
+
+     The consumer, the provider and `source` are NOT here. Re-pointing an edge
+     is declaring a different edge and the store guards it with two separate
+     subject checks; flipping source is what Verify exists for. Neither
+     belongs on a correction form -- see DependencyUpdate. */}}
+<tr id="dep-{{.Dep.ID}}" class="rail-row row-editing">
+  <td>
+    {{if eq .Direction "upstream"}}
+      <a class="id" href="/services/{{.Dep.ProviderSvc}}">{{.Dep.ProviderCode}}</a>
+    {{else}}
+      <a class="id" href="/services/{{.Dep.ConsumerServiceID}}">{{.Dep.ConsumerCode}}</a>
+    {{end}}
+    <div class="mono" style="color:var(--faint);font-size:11.5px">not editable here</div>
+  </td>
+  <td>
+    {{$n := .EditForm.Edit.Value "nature" .Dep.Nature}}
+    <select form="dep-f-{{.Dep.ID}}" name="nature" aria-label="Nature" required>
+      {{range .EditForm.Natures}}<option value="{{.}}" {{if eq . $n}}selected{{end}}>{{.}} — {{natureDesc .}}</option>{{end}}
+    </select>
+    {{with .EditForm.Edit.Err "nature"}}<div class="field-error">{{.}}</div>{{end}}
+    <input form="dep-f-{{.Dep.ID}}" class="{{if .EditForm.Edit.Err "tolerance_seconds"}}invalid{{end}}"
+           type="number" name="tolerance_seconds" min="0" style="width:6em;margin-top:4px"
+           value="{{.EditForm.Edit.Value "tolerance_seconds" (derefInt .Dep.ToleranceSeconds)}}"
+           aria-label="Tolerance in seconds" placeholder="tolerates (s)">
+    {{with .EditForm.Edit.Err "tolerance_seconds"}}<div class="field-error">{{.}}</div>{{end}}
+  </td>
+  <td>
+    <input form="dep-f-{{.Dep.ID}}" class="{{if .EditForm.Edit.Err "failure_mode"}}invalid{{end}}"
+           type="text" name="failure_mode" style="width:14em"
+           value="{{.EditForm.Edit.Value "failure_mode" .Dep.FailureMode}}"
+           aria-label="Failure mode" required>
+    {{with .EditForm.Edit.Err "failure_mode"}}<div class="field-error">{{.}}</div>{{end}}
+    {{/* THE COMPLETE SET, EVERY TIME. dependency_data_class is replaced
+         wholesale, so a box left unticked has to arrive as an absence rather
+         than fall back to what is stored -- Checked's rule, and the reason a
+         refused save carries the ticked set in editState.Multi rather than
+         through Value. */}}
+    <div class="tag-list" style="margin-top:4px">
+      {{$ticked := .DataClasses}}
+      {{if .EditForm.Edit}}{{$ticked = index .EditForm.Edit.Multi "data_class"}}{{end}}
+      {{range .EditForm.ClassOptions}}
+      <label class="check"><input form="dep-f-{{$.Dep.ID}}" type="checkbox" name="data_class"
+             value="{{.Code}}" {{if has $ticked .Code}}checked{{end}}> {{.Label}}</label>
+      {{end}}
+    </div>
+  </td>
+  <td class="mono" style="font-size:11.5px">
+    {{$idv := .EditForm.Edit.Value "identity_id" (deref .Dep.IdentityID)}}
+    <select form="dep-f-{{.Dep.ID}}" name="identity_id" aria-label="Identity">
+      <option value="">—</option>
+      {{range .EditForm.Identities}}<option value="{{.ID}}" {{if eq .ID $idv}}selected{{end}}>{{.Realm}} · {{.Name}}</option>{{end}}
+    </select>
+    <input form="dep-f-{{.Dep.ID}}" type="text" name="auth_method" style="width:9em;margin-top:4px"
+           value="{{.EditForm.Edit.Value "auth_method" (deref .Dep.AuthMethod)}}"
+           aria-label="Auth method" placeholder="auth method">
+    <input form="dep-f-{{.Dep.ID}}" type="text" name="firewall_rule_ref" style="width:9em;margin-top:4px"
+           value="{{.EditForm.Edit.Value "firewall_rule_ref" (deref .Dep.FirewallRuleRef)}}"
+           aria-label="Firewall rule reference" placeholder="firewall rule">
+  </td>
+  <td>
+    {{if .Dep.VerifiedAt}}
+      <span class="pill pill-info">verified {{since (deref .Dep.VerifiedAt)}}</span>
+    {{else}}
+      <span class="pill pill-muted">unverified</span>
+    {{end}}
+    <div class="mono" style="color:var(--faint);font-size:11.5px">kept as it is</div>
+  </td>
+  {{if .ShowActions}}
+  <td style="white-space:nowrap">
+    <form id="dep-f-{{.Dep.ID}}" method="post" action="/dependencies/{{.Dep.ID}}" style="display:inline">
+      <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+      <input type="hidden" name="row_version" value="{{.EditForm.Edit.Value "row_version" (itoa .Dep.RowVersion)}}">
+      <button class="btn btn-sm btn-primary" type="submit">Save</button>
+    </form>
+    <a class="btn btn-sm" href="/services/{{.Dep.ConsumerServiceID}}">Cancel</a>
+  </td>
+  {{end}}
+</tr>
+{{else}}
 <tr id="dep-{{.Dep.ID}}" class="rail-row {{if eq .Dep.Nature "hard"}}is-down{{else if eq .Dep.Nature "startup"}}is-startup{{else if eq .Dep.Nature "optional"}}is-ok{{else}}is-degraded{{end}}">
   <td>
     {{if eq .Direction "upstream"}}
@@ -69,6 +154,7 @@
     <button class="btn btn-sm" type="button"
             hx-post="/dependencies/{{.Dep.ID}}/verify?direction={{.Direction}}"
             hx-target="#dep-{{.Dep.ID}}" hx-swap="outerHTML">Verify</button>
+    <a class="btn btn-sm" href="/services/{{.Dep.ConsumerServiceID}}?dep={{.Dep.ID}}">Edit</a>
     <button class="btn btn-sm btn-danger" type="button"
             hx-post="/dependencies/{{.Dep.ID}}/retire"
             hx-confirm="Retire this dependency? The record is kept.">Retire</button>
@@ -76,6 +162,7 @@
   </td>
   {{end}}
 </tr>
+{{end}}
 {{end}}
 
 

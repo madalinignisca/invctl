@@ -28,24 +28,38 @@ import (
 // Removing an entry means the correction path was built. Adding one means a
 // new entity shipped without one, and that is the thing this test exists to
 // make somebody say out loud.
-var correctionPathsNotYetBuilt = map[string]string{
-	"UpdateCircuit": "a circuit's CID, bandwidth or supplier cannot be corrected; " +
-		"a typo means retiring the circuit and declaring another, losing its " +
-		"terminations and the impact history that made it a failure target.",
-	"UpdateDependency": "a dependency's nature, tolerance or failure mode cannot be " +
-		"corrected. It is the edge the impact engine reasons over, so a wrong " +
-		"`nature` is a wrong answer at three in the morning, and the only fix is " +
-		"to retire the edge and redraw it.",
-	"UpdateIPRange": "a reservation's bounds and purpose cannot be corrected.",
-	"UpdatePowerFeed": "a feed's rating cannot be corrected, so a mistyped amperage " +
-		"makes every capacity finding on that board wrong until somebody retires " +
-		"the feed -- which is what the inputs hang off.",
-	"UpdatePowerInput": "draw_va cannot be corrected. Recorded already by WP-I2's " +
-		"review: \"correcting a number means Disconnect-and-re-add\", which is why " +
-		"D7's convergence claim there is doing more work than the UI supports.",
-	"UpdatePowerSource": "a supply's kind or parent cannot be corrected, and the " +
-		"parent is what decides whether two boards are genuinely independent.",
-}
+//
+// IT IS EMPTY, AND KEEPING IT EMPTY IS THE POINT. Six entries went in when this
+// test was written and all six came out over the days after: the power chain's
+// feed, supply and input, then the reservation, the circuit and the dependency.
+// An empty map is not a reason to delete the mechanism -- the test below still
+// fails on any new unreachable Update method, and this is where the next one
+// gets justified in writing or, better, refused.
+//
+// EMPTY DOES NOT MEAN THE WRITE SURFACE IS COMPLETE, and reading it that way is
+// the mistake this paragraph exists to prevent. The population below is built
+// from storeUpdateMethods -- existing `func (s *SQLStore) Update…` declarations
+// -- so it can only ever report on corrections somebody already wrote. AN
+// ENTITY WITH NO Update* METHOD AT ALL CONTRIBUTES NOTHING AND PASSES IN
+// SILENCE. Verified in the tree on 2026-09-08, after the six landed:
+//
+//   - Provider has CreateProvider, a live POST /providers, and no update and no
+//     retire method of any kind. A supplier typed wrong stays wrong for ever --
+//     and CircuitUpdate now offers a picker for it.
+//   - NetAnchor has neither, and this codebase's own domain comment calls a
+//     misplaced anchor "the single highest-leverage wrong row in this model".
+//   - The net_* family has five create routes and zero retire routes, while
+//     RetireNetGroup, RetireNetGroupMember and RetireNetUplink sit in reach.go
+//     with no caller. This test never looked: it scans only Update*.
+//
+// It is blind the other way too -- AmendHealthOverride is a real, routed
+// correction path the Update prefix will never match. What this checks is a
+// naming convention with a capability behind it, not the capability itself.
+//
+// The complementary census -- enumerate Create*, require an Update*/Retire* or
+// a named exemption -- is not written. It would fail today with roughly a dozen
+// entries, several of them damaging. That is the next piece of this work.
+var correctionPathsNotYetBuilt = map[string]string{}
 
 // TestEveryUpdateMethodIsReachable fails when a store method written to correct
 // something has nothing calling it.

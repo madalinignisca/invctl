@@ -116,6 +116,47 @@
       <thead><tr><th>Span</th><th class="num">Addresses</th><th>Held by</th><th>Note</th>{{if .IsAdmin}}<th></th>{{end}}</tr></thead>
       <tbody>
         {{range .Ranges}}
+        {{/* CORRECTING one. A reservation is a claim on space the allocator
+             will never offer, so a mistyped bound withholds addresses nobody
+             holds, or leaves the allocator handing out one a DHCP pool is
+             already using. Withdraw-and-redeclare was the only fix, and it
+             returns the whole span to the allocator in the gap between the
+             two -- precisely where a fresh allocation lands in the middle of
+             the range being repaired.
+
+             This page's ?edit= is shared with the prefix table above. A
+             prefix id and a range id are both UUIDv7 and never equal, so at
+             most one row on the page opens. */}}
+        {{if and $.IsAdmin (eq .ID $.EditRow)}}
+        <tr class="row-editing">
+          <td>
+            <input form="rng-{{.ID}}" class="mono {{if $.Edit.Err "start_text"}}invalid{{end}}" type="text"
+                   name="start_text" value="{{$.Edit.Value "start_text" .StartText}}"
+                   aria-label="First address" required style="width:11em">
+            –
+            <input form="rng-{{.ID}}" class="mono {{if $.Edit.Err "end_text"}}invalid{{end}}" type="text"
+                   name="end_text" value="{{$.Edit.Value "end_text" .EndText}}"
+                   aria-label="Last address" required style="width:11em">
+            {{with $.Edit.Err "start_text"}}<div class="field-error">{{.}}</div>{{end}}
+            {{with $.Edit.Err "end_text"}}<div class="field-error">{{.}}</div>{{end}}
+          </td>
+          <td class="num">{{.Size}}</td>
+          <td><input form="rng-{{.ID}}" type="text" name="role"
+                     value="{{$.Edit.Value "role" (deref .Role)}}"
+                     aria-label="Held by" style="width:8em"></td>
+          <td><input form="rng-{{.ID}}" type="text" name="description"
+                     value="{{$.Edit.Value "description" (deref .Description)}}"
+                     aria-label="Note" style="width:14em"></td>
+          <td style="white-space:nowrap">
+            <form id="rng-{{.ID}}" method="post" action="/ip-ranges/{{.ID}}" style="display:inline">
+              <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+              <input type="hidden" name="row_version" value="{{$.Edit.Value "row_version" (itoa .RowVersion)}}">
+              <button class="btn btn-sm btn-primary" type="submit">Save</button>
+            </form>
+            <a class="btn btn-sm" href="/prefixes">Cancel</a>
+          </td>
+        </tr>
+        {{else}}
         <tr>
           <td class="mono">{{.StartText}} – {{.EndText}}
             {{if .VRFName}}<span class="pill pill-muted">{{.VRFName}}</span>{{end}}</td>
@@ -124,6 +165,7 @@
           <td>{{if .Description}}{{deref .Description}}{{else}}—{{end}}</td>
           {{if $.IsAdmin}}
           <td style="white-space:nowrap">
+            <a class="btn btn-sm" href="/prefixes?edit={{.ID}}">Edit</a>
             <form method="post" action="/ip-ranges/{{.ID}}/retire"
                   hx-post="/ip-ranges/{{.ID}}/retire" style="display:inline">
               <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
@@ -132,6 +174,7 @@
           </td>
           {{end}}
         </tr>
+        {{end}}
         {{end}}
       </tbody>
     </table>

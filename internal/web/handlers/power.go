@@ -32,7 +32,6 @@ type powerPage struct {
 	PanelSpec  domain.PowerPanelSpec
 	FeedSpec   domain.PowerFeedSpec
 	SourceSpec domain.PowerSourceSpec
-	Editing    string
 }
 
 type powerReportPage struct {
@@ -83,7 +82,6 @@ func (a *App) renderPower(w http.ResponseWriter, r *http.Request, status int,
 		Lifecycles: domain.PowerLifecycles,
 		PanelSpec:  panelSpec,
 		FeedSpec:   feedSpec,
-		Editing:    r.URL.Query().Get("edit"),
 	})
 }
 
@@ -433,5 +431,158 @@ func (a *App) PowerInputRetire(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.setFlash(r, "success", "Power input disconnected.")
+	render.Redirect(w, r, "/assets/"+assetID)
+}
+
+// PowerFeedUpdate corrects a feed's rating.
+//
+// THE RATING IS THE DENOMINATOR OF EVERY CAPACITY FINDING ON THAT BOARD. A
+// mistyped amperage does not read as wrong -- it reads as a feed that is
+// comfortably loaded, or as one that is over, and the findings page states it
+// with the same confidence either way. Until this route existed the only fix
+// was to retire the feed, and the inputs hang off the feed, so correcting one
+// digit meant disconnecting every asset on it and reconnecting them by hand.
+//
+// PanelID IS ABSENT ON PURPOSE, not forgotten: UpdatePowerFeed pins it from
+// the stored row (`f.PanelID = before.PanelID`), so a form offering to move a
+// feed between boards would be offered-and-silently-ignored. A feed that is on
+// the wrong panel is a different act -- withdraw it and declare it where it
+// belongs, because its inputs were plugged into the wrong board too.
+func (a *App) PowerFeedUpdate(w http.ResponseWriter, r *http.Request) {
+	existing, err := a.Store.GetPowerFeed(r.Context(), r.PathValue("id"))
+	if err != nil {
+		a.handleStoreError(w, r, err)
+		return
+	}
+	updated := existing.PowerFeed
+	volts, vOK := optionalInt(r, "voltage")
+	amps, aOK := optionalInt(r, "amperage")
+	util, uOK := intValue(r, "max_utilisation", updated.MaxUtilisation)
+	if !vOK || !aOK || !uOK {
+		a.setFlash(r, "error", "A rating has to be whole numbers, or left empty.")
+		render.Redirect(w, r, "/power")
+		return
+	}
+	updated.Name = formValue(r, "name")
+	updated.Voltage, updated.Amperage = volts, amps
+	updated.Phase = optional(formValue(r, "phase"))
+	updated.MaxUtilisation = util
+	updated.Notes = optional(formValue(r, "notes"))
+	updated.RowVersion = submittedVersion(r, updated.RowVersion)
+
+	if err := a.Store.UpdatePowerFeed(r.Context(), a.permit(r), &updated); err != nil {
+		if messages, ok := refusalMessages(err, map[string]string{
+			"name": "that panel already has a feed by that name",
+		}); ok {
+			a.setFlash(r, "error", "That feed was not accepted: "+joinMessages(messages))
+			render.Redirect(w, r, "/power")
+			return
+		}
+		a.handleStoreError(w, r, err)
+		return
+	}
+	a.setFlash(r, "success", "Feed "+updated.Name+" updated.")
+	render.Redirect(w, r, "/power")
+}
+
+// PowerSourceUpdate corrects a supply's kind, its catalogue link, or what feeds
+// it.
+//
+// THE PARENT IS THE FIELD THAT MATTERS. It is what decides whether two boards
+// are genuinely independent, and a supply entered with no parent -- or with the
+// wrong one -- makes an A/B pair look redundant when one UPS carries both. That
+// is the single question the power chain exists to answer, and it was the one
+// field nobody could fix.
+//
+// SiteID is pinned by the store the way PowerFeedUpdate's PanelID is, and is
+// left out of the form for the same reason. The parent is guarded there too:
+// requireNoSupplyCycle refuses a chain that feeds itself, so this handler does
+// not have to re-derive it.
+func (a *App) PowerSourceUpdate(w http.ResponseWriter, r *http.Request) {
+	existing, err := a.Store.GetPowerSource(r.Context(), r.PathValue("id"))
+	if err != nil {
+		a.handleStoreError(w, r, err)
+		return
+	}
+	updated := existing.PowerSource
+	updated.Name = formValue(r, "name")
+	updated.Kind = formValue(r, "kind")
+	// submittedString, not optionalString, and for PowerPanelUpdate's reason: a
+	// picker that failed to render must not read as an operator detaching this
+	// supply from the one that feeds it, which is precisely the state that
+	// makes two dependent boards look independent.
+	updated.ParentID = submittedString(r, "parent_id", updated.ParentID)
+	updated.AssetID = submittedString(r, "asset_id", updated.AssetID)
+	updated.Notes = optional(formValue(r, "notes"))
+	updated.RowVersion = submittedVersion(r, updated.RowVersion)
+
+	if err := a.Store.UpdatePowerSource(r.Context(), a.permit(r), &updated); err != nil {
+		if messages, ok := refusalMessages(err, map[string]string{
+			"name": "that site already has a supply by that name",
+		}); ok {
+			a.setFlash(r, "error", "That supply was not accepted: "+joinMessages(messages))
+			render.Redirect(w, r, "/power")
+			return
+		}
+		a.handleStoreError(w, r, err)
+		return
+	}
+	a.setFlash(r, "success", "Supply "+updated.Name+" updated.")
+	render.Redirect(w, r, "/power")
+}
+
+// PowerInputUpdate corrects a declared draw, or moves an asset onto the feed it
+// is actually plugged into.
+//
+// RECORDED AGAINST WP-I2 AND LEFT OPEN: its review noted that "correcting a
+// number means Disconnect-and-re-add", which made D7's convergence claim --
+// that declared draw improves as operators refine it -- depend on a UI that had
+// no way to refine anything. A figure could be entered once and never adjusted.
+// The cost report is built on this column, so a mistyped nameplate propagated
+// into money.
+//
+// AssetID is pinned by the store; feed_id is not, and is offered, because
+// "this is plugged into the other feed" is a correction rather than a move --
+// the asset has not gone anywhere.
+func (a *App) PowerInputUpdate(w http.ResponseWriter, r *http.Request) {
+	assetID := r.PathValue("id")
+	existing, err := a.Store.GetPowerInput(r.Context(), r.PathValue("inputID"))
+	if err != nil {
+		a.handleStoreError(w, r, err)
+		return
+	}
+	draw, numeric := optionalInt(r, "draw_va")
+	if !numeric {
+		a.setFlash(r, "error", "The draw has to be a whole number of volt-amps, or left empty.")
+		render.Redirect(w, r, "/assets/"+assetID)
+		return
+	}
+	updated := existing.PowerInput
+	updated.Name = formValue(r, "name")
+	// The same rule as submittedString, spelled out because feed_id is a
+	// required column rather than a nullable one: an absent or empty picker
+	// means "not rendered", never "detach this asset from its feed". There is
+	// no such thing as an input that draws from nothing, and the store would
+	// refuse it anyway -- this keeps the refusal from ever being reached by a
+	// form that simply failed to draw its options.
+	if v := formValue(r, "feed_id"); v != "" {
+		updated.FeedID = v
+	}
+	updated.DrawVA = draw
+	updated.Notes = optional(formValue(r, "notes"))
+	updated.RowVersion = submittedVersion(r, updated.RowVersion)
+
+	if err := a.Store.UpdatePowerInput(r.Context(), a.permit(r), &updated); err != nil {
+		if messages, ok := refusalMessages(err, map[string]string{
+			"name": "that asset already has an input by that name",
+		}); ok {
+			a.setFlash(r, "error", "That power input was not accepted: "+joinMessages(messages))
+			render.Redirect(w, r, "/assets/"+assetID)
+			return
+		}
+		a.handleStoreError(w, r, err)
+		return
+	}
+	a.setFlash(r, "success", "Power input updated.")
 	render.Redirect(w, r, "/assets/"+assetID)
 }
