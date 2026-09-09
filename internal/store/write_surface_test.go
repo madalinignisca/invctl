@@ -137,9 +137,13 @@ var writeSurfaceGaps = map[string]string{
 	"FHRPGroup": "no correction: a group's protocol, priority or virtual address " +
 		"cannot be fixed, and those are what make it a failure target.",
 
+	// Interface left this list 2026-09-09 (migration 00062). It was the
+	// most-referenced table in the schema with no lifecycle column at all --
+	// nine FK columns point at it and 58 queries read it -- which is why it was
+	// picked ahead of the rest: built later, it would have forced rework
+	// through everything that touches a port.
+	//
 	// --- correction exists, withdrawal does not ---
-	"Interface": "no withdrawal. A port that was physically removed stays on the " +
-		"asset for ever; UpdateInterface can rename it but nothing can retire it.",
 	"Prefix": "no withdrawal. A network declared in error is permanent, and it " +
 		"keeps taking part in every containment answer computed over the tree.",
 	"IPAddress": "no withdrawal. An address freed cannot be released, so the " +

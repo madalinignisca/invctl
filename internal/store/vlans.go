@@ -423,6 +423,9 @@ func (s *SQLStore) ListPortOptions(ctx context.Context) ([]InterfaceOption, erro
 		FROM interface i
 		JOIN asset a ON a.id = i.asset_id
 		WHERE a.lifecycle <> 'retired'
+		  -- and the port itself, for ListAvailableInterfaces' reason: a
+		  -- withdrawn port is not there to put in a VLAN.
+		  AND i.lifecycle <> 'retired'
 		ORDER BY a.name, i.name`)
 	if err != nil {
 		return nil, fmt.Errorf("listing ports: %w", err)

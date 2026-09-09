@@ -11,6 +11,8 @@ package store
 import (
 	"bytes"
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"sort"
 
@@ -146,6 +148,10 @@ func (s *SQLStore) ListAvailableInterfaces(ctx context.Context, excludeInterface
 		FROM interface i
 		JOIN asset a ON a.id = i.asset_id
 		WHERE i.id <> ?
+		  -- A withdrawn port is not there to patch into. Offering one would be
+		  -- offered-and-refused (requireLiveInterface), and worse, accepting it
+		  -- would put a cable on a port that does not exist.
+		  AND i.lifecycle <> 'retired'
 		  AND i.id NOT IN (
 		    SELECT a_interface_id FROM link WHERE lifecycle = 'active'
 		    UNION
@@ -193,6 +199,23 @@ func (s *SQLStore) CreateInterface(ctx context.Context, p domain.Permit, i *doma
 	// submitted asset_id is exactly what the caller is asserting they may
 	// create a port on (see authorizeJournalSubject's doc comment on
 	// CreateJournalEntry for the same rule stated once already).
+	// RESOLVE A REACTIVATION BEFORE MINTING THE PERMIT, not inside the
+	// transaction. authorizeInterfaceSubject scopes the permit to ONE interface
+	// id, and tx.log refuses a write to any other -- so rewriting i.ID after the
+	// permit exists produced "forbidden" from the audit gate, which is the gate
+	// working exactly as designed. The id this call will actually write has to
+	// be known first.
+	//
+	// The read is outside the transaction, so another writer could in principle
+	// reactivate the same port in between. That is harmless: this path then
+	// falls through to the INSERT and the unique constraint on (asset_id, name)
+	// refuses it, which is the same answer a concurrent duplicate has always
+	// received.
+	if retiredID, lookupErr := s.retiredInterfaceID(ctx, i.AssetID, i.Name); lookupErr != nil {
+		return lookupErr
+	} else if retiredID != "" {
+		i.ID = retiredID
+	}
 	ifacePermit, err := authorizeInterfaceSubject(p, i.AssetID, i.ID)
 	if err != nil {
 		return err
@@ -201,12 +224,35 @@ func (s *SQLStore) CreateInterface(ctx context.Context, p domain.Permit, i *doma
 		if err := t.requireVocabulary(ctx, vocabInterfaceFormFactor, "form_factor", i.FormFactor); err != nil {
 			return err
 		}
-		_, err := t.exec(ctx, `
+		// A RETIRED PORT KEEPS ITS NAME, so re-adding one REACTIVATES it rather
+		// than failing. Without this, withdrawing a port would be a trap: the
+		// unique constraint on (asset_id, name) is a table constraint rather
+		// than an index, so `eth0` stays taken and a NIC swap could never put
+		// `eth0` back -- which is worse than not being able to retire at all.
+		//
+		// THE PORT COMES BACK AS ITSELF, deliberately: same id, same
+		// change_log, same position in the chassis. A second row claiming to be
+		// the same physical port would split its history in two and leave every
+		// past cable, address and VLAN membership pointing at the wrong one.
+		// The submitted attributes are applied, because a replacement NIC
+		// legitimately has a different form factor, speed or MAC.
+		//
+		// Only a RETIRED row is reactivated. Colliding with a live port is
+		// still the error it always was.
+		reactivated, err := reactivateRetiredInterface(ctx, t, i)
+		if err != nil {
+			return err
+		}
+		if reactivated {
+			return nil
+		}
+		_, err = t.exec(ctx, `
 			INSERT INTO interface (id, asset_id, name, form_factor, speed_mbps, mac, mtu,
-			                       lag_parent_id, is_mgmt, enabled, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			                       lag_parent_id, is_mgmt, enabled, lifecycle,
+			                       created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			i.ID, i.AssetID, i.Name, i.FormFactor, i.SpeedMbps, i.MAC, i.MTU,
-			i.LagParentID, i.IsMgmt, i.Enabled, i.CreatedAt, i.UpdatedAt)
+			i.LagParentID, i.IsMgmt, i.Enabled, i.Lifecycle, i.CreatedAt, i.UpdatedAt)
 		if err != nil {
 			return translateWriteErr(err, "creating interface")
 		}
@@ -233,6 +279,13 @@ func (s *SQLStore) UpdateInterface(ctx context.Context, p domain.Permit, i *doma
 	// would be the move this method exists to refuse.
 	i.AssetID = before.AssetID
 	i.LagParentID = before.LagParentID
+	// AND lifecycle, for the reason UpdateProvider and UpdateDependency pin
+	// theirs: this method would otherwise be a second withdrawal path with none
+	// of RetireInterface's guard, so a caller could set lifecycle = retired on a
+	// port that still carries a cable and every read site trusting "a retired
+	// port is bare" would be wrong. Reactivation is CreateInterface's job, and
+	// it is explicit about it.
+	i.Lifecycle = before.Lifecycle
 	at := domain.FormatTime(s.now())
 	i.UpdatedAt = &at
 
@@ -327,6 +380,16 @@ func (s *SQLStore) CreateLink(ctx context.Context, p domain.Permit, l *domain.Li
 	// about to break, and at read-committed two concurrent patches both see an
 	// unpatched port and both commit. See writeSerializable.
 	return s.writeSerializable(ctx, linkPermit, func(t *tx) error {
+		// Neither end may be a withdrawn port. Without this, retiring a bare
+		// port and then cabling it reaches exactly the state RetireInterface
+		// refuses to create -- from the direction nobody was watching. Both
+		// ends are named, so a wrong picker says which.
+		if err := requireLiveInterface(ctx, t, "a_interface_id", l.AInterfaceID); err != nil {
+			return err
+		}
+		if err := requireLiveInterface(ctx, t, "b_interface_id", l.BInterfaceID); err != nil {
+			return err
+		}
 		// A port has one active cable. Catching the second one here gives a
 		// usable error instead of a silently duplicated topology. A retired
 		// link does not count -- unpatching a port is exactly what frees it up
@@ -401,6 +464,226 @@ func (s *SQLStore) GetLinkEnds(ctx context.Context, id string) (*LinkEnds, error
 		return nil, fmt.Errorf("getting link ends %s: %w", id, err)
 	}
 	return &out, nil
+}
+
+// requireLiveInterface refuses to fasten anything to a withdrawn port.
+//
+// THE OTHER HALF OF THE INVARIANT, and the easier one to forget.
+// RetireInterface refuses while anything is attached; without this, an operator
+// could retire a bare port and then patch a cable straight into it -- arriving
+// at exactly the state the refusal exists to prevent, from the direction nobody
+// was watching. Both halves are needed for "a retired port is bare" to hold.
+//
+// Shaped like requireLiveAsset and requireLiveFeed, and returns a validation
+// error against the field so the form says which picker was wrong rather than
+// failing the whole submission opaquely.
+func requireLiveInterface(ctx context.Context, t *tx, field, id string) error {
+	var lifecycle string
+	if err := t.get(ctx, &lifecycle, `SELECT lifecycle FROM interface WHERE id = ?`, id); err != nil {
+		ve := &domain.ValidationError{}
+		ve.Add(field, "choose a port")
+		return ve
+	}
+	if lifecycle == domain.LifecycleRetired {
+		ve := &domain.ValidationError{}
+		ve.Add(field, "that port has been withdrawn")
+		return ve
+	}
+	return nil
+}
+
+// retiredInterfaceID returns the id of a withdrawn port of this name on this
+// asset, or "" when there is none.
+func (s *SQLStore) retiredInterfaceID(ctx context.Context, assetID, name string) (string, error) {
+	var id string
+	err := s.readOne(ctx, &id, `
+		SELECT id FROM interface
+		 WHERE asset_id = ? AND name = ? AND lifecycle = ?`,
+		assetID, name, domain.LifecycleRetired)
+	if errors.Is(err, domain.ErrNotFound) || errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("looking for a retired port to reactivate: %w", err)
+	}
+	return id, nil
+}
+
+// reactivateRetiredInterface brings a withdrawn port back under its own id.
+//
+// Reports whether it did. The caller's struct is rewritten to the STORED id, so
+// a handler redirecting to "the port just created" lands on the real row rather
+// than on a UUID that was never inserted.
+func reactivateRetiredInterface(ctx context.Context, t *tx, i *domain.Interface) (bool, error) {
+	var before domain.Interface
+	err := t.get(ctx, &before, `
+		SELECT * FROM interface
+		 WHERE asset_id = ? AND name = ? AND lifecycle = ?`,
+		i.AssetID, i.Name, domain.LifecycleRetired)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("looking for a retired port to reactivate: %w", err)
+	}
+
+	i.ID = before.ID
+	i.CreatedAt = before.CreatedAt
+	i.Lifecycle = domain.LifecycleActive
+	i.RowVersion = before.RowVersion + 1
+
+	res, err := t.exec(ctx, `
+		UPDATE interface SET form_factor = ?, speed_mbps = ?, mac = ?, mtu = ?,
+		                     is_mgmt = ?, enabled = ?, lifecycle = ?, updated_at = ?,
+		                     row_version = row_version + 1
+		 WHERE id = ? AND row_version = ?`,
+		i.FormFactor, i.SpeedMbps, i.MAC, i.MTU, i.IsMgmt, i.Enabled,
+		domain.LifecycleActive, i.UpdatedAt, before.ID, before.RowVersion)
+	if err != nil {
+		return false, translateWriteErr(err, "reactivating interface")
+	}
+	v := before.RowVersion
+	if err := requireVersion(res, "interface", before.ID, &v); err != nil {
+		return false, err
+	}
+	// Logged as an UPDATE, not a create: the row is not new, and the diff is
+	// what an auditor wants -- lifecycle retired -> active beside whatever the
+	// replacement part changed.
+	return true, t.logUpdate(ctx, "interface", before.ID, &before, i)
+}
+
+// interfaceAttachments are every way something can be fastened to a port, and
+// the sentence to say when it is.
+//
+// DERIVED FROM THE SCHEMA, NOT FROM MEMORY. Nine columns across eight tables
+// carry a foreign key to interface(id); this list is all of them. A missed one
+// would let a port retire with something still on it, and every read site that
+// trusts "a retired port is bare" would then be wrong -- silently, in the
+// direction that looks fine.
+//
+// TestARetiredInterfaceIsAlwaysBare walks the schema and fails if a new
+// referencing column appears without an entry here, so the list cannot fall
+// behind the tables the way a hand-kept one would.
+var interfaceAttachments = []struct{ table, column, what string }{
+	{"link", "a_interface_id", "a cable is patched into it"},
+	{"link", "b_interface_id", "a cable is patched into it"},
+	{"port_pass_through", "front_interface_id", "a panel strand passes through it"},
+	{"port_pass_through", "rear_interface_id", "a panel strand passes through it"},
+	{"circuit_termination", "interface_id", "a circuit lands on it"},
+	{"ip_address", "interface_id", "an address is assigned to it"},
+	{"interface_vlan", "interface_id", "it is a member of a VLAN"},
+	{"interface_wlan", "interface_id", "it broadcasts a wireless LAN"},
+	{"fhrp_member", "interface_id", "it is a member of an FHRP group"},
+	{"l2vpn_termination", "interface_id", "an L2VPN terminates on it"},
+	{"interface", "lag_parent_id", "another port is bonded into it"},
+}
+
+// RetireInterface withdraws a port, refusing while anything is attached to it.
+//
+// A PORT COULD ONLY EVER BE ADDED until migration 00062. `interface` was the
+// most-referenced table in the schema with no lifecycle column at all, so a NIC
+// pulled out of a chassis stayed on the asset for ever: UpdateInterface could
+// rename it and nothing could withdraw it. The write-surface census found it.
+//
+// REFUSED, NOT CASCADED, and that choice is what makes the rest cheap. Retiring
+// a port does not quietly retire the cable on it, the address assigned to it or
+// its VLAN membership -- each of those is a topology fact somebody declared, and
+// removing them as a side effect would write change_log entries attributing
+// decisions to an operator who never made them, which is the misattribution
+// docs/AUDIT.md objects to for observed state arriving through the declared
+// door. The operator unpatches first, in the order the physical act happens.
+//
+// WHAT THAT BUYS: a retired port is ALWAYS BARE, by construction. Fifty-eight
+// queries read this table; without the invariant each would need its own
+// judgement about whether to exclude retired rows, and a wrong default is
+// silent -- a removed port still deriving a reachability edge, or still offered
+// in a picker. With it, the ones that join THROUGH an attachment are correct
+// unchanged, because the attachment cannot exist.
+func (s *SQLStore) RetireInterface(ctx context.Context, p domain.Permit, id string) error {
+	before, err := s.GetInterface(ctx, id)
+	if err != nil {
+		return err
+	}
+	// Authorize before acting, ahead of the already-retired early exit, for the
+	// reason RetireLink states below: it keeps this method the same shape as
+	// every other authorize-then-mutate one here, at no cost.
+	ifacePermit, err := authorizeInterfaceSubject(p, before.AssetID, id)
+	if err != nil {
+		return err
+	}
+	if before.Lifecycle == domain.LifecycleRetired {
+		// Already withdrawn: a second audit entry would claim a withdrawal that
+		// did not happen. RetireIPRange and RetireProvider do the same.
+		return nil
+	}
+
+	after := *before
+	after.Lifecycle = domain.LifecycleRetired
+	at := domain.FormatTime(s.now())
+	after.UpdatedAt = &at
+
+	return s.write(ctx, ifacePermit, func(t *tx) error {
+		for _, a := range interfaceAttachments {
+			held, err := attachmentHolds(ctx, t, a.table, a.column, id)
+			if err != nil {
+				return err
+			}
+			if held {
+				return fmt.Errorf("port %s cannot be withdrawn while %s: %w",
+					before.Name, a.what, domain.ErrConflict)
+			}
+		}
+		res, err := t.exec(ctx, `
+			UPDATE interface SET lifecycle = ?, updated_at = ?,
+			                     row_version = row_version + 1
+			WHERE id = ? AND row_version = ?`,
+			domain.LifecycleRetired, at, id, before.RowVersion)
+		if err != nil {
+			return translateWriteErr(err, "retiring interface")
+		}
+		v := before.RowVersion
+		if err := requireVersion(res, "interface", id, &v); err != nil {
+			return err
+		}
+		return t.logUpdate(ctx, "interface", id, before, &after)
+	})
+}
+
+// attachmentHolds reports whether anything live still fastens to this port.
+//
+// The lifecycle filter is applied only where the table HAS one: interface_vlan,
+// interface_wlan, ip_address and fhrp_member are membership rows replaced
+// wholesale by their parent rather than soft-deleted, so their mere presence is
+// the attachment. Asking for a lifecycle column they do not have would be a SQL
+// error rather than a wrong answer, which is why this is decided per table here
+// instead of assumed.
+func attachmentHolds(ctx context.Context, t *tx, table, column, ifaceID string) (bool, error) {
+	query := `SELECT COUNT(*) FROM ` + table + ` WHERE ` + column + ` = ?`
+	args := []any{ifaceID}
+	if tableHasLifecycle[table] {
+		query += ` AND lifecycle <> ?`
+		args = append(args, domain.LifecycleRetired)
+	}
+	var n int
+	if err := t.get(ctx, &n, query, args...); err != nil {
+		return false, fmt.Errorf("checking %s.%s for attachments: %w", table, column, err)
+	}
+	return n > 0, nil
+}
+
+// tableHasLifecycle names the attachment tables that soft-delete, so a
+// withdrawn cable or circuit end stops holding its port. Pinned by
+// TestTheAttachmentLifecycleMapMatchesTheSchema rather than trusted.
+var tableHasLifecycle = map[string]bool{
+	"link":                true,
+	"port_pass_through":   true,
+	"circuit_termination": true,
+	"l2vpn_termination":   true,
+	"interface":           true,
+	"ip_address":          false,
+	"interface_vlan":      false,
+	"interface_wlan":      false,
+	"fhrp_member":         false,
 }
 
 // RetireLink unpatches a cable. The row and its audit history stay; a retired

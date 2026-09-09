@@ -263,6 +263,20 @@
             {{if .LinkID}}
             <a class="btn btn-sm" href="/links/{{.LinkID}}/impact">If it is cut</a>
             {{end}}
+            {{/* WITHDRAWING A PORT (migration 00062). Offered only on a bare
+                 one: the store refuses while a cable, an address, a VLAN
+                 membership or a circuit end is attached, and a button that can
+                 only be refused is the offered-and-refused defect this codebase
+                 closes wherever it finds it. .LinkID is the common case by far,
+                 so it alone gates the control; the store still refuses the
+                 rest, and says which. */}}
+            {{if and ($.CanWriteEntity "asset" $.Asset.ID) (not .LinkID)}}
+            <form method="post" action="/interfaces/{{.ID}}/retire" style="display:inline"
+                  hx-confirm="Withdraw {{.Name}}? Re-adding a port of the same name brings it back with its history.">
+              <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+              <button class="btn btn-sm btn-danger" type="submit">Withdraw</button>
+            </form>
+            {{end}}
             {{if .CanUnpatch}}
             <form method="post" action="/links/{{.LinkID}}/retire" style="display:inline"
                   hx-post="/links/{{.LinkID}}/retire"
