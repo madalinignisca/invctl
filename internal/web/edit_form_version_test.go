@@ -50,7 +50,7 @@ import (
 // versionExemptRoutes are Update routes whose form legitimately carries no
 // row_version, with the reason.
 //
-// A backlog, like correctionPathsNotYetBuilt: an entry is a claim that this
+// A backlog, like the store's unreachableRepairPaths: an entry is a claim that this
 // particular write does not need the guard, and it has to be argued rather
 // than assumed. Empty is the goal.
 var versionExemptRoutes = map[string]string{}
@@ -167,7 +167,7 @@ func TestEveryEditFormCarriesItsVersion(t *testing.T) {
 			"correction form carries row_version. Either the form's action is "+
 			"computed in Go -- add it to routesServedByAComputedAction naming the "+
 			"test that drives its token -- or this route has no form at all, which "+
-			"is the gap correctionPathsNotYetBuilt exists to catch one layer down.",
+			"is the gap the store's write-surface census exists to catch one layer down.",
 			route)
 	}
 }
