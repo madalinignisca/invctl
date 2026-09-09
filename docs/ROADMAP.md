@@ -385,25 +385,45 @@ analysis is the part worth sizing around.*
 **WP-B2 · Front and rear ports, pass-through** — M — **DONE**
 Port position mapping on patch panels and similar passive gear.
 
-**WP-B3 · Cables and path tracing** — L — **TRACER DONE, ENGINE HALF NOT DELIVERED**
+**WP-B3 · Cables and path tracing** — L — **DONE** (engine half delivered 2026-09-09)
 Cable with two terminations; a tracer that walks pass-through hops end to end.
 Explicit hop limit, cycle guard, and a test asserting termination on a
 deliberately malformed patch field — this is where these systems get slow and
 subtly wrong. All of that is delivered, and WP-B4 extended it to breakout.
 
 ~~Engine: a cable or panel becomes a failure target; partitioned findings gain
-the specific hop responsible.~~ **NOT BUILT. Recorded 2026-09-07**, found while
+the specific hop responsible.~~ ~~**NOT BUILT. Recorded 2026-09-07**, found while
 specifying B4 and verified again before writing this down: `impact.Request`
 (`internal/impact/engine.go:26-43`) accepts `DownAssetIDs` and `CutCircuitIDs`
 and nothing else. There is no `CutLinkIDs` and no equivalent, so **cutting a
 cable concludes nothing today** — an operator's only recourse is to down an
-asset, which is a different question and a blunter one.
+asset, which is a different question and a blunter one.~~
+
+**BUILT 2026-09-09.** `impact.Request.CutLinkIDs`, `GET /links/{id}/impact`, and
+an "If it is cut" control in the patching table on every asset page. The finding
+names the cable, which is the "specific hop responsible" half.
+
+**It was designed against the exclusion rather than around it, as the entry
+below demanded.** The circuit case turned out to be the worked precedent: a
+circuit is not an asset either, so `graph.go` already derives a group-to-group
+uplink edge from any circuit whose ends land in two different forwarder groups,
+tags it `CircuitID`, and lets `components()` drop exactly that edge. A cable is
+structurally simpler — `link` carries both interface ids directly — so it
+derives the same edge the same way, tagged `LinkID`.
+
+**The `<>` is the whole design.** Only cables whose ends sit in *different*
+groups derive anything (`ma.group_id <> mb.group_id`). A cable inside one group
+derives nothing at all, because that is the intra-group case where
+`net_attachment` already answers and a cable-derived answer would compete with
+it. `graph_coverage_test.go`'s exclusion for `link` was therefore **narrowed,
+not deleted** — and that test is what forced the narrowing to be written down,
+by refusing to let the exclusion and the code disagree.
 
 This entry read **DONE** for weeks with half of it unbuilt, which is worth as
 much attention as the gap itself: a work package that delivers its first
 paragraph and not its second still closes, because nothing checks the second.
 
-Reviving it is not a small job and it is not merely wiring. `link` is
+~~Reviving it is not a small job and it is not merely wiring. `link` is
 deliberately **not** a reachability edge — `internal/store/graph_coverage_test.go`
 records the reason with the exclusion, that `docs/reachability-design.md` models
 reachability at forwarder-group level and *"a cable genuinely cannot tell you
@@ -411,7 +431,8 @@ which way traffic flows, so it is declared rather than guessed"*. Adding `link`
 to the impact graph would be a second, disagreeing answer to a question
 `net_attachment` already answers. So a cable-as-failure-target has to be
 designed against that decision rather than around it, which is a spec, not a
-patch.
+patch.~~ *That held: the design is above, and the decision it had to respect is
+intact for the intra-group case it was actually about.*
 
 *The other three closed work packages that promise an engine change were
 checked at the same time and all three delivered:* B1's feed is simulatable

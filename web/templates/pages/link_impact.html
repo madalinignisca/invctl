@@ -1,0 +1,95 @@
+{{/*
+  invctl — infrastructure inventory
+  Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+
+  Licensed under the GNU Affero General Public License, version 3 only —
+  no later version applies. See LICENSE for the full text.
+
+  SPDX-License-Identifier: AGPL-3.0-only
+*/}}
+{{define "content"}}
+<div class="crumbs">
+  <a href="/assets/{{.Link.AAssetID}}">{{.Link.AAssetName}}</a><span class="sep">/</span><span>cut</span>
+</div>
+
+<div class="page-head">
+  <div class="eyebrow">Outage simulation</div>
+  <h1>If <span class="mono">{{.Link.Label}}</span> is cut</h1>
+  <p class="lede">
+    The cable is unplugged and the kit at both ends is fine — this asks what
+    stops being reachable, not what loses power. Nothing is taken out of the
+    estate, so anything still reachable another way is correctly reported as
+    unaffected.
+  </p>
+</div>
+
+<div style="margin-bottom:18px">
+  <a class="btn btn-sm" href="/interfaces/{{.Link.AInterfaceID}}/trace">Trace this run</a>
+</div>
+
+{{if not .Cut.Joins}}
+{{/* THE COMMON CASE, and it must not render as an empty result. A cable with
+     both ends inside one forwarder group joins nothing HERE -- that is a fact
+     about the model, not a finding that cutting it is harmless. The two look
+     identical in a Result and need opposite sentences, which is the whole
+     reason store.CircuitCut exists. */}}
+<div class="panel">
+  <div class="panel-head"><h2>This cable joins nothing that is modelled</h2></div>
+  <div class="panel-body">
+    <p>
+      A cable becomes a connectivity edge when its two ends land on assets that
+      forward — members of a network group — in two <em>different</em> groups.
+    </p>
+    <p>
+      This one does not, which is ordinary rather than wrong: a server's uplink
+      to its own top-of-rack switch has both ends in the same group, so it
+      cannot change what is reachable between groups. Reachability inside a
+      group is answered by the group's own membership, deliberately, because
+      <strong>a cable cannot tell you which way traffic flows</strong> — so it
+      is declared rather than guessed
+      (<span class="mono">docs/reachability-design.md</span>).
+    </p>
+    <p>
+      The cable is still real, still traced, and unplugging it still matters to
+      whatever is on the end of it. It simply cannot partition the estate, so
+      there is nothing below.
+    </p>
+  </div>
+</div>
+{{else if .Cut.Separates}}
+<div class="panel panel-warn">
+  <div class="panel-head"><h2>Cutting this separates the estate</h2></div>
+  <div class="panel-body">
+    <p>
+      It is the <strong>only</strong> path between
+      {{range $i, $g := .Cut.Groups}}{{if $i}} and {{end}}<span class="mono">{{$g}}</span>{{end}},
+      so unplugging it leaves the two sides unable to reach each other.
+    </p>
+    {{if not .HasNetworkFinding}}
+    <p>
+      Nothing below is reported as unreachable, and that is not a contradiction:
+      the two sides are separated, and nothing currently recorded on the far side
+      depends on reaching this one. A partition with nothing behind it produces
+      no findings — usually a sign the far side is not yet modelled rather than
+      that it is safe.
+    </p>
+    {{end}}
+  </div>
+</div>
+{{else}}
+<div class="panel">
+  <div class="panel-head"><h2>Another path survives this</h2></div>
+  <div class="panel-body">
+    <p>
+      This cable joins
+      {{range $i, $g := .Cut.Groups}}{{if $i}} and {{end}}<span class="mono">{{$g}}</span>{{end}},
+      and cutting it separates nothing — another path already joins them. That is
+      the answer redundancy is bought for, and it is worth knowing it is real
+      rather than assumed.
+    </p>
+  </div>
+</div>
+{{end}}
+
+{{template "impact_result" .}}
+{{end}}

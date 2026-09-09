@@ -166,6 +166,7 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	read("GET /certificates/{id}", app.CertificateDetail)
 	read("GET /catalogue", app.Catalogue)
 	read("GET /interfaces/{id}/trace", app.TracePort)
+	read("GET /links/{id}/impact", app.LinkImpact)
 	read("GET /power", app.Power)
 	read("GET /power/feeds/{id}/impact", app.PowerFeedImpact)
 	read("GET /power/sources/{id}/impact", app.PowerSourceImpact)

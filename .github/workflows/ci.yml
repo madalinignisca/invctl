@@ -182,5 +182,31 @@ jobs:
       # The race detector instruments every memory access, so it costs roughly
       # 2.8x the plain run on this suite (3845s against 1372s, measured) and
       # gets proportionally more room. `make test-race` is the same command.
+      #
+      # 60m -> 120m ON 2026-09-09, WHEN internal/store HIT THE CAP OUTRIGHT
+      # ("panic: test timed out after 1h0m0s", with the alarm catching a test
+      # only 16s in -- so nothing hung; the package simply ran out of budget
+      # doing ordinary work).
+      #
+      # THE HEADROOM WAS NEVER THE SAME AS THE PLAIN JOB'S, and that is the
+      # whole finding. Measured over the three preceding merges, internal/store
+      # under -race took 2464s, 2967s and 2918s. Against a 60m cap that is 1.2x
+      # headroom, while the `test` job above sits at 2.7x (660s against 30m). A
+      # suite whose own run-to-run spread is ~20% cannot live inside 1.2x: the
+      # cap gets hit by variance alone, by whoever commits next, which is
+      # exactly what happened. 120m restores roughly the plain job's ratio.
+      #
+      # THE `test` JOB'S NOTE SAYS RAISING A TIMEOUT IS "WP-I3 ASKING TO BE DONE
+      # RATHER THAN A NUMBER TO INCREASE", AND IT IS RIGHT -- but that is about
+      # the measured cost growing, and this is not that. The measured cost has
+      # not moved: the plain store run was 661s before this change and 660s
+      # after. What moved was nothing; the cap was simply set too close to the
+      # measurement to survive normal variance. If the MEASURED figure starts
+      # climbing, that note applies in full and this number is not the answer.
+      #
+      # Considered and rejected: passing -short here, on the theory that the two
+      # large-estate builders were the cost. Measured, they are 2.2s -- seconds,
+      # not the ~11 minutes that needed explaining -- so it would have bought
+      # ~1% while quietly removing two tests from race coverage.
       - name: test -race (both engines)
-        run: go test -race ./... -count=1 -timeout 60m
+        run: go test -race ./... -count=1 -timeout 120m

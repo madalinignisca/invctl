@@ -75,9 +75,51 @@ type NetUplinkInfo struct {
 	// would be asking them to say the same thing twice and to keep the two in
 	// agreement forever.
 	CircuitID string
-	// Label names the circuit for a finding. Empty for declared uplinks, which
-	// are described by their groups.
+	// LinkID is set when this edge was DERIVED from a CABLE whose two ends land
+	// on interfaces of assets in different groups -- WP-B3's engine half.
+	//
+	// EXACTLY THE CIRCUIT ARGUMENT, APPLIED TO THE OTHER KIND OF MEDIA. A cable
+	// is not an asset either, so "simulate cutting this" cannot go through the
+	// ordinary down-set, and naming the link on the edge is what lets
+	// components() drop precisely the edges a cut cable removes.
+	//
+	// DERIVED, AND ONLY ACROSS GROUPS. `link` is deliberately not a
+	// reachability edge -- docs/reachability-design.md models reachability at
+	// forwarder-group level because "a cable genuinely cannot tell you which
+	// way traffic flows, so it is declared rather than guessed", and
+	// graph_coverage_test.go records the exclusion. That decision is about
+	// ATTACHMENT: which group a host belongs to, where net_attachment is the
+	// answer and a cable-derived one would disagree with it.
+	//
+	// A cable BETWEEN two groups is a different fact, and it is the same fact a
+	// circuit between them already contributes: an adjacency, undirected, with
+	// no claim about flow. So a link whose ends sit in the same group derives
+	// nothing at all -- that is the intra-group case, and it is precisely where
+	// a second disagreeing answer would arise.
+	LinkID string
+	// Label names the circuit or cable for a finding. Empty for declared
+	// uplinks, which are described by their groups.
 	Label string
+}
+
+// cutMedia names the physical media treated as severed for one run.
+//
+// A struct rather than a map per medium: components() and buildReachModel each
+// take it as one parameter, so WP-B4's bundles add a field and a line in
+// severs() rather than a fifth positional argument at every call site.
+type cutMedia struct {
+	circuits map[string]bool
+	links    map[string]bool
+}
+
+// severs reports whether this edge is carried by something cut this run.
+//
+// An edge with neither id is a DECLARED uplink, which no media cut can remove:
+// somebody asserted that adjacency directly rather than deriving it from a
+// cable or a circuit, so severing the cable does not withdraw the assertion.
+func (c cutMedia) severs(u NetUplinkInfo) bool {
+	return (u.CircuitID != "" && c.circuits[u.CircuitID]) ||
+		(u.LinkID != "" && c.links[u.LinkID])
 }
 
 // NetAttachmentInfo is a host's attachment to a group on one plane.
@@ -317,13 +359,13 @@ func (uf *unionFind) union(a, b string) {
 // components unions every edge on one plane whose endpoints both satisfy
 // allow, and returns each allowed vertex's representative.
 //
-// cutCircuits names circuits treated as severed for this run. An edge derived
-// from one is skipped, which is the whole of "simulate losing this circuit":
-// the fibre is not carrying anything, so the two groups it joined are no longer
+// cut names the media treated as severed for this run. An edge derived from
+// one is skipped, which is the whole of "simulate losing this": the fibre or
+// the cable is not carrying anything, so the two groups it joined are no longer
 // joined by it -- and if another path joins them, the partition is unchanged
 // and the answer is correctly "nothing happens".
 func components(net *NetGraph, status map[string]domain.Status, plane string,
-	allow func(domain.Status) bool, cutCircuits map[string]bool) map[string]string {
+	allow func(domain.Status) bool, cut cutMedia) map[string]string {
 	nodes := make([]string, 0, len(net.Groups))
 	inSet := make(map[string]bool, len(net.Groups))
 	for id, st := range status {
@@ -343,7 +385,7 @@ func components(net *NetGraph, status map[string]domain.Status, plane string,
 		if !inSet[u.GroupID] || !inSet[u.UpstreamGroupID] {
 			continue
 		}
-		if u.CircuitID != "" && cutCircuits[u.CircuitID] {
+		if cut.severs(u) {
 			continue
 		}
 		edges = append(edges, u)
@@ -399,17 +441,17 @@ type reachModel struct {
 
 	netOfCache    map[netKey][]string
 	modelledCache map[netKey]bool
-	// cutCircuits is carried so a finding can say which circuit it was.
-	cutCircuits map[string]bool
+	// cut is carried so a finding can say which circuit or cable it was.
+	cut cutMedia
 }
 
 // buildReachModel returns nil when net is nil or declares nothing, which is
 // what makes every call site's `net == nil` check sufficient on its own.
-func buildReachModel(net *NetGraph, down map[string]bool, cutCircuits map[string]bool) *reachModel {
+func buildReachModel(net *NetGraph, down map[string]bool, cut cutMedia) *reachModel {
 	if net.IsEmpty() {
 		return nil
 	}
-	m := &reachModel{net: net, down: down, cutCircuits: cutCircuits}
+	m := &reachModel{net: net, down: down, cut: cut}
 	m.groupStatus = groupStatuses(net, down)
 
 	planes := []string{domain.PlaneData, domain.PlaneMgmt, domain.PlaneStorage}
@@ -417,9 +459,9 @@ func buildReachModel(net *NetGraph, down map[string]bool, cutCircuits map[string
 	m.compPessimistic = make(map[string]map[string]string, len(planes))
 	for _, p := range planes {
 		m.compOptimistic[p] = components(net, m.groupStatus, p,
-			func(s domain.Status) bool { return s != domain.StatusDown }, cutCircuits)
+			func(s domain.Status) bool { return s != domain.StatusDown }, cut)
 		m.compPessimistic[p] = components(net, m.groupStatus, p,
-			func(s domain.Status) bool { return s == domain.StatusOK }, cutCircuits)
+			func(s domain.Status) bool { return s == domain.StatusOK }, cut)
 	}
 
 	m.attachmentsByAssetPlane = map[string]map[string][]int{}
