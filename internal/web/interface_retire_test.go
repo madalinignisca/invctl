@@ -85,6 +85,49 @@ func TestAPatchedPortIsNeitherOfferedNorAccepted(t *testing.T) {
 	}
 }
 
+// TestAPortHeldBySomethingOtherThanACableIsNotOffered is the case that escaped.
+//
+// The Withdraw control first gated on "not patched", which is the CABLE case
+// only. An access point's radio carries no cable and a WLAN membership, so the
+// button rendered on a port RetireInterface then refused -- and because both a
+// refusal and a success redirect with 303, it looked like it had worked.
+//
+// EVERY GO TEST FOR THE GATE HAD USED A CABLE. The browser found it, which is
+// the whole argument for the E2E spec beside this one: a fixture chosen to
+// exercise the rule and a fixture chosen by walking the real estate find
+// different things.
+func TestAPortHeldBySomethingOtherThanACableIsNotOffered(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	// A radio: no cable, but it broadcasts an SSID.
+	id := h.lookup(`SELECT iw.interface_id FROM interface_wlan iw
+	                JOIN interface i ON i.id = iw.interface_id
+	                WHERE i.lifecycle = 'active'
+	                  AND i.id NOT IN (SELECT a_interface_id FROM link WHERE lifecycle = 'active'
+	                                   UNION SELECT b_interface_id FROM link WHERE lifecycle = 'active')
+	                ORDER BY iw.interface_id LIMIT 1`)
+	assetID := h.lookup(`SELECT asset_id FROM interface WHERE id = ?`, id)
+
+	page := body(t, h.get("/assets/"+assetID, false))
+	if strings.Contains(page, "/interfaces/"+id+"/retire") {
+		t.Error("the page offers Withdraw on a radio that broadcasts an SSID. It " +
+			"carries no cable, so a gate on \"not patched\" lets it through -- and " +
+			"the store refuses, which redirects 303 exactly like success does")
+	}
+
+	// And the store refuses it, so the absence of the control is not the only
+	// thing standing between an operator and a broken invariant.
+	resp := h.post("/interfaces/"+id+"/retire", url.Values{
+		"csrf_token": {h.csrfToken("/assets/" + assetID)},
+	}, false)
+	defer resp.Body.Close()
+	if got := h.lookup(`SELECT lifecycle FROM interface WHERE id = ?`, id); got != "active" {
+		t.Errorf("lifecycle = %q -- a radio still broadcasting an SSID was "+
+			"withdrawn, leaving the membership pointing at a port that is gone", got)
+	}
+}
+
 // TestOnlyAWriterCanWithdrawAPort. interface is ScopeSubjectDerived through its
 // owning asset, so an Observer is refused at the middleware.
 func TestOnlyAWriterCanWithdrawAPort(t *testing.T) {

@@ -36,16 +36,46 @@ type InterfaceRow struct {
 	// store then refuses). Empty on an unpatched port, same as PeerAsset.
 	PeerAssetID string
 	PeerPort    string
+	// Attached is true when anything at all fastens to this port. Read through
+	// Bare() rather than directly; see its doc comment.
+	Attached bool
 }
 
 // IsPatched reports whether this port already carries an active cable.
 func (r InterfaceRow) IsPatched() bool { return r.LinkID != "" }
 
+// Bare reports whether NOTHING is attached to this port -- no cable, no
+// address, no VLAN or WLAN membership, no circuit end, no bonded child.
+//
+// NOT THE SAME AS IsPatched, AND THE DIFFERENCE IS A REAL DEFECT THIS FIXED.
+// The Withdraw control first gated on "not patched", which is the cable case
+// only. An access point's radio carries no cable and a WLAN membership, so the
+// button rendered on a port RetireInterface then refused -- the
+// offered-and-refused shape this codebase closes wherever it finds it, found by
+// the browser because every Go test for it used a cable.
+//
+// Computed from interfaceAttachments, the same list RetireInterface enforces,
+// so the control and the rule cannot drift apart.
+func (r InterfaceRow) Bare() bool { return !r.Attached }
+
 // ListInterfaces returns the ports on an asset, with addresses attached.
 func (s *SQLStore) ListInterfaces(ctx context.Context, assetID string) ([]InterfaceRow, error) {
+	// WITHDRAWN PORTS ARE NOT LISTED, the same as every other working list in
+	// this product: a retired asset is absent from /assets, a retired VLAN from
+	// /vlans, and the history lives in change_log rather than in the table an
+	// operator works from.
+	//
+	// THIS IS A DIRECT READ, WHICH IS WHY IT NEEDS THE FILTER AND MOST DO NOT.
+	// The invariant that a retired port is bare makes every query joining
+	// THROUGH an attachment correct unchanged -- the attachment cannot exist.
+	// It says nothing about a query that reads ports themselves, and this one
+	// does. Found in the browser: a withdrawn port stayed in the list and, being
+	// bare, offered Withdraw again.
 	var ifaces []domain.Interface
 	err := s.read(ctx, &ifaces,
-		`SELECT * FROM interface WHERE asset_id = ? ORDER BY is_mgmt DESC, name`, assetID)
+		`SELECT * FROM interface
+		  WHERE asset_id = ? AND lifecycle <> ?
+		  ORDER BY is_mgmt DESC, name`, assetID, domain.LifecycleRetired)
 	if err != nil {
 		return nil, fmt.Errorf("listing interfaces of %s: %w", assetID, err)
 	}
@@ -53,11 +83,16 @@ func (s *SQLStore) ListInterfaces(ctx context.Context, assetID string) ([]Interf
 		return nil, nil
 	}
 
+	attached, err := attachedInterfaceIDs(ctx, s, assetID)
+	if err != nil {
+		return nil, err
+	}
+
 	rows := make([]InterfaceRow, len(ifaces))
 	ids := make([]string, len(ifaces))
 	index := make(map[string]int, len(ifaces))
 	for i, iface := range ifaces {
-		rows[i] = InterfaceRow{Interface: iface}
+		rows[i] = InterfaceRow{Interface: iface, Attached: attached[iface.ID]}
 		ids[i] = iface.ID
 		index[iface.ID] = i
 	}
@@ -464,6 +499,36 @@ func (s *SQLStore) GetLinkEnds(ctx context.Context, id string) (*LinkEnds, error
 		return nil, fmt.Errorf("getting link ends %s: %w", id, err)
 	}
 	return &out, nil
+}
+
+// attachedInterfaceIDs returns every port on this asset that has something
+// fastened to it.
+//
+// ONE SOURCE OF TRUTH WITH RetireInterface: both walk interfaceAttachments, so
+// the Withdraw control is offered exactly when the store would accept it. The
+// first version of the control gated on "not patched" -- the cable case alone --
+// and rendered on an access point's radio, which carries a WLAN membership and
+// no cable. The browser found it; every Go test for the gate had used a cable.
+func attachedInterfaceIDs(ctx context.Context, s *SQLStore, assetID string) (map[string]bool, error) {
+	out := map[string]bool{}
+	for _, a := range interfaceAttachments {
+		query := `SELECT t.` + a.column + ` FROM ` + a.table + ` t
+		          JOIN interface i ON i.id = t.` + a.column + `
+		          WHERE i.asset_id = ?`
+		args := []any{assetID}
+		if tableHasLifecycle[a.table] {
+			query += ` AND t.lifecycle <> ?`
+			args = append(args, domain.LifecycleRetired)
+		}
+		var ids []string
+		if err := s.read(ctx, &ids, query, args...); err != nil {
+			return nil, fmt.Errorf("listing %s attachments: %w", a.table, err)
+		}
+		for _, id := range ids {
+			out[id] = true
+		}
+	}
+	return out, nil
 }
 
 // requireLiveInterface refuses to fasten anything to a withdrawn port.
