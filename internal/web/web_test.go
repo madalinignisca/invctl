@@ -215,6 +215,48 @@ var (
 // drift is bounded by how long the package takes, which is under two minutes,
 // and no test here asserts on the seed's own timestamps at finer granularity
 // than that -- the health tests insert their own rows with their own times.
+// THE RENDERER IS BUILT ONCE FOR THE PACKAGE, NOT ONCE PER HARNESS, and that
+// is worth about eight minutes of CI.
+//
+// MEASURED, not assumed: newHarness costs 290ms, of which render.New is 263ms --
+// 91% of it. Copying the template database, opening it, building the session
+// store and assembling the App account for the other 27ms between them. This
+// package builds 437 harnesses, so the same immutable templates were parsed out
+// of the same embedded filesystem 437 times: 1m55s of the 2m7s spent building
+// harnesses at all.
+//
+// Under -race it is worse, because parsing is almost pure allocation and that is
+// what the detector instruments: 1.11s per build against 256ms, a 4.3x
+// multiplier where the suite's average is 2.8x. Against internal/web's 3123s
+// race time that is roughly 8 minutes of re-parsing.
+//
+// SAFE TO SHARE, checked rather than hoped:
+//   - Renderer is immutable after New -- every assignment to its fields is
+//     inside New (render.go:52, 65, 88).
+//   - dev is false here, so none of the `if r.dev` re-parse branches ever run.
+//   - Its one piece of lazy state, the asset fingerprint cache, is guarded by a
+//     sync.RWMutex of its own (render/assets.go).
+//   - html/template is safe for concurrent execution once parsed, and no test
+//     in this package calls t.Parallel() in any case.
+//
+// Both test call sites passed byte-identical arguments, so there is nothing to
+// key the cache on. If one ever needs a different currency or dev=true, it must
+// build its own renderer rather than parameterising this -- a cache keyed on
+// arguments would hand two tests the same pointer for different intents.
+var (
+	testRendererOnce sync.Once
+	testRendererVal  *render.Renderer
+	testRendererErr  error
+)
+
+func testRenderer(t *testing.T) (*render.Renderer, error) {
+	t.Helper()
+	testRendererOnce.Do(func() {
+		testRendererVal, testRendererErr = render.New(webassets.FS, false, "EUR")
+	})
+	return testRendererVal, testRendererErr
+}
+
 func webTemplate(t *testing.T) (string, *seed.Refs) {
 	t.Helper()
 	webTemplateOnce.Do(func() {
@@ -350,7 +392,7 @@ func newHarnessTuned(t *testing.T, creds []config.AgentCredential, readerCreds [
 	// prove nothing about the deployment.
 	sessions.Cookie.Name = "invctl_session"
 
-	renderer, err := render.New(webassets.FS, false, "EUR")
+	renderer, err := testRenderer(t)
 	if err != nil {
 		t.Fatalf("parsing templates: %v", err)
 	}

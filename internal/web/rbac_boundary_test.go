@@ -39,9 +39,7 @@ import (
 	"github.com/madalinignisca/invctl/internal/store"
 	"github.com/madalinignisca/invctl/internal/web"
 	"github.com/madalinignisca/invctl/internal/web/handlers"
-	"github.com/madalinignisca/invctl/internal/web/render"
 	"github.com/madalinignisca/invctl/internal/web/routescan"
-	webassets "github.com/madalinignisca/invctl/web"
 )
 
 // The boundary suite -- WP-G1 Task 16.
@@ -237,7 +235,7 @@ func newBoundaryHarness(t *testing.T, adminUsername string, st *store.SQLStore) 
 	sessions.Cookie.Secure = false
 	sessions.Cookie.Name = "invctl_session"
 
-	renderer, err := render.New(webassets.FS, false, "EUR")
+	renderer, err := testRenderer(t)
 	if err != nil {
 		t.Fatalf("parsing templates: %v", err)
 	}
