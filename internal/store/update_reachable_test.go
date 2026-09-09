@@ -18,8 +18,15 @@ import (
 	"testing"
 )
 
-// correctionPathsNotYetBuilt is every Update* store method that nothing calls,
-// with what it means for the operator who needs it.
+// unreachableRepairPaths is every Update* or Retire* store method that nothing
+// calls, with what it means for the operator who needs it.
+//
+// IT WAS CALLED correctionPathsNotYetBuilt AND THAT NAME OVERSOLD IT. It reads
+// as "corrections an operator cannot make", which is a claim about the product;
+// what this actually checks is narrower and mechanical -- repair methods with
+// no caller. The honest name for the wider claim now belongs to
+// write_surface_test.go, which keys on creation rather than on what somebody
+// happened to write.
 //
 // THIS ONE IS A BACKLOG, NOT A SET OF DECISIONS, and it is the difference
 // between this list and connectiveTablesOutsideTheGraph's -- that one says a
@@ -56,10 +63,27 @@ import (
 // correction path the Update prefix will never match. What this checks is a
 // naming convention with a capability behind it, not the capability itself.
 //
-// The complementary census -- enumerate Create*, require an Update*/Retire* or
-// a named exemption -- is not written. It would fail today with roughly a dozen
-// entries, several of them damaging. That is the next piece of this work.
-var correctionPathsNotYetBuilt = map[string]string{}
+// The complementary census IS NOW WRITTEN -- write_surface_test.go, keyed on
+// Create* rather than on what somebody happened to write, with its gaps and its
+// by-design decisions kept apart. Between the two: that one asks whether a
+// repair path EXISTS, this one asks whether anything can REACH it. Neither
+// question implies the other, and the net_* family was failing both at once --
+// no way to correct a forwarder group, and a withdrawal method nothing called.
+var unreachableRepairPaths = map[string]string{
+	// THE net_* FAMILY, found the moment this scan learned about Retire*. Five
+	// create routes, no retire routes, and these five methods complete and
+	// unreachable -- so the reachability layer can be declared and never taken
+	// back. The correction half of the same gap is in writeSurfaceGaps
+	// (write_surface_test.go); this is the withdrawal half.
+	"RetireNetAnchor": "an anchor placed on the wrong asset cannot be removed, and " +
+		"a misplaced anchor silently changes every external-reachability verdict " +
+		"in the estate.",
+	"RetireNetGroup": "a forwarder group declared in error cannot be withdrawn, so " +
+		"it keeps taking part in every impact answer computed through it.",
+	"RetireNetGroupMember": "an asset put in the wrong forwarder group stays in it.",
+	"RetireNetUplink":      "an uplink edge drawn in error cannot be removed.",
+	"RetireNetAttachment":  "an attachment made in error cannot be removed.",
+}
 
 // TestEveryUpdateMethodIsReachable fails when a store method written to correct
 // something has nothing calling it.
@@ -102,24 +126,38 @@ func TestEveryUpdateMethodIsReachable(t *testing.T) {
 
 	for _, m := range updaters {
 		if referenced[m] {
-			if why, listed := correctionPathsNotYetBuilt[m]; listed {
+			if why, listed := unreachableRepairPaths[m]; listed {
 				t.Errorf("%s IS reachable now, but is still listed as a gap: %q. Delete the "+
 					"entry -- a backlog that keeps things it has finished stops being read.",
 					m, why)
 			}
 			continue
 		}
-		if _, listed := correctionPathsNotYetBuilt[m]; listed {
+		if _, listed := unreachableRepairPaths[m]; listed {
 			continue
 		}
-		t.Errorf("%s has no caller anywhere outside tests, so the thing it corrects "+
-			"cannot be corrected: it can be declared and withdrawn and never fixed. "+
-			"Either wire it to a handler and a route, or add it to "+
-			"correctionPathsNotYetBuilt saying what an operator loses without it.", m)
+		t.Errorf("%s has no caller anywhere outside tests, so the thing it exists to "+
+			"undo cannot be undone through the product: an Update nothing reaches "+
+			"means a row can be declared and never fixed, and a Retire nothing "+
+			"reaches means it can be declared and never taken back. Either wire it "+
+			"to a handler and a route, or add it to unreachableRepairPaths "+
+			"saying what an operator loses without it.", m)
 	}
 }
 
-// storeUpdateMethods returns every `func (s *SQLStore) Update…` in dir.
+// storeUpdateMethods returns every `func (s *SQLStore) Update…` or `Retire…`
+// in dir.
+//
+// RETIRE WAS ADDED AFTER THE FACT, and finding what it found is the argument
+// for it. This scanned only Update* for as long as it existed, so five
+// withdrawal paths -- the whole net_* family -- sat complete and unreachable
+// without anything noticing: five create routes, no retire routes,
+// RetireNetGroup and its siblings called by nothing. An estate could declare a
+// forwarder group and never take it back.
+//
+// A correction path and a withdrawal path are the same KIND of thing from this
+// test's point of view: a store method written so somebody can undo a mistake,
+// which is worth nothing if no route reaches it.
 func storeUpdateMethods(dir string) ([]string, error) {
 	paths, err := filepath.Glob(filepath.Join(dir, "*.go"))
 	if err != nil {
@@ -137,7 +175,11 @@ func storeUpdateMethods(dir string) ([]string, error) {
 		}
 		for _, decl := range file.Decls {
 			fn, ok := decl.(*ast.FuncDecl)
-			if !ok || fn.Recv == nil || !strings.HasPrefix(fn.Name.Name, "Update") {
+			if !ok || fn.Recv == nil {
+				continue
+			}
+			if !strings.HasPrefix(fn.Name.Name, "Update") &&
+				!strings.HasPrefix(fn.Name.Name, "Retire") {
 				continue
 			}
 			out = append(out, fn.Name.Name)
