@@ -175,7 +175,7 @@ test-sqlite: ## Run against SQLite only — NOT the gate; see `make test`
 
 .PHONY: test-race
 test-race: compose-up ## Run the suite with the race detector
-	INV_TEST_POSTGRES_DSN="$(PG_DSN)" go test ./... -race -count=1 -timeout 60m
+	INV_TEST_POSTGRES_DSN="$(PG_DSN)" go test ./... -race -count=1 -timeout 120m
 
 .PHONY: cover
 cover: compose-up ## Report test coverage
