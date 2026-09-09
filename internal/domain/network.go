@@ -55,7 +55,14 @@ type Interface struct {
 	MTU         *int    `db:"mtu"`
 	LagParentID *string `db:"lag_parent_id"`
 	IsMgmt      bool    `db:"is_mgmt"`
-	Enabled     bool    `db:"enabled"`
+	// Enabled is ADMINISTRATIVE STATE, not existence. A disabled port is in the
+	// chassis and can be brought up; an operator asking "what is shut" wants to
+	// see it. Lifecycle below is whether the port is there at all.
+	Enabled bool `db:"enabled"`
+	// Lifecycle is whether this port still exists (migration 00062). Retiring
+	// one is refused while anything is attached, so a retired port is always
+	// bare -- see RetireInterface, and the invariant test that pins it.
+	Lifecycle string `db:"lifecycle"`
 	// Nullable, unlike on the tables that carried these from the start: rows
 	// that predate migration 00019 have whatever change_log could tell us, and
 	// NULL where it could tell us nothing. See the migration header.
@@ -70,6 +77,7 @@ type Interface struct {
 func NewInterface(id, assetID, name, formFactor string) (*Interface, error) {
 	i := &Interface{
 		ID: id, AssetID: assetID, Name: name, FormFactor: formFactor, Enabled: true,
+		Lifecycle: LifecycleActive,
 	}
 	if err := i.Validate(); err != nil {
 		return nil, err
@@ -103,6 +111,10 @@ func (i *Interface) Validate() error {
 	// terminate. Deeper cycles are the store's problem, not a field check.
 	if i.LagParentID != nil && *i.LagParentID == i.ID {
 		ve.Add("lag_parent_id", "a port cannot be bonded into itself")
+	}
+	// The DB CHECK is the second line of defence, not the first (CLAUDE.md).
+	if i.Lifecycle != LifecycleActive && i.Lifecycle != LifecycleRetired {
+		ve.Add("lifecycle", "%q is not a lifecycle", i.Lifecycle)
 	}
 	return ve.OrNil()
 }

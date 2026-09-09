@@ -337,6 +337,47 @@ func (a *App) PrefixCreate(w http.ResponseWriter, r *http.Request) {
 // the store carries them over from the stored row rather than trusting the
 // form — the UI not offering a field is not a control.
 
+// InterfaceRetire withdraws a port that is no longer in the chassis.
+//
+// A PORT COULD ONLY EVER BE ADDED before migration 00062. `interface` was the
+// most-referenced table in the schema with no lifecycle column at all, so a NIC
+// pulled out of a machine stayed on the asset for ever -- renameable, never
+// removable. The write-surface census found it; the reachability guard is what
+// insists this handler exists rather than leaving RetireInterface unreachable
+// the way six other repair methods once were.
+//
+// THE REFUSAL IS THE USEFUL PART and it belongs to the store: a port carrying a
+// cable, an address, a VLAN membership or a circuit end cannot be withdrawn
+// until those are removed. That keeps "a retired port is bare" true, which is
+// what lets fifty-eight queries go on reading this table unchanged.
+func (a *App) InterfaceRetire(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	iface, err := a.Store.GetInterface(r.Context(), id)
+	if err != nil {
+		a.handleStoreError(w, r, err)
+		return
+	}
+	// Read before the write, so the redirect lands on the asset even when the
+	// retire is refused -- the operator needs to be looking at the port list to
+	// act on the reason.
+	assetID := iface.AssetID
+
+	if err := a.Store.RetireInterface(r.Context(), a.permit(r), id); err != nil {
+		if isConflict(err) {
+			a.setFlash(r, "error", "That port still has something attached — a cable, "+
+				"an address, a VLAN or a circuit end. Remove those first; withdrawing "+
+				"it would leave them pointing at a port that is no longer there.")
+			render.Redirect(w, r, "/assets/"+assetID)
+			return
+		}
+		a.handleStoreError(w, r, err)
+		return
+	}
+	a.setFlash(r, "success", "Port "+iface.Name+" withdrawn. Re-adding a port of the "+
+		"same name brings this one back, with its history.")
+	render.Redirect(w, r, "/assets/"+assetID)
+}
+
 // InterfaceUpdate corrects a port.
 func (a *App) InterfaceUpdate(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {

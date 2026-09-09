@@ -307,6 +307,12 @@ var DeclaredColumns = map[string][]string{
 	"interface": {
 		"id", "asset_id", "name", "form_factor", "speed_mbps", "mac", "mtu",
 		"lag_parent_id", "is_mgmt", "enabled",
+		// lifecycle is DECLARED, like every other lifecycle here and for the
+		// same reason: a port is gone because a person says the NIC was pulled,
+		// not because anything reported it missing. Rule 2 is explicit that a
+		// reported `down` never sets lifecycle -- a port that stops answering is
+		// observed state on `enabled`/health, and only a person retires one.
+		"lifecycle",
 		"created_at", "updated_at", "row_version",
 	},
 	"ip_address": {"id", "addr_text", "addr_family", "addr_start", "interface_id", "fhrp_group_id", "role", "created_at", "updated_at", "row_version"},
