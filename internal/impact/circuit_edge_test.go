@@ -49,7 +49,7 @@ func TestACircuitEdgeJoinsTwoGroups(t *testing.T) {
 		GroupID: "g-oslo", UpstreamGroupID: "g-bergen",
 		Plane: domain.PlaneData, CircuitID: "c1", Label: "DF-1",
 	})
-	comp := components(net, status, domain.PlaneData, alive, nil)
+	comp := components(net, status, domain.PlaneData, alive, cutMedia{})
 	if !joined(comp) {
 		t.Error("two groups joined only by a circuit are in different components; " +
 			"the circuit edge is not being unioned")
@@ -59,7 +59,7 @@ func TestACircuitEdgeJoinsTwoGroups(t *testing.T) {
 	// this, a components() that joined everything would satisfy the assertion
 	// above.
 	bare, bareStatus := twoGroups()
-	if joined(components(bare, bareStatus, domain.PlaneData, alive, nil)) {
+	if joined(components(bare, bareStatus, domain.PlaneData, alive, cutMedia{})) {
 		t.Error("two groups with no edge between them are in one component")
 	}
 }
@@ -71,10 +71,10 @@ func TestCuttingTheCircuitWithdrawsItsEdge(t *testing.T) {
 		GroupID: "g-oslo", UpstreamGroupID: "g-bergen",
 		Plane: domain.PlaneData, CircuitID: "c1",
 	})
-	if !joined(components(net, status, domain.PlaneData, alive, nil)) {
+	if !joined(components(net, status, domain.PlaneData, alive, cutMedia{})) {
 		t.Fatal("the groups are not joined before the cut, so cutting proves nothing")
 	}
-	cut := components(net, status, domain.PlaneData, alive, map[string]bool{"c1": true})
+	cut := components(net, status, domain.PlaneData, alive, cutMedia{circuits: map[string]bool{"c1": true}})
 	if joined(cut) {
 		t.Error("cutting the only circuit joining two groups left them in one " +
 			"component; the edge is not being withdrawn")
@@ -94,14 +94,14 @@ func TestCuttingOneCircuitLeavesTheOthers(t *testing.T) {
 		NetUplinkInfo{GroupID: "g-oslo", UpstreamGroupID: "g-bergen",
 			Plane: domain.PlaneData, CircuitID: "c2"},
 	)
-	if !joined(components(net, status, domain.PlaneData, alive, map[string]bool{"c1": true})) {
+	if !joined(components(net, status, domain.PlaneData, alive, cutMedia{circuits: map[string]bool{"c1": true}})) {
 		t.Error("cutting one of two circuits separated the groups; the other one " +
 			"still joins them, and reporting an outage here would be crying wolf")
 	}
 	// Both gone is a real partition, so the check above is not simply never
 	// separating anything.
 	if joined(components(net, status, domain.PlaneData, alive,
-		map[string]bool{"c1": true, "c2": true})) {
+		cutMedia{circuits: map[string]bool{"c1": true, "c2": true}})) {
 		t.Error("cutting both circuits left the groups joined")
 	}
 }
@@ -118,7 +118,8 @@ func TestADeclaredUplinkIsNeverWithdrawnByACircuitCut(t *testing.T) {
 	})
 	// A cut set containing the empty string is the shape a missing guard would
 	// match against.
-	cut := components(net, status, domain.PlaneData, alive, map[string]bool{"": true, "c1": true})
+	cut := components(net, status, domain.PlaneData, alive,
+		cutMedia{circuits: map[string]bool{"": true, "c1": true}})
 	if !joined(cut) {
 		t.Error("a declared uplink was withdrawn by a circuit cut; only edges " +
 			"carrying that circuit's id may be dropped")
@@ -133,10 +134,10 @@ func TestACircuitOnAnotherPlaneDoesNotJoinTheDataPlane(t *testing.T) {
 		GroupID: "g-oslo", UpstreamGroupID: "g-bergen",
 		Plane: domain.PlaneMgmt, CircuitID: "c1",
 	})
-	if joined(components(net, status, domain.PlaneData, alive, nil)) {
+	if joined(components(net, status, domain.PlaneData, alive, cutMedia{})) {
 		t.Error("a management-plane edge joined two groups on the data plane")
 	}
-	if !joined(components(net, status, domain.PlaneMgmt, alive, nil)) {
+	if !joined(components(net, status, domain.PlaneMgmt, alive, cutMedia{})) {
 		t.Error("the edge does not join them on its own plane either, so the test " +
 			"above proves nothing about planes")
 	}

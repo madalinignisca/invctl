@@ -41,6 +41,19 @@ type Request struct {
 	// the question a circuit exists to answer and the one the terminations page
 	// could only hint at.
 	CutCircuitIDs []string
+	// CutLinkIDs are cables treated as severed for this run -- WP-B3's engine
+	// half, and the same argument as CutCircuitIDs one line up: a cable is not
+	// an asset, has no row in the containment tree, and taking it away removes
+	// a connectivity EDGE rather than a vertex.
+	//
+	// Until this existed, "cutting a cable concludes nothing" was literally
+	// true: an operator's only recourse was to down an asset, which is a
+	// different question and a blunter one -- a switch losing power is not the
+	// same event as one of its uplinks being unplugged.
+	//
+	// Only cables BETWEEN forwarder groups derive an edge to remove; see
+	// NetUplinkInfo.LinkID for why a same-group cable derives nothing.
+	CutLinkIDs []string
 	// WindowSeconds is how long the outage lasts. It matters only for async
 	// dependencies, where a 3-minute reboot and a 45-minute one genuinely
 	// differ for a consumer with a buffer.
@@ -203,11 +216,17 @@ func Analyse(g *Graph, req Request, in Inputs) Result {
 		}
 		in.DownInstanceIDs = downInstances
 	}
-	cutCircuits := make(map[string]bool, len(req.CutCircuitIDs))
-	for _, id := range req.CutCircuitIDs {
-		cutCircuits[id] = true
+	cut := cutMedia{
+		circuits: make(map[string]bool, len(req.CutCircuitIDs)),
+		links:    make(map[string]bool, len(req.CutLinkIDs)),
 	}
-	net := buildReachModel(netInput, in.DownAssetIDs, cutCircuits)
+	for _, id := range req.CutCircuitIDs {
+		cut.circuits[id] = true
+	}
+	for _, id := range req.CutLinkIDs {
+		cut.links[id] = true
+	}
+	net := buildReachModel(netInput, in.DownAssetIDs, cut)
 
 	// Seam 1. An empty needsNet makes isolation unable to reach the alive
 	// term, so phaseCapacity runs exactly as it did before reachability

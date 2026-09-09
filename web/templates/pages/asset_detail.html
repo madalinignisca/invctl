@@ -256,6 +256,13 @@
             {{if $.CanWriteEntity "asset" $.Asset.ID}}
             <a class="btn btn-sm" href="/assets/{{$.Asset.ID}}?edit={{.ID}}#ports">Edit</a>
             {{end}}
+            {{/* WP-B3's engine half reaching the screen. Offered to any reader,
+                 not gated on CanUnpatch: asking what a cut would do is a READ,
+                 and the person who most needs it during an incident is often
+                 not the person who may unplug it. */}}
+            {{if .LinkID}}
+            <a class="btn btn-sm" href="/links/{{.LinkID}}/impact">If it is cut</a>
+            {{end}}
             {{if .CanUnpatch}}
             <form method="post" action="/links/{{.LinkID}}/retire" style="display:inline"
                   hx-post="/links/{{.LinkID}}/retire"

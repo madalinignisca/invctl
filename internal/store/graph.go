@@ -302,6 +302,58 @@ func (s *SQLStore) loadNetGraph(ctx context.Context) (*impact.NetGraph, error) {
 		})
 	}
 
+	// CABLE EDGES -- WP-B3's engine half, and the circuit block above is the
+	// argument for it in full. A cable whose two ends land on interfaces of
+	// assets in DIFFERENT forwarder groups contributes exactly what a circuit
+	// between them contributes: an undirected adjacency, with no claim about
+	// which way traffic flows.
+	//
+	// `ma.group_id <> mb.group_id` IS THE WHOLE DESIGN, not an optimisation. A
+	// cable inside one group is an intra-group adjacency, and that is the
+	// question net_attachment already answers -- deriving an edge from it would
+	// be the "second, disagreeing answer" docs/reachability-design.md and
+	// graph_coverage_test.go's exclusion exist to prevent. Between groups there
+	// is no competing answer: nothing else in this model records that two
+	// forwarder groups are joined by a piece of copper.
+	//
+	// Most cables fail this test, and that is correct. A server's uplink to its
+	// own top-of-rack switch joins nothing, because both ends are in the same
+	// group; it is the inter-rack and inter-site runs that carry a partition.
+	//
+	// The plane is the data plane, for the reason the circuit block gives: a
+	// cable carrying management traffic is a real thing and is not
+	// distinguishable here, so claiming otherwise would be inventing a fact.
+	var linkEdges []struct {
+		LinkID string `db:"link_id"`
+		Label  string `db:"label"`
+		GroupA string `db:"group_a"`
+		GroupB string `db:"group_b"`
+	}
+	if err := s.read(ctx, &linkEdges, `
+		SELECT l.id AS link_id,
+		       aa.name || ' ' || ia.name || ' – ' || ab.name || ' ' || ib.name AS label,
+		       ma.group_id AS group_a, mb.group_id AS group_b
+		FROM link l
+		JOIN interface ia ON ia.id = l.a_interface_id
+		JOIN interface ib ON ib.id = l.b_interface_id
+		JOIN asset aa ON aa.id = ia.asset_id
+		JOIN asset ab ON ab.id = ib.asset_id
+		JOIN net_group_member ma ON ma.asset_id = ia.asset_id
+		JOIN net_group_member mb ON mb.asset_id = ib.asset_id
+		WHERE l.lifecycle = ?
+		  AND ma.lifecycle = ? AND mb.lifecycle = ?
+		  AND ma.group_id <> mb.group_id`,
+		domain.LifecycleActive, domain.LifecycleActive, domain.LifecycleActive); err != nil {
+		return nil, fmt.Errorf("loading cable edges for graph: %w", err)
+	}
+	for _, e := range linkEdges {
+		net.Uplinks = append(net.Uplinks, impact.NetUplinkInfo{
+			GroupID: e.GroupA, UpstreamGroupID: e.GroupB,
+			Plane:  domain.PlaneData,
+			LinkID: e.LinkID, Label: e.Label,
+		})
+	}
+
 	var anchors []domain.NetAnchor
 	if err := s.read(ctx, &anchors, `SELECT * FROM net_anchor WHERE lifecycle = ?`, domain.LifecycleActive); err != nil {
 		return nil, fmt.Errorf("loading net anchors for graph: %w", err)
@@ -473,6 +525,34 @@ type CircuitCut struct {
 
 // CircuitCutEffect answers what cutting one circuit does.
 func (s *SQLStore) CircuitCutEffect(ctx context.Context, circuitID string) (CircuitCut, error) {
+	return s.cutEffect(ctx, func(u impact.NetUplinkInfo) bool {
+		return u.CircuitID == circuitID
+	})
+}
+
+// LinkCutEffect answers what cutting one CABLE does -- WP-B3's engine half.
+//
+// The same three outcomes as a circuit and the same reasoning, because a cable
+// contributes the same kind of edge. Most cables answer Joins == false, and
+// that is correct rather than a gap: a server's uplink to its own
+// top-of-rack switch has both ends in one forwarder group, so it joins nothing
+// and cutting it partitions nothing. It is the inter-rack and inter-site runs
+// that carry a partition, and those are the ones somebody asks about.
+func (s *SQLStore) LinkCutEffect(ctx context.Context, linkID string) (CircuitCut, error) {
+	return s.cutEffect(ctx, func(u impact.NetUplinkInfo) bool {
+		return u.LinkID == linkID
+	})
+}
+
+// cutEffect is the shared body: which edges the medium contributes, and whether
+// anything else still joins the groups those edges joined.
+//
+// FACTORED WHEN THE CABLE CASE ARRIVED rather than copied. The two differ in
+// one predicate; duplicating the walk would have given the page for a cable and
+// the page for a circuit two chances to disagree about what "separates" means,
+// and CircuitCut's own doc comment is explicit that conflating any two of its
+// three outcomes is a lie the page would tell.
+func (s *SQLStore) cutEffect(ctx context.Context, carries func(impact.NetUplinkInfo) bool) (CircuitCut, error) {
 	var out CircuitCut
 	g, err := s.LoadGraph(ctx)
 	if err != nil {
@@ -482,11 +562,11 @@ func (s *SQLStore) CircuitCutEffect(ctx context.Context, circuitID string) (Circ
 		return out, nil
 	}
 
-	// The edges this circuit contributes, and everything else.
+	// The edges this medium contributes, and everything else.
 	var ends [][2]string
 	adjacency := map[string][]string{}
 	for _, u := range g.Net.Uplinks {
-		if u.CircuitID == circuitID {
+		if carries(u) {
 			ends = append(ends, [2]string{u.GroupID, u.UpstreamGroupID})
 			continue
 		}

@@ -29,13 +29,25 @@ import (
 // WP-I1.
 var connectiveTablesOutsideTheGraph = map[string]string{
 	// --- Deliberately not reachability edges -------------------------------
-	"link": "a cable is physical inventory and path tracing (WP-B3), not a " +
-		"reachability edge. docs/reachability-design.md models reachability at " +
-		"FORWARDER GROUP level, with net_attachment_member naming which chassis " +
-		"the cable actually lands on -- \"directed, unlike link\" -- because a " +
-		"cable genuinely cannot tell you which way traffic flows, so it is " +
-		"declared rather than guessed. Adding link here would be a second, " +
-		"disagreeing answer to a question net_attachment already answers.",
+	// `link` WAS HERE AND IS NOW READ BY LoadGraph -- WP-B3's engine half,
+	// 2026-09-09. This test is what made the change say why, by refusing to let
+	// the exclusion and the code disagree.
+	//
+	// The old entry said a cable "cannot tell you which way traffic flows, so
+	// it is declared rather than guessed", and that adding it "would be a
+	// second, disagreeing answer to a question net_attachment already answers".
+	// Both remain true OF ATTACHMENT: which group a host belongs to is
+	// net_attachment's answer, and a cable-derived one would compete with it.
+	//
+	// The derivation added is narrower and does not touch that. It reads only
+	// cables whose two ends sit in DIFFERENT forwarder groups
+	// (`ma.group_id <> mb.group_id`, graph.go) and contributes an undirected
+	// group-to-group adjacency -- exactly what a circuit between the same two
+	// groups already contributes, by exactly the same derivation, and with no
+	// claim about direction. Nothing else in this model records that two
+	// forwarder groups are joined by a piece of copper, so there is no
+	// competing answer to disagree with. A cable inside one group still derives
+	// nothing at all: that is the intra-group case the old entry was about.
 	"port_pass_through": "a patch panel passes a cable through without " +
 		"terminating it; it belongs to path tracing for the same reason link " +
 		"does, and carries even less: it cannot originate an outage, only relay " +

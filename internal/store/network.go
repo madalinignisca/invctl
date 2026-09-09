@@ -364,6 +364,45 @@ func (s *SQLStore) GetLink(ctx context.Context, id string) (*domain.Link, error)
 	return &l, nil
 }
 
+// LinkEnds is one cable with both ends resolved to names, for a page heading.
+//
+// GetLink returns interface ids, which are UUIDv7s and say nothing to a reader.
+// A cable has no name of its own -- it is identified by what it joins -- so
+// anything rendering one has to resolve both ends or show an id nobody
+// recognises.
+type LinkEnds struct {
+	domain.Link
+	AAssetID   string `db:"a_asset_id"`
+	AAssetName string `db:"a_asset_name"`
+	AIface     string `db:"a_iface"`
+	BAssetID   string `db:"b_asset_id"`
+	BAssetName string `db:"b_asset_name"`
+	BIface     string `db:"b_iface"`
+}
+
+// Label is how a cable is named in a sentence.
+func (l LinkEnds) Label() string {
+	return l.AAssetName + " " + l.AIface + " – " + l.BAssetName + " " + l.BIface
+}
+
+// GetLinkEnds loads one cable with both ends resolved.
+func (s *SQLStore) GetLinkEnds(ctx context.Context, id string) (*LinkEnds, error) {
+	var out LinkEnds
+	if err := s.readOne(ctx, &out, `
+		SELECT l.*,
+		       ia.asset_id AS a_asset_id, aa.name AS a_asset_name, ia.name AS a_iface,
+		       ib.asset_id AS b_asset_id, ab.name AS b_asset_name, ib.name AS b_iface
+		FROM link l
+		JOIN interface ia ON ia.id = l.a_interface_id
+		JOIN interface ib ON ib.id = l.b_interface_id
+		JOIN asset aa ON aa.id = ia.asset_id
+		JOIN asset ab ON ab.id = ib.asset_id
+		WHERE l.id = ?`, id); err != nil {
+		return nil, fmt.Errorf("getting link ends %s: %w", id, err)
+	}
+	return &out, nil
+}
+
 // RetireLink unpatches a cable. The row and its audit history stay; a retired
 // link is simply excluded from every far-end lookup (docs/DECISIONS.md,
 // 2026-07-28 decisions) -- soft-delete-only applies to a cable exactly as it
