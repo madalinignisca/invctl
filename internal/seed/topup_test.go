@@ -298,6 +298,17 @@ func countEstate(t *testing.T, f *fixture) map[string]int {
 	}
 	out["device types"] = len(types)
 
+	// Reservations, so the phase that seeds them is held to the same
+	// idempotence bar as everything else in TopUp's list. CreateIPRange refuses
+	// a duplicate span, so a phase that did not skip would fail the top-up
+	// rather than quietly double it -- but counting them here is what makes
+	// that a test result instead of a stack trace somebody has to read.
+	ranges, err := f.store.ListIPRanges(f.ctx)
+	if err != nil {
+		t.Fatalf("listing reservations: %v", err)
+	}
+	out["reservations"] = len(ranges)
+
 	// WIRELESS IS COUNTED HERE OR IT IS NOT COUNTED AT ALL. wirelessLANs()
 	// joined TopUp's phase list on 2026-09-07, and the whole-estate assertion
 	// above is what holds it to the idempotency bar this list sets -- but only
@@ -568,6 +579,102 @@ func TestHydrateFillsEveryRefAPhaseReads(t *testing.T) {
 					"failed row, just an estate quietly missing a link that a freshly "+
 					"seeded one has", want.what, want.key)
 			}
+		}
+	})
+}
+
+// TestTheSeededEstateCarriesReservations.
+//
+// `ip_range` was the one shipped feature with NO demo data at all: the
+// reservations panel on /prefixes read "Nothing reserved" on a fresh estate, so
+// the half of that page explaining why an address is not offered could not be
+// seen, and WP-1.2's correction path for a reservation had nothing to correct.
+// Found by resetting the public demo and comparing the fresh estate against the
+// one it replaced -- not by any test, because tests build their own fixtures
+// and never ask what the DEMO can show.
+//
+// Both reservations sit inside a seeded prefix on purpose: a span floating in
+// space is a row, while one carved out of 10.20.30.0/24 is the lesson --
+// NextFreeAddress skips it, so .10 is never offered even though nothing holds
+// it.
+func TestTheSeededEstateCarriesReservations(t *testing.T) {
+	seed.CompanyEstate = true
+	t.Cleanup(func() { seed.CompanyEstate = false })
+
+	eachEngine(t, func(t *testing.T, f *fixture) {
+		ranges, err := f.store.ListIPRanges(f.ctx)
+		if err != nil {
+			t.Fatalf("listing reservations: %v", err)
+		}
+		if len(ranges) < 2 {
+			t.Fatalf("the seeded estate carries %d reservations, want at least 2. "+
+				"With none, /prefixes says \"Nothing reserved\" and the feature "+
+				"cannot be demonstrated at all", len(ranges))
+		}
+
+		// Inside a prefix the estate actually declares, or the demo shows a
+		// reservation with no context and NextFreeAddress has nothing to skip.
+		prefixes, err := f.store.ListPrefixes(f.ctx)
+		if err != nil {
+			t.Fatalf("listing prefixes: %v", err)
+		}
+		declared := map[string]bool{}
+		for _, p := range prefixes {
+			declared[p.CIDRText] = true
+		}
+		if !declared["10.20.30.0/24"] || !declared["10.20.40.0/24"] {
+			t.Fatalf("the prefixes the reservations sit inside are not seeded; "+
+				"declared = %v", declared)
+		}
+	})
+}
+
+// TestATopUpGivesAnOlderEstateItsReservations is the scenario that actually
+// bit, reproduced.
+//
+// WP-F1's SSIDs were added to Load and not to TopUp, so the public demo -- an
+// estate that is topped up rather than reset -- never gained them, and nobody
+// noticed until somebody looked at the running site. The existing idempotence
+// test cannot see that class of mistake: it tops up an estate that ALREADY has
+// the rows, where adding nothing is the correct answer.
+//
+// This one removes them first, which is what an estate seeded before the phase
+// existed looks like. Verified by mutation: deleting b.reservations() from
+// TopUp's list leaves every other test in this package green and fails only
+// this one.
+func TestATopUpGivesAnOlderEstateItsReservations(t *testing.T) {
+	seed.CompanyEstate = true
+	t.Cleanup(func() { seed.CompanyEstate = false })
+
+	eachEngine(t, func(t *testing.T, f *fixture) {
+		ranges, err := f.store.ListIPRanges(f.ctx)
+		if err != nil {
+			t.Fatalf("listing reservations: %v", err)
+		}
+		if len(ranges) == 0 {
+			t.Fatal("the loaded estate has no reservations, so removing them proves nothing")
+		}
+
+		// An estate from before the phase existed.
+		for _, r := range ranges {
+			if err := f.store.RetireIPRange(f.ctx, seed.Permit, r.ID); err != nil {
+				t.Fatalf("clearing reservations: %v", err)
+			}
+		}
+
+		if _, err := seed.TopUp(f.ctx, f.store); err != nil {
+			t.Fatalf("topping up: %v", err)
+		}
+
+		after, err := f.store.ListIPRanges(f.ctx)
+		if err != nil {
+			t.Fatalf("re-listing reservations: %v", err)
+		}
+		if len(after) == 0 {
+			t.Error("a top-up over an estate with no reservations added none. A phase " +
+				"in Load but not in TopUp never reaches an estate that is topped up " +
+				"rather than reset -- which is exactly how WP-F1's SSIDs were missing " +
+				"from the public demo until somebody looked at it")
 		}
 	})
 }

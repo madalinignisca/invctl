@@ -621,6 +621,8 @@ func (b *builder) networking() {
 		}
 	}
 
+	b.reservations()
+
 	// Interfaces and addresses, enough to make search resolve an IP or a MAC
 	// to a box and to give the cabling view something to draw.
 	type iface struct {
@@ -886,5 +888,69 @@ func (b *builder) identities() {
 			return
 		}
 		b.identityIDs[i.name] = identity.ID
+	}
+}
+
+// reservations declares spans the allocator must never hand out.
+//
+// SEEDED BECAUSE NOTHING DID. `ip_range` was the one shipped feature with no
+// demo data at all -- the reservations panel on /prefixes read "Nothing
+// reserved" on a fresh estate, so the half of that page which explains why an
+// address is not offered could not be seen, and the correction path for a
+// reservation had nothing to correct. Found by resetting the public demo and
+// comparing the fresh estate against the one it replaced.
+//
+// BOTH ARE INSIDE A SEEDED PREFIX, deliberately: a reservation floating in
+// space is a row, while one carved out of 10.20.30.0/24 is the actual lesson --
+// NextFreeAddress skips it, so an operator can see why .10 is never offered
+// even though nothing holds it.
+//
+// The two kinds people actually reserve: a DHCP pool, and a block a load
+// balancer owns. Both are held by something OUTSIDE this inventory, which is
+// exactly why the estate has to be told rather than left to infer.
+//
+// IDEMPOTENT, which is what lets it join TopUp's phase list. A reservation with
+// the same bounds is skipped rather than re-declared -- CreateIPRange refuses a
+// duplicate, so without the check a second run would fail rather than no-op,
+// and the bar for that list is idempotence, not novelty.
+func (b *builder) reservations() {
+	existing, err := b.store.ListIPRanges(b.ctx)
+	if err != nil {
+		b.fail(fmt.Errorf("reading existing reservations: %w", err))
+		return
+	}
+	held := make(map[string]bool, len(existing))
+	for _, r := range existing {
+		held[r.StartText+"-"+r.EndText] = true
+	}
+
+	for _, r := range []struct{ start, end, role, note string }{
+		{
+			"10.20.30.10", "10.20.30.99", "dhcp",
+			"DHCP pool on the production VLAN — the server hands these out, " +
+				"so nothing here may allocate them.",
+		},
+		{
+			"10.20.40.200", "10.20.40.249", "load-balancer",
+			"VIP range owned by the load balancer on the development VLAN.",
+		},
+	} {
+		if !b.ok() {
+			return
+		}
+		if held[r.start+"-"+r.end] {
+			continue
+		}
+		rng, err := domain.NewIPRange(store.NewID(), r.start, r.end)
+		if err != nil {
+			b.fail(fmt.Errorf("building reservation %s-%s: %w", r.start, r.end, err))
+			return
+		}
+		rng.Role = str(r.role)
+		rng.Description = str(r.note)
+		if err := b.store.CreateIPRange(b.ctx, Permit, rng); err != nil {
+			b.fail(fmt.Errorf("seeding reservation %s-%s: %w", r.start, r.end, err))
+			return
+		}
 	}
 }
