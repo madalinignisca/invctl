@@ -134,6 +134,46 @@ describe(describeTitle, () => {
       'input was not submitted with its form.').toContainText(`${corrected} A`);
   });
 
+  // The provider row editor. Same association claim as the feed above, and it
+  // needs its own case rather than inheriting that one: form= is per-form, so
+  // `form="prov-<id>"` being wrong is invisible to the feed test and to every
+  // Go test, which post payloads directly.
+  //
+  // A supplier is worth the extra case on its own merits: it was the only
+  // entity in this system with a live create route and no repair at all, so
+  // this is the first browser that has ever submitted a correction for one.
+  test('a supplier correction typed outside the form element is actually submitted', async ({
+    page,
+  }) => {
+    await page.goto('/circuits', { waitUntil: 'networkidle' });
+
+    const providers = page.locator('table').filter({ has: page.locator('th:text-is("Account")') });
+    await expect(providers, 'no providers table on /circuits').toHaveCount(1);
+
+    const row = providers.locator('tbody tr').filter({ has: page.locator('a:text-is("Edit")') }).first();
+    await expect(row, 'no editable provider row -- the seed has none, or Edit did not render').toBeVisible();
+    await row.locator('a:text-is("Edit")').click();
+
+    const editing = providers.locator('tr.row-editing').first();
+    await expect(editing, 'clicking Edit did not open a provider row editor').toBeVisible();
+
+    const account = editing.locator('input[name="account_ref"]');
+    const formID = await account.getAttribute('form');
+    expect(formID, 'the account_ref input carries no form= attribute, so a browser ' +
+      'will not submit it and the reference would be blanked on save').toBeTruthy();
+    await expect(page.locator(`form#${formID}`),
+      `the account_ref input points at form#${formID}, which is not on this page`).toHaveCount(1);
+
+    const corrected = `ACC-E2E-${Date.now()}`;
+    await account.fill(corrected);
+    await editing.locator('button:text-is("Save")').click();
+    await page.waitForLoadState('networkidle');
+
+    await expect(page.locator('table').filter({ has: page.locator('th:text-is("Account")') }),
+      `the corrected account reference ${corrected} is not on /circuits after saving. ` +
+      'The route and handler are covered by Go tests, so this is the markup.').toContainText(corrected);
+  });
+
   // The dependency row editor, and the case a browser decides: a checkbox
   // group with every box unticked submits NO key at all.
   //
