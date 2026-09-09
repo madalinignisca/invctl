@@ -114,6 +114,12 @@ func TopUp(ctx context.Context, s *store.SQLStore) (*Refs, error) {
 	// the other route. A fixture a running demo cannot reach is a fixture that
 	// only ever appears on a machine somebody reset.
 	b.wirelessLANs()
+	// The reservations. It joins this list for the same reason wireless did --
+	// because it is idempotent, skipping a span already declared, not because
+	// it is new. An estate topped up rather than reset would otherwise never
+	// gain them, which is exactly how WP-F1's SSIDs were missing from the
+	// public demo until somebody looked.
+	b.reservations()
 
 	if b.err != nil {
 		return nil, b.err
