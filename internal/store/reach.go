@@ -65,6 +65,62 @@ func (s *SQLStore) CreateNetGroup(ctx context.Context, p domain.Permit, g *domai
 	})
 }
 
+// UpdateNetGroup corrects a forwarder group.
+//
+// availability, min_healthy AND failover_mode ARE THE POINT. HANDOVER §3.3 says
+// these are the semantics that make impact analysis mean anything: they decide
+// whether losing a member degrades a group or kills it. A group declared
+// active-active with min_healthy 2 when it should be 1 reports an outage that
+// will not happen; the other way round it promises survival it cannot deliver.
+// Until this method existed neither could be fixed -- the only recourse was to
+// retire the group, which cascades away every member, uplink, attachment and
+// anchor hanging off it, and then redraw all of them.
+//
+// That is the same class as dependency.nature: a wrong ANSWER at three in the
+// morning, not a wrong label.
+//
+// CARRIED FROM THE STORED ROW, never taken from the caller: lifecycle, source,
+// confidence and the attestation. RetireNetGroup is the only thing allowed to
+// withdraw one, and it cascades -- accepting a lifecycle here would route
+// around that entirely, leaving members stranded with no route back to a live
+// group. `source` is provenance: docs/AUDIT.md rule 7 calls relabelling an
+// established derived row as `declared` the cheaper of the two attacks, and
+// net_group can be derived (DeriveNetworkProposal).
+func (s *SQLStore) UpdateNetGroup(ctx context.Context, p domain.Permit, g *domain.NetGroup) error {
+	if err := g.Validate(); err != nil {
+		return err
+	}
+	before, err := s.GetNetGroup(ctx, g.ID)
+	if err != nil {
+		return err
+	}
+	g.Lifecycle = before.Lifecycle
+	g.Source = before.Source
+	g.Confidence = before.Confidence
+	g.FirstSeen, g.LastSeen = before.FirstSeen, before.LastSeen
+	g.VerifiedBy, g.VerifiedAt = before.VerifiedBy, before.VerifiedAt
+	g.CreatedAt = before.CreatedAt
+	at := domain.FormatTime(s.now())
+	g.UpdatedAt = at
+
+	return s.write(ctx, p, func(t *tx) error {
+		res, err := t.exec(ctx, `
+			UPDATE net_group SET code = ?, name = ?, kind = ?, role = ?, availability = ?,
+			                     min_healthy = ?, failover_mode = ?, environment_id = ?,
+			                     updated_at = ?, row_version = row_version + 1
+			WHERE id = ? AND row_version = ?`,
+			g.Code, g.Name, g.Kind, g.Role, g.Availability, g.MinHealthy,
+			g.FailoverMode, g.EnvironmentID, at, g.ID, g.RowVersion)
+		if err != nil {
+			return translateWriteErr(err, "updating net group")
+		}
+		if err := requireVersion(res, "net_group", g.ID, &g.RowVersion); err != nil {
+			return err
+		}
+		return t.logUpdate(ctx, "net_group", g.ID, before, g)
+	})
+}
+
 // GetNetGroup loads one forwarder group.
 func (s *SQLStore) GetNetGroup(ctx context.Context, id string) (*domain.NetGroup, error) {
 	var g domain.NetGroup
@@ -665,6 +721,79 @@ func (s *SQLStore) GetNetAnchor(ctx context.Context, id string) (*domain.NetAnch
 		return nil, fmt.Errorf("getting net anchor %s: %w", id, err)
 	}
 	return &na, nil
+}
+
+// UpdateNetAnchor corrects an anchor.
+//
+// THE HIGHEST-LEVERAGE ROW IN THIS MODEL, by internal/domain's own account: an
+// anchor decides external reachability for everything behind it, so one placed
+// on the wrong group silently changes every verdict in the estate. `group_id`
+// is therefore the field this method exists for -- it is exactly the thing
+// somebody gets wrong, and until now the only fix was to withdraw the anchor
+// and place another, which is fine for the row and useless for the audit trail:
+// it records a withdrawal and a new declaration where what happened was a
+// correction.
+//
+// `scope` and `plane` matter for the same reason at one remove: an anchor
+// scoped or planed wrongly answers a different question than the one asked.
+//
+// Lifecycle, provenance and the attestation are carried from the stored row,
+// for the reasons UpdateNetGroup gives just above.
+func (s *SQLStore) UpdateNetAnchor(ctx context.Context, p domain.Permit, na *domain.NetAnchor) error {
+	if err := na.Validate(); err != nil {
+		return err
+	}
+	before, err := s.GetNetAnchor(ctx, na.ID)
+	if err != nil {
+		return err
+	}
+	na.Lifecycle = before.Lifecycle
+	na.Source = before.Source
+	na.Confidence = before.Confidence
+	na.FirstSeen, na.LastSeen = before.FirstSeen, before.LastSeen
+	na.VerifiedBy, na.VerifiedAt = before.VerifiedBy, before.VerifiedAt
+	na.CreatedAt = before.CreatedAt
+	at := domain.FormatTime(s.now())
+	na.UpdatedAt = at
+
+	return s.write(ctx, p, func(t *tx) error {
+		// The group must be live: an anchor pointing at a withdrawn group is
+		// invisible to the M3 loader, so it would silently stop anchoring
+		// anything while still reading as declared.
+		if err := requireLiveNetGroup(ctx, t, na.GroupID); err != nil {
+			return err
+		}
+		res, err := t.exec(ctx, `
+			UPDATE net_anchor SET code = ?, name = ?, scope = ?, group_id = ?,
+			                      environment_id = ?, plane = ?, updated_at = ?,
+			                      row_version = row_version + 1
+			WHERE id = ? AND row_version = ?`,
+			na.Code, na.Name, na.Scope, na.GroupID, na.EnvironmentID, na.Plane,
+			at, na.ID, na.RowVersion)
+		if err != nil {
+			return translateWriteErr(err, "updating net anchor")
+		}
+		if err := requireVersion(res, "net_anchor", na.ID, &na.RowVersion); err != nil {
+			return err
+		}
+		return t.logUpdate(ctx, "net_anchor", na.ID, before, na)
+	})
+}
+
+// requireLiveNetGroup refuses to point something at a withdrawn group.
+func requireLiveNetGroup(ctx context.Context, t *tx, id string) error {
+	var lifecycle string
+	if err := t.get(ctx, &lifecycle, `SELECT lifecycle FROM net_group WHERE id = ?`, id); err != nil {
+		ve := &domain.ValidationError{}
+		ve.Add("group_id", "choose a forwarder group")
+		return ve
+	}
+	if lifecycle == domain.LifecycleRetired {
+		ve := &domain.ValidationError{}
+		ve.Add("group_id", "that forwarder group has been withdrawn")
+		return ve
+	}
+	return nil
 }
 
 // RetireNetAnchor withdraws an anchor.
