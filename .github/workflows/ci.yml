@@ -143,8 +143,19 @@ jobs:
       # minutes is roughly three times the current cost, which leaves room to
       # grow and still fails fast on a genuine hang.
       #
-      # If this number needs raising again, that is WP-I3 asking to be done
-      # rather than a number to increase.
+      # THE NUMBER CAME DUE AND WAS NOT RAISED. At 63 migrations the store
+      # package reached 1380s here -- 77% of this cap -- and a PR that added
+      # 102s of tests elsewhere tipped it over. The line that used to sit here
+      # said "if this number needs raising again, that is WP-I3 asking to be
+      # done rather than a number to increase", and it was right: the Postgres
+      # half of the store suite was migrating per test, which WP-I3's first
+      # pass had already fixed for SQLite and never applied to Postgres. It now
+      # clones a template database (internal/store/engines_test.go), and store
+      # went from 1380s to well under a third of that. Thirty minutes is again
+      # several times the cost.
+      #
+      # The instruction stands for whoever reads this next: raising it is the
+      # answer only once there is nothing left to stop doing.
       - name: test (both engines)
         run: go test ./... -count=1 -timeout 30m
 
