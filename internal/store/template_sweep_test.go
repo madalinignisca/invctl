@@ -65,8 +65,24 @@ func TestTheTemplateSweepSparesALiveSiblingsTemplate(t *testing.T) {
 	if _, err := admin.Writer.Exec(`CREATE DATABASE ` + live); err != nil {
 		t.Fatalf("creating the stand-in template: %v", err)
 	}
+	// A FRESH CONNECTION, not `admin`.
+	//
+	// `defer admin.Close()` above runs when this function returns, and
+	// t.Cleanup runs AFTER that -- so a cleanup closing over `admin` executes
+	// against a closed pool, and the `_, _ =` swallows the error it gets. That
+	// is exactly what happened: the first version of this test left its
+	// stand-in database behind on every run, and only the next run's sweep
+	// collected it. Self-healing is not the same as not leaking.
 	t.Cleanup(func() {
-		_, _ = admin.Writer.Exec(`DROP DATABASE IF EXISTS ` + live + ` WITH (FORCE)`)
+		cleanup, err := Open(DriverPostgres, dsn)
+		if err != nil {
+			t.Errorf("reopening postgres to drop %s: %v", live, err)
+			return
+		}
+		defer cleanup.Close()
+		if _, err := cleanup.Writer.Exec(`DROP DATABASE IF EXISTS ` + live + ` WITH (FORCE)`); err != nil {
+			t.Errorf("dropping the stand-in %s: %v", live, err)
+		}
 	})
 
 	// A name the sweep must NOT treat as its own, so `live` is judged purely
