@@ -547,10 +547,12 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	write("POST /network/attachments", app.NetworkAttachmentCreate)
 	write("POST /network/anchors", app.NetworkAnchorCreate)
 	write("POST /network/derive", app.NetworkDerive)
+	write("POST /network/groups/{id}", app.NetworkGroupUpdate)
 	write("POST /network/groups/{id}/retire", app.NetworkGroupRetire)
 	write("POST /network/groups/{id}/members/{assetID}/retire", app.NetworkGroupMemberRetire)
 	write("POST /network/groups/{id}/uplinks/{uplinkID}/retire", app.NetworkUplinkRetire)
 	write("POST /network/groups/{id}/attachments/{attachmentID}/retire", app.NetworkAttachmentRetire)
+	write("POST /network/anchors/{id}", app.NetworkAnchorUpdate)
 	write("POST /network/anchors/{id}/retire", app.NetworkAnchorRetire)
 
 	// Saved views (WP-G4b). `self`, not `write`: a view's subject is a

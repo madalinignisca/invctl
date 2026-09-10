@@ -10,7 +10,9 @@ package handlers
 
 import (
 	"net/http"
+	"strconv"
 
+	"github.com/madalinignisca/invctl/internal/domain"
 	"github.com/madalinignisca/invctl/internal/store"
 	"github.com/madalinignisca/invctl/internal/web/render"
 )
@@ -40,11 +42,21 @@ type netGroupDetailPage struct {
 	Members     []store.NetGroupMemberRow
 	Uplinks     []store.NetUplinkRow
 	Attachments []store.NetAttachmentRow
+	// The correction form's vocabularies, so the page can offer the same
+	// choices the create form does rather than a free-text box that could
+	// invent a kind the CHECK constraint refuses.
+	Kinds          []string
+	Roles          []string
+	Availabilities []string
+	FailoverModes  []string
 }
 
 // netGroupView is the group plus what the page says about withdrawing it.
 type netGroupView struct {
 	ID, Code, Name, Kind, Role, Availability string
+	MinHealthy                               string
+	FailoverMode                             string
+	RowVersion                               int
 	// Cascades is what RetireNetGroup will take with it, counted so the
 	// confirmation can say so rather than leaving an operator to find out.
 	//
@@ -90,11 +102,18 @@ func (a *App) NetworkGroupDetail(w http.ResponseWriter, r *http.Request) {
 		Group: &netGroupView{
 			ID: group.ID, Code: group.Code, Name: group.Name,
 			Kind: group.Kind, Role: group.Role, Availability: group.Availability,
-			Cascades: len(members) + len(uplinks) + len(attachments),
+			MinHealthy:   intOrBlank(group.MinHealthy),
+			FailoverMode: derefOr(group.FailoverMode, ""),
+			RowVersion:   group.RowVersion,
+			Cascades:     len(members) + len(uplinks) + len(attachments),
 		},
-		Members:     members,
-		Uplinks:     uplinks,
-		Attachments: attachments,
+		Members:        members,
+		Uplinks:        uplinks,
+		Attachments:    attachments,
+		Kinds:          domain.NetGroupKinds,
+		Roles:          domain.NetGroupRoles,
+		Availabilities: domain.NetGroupAvailabilities,
+		FailoverModes:  domain.FailoverModes,
 	})
 }
 
@@ -160,4 +179,129 @@ func (a *App) NetworkAnchorRetire(w http.ResponseWriter, r *http.Request) {
 	}
 	a.setFlash(r, "success", "Anchor withdrawn.")
 	render.Redirect(w, r, "/network")
+}
+
+// NetworkGroupUpdate corrects a forwarder group.
+//
+// availability, min_healthy AND failover_mode ARE WHY THIS EXISTS. HANDOVER
+// §3.3 calls them the semantics that make impact analysis mean anything: they
+// decide whether losing a member degrades a group or kills it. Declared wrong,
+// every verdict computed through that group is wrong -- and the only fix was to
+// retire the group, which cascades away every member, uplink, attachment and
+// anchor, and then redraw all of them to correct one number.
+//
+// Copy-then-overwrite, PrefixUpdate's shape: UpdateNetGroup writes every column
+// it is given, so building a fresh group from the form would blank whatever the
+// form does not carry.
+func (a *App) NetworkGroupUpdate(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Could not read that form.", http.StatusBadRequest)
+		return
+	}
+	id := r.PathValue("id")
+	existing, err := a.Store.GetNetGroup(r.Context(), id)
+	if err != nil {
+		a.handleStoreError(w, r, err)
+		return
+	}
+
+	nums := optionalNumbers(r)
+	updated := *existing
+	updated.Code = formValue(r, "code")
+	updated.Name = formValue(r, "name")
+	updated.Kind = formValue(r, "kind")
+	updated.Role = formValue(r, "role")
+	updated.Availability = formValue(r, "availability")
+	updated.MinHealthy = nums.opt("min_healthy")
+	updated.FailoverMode = optionalString(r, "failover_mode")
+	updated.EnvironmentID = optionalString(r, "environment_id")
+	updated.RowVersion = submittedVersion(r, updated.RowVersion)
+
+	if msgs := nums.messages(); msgs != nil {
+		err = domain.NewValidationFrom(msgs)
+	} else {
+		err = a.Store.UpdateNetGroup(r.Context(), a.permit(r), &updated)
+	}
+	if err != nil {
+		messages, ok := refusalMessages(err, map[string]string{
+			"code": "a forwarder group with that code already exists",
+		})
+		if !ok {
+			a.handleStoreError(w, r, err)
+			return
+		}
+		a.setFlash(r, "error", "That group was not accepted: "+joinMessages(messages))
+		render.Redirect(w, r, "/network/groups/"+id)
+		return
+	}
+	a.setFlash(r, "success", "Forwarder group "+updated.Code+" updated.")
+	render.Redirect(w, r, "/network/groups/"+id)
+}
+
+// NetworkAnchorUpdate corrects an anchor.
+//
+// group_id IS THE FIELD THIS EXISTS FOR. internal/domain calls a misplaced
+// anchor "the single highest-leverage wrong row in this model -- one row
+// silently changes every external-reachability verdict in the estate", and it
+// is exactly the thing somebody gets wrong. The only previous fix was to
+// withdraw the anchor and place another, which is fine for the row and useless
+// for the audit trail: it records a withdrawal and a fresh declaration where
+// what actually happened was a correction.
+func (a *App) NetworkAnchorUpdate(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Could not read that form.", http.StatusBadRequest)
+		return
+	}
+	id := r.PathValue("id")
+	existing, err := a.Store.GetNetAnchor(r.Context(), id)
+	if err != nil {
+		a.handleStoreError(w, r, err)
+		return
+	}
+
+	updated := *existing
+	updated.Code = formValue(r, "code")
+	updated.Name = formValue(r, "name")
+	updated.Scope = formValue(r, "scope")
+	updated.Plane = formValue(r, "plane")
+	updated.EnvironmentID = optionalString(r, "environment_id")
+	updated.RowVersion = submittedVersion(r, updated.RowVersion)
+	// submittedString's rule, spelled out because group_id is required: an
+	// empty picker means "not rendered", never "this anchor points nowhere".
+	// An anchor with no group is not a state the domain has.
+	if v := formValue(r, "group_id"); v != "" {
+		updated.GroupID = v
+	}
+
+	if err := a.Store.UpdateNetAnchor(r.Context(), a.permit(r), &updated); err != nil {
+		messages, ok := refusalMessages(err, map[string]string{
+			"code": "an anchor with that code already exists",
+		})
+		if !ok {
+			a.handleStoreError(w, r, err)
+			return
+		}
+		a.setFlash(r, "error", "That anchor was not accepted: "+joinMessages(messages))
+		render.Redirect(w, r, "/network")
+		return
+	}
+	a.setFlash(r, "success", "Anchor "+updated.Code+" updated.")
+	render.Redirect(w, r, "/network")
+}
+
+// intOrBlank renders an optional int for a number input: blank, never "0".
+// A min_healthy nobody recorded is not a min_healthy of zero, and rendering it
+// as one is the "not recorded shown as a number" trap power_rating warns about.
+func intOrBlank(n *int) string {
+	if n == nil {
+		return ""
+	}
+	return strconv.Itoa(*n)
+}
+
+func derefOr(s *string, fallback string) string {
+	if s == nil {
+		return fallback
+	}
+	return *s
 }

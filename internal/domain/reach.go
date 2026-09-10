@@ -153,6 +153,8 @@ type NetGroup struct {
 	Attrs         string   `db:"attrs"`
 	CreatedAt     string   `db:"created_at"`
 	UpdatedAt     string   `db:"updated_at"`
+	// RowVersion is the optimistic-concurrency token (migration 00063).
+	RowVersion int `db:"row_version"`
 }
 
 // NewNetGroup validates and constructs a forwarder group.
@@ -426,6 +428,8 @@ type NetAnchor struct {
 	VerifiedAt    *string  `db:"verified_at"`
 	CreatedAt     string   `db:"created_at"`
 	UpdatedAt     string   `db:"updated_at"`
+	// RowVersion is the optimistic-concurrency token (migration 00063).
+	RowVersion int `db:"row_version"`
 }
 
 // NewNetAnchor validates and constructs an anchor.

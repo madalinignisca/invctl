@@ -102,6 +102,45 @@
       <thead><tr><th>Code</th><th>Name</th><th>Scope</th><th>Group</th><th>Plane</th>{{if .IsAdmin}}<th></th>{{end}}</tr></thead>
       <tbody>
         {{range .Anchors}}
+        {{/* CORRECTING one. group_id is the field this exists for: a misplaced
+             anchor is "the single highest-leverage wrong row in this model --
+             one row silently changes every external-reachability verdict in
+             the estate" (internal/domain). The only previous fix was to
+             withdraw it and place another, which reads in the audit trail as a
+             withdrawal and a fresh declaration when what happened was a
+             correction. */}}
+        {{if and $.IsAdmin (eq .ID $.EditRow)}}
+        {{$row := .}}
+        <tr class="row-editing">
+          <td><input form="anc-{{.ID}}" class="mono" type="text" name="code"
+                     value="{{.Code}}" aria-label="Code" required style="width:8em"></td>
+          <td><input form="anc-{{.ID}}" type="text" name="name"
+                     value="{{.Name}}" aria-label="Name" required style="width:10em"></td>
+          <td>
+            <select form="anc-{{.ID}}" name="scope" aria-label="Scope" required>
+              {{range $.AnchorForm.Scopes}}<option value="{{.}}" {{if eq . $row.Scope}}selected{{end}}>{{.}}</option>{{end}}
+            </select>
+          </td>
+          <td>
+            <select form="anc-{{.ID}}" name="group_id" aria-label="Group" required>
+              {{range $.AnchorForm.Groups}}<option value="{{.ID}}" {{if eq .ID $row.GroupID}}selected{{end}}>{{.Code}}</option>{{end}}
+            </select>
+          </td>
+          <td>
+            <select form="anc-{{.ID}}" name="plane" aria-label="Plane" required>
+              {{range $.UplinkForm.Planes}}<option value="{{.}}" {{if eq . $row.Plane}}selected{{end}}>{{.}}</option>{{end}}
+            </select>
+          </td>
+          <td style="white-space:nowrap">
+            <form id="anc-{{.ID}}" method="post" action="/network/anchors/{{.ID}}" style="display:inline">
+              <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+              <input type="hidden" name="row_version" value="{{.RowVersion}}">
+              <button class="btn btn-sm btn-primary" type="submit">Save</button>
+            </form>
+            <a class="btn btn-sm" href="/network">Cancel</a>
+          </td>
+        </tr>
+        {{else}}
         <tr>
           <td class="mono">{{.Code}}</td>
           <td>{{.Name}}</td>
@@ -115,6 +154,7 @@
                  silently changes every external-reachability verdict in the
                  estate. Until this control existed it could be placed and
                  never removed. */}}
+            <a class="btn btn-sm" href="/network?edit={{.ID}}">Edit</a>
             <form method="post" action="/network/anchors/{{.ID}}/retire"
                   hx-post="/network/anchors/{{.ID}}/retire"
                   hx-confirm="Withdraw anchor {{.Code}}? Every reachability verdict computed through it changes. The record is kept."
@@ -125,6 +165,7 @@
           </td>
           {{end}}
         </tr>
+        {{end}}
         {{end}}
       </tbody>
     </table>
