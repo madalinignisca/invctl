@@ -70,19 +70,15 @@ import (
 // question implies the other, and the net_* family was failing both at once --
 // no way to correct a forwarder group, and a withdrawal method nothing called.
 var unreachableRepairPaths = map[string]string{
-	// THE net_* FAMILY, found the moment this scan learned about Retire*. Five
-	// create routes, no retire routes, and these five methods complete and
-	// unreachable -- so the reachability layer can be declared and never taken
-	// back. The correction half of the same gap is in writeSurfaceGaps
-	// (write_surface_test.go); this is the withdrawal half.
-	"RetireNetAnchor": "an anchor placed on the wrong asset cannot be removed, and " +
-		"a misplaced anchor silently changes every external-reachability verdict " +
-		"in the estate.",
-	"RetireNetGroup": "a forwarder group declared in error cannot be withdrawn, so " +
-		"it keeps taking part in every impact answer computed through it.",
-	"RetireNetGroupMember": "an asset put in the wrong forwarder group stays in it.",
-	"RetireNetUplink":      "an uplink edge drawn in error cannot be removed.",
-	"RetireNetAttachment":  "an attachment made in error cannot be removed.",
+	// EMPTY AGAIN, and the second time round it emptied for the right reason.
+	//
+	// The five net_* withdrawal paths that filled it -- RetireNetAnchor,
+	// RetireNetGroup, RetireNetGroupMember, RetireNetUplink and
+	// RetireNetAttachment -- were complete store methods with no routes at all:
+	// the reachability layer had five create routes and none to take anything
+	// back. They were wired 2026-09-10, which is the same shape WP-1.2 took for
+	// the six correction paths before them. The methods were never wrong; they
+	// were unreachable, and this test is what refused to let that stay quiet.
 }
 
 // TestEveryUpdateMethodIsReachable fails when a store method written to correct

@@ -933,8 +933,16 @@ func TestAProjectOwnerIsRefusedOnEveryNonProjectLinkableWriteRoute(t *testing.T)
 				t.Errorf("RequireAdministrator refusals = %d, want 14 (six import routes "+
 					"and eight /users routes)", administratorGate)
 			}
-			if permitGate != 10 {
-				t.Errorf("permit-layer refusals (generic body) = %d, want 10 -- see this test's own "+
+			// 10 -> 11: POST /network/groups/{id}/retire. net_group is
+			// ScopeTopology, so a project owner passes RequireWrite and is
+			// refused by permit.Covers -- the same layer, and the same generic
+			// body, as the ten before it. The other four reachability retires
+			// added at the same time do NOT land here: each takes a second path
+			// parameter (a member, uplink or attachment id) and 404s against
+			// this suite's random fallback before any permit check runs, which
+			// is where most driven routes in this suite end up.
+			if permitGate != 11 {
+				t.Errorf("permit-layer refusals (generic body) = %d, want 11 -- see this test's own "+
 					"comment for the routes this pins", permitGate)
 			}
 			// 4: the four /projects/{id}/costs* routes (Task 4a moved all
@@ -1164,8 +1172,11 @@ func TestNoWriteRouteIsReachableWithNoSessionAtAll(t *testing.T) {
 	// POST /dependencies/{id}. 194 -> 196: POST /providers/{id} and
 	// /providers/{id}/retire -- the last entity with a create route and no
 	// repair at all. 196 -> 197: POST /interfaces/{id}/retire, so a port that
-	// was pulled out of a chassis can finally be withdrawn.
-	const pinnedNoSessionRouteCount = 197
+	// was pulled out of a chassis can finally be withdrawn. 197 -> 202: the
+	// reachability layer's five retires, which had complete store methods and
+	// no routes at all -- a group, a membership, an uplink, an attachment and
+	// an anchor could each be declared and never taken back.
+	const pinnedNoSessionRouteCount = 202
 
 	for _, eng := range boundaryEngines(t) {
 		t.Run(eng.name, func(t *testing.T) {

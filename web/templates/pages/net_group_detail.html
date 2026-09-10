@@ -1,0 +1,181 @@
+{{/*
+  invctl — infrastructure inventory
+  Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+
+  Licensed under the GNU Affero General Public License, version 3 only —
+  no later version applies. See LICENSE for the full text.
+
+  SPDX-License-Identifier: AGPL-3.0-only
+*/}}
+{{define "content"}}
+<div class="crumbs">
+  <a href="/network">Topology</a><span class="sep">/</span><span>{{.Group.Code}}</span>
+</div>
+
+<div class="page-head">
+  <div class="eyebrow">forwarder group</div>
+  <h1 class="mono">{{.Group.Code}}</h1>
+  <p class="lede">
+    {{.Group.Name}} — {{.Group.Kind}}, {{.Group.Role}}, {{.Group.Availability}}.
+    What this group holds is what an impact verdict computed through it is
+    reasoning over.
+  </p>
+</div>
+
+{{/* THE PAGE EXISTS SO THREE RETIRES HAVE SOMEWHERE TO LIVE. /network renders
+     a group as counts -- "4 members, 2 uplinks" -- and you cannot remove one
+     member from a number. It is also the view somebody wants when asking why
+     an impact answer came out the way it did. */}}
+
+<div class="panel">
+  <div class="panel-head">
+    <h2>{{pluralise (len .Members) "member" "members"}}</h2>
+    <span class="panel-note">The chassis that forward for this group</span>
+  </div>
+  {{if .Members}}
+  <div class="scroll-x">
+    <table>
+      <thead><tr><th>Asset</th><th>Role</th>{{if .IsAdmin}}<th></th>{{end}}</tr></thead>
+      <tbody>
+        {{range .Members}}
+        <tr>
+          <td><a href="/assets/{{.AssetID}}">{{.AssetName}}</a></td>
+          <td>{{.Role}}</td>
+          {{if $.IsAdmin}}
+          <td style="white-space:nowrap">
+            <form method="post" action="/network/groups/{{$.Group.ID}}/members/{{.AssetID}}/retire"
+                  hx-post="/network/groups/{{$.Group.ID}}/members/{{.AssetID}}/retire"
+                  hx-confirm="Remove {{.AssetName}} from {{$.Group.Code}}? The record is kept."
+                  style="display:inline">
+              <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+              <button class="btn btn-sm btn-danger" type="submit">Remove</button>
+            </form>
+          </td>
+          {{end}}
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{else}}
+  <div class="empty"><strong>No members.</strong>A group that forwards for nothing takes nothing down when it fails.</div>
+  {{end}}
+</div>
+
+<div class="panel">
+  <div class="panel-head">
+    <h2>{{pluralise (len .Uplinks) "uplink" "uplinks"}}</h2>
+    <span class="panel-note">Declared edges to other groups</span>
+  </div>
+  {{if .Uplinks}}
+  <div class="scroll-x">
+    <table>
+      <thead><tr><th>From</th><th>To</th><th>Plane</th><th>Source</th>{{if .IsAdmin}}<th></th>{{end}}</tr></thead>
+      <tbody>
+        {{range .Uplinks}}
+        <tr>
+          <td class="mono">{{.GroupCode}}</td>
+          <td class="mono">{{.UpstreamCode}}</td>
+          <td>{{.Plane}}</td>
+          <td>{{.Source}}</td>
+          {{if $.IsAdmin}}
+          <td style="white-space:nowrap">
+            <form method="post" action="/network/groups/{{$.Group.ID}}/uplinks/{{.ID}}/retire"
+                  hx-post="/network/groups/{{$.Group.ID}}/uplinks/{{.ID}}/retire"
+                  hx-confirm="Withdraw this uplink? The record is kept."
+                  style="display:inline">
+              <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+              <button class="btn btn-sm btn-danger" type="submit">Withdraw</button>
+            </form>
+          </td>
+          {{end}}
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{else}}
+  <div class="empty">
+    <strong>No declared uplinks.</strong>An edge DERIVED from a circuit or a
+    cable has no row here — it is built from the terminations, so it is
+    withdrawn by cutting the circuit or unpatching the cable.
+  </div>
+  {{end}}
+</div>
+
+<div class="panel">
+  <div class="panel-head">
+    <h2>{{pluralise (len .Attachments) "attachment" "attachments"}}</h2>
+    <span class="panel-note">Hosts that reach the estate through this group</span>
+  </div>
+  {{if .Attachments}}
+  <div class="scroll-x">
+    <table>
+      <thead><tr><th>Asset</th><th>Plane</th><th>Source</th>{{if .IsAdmin}}<th></th>{{end}}</tr></thead>
+      <tbody>
+        {{range .Attachments}}
+        <tr>
+          <td><a href="/assets/{{.AssetID}}">{{.AssetName}}</a></td>
+          <td>{{.Plane}}</td>
+          <td>{{.Source}}</td>
+          {{if $.IsAdmin}}
+          <td style="white-space:nowrap">
+            <form method="post" action="/network/groups/{{$.Group.ID}}/attachments/{{.ID}}/retire"
+                  hx-post="/network/groups/{{$.Group.ID}}/attachments/{{.ID}}/retire"
+                  hx-confirm="Detach {{.AssetName}}? The record is kept."
+                  style="display:inline">
+              <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+              <button class="btn btn-sm btn-danger" type="submit">Detach</button>
+            </form>
+          </td>
+          {{end}}
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{else}}
+  <div class="empty"><strong>Nothing attached.</strong>No host reaches the estate through this group.</div>
+  {{end}}
+</div>
+
+{{if .IsAdmin}}
+<div class="panel panel-warn">
+  <div class="panel-head"><h2>Withdraw this group</h2></div>
+  <div class="panel-body">
+    {{/* THE CASCADE IS STRUCTURAL, NOT A CONVENIENCE, and the count says so
+         before the click rather than after. The store's own comment: retiring
+         the vertex without cascading "would strand its members forever (the
+         partial unique index gives a retired-group membership no route back to
+         any live group), leave active anchors pointing at a group the M3
+         loader will exclude, and leave uplinks and attachments dangling."
+
+         That is why this differs from withdrawing a port, which REFUSES while
+         anything is attached: a cable on a port is a fact about two ports and
+         survives on its own, while a group membership has no meaning without
+         its group and cannot be recovered. */}}
+    <p>
+      A forwarder group cannot be withdrawn on its own. Its members, uplinks,
+      attachments and anchors have no meaning without it — and a membership
+      whose group is retired has no route back to any live group — so all of
+      them are withdrawn in the same transaction.
+    </p>
+    <p>
+      {{if .Group.Cascades}}
+      <strong>{{.Group.Cascades}} {{pluralise .Group.Cascades "row" "rows"}}</strong>
+      would go with it, plus any anchors pointing at it. Nothing is deleted; the
+      records and their history stay.
+      {{else}}
+      Nothing hangs off this group, so only the group itself is withdrawn.
+      {{end}}
+    </p>
+    <form method="post" action="/network/groups/{{.Group.ID}}/retire"
+          hx-post="/network/groups/{{.Group.ID}}/retire"
+          hx-confirm="Withdraw {{.Group.Code}} and everything hanging off it? The records are kept.">
+      <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+      <button class="btn btn-danger" type="submit">Withdraw {{.Group.Code}}</button>
+    </form>
+  </div>
+</div>
+{{end}}
+{{end}}
