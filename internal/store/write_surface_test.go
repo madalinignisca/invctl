@@ -94,6 +94,11 @@ var writeSurfaceByDesign = map[string]string{
 		"place, and naming a different place is a different termination.",
 	"NetAttachment": "an attachment is an edge with no attributes of its own; " +
 		"correcting it would mean pointing it somewhere else, which is a new edge.",
+	"NetUplink": "no correction, by design: an uplink is a group-to-group edge " +
+		"with no attributes of its own beyond its endpoints and a plane, so " +
+		"pointing it somewhere else is a DIFFERENT edge rather than a repair of " +
+		"this one -- exactly the reasoning CircuitTermination and NetAttachment " +
+		"already carry here. Withdraw it and draw the right one.",
 	"PassThrough": "a panel strand is re-punched, not amended. The row records a " +
 		"physical fact about a patch panel, and changing it means somebody went " +
 		"and moved the copper.",
@@ -121,13 +126,6 @@ var writeSurfaceGaps = map[string]string{
 	// the entry once POST /providers/{id} and /retire existed.
 	//
 	// --- reachable, and the row carries attributes somebody typed ---
-	"NetAnchor": "no correction. internal/domain's own comment calls a misplaced " +
-		"anchor \"the single highest-leverage wrong row in this model -- one row " +
-		"silently changes every external-reachability verdict in the estate\".",
-	"NetGroup": "no correction. availability, min_healthy and failover_mode are " +
-		"the semantics HANDOVER §3.3 says make impact analysis mean anything, and " +
-		"they cannot be fixed after the fact.",
-	"NetUplink": "no correction for an uplink edge's own attributes.",
 	"Link": "no correction. medium and length_m are DESCRIPTIVE, not identity, so " +
 		"retire-and-re-patch writes a physical event into the cabling audit that " +
 		"never happened -- somebody reading it later sees a cable that was pulled.",
