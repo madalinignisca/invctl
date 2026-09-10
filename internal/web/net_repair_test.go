@@ -196,3 +196,130 @@ func TestOnlyAnAdministratorCanUnpickTheReachabilityLayer(t *testing.T) {
 		t.Errorf("the group is %q after two refused attempts, want active", got)
 	}
 }
+
+// TestAForwarderGroupsImpactSemanticsCanBeCorrected.
+//
+// availability, min_healthy and failover_mode are what HANDOVER §3.3 calls the
+// semantics that make impact analysis mean anything: they decide whether losing
+// a member degrades a group or kills it. Declared wrong, every verdict computed
+// through that group is wrong -- and the only previous fix was to retire the
+// group, which cascades away every member, uplink, attachment and anchor, then
+// redraw all of them to correct one number.
+//
+// The same class as dependency.nature: a wrong ANSWER, not a wrong label.
+func TestAForwarderGroupsImpactSemanticsCanBeCorrected(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+	id := firstNetGroup(t, h)
+
+	form := url.Values{
+		"csrf_token":   {h.csrfToken("/network/groups/" + id)},
+		"code":         {h.lookup(`SELECT code FROM net_group WHERE id = ?`, id)},
+		"name":         {"Corrected core"},
+		"kind":         {h.lookup(`SELECT kind FROM net_group WHERE id = ?`, id)},
+		"role":         {h.lookup(`SELECT role FROM net_group WHERE id = ?`, id)},
+		"availability": {"active_active"},
+		"min_healthy":  {"2"},
+		"row_version":  {h.lookup(`SELECT row_version FROM net_group WHERE id = ?`, id)},
+	}
+	resp := h.post("/network/groups/"+id, form, false)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("correcting a group returned %d, want 303", resp.StatusCode)
+	}
+
+	if got := h.lookup(`SELECT min_healthy FROM net_group WHERE id = ?`, id); got != "2" {
+		t.Errorf("min_healthy = %s after the correction, want 2 -- this is what "+
+			"decides whether losing a member degrades this group or kills it", got)
+	}
+	if got := h.lookup(`SELECT name FROM net_group WHERE id = ?`, id); got != "Corrected core" {
+		t.Errorf("name = %q after the correction", got)
+	}
+	// The members are untouched: correcting is not retire-and-redraw, which is
+	// the entire reason this path is worth having.
+	if got := h.lookup(`SELECT COUNT(*) FROM net_group_member
+	                    WHERE group_id = ? AND lifecycle = 'active'`, id); got == "0" {
+		t.Error("the group's members went away when it was corrected; a correction " +
+			"must not cascade the way a withdrawal does")
+	}
+}
+
+// TestAnAnchorCanBeMovedToTheRightGroup.
+//
+// group_id is the field this exists for. internal/domain calls a misplaced
+// anchor "the single highest-leverage wrong row in this model", and the only
+// previous fix was to withdraw it and place another -- which records a
+// withdrawal and a fresh declaration in the audit trail where what actually
+// happened was a correction.
+func TestAnAnchorCanBeMovedToTheRightGroup(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	id := h.lookup(`SELECT id FROM net_anchor WHERE lifecycle = 'active' ORDER BY id LIMIT 1`)
+	from := h.lookup(`SELECT group_id FROM net_anchor WHERE id = ?`, id)
+	to := h.lookup(`SELECT id FROM net_group WHERE lifecycle = 'active' AND id <> ?
+	                ORDER BY id LIMIT 1`, from)
+	if to == "" {
+		t.Skip("the estate has only one forwarder group, so there is nowhere to move it")
+	}
+
+	// Offered by the page, not just the router.
+	if !strings.Contains(body(t, h.get("/network", false)), "/network?edit="+id) {
+		t.Fatal("the topology page offers no Edit control for an anchor")
+	}
+
+	resp := h.post("/network/anchors/"+id, url.Values{
+		"csrf_token":  {h.csrfToken("/network")},
+		"code":        {h.lookup(`SELECT code FROM net_anchor WHERE id = ?`, id)},
+		"name":        {h.lookup(`SELECT name FROM net_anchor WHERE id = ?`, id)},
+		"scope":       {h.lookup(`SELECT scope FROM net_anchor WHERE id = ?`, id)},
+		"plane":       {h.lookup(`SELECT plane FROM net_anchor WHERE id = ?`, id)},
+		"group_id":    {to},
+		"row_version": {h.lookup(`SELECT row_version FROM net_anchor WHERE id = ?`, id)},
+	}, false)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("moving an anchor returned %d, want 303", resp.StatusCode)
+	}
+	if got := h.lookup(`SELECT group_id FROM net_anchor WHERE id = ?`, id); got != to {
+		t.Errorf("group_id = %q, want %q -- the anchor did not move", got, to)
+	}
+	// Corrected, not replaced: same row, so its history stays in one place.
+	if got := h.lookup(`SELECT lifecycle FROM net_anchor WHERE id = ?`, id); got != "active" {
+		t.Errorf("the anchor is %q after a correction, want active", got)
+	}
+}
+
+// TestAnAnchorCannotBeMovedOntoAWithdrawnGroup. An anchor pointing at a retired
+// group is invisible to the M3 loader, so it would silently stop anchoring
+// anything while still reading as declared.
+func TestAnAnchorCannotBeMovedOntoAWithdrawnGroup(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	id := h.lookup(`SELECT id FROM net_anchor WHERE lifecycle = 'active' ORDER BY id LIMIT 1`)
+	from := h.lookup(`SELECT group_id FROM net_anchor WHERE id = ?`, id)
+	dead := h.lookup(`SELECT id FROM net_group WHERE lifecycle = 'active' AND id <> ?
+	                  ORDER BY id LIMIT 1`, from)
+	if dead == "" {
+		t.Skip("only one group in the estate")
+	}
+	h.exec(`UPDATE net_group SET lifecycle = 'retired' WHERE id = ?`, dead)
+
+	resp := h.post("/network/anchors/"+id, url.Values{
+		"csrf_token":  {h.csrfToken("/network")},
+		"code":        {h.lookup(`SELECT code FROM net_anchor WHERE id = ?`, id)},
+		"name":        {h.lookup(`SELECT name FROM net_anchor WHERE id = ?`, id)},
+		"scope":       {h.lookup(`SELECT scope FROM net_anchor WHERE id = ?`, id)},
+		"plane":       {h.lookup(`SELECT plane FROM net_anchor WHERE id = ?`, id)},
+		"group_id":    {dead},
+		"row_version": {h.lookup(`SELECT row_version FROM net_anchor WHERE id = ?`, id)},
+	}, false)
+	defer resp.Body.Close()
+
+	if got := h.lookup(`SELECT group_id FROM net_anchor WHERE id = ?`, id); got == dead {
+		t.Error("an anchor was moved onto a withdrawn group. The M3 loader excludes " +
+			"that group, so the anchor silently stops anchoring anything while " +
+			"still reading as declared")
+	}
+}

@@ -91,10 +91,12 @@ POST /ip-ranges/{id}/retire | IPRangeRetire | write | true
 POST /links | LinkCreate | write | true
 POST /links/{id}/retire | LinkRetire | write | true
 POST /network/anchors | NetworkAnchorCreate | write | true
+POST /network/anchors/{id} | NetworkAnchorUpdate | write | true
 POST /network/anchors/{id}/retire | NetworkAnchorRetire | write | true
 POST /network/attachments | NetworkAttachmentCreate | write | true
 POST /network/derive | NetworkDerive | write | false
 POST /network/groups | NetworkGroupCreate | write | true
+POST /network/groups/{id} | NetworkGroupUpdate | write | true
 POST /network/groups/{id}/attachments/{attachmentID}/retire | NetworkAttachmentRetire | write | true
 POST /network/groups/{id}/members | NetworkGroupMemberCreate | write | true
 POST /network/groups/{id}/members/{assetID}/retire | NetworkGroupMemberRetire | write | true
