@@ -32,6 +32,12 @@ type powerPage struct {
 	PanelSpec  domain.PowerPanelSpec
 	FeedSpec   domain.PowerFeedSpec
 	SourceSpec domain.PowerSourceSpec
+	// Edit carries a refused correction of a panel, feed or supply row, so
+	// that row reopens with what was typed rather than what is stored. Base's
+	// EditRow (set from Edit.ID below, the same pattern renderAssetDetail
+	// uses) decides WHICH row's editing block renders; Edit itself is what
+	// that block reads its field values and errors from.
+	Edit *editState
 }
 
 type powerReportPage struct {
@@ -41,11 +47,11 @@ type powerReportPage struct {
 
 // Power lists panels and feeds, and the forms to add either.
 func (a *App) Power(w http.ResponseWriter, r *http.Request) {
-	a.renderPower(w, r, http.StatusOK, nil, domain.PowerPanelSpec{}, domain.PowerFeedSpec{})
+	a.renderPower(w, r, http.StatusOK, nil, domain.PowerPanelSpec{}, domain.PowerFeedSpec{}, nil)
 }
 
 func (a *App) renderPower(w http.ResponseWriter, r *http.Request, status int,
-	errs map[string]string, panelSpec domain.PowerPanelSpec, feedSpec domain.PowerFeedSpec) {
+	errs map[string]string, panelSpec domain.PowerPanelSpec, feedSpec domain.PowerFeedSpec, edit *editState) {
 
 	panels, err := a.Store.ListPowerPanels(r.Context(), false)
 	if err != nil {
@@ -70,8 +76,14 @@ func (a *App) renderPower(w http.ResponseWriter, r *http.Request, status int,
 		a.serverError(w, r, err)
 		return
 	}
+	base := a.base(r, "Power", "power")
+	if edit != nil {
+		// The refused row opens, whatever the query string said -- the same
+		// rule renderAssetDetail and renderEnvironmentsWith follow.
+		base.EditRow = edit.ID
+	}
 	a.Render.Respond(w, r, status, "power", "power_panel_list", powerPage{
-		Base:       a.base(r, "Power", "power"),
+		Base:       base,
 		Errors:     orEmpty(errs),
 		Panels:     panels,
 		Sources:    sources,
@@ -82,6 +94,7 @@ func (a *App) renderPower(w http.ResponseWriter, r *http.Request, status int,
 		Lifecycles: domain.PowerLifecycles,
 		PanelSpec:  panelSpec,
 		FeedSpec:   feedSpec,
+		Edit:       edit,
 	})
 }
 
@@ -110,7 +123,7 @@ func (a *App) PowerPanelCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		if errs, ok := validationErrors(err); ok {
-			a.renderPower(w, r, http.StatusUnprocessableEntity, errs, spec, domain.PowerFeedSpec{})
+			a.renderPower(w, r, http.StatusUnprocessableEntity, errs, spec, domain.PowerFeedSpec{}, nil)
 			return
 		}
 		a.handleStoreError(w, r, err)
@@ -136,7 +149,7 @@ func (a *App) panelSpecFrom(w http.ResponseWriter, r *http.Request) (domain.Powe
 		if vOK {
 			field = "amperage"
 		}
-		a.renderPower(w, r, http.StatusUnprocessableEntity, notANumber(field), spec, domain.PowerFeedSpec{})
+		a.renderPower(w, r, http.StatusUnprocessableEntity, notANumber(field), spec, domain.PowerFeedSpec{}, nil)
 		return spec, false
 	}
 	return spec, true
@@ -158,7 +171,7 @@ func (a *App) PowerSourceCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		if errs, ok := validationErrors(err); ok {
-			a.renderPowerWithSource(w, r, errs, spec)
+			a.renderPowerWithSource(w, r, errs, spec, nil)
 			return
 		}
 		a.handleStoreError(w, r, err)
@@ -206,7 +219,7 @@ func (a *App) PowerSourceRetire(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) renderPowerWithSource(w http.ResponseWriter, r *http.Request,
-	errs map[string]string, spec domain.PowerSourceSpec) {
+	errs map[string]string, spec domain.PowerSourceSpec, edit *editState) {
 
 	// Rendered through the same assembly as everything else on this page, so a
 	// refused supply form comes back with the panels and feeds still on screen.
@@ -230,8 +243,12 @@ func (a *App) renderPowerWithSource(w http.ResponseWriter, r *http.Request,
 		a.serverError(w, r, err)
 		return
 	}
+	base := a.base(r, "Power", "power")
+	if edit != nil {
+		base.EditRow = edit.ID
+	}
 	a.Render.Respond(w, r, http.StatusUnprocessableEntity, "power", "power_panel_list", powerPage{
-		Base:       a.base(r, "Power", "power"),
+		Base:       base,
 		Errors:     orEmpty(errs),
 		Panels:     panels,
 		Sources:    sources,
@@ -241,6 +258,7 @@ func (a *App) renderPowerWithSource(w http.ResponseWriter, r *http.Request,
 		Phases:     domain.Phases,
 		Lifecycles: domain.PowerLifecycles,
 		SourceSpec: spec,
+		Edit:       edit,
 	})
 }
 
@@ -260,8 +278,12 @@ func (a *App) PowerPanelUpdate(w http.ResponseWriter, r *http.Request) {
 	volts, vOK := optionalInt(r, "voltage")
 	amps, aOK := optionalInt(r, "amperage")
 	if !vOK || !aOK {
-		a.setFlash(r, "error", "The rating has to be whole numbers, or left empty.")
-		render.Redirect(w, r, "/power")
+		field := "voltage"
+		if vOK {
+			field = "amperage"
+		}
+		a.renderPower(w, r, http.StatusUnprocessableEntity, nil, domain.PowerPanelSpec{}, domain.PowerFeedSpec{},
+			rejected(r, id, notANumber(field), "name", "voltage", "amperage", "phase", "source_id"))
 		return
 	}
 
@@ -279,8 +301,15 @@ func (a *App) PowerPanelUpdate(w http.ResponseWriter, r *http.Request) {
 
 	if err := a.Store.UpdatePowerPanel(r.Context(), a.permit(r), &updated); err != nil {
 		if messages, ok := validationErrors(err); ok {
-			a.setFlash(r, "error", "That panel was not accepted: "+joinMessages(messages))
-			render.Redirect(w, r, "/power")
+			// 422 with the row reopened on what was typed, not a redirect that
+			// throws it away -- the house rule (CLAUDE.md), and renderPower
+			// already exists to do it: a refused save of any row on this page
+			// comes back through the same assembly rather than a second one.
+			// Errors is nil, not messages: that map feeds the "Add a panel"
+			// CREATE form at the top of the page, and this is a correction of
+			// an existing row -- Edit below is what the row itself reads.
+			a.renderPower(w, r, refusalStatus(err), nil, domain.PowerPanelSpec{}, domain.PowerFeedSpec{},
+				rejected(r, id, messages, "name", "voltage", "amperage", "phase", "source_id"))
 			return
 		}
 		a.handleStoreError(w, r, err)
@@ -323,7 +352,7 @@ func (a *App) PowerFeedCreate(w http.ResponseWriter, r *http.Request) {
 			field = "max_utilisation"
 		}
 		a.renderPower(w, r, http.StatusUnprocessableEntity, notANumber(field),
-			domain.PowerPanelSpec{}, spec)
+			domain.PowerPanelSpec{}, spec, nil)
 		return
 	}
 
@@ -333,7 +362,7 @@ func (a *App) PowerFeedCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		if errs, ok := validationErrors(err); ok {
-			a.renderPower(w, r, http.StatusUnprocessableEntity, errs, domain.PowerPanelSpec{}, spec)
+			a.renderPower(w, r, http.StatusUnprocessableEntity, errs, domain.PowerPanelSpec{}, spec, nil)
 			return
 		}
 		a.handleStoreError(w, r, err)
@@ -388,13 +417,22 @@ func (a *App) PowerFeedImpact(w http.ResponseWriter, r *http.Request) {
 	render.Redirect(w, r, impactURL(down, 180))
 }
 
+// powerInputCreateEditID names the sentinel editState.ID an "add an input"
+// refusal carries, distinct from an existing power input's own row id (which
+// rides the ?power= query parameter, PowerEdit -- see renderAssetDetail) and
+// from every other sentinel and row id sharing this page's edit mechanism.
+// Never a real row id: those are UUIDv7, this is not.
+func powerInputCreateEditID(assetID string) string {
+	return "power-input-new:" + assetID
+}
+
 // PowerInputCreate plugs an asset into a feed.
 func (a *App) PowerInputCreate(w http.ResponseWriter, r *http.Request) {
 	assetID := r.PathValue("id")
 	draw, numeric := optionalInt(r, "draw_va")
 	if !numeric {
-		a.setFlash(r, "error", "The draw has to be a whole number of volt-amps, or left empty.")
-		render.Redirect(w, r, "/assets/"+assetID)
+		a.renderAssetDetail(w, r, http.StatusUnprocessableEntity, assetID,
+			rejected(r, powerInputCreateEditID(assetID), notANumber("draw_va"), "name", "feed_id", "draw_va"))
 		return
 	}
 	i, err := domain.NewPowerInput(store.NewID(), domain.PowerInputSpec{
@@ -409,12 +447,13 @@ func (a *App) PowerInputCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		if messages, ok := validationErrors(err); ok {
-			// Flashed rather than re-rendered into the form partial, the same
-			// trade the cost rows make: the asset page is assembled from a dozen
-			// queries and the input row is three short fields. The message names
-			// the field either way.
-			a.setFlash(r, "error", "That power input was not accepted: "+joinMessages(messages))
-			render.Redirect(w, r, "/assets/"+assetID)
+			// 422 with the create form reopened on what was typed, the house
+			// rule (CLAUDE.md): a redirect throws the operator's input away and
+			// reports a success-shaped status for a refusal. renderAssetDetail
+			// already exists and is already used for every other refusal on
+			// this page, so there is no second page assembly to keep in step.
+			a.renderAssetDetail(w, r, refusalStatus(err), assetID,
+				rejected(r, powerInputCreateEditID(assetID), messages, "name", "feed_id", "draw_va"))
 			return
 		}
 		a.handleStoreError(w, r, err)
@@ -459,8 +498,15 @@ func (a *App) PowerFeedUpdate(w http.ResponseWriter, r *http.Request) {
 	amps, aOK := optionalInt(r, "amperage")
 	util, uOK := intValue(r, "max_utilisation", updated.MaxUtilisation)
 	if !vOK || !aOK || !uOK {
-		a.setFlash(r, "error", "A rating has to be whole numbers, or left empty.")
-		render.Redirect(w, r, "/power")
+		field := "voltage"
+		switch {
+		case vOK && !aOK:
+			field = "amperage"
+		case vOK && aOK:
+			field = "max_utilisation"
+		}
+		a.renderPower(w, r, http.StatusUnprocessableEntity, nil, domain.PowerPanelSpec{}, domain.PowerFeedSpec{},
+			rejected(r, existing.ID, notANumber(field), "name", "voltage", "amperage", "phase", "max_utilisation"))
 		return
 	}
 	updated.Name = formValue(r, "name")
@@ -474,8 +520,9 @@ func (a *App) PowerFeedUpdate(w http.ResponseWriter, r *http.Request) {
 		if messages, ok := refusalMessages(err, map[string]string{
 			"name": "that panel already has a feed by that name",
 		}); ok {
-			a.setFlash(r, "error", "That feed was not accepted: "+joinMessages(messages))
-			render.Redirect(w, r, "/power")
+			// 422 with the row reopened on what was typed -- see PowerPanelUpdate.
+			a.renderPower(w, r, refusalStatus(err), nil, domain.PowerPanelSpec{}, domain.PowerFeedSpec{},
+				rejected(r, existing.ID, messages, "name", "voltage", "amperage", "phase", "max_utilisation"))
 			return
 		}
 		a.handleStoreError(w, r, err)
@@ -520,8 +567,12 @@ func (a *App) PowerSourceUpdate(w http.ResponseWriter, r *http.Request) {
 		if messages, ok := refusalMessages(err, map[string]string{
 			"name": "that site already has a supply by that name",
 		}); ok {
-			a.setFlash(r, "error", "That supply was not accepted: "+joinMessages(messages))
-			render.Redirect(w, r, "/power")
+			// 422 with the row reopened on what was typed -- see PowerPanelUpdate.
+			// renderPower, not renderPowerWithSource: that one exists to carry a
+			// refused CREATE form's typed values (SourceSpec), and this is a
+			// correction of a row that already exists -- Edit is what it reads.
+			a.renderPower(w, r, refusalStatus(err), nil, domain.PowerPanelSpec{}, domain.PowerFeedSpec{},
+				rejected(r, existing.ID, messages, "name", "kind", "parent_id"))
 			return
 		}
 		a.handleStoreError(w, r, err)
@@ -551,10 +602,11 @@ func (a *App) PowerInputUpdate(w http.ResponseWriter, r *http.Request) {
 		a.handleStoreError(w, r, err)
 		return
 	}
+	rowID := r.PathValue("inputID")
 	draw, numeric := optionalInt(r, "draw_va")
 	if !numeric {
-		a.setFlash(r, "error", "The draw has to be a whole number of volt-amps, or left empty.")
-		render.Redirect(w, r, "/assets/"+assetID)
+		a.renderAssetDetail(w, r, http.StatusUnprocessableEntity, assetID,
+			rejected(r, rowID, notANumber("draw_va"), "name", "feed_id", "draw_va"))
 		return
 	}
 	updated := existing.PowerInput
@@ -576,8 +628,12 @@ func (a *App) PowerInputUpdate(w http.ResponseWriter, r *http.Request) {
 		if messages, ok := refusalMessages(err, map[string]string{
 			"name": "that asset already has an input by that name",
 		}); ok {
-			a.setFlash(r, "error", "That power input was not accepted: "+joinMessages(messages))
-			render.Redirect(w, r, "/assets/"+assetID)
+			// 422 with the row reopened on what was typed -- the house rule,
+			// and the reason for it: a redirect refills the row from storage,
+			// so the field the operator just corrected shows the old value
+			// back and nothing says whether it saved.
+			a.renderAssetDetail(w, r, refusalStatus(err), assetID,
+				rejected(r, rowID, messages, "name", "feed_id", "draw_va"))
 			return
 		}
 		a.handleStoreError(w, r, err)

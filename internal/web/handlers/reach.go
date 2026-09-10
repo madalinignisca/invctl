@@ -34,6 +34,11 @@ type networkListPage struct {
 	UplinkForm     netUplinkFormData
 	AttachmentForm netAttachmentFormData
 	AnchorForm     netAnchorFormData
+	// Edit carries a refused correction of one anchor row, so it reopens
+	// showing what was typed rather than what is stored -- see
+	// NetworkAnchorUpdate. Base.EditRow (set below when Edit is non-nil)
+	// decides which row's editing block renders.
+	Edit *editState
 }
 
 type netGroupFormData struct {
@@ -125,7 +130,7 @@ func attachableAssets(assets []store.AssetRow) []store.AssetRow {
 // NetworkList renders the topology page: groups with their members, uplinks
 // and anchors, and a coverage summary.
 func (a *App) NetworkList(w http.ResponseWriter, r *http.Request) {
-	page, err := a.buildNetworkListPage(r, http.StatusOK, nil, nil, nil, nil, nil)
+	page, err := a.buildNetworkListPage(r, http.StatusOK, nil, nil, nil, nil, nil, nil)
 	if err != nil {
 		a.serverError(w, r, err)
 		return
@@ -134,7 +139,7 @@ func (a *App) NetworkList(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) buildNetworkListPage(r *http.Request, status int,
-	groupErrs, memberErrs, uplinkErrs, attachErrs, anchorErrs map[string]string,
+	groupErrs, memberErrs, uplinkErrs, attachErrs, anchorErrs map[string]string, edit *editState,
 ) (networkListPage, error) {
 	ctx := r.Context()
 	groups, err := a.Store.ListNetGroups(ctx)
@@ -154,8 +159,14 @@ func (a *App) buildNetworkListPage(r *http.Request, status int,
 		return networkListPage{}, err
 	}
 
+	base := a.base(r, "Topology", "network")
+	if edit != nil {
+		// The refused row opens, whatever the query string said -- the same
+		// rule renderAssetDetail and renderPower follow.
+		base.EditRow = edit.ID
+	}
 	return networkListPage{
-		Base:           a.base(r, "Topology", "network"),
+		Base:           base,
 		Groups:         groups,
 		Anchors:        anchors,
 		Coverage:       coverage,
@@ -164,6 +175,7 @@ func (a *App) buildNetworkListPage(r *http.Request, status int,
 		UplinkForm:     a.newNetUplinkForm(r, uplinkErrs, groups),
 		AttachmentForm: a.newNetAttachmentForm(r, attachErrs, groups, attachableAssets(assets)),
 		AnchorForm:     a.newNetAnchorForm(r, anchorErrs, groups),
+		Edit:           edit,
 	}, nil
 }
 
@@ -384,7 +396,7 @@ func (a *App) rerenderNetworkForm(w http.ResponseWriter, r *http.Request, partia
 	case "anchor":
 		anchorErrs = messages
 	}
-	page, err := a.buildNetworkListPage(r, http.StatusUnprocessableEntity, groupErrs, memberErrs, uplinkErrs, attachErrs, anchorErrs)
+	page, err := a.buildNetworkListPage(r, http.StatusUnprocessableEntity, groupErrs, memberErrs, uplinkErrs, attachErrs, anchorErrs, nil)
 	if err != nil {
 		a.serverError(w, r, err)
 		return

@@ -179,31 +179,44 @@
                it. The panel is NOT offered: UpdatePowerFeed pins it from the
                stored row, so a picker here would be ignored in silence. */}}
           {{if and $.IsAdmin (eq .ID $.EditRow)}}
+          {{/* Values and errors come from $.Edit, not from this row, once a
+               correction has been refused -- the row must reopen on what was
+               TYPED, not on what is still stored, the same rule ports and
+               addresses follow on the asset page. $.Edit is nil-safe (nil on
+               an ordinary ?edit= open with nothing refused yet), so .Value
+               falls back to the stored figure either way. */}}
           <tr class="row-editing">
             <td>{{.SiteName}}</td>
             <td class="mono">{{.PanelName}}</td>
-            <td><input form="feed-{{.ID}}" class="mono" type="text" name="name" value="{{.Name}}"
-                       aria-label="Feed name" required style="width:8em"></td>
+            <td><input form="feed-{{.ID}}" class="mono {{if $.Edit.Err "name"}}invalid{{end}}"
+                       type="text" name="name" value="{{$.Edit.Value "name" .Name}}"
+                       aria-label="Feed name" required style="width:8em">
+                {{with $.Edit.Err "name"}}<div class="field-error">{{.}}</div>{{end}}</td>
             <td>
-              <input form="feed-{{.ID}}" type="number" name="voltage" value="{{derefInt .Voltage}}"
+              <input form="feed-{{.ID}}" type="number" name="voltage" value="{{$.Edit.Value "voltage" (derefInt .Voltage)}}"
                      min="1" aria-label="Voltage" style="width:5em"> V
-              <input form="feed-{{.ID}}" type="number" name="amperage" value="{{derefInt .Amperage}}"
+              <input form="feed-{{.ID}}" type="number" name="amperage" value="{{$.Edit.Value "amperage" (derefInt .Amperage)}}"
                      min="1" aria-label="Amperage" style="width:5em"> A
               <select form="feed-{{.ID}}" name="phase" aria-label="Phase">
                 <option value="">—</option>
-                {{$ph := deref .Phase}}
+                {{$ph := $.Edit.Value "phase" (deref .Phase)}}
                 {{range $.Phases}}<option value="{{.}}" {{if eq . $ph}}selected{{end}}>{{.}}</option>{{end}}
               </select>
+              {{with $.Edit.Err "voltage"}}<div class="field-error">{{.}}</div>{{end}}
+              {{with $.Edit.Err "amperage"}}<div class="field-error">{{.}}</div>{{end}}
+              {{with $.Edit.Err "phase"}}<div class="field-error">{{.}}</div>{{end}}
             </td>
             <td>
-              <input form="feed-{{.ID}}" type="number" name="max_utilisation" value="{{.MaxUtilisation}}"
+              <input form="feed-{{.ID}}" type="number" name="max_utilisation"
+                     value="{{$.Edit.Value "max_utilisation" (itoa .MaxUtilisation)}}"
                      min="1" max="100" aria-label="Maximum utilisation" style="width:5em"> %
+              {{with $.Edit.Err "max_utilisation"}}<div class="field-error">{{.}}</div>{{end}}
             </td>
             <td>{{.Inputs}}</td>
             <td class="row-actions" style="white-space:nowrap">
               <form id="feed-{{.ID}}" method="post" action="/power/feeds/{{.ID}}" style="display:inline">
                 <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
-                <input type="hidden" name="row_version" value="{{.RowVersion}}">
+                <input type="hidden" name="row_version" value="{{$.Edit.Value "row_version" (itoa .RowVersion)}}">
                 {{/* Carried, not shown: UpdatePowerFeed writes every column,
                      so dropping this would blank the note on save. */}}
                 <input type="hidden" name="notes" value="{{deref .Notes}}">
@@ -261,30 +274,38 @@
                list every other supply without re-deriving that here. */}}
           {{if and $.IsAdmin (eq .ID $.EditRow)}}
           {{$row := .}}
+          {{/* Same rule as the feed row above: $.Edit, when a correction was
+               refused, is what was TYPED -- $row is only the fallback. */}}
           <tr class="row-editing">
             <td>{{.SiteName}}</td>
-            <td><input form="src-{{.ID}}" class="mono" type="text" name="name" value="{{.Name}}"
-                       aria-label="Supply name" required style="width:10em"></td>
+            <td><input form="src-{{.ID}}" class="mono {{if $.Edit.Err "name"}}invalid{{end}}"
+                       type="text" name="name" value="{{$.Edit.Value "name" .Name}}"
+                       aria-label="Supply name" required style="width:10em">
+                {{with $.Edit.Err "name"}}<div class="field-error">{{.}}</div>{{end}}</td>
             <td>
+              {{$kind := $.Edit.Value "kind" $row.Kind}}
               <select form="src-{{.ID}}" name="kind" aria-label="Kind" required>
-                {{range $.Kinds}}<option value="{{.}}" {{if eq . $row.Kind}}selected{{end}}>{{title .}}</option>{{end}}
+                {{range $.Kinds}}<option value="{{.}}" {{if eq . $kind}}selected{{end}}>{{title .}}</option>{{end}}
               </select>
+              {{with $.Edit.Err "kind"}}<div class="field-error">{{.}}</div>{{end}}
             </td>
             <td>
+              {{$parent := $.Edit.Value "parent_id" (deref $row.ParentID)}}
               <select form="src-{{.ID}}" name="parent_id" aria-label="Fed by">
                 <option value="">top of the chain</option>
                 {{range $.Sources}}
                   {{if ne .ID $row.ID}}
-                  <option value="{{.ID}}" {{if eq (deref $row.ParentID) .ID}}selected{{end}}>{{.Name}}</option>
+                  <option value="{{.ID}}" {{if eq $parent .ID}}selected{{end}}>{{.Name}}</option>
                   {{end}}
                 {{end}}
               </select>
+              {{with $.Edit.Err "parent_id"}}<div class="field-error">{{.}}</div>{{end}}
             </td>
             <td>{{.Panels}}</td>
             <td class="row-actions" style="white-space:nowrap">
               <form id="src-{{.ID}}" method="post" action="/power/sources/{{.ID}}" style="display:inline">
                 <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
-                <input type="hidden" name="row_version" value="{{.RowVersion}}">
+                <input type="hidden" name="row_version" value="{{$.Edit.Value "row_version" (itoa .RowVersion)}}">
                 {{/* Carried, not shown: UpdatePowerSource writes every column.
                      asset_id especially -- it is how a UPS's battery
                      end-of-life reaches the expiry report, and blanking it
@@ -342,20 +363,43 @@
             <td class="mono">{{.Name}}</td>
             <td class="mono">
               {{if $.IsAdmin}}
+              {{/* This is the whole of PowerPanelUpdate's UI: name, voltage,
+                   amperage and phase ride along unedited (hidden), only
+                   source_id is a real control. When THIS panel is the one a
+                   correction was just refused on, $.Edit carries what was
+                   actually submitted rather than what is stored -- the same
+                   rule the feed and source rows above follow -- so a refusal
+                   here reopens on the submitted source_id, not a silently
+                   reverted one, and names the field that was rejected. */}}
+              {{$editingThis := and $.Edit (eq .ID $.Edit.ID)}}
               <form method="post" action="/power/panels/{{.ID}}" style="display:flex;gap:4px">
                 <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
-                <input type="hidden" name="row_version" value="{{.RowVersion}}">
-                <input type="hidden" name="name" value="{{.Name}}">
-                <input type="hidden" name="voltage" value="{{derefInt .Voltage}}">
-                <input type="hidden" name="amperage" value="{{derefInt .Amperage}}">
-                <input type="hidden" name="phase" value="{{deref .Phase}}">
+                <input type="hidden" name="row_version"
+                       value="{{if $editingThis}}{{$.Edit.Value "row_version" (itoa .RowVersion)}}{{else}}{{.RowVersion}}{{end}}">
+                <input type="hidden" name="name"
+                       value="{{if $editingThis}}{{$.Edit.Value "name" .Name}}{{else}}{{.Name}}{{end}}">
+                <input type="hidden" name="voltage"
+                       value="{{if $editingThis}}{{$.Edit.Value "voltage" (derefInt .Voltage)}}{{else}}{{derefInt .Voltage}}{{end}}">
+                <input type="hidden" name="amperage"
+                       value="{{if $editingThis}}{{$.Edit.Value "amperage" (derefInt .Amperage)}}{{else}}{{derefInt .Amperage}}{{end}}">
+                <input type="hidden" name="phase"
+                       value="{{if $editingThis}}{{$.Edit.Value "phase" (deref .Phase)}}{{else}}{{deref .Phase}}{{end}}">
                 {{$row := .}}
+                {{$sourceID := deref $row.SourceID}}
+                {{if $editingThis}}{{$sourceID = $.Edit.Value "source_id" $sourceID}}{{end}}
                 <select name="source_id">
                   <option value="">— not recorded —</option>
-                  {{range $.Sources}}<option value="{{.ID}}" {{if eq (deref $row.SourceID) .ID}}selected{{end}}>{{.Name}}</option>{{end}}
+                  {{range $.Sources}}<option value="{{.ID}}" {{if eq $sourceID .ID}}selected{{end}}>{{.Name}}</option>{{end}}
                 </select>
                 <button class="btn btn-sm" type="submit">Set</button>
               </form>
+              {{if $editingThis}}
+                {{with $.Edit.Err "name"}}<div class="field-error">{{.}}</div>{{end}}
+                {{with $.Edit.Err "voltage"}}<div class="field-error">{{.}}</div>{{end}}
+                {{with $.Edit.Err "amperage"}}<div class="field-error">{{.}}</div>{{end}}
+                {{with $.Edit.Err "phase"}}<div class="field-error">{{.}}</div>{{end}}
+                {{with $.Edit.Err "source_id"}}<div class="field-error">{{.}}</div>{{end}}
+              {{end}}
               {{else}}
                 {{if .SourceName}}{{deref .SourceName}}{{else}}<span class="muted">not recorded</span>{{end}}
               {{end}}
