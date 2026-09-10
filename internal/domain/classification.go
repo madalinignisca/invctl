@@ -320,6 +320,7 @@ var DeclaredColumns = map[string][]string{
 	"net_anchor": {
 		"id", "code", "name", "scope", "group_id", "environment_id", "plane",
 		"lifecycle", "verified_by", "verified_at", "created_at", "updated_at",
+		"row_version",
 	},
 	"net_attachment": {
 		"id", "asset_id", "group_id", "plane", "lifecycle",
@@ -330,6 +331,7 @@ var DeclaredColumns = map[string][]string{
 		"id", "code", "name", "kind", "role", "availability", "min_healthy",
 		"failover_mode", "environment_id", "lifecycle",
 		"verified_by", "verified_at", "attrs", "created_at", "updated_at",
+		"row_version",
 	},
 	"net_group_member": {"group_id", "asset_id", "role", "lifecycle", "created_at", "updated_at"},
 	"net_uplink": {
