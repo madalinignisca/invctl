@@ -60,11 +60,15 @@
   {{if .Groups}}
   <div class="scroll-x">
     <table>
-      <thead><tr><th>Code</th><th>Role</th><th>Kind</th><th>Availability</th><th>Members</th><th>Uplinks</th><th>Anchors</th><th>Source</th></tr></thead>
+      <thead><tr><th>Code</th><th>Role</th><th>Kind</th><th>Availability</th><th>Members</th><th>Uplinks</th><th>Anchors</th><th>Source</th>{{if .IsAdmin}}<th></th>{{end}}</tr></thead>
       <tbody>
         {{range .Groups}}
         <tr>
-          <td class="mono">{{.Code}}</td>
+          {{/* The code links to the group's own page, which is where its
+               members, uplinks and attachments can be removed one at a time --
+               this table shows them as counts, and you cannot remove one
+               member from a number. */}}
+          <td class="mono"><a href="/network/groups/{{.ID}}">{{.Code}}</a></td>
           <td><span class="pill pill-info">{{.Role}}</span></td>
           <td>{{.Kind}}</td>
           <td>{{.Availability}}</td>
@@ -72,6 +76,14 @@
           <td class="num">{{.UplinkCount}}</td>
           <td class="num">{{.AnchorCount}}</td>
           <td>{{if eq .Source "declared"}}<span class="pill pill-muted">declared</span>{{else}}<span class="pill pill-degraded">{{.Source}}</span>{{end}}</td>
+          {{if $.IsAdmin}}
+          <td style="white-space:nowrap">
+            {{/* Withdrawing a group cascades, so the confirmation lives on the
+                 group's own page where the count of what goes with it can be
+                 shown before the click rather than after. */}}
+            <a class="btn btn-sm" href="/network/groups/{{.ID}}">Open</a>
+          </td>
+          {{end}}
         </tr>
         {{end}}
       </tbody>
@@ -87,7 +99,7 @@
   {{if .Anchors}}
   <div class="scroll-x">
     <table>
-      <thead><tr><th>Code</th><th>Name</th><th>Scope</th><th>Group</th><th>Plane</th></tr></thead>
+      <thead><tr><th>Code</th><th>Name</th><th>Scope</th><th>Group</th><th>Plane</th>{{if .IsAdmin}}<th></th>{{end}}</tr></thead>
       <tbody>
         {{range .Anchors}}
         <tr>
@@ -96,6 +108,22 @@
           <td><span class="pill pill-info">{{.Scope}}</span></td>
           <td class="mono">{{.GroupCode}}</td>
           <td>{{.Plane}}</td>
+          {{if $.IsAdmin}}
+          <td style="white-space:nowrap">
+            {{/* An anchor is the highest-leverage row in this model by
+                 internal/domain's own account -- one placed on the wrong group
+                 silently changes every external-reachability verdict in the
+                 estate. Until this control existed it could be placed and
+                 never removed. */}}
+            <form method="post" action="/network/anchors/{{.ID}}/retire"
+                  hx-post="/network/anchors/{{.ID}}/retire"
+                  hx-confirm="Withdraw anchor {{.Code}}? Every reachability verdict computed through it changes. The record is kept."
+                  style="display:inline">
+              <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+              <button class="btn btn-sm btn-danger" type="submit">Withdraw</button>
+            </form>
+          </td>
+          {{end}}
         </tr>
         {{end}}
       </tbody>
