@@ -455,6 +455,7 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	write("POST /endpoints/{id}/retire", app.EndpointRetire)
 	write("POST /instances/{id}", app.InstanceUpdate)
 	write("POST /environments/{id}", app.EnvironmentUpdate)
+	write("POST /environments/{id}/retire", app.EnvironmentRetire)
 	write("POST /interfaces/{id}", app.InterfaceUpdate)
 	write("POST /interfaces/{id}/retire", app.InterfaceRetire)
 	write("POST /addresses/{id}", app.IPAddressUpdate)

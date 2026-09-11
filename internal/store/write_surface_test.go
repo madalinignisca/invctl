@@ -147,9 +147,12 @@ var writeSurfaceGaps = map[string]string{
 	// and RetireIPAddress (internal/store/network.go) close both gaps, refusing
 	// rather than cascading while a child prefix, an address, a reservation, an
 	// endpoint or an FHRP virtual-address binding is still live.
-	"Environment": "no withdrawal. Referenced by nearly everything, so retiring " +
-		"one is a genuinely bigger question than the others here -- but the answer " +
-		"today is that nobody can, which is not the same as having decided.",
+	//
+	// Environment left this list with migration 00065: RetireEnvironment
+	// (internal/store/assets.go) closes it too, but unlike Prefix and
+	// IPAddress it refuses NOTHING -- an environment is a label, not an
+	// occupancy, and the six tables that still point at a retired one keep
+	// pointing at it untouched. See that method's own doc comment.
 
 	// --- latent: no create route yet. Live the moment any gets a UI ---
 	"BackendPool": "neither, and no route today.",

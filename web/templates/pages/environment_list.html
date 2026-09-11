@@ -23,7 +23,7 @@
   {{if .Environments}}
   <div class="scroll-x">
     <table>
-      <thead><tr><th>Code</th><th>Name</th><th>Role</th><th>Criticality</th><th>Audit scope</th><th></th></tr></thead>
+      <thead><tr><th>Code</th><th>Name</th><th>Role</th><th>Criticality</th><th>Audit scope</th><th>Lifecycle</th><th></th></tr></thead>
       <tbody>
         {{range .Environments}}
         {{$env := .}}
@@ -64,6 +64,7 @@
               in scope
             </label>
           </td>
+          <td>{{if eq .Lifecycle "retired"}}<span class="pill pill-muted">retired</span>{{else}}<span class="pill pill-info">active</span>{{end}}</td>
           <td style="white-space:nowrap">
             <form id="env-{{.ID}}" method="post" action="/environments/{{.ID}}" style="display:inline">
               <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
@@ -82,9 +83,19 @@
           </td>
           <td class="num">{{.Criticality}}</td>
           <td>{{if .InScope}}<span class="pill pill-info">in scope</span>{{else}}<span class="pill pill-muted">out of scope</span>{{end}}</td>
+          {{/* STORED KEEPS DISPLAYING (docs/AUDIT.md): a retired environment
+               stays on this page, plainly marked, beside everything that
+               still carries it -- six tables' worth, and retiring it did not
+               touch a single one of them. */}}
+          <td>{{if eq .Lifecycle "retired"}}<span class="pill pill-muted">retired</span>{{else}}<span class="pill pill-info">active</span>{{end}}</td>
           <td style="white-space:nowrap">
             <a class="btn btn-sm" href="/environments/{{.ID}}/map">Map — all three layers</a>
             {{if $.IsAdmin}}<a class="btn btn-sm" href="/environments?edit={{.ID}}">Edit</a>{{end}}
+            {{if and $.IsAdmin (ne .Lifecycle "retired")}}
+            <button class="btn btn-sm btn-danger" type="button"
+                    hx-post="/environments/{{.ID}}/retire"
+                    hx-confirm="Withdraw {{.Code}}? Nothing that already carries it is touched -- it stays assigned, and this label just stops being offered for new assignments. Re-declaring the same code brings it back.">Withdraw</button>
+            {{end}}
           </td>
         </tr>
         {{end}}

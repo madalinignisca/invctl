@@ -69,7 +69,7 @@ func setupPickerFixture(t *testing.T, ctx context.Context, h *harness, fx *bound
 		t.Fatalf("linking the second in-scope asset to alpha: %v", err)
 	}
 
-	env, err := h.store.ListEnvironments(ctx)
+	env, err := h.store.ListEnvironments(ctx, store.EnvironmentFilter{IncludeRetired: true})
 	if err != nil || len(env) == 0 {
 		t.Fatalf("listing environments for the picker fixture: %v", err)
 	}

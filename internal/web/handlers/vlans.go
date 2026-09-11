@@ -59,7 +59,7 @@ func (a *App) renderVLANs(w http.ResponseWriter, r *http.Request, status int,
 		a.serverError(w, r, err)
 		return
 	}
-	envs, err := a.Store.ListEnvironments(r.Context())
+	envs, err := a.Store.ListEnvironments(r.Context(), store.EnvironmentFilter{IncludeRetired: true})
 	if err != nil {
 		a.serverError(w, r, err)
 		return

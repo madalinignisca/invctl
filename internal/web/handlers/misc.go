@@ -63,7 +63,7 @@ func (p dashboardPage) SilentReporters() int {
 // Dashboard is the landing page: what exists, what spans a boundary, and what
 // changed recently.
 func (a *App) Dashboard(w http.ResponseWriter, r *http.Request) {
-	envs, err := a.Store.ListEnvironments(r.Context())
+	envs, err := a.Store.ListEnvironments(r.Context(), store.EnvironmentFilter{})
 	if err != nil {
 		a.serverError(w, r, err)
 		return

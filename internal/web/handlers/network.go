@@ -244,7 +244,7 @@ func (a *App) renderPrefixes(w http.ResponseWriter, r *http.Request, status int,
 		a.serverError(w, r, err)
 		return
 	}
-	envs, err := a.Store.ListEnvironments(r.Context())
+	envs, err := a.Store.ListEnvironments(r.Context(), store.EnvironmentFilter{IncludeRetired: true})
 	if err != nil {
 		a.serverError(w, r, err)
 		return
@@ -310,7 +310,7 @@ func (a *App) PrefixCreate(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		envs, listErr := a.Store.ListEnvironments(r.Context())
+		envs, listErr := a.Store.ListEnvironments(r.Context(), store.EnvironmentFilter{IncludeRetired: true})
 		if listErr != nil {
 			a.serverError(w, r, listErr)
 			return

@@ -69,7 +69,7 @@ func setupDepRowFixture(t *testing.T, ctx context.Context, h *harness, fx *bound
 	t.Helper()
 	admin := domain.AdministratorPermit(domain.SystemActor)
 
-	env, err := h.store.ListEnvironments(ctx)
+	env, err := h.store.ListEnvironments(ctx, store.EnvironmentFilter{IncludeRetired: true})
 	if err != nil || len(env) == 0 {
 		t.Fatalf("listing environments for the dep-row fixture: %v", err)
 	}

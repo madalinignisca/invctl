@@ -50,7 +50,7 @@
             {{$env := $.Edit.Value "environment_id" (deref $p.EnvironmentID)}}
             <select form="pfx-{{.ID}}" name="environment_id" aria-label="Environment">
               <option value="">—</option>
-              {{range $.FormData.Environments}}<option value="{{.ID}}" {{if eq .ID $env}}selected{{end}}>{{.Code}}</option>{{end}}
+              {{range $.FormData.Environments}}<option value="{{.ID}}" {{if eq .ID $env}}selected{{end}}>{{.Code}}{{if eq .Lifecycle "retired"}} (retired){{end}}</option>{{end}}
             </select>
           </td>
           <td data-col="role"><input form="pfx-{{.ID}}" type="text" name="role" value="{{$.Edit.Value "role" (deref .Role)}}"

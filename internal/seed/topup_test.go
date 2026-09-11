@@ -286,7 +286,7 @@ func countEstate(t *testing.T, f *fixture) map[string]int {
 		out["asset costs"] += len(costs)
 	}
 
-	envs, err := f.store.ListEnvironments(f.ctx)
+	envs, err := f.store.ListEnvironments(f.ctx, store.EnvironmentFilter{IncludeRetired: true})
 	if err != nil {
 		t.Fatalf("listing environments: %v", err)
 	}
