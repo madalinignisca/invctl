@@ -1016,7 +1016,8 @@ configured." rather than nothing (D5), and the figure never enters
 `TestThePowerFigureIsNotInTheEstateTotals` at store level and
 `TestTheEstateTotalIsUnchangedByThePowerFigure` at the page.*
 
-**WP-I3 · Performance** — M — **DONE (first pass)**
+**WP-I3 · Performance** — M — **DONE (first pass; second pass on the Postgres
+test harness, below)**
 Built the fixture the entry asked for — 4,000 assets, 10,000 prefixes, 50,000
 addresses — and measured before changing anything. Two real findings, one of
 them a bug.
@@ -1044,6 +1045,29 @@ migrating one SQLite database costs 295ms and this package has 306 test
 functions; the SQLite half of the store suite was 98s of almost pure migration.
 It now copies a template file that is migrated once per process — identical
 isolation, 98s → **11s**, and the whole suite 303s → 218s locally.
+
+**Second pass — the Postgres half of the same finding.** The first pass fixed
+the per-test migration replay for SQLite and left Postgres migrating for every
+test. That came due when CI's 30-minute cap was reached: at 63 migrations the
+store package was 1380s, 77% of the budget, and a PR touching no store code
+tipped it over.
+
+**Measured on PostgreSQL 17 before changing anything**, which is what chose the
+design:
+
+| | cost |
+|---|---|
+| per-test `Migrate` (63 migrations) | 493ms |
+| `CREATE DATABASE … TEMPLATE` | 32ms |
+| `DROP DATABASE` | 4.6ms |
+
+493ms is 7.8ms per migration against a 0.05ms round trip — DDL executing in the
+server, not client chatter. Batching migrations into one transaction or
+dropping goose's bookkeeping would have saved about a fifth; copying a finished
+database executes no DDL at all. **The store suite went 641.7s → 90.7s alone,
+106.8s under the full gate.** It also retires the truncated-`t.Name()` schema
+collision this harness carried a comment about, since database names now carry
+pid and sequence.
 
 *What is left, and deliberately not done: the remaining 181ms splits 74ms
 correlated subquery / 60ms allocation spans / ~51ms assembly, with no single

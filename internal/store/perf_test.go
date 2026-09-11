@@ -256,6 +256,7 @@ var (
 // TestMain owns the shared estate's lifetime.
 func TestMain(m *testing.M) {
 	code := m.Run()
+	dropPgTemplate()
 	if sharedDB != nil {
 		_ = sharedDB.Close()
 	}
