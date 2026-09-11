@@ -79,6 +79,7 @@ POST /endpoints/{id} | EndpointUpdate | write | true
 POST /endpoints/{id}/retire | EndpointRetire | write | true
 POST /environments | EnvironmentCreate | write | true
 POST /environments/{id} | EnvironmentUpdate | write | true
+POST /environments/{id}/retire | EnvironmentRetire | write | true
 POST /import/assets | AssetImportRun | writeAdminOnly | true
 POST /import/device-types | DeviceTypeImportRun | writeAdminOnly | true
 POST /inflation | InflationSet | write | true

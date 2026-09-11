@@ -127,7 +127,13 @@ func TestARetiredEnvironmentIsNotOfferedToAnAssetThatNeverCarriedIt(t *testing.T
 	resp.Body.Close()
 
 	freeAsset := mustAssetInEnvironmentWeb(t, h, "unrelated-asset", mustEnvironmentWeb(t, h, "other-live-env"))
-	page := body(t, h.get("/assets/"+freeAsset, false))
+	// ?edit= opens the inline correction form -- without it the checkbox
+	// group is not rendered at all, and the assertion below would pass
+	// vacuously regardless of what the picker offers.
+	page := body(t, h.get("/assets/"+freeAsset+"?edit="+freeAsset, false))
+	if !strings.Contains(page, `name="environments"`) {
+		t.Fatal("the edit form did not render at all, so this test is checking nothing")
+	}
 	if strings.Contains(page, `value="`+envID+`"`) {
 		t.Error("a retired environment the asset never carried is offered as a checkbox option")
 	}

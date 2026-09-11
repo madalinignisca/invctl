@@ -941,8 +941,16 @@ func TestAProjectOwnerIsRefusedOnEveryNonProjectLinkableWriteRoute(t *testing.T)
 			// parameter (a member, uplink or attachment id) and 404s against
 			// this suite's random fallback before any permit check runs, which
 			// is where most driven routes in this suite end up.
-			if permitGate != 11 {
-				t.Errorf("permit-layer refusals (generic body) = %d, want 11 -- see this test's own "+
+			//
+			// 11 -> 12: POST /environments/{id}/retire. environment is
+			// ScopeEstateConfig, so a project owner passes RequireWrite (true
+			// since Task 13) and is refused at the same permit.Covers layer as
+			// every other estate-config write in this bucket -- see
+			// RetireEnvironment's own doc comment for why the route exists at
+			// all (it withdraws a label, refusing and rewriting nothing that
+			// carries it).
+			if permitGate != 12 {
+				t.Errorf("permit-layer refusals (generic body) = %d, want 12 -- see this test's own "+
 					"comment for the routes this pins", permitGate)
 			}
 			// 4: the four /projects/{id}/costs* routes (Task 4a moved all
@@ -1180,8 +1188,11 @@ func TestNoWriteRouteIsReachableWithNoSessionAtAll(t *testing.T) {
 	// availability/min_healthy/failover_mode and an anchor's group could be
 	// declared wrong and never fixed. 204 -> 206: POST /addresses/{id}/retire
 	// and /prefixes/{id}/retire (migration 00064) -- a network declared in
-	// error or an address freed could previously only ever be added.
-	const pinnedNoSessionRouteCount = 206
+	// error or an address freed could previously only ever be added. 206 ->
+	// 207: POST /environments/{id}/retire (migration 00065) -- an environment
+	// declared in error could previously only ever be added; RetireEnvironment
+	// withdraws the label without touching what still carries it.
+	const pinnedNoSessionRouteCount = 207
 
 	for _, eng := range boundaryEngines(t) {
 		t.Run(eng.name, func(t *testing.T) {
