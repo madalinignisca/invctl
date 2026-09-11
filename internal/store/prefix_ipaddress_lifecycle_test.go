@@ -358,3 +358,91 @@ func prefixLifecycleOf(t *testing.T, s *SQLStore, ctx context.Context, id string
 func containsMsg(err error, substr string) bool {
 	return err != nil && strings.Contains(err.Error(), substr)
 }
+
+// TestAWithdrawnAddressCannotBecomeAVirtualAddress closes a hole this work
+// package OPENED rather than one it inherited. Until migration 00064 gave
+// ip_address a lifecycle there was no withdrawn address for AssignVIP to
+// refuse, so the missing check was not a bug; adding the column made it one.
+//
+// The two rules deadlock a row between them. RetireIPAddress refuses while
+// fhrp_group_id is set, so an address assigned as a VIP *after* being withdrawn
+// can never be withdrawn again to clear the assignment -- while the group it
+// serves points at an address that appears in no list. A failure target whose
+// virtual address is invisible is the worst version of this to debug at 03:00,
+// because every page that would tell you is the page filtering it out.
+func TestAWithdrawnAddressCannotBecomeAVirtualAddress(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			s, ctx := newStore(t, e)
+			groupID := mustFHRP(t, s, ctx, 22, "vip-after-withdrawal")
+			addr, err := domain.NewIPAddress(NewID(), "10.90.0.1", nil, domain.IPRoleVIP)
+			if err != nil {
+				t.Fatalf("building address: %v", err)
+			}
+			if err := s.CreateIPAddress(ctx, testPermit, addr); err != nil {
+				t.Fatalf("creating address: %v", err)
+			}
+			if err := s.RetireIPAddress(ctx, testPermit, addr.ID); err != nil {
+				t.Fatalf("withdrawing the address: %v", err)
+			}
+
+			if err := s.AssignVIP(ctx, testPermit, addr.ID, groupID); err == nil {
+				t.Fatal("a withdrawn address was made a group's virtual address. " +
+					"RetireIPAddress now refuses to withdraw it again because " +
+					"fhrp_group_id is set, so the row is stuck: invisible in every " +
+					"list and load-bearing for a failure target.")
+			}
+
+			// And nothing was written on the way to refusing.
+			var got int
+			if err := s.DB().Reader.Get(&got, s.DB().Reader.Rebind(
+				`SELECT COUNT(*) FROM ip_address WHERE id = ? AND fhrp_group_id IS NOT NULL`),
+				addr.ID); err != nil {
+				t.Fatalf("reading back: %v", err)
+			}
+			if got != 0 {
+				t.Error("the refusal still wrote fhrp_group_id")
+			}
+		})
+	}
+}
+
+// TestAWithdrawnNetworkCanBeDeclaredAgain pins that withdrawal is not a
+// trapdoor. The unique indexes on cidr_text are scoped to live rows (migration
+// 00064); without that, withdrawing 10.0.0.0/8 keeps those numbers taken for
+// ever and CreatePrefix answers "that network is already declared" -- false,
+// and naming a row the operator cannot see to act on.
+//
+// A NEW ROW, NOT A REACTIVATION, which is where this parts company with
+// interface. A port re-added is the same physical port and comes back as
+// itself; a CIDR is not an object, and redeclaring it later is a fresh
+// assertion about a different network occupying the same numbers. Asserting
+// two distinct ids is asserting exactly that.
+func TestAWithdrawnNetworkCanBeDeclaredAgain(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			s, ctx := newStore(t, e)
+			first := mustPrefix(t, s, ctx, "10.91.0.0/24")
+			if err := s.RetirePrefix(ctx, testPermit, first); err != nil {
+				t.Fatalf("withdrawing: %v", err)
+			}
+
+			second := mustPrefix(t, s, ctx, "10.91.0.0/24")
+			if second == first {
+				t.Fatal("redeclaring reused the withdrawn row's id; this path is " +
+					"meant to write a new row, so the withdrawn one keeps its own " +
+					"history and its own answer to \"when did this stop being ours\"")
+			}
+
+			// The withdrawn one is still there, still withdrawn: history kept.
+			var life string
+			if err := s.DB().Reader.Get(&life, s.DB().Reader.Rebind(
+				`SELECT lifecycle FROM prefix WHERE id = ?`), first); err != nil {
+				t.Fatalf("reading the withdrawn row: %v", err)
+			}
+			if life != domain.LifecycleRetired {
+				t.Errorf("the withdrawn network is %q, want retired", life)
+			}
+		})
+	}
+}

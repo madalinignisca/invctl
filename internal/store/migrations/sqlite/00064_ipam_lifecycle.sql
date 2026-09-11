@@ -30,7 +30,33 @@ ALTER TABLE ip_address ADD COLUMN lifecycle TEXT NOT NULL DEFAULT 'active'
   CONSTRAINT ip_address_lifecycle_check CHECK (lifecycle IN ('active','retired'));
 CREATE INDEX idx_ip_address_lifecycle ON ip_address(lifecycle);
 
+-- THE UNIQUE INDEXES MUST ONLY BIND LIVE ROWS, or withdrawal is a trapdoor:
+-- `10.0.0.0/8` withdrawn stays taken for ever, and CreatePrefix answers "that
+-- network is already declared" -- which is false, and names a row the operator
+-- cannot see to do anything about. RetireInterface's comment makes the general
+-- point: a withdrawal you cannot undo by redeclaring is worse than not being
+-- able to withdraw at all.
+--
+-- A NEW ROW RATHER THAN REACTIVATION, which is where this parts company with
+-- interface. A port re-added is the same physical port, so it comes back as
+-- itself, id and history intact. A CIDR is not an object; redeclaring
+-- 10.0.0.0/8 two years later is a fresh assertion about a different network
+-- that happens to occupy the same numbers, and reactivating would drag the old
+-- row's environment, role and VLAN binding back with it. Two rows is also what
+-- keeps "when was the old one withdrawn" answerable -- the reasoning
+-- user_project's partial index already carries.
+DROP INDEX prefix_vrf_cidr_key;
+DROP INDEX prefix_global_cidr_key;
+CREATE UNIQUE INDEX prefix_vrf_cidr_key    ON prefix(vrf_id, cidr_text)
+  WHERE vrf_id IS NOT NULL AND lifecycle = 'active';
+CREATE UNIQUE INDEX prefix_global_cidr_key ON prefix(cidr_text)
+  WHERE vrf_id IS NULL     AND lifecycle = 'active';
+
 -- +goose Down
+DROP INDEX prefix_global_cidr_key;
+DROP INDEX prefix_vrf_cidr_key;
+CREATE UNIQUE INDEX prefix_vrf_cidr_key    ON prefix(vrf_id, cidr_text) WHERE vrf_id IS NOT NULL;
+CREATE UNIQUE INDEX prefix_global_cidr_key ON prefix(cidr_text)         WHERE vrf_id IS NULL;
 DROP INDEX idx_ip_address_lifecycle;
 ALTER TABLE ip_address DROP COLUMN lifecycle;
 DROP INDEX idx_prefix_lifecycle;
