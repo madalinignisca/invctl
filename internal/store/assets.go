@@ -255,7 +255,7 @@ func (s *SQLStore) GetEnvironmentByCode(ctx context.Context, code string) (*doma
 	return &env, nil
 }
 
-// EnvironmentFilter narrows a environment list. Shaped like TeamFilter: the
+// EnvironmentFilter narrows an environment list. Shaped like TeamFilter: the
 // zero value is the picker's answer (retired excluded), and IncludeRetired is
 // what a display -- the environment list page itself, or a form that must keep
 // showing a stored-but-retired assignment -- asks for instead.
