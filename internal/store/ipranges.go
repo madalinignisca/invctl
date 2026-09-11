@@ -226,10 +226,17 @@ func (s *SQLStore) NextFreeAddress(ctx context.Context, prefixID string) (NextFr
 	// narrow, and it is deliberately left wide: counting an address that might
 	// be another tenant's costs one address, and missing one that is ours
 	// hands out a duplicate.
+	//
+	// A WITHDRAWN ADDRESS IS NOT AN ASSIGNMENT (migration 00064). Without this
+	// filter RetireIPAddress would flip the column and this function -- the
+	// one the operator actually sees "next free" from -- would still refuse
+	// to offer the address back, which is the exact bug the write-surface
+	// census named.
 	var addrs []span
 	err = s.read(ctx, &addrs, `
 		SELECT ip.addr_start, ip.addr_start AS addr_end FROM ip_address ip
-		WHERE ip.addr_family = ? AND ip.addr_start >= ? AND ip.addr_start <= ?`,
+		WHERE ip.addr_family = ? AND ip.addr_start >= ? AND ip.addr_start <= ?
+		  AND ip.lifecycle <> 'retired'`,
 		p.AddrFamily, p.AddrStart, p.AddrEnd)
 	if err != nil {
 		return NextFree{}, fmt.Errorf("reading assignments in %s: %w", p.CIDRText, err)

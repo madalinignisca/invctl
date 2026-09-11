@@ -678,6 +678,13 @@ func (s *SQLStore) APIListAddresses(ctx context.Context, scope domain.Environmen
 	}
 	where = append(where, `a.lifecycle <> ?`)
 	args = append(args, domain.LifecycleRetired)
+	// A withdrawn address is released back to the allocator (see
+	// allocationSpans, network.go), and it must be just as absent from this
+	// read surface as a retired asset already is -- otherwise an Ansible or
+	// observability consumer keeps being handed an address that has been
+	// freed and may since have been reassigned.
+	where = append(where, `ip.lifecycle <> ?`)
+	args = append(args, domain.LifecycleRetired)
 	query := `
 		SELECT ip.id, ip.addr_text, ip.addr_family,
 		       a.id AS asset_id, a.name AS asset_name

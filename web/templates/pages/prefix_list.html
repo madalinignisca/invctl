@@ -92,7 +92,25 @@
             {{if .HasNextFree}}{{.NextFree}}
             {{else}}<span class="util-full" title="Every usable address is assigned, reserved or inside a child network">none</span>{{end}}
           </td>
-          <td>{{if $.IsAdmin}}<a class="btn btn-sm" href="/prefixes?edit={{.ID}}">Edit</a>{{end}}</td>
+          <td style="white-space:nowrap">
+            {{if $.IsAdmin}}<a class="btn btn-sm" href="/prefixes?edit={{.ID}}">Edit</a>
+            {{/* WITHDRAWING A NETWORK (migration 00064). Offered only when the
+                 tree already shows it empty of children and direct addresses --
+                 the same two counts RetirePrefix checks server-side, so a click
+                 here is only refused for a reservation this row has no column
+                 for. Not a substitute for the store's own check: a reservation
+                 declared between this render and the click is still caught
+                 there and reported back as a flash. */}}
+            {{if and (not .Children) (not .Addresses)}}
+            <form method="post" action="/prefixes/{{.ID}}/retire" style="display:inline"
+                  hx-post="/prefixes/{{.ID}}/retire"
+                  hx-confirm="Withdraw {{.CIDRText}}? The record is kept.">
+              <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+              <button class="btn btn-sm btn-danger" type="submit">Withdraw</button>
+            </form>
+            {{end}}
+            {{end}}
+          </td>
         </tr>
         {{end}}
         {{end}}

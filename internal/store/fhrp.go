@@ -283,6 +283,19 @@ func (s *SQLStore) AssignVIP(ctx context.Context, p domain.Permit, addressID, gr
 	if err != nil {
 		return err
 	}
+	// A WITHDRAWN ADDRESS IS NOT AVAILABLE TO BE A VIP, and this check is new
+	// with migration 00064 rather than an omission before it: until ip_address
+	// had a lifecycle there was no such thing as a withdrawn one to refuse.
+	//
+	// Without it the pair of rules here deadlocks a row. RetireIPAddress
+	// refuses while fhrp_group_id is set, so an address assigned as a VIP after
+	// being withdrawn can never be withdrawn again to clear it -- while the
+	// group it serves points at an address that appears in no list, which is
+	// the worst possible state for a failure target to be in.
+	if before.Lifecycle == domain.LifecycleRetired {
+		return domain.NewValidation("address_id",
+			"that address has been withdrawn, so it cannot be a virtual address")
+	}
 	at := domain.FormatTime(s.now())
 	after := *before
 	after.FHRPGroupID = &groupID

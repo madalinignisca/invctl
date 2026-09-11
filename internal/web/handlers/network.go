@@ -460,6 +460,51 @@ func (a *App) IPAddressUpdate(w http.ResponseWriter, r *http.Request) {
 	render.Redirect(w, r, back)
 }
 
+// IPAddressRetire frees an address back to the allocator.
+//
+// THE REFUSAL IS THE USEFUL PART, and it belongs to the store: an address
+// still bound to an endpoint or answering as an FHRP group's virtual address
+// cannot be withdrawn until that binding is cleared. There is no form here to
+// re-render on refusal -- a retire button carries nothing the operator typed
+// -- so this flashes and redirects, the same shape as InterfaceRetire and
+// refuseAssetEdit's own documented exception.
+func (a *App) IPAddressRetire(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	existing, err := a.Store.GetIPAddress(r.Context(), id)
+	if err != nil {
+		a.handleStoreError(w, r, err)
+		return
+	}
+	// Read before the write, so the redirect lands on the right asset page
+	// even when the retire is refused -- the operator needs to be looking at
+	// the address to act on the reason.
+	assetID := ""
+	if existing.InterfaceID != nil {
+		if iface, ifErr := a.Store.GetInterface(r.Context(), *existing.InterfaceID); ifErr == nil {
+			assetID = iface.AssetID
+		}
+	}
+	back := "/assets"
+	if assetID != "" {
+		back = "/assets/" + assetID
+	}
+
+	if err := a.Store.RetireIPAddress(r.Context(), a.permit(r), id); err != nil {
+		if isConflict(err) {
+			a.setFlash(r, "error", "That address is still in use — an endpoint binds to "+
+				"it, or it answers as a redundancy group's virtual address. Clear that "+
+				"first; withdrawing it would leave the binding pointing at an address "+
+				"nothing holds any more.")
+			render.Redirect(w, r, back)
+			return
+		}
+		a.handleStoreError(w, r, err)
+		return
+	}
+	a.setFlash(r, "success", "Address "+existing.AddrText+" withdrawn. The record is kept.")
+	render.Redirect(w, r, back)
+}
+
 // PrefixUpdate corrects a network.
 func (a *App) PrefixUpdate(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
@@ -497,6 +542,38 @@ func (a *App) PrefixUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.setFlash(r, "success", "Network updated.")
+	render.Redirect(w, r, "/prefixes")
+}
+
+// PrefixRetire withdraws a network, refusing while a child prefix, an address
+// or a reservation still lives inside it.
+//
+// THE REFUSAL IS THE USEFUL PART, and it belongs to the store (RetirePrefix,
+// network.go): it is the one that walks the same tree the prefixes page
+// renders, so a network offered for withdrawal here is one the store will
+// actually accept. There is no form to lose on refusal -- a retire button
+// carries nothing the operator typed -- so this flashes and redirects, the
+// same shape as InterfaceRetire.
+func (a *App) PrefixRetire(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	existing, err := a.Store.GetPrefix(r.Context(), id)
+	if err != nil {
+		a.handleStoreError(w, r, err)
+		return
+	}
+	if err := a.Store.RetirePrefix(r.Context(), a.permit(r), id); err != nil {
+		if isConflict(err) {
+			a.setFlash(r, "error", "That network still has something inside it — a "+
+				"child prefix, an assigned address or a reservation. Withdraw those "+
+				"first; retiring this network would leave them delegated from a "+
+				"network that no longer exists.")
+			render.Redirect(w, r, "/prefixes")
+			return
+		}
+		a.handleStoreError(w, r, err)
+		return
+	}
+	a.setFlash(r, "success", "Network "+existing.CIDRText+" withdrawn. The record is kept.")
 	render.Redirect(w, r, "/prefixes")
 }
 

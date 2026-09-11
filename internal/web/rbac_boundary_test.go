@@ -1178,8 +1178,10 @@ func TestNoWriteRouteIsReachableWithNoSessionAtAll(t *testing.T) {
 	// an anchor could each be declared and never taken back. 202 -> 204: their
 	// correction half, POST /network/groups/{id} and /network/anchors/{id} --
 	// availability/min_healthy/failover_mode and an anchor's group could be
-	// declared wrong and never fixed.
-	const pinnedNoSessionRouteCount = 204
+	// declared wrong and never fixed. 204 -> 206: POST /addresses/{id}/retire
+	// and /prefixes/{id}/retire (migration 00064) -- a network declared in
+	// error or an address freed could previously only ever be added.
+	const pinnedNoSessionRouteCount = 206
 
 	for _, eng := range boundaryEngines(t) {
 		t.Run(eng.name, func(t *testing.T) {

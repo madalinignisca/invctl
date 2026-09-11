@@ -315,7 +315,7 @@ var DeclaredColumns = map[string][]string{
 		"lifecycle",
 		"created_at", "updated_at", "row_version",
 	},
-	"ip_address": {"id", "addr_text", "addr_family", "addr_start", "interface_id", "fhrp_group_id", "role", "created_at", "updated_at", "row_version"},
+	"ip_address": {"id", "addr_text", "addr_family", "addr_start", "interface_id", "fhrp_group_id", "role", "lifecycle", "created_at", "updated_at", "row_version"},
 	"link":       {"id", "a_interface_id", "b_interface_id", "medium", "length_m", "lifecycle"},
 	"net_anchor": {
 		"id", "code", "name", "scope", "group_id", "environment_id", "plane",
@@ -340,7 +340,7 @@ var DeclaredColumns = map[string][]string{
 	},
 	"prefix": {
 		"id", "cidr_text", "addr_family", "addr_start", "addr_end",
-		"environment_id", "role", "vrf_id", "vlan_ref_id",
+		"environment_id", "role", "vrf_id", "vlan_ref_id", "lifecycle",
 		"created_at", "updated_at", "row_version",
 	},
 	// Clusters, migration 00037. Declared: somebody built a cluster and set its

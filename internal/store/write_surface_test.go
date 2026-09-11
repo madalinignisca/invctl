@@ -142,10 +142,11 @@ var writeSurfaceGaps = map[string]string{
 	// through everything that touches a port.
 	//
 	// --- correction exists, withdrawal does not ---
-	"Prefix": "no withdrawal. A network declared in error is permanent, and it " +
-		"keeps taking part in every containment answer computed over the tree.",
-	"IPAddress": "no withdrawal. An address freed cannot be released, so the " +
-		"allocator keeps treating it as taken.",
+	//
+	// Prefix and IPAddress left this list with migration 00064: RetirePrefix
+	// and RetireIPAddress (internal/store/network.go) close both gaps, refusing
+	// rather than cascading while a child prefix, an address, a reservation, an
+	// endpoint or an FHRP virtual-address binding is still live.
 	"Environment": "no withdrawal. Referenced by nearly everything, so retiring " +
 		"one is a genuinely bigger question than the others here -- but the answer " +
 		"today is that nobody can, which is not the same as having decided.",
