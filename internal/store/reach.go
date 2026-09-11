@@ -48,6 +48,9 @@ func (s *SQLStore) CreateNetGroup(ctx context.Context, p domain.Permit, g *domai
 		return err
 	}
 	return s.write(ctx, p, func(t *tx) error {
+		if err := requireAssignableEnvironment(ctx, t, "environment_id", g.EnvironmentID, nil); err != nil {
+			return err
+		}
 		_, err := t.exec(ctx, `
 			INSERT INTO net_group (id, code, name, kind, role, availability, min_healthy,
 			                       failover_mode, environment_id, lifecycle, source, confidence,
@@ -104,6 +107,9 @@ func (s *SQLStore) UpdateNetGroup(ctx context.Context, p domain.Permit, g *domai
 	g.UpdatedAt = at
 
 	return s.write(ctx, p, func(t *tx) error {
+		if err := requireAssignableEnvironment(ctx, t, "environment_id", g.EnvironmentID, before.EnvironmentID); err != nil {
+			return err
+		}
 		res, err := t.exec(ctx, `
 			UPDATE net_group SET code = ?, name = ?, kind = ?, role = ?, availability = ?,
 			                     min_healthy = ?, failover_mode = ?, environment_id = ?,
@@ -689,6 +695,9 @@ func (s *SQLStore) CreateNetAnchor(ctx context.Context, p domain.Permit, na *dom
 		return err
 	}
 	return s.write(ctx, p, func(t *tx) error {
+		if err := requireAssignableEnvironment(ctx, t, "environment_id", na.EnvironmentID, nil); err != nil {
+			return err
+		}
 		_, err := t.exec(ctx, `
 			INSERT INTO net_anchor (id, code, name, scope, group_id, environment_id, plane,
 			                        lifecycle, created_at, updated_at)
@@ -757,6 +766,9 @@ func (s *SQLStore) UpdateNetAnchor(ctx context.Context, p domain.Permit, na *dom
 	na.UpdatedAt = at
 
 	return s.write(ctx, p, func(t *tx) error {
+		if err := requireAssignableEnvironment(ctx, t, "environment_id", na.EnvironmentID, before.EnvironmentID); err != nil {
+			return err
+		}
 		// The group must be live: an anchor pointing at a withdrawn group is
 		// invisible to the M3 loader, so it would silently stop anchoring
 		// anything while still reading as declared.

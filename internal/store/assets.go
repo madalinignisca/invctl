@@ -1540,3 +1540,44 @@ func (r AssetRow) InheritedEOL() bool {
 	_, source := domain.ResolveEOL(r.EOLDate, r.DeviceTypeEOL)
 	return source == domain.EOLFromDeviceType
 }
+
+// requireAssignableEnvironment enforces the half of the withdrawal rule that a
+// picker cannot: a retired environment is not NEWLY selectable.
+//
+// docs/AUDIT.md's rule for team and custom_field_option is "what is STORED must
+// keep displaying, what is RETIRED must not be newly selectable", and migration
+// 00065 applies it to environments. The displaying half is the templates' job.
+// This is the other half, and it lives in the store deliberately:
+//
+//   - The forms that pick an environment are SELECT elements on list pages that
+//     render one shared option list across every row's inline edit. Dropping
+//     retired options there silently reassigns any row whose stored value just
+//     vanished from the list -- worse than the problem being solved -- so those
+//     pages keep showing them. Enforcement has to be somewhere else.
+//   - A UI-only rule is not a rule. The read-only API, the importer and any
+//     future caller reach these same methods without passing a template.
+//
+// UNCHANGED IS ALWAYS ALLOWED, which is what makes a labelled entity editable
+// at all: a prefix carrying a withdrawn environment must still accept an edit
+// to its role or its VLAN without being forced to relabel first. Only a CHANGE
+// to a retired environment is refused.
+func requireAssignableEnvironment(ctx context.Context, t *tx, field string, next, current *string) error {
+	if next == nil || *next == "" {
+		return nil
+	}
+	if current != nil && *current == *next {
+		return nil // unchanged: the stored value keeps round-tripping
+	}
+	var lifecycle string
+	if err := t.get(ctx, &lifecycle, `SELECT lifecycle FROM environment WHERE id = ?`, *next); err != nil {
+		ve := &domain.ValidationError{}
+		ve.Add(field, "choose an environment")
+		return ve
+	}
+	if lifecycle == domain.LifecycleRetired {
+		ve := &domain.ValidationError{}
+		ve.Add(field, "that environment has been withdrawn")
+		return ve
+	}
+	return nil
+}

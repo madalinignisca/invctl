@@ -275,3 +275,92 @@ func TestReDeclaringALiveEnvironmentIsStillRefused(t *testing.T) {
 		})
 	}
 }
+
+// TestARetiredEnvironmentIsNotNewlySelectableButKeepsRoundTripping is the
+// enforcement half of the rule, and it lives here rather than in a handler
+// test on purpose.
+//
+// docs/AUDIT.md: "what is STORED must keep displaying, what is RETIRED must not
+// be newly selectable." The displaying half is the templates' job. This half
+// cannot be, for two reasons:
+//
+//   - The prefix, VLAN and service pickers are SELECT elements on list pages
+//     that render ONE shared option list across every row's inline edit.
+//     Dropping retired options there silently reassigns any row whose stored
+//     value just vanished from the list -- a worse bug than the one being
+//     fixed, and the same shape as the setDataClasses nil/empty collision where
+//     unticking the last data class silently restored it.
+//   - A rule enforced only in a template is not enforced. The read-only API and
+//     the importer reach these same store methods without rendering anything.
+//
+// The two halves of the assertion pull against each other, which is why both
+// are here: refusing a retired environment outright would make an entity that
+// already carries one uneditable, forcing a relabel before any unrelated fix.
+func TestARetiredEnvironmentIsNotNewlySelectableButKeepsRoundTripping(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			s, ctx := newStore(t, e)
+			live := mustEnvironment(t, s, ctx, "live-env", domain.EnvRoleProduction)
+			dead := mustEnvironment(t, s, ctx, "dead-env", domain.EnvRoleStaging)
+
+			// Labelled BEFORE withdrawal, which is the only way to get here.
+			labelled := mustPrefix(t, s, ctx, "10.95.0.0/24")
+			stored, err := s.GetPrefix(ctx, labelled)
+			if err != nil {
+				t.Fatalf("loading: %v", err)
+			}
+			stored.EnvironmentID = &dead
+			if err := s.UpdatePrefix(ctx, testPermit, stored); err != nil {
+				t.Fatalf("labelling while still live: %v", err)
+			}
+			if err := s.RetireEnvironment(ctx, testPermit, dead); err != nil {
+				t.Fatalf("withdrawing the environment: %v", err)
+			}
+
+			// ROUND TRIP: an unrelated edit must still go through, carrying the
+			// withdrawn label untouched.
+			stored, err = s.GetPrefix(ctx, labelled)
+			if err != nil {
+				t.Fatalf("reloading: %v", err)
+			}
+			role := "container"
+			stored.Role = &role
+			if err := s.UpdatePrefix(ctx, testPermit, stored); err != nil {
+				t.Fatalf("editing a prefix that carries a withdrawn environment: %v\n"+
+					"An entity labelled before the withdrawal must stay editable, or "+
+					"withdrawing an environment freezes everything wearing it.", err)
+			}
+			var got string
+			if err := s.DB().Reader.Get(&got, s.DB().Reader.Rebind(
+				`SELECT COALESCE(environment_id, '') FROM prefix WHERE id = ?`), labelled); err != nil {
+				t.Fatalf("reading back: %v", err)
+			}
+			if got != dead {
+				t.Errorf("environment_id = %q after an unrelated edit, want the withdrawn "+
+					"one kept: the stored label was dropped on save", got)
+			}
+
+			// NOT NEWLY SELECTABLE: moving a different prefix ONTO it is refused.
+			fresh := mustPrefix(t, s, ctx, "10.96.0.0/24")
+			other, err := s.GetPrefix(ctx, fresh)
+			if err != nil {
+				t.Fatalf("loading: %v", err)
+			}
+			other.EnvironmentID = &live
+			if err := s.UpdatePrefix(ctx, testPermit, other); err != nil {
+				t.Fatalf("labelling with a live environment: %v", err)
+			}
+			other, err = s.GetPrefix(ctx, fresh)
+			if err != nil {
+				t.Fatalf("reloading: %v", err)
+			}
+			other.EnvironmentID = &dead
+			if err := s.UpdatePrefix(ctx, testPermit, other); err == nil {
+				t.Error("a prefix was newly labelled with a withdrawn environment. " +
+					"The picker still lists it -- deliberately, so a stored value " +
+					"cannot vanish out of a SELECT and silently reassign the row -- " +
+					"so this refusal is the only thing enforcing the rule.")
+			}
+		})
+	}
+}

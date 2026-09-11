@@ -212,6 +212,11 @@ func (s *SQLStore) insertService(ctx context.Context, t *tx, svc *domain.Service
 	if err := t.requireVocabulary(ctx, vocabServiceKind, "kind", svc.Kind); err != nil {
 		return err
 	}
+	// No current value on an insert, so any retired environment is a NEW
+	// selection and refused.
+	if err := requireAssignableEnvironment(ctx, t, "environment_id", &svc.EnvironmentID, nil); err != nil {
+		return err
+	}
 	if err := requireRole(ctx, t, svc.ManagerRole); err != nil {
 		return err
 	}
@@ -313,6 +318,9 @@ func (s *SQLStore) UpdateService(ctx context.Context, p domain.Permit, svc *doma
 	svc.UpdatedAt = domain.FormatTime(s.now())
 
 	return s.write(ctx, p, func(t *tx) error {
+		if err := requireAssignableEnvironment(ctx, t, "environment_id", &svc.EnvironmentID, &before.EnvironmentID); err != nil {
+			return err
+		}
 		if err := t.requireVocabulary(ctx, vocabServiceKind, "kind", svc.Kind); err != nil {
 			return err
 		}
