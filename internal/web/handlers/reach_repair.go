@@ -49,6 +49,10 @@ type netGroupDetailPage struct {
 	Roles          []string
 	Availabilities []string
 	FailoverModes  []string
+	// Edit carries a refused correction of the group itself, so the form
+	// reopens with what was typed instead of the stored row -- see
+	// renderNetGroupDetail. Nil on an ordinary GET.
+	Edit *editState
 }
 
 // netGroupView is the group plus what the page says about withdrawing it.
@@ -74,8 +78,19 @@ type netGroupView struct {
 
 // NetworkGroupDetail lists what one forwarder group holds.
 func (a *App) NetworkGroupDetail(w http.ResponseWriter, r *http.Request) {
+	a.renderNetGroupDetail(w, r, http.StatusOK, r.PathValue("id"), nil)
+}
+
+// renderNetGroupDetail draws the page at any status, so a refused correction
+// can come back as 422 (or 409, for a stale token) with the group's own form
+// reopened on what was typed -- the same shape renderAssetDetail and
+// renderPower already have, and for the same reason: a bare flash-and-
+// redirect throws the submission away and reports a success-shaped status
+// for a refusal.
+func (a *App) renderNetGroupDetail(w http.ResponseWriter, r *http.Request, status int,
+	id string, edit *editState) {
+
 	ctx := r.Context()
-	id := r.PathValue("id")
 	group, err := a.Store.GetNetGroup(ctx, id)
 	if err != nil {
 		a.handleStoreError(w, r, err)
@@ -97,7 +112,7 @@ func (a *App) NetworkGroupDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	a.Render.Page(w, http.StatusOK, "net_group_detail", netGroupDetailPage{
+	a.Render.Page(w, status, "net_group_detail", netGroupDetailPage{
 		Base: a.base(r, "Group "+group.Code, "network"),
 		Group: &netGroupView{
 			ID: group.ID, Code: group.Code, Name: group.Name,
@@ -114,6 +129,7 @@ func (a *App) NetworkGroupDetail(w http.ResponseWriter, r *http.Request) {
 		Roles:          domain.NetGroupRoles,
 		Availabilities: domain.NetGroupAvailabilities,
 		FailoverModes:  domain.FailoverModes,
+		Edit:           edit,
 	})
 }
 
@@ -230,8 +246,13 @@ func (a *App) NetworkGroupUpdate(w http.ResponseWriter, r *http.Request) {
 			a.handleStoreError(w, r, err)
 			return
 		}
-		a.setFlash(r, "error", "That group was not accepted: "+joinMessages(messages))
-		render.Redirect(w, r, "/network/groups/"+id)
+		// 422 (or 409, for a stale token) with the form reopened on what was
+		// typed, not a redirect that throws it away -- the house rule
+		// (CLAUDE.md), the same shape every other correction on this estate
+		// follows.
+		a.renderNetGroupDetail(w, r, refusalStatus(err), id,
+			rejected(r, id, messages, "code", "name", "kind", "role",
+				"availability", "min_healthy", "failover_mode", "environment_id"))
 		return
 	}
 	a.setFlash(r, "success", "Forwarder group "+updated.Code+" updated.")
@@ -281,8 +302,18 @@ func (a *App) NetworkAnchorUpdate(w http.ResponseWriter, r *http.Request) {
 			a.handleStoreError(w, r, err)
 			return
 		}
-		a.setFlash(r, "error", "That anchor was not accepted: "+joinMessages(messages))
-		render.Redirect(w, r, "/network")
+		// 422 (or 409, for a stale token) with the row reopened on what was
+		// typed, not a redirect that throws it away -- CLAUDE.md's rule, and
+		// buildNetworkListPage already exists to do it: the topology page is
+		// assembled from every other panel on it too, so there is no second
+		// assembly to keep in step.
+		page, err := a.buildNetworkListPage(r, refusalStatus(err), nil, nil, nil, nil, nil,
+			rejected(r, id, messages, "code", "name", "scope", "plane", "group_id", "environment_id"))
+		if err != nil {
+			a.serverError(w, r, err)
+			return
+		}
+		a.Render.Page(w, refusalStatus(err), "network_list", page)
 		return
 	}
 	a.setFlash(r, "success", "Anchor "+updated.Code+" updated.")

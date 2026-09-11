@@ -146,31 +146,39 @@
      wrong, every verdict computed through it is wrong, and the only previous
      fix was to withdraw the group, which cascades away every member, uplink,
      attachment and anchor, and then redraw all of them to correct one number. */}}
+{{/* .Edit carries what was actually TYPED when a correction was refused --
+     nil on an ordinary GET, in which case .Value falls back to the stored
+     row (.Group), the same rule ports and addresses follow on the asset
+     page. */}}
 <form class="panel" method="post" action="/network/groups/{{.Group.ID}}">
   <input type="hidden" name="csrf_token" value="{{.CSRF}}">
-  <input type="hidden" name="row_version" value="{{.Group.RowVersion}}">
+  <input type="hidden" name="row_version" value="{{.Edit.Value "row_version" (itoa .Group.RowVersion)}}">
   <div class="panel-head"><h2>Correct this group</h2></div>
   <div class="panel-body">
     <div class="field-row">
       <div class="field">
         <label for="g-code">Code</label>
-        <input id="g-code" class="mono" type="text" name="code" value="{{.Group.Code}}" required>
+        <input id="g-code" class="mono {{if .Edit.Err "code"}}invalid{{end}}"
+               type="text" name="code" value="{{.Edit.Value "code" .Group.Code}}" required>
+        {{with .Edit.Err "code"}}<div class="field-error">{{.}}</div>{{end}}
       </div>
       <div class="field">
         <label for="g-name">Name</label>
-        <input id="g-name" type="text" name="name" value="{{.Group.Name}}" required>
+        <input id="g-name" class="{{if .Edit.Err "name"}}invalid{{end}}"
+               type="text" name="name" value="{{.Edit.Value "name" .Group.Name}}" required>
+        {{with .Edit.Err "name"}}<div class="field-error">{{.}}</div>{{end}}
       </div>
       <div class="field">
         <label for="g-kind">Kind</label>
+        {{$k := .Edit.Value "kind" .Group.Kind}}
         <select id="g-kind" name="kind" required>
-          {{$k := .Group.Kind}}
           {{range .Kinds}}<option value="{{.}}" {{if eq . $k}}selected{{end}}>{{.}}</option>{{end}}
         </select>
       </div>
       <div class="field">
         <label for="g-role">Role</label>
+        {{$rl := .Edit.Value "role" .Group.Role}}
         <select id="g-role" name="role" required>
-          {{$rl := .Group.Role}}
           {{range .Roles}}<option value="{{.}}" {{if eq . $rl}}selected{{end}}>{{.}}</option>{{end}}
         </select>
       </div>
@@ -178,24 +186,27 @@
     <div class="field-row">
       <div class="field">
         <label for="g-avail">Availability</label>
+        {{$av := .Edit.Value "availability" .Group.Availability}}
         <select id="g-avail" name="availability" required>
-          {{$av := .Group.Availability}}
           {{range .Availabilities}}<option value="{{.}}" {{if eq . $av}}selected{{end}}>{{.}}</option>{{end}}
         </select>
         <div class="field-hint">What losing a member means: whether this group degrades or dies.</div>
       </div>
       <div class="field">
         <label for="g-min">Minimum healthy</label>
-        <input id="g-min" type="number" name="min_healthy" min="1" value="{{.Group.MinHealthy}}">
+        <input id="g-min" class="{{if .Edit.Err "min_healthy"}}invalid{{end}}"
+               type="number" name="min_healthy" min="1" value="{{.Edit.Value "min_healthy" .Group.MinHealthy}}">
         <div class="field-hint">How many members must survive. Blank means nobody has recorded one — not zero.</div>
+        {{with .Edit.Err "min_healthy"}}<div class="field-error">{{.}}</div>{{end}}
       </div>
       <div class="field">
         <label for="g-failover">Failover mode</label>
+        {{$fm := .Edit.Value "failover_mode" .Group.FailoverMode}}
         <select id="g-failover" name="failover_mode">
           <option value="">—</option>
-          {{$fm := .Group.FailoverMode}}
           {{range .FailoverModes}}<option value="{{.}}" {{if eq . $fm}}selected{{end}}>{{.}}</option>{{end}}
         </select>
+        {{with .Edit.Err "failover_mode"}}<div class="field-error">{{.}}</div>{{end}}
       </div>
     </div>
     <div class="form-actions">

@@ -14,6 +14,21 @@
   <span class="sep">/</span><span>{{.Asset.Name}}</span>
 </div>
 
+{{/* $.MoveEdit is set only when a POST to /assets/{id}/parent (AssetReparent)
+     was refused -- see assetMoveEditID. There is no picker to reopen here
+     (asset_form's own comment explains why moving is a separate flow from
+     the correction form), so this names the destination that was rejected
+     and why, rather than silently discarding both the way a flash-and-
+     redirect did. */}}
+{{with $.MoveEdit}}
+<div class="panel">
+  <div class="panel-body">
+    <p class="field-error"><strong>That move was not accepted.</strong> {{.Err "parent_id"}}</p>
+    <input type="hidden" name="parent_id" value="{{.Value "parent_id" ""}}">
+  </div>
+</div>
+{{end}}
+
 <div class="page-head">
   <div class="eyebrow">{{.Asset.Kind}}</div>
   <h1>{{.Asset.Name}}</h1>
@@ -474,6 +489,14 @@
          owner who owns this asset may write it -- asset-scoped, not the
          page-wide .CanWrite. */}}
     {{if $.CanWriteEntity "asset" .Asset.ID}}
+    {{/* $.OccEdit carries what was typed when a submission of this set was
+         refused -- see occupantsEditID. Field-scoped errors (a share out of
+         range, a project named twice) are keyed generically by
+         ValidateOccupants ("percent"/"project_id"), not per row, so they are
+         shown once above the table rather than chased to a row that may not
+         even be the one at fault. */}}
+    {{with $.OccEdit.Err "percent"}}<div class="field-error">{{.}}</div>{{end}}
+    {{with $.OccEdit.Err "project_id"}}<div class="field-error">{{.}}</div>{{end}}
     <form method="post" action="/assets/{{.Asset.ID}}/occupants" style="margin-top:12px">
       <input type="hidden" name="csrf_token" value="{{.CSRF}}">
       <p class="field-hint">
@@ -484,6 +507,7 @@
         <thead><tr><th>Project</th><th>Share (%)</th><th>Why this number</th></tr></thead>
         <tbody>
           {{$occ := .SharedWith}}
+          {{$edit := $.OccEdit}}
           {{range .Projects}}
           <tr>
             <td>
@@ -491,12 +515,13 @@
               {{.Code}}
             </td>
             <td>
-              <input type="number" name="percent_{{.ID}}" min="0" max="100"
-                     style="width:6em" value="{{percentOf $occ .ID}}">
+              <input type="number" name="{{printf "percent_%s" .ID}}" min="0" max="100"
+                     style="width:6em" value="{{$edit.Value (printf "percent_%s" .ID) (percentOf $occ .ID)}}">
+              {{with $edit.Err (printf "percent_%s" .ID)}}<div class="field-error">{{.}}</div>{{end}}
             </td>
             <td>
-              <input type="text" name="note_{{.ID}}" style="width:100%"
-                     value="{{occupantNote $occ .ID}}"
+              <input type="text" name="{{printf "note_%s" .ID}}" style="width:100%"
+                     value="{{$edit.Value (printf "note_%s" .ID) (occupantNote $occ .ID)}}"
                      placeholder="how the figure was agreed">
             </td>
           </tr>
@@ -655,23 +680,33 @@
              ?power= rather than ?edit=: this page spends EditRow on the asset
              itself, and opening an input must not close the asset's own form. */}}
         {{if and $.IsAdmin (eq .ID $.PowerEdit)}}
+        {{/* $.PowerRowEdit carries what was actually TYPED when a correction
+             of THIS row was refused -- nil on an ordinary ?power= open with
+             nothing refused yet, in which case .Value falls back to the
+             stored figure, the same rule ports and addresses follow above. */}}
         <tr class="row-editing">
-          <td><input form="pi-{{.ID}}" class="mono" type="text" name="name" value="{{.Name}}"
-                     aria-label="Input name" required style="width:6em"></td>
+          <td><input form="pi-{{.ID}}" class="mono {{if $.PowerRowEdit.Err "name"}}invalid{{end}}"
+                     type="text" name="name" value="{{$.PowerRowEdit.Value "name" .Name}}"
+                     aria-label="Input name" required style="width:6em">
+              {{with $.PowerRowEdit.Err "name"}}<div class="field-error">{{.}}</div>{{end}}</td>
           <td colspan="2">
             {{$row := .}}
+            {{$feedID := $.PowerRowEdit.Value "feed_id" $row.FeedID}}
             <select form="pi-{{.ID}}" name="feed_id" aria-label="Feed" required>
-              {{range $.PowerFeeds}}<option value="{{.ID}}" {{if eq .ID $row.FeedID}}selected{{end}}>{{.SiteName}} / {{.PanelName}} / {{.Name}}</option>{{end}}
+              {{range $.PowerFeeds}}<option value="{{.ID}}" {{if eq .ID $feedID}}selected{{end}}>{{.SiteName}} / {{.PanelName}} / {{.Name}}</option>{{end}}
             </select>
+            {{with $.PowerRowEdit.Err "feed_id"}}<div class="field-error">{{.}}</div>{{end}}
           </td>
           <td>
-            <input form="pi-{{.ID}}" type="number" name="draw_va" value="{{derefInt .DrawVA}}"
+            <input form="pi-{{.ID}}" type="number" name="draw_va"
+                   value="{{$.PowerRowEdit.Value "draw_va" (derefInt .DrawVA)}}"
                    min="0" aria-label="Draw in volt-amps" style="width:6em"> VA
+            {{with $.PowerRowEdit.Err "draw_va"}}<div class="field-error">{{.}}</div>{{end}}
           </td>
           <td class="row-actions" style="white-space:nowrap">
             <form id="pi-{{.ID}}" method="post" action="/assets/{{$.Asset.ID}}/power/{{.ID}}" style="display:inline">
               <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
-              <input type="hidden" name="row_version" value="{{.RowVersion}}">
+              <input type="hidden" name="row_version" value="{{$.PowerRowEdit.Value "row_version" (itoa .RowVersion)}}">
               {{/* Carried, not shown: UpdatePowerInput writes every column. */}}
               <input type="hidden" name="notes" value="{{deref .Notes}}">
               <button class="btn btn-sm btn-primary" type="submit">Save</button>
@@ -706,25 +741,34 @@
     {{end}}
 
     {{if .IsAdmin}}
+    {{/* $.PowerCreateEdit carries what was typed when a submission of THIS
+         form was refused, so it reopens with the operator's input rather
+         than blank fields -- see powerInputCreateEditID. */}}
     <form method="post" action="/assets/{{.Asset.ID}}/power" style="margin-top:12px">
       <input type="hidden" name="csrf_token" value="{{.CSRF}}">
       <div class="field-row">
         <div class="field">
           <label for="pi-name">Input</label>
-          <input id="pi-name" type="text" name="name" placeholder="A" required>
+          <input id="pi-name" class="{{if $.PowerCreateEdit.Err "name"}}invalid{{end}}"
+                 type="text" name="name" value="{{$.PowerCreateEdit.Value "name" ""}}" placeholder="A" required>
+          {{with $.PowerCreateEdit.Err "name"}}<div class="field-error">{{.}}</div>{{end}}
         </div>
         <div class="field">
           <label for="pi-feed">Feed</label>
+          {{$newFeed := $.PowerCreateEdit.Value "feed_id" ""}}
           <select id="pi-feed" name="feed_id" required>
             <option value="">Choose…</option>
-            {{range .PowerFeeds}}<option value="{{.ID}}">{{.SiteName}} / {{.PanelName}} / {{.Name}}</option>{{end}}
+            {{range .PowerFeeds}}<option value="{{.ID}}" {{if eq .ID $newFeed}}selected{{end}}>{{.SiteName}} / {{.PanelName}} / {{.Name}}</option>{{end}}
           </select>
           {{if not .PowerFeeds}}<div class="field-hint">Add a feed under <a href="/power">Power</a> first.</div>{{end}}
+          {{with $.PowerCreateEdit.Err "feed_id"}}<div class="field-error">{{.}}</div>{{end}}
         </div>
         <div class="field">
           <label for="pi-draw">Draw (VA)</label>
-          <input id="pi-draw" type="number" name="draw_va" min="0">
+          <input id="pi-draw" class="{{if $.PowerCreateEdit.Err "draw_va"}}invalid{{end}}"
+                 type="number" name="draw_va" value="{{$.PowerCreateEdit.Value "draw_va" ""}}" min="0">
           <div class="field-hint">Nameplate — the whole load of THIS asset, not your half of it, and not what it passes on to something downstream. A feed must be able to carry its partner's load alone. Nothing measures this.</div>
+          {{with $.PowerCreateEdit.Err "draw_va"}}<div class="field-error">{{.}}</div>{{end}}
         </div>
       </div>
       <div class="form-actions"><button type="submit" class="btn btn-sm">Add input</button></div>

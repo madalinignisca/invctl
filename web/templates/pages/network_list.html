@@ -111,30 +111,43 @@
              correction. */}}
         {{if and $.IsAdmin (eq .ID $.EditRow)}}
         {{$row := .}}
+        {{/* $.Edit carries what was actually TYPED when a correction of THIS
+             anchor was refused -- nil on an ordinary ?edit= open with
+             nothing refused yet, in which case .Value falls back to $row,
+             the same rule the group correction form and the asset page's
+             ports and addresses follow. */}}
         <tr class="row-editing">
-          <td><input form="anc-{{.ID}}" class="mono" type="text" name="code"
-                     value="{{.Code}}" aria-label="Code" required style="width:8em"></td>
-          <td><input form="anc-{{.ID}}" type="text" name="name"
-                     value="{{.Name}}" aria-label="Name" required style="width:10em"></td>
+          <td><input form="anc-{{.ID}}" class="mono {{if $.Edit.Err "code"}}invalid{{end}}"
+                     type="text" name="code" value="{{$.Edit.Value "code" .Code}}"
+                     aria-label="Code" required style="width:8em">
+              {{with $.Edit.Err "code"}}<div class="field-error">{{.}}</div>{{end}}</td>
+          <td><input form="anc-{{.ID}}" class="{{if $.Edit.Err "name"}}invalid{{end}}"
+                     type="text" name="name" value="{{$.Edit.Value "name" .Name}}"
+                     aria-label="Name" required style="width:10em">
+              {{with $.Edit.Err "name"}}<div class="field-error">{{.}}</div>{{end}}</td>
           <td>
+            {{$scope := $.Edit.Value "scope" $row.Scope}}
             <select form="anc-{{.ID}}" name="scope" aria-label="Scope" required>
-              {{range $.AnchorForm.Scopes}}<option value="{{.}}" {{if eq . $row.Scope}}selected{{end}}>{{.}}</option>{{end}}
+              {{range $.AnchorForm.Scopes}}<option value="{{.}}" {{if eq . $scope}}selected{{end}}>{{.}}</option>{{end}}
             </select>
           </td>
           <td>
+            {{$groupID := $.Edit.Value "group_id" $row.GroupID}}
             <select form="anc-{{.ID}}" name="group_id" aria-label="Group" required>
-              {{range $.AnchorForm.Groups}}<option value="{{.ID}}" {{if eq .ID $row.GroupID}}selected{{end}}>{{.Code}}</option>{{end}}
+              {{range $.AnchorForm.Groups}}<option value="{{.ID}}" {{if eq .ID $groupID}}selected{{end}}>{{.Code}}</option>{{end}}
             </select>
+            {{with $.Edit.Err "group_id"}}<div class="field-error">{{.}}</div>{{end}}
           </td>
           <td>
+            {{$plane := $.Edit.Value "plane" $row.Plane}}
             <select form="anc-{{.ID}}" name="plane" aria-label="Plane" required>
-              {{range $.UplinkForm.Planes}}<option value="{{.}}" {{if eq . $row.Plane}}selected{{end}}>{{.}}</option>{{end}}
+              {{range $.UplinkForm.Planes}}<option value="{{.}}" {{if eq . $plane}}selected{{end}}>{{.}}</option>{{end}}
             </select>
           </td>
           <td style="white-space:nowrap">
             <form id="anc-{{.ID}}" method="post" action="/network/anchors/{{.ID}}" style="display:inline">
               <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
-              <input type="hidden" name="row_version" value="{{.RowVersion}}">
+              <input type="hidden" name="row_version" value="{{$.Edit.Value "row_version" (itoa .RowVersion)}}">
               <button class="btn btn-sm btn-primary" type="submit">Save</button>
             </form>
             <a class="btn btn-sm" href="/network">Cancel</a>

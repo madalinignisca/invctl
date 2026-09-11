@@ -457,6 +457,19 @@ type assetDetailPage struct {
 	// one: opening the power row must not close the asset form, and the two
 	// are different verbs on different entities that happen to share a page.
 	PowerEdit string
+	// PowerRowEdit carries a refused correction of the power input named by
+	// PowerEdit, so its fields reopen showing what was typed rather than what
+	// is stored. Nil-safe, like every other editState use on this page.
+	PowerRowEdit *editState
+	// PowerCreateEdit carries a refused "add an input" submission, so that
+	// form reopens with what was typed instead of silently clearing it.
+	PowerCreateEdit *editState
+	// OccEdit carries a refused occupant-set submission -- see occupantsEditID.
+	OccEdit *editState
+	// MoveEdit carries a refused reparent -- see assetMoveEditID. There is no
+	// picker to reopen (asset_form's own comment explains why moving is a
+	// separate flow), so this only carries the error and what was submitted.
+	MoveEdit *editState
 	// Elevation is set only for a rack: what is mounted in it and where.
 	Elevation *store.RackElevation
 	// Fit is set only for a rack: whether what is in it physically fits, what
@@ -708,6 +721,17 @@ func (a *App) renderAssetDetail(w http.ResponseWriter, r *http.Request, status i
 		a.serverError(w, r, err)
 		return
 	}
+	// Occupants (WP-J5) and a reparent -- same sentinel treatment as custom
+	// fields and tags above: each gets its own id that cannot collide with a
+	// real row, so a refusal of one submission never reopens another.
+	var occEdit *editState
+	if edit != nil && edit.ID == occupantsEditID(asset.ID) {
+		occEdit = edit
+	}
+	var moveEdit *editState
+	if edit != nil && edit.ID == assetMoveEditID(asset.ID) {
+		moveEdit = edit
+	}
 	// Power, and the feeds this asset could be plugged into. A failure to read
 	// either leaves the section empty rather than failing the page: an asset
 	// page is what somebody opens during an incident, and it must not 500
@@ -719,6 +743,25 @@ func (a *App) renderAssetDetail(w http.ResponseWriter, r *http.Request, status i
 	powerFeeds, err := a.Store.ListPowerFeeds(r.Context(), store.PowerFeedFilter{})
 	if err != nil {
 		slog.Error("listing power feeds", "error", err, "asset", id)
+	}
+	// The power input opened for correction, and the create form -- resolved
+	// against the actually-loaded rows rather than trusted blindly, so a
+	// refusal riding this page's edit parameter for a PORT or ADDRESS (which
+	// share the same mechanism) can never be mistaken for a power row that
+	// happens to share no id with it.
+	powerEditID := r.URL.Query().Get("power")
+	var powerRowEdit, powerCreateEdit *editState
+	switch {
+	case edit != nil && edit.ID == powerInputCreateEditID(id):
+		powerCreateEdit = edit
+	case edit != nil:
+		for _, in := range powerInputs {
+			if in.ID == edit.ID {
+				powerEditID = edit.ID
+				powerRowEdit = edit
+				break
+			}
+		}
 	}
 
 	// The elevation, for racks only. A failure leaves the section absent rather
@@ -877,7 +920,11 @@ func (a *App) renderAssetDetail(w http.ResponseWriter, r *http.Request, status i
 		PassThroughs:    passThroughs,
 		PowerInputs:     powerInputs,
 		PowerFeeds:      powerFeeds,
-		PowerEdit:       r.URL.Query().Get("power"),
+		PowerEdit:       powerEditID,
+		PowerRowEdit:    powerRowEdit,
+		PowerCreateEdit: powerCreateEdit,
+		OccEdit:         occEdit,
+		MoveEdit:        moveEdit,
 		Edit:            edit,
 		AssetEdit:       assetEdit,
 		CustomFields:    customFields,
@@ -1042,9 +1089,21 @@ func (a *App) AssetOccupants(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := r.PathValue("id")
+	// project_id is a REPEATING field, one hidden input per row the form
+	// drew -- so which percent_<id>/note_<id> pairs exist is only known once
+	// this is read, and rejected() below needs the exact list to capture them
+	// (it reads named fields with formValue, which cannot enumerate a
+	// dynamic set on its own). withMulti carries the list itself, the same
+	// split postEntityTags uses for tag_id.
+	projectIDs := r.PostForm["project_id"]
+	fieldNames := make([]string, 0, len(projectIDs)*2)
+	for _, projectID := range projectIDs {
+		fieldNames = append(fieldNames, "percent_"+projectID, "note_"+projectID)
+	}
+
 	nums := optionalNumbers(r)
 	occupants := []domain.Occupant{}
-	for _, projectID := range r.PostForm["project_id"] {
+	for _, projectID := range projectIDs {
 		percent := nums.opt("percent_" + projectID)
 		if percent == nil || *percent == 0 {
 			continue // an untouched row is not an occupant
@@ -1054,16 +1113,15 @@ func (a *App) AssetOccupants(w http.ResponseWriter, r *http.Request) {
 			Note: optionalString(r, "note_"+projectID),
 		})
 	}
-	if nums.messages() != nil {
-		a.setFlash(r, "error", "A share is a whole number of percent.")
-		render.Redirect(w, r, "/assets/"+id)
+	if msgs := nums.messages(); msgs != nil {
+		a.renderAssetDetail(w, r, http.StatusUnprocessableEntity, id,
+			rejected(r, occupantsEditID(id), msgs, fieldNames...).withMulti("project_id", projectIDs))
 		return
 	}
 	if err := a.Store.SetOccupants(r.Context(), a.permit(r), id, occupants); err != nil {
-		if _, ok := validationErrors(err); ok {
-			a.setFlash(r, "error", firstMessage(err,
-				"That set of shares was refused."))
-			render.Redirect(w, r, "/assets/"+id)
+		if messages, ok := validationErrors(err); ok {
+			a.renderAssetDetail(w, r, refusalStatus(err), id,
+				rejected(r, occupantsEditID(id), messages, fieldNames...).withMulti("project_id", projectIDs))
 			return
 		}
 		a.handleStoreError(w, r, err)
@@ -1071,6 +1129,14 @@ func (a *App) AssetOccupants(w http.ResponseWriter, r *http.Request) {
 	}
 	a.setFlash(r, "success", "Recorded who shares this machine.")
 	render.Redirect(w, r, "/assets/"+id)
+}
+
+// occupantsEditID names the sentinel editState.ID an occupant-set refusal
+// carries, distinct from the asset's own edit, its ports, addresses, custom
+// fields and tags -- all of which share this same page and this same ?edit=
+// mechanism. Never a real row id: those are UUIDv7, this is not.
+func occupantsEditID(assetID string) string {
+	return "occupants:" + assetID
 }
 
 // AssetStorageClaim records what a workload holds in a pool.
@@ -1239,13 +1305,17 @@ func (a *App) AssetReparent(w http.ResponseWriter, r *http.Request) {
 
 	if err := a.Store.ReparentAsset(r.Context(), a.permit(r), id, parentID); err != nil {
 		if messages, ok := validationErrors(err); ok {
-			text := "That move is not allowed."
-			for _, m := range messages {
-				text = m
-				break
-			}
-			a.setFlash(r, "error", text)
-			render.Redirect(w, r, "/assets/"+id)
+			// 422 with the move reopened on what was submitted, not a redirect
+			// that throws it away -- CLAUDE.md's rule, same as every other
+			// refusal on this page. parent_id has no visible picker of its own
+			// today (the create form's comment explains why moving is a
+			// separate flow from asset_form), so what comes back is the field
+			// error against the asset page rather than a repopulated control;
+			// that is still strictly more than the flash-and-redirect this
+			// replaced, which handed back neither the input nor a form to put
+			// it in.
+			a.renderAssetDetail(w, r, refusalStatus(err), id,
+				rejected(r, assetMoveEditID(id), messages, "parent_id"))
 			return
 		}
 		a.handleStoreError(w, r, err)
@@ -1253,6 +1323,13 @@ func (a *App) AssetReparent(w http.ResponseWriter, r *http.Request) {
 	}
 	a.setFlash(r, "success", "Asset moved.")
 	render.Redirect(w, r, "/assets/"+id)
+}
+
+// assetMoveEditID names the sentinel editState.ID a reparent refusal carries,
+// distinct from every other sentinel and row id sharing this page's ?edit=
+// mechanism. Never a real row id: those are UUIDv7, this is not.
+func assetMoveEditID(assetID string) string {
+	return "move:" + assetID
 }
 
 func (a *App) renderAssetFormError(w http.ResponseWriter, r *http.Request, messages map[string]string) {
