@@ -97,9 +97,14 @@ func (s *SQLStore) ListInterfaces(ctx context.Context, assetID string) ([]Interf
 		index[iface.ID] = i
 	}
 
+	// Withdrawn addresses are not listed, the same reason a withdrawn port
+	// itself is absent from this query: an address freed by RetireIPAddress
+	// must actually leave the page it was assigned from, or the operator has
+	// no way to tell it was released.
 	var addrs []domain.IPAddress
 	err = s.read(ctx, &addrs,
-		`SELECT * FROM ip_address WHERE interface_id IN (`+placeholders(len(ids))+`) ORDER BY addr_text`,
+		`SELECT * FROM ip_address WHERE interface_id IN (`+placeholders(len(ids))+`)
+		 AND lifecycle <> 'retired' ORDER BY addr_text`,
 		anySlice(ids)...)
 	if err != nil {
 		return nil, fmt.Errorf("loading addresses: %w", err)
@@ -738,14 +743,20 @@ func attachmentHolds(ctx context.Context, t *tx, table, column, ifaceID string) 
 
 // tableHasLifecycle names the attachment tables that soft-delete, so a
 // withdrawn cable or circuit end stops holding its port. Pinned by
-// TestTheAttachmentLifecycleMapMatchesTheSchema rather than trusted.
+// TestTheAttachmentListMatchesTheSchema rather than trusted.
+//
+// ip_address flipped to true with migration 00064: before it, a RETIRED
+// address still counted as something attached to its old port, which would
+// have made a withdrawn address block that port's own withdrawal forever --
+// exactly the kind of stale hold this map exists to prevent for every other
+// attachment.
 var tableHasLifecycle = map[string]bool{
 	"link":                true,
 	"port_pass_through":   true,
 	"circuit_termination": true,
 	"l2vpn_termination":   true,
 	"interface":           true,
-	"ip_address":          false,
+	"ip_address":          true,
 	"interface_vlan":      false,
 	"interface_wlan":      false,
 	"fhrp_member":         false,
@@ -921,6 +932,82 @@ func (s *SQLStore) UpdateIPAddress(ctx context.Context, p domain.Permit, a *doma
 	})
 }
 
+// RetireIPAddress withdraws an address, freeing it back to the allocator.
+//
+// A NETWORK ADDRESS COULD ONLY EVER BE ADDED before migration 00064 -- the
+// write-surface census's words, quoted in that migration's own comment: "an
+// address freed cannot be released, so the allocator keeps treating it as
+// taken." allocationSpans (this file) is where that is actually fixed --
+// this method just flips the column it reads.
+//
+// REFUSED, NOT CASCADED, for the same reason RetireInterface gives above: an
+// endpoint bound to this address or a redundancy group answering through it
+// is a fact somebody else declared, and silently unbinding either one as a
+// side effect would write a change_log entry attributing that decision to an
+// operator who never made it.
+//
+// THE FHRP CHECK IS PERMANENT UNTIL SOMETHING ELSE CLEARS fhrp_group_id, and
+// nothing in this codebase currently does: AssignVIP is the only writer of
+// that column and there is no path back to nil. So this refusal is not
+// "temporary until the operator does one more thing" the way the endpoint one
+// is -- an address that has become a VIP cannot be withdrawn at all today,
+// which matches RetireFHRPGroup's own refusal in the other direction (a group
+// cannot retire while a VIP still names it). A group does not tolerate losing
+// its virtual address either way; that symmetry is why the check belongs
+// here rather than being loosened.
+func (s *SQLStore) RetireIPAddress(ctx context.Context, p domain.Permit, id string) error {
+	before, err := s.GetIPAddress(ctx, id)
+	if err != nil {
+		return err
+	}
+	// Authorize before acting, ahead of the already-retired early exit, for
+	// the reason RetireLink states: it keeps this method the same shape as
+	// every other authorize-then-mutate one here, at no cost.
+	addrPermit, err := s.authorizeAddressSubject(ctx, p, before.InterfaceID, id)
+	if err != nil {
+		return err
+	}
+	if before.Lifecycle == domain.LifecycleRetired {
+		// Already withdrawn: a second audit entry would claim a withdrawal
+		// that did not happen. RetireIPRange and RetireInterface do the same.
+		return nil
+	}
+
+	at := domain.FormatTime(s.now())
+	after := *before
+	after.Lifecycle = domain.LifecycleRetired
+	after.UpdatedAt = &at
+
+	return s.write(ctx, addrPermit, func(t *tx) error {
+		if before.FHRPGroupID != nil {
+			return fmt.Errorf("address %s cannot be withdrawn while it answers as a redundancy group's virtual address: %w",
+				before.AddrText, domain.ErrConflict)
+		}
+		var endpoints int
+		if err := t.get(ctx, &endpoints,
+			`SELECT COUNT(*) FROM endpoint WHERE ip_address_id = ? AND lifecycle <> ?`,
+			id, domain.LifecycleRetired); err != nil {
+			return fmt.Errorf("checking endpoints bound to address %s: %w", id, err)
+		}
+		if endpoints > 0 {
+			return fmt.Errorf("address %s cannot be withdrawn while an endpoint binds to it: %w",
+				before.AddrText, domain.ErrConflict)
+		}
+		res, err := t.exec(ctx, `
+			UPDATE ip_address SET lifecycle = ?, updated_at = ?,
+			                      row_version = row_version + 1
+			WHERE id = ? AND row_version = ?`,
+			domain.LifecycleRetired, at, id, before.RowVersion)
+		if err != nil {
+			return translateWriteErr(err, "retiring ip address")
+		}
+		if err := requireVersion(res, "ip_address", id, &before.RowVersion); err != nil {
+			return err
+		}
+		return t.logUpdate(ctx, "ip_address", id, before, &after)
+	})
+}
+
 // GetPrefix loads one network by id.
 func (s *SQLStore) GetPrefix(ctx context.Context, id string) (*domain.Prefix, error) {
 	var p domain.Prefix
@@ -999,6 +1086,113 @@ func (s *SQLStore) CreatePrefix(ctx context.Context, permit domain.Permit, p *do
 			EntityType: "prefix", EntityID: p.ID,
 			Title: p.CIDRText, Subtitle: derefString(p.Role), Body: p.CIDRText,
 		})
+	})
+}
+
+// RetirePrefix withdraws a network, refusing while anything still lives
+// inside it.
+//
+// A NETWORK COULD ONLY EVER BE ADDED before migration 00064 -- the
+// write-surface census's words: a prefix declared in error "keeps taking
+// part in every containment answer computed over the tree." ListPrefixes
+// (this file) now excludes a retired row from that answer; this method is
+// what lets a row get there.
+//
+// REFUSED, NOT CASCADED, the same choice RetireInterface makes and for the
+// same reason stated on its doc comment: a child network, an assigned
+// address or a reservation is a fact somebody else declared, and quietly
+// withdrawing any of them as a side effect would write a change_log entry
+// attributing that decision to an operator who never made it.
+//
+// THE CHILD-PREFIX CHECK GOES THROUGH THE TREE, NOT A SECOND SQL RULE.
+// ListPrefixTree already answers "does this prefix have a child, and how many
+// addresses sit directly in it" by running every live prefix through
+// domain.BuildPrefixTree, which keys containment on VRF, then address family,
+// then start/end span (prefix_tree.go's contains()) -- the same rule that
+// decides what the operator sees rendered under this row on the prefixes
+// page. A second, hand-written containment query here could disagree with
+// it: a prefix that visibly has a child in the tree but retires anyway, or
+// one that refuses with nothing visible inside it. Asking the tree for both
+// counts is what keeps the two answers the same by construction, and
+// TestRetirePrefixAgreesWithTheTree pins exactly that.
+//
+// The reservation check is the one exception, and it is not a new rule: it is
+// the same VRF-then-family-then-span comparison NextFreeAddress already runs
+// against ip_range for precisely this prefix (ipranges.go) -- reused here
+// rather than re-derived, and run inside the same transaction as the update
+// so a reservation cannot be declared into the gap between the check and the
+// write the way the tree-derived counts theoretically can.
+func (s *SQLStore) RetirePrefix(ctx context.Context, permit domain.Permit, id string) error {
+	before, err := s.GetPrefix(ctx, id)
+	if err != nil {
+		return err
+	}
+	if before.Lifecycle == domain.LifecycleRetired {
+		// Already withdrawn: a second audit entry would claim a withdrawal
+		// that did not happen. RetireIPRange and RetireInterface do the same.
+		return nil
+	}
+
+	tree, err := s.ListPrefixTree(ctx)
+	if err != nil {
+		return fmt.Errorf("checking prefix %s for occupants: %w", id, err)
+	}
+	var node *PrefixTreeRow
+	for i := range tree {
+		if tree[i].ID == id {
+			node = &tree[i]
+			break
+		}
+	}
+	if node == nil {
+		// Retired or removed by a concurrent call between GetPrefix and here.
+		return fmt.Errorf("retiring prefix %s: %w", id, domain.ErrConflict)
+	}
+	if node.Children > 0 {
+		return fmt.Errorf("network %s cannot be withdrawn while a child prefix is declared inside it: %w",
+			before.CIDRText, domain.ErrConflict)
+	}
+	if node.Addresses > 0 {
+		return fmt.Errorf("network %s cannot be withdrawn while an address is assigned inside it: %w",
+			before.CIDRText, domain.ErrConflict)
+	}
+
+	at := domain.FormatTime(s.now())
+	after := *before
+	after.Lifecycle = domain.LifecycleRetired
+	after.UpdatedAt = &at
+
+	return s.write(ctx, permit, func(t *tx) error {
+		// NULL-safe VRF equality written portably -- see ipranges.go's
+		// NextFreeAddress, which took three tries to get this spelling right.
+		const vrfMatch = `COALESCE(vrf_id, '') = COALESCE(?, '')`
+		var reservations int
+		if err := t.get(ctx, &reservations, `
+			SELECT COUNT(*) FROM ip_range
+			WHERE addr_family = ? AND lifecycle <> ?
+			  AND addr_end >= ? AND addr_start <= ?
+			  AND `+vrfMatch,
+			before.AddrFamily, domain.LifecycleRetired, before.AddrStart, before.AddrEnd, before.VRFID,
+		); err != nil {
+			return fmt.Errorf("checking prefix %s for reservations: %w", id, err)
+		}
+		if reservations > 0 {
+			return fmt.Errorf("network %s cannot be withdrawn while a reservation still spans part of it: %w",
+				before.CIDRText, domain.ErrConflict)
+		}
+
+		res, err := t.exec(ctx, `
+			UPDATE prefix SET lifecycle = ?, updated_at = ?,
+			                  row_version = row_version + 1
+			WHERE id = ? AND row_version = ?`,
+			domain.LifecycleRetired, at, id, before.RowVersion)
+		if err != nil {
+			return translateWriteErr(err, "retiring prefix")
+		}
+		if err := requireVersion(res, "prefix", id, &before.RowVersion); err != nil {
+			return err
+		}
+		return t.logUpdate(ctx, "prefix", id, before, &after)
 	})
 }
 
@@ -1173,9 +1367,15 @@ func (s *SQLStore) allocationSpans(ctx context.Context) (allocationSpans, error)
 	if err != nil {
 		return out, fmt.Errorf("reading reservations: %w", err)
 	}
+	// A withdrawn address is not an assignment any more -- this is the payoff
+	// the write-surface census named: "an address freed cannot be released, so
+	// the allocator keeps treating it as taken." Without this filter,
+	// RetireIPAddress would flip the column and the allocator would still
+	// refuse to hand the address out again.
 	var addrs []span
 	err = s.read(ctx, &addrs, `
-		SELECT addr_family, addr_start, addr_start AS addr_end FROM ip_address`)
+		SELECT addr_family, addr_start, addr_start AS addr_end FROM ip_address
+		WHERE lifecycle <> 'retired'`)
 	if err != nil {
 		return out, fmt.Errorf("reading assignments: %w", err)
 	}
@@ -1194,7 +1394,13 @@ func (s *SQLStore) allocationSpans(ctx context.Context) (allocationSpans, error)
 	return out, nil
 }
 
-// ListPrefixes returns every network, narrowest last.
+// ListPrefixes returns every LIVE network, narrowest last.
+//
+// A withdrawn prefix drops out here, the same as a retired asset drops out of
+// /assets -- and address_count excludes withdrawn addresses too, because that
+// figure feeds BuildPrefixTree's utilisation arithmetic and RetirePrefix's own
+// occupancy check (via ListPrefixTree): a prefix holding nothing but freed
+// addresses must read as empty, not as still full of them.
 func (s *SQLStore) ListPrefixes(ctx context.Context) ([]PrefixRow, error) {
 	var rows []PrefixRow
 	err := s.read(ctx, &rows, `
@@ -1205,11 +1411,13 @@ func (s *SQLStore) ListPrefixes(ctx context.Context) ([]PrefixRow, error) {
 		       (SELECT COUNT(*) FROM ip_address ip
 		         WHERE ip.addr_family = p.addr_family
 		           AND ip.addr_start >= p.addr_start
-		           AND ip.addr_start <= p.addr_end) AS address_count
+		           AND ip.addr_start <= p.addr_end
+		           AND ip.lifecycle <> 'retired') AS address_count
 		FROM prefix p
 		LEFT JOIN environment e ON e.id = p.environment_id
 		LEFT JOIN vrf v ON v.id = p.vrf_id
 		LEFT JOIN vlan vl ON vl.id = p.vlan_ref_id
+		WHERE p.lifecycle <> 'retired'
 		ORDER BY p.addr_family, p.addr_start, p.addr_end DESC`)
 	if err != nil {
 		return nil, fmt.Errorf("listing prefixes: %w", err)
@@ -1234,9 +1442,12 @@ func (s *SQLStore) ResolveAddress(ctx context.Context, addr string) (*domain.Pre
 	// corner case. The starts tie, the engine picks whichever row it reaches
 	// first, and "most specific" silently returned the widest prefix in the
 	// chain. Narrowest is the one that ends soonest, so addr_end ASC decides it.
+	// A withdrawn network takes no further part in a containment answer -- the
+	// exact reason the census gave for treating it as a gap in the first
+	// place, so it applies here as much as to the tree.
 	err = s.readOne(ctx, &p, `
 		SELECT * FROM prefix
-		WHERE addr_family = ? AND addr_start <= ? AND addr_end >= ?
+		WHERE addr_family = ? AND addr_start <= ? AND addr_end >= ? AND lifecycle <> 'retired'
 		ORDER BY addr_start DESC, addr_end ASC
 		LIMIT 1`, av.Family, av.Start, av.Start)
 	if err != nil {
