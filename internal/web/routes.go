@@ -458,7 +458,9 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	write("POST /interfaces/{id}", app.InterfaceUpdate)
 	write("POST /interfaces/{id}/retire", app.InterfaceRetire)
 	write("POST /addresses/{id}", app.IPAddressUpdate)
+	write("POST /addresses/{id}/retire", app.IPAddressRetire)
 	write("POST /prefixes/{id}", app.PrefixUpdate)
+	write("POST /prefixes/{id}/retire", app.PrefixRetire)
 
 	// Operator overrides of an observation (docs/AUDIT.md rule 14). These are
 	// DECLARED mutations -- a person decided that a reading is wrong -- so they

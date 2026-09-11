@@ -247,7 +247,23 @@
               </form>
               {{else}}
               <div>{{.AddrText}} <span class="pill pill-muted">{{.Role}}</span>
-                {{if $.CanWriteEntity "asset" $.Asset.ID}}<a class="id" href="/assets/{{$.Asset.ID}}?edit={{.ID}}#ports" title="Correct this address">edit</a>{{end}}
+                {{if $.CanWriteEntity "asset" $.Asset.ID}}<a class="id" href="/assets/{{$.Asset.ID}}?edit={{.ID}}#ports" title="Correct this address">edit</a>
+                {{/* WITHDRAWING AN ADDRESS (migration 00064). Hidden outright
+                     for a VIP -- RetireIPAddress refuses it unconditionally
+                     while fhrp_group_id is set and nothing in this codebase
+                     clears that column, so offering the button there is the
+                     offered-and-refused shape this codebase closes wherever it
+                     finds it. An endpoint binding is not visible from this row,
+                     so that refusal still surfaces as a flash on click. */}}
+                {{if not .FHRPGroupID}}
+                <form method="post" action="/addresses/{{.ID}}/retire" style="display:inline"
+                      hx-post="/addresses/{{.ID}}/retire"
+                      hx-confirm="Withdraw {{.AddrText}}? The record is kept.">
+                  <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+                  <button class="btn btn-sm btn-danger" type="submit">Withdraw</button>
+                </form>
+                {{end}}
+                {{end}}
               </div>
               {{end}}
             {{end}}
