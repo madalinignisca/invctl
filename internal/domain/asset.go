@@ -47,8 +47,13 @@ type Environment struct {
 	Role        string `db:"role"`
 	InScope     bool   `db:"in_scope"`
 	Criticality int    `db:"criticality"`
-	CreatedAt   string `db:"created_at"`
-	UpdatedAt   string `db:"updated_at"`
+	// Lifecycle is DECLARED, like every other lifecycle in this schema: only a
+	// person retires an environment, never an observation. A LABEL, NOT AN
+	// OCCUPANCY, though -- unlike interface or prefix, retiring one refuses
+	// nothing and rewrites nothing that still wears it. See migration 00065.
+	Lifecycle string `db:"lifecycle"`
+	CreatedAt string `db:"created_at"`
+	UpdatedAt string `db:"updated_at"`
 	// RowVersion is the optimistic-concurrency token; see version.go.
 	RowVersion int `db:"row_version"`
 }
@@ -60,6 +65,7 @@ func NewEnvironment(id, code, name, role string, inScope bool, criticality int, 
 	env := &Environment{
 		ID: id, Code: code, Name: name, Role: role,
 		InScope: inScope, Criticality: criticality,
+		Lifecycle: LifecycleActive,
 		CreatedAt: ts, UpdatedAt: ts,
 	}
 	if err := env.Validate(); err != nil {

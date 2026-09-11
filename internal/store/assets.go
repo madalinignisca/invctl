@@ -22,19 +22,49 @@ import (
 // ---------- environments ----------
 
 // CreateEnvironment inserts an environment and its audit row.
+//
+// RESOLVE A REACTIVATION BEFORE ANYTHING ELSE, not inside the transaction --
+// the same discipline CreateInterface's doc comment states for the identical
+// reason: environment.code carries CONSTRAINT environment_code_key UNIQUE, a
+// TABLE constraint rather than an index (like interface's (asset_id, name)),
+// so a retired code stays taken and the id a write will actually land on has
+// to be known before anything downstream treats it as fixed.
 func (s *SQLStore) CreateEnvironment(ctx context.Context, p domain.Permit, env *domain.Environment) error {
 	// The row the INSERT just wrote is version 1 (the column default).
 	// Without this a caller that creates and then updates the SAME struct
 	// compares 0 against 1 and gets a conflict against itself.
 	env.RowVersion = 1
+	if env.Lifecycle == "" {
+		env.Lifecycle = domain.LifecycleActive
+	}
+	if retiredID, lookupErr := s.retiredEnvironmentID(ctx, env.Code); lookupErr != nil {
+		return lookupErr
+	} else if retiredID != "" {
+		env.ID = retiredID
+	}
 	return s.write(ctx, p, func(t *tx) error {
 		if err := t.requireVocabulary(ctx, vocabEnvironmentRole, "role", env.Role); err != nil {
 			return err
 		}
-		_, err := t.exec(ctx,
-			`INSERT INTO environment (id, code, name, role, in_scope, criticality, created_at, updated_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-			env.ID, env.Code, env.Name, env.Role, env.InScope, env.Criticality, env.CreatedAt, env.UpdatedAt)
+		// A RETIRED CODE KEEPS ITS ROW, so re-declaring one REACTIVATES it
+		// rather than failing. A CIDR earns a fresh row on redeclaration
+		// (migration 00064) because it is not an object -- two networks can
+		// legitimately occupy the same numbers two years apart. A code is
+		// different: it IS the identity here, so the six tables still
+		// pointing at "staging" should become live-labelled again rather than
+		// orphaned beside a second row also called staging.
+		reactivated, err := reactivateRetiredEnvironment(ctx, t, env)
+		if err != nil {
+			return err
+		}
+		if reactivated {
+			return nil
+		}
+		_, err = t.exec(ctx,
+			`INSERT INTO environment (id, code, name, role, in_scope, criticality, lifecycle, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			env.ID, env.Code, env.Name, env.Role, env.InScope, env.Criticality, env.Lifecycle,
+			env.CreatedAt, env.UpdatedAt)
 		if err != nil {
 			return translateWriteErr(err, "creating environment")
 		}
@@ -48,7 +78,70 @@ func (s *SQLStore) CreateEnvironment(ctx context.Context, p domain.Permit, env *
 	})
 }
 
+// retiredEnvironmentID returns the id of a withdrawn environment with this
+// code, or "" when there is none. Mirrors retiredInterfaceID.
+func (s *SQLStore) retiredEnvironmentID(ctx context.Context, code string) (string, error) {
+	var id string
+	err := s.readOne(ctx, &id, `
+		SELECT id FROM environment WHERE code = ? AND lifecycle = ?`,
+		code, domain.LifecycleRetired)
+	if errors.Is(err, domain.ErrNotFound) || errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("looking for a retired environment to reactivate: %w", err)
+	}
+	return id, nil
+}
+
+// reactivateRetiredEnvironment brings a withdrawn environment back under its
+// own id. Reports whether it did. Mirrors reactivateRetiredInterface.
+func reactivateRetiredEnvironment(ctx context.Context, t *tx, env *domain.Environment) (bool, error) {
+	var before domain.Environment
+	err := t.get(ctx, &before, `
+		SELECT * FROM environment WHERE code = ? AND lifecycle = ?`,
+		env.Code, domain.LifecycleRetired)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("looking for a retired environment to reactivate: %w", err)
+	}
+
+	env.ID = before.ID
+	env.CreatedAt = before.CreatedAt
+	env.Lifecycle = domain.LifecycleActive
+	env.RowVersion = before.RowVersion + 1
+
+	res, err := t.exec(ctx, `
+		UPDATE environment SET name = ?, role = ?, in_scope = ?, criticality = ?,
+		                       lifecycle = ?, updated_at = ?, row_version = row_version + 1
+		 WHERE id = ? AND row_version = ?`,
+		env.Name, env.Role, env.InScope, env.Criticality, domain.LifecycleActive,
+		env.UpdatedAt, before.ID, before.RowVersion)
+	if err != nil {
+		return false, translateWriteErr(err, "reactivating environment")
+	}
+	v := before.RowVersion
+	if err := requireVersion(res, "environment", before.ID, &v); err != nil {
+		return false, err
+	}
+	// Logged as an UPDATE, not a create: the row is not new, and the diff is
+	// what an auditor wants -- lifecycle retired -> active beside whatever
+	// else the redeclaration changed.
+	if err := t.logUpdate(ctx, "environment", before.ID, &before, env); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 // UpdateEnvironment persists a modified environment.
+//
+// NOT lifecycle, for the reason UpdateInterface pins the same field: this
+// method would otherwise be a second withdrawal path with none of
+// RetireEnvironment's audit shape (it would log a plain field diff rather
+// than an ActionRetire-flavoured one), and reactivation is CreateEnvironment's
+// job, explicit about it via the code collision.
 func (s *SQLStore) UpdateEnvironment(ctx context.Context, p domain.Permit, env *domain.Environment) error {
 	if err := env.Validate(); err != nil {
 		return err
@@ -58,6 +151,7 @@ func (s *SQLStore) UpdateEnvironment(ctx context.Context, p domain.Permit, env *
 		return err
 	}
 	env.CreatedAt = before.CreatedAt
+	env.Lifecycle = before.Lifecycle
 	env.UpdatedAt = domain.FormatTime(s.now())
 
 	return s.write(ctx, p, func(t *tx) error {
@@ -87,6 +181,62 @@ func (s *SQLStore) UpdateEnvironment(ctx context.Context, p domain.Permit, env *
 	})
 }
 
+// RetireEnvironment withdraws a segmentation boundary label.
+//
+// REFUSES NOTHING AND REWRITES NOTHING IT LABELS, unlike RetireInterface and
+// RetirePrefix. Those entities are occupied and unpatching or re-homing first
+// is the honest order of the physical act; an environment is a LABEL, and six
+// tables (asset_environment, service, net_group, net_anchor, vlan, prefix)
+// carry environment_id -- refusing would force a person to relabel every one
+// of those rows by hand first, and rewriting them automatically would write
+// change_log entries attributing a relabelling to whoever clicked withdraw,
+// which is exactly the misattribution RetireInterface's own doc comment
+// refuses to commit. See migration 00065.
+//
+// WHAT STAYS TRUE: what is STORED keeps displaying -- asset, service, vlan and
+// prefix pages all still show a retired environment beside whatever still
+// wears it, same as team and custom_field_option (docs/AUDIT.md). What
+// changes is only that it stops being offered as a NEW choice: pickers built
+// from ListEnvironments(ctx, EnvironmentFilter{}) (the default) exclude it.
+func (s *SQLStore) RetireEnvironment(ctx context.Context, p domain.Permit, id string) error {
+	before, err := s.GetEnvironment(ctx, id)
+	if err != nil {
+		return err
+	}
+	if before.Lifecycle == domain.LifecycleRetired {
+		// Already withdrawn: a second audit entry would claim a withdrawal
+		// that did not happen. RetireInterface and RetireTeam do the same.
+		return nil
+	}
+
+	after := *before
+	after.Lifecycle = domain.LifecycleRetired
+	at := domain.FormatTime(s.now())
+	after.UpdatedAt = at
+
+	return s.write(ctx, p, func(t *tx) error {
+		res, err := t.exec(ctx, `
+			UPDATE environment SET lifecycle = ?, updated_at = ?,
+			                       row_version = row_version + 1
+			 WHERE id = ? AND row_version = ?`,
+			domain.LifecycleRetired, at, id, before.RowVersion)
+		if err != nil {
+			return translateWriteErr(err, "retiring environment")
+		}
+		v := before.RowVersion
+		if err := requireVersion(res, "environment", id, &v); err != nil {
+			return err
+		}
+		if err := t.logUpdate(ctx, "environment", id, before, &after); err != nil {
+			return err
+		}
+		return s.indexEntity(ctx, t, searchDoc{
+			EntityType: "environment", EntityID: id,
+			Title: after.Name, Subtitle: after.Code, Body: after.Role,
+		})
+	})
+}
+
 // GetEnvironment loads one environment by id.
 func (s *SQLStore) GetEnvironment(ctx context.Context, id string) (*domain.Environment, error) {
 	var env domain.Environment
@@ -105,11 +255,26 @@ func (s *SQLStore) GetEnvironmentByCode(ctx context.Context, code string) (*doma
 	return &env, nil
 }
 
-// ListEnvironments returns every environment, most critical first.
-func (s *SQLStore) ListEnvironments(ctx context.Context) ([]domain.Environment, error) {
+// EnvironmentFilter narrows an environment list. Shaped like TeamFilter: the
+// zero value is the picker's answer (retired excluded), and IncludeRetired is
+// what a display -- the environment list page itself, or a form that must keep
+// showing a stored-but-retired assignment -- asks for instead.
+type EnvironmentFilter struct {
+	IncludeRetired bool
+}
+
+// ListEnvironments returns environments matching the filter, most critical
+// first.
+func (s *SQLStore) ListEnvironments(ctx context.Context, f EnvironmentFilter) ([]domain.Environment, error) {
+	query := `SELECT * FROM environment`
+	var args []any
+	if !f.IncludeRetired {
+		query += ` WHERE lifecycle <> ?`
+		args = append(args, domain.LifecycleRetired)
+	}
+	query += ` ORDER BY criticality ASC, code ASC`
 	var envs []domain.Environment
-	err := s.read(ctx, &envs, `SELECT * FROM environment ORDER BY criticality ASC, code ASC`)
-	if err != nil {
+	if err := s.read(ctx, &envs, query, args...); err != nil {
 		return nil, fmt.Errorf("listing environments: %w", err)
 	}
 	return envs, nil
@@ -1374,4 +1539,45 @@ func (r AssetRow) ResolvedEOL() *string {
 func (r AssetRow) InheritedEOL() bool {
 	_, source := domain.ResolveEOL(r.EOLDate, r.DeviceTypeEOL)
 	return source == domain.EOLFromDeviceType
+}
+
+// requireAssignableEnvironment enforces the half of the withdrawal rule that a
+// picker cannot: a retired environment is not NEWLY selectable.
+//
+// docs/AUDIT.md's rule for team and custom_field_option is "what is STORED must
+// keep displaying, what is RETIRED must not be newly selectable", and migration
+// 00065 applies it to environments. The displaying half is the templates' job.
+// This is the other half, and it lives in the store deliberately:
+//
+//   - The forms that pick an environment are SELECT elements on list pages that
+//     render one shared option list across every row's inline edit. Dropping
+//     retired options there silently reassigns any row whose stored value just
+//     vanished from the list -- worse than the problem being solved -- so those
+//     pages keep showing them. Enforcement has to be somewhere else.
+//   - A UI-only rule is not a rule. The read-only API, the importer and any
+//     future caller reach these same methods without passing a template.
+//
+// UNCHANGED IS ALWAYS ALLOWED, which is what makes a labelled entity editable
+// at all: a prefix carrying a withdrawn environment must still accept an edit
+// to its role or its VLAN without being forced to relabel first. Only a CHANGE
+// to a retired environment is refused.
+func requireAssignableEnvironment(ctx context.Context, t *tx, field string, next, current *string) error {
+	if next == nil || *next == "" {
+		return nil
+	}
+	if current != nil && *current == *next {
+		return nil // unchanged: the stored value keeps round-tripping
+	}
+	var lifecycle string
+	if err := t.get(ctx, &lifecycle, `SELECT lifecycle FROM environment WHERE id = ?`, *next); err != nil {
+		ve := &domain.ValidationError{}
+		ve.Add(field, "choose an environment")
+		return ve
+	}
+	if lifecycle == domain.LifecycleRetired {
+		ve := &domain.ValidationError{}
+		ve.Add(field, "that environment has been withdrawn")
+		return ve
+	}
+	return nil
 }

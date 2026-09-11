@@ -136,7 +136,7 @@ func TopUp(ctx context.Context, s *store.SQLStore) (*Refs, error) {
 // hydrate fills the reference maps from the live database, so a phase written
 // against a fresh seed can resolve the parents, teams and models it names.
 func (b *builder) hydrate() error {
-	envs, err := b.store.ListEnvironments(b.ctx)
+	envs, err := b.store.ListEnvironments(b.ctx, store.EnvironmentFilter{IncludeRetired: true})
 	if err != nil {
 		return fmt.Errorf("environments: %w", err)
 	}

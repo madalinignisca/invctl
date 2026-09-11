@@ -1038,6 +1038,9 @@ func (s *SQLStore) UpdatePrefix(ctx context.Context, permit domain.Permit, p *do
 	p.UpdatedAt = &at
 
 	return s.write(ctx, permit, func(t *tx) error {
+		if err := requireAssignableEnvironment(ctx, t, "environment_id", p.EnvironmentID, before.EnvironmentID); err != nil {
+			return err
+		}
 		res, err := t.exec(ctx, `
 			UPDATE prefix SET cidr_text = ?, addr_family = ?, addr_start = ?, addr_end = ?,
 			                  vlan_ref_id = ?, environment_id = ?, role = ?,
@@ -1070,6 +1073,9 @@ func (s *SQLStore) CreatePrefix(ctx context.Context, permit domain.Permit, p *do
 	at := domain.FormatTime(s.now())
 	p.CreatedAt, p.UpdatedAt = &at, &at
 	return s.write(ctx, permit, func(t *tx) error {
+		if err := requireAssignableEnvironment(ctx, t, "environment_id", p.EnvironmentID, nil); err != nil {
+			return err
+		}
 		_, err := t.exec(ctx, `
 			INSERT INTO prefix (id, cidr_text, addr_family, addr_start, addr_end,
 			                    vlan_ref_id, environment_id, role, created_at, updated_at)

@@ -293,7 +293,11 @@ var DeclaredColumns = map[string][]string{
 		"created_at", "updated_at", "row_version",
 		"lifecycle",
 	},
-	"environment": {"id", "code", "name", "role", "in_scope", "criticality", "created_at", "updated_at", "row_version"},
+	// lifecycle is DECLARED, like every other lifecycle here: a label is
+	// retired by a person, never inferred from what stops reporting. See
+	// migration 00065 and domain.Environment's own comment for why retiring
+	// one refuses nothing and rewrites nothing that still carries it.
+	"environment": {"id", "code", "name", "role", "in_scope", "criticality", "lifecycle", "created_at", "updated_at", "row_version"},
 	// Rule 14: an operator overruling a monitor is a declared act, audited like
 	// any other. The row is about observed state; it is not observed state.
 	"health_override": {

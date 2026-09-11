@@ -83,7 +83,7 @@ func (a *App) ServiceList(w http.ResponseWriter, r *http.Request) {
 		a.serverError(w, r, err)
 		return
 	}
-	envs, err := a.Store.ListEnvironments(r.Context())
+	envs, err := a.Store.ListEnvironments(r.Context(), store.EnvironmentFilter{})
 	if err != nil {
 		a.serverError(w, r, err)
 		return
@@ -690,7 +690,7 @@ func (a *App) respondServiceFormError(w http.ResponseWriter, r *http.Request, er
 			return
 		}
 	}
-	envs, listErr := a.Store.ListEnvironments(r.Context())
+	envs, listErr := a.Store.ListEnvironments(r.Context(), store.EnvironmentFilter{IncludeRetired: true})
 	if listErr != nil {
 		a.serverError(w, r, listErr)
 		return
@@ -706,7 +706,7 @@ func (a *App) respondServiceFormError(w http.ResponseWriter, r *http.Request, er
 
 // serviceFormOptions loads the two lookups the service form needs.
 func (a *App) serviceFormOptions(r *http.Request) ([]domain.Environment, []store.VocabularyTerm, error) {
-	envs, err := a.Store.ListEnvironments(r.Context())
+	envs, err := a.Store.ListEnvironments(r.Context(), store.EnvironmentFilter{IncludeRetired: true})
 	if err != nil {
 		return nil, nil, err
 	}

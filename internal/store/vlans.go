@@ -72,6 +72,9 @@ func (s *SQLStore) CreateVLAN(ctx context.Context, p domain.Permit, v *domain.VL
 	at := domain.FormatTime(s.now())
 	v.CreatedAt, v.UpdatedAt = &at, &at
 	return s.write(ctx, p, func(t *tx) error {
+		if err := requireAssignableEnvironment(ctx, t, "environment_id", v.EnvironmentID, nil); err != nil {
+			return err
+		}
 		_, err := t.exec(ctx, `
 			INSERT INTO vlan (id, vid, name, group_id, role, environment_id,
 			                  description, lifecycle, created_at, updated_at)
@@ -106,6 +109,9 @@ func (s *SQLStore) UpdateVLAN(ctx context.Context, p domain.Permit, v *domain.VL
 	v.UpdatedAt = &at
 
 	return s.write(ctx, p, func(t *tx) error {
+		if err := requireAssignableEnvironment(ctx, t, "environment_id", v.EnvironmentID, before.EnvironmentID); err != nil {
+			return err
+		}
 		res, err := t.exec(ctx, `
 			UPDATE vlan SET vid = ?, name = ?, group_id = ?, role = ?,
 			                environment_id = ?, description = ?,

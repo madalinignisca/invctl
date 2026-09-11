@@ -261,7 +261,7 @@ type savedViewVocabulary struct {
 // their own filter forms, rather than calling this -- see AssetList and
 // ServiceList.
 func (a *App) savedViewVocabularyFor(ctx context.Context, entity string) (savedViewVocabulary, error) {
-	envs, err := a.Store.ListEnvironments(ctx)
+	envs, err := a.Store.ListEnvironments(ctx, store.EnvironmentFilter{})
 	if err != nil {
 		return savedViewVocabulary{}, fmt.Errorf("listing environments for the views menu: %w", err)
 	}

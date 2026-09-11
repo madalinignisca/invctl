@@ -488,7 +488,7 @@ func buildAgentSurface(ctx context.Context, st *store.SQLStore, cfg *config.Conf
 
 // warnUnknownScopes reports scope entries that name no environment.
 func warnUnknownScopes(ctx context.Context, st *store.SQLStore, cfg *config.Config) {
-	envs, err := st.ListEnvironments(ctx)
+	envs, err := st.ListEnvironments(ctx, store.EnvironmentFilter{IncludeRetired: true})
 	if err != nil {
 		slog.Warn("could not check monitoring credential scopes against the environments", "error", err)
 		return
@@ -689,7 +689,7 @@ func ensureAdmin(ctx context.Context, st *store.SQLStore, cfg *config.Config) er
 // loadDemoData populates the demo estate, and does nothing if data is already
 // present -- re-seeding would collide on every unique code.
 func loadDemoData(ctx context.Context, st *store.SQLStore) error {
-	envs, err := st.ListEnvironments(ctx)
+	envs, err := st.ListEnvironments(ctx, store.EnvironmentFilter{IncludeRetired: true})
 	if err != nil {
 		return err
 	}

@@ -341,7 +341,13 @@
       <div class="checks">
         {{range .Environments}}
         <label class="check">
-          <input type="checkbox" name="environments" value="{{.ID}}" {{if $f.InEnvironment .ID}}checked{{end}}> {{.Code}}
+          {{/* NEVER disabled, even for a retired environment: a disabled box
+               is not submitted, and asset_environment is replaced wholesale
+               on save (setAssetEnvironments) -- an unrelated field's
+               correction would silently drop the assignment. See
+               unionAssignedEnvironments and newAssetEditForm's doc comment. */}}
+          <input type="checkbox" name="environments" value="{{.ID}}" {{if $f.InEnvironment .ID}}checked{{end}}>
+          {{.Code}}{{if eq .Lifecycle "retired"}} <span class="pill pill-muted">retired</span>{{end}}
         </label>
         {{end}}
       </div>
@@ -386,7 +392,7 @@
       <div class="field">
         <label for="svc-env">Environment</label>
         <select id="svc-env" name="environment_id">
-          {{range $.Environments}}<option value="{{.ID}}" {{if eq .ID $.Spec.EnvironmentID}}selected{{end}}>{{.Code}}</option>{{end}}
+          {{range $.Environments}}<option value="{{.ID}}" {{if eq .ID $.Spec.EnvironmentID}}selected{{end}}>{{.Code}}{{if eq .Lifecycle "retired"}} (retired){{end}}</option>{{end}}
         </select>
         {{with index .Errors "environment_id"}}<div class="field-error">{{.}}</div>{{end}}
       </div>
@@ -858,7 +864,7 @@
         <label for="prefix-env">Environment</label>
         <select id="prefix-env" name="environment_id">
           <option value="">—</option>
-          {{range .Environments}}<option value="{{.ID}}">{{.Code}}</option>{{end}}
+          {{range .Environments}}<option value="{{.ID}}">{{.Code}}{{if eq .Lifecycle "retired"}} (retired){{end}}</option>{{end}}
         </select>
       </div>
       <div class="field">

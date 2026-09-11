@@ -46,7 +46,7 @@ type environmentForm struct {
 
 // EnvironmentList renders the environments page.
 func (a *App) EnvironmentList(w http.ResponseWriter, r *http.Request) {
-	envs, err := a.Store.ListEnvironments(r.Context())
+	envs, err := a.Store.ListEnvironments(r.Context(), store.EnvironmentFilter{IncludeRetired: true})
 	if err != nil {
 		a.serverError(w, r, err)
 		return
@@ -167,6 +167,29 @@ func (a *App) EnvironmentUpdate(w http.ResponseWriter, r *http.Request) {
 	render.Redirect(w, r, "/environments")
 }
 
+// EnvironmentRetire withdraws a segmentation boundary label.
+//
+// NO CONFLICT BRANCH, unlike InterfaceRetire and PrefixRetire -- the store
+// method refuses nothing (RetireEnvironment's own doc comment says why: an
+// environment is a label, not an occupancy, and six tables still pointing at
+// it are untouched by this). The only errors that can reach here are "not
+// found" and a stale row_version, both already handled by handleStoreError.
+func (a *App) EnvironmentRetire(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	env, err := a.Store.GetEnvironment(r.Context(), id)
+	if err != nil {
+		a.handleStoreError(w, r, err)
+		return
+	}
+	if err := a.Store.RetireEnvironment(r.Context(), a.permit(r), id); err != nil {
+		a.handleStoreError(w, r, err)
+		return
+	}
+	a.setFlash(r, "success", "Environment "+env.Code+" withdrawn. Everything already carrying it "+
+		"keeps carrying it; re-declaring the same code brings it back.")
+	render.Redirect(w, r, "/environments")
+}
+
 // renderEnvironmentsEditing redraws the list with one row rejected.
 func (a *App) renderEnvironmentsEditing(w http.ResponseWriter, r *http.Request, status int, edit *editState) {
 	a.renderEnvironmentsWith(w, r, status, nil, environmentForm{}, edit)
@@ -178,7 +201,7 @@ func (a *App) renderEnvironments(w http.ResponseWriter, r *http.Request, status 
 
 func (a *App) renderEnvironmentsWith(w http.ResponseWriter, r *http.Request, status int,
 	messages map[string]string, form environmentForm, edit *editState) {
-	envs, err := a.Store.ListEnvironments(r.Context())
+	envs, err := a.Store.ListEnvironments(r.Context(), store.EnvironmentFilter{IncludeRetired: true})
 	if err != nil {
 		a.serverError(w, r, err)
 		return
@@ -287,7 +310,7 @@ func (a *App) AssetList(w http.ResponseWriter, r *http.Request) {
 		a.serverError(w, r, err)
 		return
 	}
-	envs, err := a.Store.ListEnvironments(r.Context())
+	envs, err := a.Store.ListEnvironments(r.Context(), store.EnvironmentFilter{})
 	if err != nil {
 		a.serverError(w, r, err)
 		return
@@ -627,7 +650,7 @@ func (a *App) renderAssetDetail(w http.ResponseWriter, r *http.Request, status i
 		a.serverError(w, r, err)
 		return
 	}
-	envs, err := a.Store.ListEnvironments(r.Context())
+	envs, err := a.Store.ListEnvironments(r.Context(), store.EnvironmentFilter{})
 	if err != nil {
 		a.serverError(w, r, err)
 		return
@@ -1333,7 +1356,7 @@ func assetMoveEditID(assetID string) string {
 }
 
 func (a *App) renderAssetFormError(w http.ResponseWriter, r *http.Request, messages map[string]string) {
-	envs, err := a.Store.ListEnvironments(r.Context())
+	envs, err := a.Store.ListEnvironments(r.Context(), store.EnvironmentFilter{})
 	if err != nil {
 		a.serverError(w, r, err)
 		return

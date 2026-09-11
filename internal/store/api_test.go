@@ -640,7 +640,7 @@ func TestTheFixtureCannotBeFlattenedIntoUniformEnvironments(t *testing.T) {
 	e := Engines(t)[0]
 	f := newAPIFixture(t, e)
 
-	envs, err := f.s.ListEnvironments(f.ctx)
+	envs, err := f.s.ListEnvironments(f.ctx, EnvironmentFilter{IncludeRetired: true})
 	if err != nil {
 		t.Fatalf("loading the fixture environments: %v", err)
 	}

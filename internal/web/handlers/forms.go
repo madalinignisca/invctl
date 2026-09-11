@@ -162,6 +162,37 @@ func (f assetFormData) Value(field string) string {
 	return f.Edit.Value(field, stored)
 }
 
+// unionAssignedEnvironments adds any environment ROW ALREADY CARRIES, even a
+// retired one, to the list the checkbox group renders from. See
+// newAssetEditForm's doc comment for why: without this, a retired assignment
+// has no checkbox to survive on, and an unrelated field's save silently
+// clears it.
+//
+// nil-safe on row, for the same reason every other helper here is -- this
+// runs on every edit-form build, refused or not.
+func unionAssignedEnvironments(envs []domain.Environment, row *store.AssetRow) []domain.Environment {
+	if row == nil {
+		return envs
+	}
+	present := make(map[string]bool, len(envs))
+	for _, e := range envs {
+		present[e.ID] = true
+	}
+	// Copied rather than appended to in place: envs may share a backing array
+	// with a slice the caller still holds, and growing it in place would risk
+	// corrupting that.
+	out := make([]domain.Environment, len(envs), len(envs)+len(row.Environments))
+	copy(out, envs)
+	for _, assigned := range row.Environments {
+		if present[assigned.ID] {
+			continue
+		}
+		out = append(out, assigned)
+		present[assigned.ID] = true
+	}
+	return out
+}
+
 // InEnvironment reports whether the environment checkbox should be ticked.
 //
 // After a refusal the answer comes from the SUBMISSION, not the stored row: an
@@ -403,10 +434,21 @@ func (a *App) newAssetForm(r *http.Request, errs map[string]string, envs []domai
 // asset rewrites asset_closure and therefore every containment answer, every
 // impact simulation and every environment span; it has its own flow. The form
 // says so rather than leaving a reader to wonder where the field went.
+//
+// envs IS UNIONED WITH THE ASSET'S OWN MEMBERSHIP, deliberately, and this is
+// the fix for the trap that shipped once already as setDataClasses: a
+// retired-but-assigned environment must still render a checkbox, ticked AND
+// ENABLED, or the browser submits nothing for it. asset_environment is a set
+// table replaced wholesale on save (setAssetEnvironments) -- unticking every
+// box a form never rendered is indistinguishable from an operator choosing to
+// clear them, and an unrelated field's correction would silently drop the
+// assignment. ListEnvironments(ctx, EnvironmentFilter{}) already excludes
+// retired ones so they stop being offered to OTHER assets; this puts back
+// only the ones THIS asset is actually carrying.
 func (a *App) newAssetEditForm(r *http.Request, row *store.AssetRow, errs map[string]string,
 	envs []domain.Environment, kinds []store.VocabularyTerm, edit *editState) assetFormData {
 
-	f := a.newAssetForm(r, errs, envs, kinds, nil)
+	f := a.newAssetForm(r, errs, unionAssignedEnvironments(envs, row), kinds, nil)
 	f.Asset = row
 	f.Action = "/assets/" + row.ID
 	f.Submit = "Save asset"
