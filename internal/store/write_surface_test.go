@@ -132,8 +132,6 @@ var writeSurfaceGaps = map[string]string{
 	"Aggregate": "no correction for a declared aggregate's bounds or purpose.",
 	"ASN":       "no correction: a mistyped AS number is withdraw-and-redeclare.",
 	"L2VPN":     "no correction for an L2VPN's own attributes.",
-	"FHRPGroup": "no correction: a group's protocol, priority or virtual address " +
-		"cannot be fixed, and those are what make it a failure target.",
 
 	// Interface left this list 2026-09-09 (migration 00062). It was the
 	// most-referenced table in the schema with no lifecycle column at all --

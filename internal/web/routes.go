@@ -519,9 +519,25 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	write("POST /asn", app.ASNCreate)
 	write("POST /asn/{id}/retire", app.ASNRetire)
 	write("POST /redundancy", app.FHRPCreate)
+	// Correcting a group's own fields. UpdateFHRPGroup existed in the store
+	// with nothing calling it -- withdraw-and-redeclare was the only fix for
+	// a mistyped VRID or name, and RetireFHRPGroup refuses outright while a
+	// VIP still names the group, so that path did not even work.
+	write("POST /redundancy/{id}", app.FHRPUpdate)
 	write("POST /redundancy/{id}/retire", app.FHRPRetire)
 	write("POST /redundancy/{id}/members", app.FHRPMemberAdd)
+	// Correcting a member's priority in place, rather than removing the
+	// router and adding it back -- which SetFHRPMembers' own audit fold
+	// would have recorded as a departure and an arrival for a router that
+	// never left.
+	write("POST /redundancy/{id}/members/{ifaceID}", app.FHRPMemberUpdate)
 	write("POST /redundancy/{id}/members/{ifaceID}/remove", app.FHRPMemberRemove)
+	// Moving the group's virtual address. AssignVIP was complete in the store
+	// and unreachable -- a VIP could never be declared or moved through the
+	// product, and the address it moves away from is released in the same
+	// transaction, closing the stuck-row bug where a VIP recorded against the
+	// wrong address could never be withdrawn again.
+	write("POST /redundancy/{id}/vip", app.FHRPVIPAssign)
 	write("POST /vlans", app.VLANCreate)
 	// Correcting one. The store has had UpdateVLAN since VLANs arrived and
 	// nothing reached it, so a mistyped name could only be fixed by

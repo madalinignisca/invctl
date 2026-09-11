@@ -117,6 +117,68 @@ func (s *SQLStore) CreateFHRPGroup(ctx context.Context, p domain.Permit, g *doma
 	})
 }
 
+// UpdateFHRPGroup corrects a group's own fields: protocol, group number, name
+// and description.
+//
+// UNTIL THIS METHOD EXISTED THE ONLY FIX WAS WITHDRAW-AND-REDECLARE, and that
+// is a real cost here specifically because a group is the impact engine's
+// failure target: retiring one to fix a typo'd VRID cascades nothing on its
+// own (unlike UpdateNetGroup's group), but it DOES orphan the finding --
+// RetireFHRPGroup refuses outright while a VIP still names it (see that
+// method), so the operator would first have to somehow detach the VIP, lose
+// the membership history, and redraw both from nothing to fix one digit.
+//
+// CARRIED FROM THE STORED ROW, never taken from the caller: lifecycle,
+// created_at. Same reasoning as UpdateNetGroup -- RetireFHRPGroup is the only
+// path allowed to withdraw a group, and accepting a lifecycle here would let a
+// caller route around its VIP check entirely. See
+// TestUpdateFHRPGroupCannotLogAWithdrawalThatDidNotHappen for why this is a
+// pin and not a comment.
+//
+// NO UNIQUE CONSTRAINT ON group_number, checked against migration 00032 and
+// deliberate: the column's own comment there says a VRID or HSRP group number
+// "is unique only on the segment they run on, never globally", so two groups
+// legitimately sharing a number on different segments is not a collision to
+// refuse. The one uniqueness this DOES enforce is the same one CreateFHRPGroup
+// already does -- fhrp_group_name_key, live rows only -- mapped to the same
+// field message rather than a raw 500.
+func (s *SQLStore) UpdateFHRPGroup(ctx context.Context, p domain.Permit, g *domain.FHRPGroup) error {
+	if err := g.Validate(); err != nil {
+		return err
+	}
+	before, err := s.GetFHRPGroup(ctx, g.ID)
+	if err != nil {
+		return err
+	}
+	g.Lifecycle = before.Lifecycle
+	g.CreatedAt = before.CreatedAt
+	at := domain.FormatTime(s.now())
+	g.UpdatedAt = &at
+
+	return s.write(ctx, p, func(t *tx) error {
+		res, err := t.exec(ctx, `
+			UPDATE fhrp_group SET protocol = ?, group_number = ?, name = ?, description = ?,
+			                      updated_at = ?, row_version = row_version + 1
+			WHERE id = ? AND row_version = ?`,
+			g.Protocol, g.GroupNumber, g.Name, g.Description, at, g.ID, g.RowVersion)
+		if err != nil {
+			return translateWriteErr(err, "updating fhrp group")
+		}
+		if err := requireVersion(res, "fhrp_group", g.ID, &g.RowVersion); err != nil {
+			return err
+		}
+		if err := t.logUpdate(ctx, "fhrp_group", g.ID, before, g); err != nil {
+			return err
+		}
+		return s.indexEntity(ctx, t, searchDoc{
+			EntityType: "fhrp_group", EntityID: g.ID,
+			Title:    g.Name,
+			Subtitle: fmt.Sprintf("%s group %d", domain.FHRPProtocolLabel(g.Protocol), g.GroupNumber),
+			Body:     fmt.Sprintf("%s %d %s", g.Protocol, g.GroupNumber, g.Name),
+		})
+	})
+}
+
 // RetireFHRPGroup withdraws a group, refusing while a VIP still names it.
 //
 // A retired group holding a live address is a row saying "this does not exist"
@@ -272,12 +334,75 @@ func auditedFHRPGroup(g *domain.FHRPGroup, members []FHRPMemberRow) *fhrpGroupAu
 	return &fhrpGroupAudit{FHRPGroup: *g, Members: strings.Join(parts, ",")}
 }
 
-// AssignVIP points a virtual address at a group.
+// ListFHRPVIPs returns every live address currently answering for a group.
+//
+// Not DB-constrained to at most one -- migration 00032 puts no uniqueness on
+// ip_address.fhrp_group_id -- so this returns a slice rather than an
+// Optional, and AssignVIP below releases every row it finds rather than
+// assuming there is exactly one.
+func (s *SQLStore) ListFHRPVIPs(ctx context.Context, groupID string) ([]domain.IPAddress, error) {
+	var rows []domain.IPAddress
+	err := s.read(ctx, &rows,
+		`SELECT * FROM ip_address WHERE fhrp_group_id = ? ORDER BY addr_text`, groupID)
+	if err != nil {
+		return nil, fmt.Errorf("listing group %s's virtual addresses: %w", groupID, err)
+	}
+	return rows, nil
+}
+
+// VIPCandidate is a live address AssignVIP could point a group's VIP at:
+// not withdrawn, and not already answering for some group -- reassigning an
+// address that IS already somebody's VIP belongs to that group's own move,
+// not to a picker that would silently steal it.
+type VIPCandidate struct {
+	ID       string `db:"id"`
+	AddrText string `db:"addr_text"`
+	// Holder is empty when the address is not currently bound to any port.
+	// AssignVIP clears the binding the moment the address is chosen, the
+	// same way it always has -- this is only what the picker shows before
+	// that happens, so an operator is not asked to choose blind.
+	Holder string `db:"holder"`
+}
+
+// ListVIPCandidates returns every live address not already answering for
+// some group -- the set a "move this VIP" or "declare this VIP" form may
+// offer.
+func (s *SQLStore) ListVIPCandidates(ctx context.Context) ([]VIPCandidate, error) {
+	var rows []VIPCandidate
+	err := s.read(ctx, &rows, `
+		SELECT ip.id, ip.addr_text,
+		       COALESCE(a.name || ' / ' || i.name, '') AS holder
+		FROM ip_address ip
+		LEFT JOIN interface i ON i.id = ip.interface_id
+		LEFT JOIN asset a ON a.id = i.asset_id
+		WHERE ip.lifecycle <> 'retired' AND ip.fhrp_group_id IS NULL
+		ORDER BY ip.addr_text`)
+	if err != nil {
+		return nil, fmt.Errorf("listing virtual-address candidates: %w", err)
+	}
+	return rows, nil
+}
+
+// AssignVIP points a virtual address at a group, releasing whichever address
+// the group answered through before -- in the SAME transaction as the new
+// binding, so the group is never seen with two VIPs, or with none.
 //
 // The address is an ordinary ip_address row, so it already lands in its prefix,
 // counts towards utilisation and is excluded by the allocator. All this does is
 // say which group answers for it -- and clear the interface, because an address
 // answered for by a group is not held by one port.
+//
+// RELEASING THE PRIOR VIP HERE, RATHER THAN A SEPARATE METHOD, IS THE FIX FOR
+// A STUCK ROW. Before this, AssignVIP only ever WROTE fhrp_group_id, and
+// nothing anywhere cleared it -- so an address declared as the wrong VIP was
+// permanent: RetireIPAddress refuses to withdraw a live VIP (see that
+// method's own comment), and there was no way back to nil. AssignVIP already
+// means "this address answers for this group now"; moving that answer to a
+// different address is the same operation, not a new one -- so this is the
+// one place a caller needs to reach, rather than a release step every caller
+// would have to remember to call first (and every caller so far has not:
+// AssignVIP had no route calling it at all until this work package wired
+// FHRPVIPAssign to it).
 func (s *SQLStore) AssignVIP(ctx context.Context, p domain.Permit, addressID, groupID string) error {
 	before, err := s.GetIPAddress(ctx, addressID)
 	if err != nil {
@@ -296,6 +421,16 @@ func (s *SQLStore) AssignVIP(ctx context.Context, p domain.Permit, addressID, gr
 		return domain.NewValidation("address_id",
 			"that address has been withdrawn, so it cannot be a virtual address")
 	}
+	if before.FHRPGroupID != nil && *before.FHRPGroupID == groupID {
+		// Resubmitting the group's own current VIP is a no-op, not a mistake --
+		// there is nothing to release and nothing to move.
+		return nil
+	}
+	prior, err := s.ListFHRPVIPs(ctx, groupID)
+	if err != nil {
+		return err
+	}
+
 	at := domain.FormatTime(s.now())
 	after := *before
 	after.FHRPGroupID = &groupID
@@ -303,6 +438,26 @@ func (s *SQLStore) AssignVIP(ctx context.Context, p domain.Permit, addressID, gr
 	after.UpdatedAt = &at
 
 	return s.write(ctx, p, func(t *tx) error {
+		for i := range prior {
+			old := prior[i]
+			oldAfter := old
+			oldAfter.FHRPGroupID = nil
+			oldAfter.UpdatedAt = &at
+			res, err := t.exec(ctx, `
+				UPDATE ip_address SET fhrp_group_id = NULL, updated_at = ?,
+				                      row_version = row_version + 1
+				WHERE id = ? AND row_version = ?`, at, old.ID, old.RowVersion)
+			if err != nil {
+				return translateWriteErr(err, "releasing the group's previous virtual address")
+			}
+			if err := requireVersion(res, "ip_address", old.ID, &oldAfter.RowVersion); err != nil {
+				return err
+			}
+			if err := t.logUpdate(ctx, "ip_address", old.ID, &old, &oldAfter); err != nil {
+				return err
+			}
+		}
+
 		res, err := t.exec(ctx, `
 			UPDATE ip_address SET fhrp_group_id = ?, interface_id = NULL, updated_at = ?,
 			                      row_version = row_version + 1
