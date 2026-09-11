@@ -1191,8 +1191,11 @@ func TestNoWriteRouteIsReachableWithNoSessionAtAll(t *testing.T) {
 	// error or an address freed could previously only ever be added. 206 ->
 	// 207: POST /environments/{id}/retire (migration 00065) -- an environment
 	// declared in error could previously only ever be added; RetireEnvironment
-	// withdraws the label without touching what still carries it.
-	const pinnedNoSessionRouteCount = 207
+	// withdraws the label without touching what still carries it. 207 -> 210:
+	// POST /redundancy/{id}, /redundancy/{id}/members/{ifaceID} and
+	// /redundancy/{id}/vip -- a group's own fields, a member's priority and
+	// its virtual address could each be declared wrong and never fixed.
+	const pinnedNoSessionRouteCount = 210
 
 	for _, eng := range boundaryEngines(t) {
 		t.Run(eng.name, func(t *testing.T) {

@@ -350,6 +350,39 @@ func (s *SQLStore) ListFHRPVIPs(ctx context.Context, groupID string) ([]domain.I
 	return rows, nil
 }
 
+// VIPCandidate is a live address AssignVIP could point a group's VIP at:
+// not withdrawn, and not already answering for some group -- reassigning an
+// address that IS already somebody's VIP belongs to that group's own move,
+// not to a picker that would silently steal it.
+type VIPCandidate struct {
+	ID       string `db:"id"`
+	AddrText string `db:"addr_text"`
+	// Holder is empty when the address is not currently bound to any port.
+	// AssignVIP clears the binding the moment the address is chosen, the
+	// same way it always has -- this is only what the picker shows before
+	// that happens, so an operator is not asked to choose blind.
+	Holder string `db:"holder"`
+}
+
+// ListVIPCandidates returns every live address not already answering for
+// some group -- the set a "move this VIP" or "declare this VIP" form may
+// offer.
+func (s *SQLStore) ListVIPCandidates(ctx context.Context) ([]VIPCandidate, error) {
+	var rows []VIPCandidate
+	err := s.read(ctx, &rows, `
+		SELECT ip.id, ip.addr_text,
+		       COALESCE(a.name || ' / ' || i.name, '') AS holder
+		FROM ip_address ip
+		LEFT JOIN interface i ON i.id = ip.interface_id
+		LEFT JOIN asset a ON a.id = i.asset_id
+		WHERE ip.lifecycle <> 'retired' AND ip.fhrp_group_id IS NULL
+		ORDER BY ip.addr_text`)
+	if err != nil {
+		return nil, fmt.Errorf("listing virtual-address candidates: %w", err)
+	}
+	return rows, nil
+}
+
 // AssignVIP points a virtual address at a group, releasing whichever address
 // the group answered through before -- in the SAME transaction as the new
 // binding, so the group is never seen with two VIPs, or with none.

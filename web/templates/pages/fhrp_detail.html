@@ -38,10 +38,35 @@
       <thead><tr><th>Asset</th><th>Port</th><th class="num">Priority</th>{{if .IsAdmin}}<th></th>{{end}}</tr></thead>
       <tbody>
         {{range .Members}}
+        {{/* CORRECTING a priority in place, rather than remove-and-re-add --
+             which SetFHRPMembers' own audit fold would have recorded as a
+             departure and an arrival for a router that never left. The
+             number is always editable; MemberEditRow names the one row a
+             refused correction reopened with what was actually typed, the
+             same "match by id, not by mode" rule vlan_list.html's row editor
+             uses for the group case. */}}
+        {{$mine := eq .InterfaceID $.MemberEditRow}}
+        {{$stored := ""}}{{if .Priority}}{{$stored = derefInt .Priority}}{{end}}
         <tr>
           <td><a href="/assets/{{.AssetID}}">{{.AssetName}}</a></td>
           <td class="mono">{{.InterfaceName}}</td>
-          <td class="num">{{if .Priority}}{{derefInt .Priority}}{{else}}<span class="util-note">default</span>{{end}}</td>
+          <td class="num">
+            <form method="post" action="/redundancy/{{$.Group.ID}}/members/{{.InterfaceID}}"
+                  style="display:inline-flex;gap:.25rem;align-items:center">
+              <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+              {{if $mine}}
+              <input class="num {{if $.MemberEdit.Err "priority"}}invalid{{end}}" type="number"
+                     name="priority" min="0" max="255"
+                     value="{{$.MemberEdit.Value "priority" $stored}}" style="width:5em"
+                     aria-label="Priority for {{.AssetName}}" {{if not $.IsAdmin}}disabled{{end}}>
+              {{else}}
+              <input class="num" type="number" name="priority" min="0" max="255" value="{{$stored}}"
+                     style="width:5em" aria-label="Priority for {{.AssetName}}" {{if not $.IsAdmin}}disabled{{end}}>
+              {{end}}
+              {{if $.IsAdmin}}<button class="btn btn-sm" type="submit">Save</button>{{end}}
+            </form>
+            {{if $mine}}{{with $.MemberEdit.Err "priority"}}<div class="field-error">{{.}}</div>{{end}}{{end}}
+          </td>
           {{if $.IsAdmin}}
           <td style="white-space:nowrap">
             <form method="post" action="/redundancy/{{$.Group.ID}}/members/{{.InterfaceID}}/remove" style="display:inline">
@@ -78,4 +103,118 @@
   </form>
   {{end}}
 </div>
+
+<div class="panel">
+  <div class="panel-head">
+    <h2>{{pluralise (len .VIPs) "virtual address" "virtual addresses"}}</h2>
+    <span class="panel-note">An ip_address row, not text -- the allocator will not hand it to anybody else</span>
+  </div>
+  {{if .VIPs}}
+  <div class="scroll-x">
+    <table>
+      <thead><tr><th>Address</th></tr></thead>
+      <tbody>
+        {{range .VIPs}}<tr><td class="mono">{{.AddrText}}</td></tr>{{end}}
+      </tbody>
+    </table>
+  </div>
+  {{else}}
+  <div class="empty"><strong>No virtual address declared yet.</strong>The group exists but nothing points at it.</div>
+  {{end}}
+  {{if .IsAdmin}}
+  {{/* MOVING the VIP, or declaring the first one. AssignVIP was complete in
+       the store and unreachable -- see FHRPVIPAssign's own comment -- and now
+       releases whichever address the group answered through before in the
+       same transaction as the new binding, so this form is always "point the
+       VIP here" rather than needing a separate release step first. */}}
+  <form class="panel-body" method="post" action="/redundancy/{{.Group.ID}}/vip">
+    <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+    <div class="field-row">
+      <div class="field">
+        <label for="fhrp-vip">{{if .VIPs}}Move the virtual address to{{else}}Virtual address{{end}}</label>
+        <select id="fhrp-vip" name="address_id" class="{{if .VIPEdit.Err "address_id"}}invalid{{end}}" required>
+          <option value="">choose an address</option>
+          {{range .VIPCandidates}}
+          <option value="{{.ID}}" {{if eq .ID ($.VIPEdit.Value "address_id" "")}}selected{{end}}>
+            {{.AddrText}}{{if .Holder}} ({{.Holder}}){{end}}
+          </option>
+          {{end}}
+        </select>
+        {{with .VIPEdit.Err "address_id"}}<div class="field-error">{{.}}</div>{{end}}
+        <div class="field-hint">
+          Only live addresses that do not already answer for another group are offered.
+          Choosing one clears whatever port it was held by.
+        </div>
+      </div>
+    </div>
+    <button class="btn btn-primary" type="submit">{{if .VIPs}}Move{{else}}Assign{{end}} virtual address</button>
+  </form>
+  {{end}}
+</div>
+
+{{if .IsAdmin}}
+{{/* CORRECTING the group. protocol, group_number and name are exactly the
+     fields that make a group a failure target -- see writeSurfaceGaps's old
+     entry for FHRPGroup -- and until UpdateFHRPGroup was wired here, the
+     only fix for a typo was to withdraw the group, which RetireFHRPGroup
+     refuses outright while a VIP still names it. */}}
+<form class="panel" method="post" action="/redundancy/{{.Group.ID}}">
+  <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+  <input type="hidden" name="row_version" value="{{.GroupEdit.Value "row_version" (itoa .Group.RowVersion)}}">
+  <div class="panel-head"><h2>Correct this group</h2></div>
+  <div class="panel-body">
+    <div class="field-row">
+      <div class="field">
+        <label for="fg-name">Name</label>
+        <input id="fg-name" class="{{if .GroupEdit.Err "name"}}invalid{{end}}" type="text"
+               name="name" value="{{.GroupEdit.Value "name" .Group.Name}}" required>
+        {{with .GroupEdit.Err "name"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="fg-proto">Protocol</label>
+        {{$p := .GroupEdit.Value "protocol" .Group.Protocol}}
+        <select id="fg-proto" name="protocol">
+          {{range .Protocols}}<option value="{{.}}" {{if eq . $p}}selected{{end}}>{{.}}</option>{{end}}
+        </select>
+      </div>
+      <div class="field">
+        <label for="fg-num">Group number</label>
+        <input id="fg-num" class="{{if .GroupEdit.Err "group_number"}}invalid{{end}}" type="number"
+               name="group_number" min="0" max="255"
+               value="{{.GroupEdit.Value "group_number" (itoa .Group.GroupNumber)}}" required>
+        {{with .GroupEdit.Err "group_number"}}<div class="field-error">{{.}}</div>{{end}}
+        <div class="field-hint">The VRID or HSRP group. Unique on its segment, never globally.</div>
+      </div>
+    </div>
+    <div class="field-row">
+      <div class="field">
+        <label for="fg-desc">Description</label>
+        <input id="fg-desc" type="text" name="description"
+               value="{{.GroupEdit.Value "description" (deref .Group.Description)}}">
+      </div>
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-primary" type="submit">Save</button>
+    </div>
+  </div>
+</form>
+{{end}}
+
+{{if .IsAdmin}}
+<div class="panel panel-warn">
+  <div class="panel-head"><h2>Withdraw this group</h2></div>
+  <div class="panel-body">
+    <p>
+      A group cannot be withdrawn while a virtual address still names it --
+      move the address elsewhere first, or take it back with a different one.
+    </p>
+    <form method="post" action="/redundancy/{{.Group.ID}}/retire"
+          hx-post="/redundancy/{{.Group.ID}}/retire"
+          hx-confirm="Withdraw {{.Group.Name}}? The record is kept.">
+      <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+      <button class="btn btn-danger" type="submit">Withdraw {{.Group.Name}}</button>
+    </form>
+  </div>
+</div>
+{{end}}
 {{end}}

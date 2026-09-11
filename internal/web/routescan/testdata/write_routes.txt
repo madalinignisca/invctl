@@ -154,12 +154,15 @@ POST /providers | ProviderCreate | write | true
 POST /providers/{id} | ProviderUpdate | write | true
 POST /providers/{id}/retire | ProviderRetire | write | true
 POST /redundancy | FHRPCreate | write | true
+POST /redundancy/{id} | FHRPUpdate | write | true
 POST /redundancy/{id}/journal | JournalCreate | write | true
 POST /redundancy/{id}/journal/{noteID} | JournalUpdate | write | true
 POST /redundancy/{id}/journal/{noteID}/retire | JournalRetire | write | true
 POST /redundancy/{id}/members | FHRPMemberAdd | write | true
+POST /redundancy/{id}/members/{ifaceID} | FHRPMemberUpdate | write | true
 POST /redundancy/{id}/members/{ifaceID}/remove | FHRPMemberRemove | write | true
 POST /redundancy/{id}/retire | FHRPRetire | write | true
+POST /redundancy/{id}/vip | FHRPVIPAssign | write | true
 POST /reports/ownership/assign | OwnershipAssign | write | true
 POST /services | ServiceCreate | write | true
 POST /services/tags/apply | ServicesBulkTagApply | write | true

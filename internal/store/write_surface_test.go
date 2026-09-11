@@ -131,7 +131,7 @@ var writeSurfaceGaps = map[string]string{
 		"never happened -- somebody reading it later sees a cable that was pulled.",
 	"Aggregate": "no correction for a declared aggregate's bounds or purpose.",
 	"ASN":       "no correction: a mistyped AS number is withdraw-and-redeclare.",
-	"L2VPN": "no correction for an L2VPN's own attributes.",
+	"L2VPN":     "no correction for an L2VPN's own attributes.",
 
 	// Interface left this list 2026-09-09 (migration 00062). It was the
 	// most-referenced table in the schema with no lifecycle column at all --
