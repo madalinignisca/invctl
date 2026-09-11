@@ -126,7 +126,7 @@ per-row functions runs.
 | `asset_cost` | **WP-1.1 item 3.** Subject is the owning asset — `authorizeCostSubject` (`internal/store/costs.go`) checks it and refuses every other cost table (`service_cost`, `project_cost`, `circuit_cost` stay `ScopeTopology`, deliberately — see the `ScopeTopology` section below). Gated on a **second, independent seam**: `middleware.RequireCostVisibility` also requires the caller's `can_see_costs` grant before the request reaches the store at all, so a project owner who cannot see costs cannot write them either — the store-level scope check alone would let them blind-write a price they are not permitted to read. `domain.Permit` itself was **not widened** to carry a cost dimension: it stays fixed at the three width-locked methods (`TestThePermitInterfaceCannotBeWidenedWithoutSayingSo`), so cost visibility is enforced once, in the request-gating middleware, rather than duplicated into every `Covers` call a permit could ever be asked. |
 | `dependency` | **WP-1.1 item 1, two-ended.** Subjects are the two services it connects — the consumer directly, and the provider one hop away (an endpoint's own `service_id`, or a route's frontend endpoint's `service_id`). `authorizeDependencySubjects` (`internal/store/deps.go`) requires **both** ends in the caller's project scope; checking only one would let a project owner point their service at anybody's socket, or attach anybody's service as a consumer of their own. |
 | `interface` | subject is the owning asset (`authorizeInterfaceSubject`, `internal/store/network.go`). `lifecycle` (migration 00062) is **declared**: a port is gone because somebody pulled the NIC, never because it stopped answering — rule 2's "a reported `down` never sets `lifecycle`" applies to a port exactly as it does to an asset. It is also distinct from `enabled`, which is administrative state on a port that still exists. |
-| `ip_address` | subject is the owning asset, one hop through its interface |
+| `ip_address` | subject is the owning asset, one hop through its interface. `lifecycle` (migration 00064) is **declared**: an address is freed because somebody says so, never because anything observed reported it unused — the same reasoning as `interface.lifecycle` above. |
 | `journal_entry` | subject is the entity the note is attached to |
 | `link` | **WP-1.1 item 2, two-ended.** Subjects are the two assets it cables together — an interface carries no project of its own, so a link is two hops from each end (`a_interface_id` → asset, `b_interface_id` → asset). `authorizeLinkSubjects` (`internal/store/network.go`) requires **both** interfaces' owning assets in scope; checking only one would let a project owner cable their own asset to anybody else's port. |
 | `saved_view` | subject is the view's own owner (`internal/store/savedviews.go`) — the row a person may always write is their own, regardless of project membership |
@@ -202,7 +202,7 @@ subject but are excluded on purpose.
 | `power_input` | physical topology |
 | `power_panel` | physical topology |
 | `power_source` | physical topology |
-| `prefix` | addressing |
+| `prefix` | addressing. `lifecycle` (migration 00064) is **declared**: a network is withdrawn because somebody says it was declared in error, never because anything observed reported it gone. |
 | `project_cost` | costs attached to the project itself, not to one of its assets — explicitly excluded from the `asset_cost` carve-out |
 | `rir` | addressing |
 | `route` | topology |

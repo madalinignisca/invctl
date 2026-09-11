@@ -188,7 +188,12 @@ type Prefix struct {
 	// lives. It replaced a loose integer in 00031/00036 -- the two coexisted
 	// for one release and promptly disagreed, because the form wrote one and
 	// the VLAN pages read the other.
-	VLANRefID  *string `db:"vlan_ref_id"`
+	VLANRefID *string `db:"vlan_ref_id"`
+	// Lifecycle is DECLARED, the same as every other lifecycle in this file: a
+	// network is withdrawn because a person says it was declared in error, not
+	// because anything observed reported it gone. Added by migration 00064 --
+	// see RetirePrefix for why a prefix could previously only ever be added.
+	Lifecycle  string  `db:"lifecycle"`
 	CreatedAt  *string `db:"created_at"`
 	UpdatedAt  *string `db:"updated_at"`
 	RowVersion int     `db:"row_version"`
@@ -204,9 +209,12 @@ func NewPrefix(id, cidr string) (*Prefix, error) {
 	}
 	return &Prefix{
 		ID: id, CIDRText: pv.Text, AddrFamily: pv.Family,
-		AddrStart: pv.Start, AddrEnd: pv.End,
+		AddrStart: pv.Start, AddrEnd: pv.End, Lifecycle: LifecycleActive,
 	}, nil
 }
+
+// IsRetired reports whether this network has been withdrawn.
+func (p *Prefix) IsRetired() bool { return p.Lifecycle == LifecycleRetired }
 
 // SetCIDR reparses a network and rewrites ALL FOUR stored columns, for the
 // reason IPAddress.SetAddress does: the text is the label and the byte range is
@@ -262,9 +270,14 @@ type IPAddress struct {
 	// box, which is the opposite of what a first-hop protocol is for.
 	FHRPGroupID *string `db:"fhrp_group_id"`
 	Role        string  `db:"role"`
-	CreatedAt   *string `db:"created_at"`
-	UpdatedAt   *string `db:"updated_at"`
-	RowVersion  int     `db:"row_version"`
+	// Lifecycle is DECLARED: an address is freed because a person says so, not
+	// because anything observed reported it unused. Added by migration 00064
+	// -- see RetireIPAddress for why an address could previously only ever be
+	// added, never released back to the allocator.
+	Lifecycle  string  `db:"lifecycle"`
+	CreatedAt  *string `db:"created_at"`
+	UpdatedAt  *string `db:"updated_at"`
+	RowVersion int     `db:"row_version"`
 }
 
 // NewIPAddress parses and normalizes an address into the stored representation.
@@ -280,9 +293,12 @@ func NewIPAddress(id, addr string, interfaceID *string, role string) (*IPAddress
 	}
 	return &IPAddress{
 		ID: id, AddrText: av.Text, AddrFamily: av.Family, AddrStart: av.Start,
-		InterfaceID: interfaceID, Role: role,
+		InterfaceID: interfaceID, Role: role, Lifecycle: LifecycleActive,
 	}, nil
 }
+
+// IsRetired reports whether this address has been withdrawn.
+func (a *IPAddress) IsRetired() bool { return a.Lifecycle == LifecycleRetired }
 
 // SetAddress reparses an address and rewrites ALL THREE stored columns.
 //
