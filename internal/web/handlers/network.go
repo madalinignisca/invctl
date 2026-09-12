@@ -159,6 +159,61 @@ func (a *App) LinkCreate(w http.ResponseWriter, r *http.Request) {
 	render.Redirect(w, r, "/assets/"+assetID)
 }
 
+// LinkUpdate corrects a cable's medium and length.
+//
+// NOT its endpoints. There is no a_interface_id or target_interface_id field
+// on this form -- UpdateLink pins both from the stored row regardless of what
+// a caller submits, so a field for them would have nowhere to go. A wrongly
+// picked port is withdraw-and-re-patch (LinkRetire, then LinkCreate), which is
+// also what physically happened.
+func (a *App) LinkUpdate(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Could not read that form.", http.StatusBadRequest)
+		return
+	}
+	existing, err := a.Store.GetLink(r.Context(), r.PathValue("id"))
+	if err != nil {
+		a.handleStoreError(w, r, err)
+		return
+	}
+	// The asset to return to: the form field, when the page it was rendered on
+	// said so (either end may be looking at this cable, same as LinkRetire),
+	// falling back to the near end's own asset.
+	assetID := formValue(r, "asset_id")
+	if assetID == "" {
+		if iface, ifErr := a.Store.GetInterface(r.Context(), existing.AInterfaceID); ifErr == nil {
+			assetID = iface.AssetID
+		}
+	}
+	back := "/assets"
+	if assetID != "" {
+		back = "/assets/" + assetID
+	}
+
+	nums := optionalNumbers(r)
+	updated := *existing
+	updated.Medium = optionalString(r, "medium")
+	updated.LengthM = nums.opt("length_m")
+	updated.RowVersion = submittedVersion(r, updated.RowVersion)
+	if msgs := nums.messages(); msgs != nil {
+		err = domain.NewValidationFrom(msgs)
+	} else {
+		err = a.Store.UpdateLink(r.Context(), a.permit(r), &updated)
+	}
+	if err != nil {
+		a.refuseAssetEdit(w, r, err, assetID, existing.ID,
+			// Link carries no unique constraint of its own to conflict on, so
+			// the only realistic ErrConflict here is domain.ErrStale --
+			// refusalMessages reads this map's KEY, not its value, to know
+			// which field the stale-form message belongs next to.
+			map[string]string{"medium": ""},
+			"medium", "length_m")
+		return
+	}
+	a.setFlash(r, "success", "Cable updated.")
+	render.Redirect(w, r, back)
+}
+
 // LinkRetire unpatches a cable. The row and its audit history are kept; the
 // far end simply stops showing (docs/DECISIONS.md, 2026-07-28 decisions).
 func (a *App) LinkRetire(w http.ResponseWriter, r *http.Request) {

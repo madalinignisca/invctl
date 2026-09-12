@@ -269,7 +269,46 @@
             {{end}}
           </td>
           <td class="mono" style="font-size:12px;color:var(--muted)">
-            {{if .PeerAsset}}{{.PeerAsset}} · {{.PeerPort}}{{else}}—{{end}}
+            {{if .PeerAsset}}
+              {{/* Correcting a cable's medium/length (migration 00066). Gated
+                   on .CanUnpatch, not on CanWriteEntity for this asset alone:
+                   authorizeLinkSubjects requires the caller's permit to cover
+                   BOTH ends, same as unpatching, and .CanUnpatch is the one
+                   place that rule is evaluated (canWriteLink, forms.go) --
+                   see the comment on the Unpatch control below for why this
+                   is not re-derived inline. NOT a_interface_id or
+                   b_interface_id: UpdateLink pins both from the stored row
+                   regardless of what this form sends, so there is no field
+                   for either -- a wrongly picked port is withdraw-and-re-patch. */}}
+              {{if and .CanUnpatch (eq .LinkID $.EditRow)}}
+              <form method="post" action="/links/{{.LinkID}}" style="display:flex;flex-direction:column;gap:4px;align-items:flex-start">
+                <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+                <input type="hidden" name="asset_id" value="{{$.Asset.ID}}">
+                <input type="hidden" name="row_version" value="{{$.Edit.Value "row_version" (itoa .LinkRowVersion)}}">
+                <div>{{.PeerAsset}} · {{.PeerPort}}</div>
+                <input class="{{if $.Edit.Err "medium"}}invalid{{end}}" type="text" name="medium"
+                       value="{{$.Edit.Value "medium" (deref .LinkMedium)}}" placeholder="cat6a"
+                       aria-label="Cable medium" style="width:8em">
+                {{with $.Edit.Err "medium"}}<div class="field-error">{{.}}</div>{{end}}
+                <input class="{{if $.Edit.Err "length_m"}}invalid{{end}}" type="number" name="length_m" min="0"
+                       value="{{$.Edit.Value "length_m" (derefInt .LinkLengthM)}}"
+                       aria-label="Cable length in metres" style="width:6em">
+                {{with $.Edit.Err "length_m"}}<div class="field-error">{{.}}</div>{{end}}
+                <div>
+                  <button class="btn btn-sm btn-primary" type="submit">Save</button>
+                  <a class="btn btn-sm" href="/assets/{{$.Asset.ID}}#ports">Cancel</a>
+                </div>
+              </form>
+              {{else}}
+              <div>{{.PeerAsset}} · {{.PeerPort}}</div>
+              {{if or .LinkMedium .LinkLengthM}}
+              <div>{{if .LinkMedium}}{{deref .LinkMedium}}{{end}}{{if .LinkLengthM}} · {{derefInt .LinkLengthM}}m{{end}}</div>
+              {{end}}
+              {{if .CanUnpatch}}
+              <a class="id" href="/assets/{{$.Asset.ID}}?edit={{.LinkID}}#ports" title="Correct this cable's medium or length">correct</a>
+              {{end}}
+              {{end}}
+            {{else}}—{{end}}
           </td>
           {{/* Editing the port itself is single-subject (subject-derived):
                the port's only owner is this asset, so it is gated on
