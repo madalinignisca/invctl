@@ -125,10 +125,16 @@ var writeSurfaceGaps = map[string]string{
 	// kind. This test is what found it, and this test is what said to delete
 	// the entry once POST /providers/{id} and /retire existed.
 	//
+	// Link left this list with migration 00066: UpdateLink
+	// (internal/store/network.go) corrects medium and length_m -- the
+	// descriptive attributes a cable carries beyond its two endpoints -- while
+	// pinning a_interface_id, b_interface_id and lifecycle from the stored row,
+	// the same way UpdateNetGroup pins what RetireNetGroup alone may change.
+	// Moving an endpoint is still withdraw-and-re-patch; see UpdateLink's own
+	// comment for why, and writeSurfaceByDesign for the entities where that is
+	// the WHOLE story rather than half of it.
+	//
 	// --- reachable, and the row carries attributes somebody typed ---
-	"Link": "no correction. medium and length_m are DESCRIPTIVE, not identity, so " +
-		"retire-and-re-patch writes a physical event into the cabling audit that " +
-		"never happened -- somebody reading it later sees a cable that was pulled.",
 	"Aggregate": "no correction for a declared aggregate's bounds or purpose.",
 	"ASN":       "no correction: a mistyped AS number is withdraw-and-redeclare.",
 	"L2VPN":     "no correction for an L2VPN's own attributes.",

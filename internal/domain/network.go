@@ -149,6 +149,8 @@ type Link struct {
 	Medium       *string `db:"medium"`
 	LengthM      *int    `db:"length_m"`
 	Lifecycle    string  `db:"lifecycle"`
+	// RowVersion is the optimistic-concurrency token (migration 00066).
+	RowVersion int `db:"row_version"`
 }
 
 // NewLink validates and constructs a cable.

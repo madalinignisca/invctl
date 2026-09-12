@@ -1195,7 +1195,11 @@ func TestNoWriteRouteIsReachableWithNoSessionAtAll(t *testing.T) {
 	// POST /redundancy/{id}, /redundancy/{id}/members/{ifaceID} and
 	// /redundancy/{id}/vip -- a group's own fields, a member's priority and
 	// its virtual address could each be declared wrong and never fixed.
-	const pinnedNoSessionRouteCount = 210
+	// 210 -> 211: POST /links/{id} (migration 00066) -- a cable's medium or
+	// length, typed wrong, could previously only be fixed by retiring and
+	// re-patching it, which would have written a pull and a re-patch into the
+	// cabling audit for a cable nobody touched.
+	const pinnedNoSessionRouteCount = 211
 
 	for _, eng := range boundaryEngines(t) {
 		t.Run(eng.name, func(t *testing.T) {
