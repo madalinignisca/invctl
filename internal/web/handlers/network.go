@@ -203,10 +203,18 @@ func (a *App) LinkUpdate(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		a.refuseAssetEdit(w, r, err, assetID, existing.ID,
 			// Link carries no unique constraint of its own to conflict on, so
-			// the only realistic ErrConflict here is domain.ErrStale --
-			// refusalMessages reads this map's KEY, not its value, to know
-			// which field the stale-form message belongs next to.
-			map[string]string{"medium": ""},
+			// the only realistic ErrConflict here is domain.ErrStale, and for
+			// that refusalMessages reads this map's KEY rather than its value:
+			// the key says which field the stale-form message belongs next to.
+			//
+			// THE VALUE IS NOT A PLACEHOLDER THOUGH. refusalMessages' other
+			// branch returns this map verbatim as the messages for a conflict
+			// that is NOT stale, so an empty string there would mark the field
+			// in red and say nothing -- a 422 with no reason on it, which is
+			// the failure this repo's 422 rule exists to prevent. A cable
+			// cannot realistically reach that branch today; it costs one
+			// sentence to make sure it stays legible if one ever does.
+			map[string]string{"medium": "that cable could not be saved as declared"},
 			"medium", "length_m")
 		return
 	}
