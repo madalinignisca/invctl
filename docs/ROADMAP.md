@@ -1113,6 +1113,31 @@ units and weight but nothing about compute, and this is the prerequisite for
 every figure in J4. Useful before any money is involved: it answers *"is this
 cluster oversubscribed?"*.
 
+**WP-J8 · Identity surface** — S — **NOT BUILT**
+`CreateIdentity` and `ListIdentities` exist in `internal/store/deps.go` and **no
+route reaches either of them**, so an identity cannot be declared, listed,
+corrected or withdrawn through the application at all. The table carries
+`kind name realm secret_ref rotation_days last_rotated lifecycle team_id` — and
+`rotation_days`/`last_rotated` are the point of it, so a credential-rotation
+model that can never record a rotation is inert rather than merely incomplete.
+
+Wants: a list and detail page, create, correct, withdraw, and an explicit
+"record a rotation" action that stamps `last_rotated` — that last one is the
+feature, not a side effect of an edit form, because it is the thing somebody
+actually does.
+
+`secret_ref` holds a **path, never a secret** (CLAUDE.md), and it must stay
+redacted in `snapshotJSON`/`diffJSON` the way `CreateUser` already redacts
+`password_hash`. `team_id` answers "who do I ask", the same role it plays on
+`custom_field`.
+
+**Reclassified here on 2026-09-13** out of `writeSurfaceGaps`, where it had been
+filed as "neither, and no route today" alongside genuine repair gaps. That
+understated it: a gap means a working feature is missing a repair path, and this
+feature does not exist. `writeSurfaceUnbuilt` in
+`internal/store/write_surface_test.go` now points here, and fails if an entity
+listed there quietly grows both verbs.
+
 **WP-J7 · Capacity findings** — M — **DONE**
 Three findings, three audiences. A project allocated **above what it was priced
 for** is the CEO's alert: nobody is in breach, the engagement has simply grown
