@@ -320,7 +320,7 @@ var DeclaredColumns = map[string][]string{
 		"created_at", "updated_at", "row_version",
 	},
 	"ip_address": {"id", "addr_text", "addr_family", "addr_start", "interface_id", "fhrp_group_id", "role", "lifecycle", "created_at", "updated_at", "row_version"},
-	"link":       {"id", "a_interface_id", "b_interface_id", "medium", "length_m", "lifecycle"},
+	"link":       {"id", "a_interface_id", "b_interface_id", "medium", "length_m", "lifecycle", "row_version"},
 	"net_anchor": {
 		"id", "code", "name", "scope", "group_id", "environment_id", "plane",
 		"lifecycle", "verified_by", "verified_at", "created_at", "updated_at",

@@ -36,6 +36,13 @@ type InterfaceRow struct {
 	// store then refuses). Empty on an unpatched port, same as PeerAsset.
 	PeerAssetID string
 	PeerPort    string
+	// LinkMedium, LinkLengthM and LinkRowVersion are the cable's own
+	// correctable attributes -- shown beside the peer it resolves, and the
+	// version an inline correction form on this row carries so UpdateLink can
+	// detect a lost race. Zero-valued on an unpatched port, same as LinkID.
+	LinkMedium     *string
+	LinkLengthM    *int
+	LinkRowVersion int
 	// Attached is true when anything at all fastens to this port. Read through
 	// Bare() rather than directly; see its doc comment.
 	Attached bool
@@ -123,16 +130,21 @@ func (s *SQLStore) ListInterfaces(ctx context.Context, assetID string) ([]Interf
 	// links are excluded: an unpatched cable must not still show as a port's
 	// far end (docs/DECISIONS.md, 2026-07-28 decisions).
 	type peer struct {
-		NearID      string `db:"near_id"`
-		LinkID      string `db:"link_id"`
-		PeerPort    string `db:"peer_port"`
-		PeerAsset   string `db:"peer_asset"`
-		PeerAssetID string `db:"peer_asset_id"`
+		NearID      string  `db:"near_id"`
+		LinkID      string  `db:"link_id"`
+		PeerPort    string  `db:"peer_port"`
+		PeerAsset   string  `db:"peer_asset"`
+		PeerAssetID string  `db:"peer_asset_id"`
+		LinkMedium  *string `db:"link_medium"`
+		LinkLengthM *int    `db:"link_length_m"`
+		LinkVersion int     `db:"link_row_version"`
 	}
 	var peers []peer
 	err = s.read(ctx, &peers, `
 		SELECT l.id AS link_id, l.a_interface_id AS near_id, bi.name AS peer_port,
-		       ba.name AS peer_asset, ba.id AS peer_asset_id
+		       ba.name AS peer_asset, ba.id AS peer_asset_id,
+		       l.medium AS link_medium, l.length_m AS link_length_m,
+		       l.row_version AS link_row_version
 		FROM link l
 		JOIN interface bi ON bi.id = l.b_interface_id
 		JOIN asset ba ON ba.id = bi.asset_id
@@ -143,7 +155,9 @@ func (s *SQLStore) ListInterfaces(ctx context.Context, assetID string) ([]Interf
 	var peersB []peer
 	err = s.read(ctx, &peersB, `
 		SELECT l.id AS link_id, l.b_interface_id AS near_id, ai.name AS peer_port,
-		       aa.name AS peer_asset, aa.id AS peer_asset_id
+		       aa.name AS peer_asset, aa.id AS peer_asset_id,
+		       l.medium AS link_medium, l.length_m AS link_length_m,
+		       l.row_version AS link_row_version
 		FROM link l
 		JOIN interface ai ON ai.id = l.a_interface_id
 		JOIN asset aa ON aa.id = ai.asset_id
@@ -154,6 +168,9 @@ func (s *SQLStore) ListInterfaces(ctx context.Context, assetID string) ([]Interf
 	for _, p := range append(peers, peersB...) {
 		if i, ok := index[p.NearID]; ok {
 			rows[i].LinkID = p.LinkID
+			rows[i].LinkMedium = p.LinkMedium
+			rows[i].LinkLengthM = p.LinkLengthM
+			rows[i].LinkRowVersion = p.LinkVersion
 			rows[i].PeerAsset = p.PeerAsset
 			rows[i].PeerAssetID = p.PeerAssetID
 			rows[i].PeerPort = p.PeerPort
@@ -455,6 +472,66 @@ func (s *SQLStore) CreateLink(ctx context.Context, p domain.Permit, l *domain.Li
 			return translateWriteErr(err, "creating link")
 		}
 		return t.logCreate(ctx, "link", l.ID, l)
+	})
+}
+
+// UpdateLink corrects a cable's DESCRIPTIVE attributes: medium and length_m.
+//
+// NOT a_interface_id OR b_interface_id, and this is the whole reason the
+// method exists rather than the census entry staying "no correction". Those
+// two columns are the cable's IDENTITY -- a cable is nothing but the two ports
+// it joins -- so pointing one at a different port is a DIFFERENT cable, not a
+// repair of this one, exactly the reasoning writeSurfaceByDesign already
+// records for NetUplink, CircuitTermination and NetAttachment. The right path
+// for a wrongly-picked port is RetireLink and CreateLink, which is also what
+// physically happened: somebody pulled the wrong cable and ran a new one.
+// Link earns a correction path those three do not because it carries
+// attributes of its own BEYOND its endpoints; an edge with nothing to correct
+// has nothing this method would ever touch.
+//
+// medium and length_m are different: somebody typed "smf" for "mmf", or
+// measured 3m as 5m. Neither is a physical event, so retiring the cable to
+// fix a typo would write a pull and a re-patch into the cabling audit for a
+// cable nobody touched -- the exact harm the census entry recorded.
+//
+// CARRIED FROM THE STORED ROW, never taken from the caller: a_interface_id,
+// b_interface_id and lifecycle. The UPDATE statement below never names any of
+// the three, so the database is safe regardless of what a caller submits --
+// but logUpdate diffs STRUCTS, not columns, and without this pin a forged
+// endpoint or a forged lifecycle would still reach the audit as a claim that
+// the cable moved or was withdrawn, when the database shows neither happened.
+// TestUpdateLinkCannotLogAnEndpointMoveOrWithdrawalThatDidNotHappen is the
+// only thing that can catch that regression -- deleting the pin here leaves
+// every other test on this path green.
+func (s *SQLStore) UpdateLink(ctx context.Context, p domain.Permit, l *domain.Link) error {
+	before, err := s.GetLink(ctx, l.ID)
+	if err != nil {
+		return err
+	}
+	l.AInterfaceID = before.AInterfaceID
+	l.BInterfaceID = before.BInterfaceID
+	l.Lifecycle = before.Lifecycle
+
+	// Subjects come from the STORED row, the only one there is here -- both
+	// endpoints are pinned above, so a submitted struct has nothing left for a
+	// caller to forge a different subject from. Same shape as RetireLink.
+	linkPermit, err := authorizeLinkSubjects(ctx, s, p, before.AInterfaceID, before.BInterfaceID, l.ID)
+	if err != nil {
+		return err
+	}
+
+	return s.write(ctx, linkPermit, func(t *tx) error {
+		res, err := t.exec(ctx, `
+			UPDATE link SET medium = ?, length_m = ?, row_version = row_version + 1
+			WHERE id = ? AND row_version = ?`,
+			l.Medium, l.LengthM, l.ID, l.RowVersion)
+		if err != nil {
+			return translateWriteErr(err, "updating link")
+		}
+		if err := requireVersion(res, "link", l.ID, &l.RowVersion); err != nil {
+			return err
+		}
+		return t.logUpdate(ctx, "link", l.ID, before, l)
 	})
 }
 

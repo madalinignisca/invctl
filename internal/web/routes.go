@@ -479,6 +479,7 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	write("POST /assets/{id}/interfaces", app.InterfaceCreate)
 	write("POST /addresses", app.IPAddressCreate)
 	write("POST /links", app.LinkCreate)
+	write("POST /links/{id}", app.LinkUpdate)
 	write("POST /links/{id}/retire", app.LinkRetire)
 	write("POST /prefixes", app.PrefixCreate)
 	// Reservations live on the prefixes page rather than a page of their own:
