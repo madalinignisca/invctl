@@ -99,6 +99,16 @@ var writeSurfaceByDesign = map[string]string{
 		"pointing it somewhere else is a DIFFERENT edge rather than a repair of " +
 		"this one -- exactly the reasoning CircuitTermination and NetAttachment " +
 		"already carry here. Withdraw it and draw the right one.",
+	"ImportJob": "no correction and no withdrawal, by design: an import job is a " +
+		"RECORD OF A RUN, not a fact about the estate. Every column is what " +
+		"happened -- who started it, how many rows, how far it got, what went " +
+		"wrong -- and none of it is something an operator could type wrong and " +
+		"need to repair. If the wrong file was imported, the fix is to import the " +
+		"right one; editing the record of the wrong import falsifies history, " +
+		"which is the same reason change_log is append-only (docs/AUDIT.md rule 9). " +
+		"It is readable at GET /imports and that is the whole intended surface. " +
+		"DECIDED 2026-09-13, having sat in writeSurfaceGaps saying \"nobody has " +
+		"decided\" -- somebody has now.",
 	"PassThrough": "a panel strand is re-punched, not amended. The row records a " +
 		"physical fact about a patch panel, and changing it means somebody went " +
 		"and moved the copper.",
@@ -110,6 +120,30 @@ var writeSurfaceByDesign = map[string]string{
 	"AssetInProject":   "no correction, by design: a link naming a different project is a different link. Withdraw it (RetireProjectAsset) and link the right one.",
 	"CircuitInProject": "no correction, by design -- see AssetInProject.",
 	"ServiceInProject": "no correction, by design -- see AssetInProject.",
+}
+
+// writeSurfaceUnbuilt is the third answer, and it exists because the other two
+// were both wrong for `identity`.
+//
+// A GAP means a working feature is missing a repair path -- somebody uses this
+// every day and one day needs to fix a typo. BY DESIGN means the verb genuinely
+// should not exist. `identity` is neither: CreateIdentity and ListIdentities sit
+// in the store with NO ROUTE REACHING THEM, so there is no page, no create form
+// and no list. Filing that as "no correction path" understated it by a long way
+// -- rotation_days and last_rotated are the point of the table, and nothing can
+// record a rotation, so the feature is inert rather than imperfect.
+//
+// Two-directional like the maps above: an entity that grows both verbs while
+// still listed here fails, because an entry nobody deletes stops being read.
+//
+// Each entry names where the real work is tracked. This census is not the place
+// to plan a feature; it is the place to stop one being mistaken for a defect.
+var writeSurfaceUnbuilt = map[string]string{
+	"Identity": "the whole surface is unbuilt, not just the repair path: no " +
+		"route reaches CreateIdentity or ListIdentities, so an identity cannot be " +
+		"declared, listed or rotated through the application at all. Tracked as " +
+		"WP-J8 in docs/ROADMAP.md. RECLASSIFIED 2026-09-13 out of writeSurfaceGaps, " +
+		"where it read as a missing correction on a working feature.",
 }
 
 // writeSurfaceGaps is the backlog: entities somebody can create and then cannot
@@ -163,10 +197,6 @@ var writeSurfaceGaps = map[string]string{
 	"RIR":         "neither, and no route today.",
 	"Route":       "neither, and no route today.",
 	"VLANGroup":   "neither, and no route today.",
-	"Identity": "neither, and no route today -- and last_rotated and " +
-		"rotation_days are fields whose entire purpose is to change.",
-	"ImportJob": "neither. A job record is arguably immutable history rather " +
-		"than an entity, which would make this by-design; nobody has decided.",
 }
 
 // TestEveryCreatedEntityCanBeCorrectedOrWithdrawn fails when something a person
@@ -213,6 +243,7 @@ func TestEveryCreatedEntityCanBeCorrectedOrWithdrawn(t *testing.T) {
 
 		_, byDesign := writeSurfaceByDesign[entity]
 		why, listed := writeSurfaceGaps[entity]
+		_, unbuilt := writeSurfaceUnbuilt[entity]
 
 		if canCorrect && canWithdraw {
 			// Nothing missing, so neither list may claim it.
@@ -225,16 +256,22 @@ func TestEveryCreatedEntityCanBeCorrectedOrWithdrawn(t *testing.T) {
 					"listed as a gap: %q. Delete the entry -- a backlog that keeps "+
 					"things it has finished stops being read.", entity, why)
 			}
+			if unbuilt {
+				t.Errorf("%s has both a correction and a withdrawal now, but is still "+
+					"listed in writeSurfaceUnbuilt. The feature got built; delete the "+
+					"entry.", entity)
+			}
 			continue
 		}
-		if byDesign || listed {
+		if byDesign || listed || unbuilt {
 			continue
 		}
 		t.Errorf("Create%s exists and %s. Somebody can bring a %s into existence "+
 			"and then not repair it.\n"+
 			"Either build the path, or add %s to writeSurfaceByDesign (with why the "+
-			"verb genuinely does not apply) or to writeSurfaceGaps (with what an "+
-			"operator loses without it).",
+			"verb genuinely does not apply), to writeSurfaceGaps (with what an "+
+			"operator loses without it), or to writeSurfaceUnbuilt (when no route "+
+			"reaches the feature at all and it is tracked on the roadmap).",
 			entity, missingVerbs(canCorrect, canWithdraw), entity, entity)
 	}
 }
