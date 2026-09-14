@@ -222,6 +222,19 @@ var storePermitMinters = map[string]string{
 	"authorizeCostSubject": "an asset cost line's subject is the asset it is attached to: " +
 		"refuses every cost table but asset_cost outright, then checks p.Covers(\"asset\", " +
 		"ownerID) before scoping to exactly that cost id",
+
+	// applyTemplateSubject (device_type_components.go): ApplyTemplate backfills
+	// interfaces onto an EXISTING asset (Task 5, device-type-templates plan) --
+	// same subject as authorizeInterfaceSubject, one hop from the asset, but
+	// scoped to a SET of freshly minted interface ids rather than one, because
+	// a single call can add several missing ports in one transaction. Checks
+	// p.Covers("asset", assetID) before anything is read, then scopes to
+	// exactly the ids ApplyTemplate is about to insert -- never an id a caller
+	// could have supplied, since they are minted by the store itself before
+	// the permit exists.
+	"applyTemplateSubject": "ApplyTemplate's subject is the asset it backfills interfaces onto: " +
+		"checks p.Covers(\"asset\", assetID), then scopes to exactly the interface ids this " +
+		"call is about to insert",
 }
 
 // permitMinterNames is the exact, named set TestOnlyTheNamedFunctionsMintAPermit

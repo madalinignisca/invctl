@@ -291,6 +291,60 @@ func newInterfaceFromTemplate(id, assetID string, c domain.DeviceTypeComponent, 
 	return iface, nil
 }
 
+// instantiateInterfaceComponents inserts and audits one live interface row
+// for each entry in components, on assetID, inside the SAME transaction t --
+// the shared path newInterfaceFromTemplate's own doc comment promises:
+// instantiateComponents (below) is one caller, handing it every active
+// template entry because the asset is brand new and nothing can already
+// exist on it; ApplyTemplate is the other, handing it only the entries the
+// caller has already determined the asset is missing. Neither caller
+// re-implements the mapping or the INSERT.
+//
+// ids IS PARALLEL TO components, NOT MINTED HERE. Both callers need to know
+// the ids they are about to write BEFORE this runs: ApplyTemplate has to
+// hand them to applyTemplateSubject to mint a permit scoped to exactly these
+// rows before the transaction opens (domain.scopedPermit is immutable for
+// the life of a transaction -- see its own doc comment on the mutable-state
+// design this replaced). Minting them here instead would make that
+// impossible for one caller in order to save the other a three-line loop.
+//
+// EVERY ENTRY IS ASSUMED INTERFACE-KIND. Both callers filter to
+// domain.ComponentKindInterface before calling; a caller that hands this a
+// different kind gets a wrapped error rather than a silently skipped row,
+// because a mismatch here is a bug in the caller's filter, not a case to
+// tolerate. A device type's template carries interfaces only in any case --
+// see migration 00067's header for why power_input was removed from the
+// kind vocabulary entirely rather than accepted and left uninstantiated.
+func (s *SQLStore) instantiateInterfaceComponents(ctx context.Context, t *tx, assetID string, components []domain.DeviceTypeComponent, ids []string, at string) (int, error) {
+	added := 0
+	for i, c := range components {
+		if c.Kind != domain.ComponentKindInterface {
+			return added, fmt.Errorf(
+				"instantiating device type component %s onto asset %s: kind %q is not %q",
+				c.ID, assetID, c.Kind, domain.ComponentKindInterface)
+		}
+		iface, err := newInterfaceFromTemplate(ids[i], assetID, c, at)
+		if err != nil {
+			return added, err
+		}
+		_, err = t.exec(ctx, `
+			INSERT INTO interface (id, asset_id, name, form_factor, speed_mbps, mac, mtu,
+			                       lag_parent_id, is_mgmt, enabled, lifecycle,
+			                       created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			iface.ID, iface.AssetID, iface.Name, iface.FormFactor, iface.SpeedMbps, iface.MAC, iface.MTU,
+			iface.LagParentID, iface.IsMgmt, iface.Enabled, iface.Lifecycle, iface.CreatedAt, iface.UpdatedAt)
+		if err != nil {
+			return added, translateWriteErr(err, "instantiating interface from device type template")
+		}
+		if err := t.logCreate(ctx, "interface", iface.ID, iface); err != nil {
+			return added, err
+		}
+		added++
+	}
+	return added, nil
+}
+
 // instantiateComponents seeds an asset's real component rows from its device
 // type's active template entries (Task 4), inside the SAME transaction t as
 // the asset's own INSERT -- see insertAsset, the only caller. Every row this
@@ -329,28 +383,143 @@ func (s *SQLStore) instantiateComponents(ctx context.Context, t *tx, a *domain.A
 		ORDER BY kind, position, name`, *a.DeviceTypeID, domain.LifecycleActive); err != nil {
 		return fmt.Errorf("reading device type %s's component template: %w", *a.DeviceTypeID, err)
 	}
-	at := domain.FormatTime(s.now())
+	// FILTERED TO INTERFACE-KIND BEFORE THE SHARED PATH SEES IT --
+	// instantiateInterfaceComponents errors on anything else rather than
+	// skipping it; see that function's own doc comment.
+	ifaces := make([]domain.DeviceTypeComponent, 0, len(components))
 	for _, c := range components {
-		switch c.Kind {
-		case domain.ComponentKindInterface:
-			iface, err := newInterfaceFromTemplate(NewID(), a.ID, c, at)
-			if err != nil {
-				return err
-			}
-			_, err = t.exec(ctx, `
-				INSERT INTO interface (id, asset_id, name, form_factor, speed_mbps, mac, mtu,
-				                       lag_parent_id, is_mgmt, enabled, lifecycle,
-				                       created_at, updated_at)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-				iface.ID, iface.AssetID, iface.Name, iface.FormFactor, iface.SpeedMbps, iface.MAC, iface.MTU,
-				iface.LagParentID, iface.IsMgmt, iface.Enabled, iface.Lifecycle, iface.CreatedAt, iface.UpdatedAt)
-			if err != nil {
-				return translateWriteErr(err, "instantiating interface from device type template")
-			}
-			if err := t.logCreate(ctx, "interface", iface.ID, iface); err != nil {
-				return err
-			}
+		if c.Kind == domain.ComponentKindInterface {
+			ifaces = append(ifaces, c)
 		}
 	}
-	return nil
+	ids := make([]string, len(ifaces))
+	for i := range ids {
+		ids[i] = NewID()
+	}
+	at := domain.FormatTime(s.now())
+	_, err := s.instantiateInterfaceComponents(ctx, t, a.ID, ifaces, ids, at)
+	return err
+}
+
+// ---------- Task 5: backfilling a template onto an asset that already exists ----------
+
+// applyTemplateSubject is ApplyTemplate's counterpart to
+// authorizeInterfaceSubject: the caller's own permit must already cover the
+// asset, checked before anything is read, and the permit ApplyTemplate's
+// transaction actually runs under is scoped narrowly to the specific
+// interface ids this call is about to mint -- ScopeSubjectDerived, so
+// Covers only ever admits an id the store put there itself, never one a
+// caller could have supplied.
+func applyTemplateSubject(p domain.Permit, assetID string, newInterfaceIDs []string) (domain.Permit, error) {
+	if !p.Covers("asset", assetID) {
+		return nil, fmt.Errorf("applying device type template to asset %s: %w", assetID, domain.ErrForbidden)
+	}
+	ids := make(map[string]bool, len(newInterfaceIDs))
+	for _, id := range newInterfaceIDs {
+		ids[id] = true
+	}
+	return domain.ScopedPermit(p.Actor(), nil, domain.ScopedEntities{
+		"interface": ids,
+	}), nil
+}
+
+// ApplyTemplate backfills assetID with whatever interface its device type's
+// active template names that the asset does not already carry an interface
+// of that name for -- added and audited exactly as instantiateComponents
+// would have done at create time, through the same
+// instantiateInterfaceComponents this shares with it. It never removes or
+// overwrites anything; added counts only the rows this call actually
+// inserted, for a caller (Task 8's control) that wants to say "added 6
+// ports" rather than just "done".
+//
+// A COMPONENT SOMEBODY ALREADY RECORDED IS THEIRS, WHATEVER THE TEMPLATE
+// SAYS ABOUT IT NOW. Matching is by name against every interface row the
+// asset already has -- ACTIVE OR RETIRED, deliberately, not just the active
+// ones ListInterfaces would show. Two reasons, and either alone would be
+// enough:
+//
+//  1. The database will not let a plain INSERT collide with a retired name
+//     anyway -- interface's UNIQUE (asset_id, name) (migration shared/00002)
+//     is a TABLE constraint, not a partial index scoped to lifecycle, the
+//     same fact CreateInterface's own reactivation comment leans on. Trying
+//     to insert eth0 here while a retired eth0 already exists fails the
+//     constraint, full stop.
+//
+//  2. Even if it did not: a retired port is a person's decision, made
+//     through RetireInterface, that this physical port is gone. Reactivating
+//     it is CreateInterface's job, triggered by a person re-adding it BY
+//     NAME -- a deliberate act, not a side effect of backfilling a template
+//     onto an estate that predates the feature. This call never reactivates
+//     anything; a retired name is treated as "already accounted for" and
+//     left exactly as it is, same as a live one. The person who withdrew the
+//     port is the one who gets to put it back.
+//
+// A NAME'S FORM FACTOR, SPEED OR MGMT FLAG IS NEVER COMPARED OR CORRECTED
+// against what the template currently says -- only NAME decides "already
+// there". eth0 recorded as sfp28 while the template still says rj45 stays
+// sfp28, untouched, no change_log row, exactly the brief's own worked
+// example. Silently overwriting an operator's own record is worse than the
+// feature not existing at all.
+func (s *SQLStore) ApplyTemplate(ctx context.Context, p domain.Permit, assetID string) (int, error) {
+	var row struct {
+		DeviceTypeID *string `db:"device_type_id"`
+	}
+	if err := s.readOne(ctx, &row, `SELECT device_type_id FROM asset WHERE id = ?`, assetID); err != nil {
+		return 0, fmt.Errorf("reading asset %s's device type: %w", assetID, err)
+	}
+	if row.DeviceTypeID == nil {
+		return 0, nil
+	}
+
+	components, err := s.ListDeviceTypeComponents(ctx, *row.DeviceTypeID)
+	if err != nil {
+		return 0, err
+	}
+	if len(components) == 0 {
+		return 0, nil
+	}
+
+	// EVERY EXISTING NAME, ANY LIFECYCLE -- see ApplyTemplate's own doc
+	// comment for why retired counts as "already there".
+	var existingNames []string
+	if err := s.read(ctx, &existingNames,
+		`SELECT name FROM interface WHERE asset_id = ?`, assetID); err != nil {
+		return 0, fmt.Errorf("reading asset %s's existing interfaces: %w", assetID, err)
+	}
+	have := make(map[string]bool, len(existingNames))
+	for _, name := range existingNames {
+		have[name] = true
+	}
+
+	missing := make([]domain.DeviceTypeComponent, 0, len(components))
+	for _, c := range components {
+		if c.Kind == domain.ComponentKindInterface && !have[c.Name] {
+			missing = append(missing, c)
+		}
+	}
+	if len(missing) == 0 {
+		return 0, nil
+	}
+
+	// The ids this call will write have to be known BEFORE the permit is
+	// minted -- see applyTemplateSubject's own comment, and
+	// domain.scopedPermit's rejected-earlier-design comment on why a
+	// permit cannot be told "trust whatever this transaction mints" instead.
+	newIDs := make([]string, len(missing))
+	for i := range missing {
+		newIDs[i] = NewID()
+	}
+	txPermit, err := applyTemplateSubject(p, assetID, newIDs)
+	if err != nil {
+		return 0, err
+	}
+
+	at := domain.FormatTime(s.now())
+	added := 0
+	err = s.write(ctx, txPermit, func(t *tx) error {
+		n, ierr := s.instantiateInterfaceComponents(ctx, t, assetID, missing, newIDs, at)
+		added = n
+		return ierr
+	})
+	return added, err
 }
