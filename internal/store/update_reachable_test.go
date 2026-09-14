@@ -70,15 +70,26 @@ import (
 // question implies the other, and the net_* family was failing both at once --
 // no way to correct a forwarder group, and a withdrawal method nothing called.
 var unreachableRepairPaths = map[string]string{
-	// EMPTY AGAIN, and the second time round it emptied for the right reason.
+	// EMPTY, AND KEEPING IT EMPTY IS THE POINT -- see the doc comment above.
 	//
-	// The five net_* withdrawal paths that filled it -- RetireNetAnchor,
-	// RetireNetGroup, RetireNetGroupMember, RetireNetUplink and
-	// RetireNetAttachment -- were complete store methods with no routes at all:
-	// the reachability layer had five create routes and none to take anything
-	// back. They were wired 2026-09-10, which is the same shape WP-1.2 took for
-	// the six correction paths before them. The methods were never wrong; they
-	// were unreachable, and this test is what refused to let that stay quiet.
+	// The device-type-templates plan's own pair, UpdateDeviceTypeComponent and
+	// RetireDeviceTypeComponent, filled this map from Task 3 (the store
+	// methods) until Task 7 (this package's own web layer) wired
+	// POST /catalogue/types/{id}/components/{componentID} and
+	// .../{componentID}/retire -- note NOT the /device-types/{id}/... shape
+	// this map guessed while the routes did not exist yet; the real routes
+	// hang off the catalogue the same way the model's own correction route
+	// does. Both entries came out the moment the routes landed, the same as
+	// the six correction paths and the five net_* withdrawals before them.
+	//
+	// The five net_* withdrawal paths that filled it before that --
+	// RetireNetAnchor, RetireNetGroup, RetireNetGroupMember, RetireNetUplink
+	// and RetireNetAttachment -- were complete store methods with no routes at
+	// all: the reachability layer had five create routes and none to take
+	// anything back. They were wired 2026-09-10, which is the same shape
+	// WP-1.2 took for the six correction paths before them. The methods were
+	// never wrong; they were unreachable, and this test is what refused to
+	// let that stay quiet.
 }
 
 // TestEveryUpdateMethodIsReachable fails when a store method written to correct

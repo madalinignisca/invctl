@@ -542,6 +542,27 @@ type assetDetailPage struct {
 	// entity types where custom fields do not, so they are shown separately
 	// rather than merged into one section.
 	Tags entityTagsPanel
+	// MissingTemplateComponents is how many of the asset's device type's
+	// active template entries it does not yet carry an interface for --
+	// zero for an asset with no device type, a type with no template, and
+	// one that already has every port its template names, all alike (Task
+	// 8). asset_detail.html hides the apply-template control on zero rather
+	// than asking it to reason about which of those three is true: "a
+	// control that can only do nothing is worse than no control" applies to
+	// all three the same way.
+	MissingTemplateComponents int
+	// TemplateSourceLabel names the model the missing ports come from, for
+	// the control's own copy ("Add N missing ports from <label>") -- an
+	// operator reading a bare count has no way to tell it apart from any
+	// other button on the page.
+	TemplateSourceLabel string
+	// MissingTemplatePreview names a few of the ports apply-template is about
+	// to create, not just how many (final whole-branch review, blocking #1).
+	// A count cannot show a wrong shape: 48 phantom "Ethernet1/1".."Ethernet1/48"
+	// rows beside the estate's real "Ethernet1".."Ethernet48" is a correct
+	// count and entirely wrong names, and only the names in the confirmation
+	// catch it before the click.
+	MissingTemplatePreview string
 }
 
 // interfaceRowData decorates one port for asset_detail.html with CanUnpatch,
@@ -606,6 +627,41 @@ func (a *App) renderAssetDetail(w http.ResponseWriter, r *http.Request, status i
 	if err != nil {
 		a.serverError(w, r, err)
 		return
+	}
+	// The apply-template control's own count (Task 8): read only when this
+	// asset actually names a device type, the same "nothing special happens
+	// for a type with no template, or no type at all" ListDeviceTypeComponents
+	// already guarantees by returning zero rows -- so the count and the
+	// control both fall out of missingTemplateComponents without this
+	// handler needing a separate "does it have a template" branch.
+	var missingTemplate int
+	var templateSourceLabel string
+	var missingTemplatePreview string
+	if asset.DeviceTypeID != nil {
+		components, err := a.Store.ListDeviceTypeComponents(r.Context(), *asset.DeviceTypeID)
+		if err != nil {
+			a.serverError(w, r, err)
+			return
+		}
+		// THE STORE'S OWN RULE, not a second copy. ApplyTemplate acts on
+		// exactly this count, so the button cannot offer a port it will then
+		// decline to add -- which the page's own version did, because it
+		// diffed against ACTIVE interfaces while ApplyTemplate treats a
+		// RETIRED name as already there.
+		missingTemplate, err = a.Store.MissingTemplateCount(r.Context(), asset.ID, components)
+		if err != nil {
+			a.serverError(w, r, err)
+			return
+		}
+		templateSourceLabel = asset.DeviceTypeLabel
+		if missingTemplate > 0 {
+			names, err := a.Store.MissingTemplateNames(r.Context(), asset.ID, components)
+			if err != nil {
+				a.serverError(w, r, err)
+				return
+			}
+			missingTemplatePreview = namePreview(names)
+		}
 	}
 	// Radios (WP-F1 Task 7b). Skipped entirely when the asset has no
 	// radio-form-factor interface, so an estate with no wireless pays
@@ -923,57 +979,60 @@ func (a *App) renderAssetDetail(w http.ResponseWriter, r *http.Request, status i
 	}
 
 	a.Render.Page(w, status, "asset_detail", assetDetailPage{
-		Base:            assetBase,
-		Journal:         notes,
-		JournalResource: "assets",
-		JournalID:       id,
-		Elevation:       elevation,
-		Fit:             fit,
-		Replacement:     replacement,
-		Movement:        movement,
-		Providers:       providers,
-		SharedWith:      sharedWith,
-		Projects:        projects,
-		Guests:          guests,
-		CostConsumers:   consumers,
-		Storage:         storage,
-		Pools:           pools,
-		Occupancy:       occupancy,
-		PoolShare:       poolShare,
-		PassThroughs:    passThroughs,
-		PowerInputs:     powerInputs,
-		PowerFeeds:      powerFeeds,
-		PowerEdit:       powerEditID,
-		PowerRowEdit:    powerRowEdit,
-		PowerCreateEdit: powerCreateEdit,
-		OccEdit:         occEdit,
-		MoveEdit:        moveEdit,
-		Edit:            edit,
-		AssetEdit:       assetEdit,
-		CustomFields:    customFields,
-		Tags:            tags,
-		Asset:           asset,
-		Certificates:    certificates,
-		Costs:           costs,
-		CostTotals:      store.TotalCosts(costs, domain.FormatDate(a.Store.Now())),
-		CostKinds:       costKinds,
-		CostPeriods:     domain.CostPeriods,
-		Ancestors:       ancestors,
-		Children:        children,
-		Interfaces:      interfaceRowsFor(interfaces, assetBase.CanWriteEntity, id),
-		Radios:          radios,
-		Instances:       instances,
-		Health:          health,
-		InstanceHealth:  instanceHealth,
-		Timeline:        timeline,
-		Environments:    envs,
-		Kinds:           kinds,
-		Lifecycles:      domain.AssetLifecycles,
-		InterfaceForm:   a.newInterfaceForm(r, id, nil, formFactors),
-		IPAddressForm:   a.newIPAddressForm(r, id, nil, interfaces, ipRoles),
-		LinkForm:        a.newLinkForm(r, id, nil, interfaces, linkTargets),
-		PassThroughForm: a.newPassThroughForm(r, id, nil, interfaces),
-		OverrideForm:    a.newOverrideForm(r, targets, nil, overrideForm{}),
+		Base:                      assetBase,
+		Journal:                   notes,
+		JournalResource:           "assets",
+		JournalID:                 id,
+		Elevation:                 elevation,
+		Fit:                       fit,
+		Replacement:               replacement,
+		Movement:                  movement,
+		Providers:                 providers,
+		SharedWith:                sharedWith,
+		Projects:                  projects,
+		Guests:                    guests,
+		CostConsumers:             consumers,
+		Storage:                   storage,
+		Pools:                     pools,
+		Occupancy:                 occupancy,
+		PoolShare:                 poolShare,
+		PassThroughs:              passThroughs,
+		PowerInputs:               powerInputs,
+		PowerFeeds:                powerFeeds,
+		PowerEdit:                 powerEditID,
+		PowerRowEdit:              powerRowEdit,
+		PowerCreateEdit:           powerCreateEdit,
+		OccEdit:                   occEdit,
+		MoveEdit:                  moveEdit,
+		Edit:                      edit,
+		AssetEdit:                 assetEdit,
+		CustomFields:              customFields,
+		Tags:                      tags,
+		MissingTemplateComponents: missingTemplate,
+		TemplateSourceLabel:       templateSourceLabel,
+		MissingTemplatePreview:    missingTemplatePreview,
+		Asset:                     asset,
+		Certificates:              certificates,
+		Costs:                     costs,
+		CostTotals:                store.TotalCosts(costs, domain.FormatDate(a.Store.Now())),
+		CostKinds:                 costKinds,
+		CostPeriods:               domain.CostPeriods,
+		Ancestors:                 ancestors,
+		Children:                  children,
+		Interfaces:                interfaceRowsFor(interfaces, assetBase.CanWriteEntity, id),
+		Radios:                    radios,
+		Instances:                 instances,
+		Health:                    health,
+		InstanceHealth:            instanceHealth,
+		Timeline:                  timeline,
+		Environments:              envs,
+		Kinds:                     kinds,
+		Lifecycles:                domain.AssetLifecycles,
+		InterfaceForm:             a.newInterfaceForm(r, id, nil, formFactors),
+		IPAddressForm:             a.newIPAddressForm(r, id, nil, interfaces, ipRoles),
+		LinkForm:                  a.newLinkForm(r, id, nil, interfaces, linkTargets),
+		PassThroughForm:           a.newPassThroughForm(r, id, nil, interfaces),
+		OverrideForm:              a.newOverrideForm(r, targets, nil, overrideForm{}),
 	})
 }
 
@@ -1317,6 +1376,39 @@ func (a *App) AssetRetire(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.setFlash(r, "success", "Asset retired. Its history is kept.")
+	render.Redirect(w, r, "/assets/"+id)
+}
+
+// AssetApplyTemplate backfills an asset with whatever interface its device
+// type's active component template names that it does not already carry --
+// Task 8, the control that makes the feature useful on an estate that
+// predates it. store.ApplyTemplate does the work; this handler only turns
+// its answer into a flash and a redirect, the same shape every other
+// mutation on this page uses.
+//
+// NOT A VALIDATION REFUSAL. store.ApplyTemplate's only error is
+// domain.ErrForbidden -- an asset outside the caller's scope -- which
+// handleStoreError already answers with 403, the same path InterfaceRetire's
+// non-conflict branch uses above. refusal_status_test.go's AST scan only
+// forbids flash-and-redirect from a function that CLASSIFIES a refusal by
+// calling refusalMessages or validationErrors; this function calls neither,
+// because there is nothing here for an operator to retype.
+func (a *App) AssetApplyTemplate(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	added, err := a.Store.ApplyTemplate(r.Context(), a.permit(r), id)
+	if err != nil {
+		a.handleStoreError(w, r, err)
+		return
+	}
+	switch added {
+	case 0:
+		a.setFlash(r, "success", "Nothing to add -- this asset already carries every "+
+			"port its device type's template names.")
+	case 1:
+		a.setFlash(r, "success", "Added 1 port from the device type's template.")
+	default:
+		a.setFlash(r, "success", fmt.Sprintf("Added %d ports from the device type's template.", added))
+	}
 	render.Redirect(w, r, "/assets/"+id)
 }
 

@@ -36,16 +36,62 @@ type cataloguePage struct {
 	// a time: a table of input boxes is unreadable, and reading is what this
 	// table is for.
 	Editing string
+
+	// Components is the active component template of the device type named
+	// by Editing, and nil for every other response -- a model's ports are
+	// managed inside its own open row (device-type-templates plan, Task 7),
+	// the same "one row open at a time" rule Editing already enforces for
+	// the model's physical fields, so there is never a template to load for
+	// a row that is not open. See renderCataloguePage.
+	Components []domain.DeviceTypeComponent
+	// FormFactors is the interface_form_factor vocabulary, offered to both
+	// the add-by-range form and each component's own correction -- the same
+	// vocabulary asset_detail.html's "iface-form-factor" picker offers, read
+	// through the same InterfaceFormFactors query.
+	FormFactors []store.VocabularyTerm
+	// ComponentEditing is the id of the ONE component row opened for
+	// correction, from its own ?component= parameter -- PowerEdit's pattern
+	// (assets.go): this page already spends Editing/?edit= on the device
+	// type's own fields, and opening a component row must not close that
+	// form.
+	ComponentEditing string
+	// ComponentAdd carries a refused "add by range" submission, so the form
+	// reopens with the range and the other fields the operator typed rather
+	// than blank -- powerInputCreateEditID's pattern (power.go).
+	ComponentAdd *editState
+	// ComponentRow carries a refused correction of the component named by
+	// ComponentEditing, so that row reopens on what was typed rather than
+	// what is stored.
+	ComponentRow *editState
 }
 
 // Catalogue shows the makers, the models and the forms to add either.
 func (a *App) Catalogue(w http.ResponseWriter, r *http.Request) {
-	a.renderCatalogue(w, r, http.StatusOK, nil, domain.ManufacturerSpec{}, domain.DeviceTypeSpec{})
+	a.renderCataloguePage(w, r, http.StatusOK, cataloguePage{
+		Editing:          r.URL.Query().Get("edit"),
+		ComponentEditing: r.URL.Query().Get("component"),
+	})
 }
 
 func (a *App) renderCatalogue(w http.ResponseWriter, r *http.Request, status int,
 	errs map[string]string, spec domain.ManufacturerSpec, typeSpec domain.DeviceTypeSpec) {
 
+	a.renderCataloguePage(w, r, status, cataloguePage{
+		Errors:           errs,
+		Spec:             spec,
+		TypeSpec:         typeSpec,
+		Editing:          r.URL.Query().Get("edit"),
+		ComponentEditing: r.URL.Query().Get("component"),
+	})
+}
+
+// renderCataloguePage is the one page assembly every catalogue response goes
+// through, whatever action triggered it -- manufacturers, models or (Task 7)
+// a model's component template. Splitting this out is what let the
+// component handlers reuse the exact same Manufacturers/DeviceTypes read
+// renderCatalogue and renderCatalogueEditing already had, instead of growing
+// a third copy of it.
+func (a *App) renderCataloguePage(w http.ResponseWriter, r *http.Request, status int, page cataloguePage) {
 	makers, err := a.Store.ListManufacturers(r.Context(), false)
 	if err != nil {
 		a.serverError(w, r, err)
@@ -56,16 +102,31 @@ func (a *App) renderCatalogue(w http.ResponseWriter, r *http.Request, status int
 		a.serverError(w, r, err)
 		return
 	}
-	a.Render.Respond(w, r, status, "catalogue", "catalogue_panel", cataloguePage{
-		Base:          a.base(r, "Hardware catalogue", "catalogue"),
-		Errors:        orEmpty(errs),
-		Manufacturers: makers,
-		DeviceTypes:   types,
-		Lifecycles:    domain.HardwareLifecycles,
-		Spec:          spec,
-		TypeSpec:      typeSpec,
-		Editing:       r.URL.Query().Get("edit"),
-	})
+	page.Base = a.base(r, "Hardware catalogue", "catalogue")
+	page.Errors = orEmpty(page.Errors)
+	page.Manufacturers = makers
+	page.DeviceTypes = types
+	page.Lifecycles = domain.HardwareLifecycles
+
+	// Loaded ONLY for the row that is actually open -- see Components' own
+	// doc comment. Every other response (a manufacturer form refused, the
+	// plain list) pays no query at all for a template nobody is looking at.
+	if page.Editing != "" {
+		components, err := a.Store.ListDeviceTypeComponents(r.Context(), page.Editing)
+		if err != nil {
+			a.serverError(w, r, err)
+			return
+		}
+		page.Components = components
+		formFactors, err := a.Store.InterfaceFormFactors(r.Context())
+		if err != nil {
+			a.serverError(w, r, err)
+			return
+		}
+		page.FormFactors = formFactors
+	}
+
+	a.Render.Respond(w, r, status, "catalogue", "catalogue_panel", page)
 }
 
 // ManufacturerCreate adds a maker.
@@ -241,22 +302,27 @@ func (a *App) DeviceTypeRetire(w http.ResponseWriter, r *http.Request) {
 func (a *App) renderCatalogueEditing(w http.ResponseWriter, r *http.Request,
 	errs map[string]string, editing string) {
 
-	makers, err := a.Store.ListManufacturers(r.Context(), false)
-	if err != nil {
-		a.serverError(w, r, err)
-		return
-	}
-	types, err := a.Store.ListDeviceTypes(r.Context(), store.DeviceTypeFilter{})
-	if err != nil {
-		a.serverError(w, r, err)
-		return
-	}
-	a.Render.Respond(w, r, http.StatusUnprocessableEntity, "catalogue", "catalogue_panel", cataloguePage{
-		Base:          a.base(r, "Hardware catalogue", "catalogue"),
-		Errors:        orEmpty(errs),
-		Manufacturers: makers,
-		DeviceTypes:   types,
-		Lifecycles:    domain.HardwareLifecycles,
-		Editing:       editing,
+	a.renderCataloguePage(w, r, http.StatusUnprocessableEntity, cataloguePage{
+		Errors:           errs,
+		Editing:          editing,
+		ComponentEditing: r.URL.Query().Get("component"),
+	})
+}
+
+// renderCatalogueComponents re-renders with deviceTypeID's row open and,
+// optionally, a refused component action carried alongside it -- the
+// component-management counterpart of renderCatalogueEditing (Task 7 of the
+// device-type-templates plan). add carries a refused "add by range"
+// submission; row carries a refused correction of the component named by
+// componentEditing. Never both at once: they are two different forms on the
+// page and only one is ever the one just submitted.
+func (a *App) renderCatalogueComponents(w http.ResponseWriter, r *http.Request, status int,
+	deviceTypeID, componentEditing string, add, row *editState) {
+
+	a.renderCataloguePage(w, r, status, cataloguePage{
+		Editing:          deviceTypeID,
+		ComponentEditing: componentEditing,
+		ComponentAdd:     add,
+		ComponentRow:     row,
 	})
 }

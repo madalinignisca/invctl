@@ -222,6 +222,22 @@ var storePermitMinters = map[string]string{
 	"authorizeCostSubject": "an asset cost line's subject is the asset it is attached to: " +
 		"refuses every cost table but asset_cost outright, then checks p.Covers(\"asset\", " +
 		"ownerID) before scoping to exactly that cost id",
+
+	// applyTemplateSubject (device_type_components.go): ApplyTemplate backfills
+	// interfaces onto an EXISTING asset (Task 5, device-type-templates plan) --
+	// same subject as authorizeInterfaceSubject, one hop from the asset, but
+	// scoped to a SET of freshly minted interface ids rather than one, because
+	// a single call can add several missing ports in one transaction. Checks
+	// p.Covers("asset", assetID) as ApplyTemplate's FIRST STATEMENT -- before
+	// any row is read, and before the early exits for "no device type", "no
+	// template" and "nothing missing", which otherwise let a foreign asset
+	// answer three distinguishable ways instead of one. Then scopes to
+	// exactly the ids ApplyTemplate is about to insert -- never an id a caller
+	// could have supplied, since they are minted by the store itself before
+	// the permit exists.
+	"applyTemplateSubject": "ApplyTemplate's subject is the asset it backfills interfaces onto: " +
+		"checks p.Covers(\"asset\", assetID), then scopes to exactly the interface ids this " +
+		"call is about to insert",
 }
 
 // permitMinterNames is the exact, named set TestOnlyTheNamedFunctionsMintAPermit
@@ -530,7 +546,8 @@ var auditedEntityTypes = []string{
 	"aggregate", "app_user", "asn", "asset", "asset_cost", "asset_kind",
 	"backend_member", "backend_pool", "certificate", "circuit", "circuit_cost",
 	"circuit_termination", "cluster", "container_engine", "cost_kind",
-	"custom_field", "data_class", "dependency", "device_type", "endpoint",
+	"custom_field", "data_class", "dependency", "device_type",
+	"device_type_component", "endpoint",
 	"environment", "environment_role", "fhrp_group", "health_override",
 	"identity", "inflation_rate", "interface", "interface_form_factor",
 	"ip_address", "ip_address_role", "ip_range", "journal_entry", "l2vpn",

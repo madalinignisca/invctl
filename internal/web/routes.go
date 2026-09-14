@@ -322,6 +322,11 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	write("POST /assets", app.AssetCreate)
 	write("POST /assets/{id}", app.AssetUpdate)
 	write("POST /assets/{id}/retire", app.AssetRetire)
+	// device-type-templates plan, Task 8: backfilling the interfaces an
+	// asset's device type template names that it does not already carry --
+	// the control that makes Tasks 1-7's work useful on an estate that
+	// predates it, not just on an asset created from tomorrow.
+	write("POST /assets/{id}/apply-template", app.AssetApplyTemplate)
 	write("POST /assets/{id}/parent", app.AssetReparent)
 	write("POST /assets/{id}/storage", app.AssetStorageClaim)
 	write("POST /assets/{id}/occupants", app.AssetOccupants)
@@ -368,6 +373,12 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	write("POST /catalogue/types", app.DeviceTypeCreate)
 	write("POST /catalogue/types/{id}", app.DeviceTypeUpdate)
 	write("POST /catalogue/types/{id}/retire", app.DeviceTypeRetire)
+	// A model's component template (device-type-templates plan, Task 7):
+	// managed inside the same row as the model's own fields above, so it
+	// gets the same write gate rather than a separate admin-only one.
+	write("POST /catalogue/types/{id}/components", app.DeviceTypeComponentCreate)
+	write("POST /catalogue/types/{id}/components/{componentID}", app.DeviceTypeComponentUpdate)
+	write("POST /catalogue/types/{id}/components/{componentID}/retire", app.DeviceTypeComponentRetire)
 
 	write("POST /teams", app.TeamCreate)
 	write("POST /teams/{id}", app.TeamUpdate)

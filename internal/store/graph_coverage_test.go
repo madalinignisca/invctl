@@ -96,6 +96,21 @@ var connectiveTablesOutsideTheGraph = map[string]string{
 	"asset_environment":     "which environments an asset serves. A label used for scoping.",
 	"asset_storage_claim":   "declared storage demand, consumed by capacity findings (WP-J3), not by outage propagation.",
 	"user_project":          "who owns which project (WP-G1). Authorization, not topology.",
+
+	// device_type_component references device_type and interface_form_factor,
+	// which is the two-key shape this census flags -- but it is a CATALOGUE
+	// fact, not an installed one: "this model has 48 ports" describes a
+	// device_type row, the same class as device_type's own u_height and
+	// depth_mm columns (migration 00067's header), and nothing fails BECAUSE
+	// a template entry exists. The rows that actually propagate an outage are
+	// the real interface and power_input rows an asset gets when it is
+	// created FROM this template (device-type-templates plan, Task 4), and
+	// those are already read by the graph today under their own tables --
+	// this row is upstream of them, not a second path alongside them.
+	"device_type_component": "a catalogue template entry (device-type-templates " +
+		"plan). It describes what a MODEL has, not what an installed asset has -- " +
+		"the interface/power_input rows Task 4 creates from it are the ones the " +
+		"graph already reaches, under their own tables.",
 }
 
 // TestEveryConnectiveTableIsAccountedForInTheImpactGraph is WP-I1's recurring

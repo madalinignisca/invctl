@@ -38,3 +38,6 @@ tests/e2e/playwright-report/
 # docs/E2E.md. package-lock.json IS committed so the pinned Playwright version
 # is reproducible; node_modules is fetched from it, never checked in.
 tests/e2e/node_modules/
+
+# Scratch workspace for subagent-driven plan execution (ledger, briefs, review packages).
+.superpowers/

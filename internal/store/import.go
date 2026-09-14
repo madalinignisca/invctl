@@ -397,7 +397,7 @@ func (s *SQLStore) ImportAssets(ctx context.Context, p domain.Permit, rows []Ass
 					report.Problems = append(report.Problems, problems...)
 					continue
 				}
-				if err := s.insertAsset(ctx, t, asset, envIDs, envCodes); err != nil {
+				if err := s.insertAsset(ctx, t, asset, envIDs, envCodes, nil); err != nil {
 					var ve *domain.ValidationError
 					if errors.As(err, &ve) {
 						for _, f := range ve.Fields {

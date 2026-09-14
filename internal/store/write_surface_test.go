@@ -80,6 +80,18 @@ var writeSurfaceAliases = map[string]struct{ correct, withdraw []string }{
 		correct:  []string{"SetUserRole", "SetUserActive", "SetUserCostVisibility"},
 		withdraw: []string{"ScrubUser"},
 	},
+	// CreateDeviceTypeComponents inserts a whole batch from one range spec
+	// (device-type-templates plan, Task 3) -- 48 ports from one call is the
+	// point of it -- so the entity this scan derives by stripping "Create" is
+	// plural, "DeviceTypeComponents". Update and Retire act on ONE template
+	// row, which is the correct unit for a correction: an operator fixing a
+	// mistyped form factor is fixing one port, not resubmitting the whole
+	// range. So the verbs are correctly singular and this alias is the
+	// mismatch, not a gap.
+	"DeviceTypeComponents": {
+		correct:  []string{"UpdateDeviceTypeComponent"},
+		withdraw: []string{"RetireDeviceTypeComponent"},
+	},
 }
 
 // writeSurfaceByDesign are entities where a missing verb is correct, with the

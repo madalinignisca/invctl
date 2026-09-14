@@ -148,6 +148,7 @@ project and become an Administrator in all but name.
 | `custom_field` | field definitions (values fold into the owning entity's own `change_log` row, not this type) |
 | `data_class` | vocabulary |
 | `device_type` | catalogue |
+| `device_type_component` | catalogue — a model's component template. Estate-config rather than project-scoped for the same reason `device_type` is, and more sharply: editing it changes what every FUTURE asset of that model is born with, so it is an estate-wide decision that no single project owner should be able to take |
 | `environment` | catalogue |
 | `environment_role` | vocabulary |
 | `identity` | credential references |
