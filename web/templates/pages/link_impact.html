@@ -25,7 +25,25 @@
 
 <div style="margin-bottom:18px">
   <a class="btn btn-sm" href="/interfaces/{{.Link.AInterfaceID}}/trace">Trace this run</a>
+  {{if .Bundle}}
+  <a class="btn btn-sm" href="/bundles/{{.Bundle.ID}}/impact">See the whole bundle: {{.Bundle.Name}}</a>
+  {{end}}
 </div>
+
+{{if .Bundle}}
+{{/* Absence is the common case (see linkImpactPage.Bundle's doc comment) --
+     this panel only appears when the cable is actually in a bundle, so a
+     cable in none renders exactly the page it rendered before Task 3. */}}
+<div class="panel">
+  <div class="panel-body">
+    <p>
+      This cable runs in <strong>{{.Bundle.Name}}</strong> (<span class="mono">{{.Bundle.Code}}</span>).
+      A backhoe through that duct/tray/trunk does not pick one strand --
+      <a href="/bundles/{{.Bundle.ID}}/impact">see what else shares its fate</a>.
+    </p>
+  </div>
+</div>
+{{end}}
 
 {{if not .Cut.Joins}}
 {{/* THE COMMON CASE, and it must not render as an empty result. A cable with

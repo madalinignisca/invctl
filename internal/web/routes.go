@@ -167,6 +167,11 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	read("GET /catalogue", app.Catalogue)
 	read("GET /interfaces/{id}/trace", app.TracePort)
 	read("GET /links/{id}/impact", app.LinkImpact)
+	// A bundle's own cut view (Task 3, docs/cable-bundles-design.md's "The
+	// cut"). The bundle CRUD UI (list/detail/create/correct/withdraw) is
+	// Task 4 -- this route stands alone until then, reached from a bundled
+	// cable's own /links/{id}/impact page.
+	read("GET /bundles/{id}/impact", app.BundleImpact)
 	read("GET /power", app.Power)
 	read("GET /power/feeds/{id}/impact", app.PowerFeedImpact)
 	read("GET /power/sources/{id}/impact", app.PowerSourceImpact)

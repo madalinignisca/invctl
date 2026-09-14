@@ -9,8 +9,10 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 
+	"github.com/madalinignisca/invctl/internal/domain"
 	"github.com/madalinignisca/invctl/internal/impact"
 	"github.com/madalinignisca/invctl/internal/store"
 )
@@ -34,6 +36,12 @@ type linkImpactPage struct {
 	// nothing and a cable whose loss changes nothing read identically in a
 	// Result and need opposite sentences.
 	Cut store.CircuitCut
+	// Bundle is which duct/tray/trunk this cable is in, nil when it is in
+	// none. Task 3: without this a bundle is a label nothing reads (design
+	// doc). Absence is the common case and the template must not render an
+	// empty panel for it -- see the design doc's "GET /links/{id}/impact
+	// gains" line.
+	Bundle *domain.CableBundle
 	// HasImpact and HasNetworkFinding are the shared impact_result partial's
 	// contract. Not optional: html/template errors on a field a struct does not
 	// have, and the circuit page shipped a 500 that way because no test fetched
@@ -69,11 +77,21 @@ func (a *App) LinkImpact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Which bundle, if any, this cable is in. domain.ErrNotFound means "not
+	// bundled" -- BundleForLink's own doc comment says this page treats that
+	// as ordinary, not as an error.
+	bundle, err := a.Store.BundleForLink(r.Context(), id)
+	if err != nil && !errors.Is(err, domain.ErrNotFound) {
+		a.serverError(w, r, err)
+		return
+	}
+
 	data := linkImpactPage{
 		Base:      a.base(r, "If "+link.Label()+" is cut", "assets"),
 		Link:      link,
 		Result:    result,
 		Cut:       cut,
+		Bundle:    bundle,
 		HasImpact: len(result.Services) > 0 || len(result.WontRestart) > 0,
 		HasNetworkFinding: len(result.Isolated) > 0 || len(result.Partitions) > 0 ||
 			len(result.Unreachable) > 0 || len(result.RedundancyLost) > 0,

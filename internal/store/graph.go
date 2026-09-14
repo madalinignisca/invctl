@@ -544,6 +544,40 @@ func (s *SQLStore) LinkCutEffect(ctx context.Context, linkID string) (CircuitCut
 	})
 }
 
+// BundleCutEffect answers what cutting a whole bundle does -- a duct, tray or
+// trunk severed by one backhoe rather than one strand at a time
+// (docs/cable-bundles-design.md, "The cut").
+//
+// THE SAME WALKER AS LinkCutEffect, with a set predicate instead of an
+// equality one -- not a second implementation. cutEffect's own doc comment is
+// explicit about why: duplicating the walk gives the cable page and the
+// bundle page two chances to disagree about what "separates" means.
+//
+// Only LIVE members count, and this is not a filter written here: it is
+// already loadNetGraph's own guarantee. Its edge query carries
+// "WHERE l.lifecycle = ?" scoped to active links (see the comment on
+// linkEdges above), so a retired cable never reaches g.Net.Uplinks in the
+// first place -- u.LinkID in cutEffect's walk can never be a retired link's
+// id, no matter what this predicate matches on. Filtering members here too
+// would be a second, redundant gate that could never be observed to do
+// anything (a member row's Lifecycle mirrors the link's own, per
+// bundleMemberQuery), so it is left out rather than carrying an
+// unfalsifiable line: a retired cable staying in its bundle as history
+// (Task 2's rule) is what this relies on, not a check of its own.
+func (s *SQLStore) BundleCutEffect(ctx context.Context, bundleID string) (CircuitCut, error) {
+	members, err := s.ListBundleMembers(ctx, bundleID)
+	if err != nil {
+		return CircuitCut{}, err
+	}
+	inBundle := make(map[string]bool, len(members))
+	for _, m := range members {
+		inBundle[m.LinkID] = true
+	}
+	return s.cutEffect(ctx, func(u impact.NetUplinkInfo) bool {
+		return inBundle[u.LinkID]
+	})
+}
+
 // cutEffect is the shared body: which edges the medium contributes, and whether
 // anything else still joins the groups those edges joined.
 //

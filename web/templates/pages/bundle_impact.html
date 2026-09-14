@@ -1,0 +1,100 @@
+{{/*
+  invctl — infrastructure inventory
+  Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+
+  Licensed under the GNU Affero General Public License, version 3 only —
+  no later version applies. See LICENSE for the full text.
+
+  SPDX-License-Identifier: AGPL-3.0-only
+*/}}
+{{define "content"}}
+<div class="crumbs">
+  <span>{{.Bundle.Name}}</span><span class="sep">/</span><span>cut</span>
+</div>
+
+<div class="page-head">
+  <div class="eyebrow">Outage simulation</div>
+  <h1>If <span class="mono">{{.Bundle.Name}}</span> is cut</h1>
+  <p class="lede">
+    Every LIVE cable pulled through this duct/tray/trunk is severed at once — a
+    backhoe does not pick one strand out of a bundle. A retired cable in this
+    bundle is history, not something still there to be cut, so it is left out.
+    Nothing is taken out of the estate, so anything still reachable another way
+    is correctly reported as unaffected.
+  </p>
+</div>
+
+<div class="panel" style="margin-bottom:18px">
+  <div class="panel-head">
+    <h2>Cables in this bundle</h2>
+    <span class="panel-note">{{pluralise (len .Members) "cable" "cables"}}</span>
+  </div>
+  <div class="panel-body">
+    {{if not .Members}}
+      <div class="empty">No cables are in this bundle.</div>
+    {{else}}
+      <ul>
+        {{range .Members}}
+        <li>
+          <a href="/links/{{.LinkID}}/impact">{{.Label}}</a>
+          {{if ne .Lifecycle "active"}}<span class="pill">retired — not cut</span>{{end}}
+        </li>
+        {{end}}
+      </ul>
+    {{end}}
+  </div>
+</div>
+
+{{if not .Cut.Joins}}
+{{/* THE COMMON CASE, and it must not render as an empty result -- see
+     store.CircuitCut's doc comment: joining nothing modelled and cutting
+     something harmlessly look identical in a Result and need opposite
+     sentences. */}}
+<div class="panel">
+  <div class="panel-head"><h2>This bundle joins nothing that is modelled</h2></div>
+  <div class="panel-body">
+    <p>
+      None of this bundle's live cables land on two assets that forward — members
+      of a network group — in two <em>different</em> groups. Every cable in it is
+      still real and still traced; it simply cannot partition the estate, so
+      there is nothing below.
+    </p>
+  </div>
+</div>
+{{else if .Cut.Separates}}
+<div class="panel panel-warn">
+  <div class="panel-head"><h2>Cutting this bundle separates the estate</h2></div>
+  <div class="panel-body">
+    <p>
+      At least one of its cables is the <strong>only</strong> path between
+      {{range $i, $g := .Cut.Groups}}{{if $i}} and {{end}}<span class="mono">{{$g}}</span>{{end}},
+      so losing the whole bundle leaves the two sides unable to reach each other.
+    </p>
+    {{if not .HasNetworkFinding}}
+    <p>
+      Nothing below is reported as unreachable, and that is not a contradiction:
+      the two sides are separated, and nothing currently recorded on the far side
+      depends on reaching this one. A partition with nothing behind it produces
+      no findings — usually a sign the far side is not yet modelled rather than
+      that it is safe.
+    </p>
+    {{end}}
+  </div>
+</div>
+{{else}}
+<div class="panel">
+  <div class="panel-head"><h2>Another path survives this</h2></div>
+  <div class="panel-body">
+    <p>
+      This bundle joins
+      {{range $i, $g := .Cut.Groups}}{{if $i}} and {{end}}<span class="mono">{{$g}}</span>{{end}},
+      and losing it all at once separates nothing — another path already joins
+      them. That is the answer redundancy is bought for, and it is worth knowing
+      it is real rather than assumed.
+    </p>
+  </div>
+</div>
+{{end}}
+
+{{template "impact_result" .}}
+{{end}}
