@@ -67,15 +67,18 @@
   <div class="panel-body">
     <p>
       {{if eq (len .Cut.SeparatedPairs) 1}}
-      At least one of its cables is the <strong>only</strong> path between
-      {{template "group_pairs" .Cut.SeparatedPairs}},
-      so losing the whole bundle leaves the two sides unable to reach each other.
+      This <strong>bundle</strong> is the only path between
+      {{template "group_pairs" .Cut.SeparatedPairs}} — even when no single
+      cable inside it is, because two or more of its cables together cover
+      every route between the two sides — so losing it all at once leaves
+      them unable to reach each other.
       {{else}}
-      At least one cable in it is the <strong>only</strong> path for each of these
-      boundaries: {{template "group_pairs" .Cut.SeparatedPairs}}.
-      Losing the whole bundle at once leaves every one of them unable to reach
-      each other -- a bundle carries more than one cable, so a single backhoe
-      can open more than one boundary.
+      This <strong>bundle</strong> is the only path for each of these
+      boundaries: {{template "group_pairs" .Cut.SeparatedPairs}} — even where
+      no single cable inside it is, because its cables together cover every
+      route between each pair. Losing the whole bundle at once leaves every
+      one of them unable to reach each other -- a bundle carries more than
+      one cable, so a single backhoe can open more than one boundary.
       {{end}}
     </p>
     {{if not .HasNetworkFinding}}
