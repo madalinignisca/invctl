@@ -370,9 +370,26 @@ searchable, exportable, audited like any other field.
 
 ### Group B — Physical: power and cabling
 
-**WP-B1 · Power chain** — L — **DONE**
+**WP-B1 · Power chain** — L — **DONE** (but see the outlet note below)
 Power panel → feed → outlet → asset input. Supply, phase, voltage, amperage, max
 utilisation. Assets with redundant inputs from different feeds.
+
+**THE OUTLET HOP DOES NOT EXIST**, noticed 2026-09-13 while scoping WP-C1, whose
+struck-through text lists "outlets" as a component kind with no table to
+instantiate into. The chain above is four hops; what shipped is three —
+`power_input.feed_id` references `power_feed` directly, and there is no
+`power_outlet` table on either engine, nor any doc explaining its absence.
+
+Two readings, and this is NOT resolved: either outlets were deliberately
+collapsed into feeds and the sentence above is stale prose, or it is a fourth
+scope unbuilt inside a DONE marker, after WP-A3, WP-B3 and WP-C1 — all three
+found by the same marker-pass flaw, which verified a package's first paragraph
+and could not see its second.
+
+It matters if you need to track individual sockets rather than the feed as a
+whole: "this feed has 24 outlets and 20 are used" is a capacity question the
+current model cannot answer. Nothing depends on it today, which is why it is
+recorded here rather than scheduled.
 
 Engine: a feed is a simulatable failure target. Single-fed assets report **at
 risk**. A+B inputs tracing to the same upstream panel report **false redundancy** —
