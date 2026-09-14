@@ -70,9 +70,6 @@ type DeviceTypeComponent struct {
 	RowVersion int    `db:"row_version"`
 }
 
-// NewDeviceTypeComponent validates and constructs a template entry. id and now
-// come from the caller, per package convention (see errors.go's package
-// doc) -- this package has no ID or clock source of its own.
 // DeviceTypeComponentSpec is what a caller supplies. A spec rather than a
 // parameter list because an interface component REQUIRES a form factor, and a
 // constructor that cannot accept a required field cannot build a valid value --
@@ -92,7 +89,9 @@ type DeviceTypeComponentSpec struct {
 }
 
 // NewDeviceTypeComponent validates and constructs one component of a device
-// type's template.
+// type's template. id and now come from the caller, per package convention
+// (see errors.go's package doc) -- this package has no ID or clock source of
+// its own.
 func NewDeviceTypeComponent(id string, spec DeviceTypeComponentSpec, now time.Time) (*DeviceTypeComponent, error) {
 	ts := FormatTime(now)
 	c := &DeviceTypeComponent{
