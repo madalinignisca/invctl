@@ -28,6 +28,12 @@ func TestExpandRange(t *testing.T) {
 		{"non-numeric is refused", "eth[a-c]", nil, true},
 		{"two ranges are refused", "e[1-2]/[1-2]", nil, true},
 		{"over the cap is refused", "eth[1-4097]", nil, true},
+		// The cap is checked against last-first, not last-first+1, because the
+		// addition overflows here: this spec made the count MinInt64, which is
+		// not greater than the cap, so the guard passed and make() panicked
+		// with "cap out of range". Found in review; the arithmetic was wrong in
+		// the plan this was transcribed from, not in the transcription.
+		{"a bound that overflows the count is refused", "eth[0-9223372036854775807]", nil, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := ExpandRange(tc.spec)
@@ -44,5 +50,24 @@ func TestExpandRange(t *testing.T) {
 				t.Errorf("ExpandRange(%q) = %v, want %v", tc.spec, got, tc.want)
 			}
 		})
+	}
+}
+
+// TestExpandRangeCapBoundary pins the arithmetic either side of the cap, which
+// the table above cannot: asserting the exact 4096 names would be a wall of
+// text nobody reads, and the property here is the COUNT, not the names.
+//
+// The boundary is checked against last-first rather than the count, because
+// last-first+1 overflows at the extreme -- see the comment in ExpandRange.
+func TestExpandRangeCapBoundary(t *testing.T) {
+	got, err := ExpandRange("eth[1-4096]")
+	if err != nil {
+		t.Fatalf("a range of exactly the cap was refused: %v", err)
+	}
+	if len(got) != MaxRangeExpansion {
+		t.Errorf("got %d names, want %d", len(got), MaxRangeExpansion)
+	}
+	if _, err := ExpandRange("eth[1-4097]"); err == nil {
+		t.Error("one over the cap was accepted")
 	}
 }

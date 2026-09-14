@@ -160,11 +160,16 @@ func ExpandRange(spec string) ([]string, error) {
 	if last < first {
 		return nil, fmt.Errorf("%q counts backwards", spec)
 	}
-	n := last - first + 1
-	if n > MaxRangeExpansion {
-		return nil, fmt.Errorf("%q expands to %d names, over the limit of %d",
-			spec, n, MaxRangeExpansion)
+	// The subtraction is safe and the addition is not, which is why the cap is
+	// tested against the difference. first >= 0 and last >= first by here, so
+	// last-first cannot overflow; last-first+1 CAN, and a wrapped negative
+	// count is not > the cap, so it walks past the guard into make() and
+	// panics. CORRECTED 2026-09-14 after review caught it in this plan's code.
+	if last-first >= MaxRangeExpansion {
+		return nil, fmt.Errorf("%q expands to more than %d names",
+			spec, MaxRangeExpansion)
 	}
+	n := last - first + 1
 	out := make([]string, 0, n)
 	for i := first; i <= last; i++ {
 		out = append(out, prefix+strconv.Itoa(i)+suffix)

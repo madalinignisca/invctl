@@ -56,11 +56,21 @@ func ExpandRange(spec string) ([]string, error) {
 	if last < first {
 		return nil, fmt.Errorf("%q counts backwards", spec)
 	}
-	n := last - first + 1
-	if n > MaxRangeExpansion {
-		return nil, fmt.Errorf("%q expands to %d names, over the limit of %d",
-			spec, n, MaxRangeExpansion)
+	// THE SUBTRACTION IS SAFE AND THE ADDITION IS NOT, which is why the cap is
+	// tested against the difference rather than the count.
+	//
+	// After the two checks above, first >= 0 (a leading "-" makes the low bound
+	// empty and fails Atoi) and last >= first, so last-first cannot overflow.
+	// last-first+1 CAN: "eth[0-9223372036854775807]" makes it MinInt64, which
+	// is not > MaxRangeExpansion, so the cap passed and make() was handed a
+	// negative capacity -- panic: makeslice: cap out of range. A panic in
+	// internal/domain reached from a form is exactly what CLAUDE.md forbids,
+	// and it defeated the very guard it walked past.
+	if last-first >= MaxRangeExpansion {
+		return nil, fmt.Errorf("%q expands to more than %d names",
+			spec, MaxRangeExpansion)
 	}
+	n := last - first + 1
 	out := make([]string, 0, n)
 	for i := first; i <= last; i++ {
 		out = append(out, prefix+strconv.Itoa(i)+suffix)
