@@ -206,6 +206,125 @@ func TestSetBundleMembersRefusesACableAlreadyInAnotherBundle(t *testing.T) {
 	}
 }
 
+// TestSetBundleMembersAllowsAMovedCableFromARetiredBundle is the trap Task 2b
+// fixes: refusing to edit a retired bundle's membership, plus an
+// unconditional one-bundle-per-cable index, together strand a cable the
+// moment the duct it was pulled in gets retired. A cable in a RETIRED bundle
+// must be free to join a new live one.
+func TestSetBundleMembersAllowsAMovedCableFromARetiredBundle(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			s, ctx := newStore(t, e)
+			a1 := mustAsset(t, s, ctx, domain.KindServer, "srv-a", nil)
+			a2 := mustAsset(t, s, ctx, domain.KindServer, "srv-b", nil)
+			pa := mustInterface(t, s, ctx, a1, "eth0")
+			pb := mustInterface(t, s, ctx, a2, "eth0")
+			cable := mustCable(t, s, ctx, pa, pb)
+
+			oldBundle := mustBundle(t, s, ctx, "duct-old", "Old Duct")
+			if err := s.SetBundleMembers(ctx, testPermit, oldBundle, []string{cable}); err != nil {
+				t.Fatalf("adding to old bundle: %v", err)
+			}
+			if err := s.RetireBundle(ctx, testPermit, oldBundle); err != nil {
+				t.Fatalf("retiring old bundle: %v", err)
+			}
+
+			newBundle := mustBundle(t, s, ctx, "duct-new", "New Duct")
+			if err := s.SetBundleMembers(ctx, testPermit, newBundle, []string{cable}); err != nil {
+				t.Fatalf("adding a cable from a retired bundle to a new one should succeed, got: %v", err)
+			}
+
+			newMembers, err := s.ListBundleMembers(ctx, newBundle)
+			if err != nil {
+				t.Fatalf("listing new bundle members: %v", err)
+			}
+			if len(newMembers) != 1 || newMembers[0].LinkID != cable {
+				t.Fatalf("new bundle members = %+v, want exactly the moved cable", newMembers)
+			}
+
+			// The retired bundle's own history is untouched by the cable
+			// moving on -- SetBundleMembers only ever writes newBundle's rows.
+			oldMembers, err := s.ListBundleMembers(ctx, oldBundle)
+			if err != nil {
+				t.Fatalf("listing old bundle members: %v", err)
+			}
+			if len(oldMembers) != 1 || oldMembers[0].LinkID != cable {
+				t.Fatalf("old (retired) bundle members = %+v, want the cable still recorded as history", oldMembers)
+			}
+		})
+	}
+}
+
+// TestSetBundleMembersRefusesACableStillInALiveBundle is the other half: the
+// live-scoped rule still refuses a cable that is claimed by a bundle that has
+// NOT been retired, with the same named-conflict message as before.
+func TestSetBundleMembersRefusesACableStillInALiveBundle(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			s, ctx := newStore(t, e)
+			a1 := mustAsset(t, s, ctx, domain.KindServer, "srv-a", nil)
+			a2 := mustAsset(t, s, ctx, domain.KindServer, "srv-b", nil)
+			pa := mustInterface(t, s, ctx, a1, "eth0")
+			pb := mustInterface(t, s, ctx, a2, "eth0")
+			cable := mustCable(t, s, ctx, pa, pb)
+
+			bundleA := mustBundle(t, s, ctx, "duct-a", "Duct A")
+			bundleB := mustBundle(t, s, ctx, "duct-b", "Duct B")
+
+			if err := s.SetBundleMembers(ctx, testPermit, bundleA, []string{cable}); err != nil {
+				t.Fatalf("adding to bundle A: %v", err)
+			}
+
+			err := s.SetBundleMembers(ctx, testPermit, bundleB, []string{cable})
+			if !errors.Is(err, domain.ErrConflict) {
+				t.Fatalf("adding a cable still in a LIVE bundle to a second bundle = %v, want ErrConflict", err)
+			}
+			if !strings.Contains(err.Error(), cable) || !strings.Contains(err.Error(), "duct-a") {
+				t.Errorf("error %q does not name the conflicting cable and its (live) bundle", err.Error())
+			}
+		})
+	}
+}
+
+// TestSetBundleMembersRefusesEditingARetiredBundle is the other decision this
+// task adds: editing a withdrawn grouping's membership is meaningless, and
+// this is also what makes the live-scoped uniqueness rule load-bearing --
+// it's the only way a cable ever gets OUT of a retired bundle's claim.
+func TestSetBundleMembersRefusesEditingARetiredBundle(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			s, ctx := newStore(t, e)
+			a1 := mustAsset(t, s, ctx, domain.KindServer, "srv-a", nil)
+			a2 := mustAsset(t, s, ctx, domain.KindServer, "srv-b", nil)
+			pa := mustInterface(t, s, ctx, a1, "eth0")
+			pb := mustInterface(t, s, ctx, a2, "eth0")
+			cable := mustCable(t, s, ctx, pa, pb)
+
+			bundleID := mustBundle(t, s, ctx, "duct-a", "Duct A")
+			if err := s.RetireBundle(ctx, testPermit, bundleID); err != nil {
+				t.Fatalf("retiring bundle: %v", err)
+			}
+
+			err := s.SetBundleMembers(ctx, testPermit, bundleID, []string{cable})
+			var ve *domain.ValidationError
+			if !errors.As(err, &ve) {
+				t.Fatalf("editing a retired bundle's membership = %v, want a *domain.ValidationError", err)
+			}
+
+			// The retired bundle's membership must be exactly what it was
+			// before the refused edit -- empty, in this case -- not
+			// partially applied.
+			members, err := s.ListBundleMembers(ctx, bundleID)
+			if err != nil {
+				t.Fatalf("listing bundle members: %v", err)
+			}
+			if len(members) != 0 {
+				t.Errorf("retired bundle members after a refused edit = %+v, want none (the refusal must not apply)", members)
+			}
+		})
+	}
+}
+
 // TestSetBundleMembersDedupesInput proves a duplicated id in the caller's
 // slice does not trip the (bundle_id, link_id) primary key on the second
 // INSERT -- a set collapses duplicates rather than refusing them.

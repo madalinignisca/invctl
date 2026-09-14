@@ -30,13 +30,30 @@
 -- unique index bound every row regardless of lifecycle, a corrected bundle
 -- could never re-declare its code under a fresh row.
 --
--- ONE BUNDLE PER CABLE, Gabriel's decision (docs/cable-bundles-design.md):
--- cable_bundle_member's unique index is on link_id ALONE, not on
--- (bundle_id, link_id). A bundle models the physical run a cable was pulled
--- in, and a cable is in exactly one of those -- so "what else goes with this
--- cable" is a single unambiguous answer, and an accidental double-add is a
--- refusal rather than a quietly confusing result the impact page would have
--- to explain as a union.
+-- ONE BUNDLE PER CABLE, Gabriel's decision (docs/cable-bundles-design.md),
+-- BUT SCOPED TO LIVE BUNDLES -- corrected 2026-09-14 (Task 2b). A cable may
+-- be in at most one bundle whose lifecycle is not 'retired', and in any
+-- number of retired ones: those are history, not a live claim. An
+-- unconditional unique index on link_id alone cannot express this and was
+-- Task 2's original shape -- it strands a cable the moment the duct it was
+-- pulled in gets retired, since "refuse to edit a retired bundle's
+-- membership" (also decided here) removes the only way to take the cable out
+-- of it again. What actually happens physically is the opposite: a duct gets
+-- replaced, the cables are re-pulled into the new one, and the old bundle is
+-- history -- so retiring a bundle must free its cables for a new one, not
+-- lock them out of ever being bundled again.
+--
+-- THIS IS NOT A DATABASE CONSTRAINT because it can't be one: the rule needs
+-- cable_bundle.lifecycle, a column on the PARENT table, and neither engine's
+-- partial/conditional unique index can reference a second table. SQLite
+-- flatly cannot; PostgreSQL's partial index predicate is limited to the
+-- indexed table's own columns for the same reason -- the index has to be
+-- evaluable from the row being written alone. So the guarantee is enforced in
+-- Go, inside SetBundleMembers's transaction, scoped to members of bundles
+-- with lifecycle <> 'retired' -- the same trust CLAUDE.md already places in
+-- tx.log for the audit trail: one chokepoint, not a constraint. Losing the
+-- database-level guarantee is a real cost, stated here rather than glossed
+-- over, and it rests entirely on every writer going through that method.
 --
 -- MEMBERSHIP CARRIES NO LIFECYCLE OF ITS OWN and is never deleted piecemeal:
 -- CLAUDE.md's rule is that a set table is replaced wholesale inside its
@@ -74,15 +91,13 @@ CREATE TABLE cable_bundle_member (
   link_id   TEXT NOT NULL REFERENCES link(id),
   PRIMARY KEY (bundle_id, link_id)
 );
--- ONE BUNDLE PER CABLE. A bundle models the run a cable was physically pulled
--- in, and a cable is in one of those. It makes "what else goes with this"
--- a single unambiguous answer rather than a union the impact page would have
--- to explain, and an accidental double-add a refusal rather than a quietly
--- confusing result.
-CREATE UNIQUE INDEX cable_bundle_member_link_key ON cable_bundle_member(link_id);
+-- NO cable_bundle_member_link_key HERE. One-bundle-per-cable is real but
+-- scoped to LIVE bundles (see the header comment) -- a rule this table alone
+-- cannot enforce, since it would need to see cable_bundle.lifecycle on the
+-- parent row and a unique index only ever sees the row being written.
+-- SetBundleMembers checks and refuses inside its transaction instead.
 
 -- +goose Down
-DROP INDEX cable_bundle_member_link_key;
 DROP TABLE cable_bundle_member;
 DROP INDEX cable_bundle_code_key;
 DROP TABLE cable_bundle;

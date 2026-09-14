@@ -246,6 +246,15 @@ func (s *SQLStore) SetBundleMembers(ctx context.Context, p domain.Permit,
 	if err != nil {
 		return err
 	}
+	// A withdrawn bundle's membership is history, not something to keep
+	// editing (Task 2b) -- editing a grouping that has already been
+	// withdrawn is meaningless. Refused here, before anything opens a
+	// transaction, the same shape requireLiveNetGroup uses.
+	if bundle.IsRetired() {
+		ve := &domain.ValidationError{}
+		ve.Add("bundle_id", "that bundle has been withdrawn")
+		return ve
+	}
 	beforeLabels, err := s.bundleMemberLabels(ctx, bundleID)
 	if err != nil {
 		return err
@@ -267,11 +276,13 @@ func (s *SQLStore) SetBundleMembers(ctx context.Context, p domain.Permit,
 	}
 
 	return s.write(ctx, p, func(t *tx) error {
-		// ONE BUNDLE PER CABLE (cable_bundle_member_link_key), checked here
-		// rather than left to the unique index: an index violation alone
-		// would surface as a bare driver error, and a cable already claimed
-		// by another bundle needs a field message naming which one, not a
-		// 500 (design doc, "Rules"; CLAUDE.md's refusal-message rule).
+		// ONE BUNDLE PER CABLE, SCOPED TO LIVE BUNDLES (Task 2b) -- no longer
+		// a database constraint (see migration 00068's header), because the
+		// rule needs the parent's lifecycle and an index can't see across
+		// tables. Checked here instead, in the same transaction: a cable in
+		// a RETIRED bundle is free to join a new one (that's the whole point
+		// -- a duct gets replaced and its cables re-pulled), a cable in a
+		// LIVE bundle is still refused with a field message naming which one.
 		if len(unique) > 0 {
 			var conflicts []struct {
 				LinkID     string `db:"link_id"`
@@ -280,7 +291,8 @@ func (s *SQLStore) SetBundleMembers(ctx context.Context, p domain.Permit,
 			q := `SELECT m.link_id, b.code AS bundle_code
 			      FROM cable_bundle_member m
 			      JOIN cable_bundle b ON b.id = m.bundle_id
-			      WHERE m.bundle_id <> ? AND m.link_id IN (` + placeholders(len(unique)) + `)`
+			      WHERE m.bundle_id <> ? AND b.lifecycle <> 'retired'
+			        AND m.link_id IN (` + placeholders(len(unique)) + `)`
 			args := append([]any{bundleID}, anySlice(unique)...)
 			if err := t.selectAll(ctx, &conflicts, q, args...); err != nil {
 				return fmt.Errorf("checking bundle membership conflicts: %w", err)

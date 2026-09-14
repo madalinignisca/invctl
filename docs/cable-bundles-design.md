@@ -46,12 +46,9 @@ CREATE TABLE cable_bundle_member (
   link_id   TEXT NOT NULL REFERENCES link(id),
   PRIMARY KEY (bundle_id, link_id)
 );
--- ONE BUNDLE PER CABLE. A bundle models the run a cable was physically pulled
--- in, and a cable is in one of those. It makes "what else goes with this" a
--- single unambiguous answer rather than a union the impact page would have to
--- explain, and an accidental double-add a refusal rather than a quietly
--- confusing result.
-CREATE UNIQUE INDEX cable_bundle_member_link_key ON cable_bundle_member(link_id);
+-- No unique index on link_id here -- see "Rules" below (corrected 2026-09-14,
+-- Task 2b). One-bundle-per-cable is real but scoped to LIVE bundles, a rule
+-- an index on this table alone cannot express.
 ```
 
 The code index is scoped to live rows, the shape migration `00064` established:
@@ -73,6 +70,36 @@ attributing cable removals to whoever withdrew the grouping — the misattributi
 **A retired link stays in its bundle.** Membership records what was pulled
 together; a withdrawn cable is still part of that history, and removing it
 silently would rewrite it. The impact view filters live links itself.
+
+**One bundle per cable, scoped to LIVE bundles — corrected 2026-09-14
+(Task 2b).** Task 2 shipped two decisions that were each fine alone and a trap
+together: refusing to edit a *retired* bundle's membership (below) plus an
+*unconditional* one-bundle-per-cable index. Together they strand a cable
+permanently the moment the duct it was pulled in gets retired — there is no
+longer any way to take it out of that bundle, and the unconditional index
+still refuses to let it join a new one. What actually happens physically is
+the opposite: a duct gets replaced, the cables are re-pulled into the new
+one, and the old bundle is history. So the rule is: a cable may be in at most
+one bundle whose lifecycle is `active`, and in any number of retired ones —
+those are history, not a live claim.
+
+This can't be a database constraint: it needs `cable_bundle.lifecycle`, a
+column on the *parent* table, and neither SQLite nor PostgreSQL can write a
+unique/partial index on `cable_bundle_member` that sees across to it — the
+index has to be evaluable from the row being written alone. `cable_bundle_
+member_link_key` is gone from migration `00068` (unreleased, so free to
+change) and the guarantee now rests entirely on `SetBundleMembers` checking
+it inside its own transaction, scoped to members of non-retired bundles — the
+same trust CLAUDE.md already places in `tx.log` for the audit trail. Losing
+the database-level guarantee is a real cost, stated here rather than glossed
+over.
+
+**Editing a retired bundle's membership is refused.** Editing a withdrawn
+grouping is meaningless — `SetBundleMembers` refuses with a field message
+naming the bundle, the same shape `requireLiveNetGroup` uses. This is also
+what makes the live-scoped uniqueness rule above load-bearing rather than
+academic: it is the only way a cable ever gets *out* of a retired bundle's
+"claim" on it.
 
 ## The cut
 
