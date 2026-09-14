@@ -327,8 +327,12 @@ func TestUpdateDeviceTypeComponentPreservesKindAndType(t *testing.T) {
 			c := rows[0]
 
 			// Try to smuggle a different device type and kind through the edit.
+			// "port" is not a kind ComponentKinds admits today -- it stands in
+			// for whatever kind gets added next (migration 00067's header) and
+			// is enough to prove the pin, since UpdateDeviceTypeComponent
+			// overwrites Kind from the stored row before Validate ever runs.
 			c.DeviceTypeID = otherDtID
-			c.Kind = domain.ComponentKindPowerInput
+			c.Kind = "port"
 			c.Name = "eth0-renamed"
 			if err := s.UpdateDeviceTypeComponent(ctx, testPermit, &c); err != nil {
 				t.Fatalf("updating: %v", err)
@@ -357,9 +361,9 @@ func TestRetireDeviceTypeComponentIsSoftDeleteAndIdempotent(t *testing.T) {
 		t.Run(e.Name, func(t *testing.T) {
 			s, ctx := newStore(t, e)
 			dtID := mustDeviceTypeForComponents(t, s)
-			dva := 550
+			ff := "rj45"
 			if err := s.CreateDeviceTypeComponents(ctx, testPermit, dtID, ComponentSpec{
-				Kind: domain.ComponentKindPowerInput, NameSpec: "psu1", DrawVA: &dva,
+				Kind: domain.ComponentKindInterface, NameSpec: "eth0", FormFactor: &ff,
 			}); err != nil {
 				t.Fatalf("creating: %v", err)
 			}

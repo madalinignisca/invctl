@@ -14,9 +14,16 @@ import (
 )
 
 // Component kinds a device type template can carry (migration 00067).
+//
+// power_input is deliberately NOT a kind here. power_input.feed_id is
+// NOT NULL REFERENCES power_feed(id) -- the row IS the connection to a feed
+// (power.go: "PowerInput is where an asset takes power from"), not a count
+// of PSUs a model has. A catalogue template has no feed to point at, so a
+// power-input template component could never be instantiated into a real
+// row without a power-model change that is out of scope. See migration
+// 00067's header for the full reasoning.
 const (
-	ComponentKindInterface  = "interface"
-	ComponentKindPowerInput = "power_input"
+	ComponentKindInterface = "interface"
 )
 
 // ComponentKinds are the kinds this code knows how to handle. Unlike a
@@ -26,15 +33,14 @@ const (
 // component becomes. A third kind arriving as a bare INSERT would fall
 // through both switches silently, so a new one requires a release, not a
 // row.
-var ComponentKinds = []string{ComponentKindInterface, ComponentKindPowerInput}
+var ComponentKinds = []string{ComponentKindInterface}
 
 // DeviceTypeComponent is one entry in a device type's component template: a
-// port or a power input every instance of the model has. It is DECLARED, the
-// same class as device_type's own physical columns -- somebody read a
-// datasheet and asserted this model carries this port. Nothing here is an
-// asset yet; Task 4 reads the active rows for a device type and brings the
-// real interface/power_input rows into existence when an asset of that type
-// is created.
+// port every instance of the model has. It is DECLARED, the same class as
+// device_type's own physical columns -- somebody read a datasheet and
+// asserted this model carries this port. Nothing here is an asset yet; Task
+// 4 reads the active rows for a device type and brings the real interface
+// rows into existence when an asset of that type is created.
 type DeviceTypeComponent struct {
 	ID           string `db:"id"`
 	DeviceTypeID string `db:"device_type_id"`
@@ -44,17 +50,13 @@ type DeviceTypeComponent struct {
 	// bulk creation (migration 00067 header): "eth0" before "eth1" regardless
 	// of what a lexicographic sort of the names would do.
 	Position int `db:"position"`
-	// FormFactor, SpeedMbps and IsMgmt describe a port and are meaningless on
-	// a power_input -- Validate refuses a row that sets any of them outside
-	// kind == interface. FormFactor is a FOREIGN KEY into
-	// interface_form_factor, the same table Interface.FormFactor points at,
-	// so a template can only name a port kind the estate already recognises.
+	// FormFactor, SpeedMbps and IsMgmt describe a port. FormFactor is a
+	// FOREIGN KEY into interface_form_factor, the same table
+	// Interface.FormFactor points at, so a template can only name a port
+	// kind the estate already recognises.
 	FormFactor *string `db:"form_factor"`
 	SpeedMbps  *int    `db:"speed_mbps"`
 	IsMgmt     bool    `db:"is_mgmt"`
-	// DrawVA describes a power_input and is meaningless on an interface --
-	// Validate refuses a row that sets it outside kind == power_input.
-	DrawVA *int `db:"draw_va"`
 	// Lifecycle is DECLARED like every other lifecycle in this schema: a
 	// component is withdrawn from the template because a person corrected a
 	// datasheet reading, never because anything observed reported it
@@ -87,9 +89,6 @@ type DeviceTypeComponentSpec struct {
 	FormFactor *string
 	SpeedMbps  *int
 	IsMgmt     bool
-
-	// power_input-shaped.
-	DrawVA *int
 }
 
 // NewDeviceTypeComponent validates and constructs one component of a device
@@ -105,7 +104,6 @@ func NewDeviceTypeComponent(id string, spec DeviceTypeComponentSpec, now time.Ti
 		FormFactor:   spec.FormFactor,
 		SpeedMbps:    spec.SpeedMbps,
 		IsMgmt:       spec.IsMgmt,
-		DrawVA:       spec.DrawVA,
 		Lifecycle:    LifecycleActive,
 		CreatedAt:    ts,
 		UpdatedAt:    ts,
@@ -121,13 +119,11 @@ func NewDeviceTypeComponent(id string, spec DeviceTypeComponentSpec, now time.Ti
 // from the constructor so an update path (Task 4 or later) runs the same
 // checks -- see Interface.Validate for why that split matters.
 //
-// THE KIND/COLUMN CROSS-CHECK IS THE POINT OF THIS FUNCTION. A power_input
-// carrying a speed_mbps is a programming error, not a data-entry mistake a
-// person might plausibly make through a form scoped to one kind, so it fails
-// loudly here rather than silently storing a column nothing will ever read.
-// The DB CHECK on `kind` itself is the second line of defence, not the
-// first; there is no DB-level constraint that can express the cross-column
-// rule at all, which is exactly why it belongs here.
+// THE KIND/COLUMN CROSS-CHECK IS STILL THE POINT OF THIS FUNCTION even with
+// one kind in play: ComponentKinds is a closed, behavioural enum (see its
+// doc comment), so a future kind's columns get the same cross-check the
+// moment it is added -- this is where that check lives, not a place to
+// re-derive when the second kind shows up.
 func (c *DeviceTypeComponent) Validate() error {
 	ve := &ValidationError{}
 	checkRequired(ve, "device_type_id", c.DeviceTypeID)
@@ -138,9 +134,6 @@ func (c *DeviceTypeComponent) Validate() error {
 	}
 	switch c.Kind {
 	case ComponentKindInterface:
-		if c.DrawVA != nil {
-			ve.Add("draw_va", "belongs to a power_input component, not an interface")
-		}
 		// REQUIRED, not merely allowed. interface.form_factor is NOT NULL with
 		// a foreign key into interface_form_factor, and CreateInterface calls
 		// requireVocabulary on it. A template component without one is
@@ -152,16 +145,6 @@ func (c *DeviceTypeComponent) Validate() error {
 		if c.FormFactor == nil || strings.TrimSpace(*c.FormFactor) == "" {
 			ve.Add("form_factor", "an interface component needs a form factor")
 		}
-	case ComponentKindPowerInput:
-		if c.FormFactor != nil {
-			ve.Add("form_factor", "belongs to an interface component, not a power_input")
-		}
-		if c.SpeedMbps != nil {
-			ve.Add("speed_mbps", "belongs to an interface component, not a power_input")
-		}
-		if c.IsMgmt {
-			ve.Add("is_mgmt", "belongs to an interface component, not a power_input")
-		}
 	}
 	if c.FormFactor != nil {
 		trimmed := checkVocabulary(ve, "form_factor", *c.FormFactor)
@@ -169,9 +152,6 @@ func (c *DeviceTypeComponent) Validate() error {
 	}
 	if c.SpeedMbps != nil && *c.SpeedMbps <= 0 {
 		ve.Add("speed_mbps", "must be a positive number of megabits, or blank")
-	}
-	if c.DrawVA != nil && *c.DrawVA <= 0 {
-		ve.Add("draw_va", "must be a positive number of volt-amps, or blank")
 	}
 	if c.Lifecycle != LifecycleActive && c.Lifecycle != LifecycleRetired {
 		ve.Add("lifecycle", "%q is not a lifecycle", c.Lifecycle)

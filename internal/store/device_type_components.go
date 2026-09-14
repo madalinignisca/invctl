@@ -17,9 +17,9 @@ import (
 )
 
 // The store surface for a device type's component template (migration
-// 00067): the ports and power inputs every instance of a model has. Task 4
-// reads ListDeviceTypeComponents to seed the real rows an asset gets when it
-// is created from a device type -- nothing here instantiates anything.
+// 00067): the ports every instance of a model has. Task 4 reads
+// ListDeviceTypeComponents to seed the real rows an asset gets when it is
+// created from a device type -- nothing here instantiates anything.
 
 // ComponentSpec is what a form submits to add one or more template entries in
 // a single call: a name that may carry a range (domain.ExpandRange), plus
@@ -41,9 +41,6 @@ type ComponentSpec struct {
 	FormFactor *string
 	SpeedMbps  *int
 	IsMgmt     bool
-
-	// power_input-shaped.
-	DrawVA *int
 }
 
 // deviceTypeComponentSelect is unqualified because the table carries no join
@@ -100,7 +97,6 @@ type componentBatchAudit struct {
 	FormFactor   *string `db:"form_factor"`
 	SpeedMbps    *int    `db:"speed_mbps"`
 	IsMgmt       bool    `db:"is_mgmt"`
-	DrawVA       *int    `db:"draw_va"`
 }
 
 func auditedComponentBatch(deviceTypeID string, spec ComponentSpec, created []*domain.DeviceTypeComponent) *componentBatchAudit {
@@ -117,7 +113,6 @@ func auditedComponentBatch(deviceTypeID string, spec ComponentSpec, created []*d
 		FormFactor:   spec.FormFactor,
 		SpeedMbps:    spec.SpeedMbps,
 		IsMgmt:       spec.IsMgmt,
-		DrawVA:       spec.DrawVA,
 	}
 }
 
@@ -158,7 +153,6 @@ func (s *SQLStore) CreateDeviceTypeComponents(ctx context.Context, p domain.Perm
 				FormFactor:   spec.FormFactor,
 				SpeedMbps:    spec.SpeedMbps,
 				IsMgmt:       spec.IsMgmt,
-				DrawVA:       spec.DrawVA,
 			}, now)
 			if err != nil {
 				return err
@@ -166,10 +160,10 @@ func (s *SQLStore) CreateDeviceTypeComponents(ctx context.Context, p domain.Perm
 			_, err = t.exec(ctx, `
 				INSERT INTO device_type_component
 					(id, device_type_id, kind, name, position, form_factor, speed_mbps,
-					 is_mgmt, draw_va, lifecycle, created_at, updated_at)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+					 is_mgmt, lifecycle, created_at, updated_at)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 				c.ID, c.DeviceTypeID, c.Kind, c.Name, c.Position, c.FormFactor, c.SpeedMbps,
-				c.IsMgmt, c.DrawVA, c.Lifecycle, c.CreatedAt, c.UpdatedAt)
+				c.IsMgmt, c.Lifecycle, c.CreatedAt, c.UpdatedAt)
 			if err != nil {
 				return translateWriteErr(err, "creating device type component")
 			}
@@ -222,10 +216,10 @@ func (s *SQLStore) UpdateDeviceTypeComponent(ctx context.Context, p domain.Permi
 		res, err := t.exec(ctx, `
 			UPDATE device_type_component
 			SET name = ?, position = ?, form_factor = ?, speed_mbps = ?, is_mgmt = ?,
-			    draw_va = ?, updated_at = ?, row_version = row_version + 1
+			    updated_at = ?, row_version = row_version + 1
 			WHERE id = ? AND row_version = ?`,
 			c.Name, c.Position, c.FormFactor, c.SpeedMbps, c.IsMgmt,
-			c.DrawVA, c.UpdatedAt, c.ID, c.RowVersion)
+			c.UpdatedAt, c.ID, c.RowVersion)
 		if err != nil {
 			return translateWriteErr(err, "updating device type component")
 		}
@@ -322,19 +316,9 @@ func newInterfaceFromTemplate(id, assetID string, c domain.DeviceTypeComponent, 
 // the vocabulary row cannot be deleted out from under a template that still
 // references it.
 //
-// POWER INPUTS ARE NOT INSTANTIATED, and that is a deliberate limitation of
-// this task, not an oversight. power_input.feed_id is NOT NULL REFERENCES
-// power_feed(id) (migration 00023): a feed is a physical fact about which
-// panel circuit this ONE box was actually wired into, not a property of the
-// model, so a device type's template -- which knows only that "this model
-// has a C14 input" -- has nothing correct to put there. Inventing a
-// placeholder feed would be worse than not instantiating at all: it would
-// misrepresent which panel the asset draws from, silently, for every asset
-// of that type, until someone noticed and corrected however many rows had
-// accumulated. A power_input template component is therefore left as
-// documentation of what the model has, for an operator to wire up by hand
-// with CreatePowerInput once the real feed is known -- reported here and in
-// this task's own report, not silently skipped.
+// A DEVICE TYPE'S TEMPLATE CARRIES INTERFACES ONLY -- see migration 00067's
+// header for why power inputs were excluded from the kind vocabulary
+// entirely, rather than accepted and left uninstantiated here.
 func (s *SQLStore) instantiateComponents(ctx context.Context, t *tx, a *domain.Asset) error {
 	if a.DeviceTypeID == nil {
 		return nil
@@ -366,8 +350,6 @@ func (s *SQLStore) instantiateComponents(ctx context.Context, t *tx, a *domain.A
 			if err := t.logCreate(ctx, "interface", iface.ID, iface); err != nil {
 				return err
 			}
-		case domain.ComponentKindPowerInput:
-			// See the doc comment above: deliberately not instantiated.
 		}
 	}
 	return nil

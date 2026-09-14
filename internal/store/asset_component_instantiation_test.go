@@ -15,17 +15,15 @@ import (
 )
 
 // TestCreateAssetInstantiatesDeviceTypeComponents is Task 4's core case: a
-// device type with two interface components and one power_input component,
-// an asset created from it, and exactly the interfaces materialise --
-// each with the right attributes and its own change_log row.
+// device type with two interface components, an asset created from it, and
+// exactly those interfaces materialise -- each with the right attributes and
+// its own change_log row.
 //
-// power_input IS DELIBERATELY NOT INSTANTIATED -- see
-// instantiateComponents's doc comment (internal/store/device_type_components.go).
-// power_input.feed_id is NOT NULL REFERENCES power_feed(id), and a device
-// type's template names no feed: a feed is a fact about how THIS box was
-// actually wired, which nothing at asset-creation time knows. So this test
-// asserts the power_input template entry produces NO power_input row and NO
-// change_log entry for one, rather than asserting a fabricated feed.
+// power_input is not exercised here because it is not a template kind at
+// all -- see migration 00067's header and instantiateComponents's doc
+// comment (internal/store/device_type_components.go) for why it was
+// excluded from the kind vocabulary rather than accepted and left
+// uninstantiated.
 func TestCreateAssetInstantiatesDeviceTypeComponents(t *testing.T) {
 	for _, e := range Engines(t) {
 		t.Run(e.Name, func(t *testing.T) {
@@ -47,12 +45,6 @@ func TestCreateAssetInstantiatesDeviceTypeComponents(t *testing.T) {
 			}); err != nil {
 				t.Fatalf("declaring Ethernet1/1: %v", err)
 			}
-			dva := 750
-			if err := s.CreateDeviceTypeComponents(ctx, testPermit, dtID, ComponentSpec{
-				Kind: domain.ComponentKindPowerInput, NameSpec: "psu1", DrawVA: &dva,
-			}); err != nil {
-				t.Fatalf("declaring psu1: %v", err)
-			}
 
 			assetID := assetOfType(t, s, ctx, "instantiated-01", dtID, nil)
 
@@ -61,8 +53,7 @@ func TestCreateAssetInstantiatesDeviceTypeComponents(t *testing.T) {
 				t.Fatalf("listing interfaces: %v", err)
 			}
 			if len(ifaces) != 2 {
-				t.Fatalf("got %d interfaces, want exactly 2 (the power_input must not have "+
-					"produced a third component of any kind): %+v", len(ifaces), ifaces)
+				t.Fatalf("got %d interfaces, want exactly 2: %+v", len(ifaces), ifaces)
 			}
 
 			byName := map[string]InterfaceRow{}
@@ -115,19 +106,6 @@ func TestCreateAssetInstantiatesDeviceTypeComponents(t *testing.T) {
 				if changes[0].Action != domain.ActionCreate {
 					t.Errorf("interface %s's change_log action = %s, want create", name, changes[0].Action)
 				}
-			}
-
-			// The power_input template entry produced no row of any kind, and
-			// no change_log entry -- a real device_type_component change_log
-			// entry exists (its own declaration, above), but nothing claiming a
-			// power_input was created for this asset.
-			changes, err := s.ListChangesForEntity(ctx, "power_input", assetID, 10)
-			if err != nil {
-				t.Fatalf("listing power_input changes: %v", err)
-			}
-			if len(changes) != 0 {
-				t.Errorf("got %d change_log rows naming power_input/%s, want 0 -- "+
-					"no power_input was supposed to be created", len(changes), assetID)
 			}
 		})
 	}

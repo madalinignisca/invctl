@@ -59,43 +59,10 @@ func TestNewDeviceTypeComponent(t *testing.T) {
 			wantField:  "form_factor",
 		},
 		{
-			name: "a bare power_input is valid", deviceTypeID: "dt1",
-			kind: ComponentKindPowerInput, compName: "psu0", position: 0,
-		},
-		{
-			name:         "a power_input may carry draw_va",
-			deviceTypeID: "dt1", kind: ComponentKindPowerInput, compName: "psu0", position: 0,
-			mutate: func(c *DeviceTypeComponent) { c.DrawVA = intPtr(750) },
-		},
-		{
-			name:         "a power_input carrying speed_mbps is refused",
-			deviceTypeID: "dt1", kind: ComponentKindPowerInput, compName: "psu0", position: 0,
-			mutate:    func(c *DeviceTypeComponent) { c.SpeedMbps = intPtr(1000) },
-			wantErr:   true,
-			wantField: "speed_mbps",
-		},
-		{
-			name:         "a power_input carrying form_factor is refused",
-			deviceTypeID: "dt1", kind: ComponentKindPowerInput, compName: "psu0", position: 0,
-			mutate:    func(c *DeviceTypeComponent) { c.FormFactor = strPtr("rj45") },
-			wantErr:   true,
-			wantField: "form_factor",
-		},
-		{
-			name:         "a power_input flagged is_mgmt is refused",
-			deviceTypeID: "dt1", kind: ComponentKindPowerInput, compName: "psu0", position: 0,
-			mutate:    func(c *DeviceTypeComponent) { c.IsMgmt = true },
-			wantErr:   true,
-			wantField: "is_mgmt",
-		},
-		{
-			name:         "an interface carrying draw_va is refused",
-			deviceTypeID: "dt1", kind: ComponentKindInterface, compName: "eth0", position: 0,
-			mutate:    func(c *DeviceTypeComponent) { c.DrawVA = intPtr(100) },
-			wantErr:   true,
-			wantField: "draw_va",
-		},
-		{
+			// kind is a closed, behavioural enum (ComponentKinds' doc comment):
+			// this is the check that will refuse a stray power_input row too,
+			// since power_input was deliberately excluded from the kind vocabulary
+			// (migration 00067's header) rather than merely undocumented.
 			name:         "an unknown kind is refused",
 			deviceTypeID: "dt1", kind: "widget", compName: "w0", position: 0,
 			wantErr: true, wantField: "kind",

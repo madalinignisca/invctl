@@ -6,13 +6,25 @@
 --
 -- SPDX-License-Identifier: AGPL-3.0-only
 
--- A device type's component template: the ports and power inputs every
--- instance of a model has. DECLARED -- somebody read a datasheet and asserted
--- that this model carries this port, the same class as device_type's own
--- physical columns (migration 00038). Nothing observes a template and nothing
--- derives one; Task 4 reads it to seed the real interface/power_input rows an
--- asset gets when it is created from this device type, but the template row
--- itself is intent, not a report about any physical box.
+-- A device type's component template: the ports every instance of a model
+-- has. DECLARED -- somebody read a datasheet and asserted that this model
+-- carries this port, the same class as device_type's own physical columns
+-- (migration 00038). Nothing observes a template and nothing derives one;
+-- Task 4 reads it to seed the real interface rows an asset gets when it is
+-- created from this device type, but the template row itself is intent, not
+-- a report about any physical box.
+--
+-- POWER INPUTS WERE CONSIDERED AND EXCLUDED. power_input.feed_id is
+-- NOT NULL REFERENCES power_feed(id) -- the row IS the connection to a feed
+-- (internal/domain/power.go: "PowerInput is where an asset takes power
+-- from"), not a count of how many PSUs a model has. A catalogue template
+-- has no feed to point at and cannot acquire one without a power-model
+-- change that is out of scope here, so a power-input template component
+-- could never be instantiated into a real power_input row. Offering a
+-- `kind` an operator can pick that is guaranteed to instantiate into
+-- nothing is a trap, not a feature -- better to not offer it. `kind` keeps
+-- its discriminator shape below so `port` or `outlet` can be added later
+-- once they have somewhere to go; only `power_input` itself is refused.
 --
 -- THE UNIQUE INDEX IS LIVE-SCOPED, same reasoning as 00064's prefix/ip_address
 -- pair: a name withdrawn from a template must not keep its slot reserved
@@ -43,13 +55,12 @@ CREATE TABLE device_type_component (
   id              TEXT PRIMARY KEY NOT NULL,
   device_type_id  TEXT NOT NULL REFERENCES device_type(id),
   kind            TEXT NOT NULL
-                    CONSTRAINT dtc_kind_check CHECK (kind IN ('interface','power_input')),
+                    CONSTRAINT dtc_kind_check CHECK (kind IN ('interface')),
   name            TEXT NOT NULL,
   position        INTEGER NOT NULL,
   form_factor     TEXT REFERENCES interface_form_factor(code),
   speed_mbps      INTEGER,
   is_mgmt         BOOLEAN NOT NULL DEFAULT FALSE,
-  draw_va         INTEGER,
   lifecycle       TEXT NOT NULL DEFAULT 'active'
                     CONSTRAINT dtc_lifecycle_check CHECK (lifecycle IN ('active','retired')),
   created_at      TEXT NOT NULL,
@@ -64,6 +75,12 @@ CREATE TABLE device_type_component (
   --
   -- A TABLE constraint, so it sits after every column definition rather than
   -- among them -- placing it mid-list is a syntax error on both engines.
+  --
+  -- KEPT even though 'interface' is the only kind the CHECK above admits
+  -- right now: this is the constraint that keeps `port` or `outlet` safe to
+  -- add later, since it already refuses a non-interface row a form factor
+  -- silently leaking into. Deleting it because it is currently a tautology
+  -- would make the next kind's addition quietly unsafe.
   CONSTRAINT dtc_interface_form_factor_check
     CHECK (kind <> 'interface' OR form_factor IS NOT NULL)
 );

@@ -10,6 +10,20 @@
 
 **Spec:** `docs/device-type-templates-design.md`
 
+**Correction, 2026-09-14, after Task 4 landed:** this plan describes
+`power_input` as a second template kind throughout (Tasks 2–4 below).
+`power_input` was subsequently removed as a template kind entirely, not left
+"instantiated as a no-op" as Task 4's own step 3 originally read.
+`power_input.feed_id` is `NOT NULL REFERENCES power_feed(id)` — the row IS
+the connection to a feed, not a count of PSUs a model has — so a catalogue
+template has no feed to point at and a power-input template component could
+never be instantiated into a real row. A `kind` an operator can pick that is
+guaranteed to instantiate into nothing is a trap, not a feature, so it was
+dropped from the `kind` CHECK rather than kept and documented as inert. The
+steps below are left as executed/originally written rather than quietly
+reworded; see migration `00067`'s header and `docs/device-type-templates-design.md`'s
+own correction note for the current, built shape.
+
 ## Global Constraints
 
 Every task's requirements implicitly include these. They are copied from `CLAUDE.md` and the spec, not summarised.

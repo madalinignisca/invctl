@@ -3,6 +3,20 @@
 **WP-C1, the unbuilt half.** Status: design, not built.
 Decisions taken with Gabriel 2026-09-13.
 
+**Correction, 2026-09-14: `power_input` is not a template kind.** The
+sections below still describe it as one because that is what was designed on
+2026-09-13; Task 4's build made the exclusion concrete and it is recorded
+here rather than silently reworded. `power_input.feed_id` is
+`NOT NULL REFERENCES power_feed(id)` — the row **is** the connection to a
+feed, not a count of how many PSUs a model has. A catalogue template has no
+feed to point at and cannot acquire one without a power-model change that is
+out of scope, so a power-input template component could never be
+instantiated into a real row. A `kind` an operator can select that is
+guaranteed to instantiate into nothing is a trap, not a feature. `kind`
+keeps its discriminator shape so `port` or `outlet` can be added once they
+have somewhere to go; only `power_input` itself is refused. See migration
+`00067`'s header for the full reasoning.
+
 ## The problem, measured
 
 `DCS-7050SX3-48YC8` is a 48-port switch. The demo estate has **four of them and
@@ -46,22 +60,22 @@ has. Creating an asset of that type brings them into existence.
 
 One table, one row per component a model has.
 
+As built (see the correction above — power_input was designed here but
+excluded before Task 4 shipped):
+
 ```sql
 CREATE TABLE device_type_component (
   id              TEXT PRIMARY KEY,
   device_type_id  TEXT NOT NULL REFERENCES device_type(id),
   kind            TEXT NOT NULL
-                    CONSTRAINT dtc_kind_check CHECK (kind IN ('interface','power_input')),
+                    CONSTRAINT dtc_kind_check CHECK (kind IN ('interface')),
   name            TEXT NOT NULL,
   position        INTEGER NOT NULL,
 
-  -- interface-shaped, NULL for other kinds
+  -- interface-shaped, NULL if a future kind doesn't use them
   form_factor     TEXT REFERENCES interface_form_factor(code),
   speed_mbps      INTEGER,
   is_mgmt         ...,
-
-  -- power_input-shaped, NULL for other kinds
-  draw_va         INTEGER,
 
   lifecycle, created_at, updated_at, row_version
 );
@@ -101,10 +115,11 @@ refuses an unbounded or reversed range and caps the count, because
 ## Instantiation
 
 **At creation, when the asset names a device type that has templates.** Each
-component is an ordinary `interface` or `power_input` row, created in the same
-transaction as the asset, each with its own `change_log` entry — they are
-declared state and the audit rule has no exception for rows a template
-suggested.
+component is an ordinary `interface` row, created in the same transaction as
+the asset, each with its own `change_log` entry — they are declared state
+and the audit rule has no exception for rows a template suggested.
+`power_input` is not instantiated because it is not a template kind (see the
+correction at the top of this document).
 
 **A one-time copy, not a live relationship.** Once created, a component belongs
 to the asset. This is the decision the original entry already took and it
