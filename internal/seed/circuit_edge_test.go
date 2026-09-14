@@ -106,10 +106,11 @@ func TestCuttingTheDRFibreSeparatesBergen(t *testing.T) {
 		if !cut.Separates {
 			t.Errorf("cutting the only fibre to the DR site separates nothing. It is "+
 				"the sole path to Bergen, so either another path has been added or the "+
-				"edge is not being withdrawn. Groups: %v", cut.Groups)
+				"edge is not being withdrawn. SeparatedPairs: %v", cut.SeparatedPairs)
 		}
-		if len(cut.Groups) != 2 {
-			t.Errorf("the cut names %v, want the two groups it joins", cut.Groups)
+		if len(cut.SeparatedPairs) != 1 {
+			t.Errorf("the cut names %v, want exactly the one boundary this single "+
+				"circuit opens", cut.SeparatedPairs)
 		}
 	})
 }

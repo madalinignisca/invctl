@@ -1,0 +1,18 @@
+{{/*
+  invctl — infrastructure inventory
+  Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+
+  Licensed under the GNU Affero General Public License, version 3 only —
+  no later version applies. See LICENSE for the full text.
+
+  SPDX-License-Identifier: AGPL-3.0-only
+*/}}
+{{/* group_pairs renders a []store.GroupPair as a sentence fragment.
+
+     A single pair renders exactly as the old flat "A and B" did, so the
+     circuit and single-cable pages -- which only ever carry one pair -- read
+     unchanged. A bundle can carry more than one boundary, so additional
+     pairs are appended as ", and A and B" -- readable rather than a bare
+     list, and it never has to guess a count the caller already knows: the
+     template just ranges over however many there are. */}}
+{{define "group_pairs"}}{{range $i, $p := .}}{{if $i}}, and {{end}}<span class="mono">{{$p.A}}</span> and <span class="mono">{{$p.B}}</span>{{end}}{{end}}

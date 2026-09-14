@@ -66,9 +66,17 @@
   <div class="panel-head"><h2>Cutting this bundle separates the estate</h2></div>
   <div class="panel-body">
     <p>
+      {{if eq (len .Cut.SeparatedPairs) 1}}
       At least one of its cables is the <strong>only</strong> path between
-      {{range $i, $g := .Cut.Groups}}{{if $i}} and {{end}}<span class="mono">{{$g}}</span>{{end}},
+      {{template "group_pairs" .Cut.SeparatedPairs}},
       so losing the whole bundle leaves the two sides unable to reach each other.
+      {{else}}
+      At least one cable in it is the <strong>only</strong> path for each of these
+      boundaries: {{template "group_pairs" .Cut.SeparatedPairs}}.
+      Losing the whole bundle at once leaves every one of them unable to reach
+      each other -- a bundle carries more than one cable, so a single backhoe
+      can open more than one boundary.
+      {{end}}
     </p>
     {{if not .HasNetworkFinding}}
     <p>
@@ -87,7 +95,7 @@
   <div class="panel-body">
     <p>
       This bundle joins
-      {{range $i, $g := .Cut.Groups}}{{if $i}} and {{end}}<span class="mono">{{$g}}</span>{{end}},
+      {{template "group_pairs" .Cut.JoinedPairs}},
       and losing it all at once separates nothing — another path already joins
       them. That is the answer redundancy is bought for, and it is worth knowing
       it is real rather than assumed.
