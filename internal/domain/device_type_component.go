@@ -8,7 +8,10 @@
 
 package domain
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // Component kinds a device type template can carry (migration 00067).
 const (
@@ -68,14 +71,41 @@ type DeviceTypeComponent struct {
 // NewDeviceTypeComponent validates and constructs a template entry. id and now
 // come from the caller, per package convention (see errors.go's package
 // doc) -- this package has no ID or clock source of its own.
-func NewDeviceTypeComponent(id, deviceTypeID, kind, name string, position int, now time.Time) (*DeviceTypeComponent, error) {
+// DeviceTypeComponentSpec is what a caller supplies. A spec rather than a
+// parameter list because an interface component REQUIRES a form factor, and a
+// constructor that cannot accept a required field cannot build a valid value --
+// which is what the earlier positional signature did, discovered when the rule
+// was added. NewNetGroup and NewPowerInput already take specs for the same
+// reason.
+type DeviceTypeComponentSpec struct {
+	DeviceTypeID string
+	Kind         string
+	Name         string
+	Position     int
+
+	// Interface-shaped. FormFactor is required when Kind is interface.
+	FormFactor *string
+	SpeedMbps  *int
+	IsMgmt     bool
+
+	// power_input-shaped.
+	DrawVA *int
+}
+
+// NewDeviceTypeComponent validates and constructs one component of a device
+// type's template.
+func NewDeviceTypeComponent(id string, spec DeviceTypeComponentSpec, now time.Time) (*DeviceTypeComponent, error) {
 	ts := FormatTime(now)
 	c := &DeviceTypeComponent{
 		ID:           id,
-		DeviceTypeID: deviceTypeID,
-		Kind:         kind,
-		Name:         name,
-		Position:     position,
+		DeviceTypeID: spec.DeviceTypeID,
+		Kind:         spec.Kind,
+		Name:         spec.Name,
+		Position:     spec.Position,
+		FormFactor:   spec.FormFactor,
+		SpeedMbps:    spec.SpeedMbps,
+		IsMgmt:       spec.IsMgmt,
+		DrawVA:       spec.DrawVA,
 		Lifecycle:    LifecycleActive,
 		CreatedAt:    ts,
 		UpdatedAt:    ts,
@@ -110,6 +140,17 @@ func (c *DeviceTypeComponent) Validate() error {
 	case ComponentKindInterface:
 		if c.DrawVA != nil {
 			ve.Add("draw_va", "belongs to a power_input component, not an interface")
+		}
+		// REQUIRED, not merely allowed. interface.form_factor is NOT NULL with
+		// a foreign key into interface_form_factor, and CreateInterface calls
+		// requireVocabulary on it. A template component without one is
+		// therefore accepted here and then refused at INSTANTIATION -- meaning
+		// every attempt to create an asset of that model fails, with a
+		// vocabulary error naming a field the operator never filled in on a
+		// form they are not looking at. Refusing it while the template is being
+		// written puts the message where the mistake is.
+		if c.FormFactor == nil || strings.TrimSpace(*c.FormFactor) == "" {
+			ve.Add("form_factor", "an interface component needs a form factor")
 		}
 	case ComponentKindPowerInput:
 		if c.FormFactor != nil {

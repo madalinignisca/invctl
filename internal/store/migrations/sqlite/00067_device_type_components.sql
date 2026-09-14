@@ -47,7 +47,18 @@ CREATE TABLE device_type_component (
                     CONSTRAINT dtc_lifecycle_check CHECK (lifecycle IN ('active','retired')),
   created_at      TEXT NOT NULL,
   updated_at      TEXT NOT NULL,
-  row_version     INTEGER NOT NULL DEFAULT 1
+  row_version     INTEGER NOT NULL DEFAULT 1,
+
+  -- An interface component MUST name a form factor: interface.form_factor is
+  -- NOT NULL with a foreign key into interface_form_factor, so a component
+  -- without one is accepted by the template and then refused at INSTANTIATION,
+  -- which fails every attempt to create an asset of that model. The constructor
+  -- is the first line of defence; this is the second.
+  --
+  -- A TABLE constraint, so it sits after every column definition rather than
+  -- among them -- placing it mid-list is a syntax error on both engines.
+  CONSTRAINT dtc_interface_form_factor_check
+    CHECK (kind <> 'interface' OR form_factor IS NOT NULL)
 );
 CREATE UNIQUE INDEX dtc_name_key ON device_type_component(device_type_id, kind, name)
   WHERE lifecycle = 'active';

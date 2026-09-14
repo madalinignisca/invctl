@@ -28,6 +28,10 @@ func TestNewDeviceTypeComponent(t *testing.T) {
 		mutate       func(*DeviceTypeComponent)
 		wantErr      bool
 		wantField    string
+		// specMutate shapes the SPEC before construction, where mutate shapes
+		// the built value after it. A required field can only be tested absent
+		// from here -- once the value exists the constructor has already run.
+		specMutate func(*DeviceTypeComponentSpec)
 	}{
 		{
 			name: "a bare interface is valid", deviceTypeID: "dt1",
@@ -41,6 +45,18 @@ func TestNewDeviceTypeComponent(t *testing.T) {
 				c.SpeedMbps = intPtr(1000)
 				c.IsMgmt = true
 			},
+		},
+		{
+			// The rule this case guards: interface.form_factor is NOT NULL with
+			// a vocabulary foreign key, so a component without one is accepted
+			// by the template and then refused at INSTANTIATION -- every asset
+			// of that model failing to create, with an error naming a field on
+			// a form the operator is not looking at.
+			name:         "an interface with no form factor at all is refused",
+			deviceTypeID: "dt1", kind: ComponentKindInterface, compName: "eth0", position: 0,
+			specMutate: func(sp *DeviceTypeComponentSpec) { sp.FormFactor = nil },
+			wantErr:    true,
+			wantField:  "form_factor",
 		},
 		{
 			name: "a bare power_input is valid", deviceTypeID: "dt1",
@@ -115,7 +131,20 @@ func TestNewDeviceTypeComponent(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			c, err := NewDeviceTypeComponent("id1", tc.deviceTypeID, tc.kind, tc.compName, tc.position, now)
+			spec := DeviceTypeComponentSpec{
+				DeviceTypeID: tc.deviceTypeID, Kind: tc.kind,
+				Name: tc.compName, Position: tc.position,
+			}
+			// An interface component requires a form factor, so the fixtures
+			// carry one by default; the cases that test its absence or its
+			// blankness clear it through specMutate.
+			if tc.kind == ComponentKindInterface {
+				spec.FormFactor = strPtr("rj45")
+			}
+			if tc.specMutate != nil {
+				tc.specMutate(&spec)
+			}
+			c, err := NewDeviceTypeComponent("id1", spec, now)
 			if tc.mutate != nil {
 				// The constructor already ran; re-run Validate after mutating
 				// to exercise the cross-column rule the same way an update

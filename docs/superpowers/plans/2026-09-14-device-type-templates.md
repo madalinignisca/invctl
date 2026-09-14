@@ -203,7 +203,22 @@ git commit   # why: 48 ports have to be enterable or the feature is unused
 - Modify: `internal/domain/classification.go`
 
 **Interfaces:**
-- Produces: `domain.DeviceTypeComponent`, `domain.NewDeviceTypeComponent(id, deviceTypeID, kind, name string, position int, now time.Time) (*DeviceTypeComponent, error)`, constants `domain.ComponentKindInterface = "interface"` and `domain.ComponentKindPowerInput = "power_input"`.
+- Produces: `domain.DeviceTypeComponent`, `domain.DeviceTypeComponentSpec`, `domain.NewDeviceTypeComponent(id string, spec DeviceTypeComponentSpec, now time.Time) (*DeviceTypeComponent, error)`, constants `domain.ComponentKindInterface = "interface"` and `domain.ComponentKindPowerInput = "power_input"`.
+
+  **CORRECTED 2026-09-14, during execution.** This was a positional signature
+  `(id, deviceTypeID, kind, name, position, now)`. It cannot build a valid
+  interface component, because a form factor is REQUIRED for that kind (see
+  below) and the signature has nowhere to pass one. A spec, like `NewNetGroup`
+  and `NewPowerInput` already take.
+
+  **A form factor is required when `kind` is `interface`**, enforced in the
+  constructor AND as a table `CHECK`. `interface.form_factor` is `NOT NULL` with
+  a foreign key into `interface_form_factor`, and `CreateInterface` calls
+  `requireVocabulary` on it — so a component without one is accepted by the
+  template and then refused at INSTANTIATION, failing every attempt to create an
+  asset of that model, with an error naming a field on a form the operator is
+  not looking at. The table constraint goes AFTER every column definition;
+  placing it among them is a syntax error on both engines.
 
 - [ ] **Step 1: Write the migration, both engines**
 
