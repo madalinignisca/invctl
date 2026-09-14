@@ -812,6 +812,22 @@ func TestTheOnlyFactDeletingStatementIsThePrune(t *testing.T) {
 			tables: []string{"entity_tag"},
 			reason: "entity_tag: the tags an entity carries, replaced wholesale",
 		},
+		// cable_bundle_member: the cables in a bundle. Same rule,
+		// twelfth time (docs/cable-bundles-design.md). Replaced
+		// wholesale inside the bundle's own transaction by
+		// SetBundleMembers, and folded into bundleAudit.Members so
+		// the replacement cannot produce an empty diff -- the exact
+		// failure CLAUDE.md says this repo has made three times
+		// before, twice on rows deciding audit scope. A retired
+		// LINK is never removed from this table by anything --
+		// membership records history and a withdrawn cable stays
+		// in its bundle -- so the only deletions this file makes
+		// are whole-set replacements a person made through
+		// SetBundleMembers.
+		"internal/store/cable_bundles.go": {
+			tables: []string{"cable_bundle_member"},
+			reason: "cable_bundle_member: the cables in a bundle, replaced wholesale",
+		},
 	}
 
 	root := repoRoot(t)

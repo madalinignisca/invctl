@@ -90,6 +90,16 @@ var unreachableRepairPaths = map[string]string{
 	// WP-1.2 took for the six correction paths before them. The methods were
 	// never wrong; they were unreachable, and this test is what refused to
 	// let that stay quiet.
+	//
+	// UpdateBundle and RetireBundle (docs/cable-bundles-design.md, Task 2 of
+	// the cable-bundles plan) fill this map for the same reason the
+	// device-type-templates pair did: the store methods exist and are
+	// tested here, but Task 2 is explicitly barred from the web layer --
+	// the routes that reach them are Task 4's. Both entries come out the
+	// moment that task wires a correction and a withdrawal route for a
+	// bundle.
+	"UpdateBundle": "a bundle's code, name or description typed wrong stays wrong until Task 4 wires the correction route",
+	"RetireBundle": "a bundle declared in error, or one whose duct is gone, cannot be withdrawn until Task 4 wires the route",
 }
 
 // TestEveryUpdateMethodIsReachable fails when a store method written to correct
