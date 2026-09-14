@@ -33,7 +33,14 @@
 
 -- +goose Up
 CREATE TABLE device_type_component (
-  id              TEXT PRIMARY KEY,
+  -- NOT NULL IS EXPLICIT, not merely implied by PRIMARY KEY: SQLite does not
+  -- infer it the way PostgreSQL does, and without it several rows could hold
+  -- a NULL id -- each invisible to every statement keyed on that column, since
+  -- SQLite treats NULLs as distinct in a unique index, while still counting
+  -- towards every total. TestColumnShapesMatchAcrossEngines is what catches a
+  -- column definition that would otherwise pass on both engines and diverge
+  -- in what it actually permits.
+  id              TEXT PRIMARY KEY NOT NULL,
   device_type_id  TEXT NOT NULL REFERENCES device_type(id),
   kind            TEXT NOT NULL
                     CONSTRAINT dtc_kind_check CHECK (kind IN ('interface','power_input')),

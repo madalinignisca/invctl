@@ -70,7 +70,24 @@ import (
 // question implies the other, and the net_* family was failing both at once --
 // no way to correct a forwarder group, and a withdrawal method nothing called.
 var unreachableRepairPaths = map[string]string{
-	// EMPTY AGAIN, and the second time round it emptied for the right reason.
+	// device-type-templates plan, Task 3 of 8: the store surface for a type's
+	// component template landed ahead of the web layer that reaches it.
+	// UpdateDeviceTypeComponent corrects a mistyped form factor or a renamed
+	// port; RetireDeviceTypeComponent withdraws one the datasheet turned out
+	// not to name. Both are complete, both are table-driven-tested against
+	// both engines, and both are unreachable ONLY because Task 7 (the routes)
+	// has not run yet in the same plan -- not because nobody decided an
+	// operator needs them. Delete these two entries when Task 7 wires them.
+	"UpdateDeviceTypeComponent": "no route yet; Task 7 of the device-type-templates " +
+		"plan wires POST /device-types/{id}/components/{cid}. Without it a mistyped " +
+		"form factor or speed on a template entry cannot be fixed except by retiring " +
+		"the row and redeclaring it.",
+	"RetireDeviceTypeComponent": "no route yet; Task 7 of the device-type-templates " +
+		"plan wires POST /device-types/{id}/components/{cid}/retire. Without it a " +
+		"port a datasheet turns out not to name cannot be withdrawn from the template.",
+
+	// EMPTY BEFORE THE ABOVE, and the second time round it emptied for the
+	// right reason.
 	//
 	// The five net_* withdrawal paths that filled it -- RetireNetAnchor,
 	// RetireNetGroup, RetireNetGroupMember, RetireNetUplink and

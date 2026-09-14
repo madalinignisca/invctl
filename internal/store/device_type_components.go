@@ -1,0 +1,252 @@
+// invctl — infrastructure inventory
+// Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+//
+// Licensed under the GNU Affero General Public License, version 3 only —
+// no later version applies. See LICENSE for the full text.
+//
+// SPDX-License-Identifier: AGPL-3.0-only
+
+package store
+
+import (
+	"context"
+	"fmt"
+	"strings"
+
+	"github.com/madalinignisca/invctl/internal/domain"
+)
+
+// The store surface for a device type's component template (migration
+// 00067): the ports and power inputs every instance of a model has. Task 4
+// reads ListDeviceTypeComponents to seed the real rows an asset gets when it
+// is created from a device type -- nothing here instantiates anything.
+
+// ComponentSpec is what a form submits to add one or more template entries in
+// a single call: a name that may carry a range (domain.ExpandRange), plus
+// every kind-specific field NewDeviceTypeComponent needs.
+//
+// ONE SPEC PRODUCES ROWS OF ONE KIND. An interface batch and a power_input
+// batch are two separate calls, because the kind decides which of the
+// remaining fields is even meaningful -- domain.DeviceTypeComponent.Validate's
+// cross-check would refuse a spec that tried to mix them, so there is no
+// value in a shape that could ask for both at once.
+type ComponentSpec struct {
+	Kind string
+	// NameSpec is a literal name ("psu1") or a range ("Ethernet1/[1-48]"),
+	// exactly what domain.ExpandRange accepts.
+	NameSpec string
+
+	// Interface-shaped. FormFactor is required when Kind is interface --
+	// enforced by domain.NewDeviceTypeComponent, not re-checked here.
+	FormFactor *string
+	SpeedMbps  *int
+	IsMgmt     bool
+
+	// power_input-shaped.
+	DrawVA *int
+}
+
+// deviceTypeComponentSelect is unqualified because the table carries no join
+// this package needs -- the same shape as endpointSelect before it grew one.
+const deviceTypeComponentSelect = `SELECT * FROM device_type_component`
+
+// ListDeviceTypeComponents returns a type's active template entries, ordered
+// the way an elevation or a form renders them: grouped by kind, then by the
+// position ExpandRange assigned, then by name as the final tie-break.
+//
+// position IS load-bearing here, not merely a display nicety: a lexical sort
+// puts "Ethernet1/10" before "Ethernet1/2", and position is what the create
+// path assigns from expansion order specifically so this ORDER BY does not
+// have to parse names to get that right (migration 00067's header).
+func (s *SQLStore) ListDeviceTypeComponents(ctx context.Context, deviceTypeID string) ([]domain.DeviceTypeComponent, error) {
+	var rows []domain.DeviceTypeComponent
+	err := s.read(ctx, &rows, deviceTypeComponentSelect+`
+		WHERE device_type_id = ? AND lifecycle = ?
+		ORDER BY kind, position, name`, deviceTypeID, domain.LifecycleActive)
+	if err != nil {
+		return nil, fmt.Errorf("listing components of device type %s: %w", deviceTypeID, err)
+	}
+	return rows, nil
+}
+
+// getDeviceTypeComponent loads one template entry by id, retired or not --
+// the internal counterpart of GetDeviceType, used by Update and Retire below
+// to read the row they are about to change.
+func (s *SQLStore) getDeviceTypeComponent(ctx context.Context, id string) (*domain.DeviceTypeComponent, error) {
+	var c domain.DeviceTypeComponent
+	if err := s.readOne(ctx, &c, deviceTypeComponentSelect+` WHERE id = ?`, id); err != nil {
+		return nil, fmt.Errorf("getting device type component %s: %w", id, err)
+	}
+	return &c, nil
+}
+
+// componentBatchAudit is the audited shape of a CreateDeviceTypeComponents
+// call: not one row, but the operator action that produced however many rows
+// ExpandRange returned.
+//
+// ONE change_log ENTRY FOR THE WHOLE BATCH, DELIBERATELY -- the brief's own
+// framing: "48 ports are one operator action and one audit story, not 48."
+// Forty-eight individual create entries would bury the one thing a reader
+// actually wants, which is "an operator declared this range on this model",
+// under forty-eight repetitions of it. Names is sorted and joined the way
+// auditedDependency sorts data classes, so the entry is stable and readable
+// rather than an opaque count.
+type componentBatchAudit struct {
+	DeviceTypeID string  `db:"device_type_id"`
+	Kind         string  `db:"kind"`
+	NameSpec     string  `db:"name_spec"`
+	Names        string  `db:"names"`
+	Count        int     `db:"count"`
+	FormFactor   *string `db:"form_factor"`
+	SpeedMbps    *int    `db:"speed_mbps"`
+	IsMgmt       bool    `db:"is_mgmt"`
+	DrawVA       *int    `db:"draw_va"`
+}
+
+func auditedComponentBatch(deviceTypeID string, spec ComponentSpec, created []*domain.DeviceTypeComponent) *componentBatchAudit {
+	names := make([]string, len(created))
+	for i, c := range created {
+		names[i] = c.Name
+	}
+	return &componentBatchAudit{
+		DeviceTypeID: deviceTypeID,
+		Kind:         spec.Kind,
+		NameSpec:     spec.NameSpec,
+		Names:        strings.Join(names, ","),
+		Count:        len(created),
+		FormFactor:   spec.FormFactor,
+		SpeedMbps:    spec.SpeedMbps,
+		IsMgmt:       spec.IsMgmt,
+		DrawVA:       spec.DrawVA,
+	}
+}
+
+// CreateDeviceTypeComponents expands spec.NameSpec and inserts every
+// resulting row for one device type in ONE transaction.
+//
+// ONE TRANSACTION FOR THE WHOLE EXPANSION, not one per name -- the brief's
+// framing again: 48 ports are one operator action, so they either all land or
+// none do, and they produce exactly one change_log row (componentBatchAudit
+// above), not forty-eight.
+//
+// position is assigned from the expansion order, continuing after whatever is
+// already declared for this (device_type_id, kind) pair rather than
+// restarting at 0 -- a second batch of interfaces added later must sort after
+// the first, not interleave with it by chance.
+func (s *SQLStore) CreateDeviceTypeComponents(ctx context.Context, p domain.Permit, deviceTypeID string, spec ComponentSpec) error {
+	names, err := domain.ExpandRange(spec.NameSpec)
+	if err != nil {
+		return fmt.Errorf("expanding %q: %w", spec.NameSpec, err)
+	}
+	now := s.now()
+
+	return s.write(ctx, p, func(t *tx) error {
+		var nextPosition int
+		if err := t.get(ctx, &nextPosition, `
+			SELECT COALESCE(MAX(position), -1) + 1 FROM device_type_component
+			WHERE device_type_id = ? AND kind = ?`, deviceTypeID, spec.Kind); err != nil {
+			return fmt.Errorf("finding the next position for device type %s: %w", deviceTypeID, err)
+		}
+
+		created := make([]*domain.DeviceTypeComponent, 0, len(names))
+		for i, name := range names {
+			c, err := domain.NewDeviceTypeComponent(NewID(), domain.DeviceTypeComponentSpec{
+				DeviceTypeID: deviceTypeID,
+				Kind:         spec.Kind,
+				Name:         name,
+				Position:     nextPosition + i,
+				FormFactor:   spec.FormFactor,
+				SpeedMbps:    spec.SpeedMbps,
+				IsMgmt:       spec.IsMgmt,
+				DrawVA:       spec.DrawVA,
+			}, now)
+			if err != nil {
+				return err
+			}
+			_, err = t.exec(ctx, `
+				INSERT INTO device_type_component
+					(id, device_type_id, kind, name, position, form_factor, speed_mbps,
+					 is_mgmt, draw_va, lifecycle, created_at, updated_at)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				c.ID, c.DeviceTypeID, c.Kind, c.Name, c.Position, c.FormFactor, c.SpeedMbps,
+				c.IsMgmt, c.DrawVA, c.Lifecycle, c.CreatedAt, c.UpdatedAt)
+			if err != nil {
+				return translateWriteErr(err, "creating device type component")
+			}
+			created = append(created, c)
+		}
+
+		return t.logCreate(ctx, "device_type_component", deviceTypeID,
+			auditedComponentBatch(deviceTypeID, spec, created))
+	})
+}
+
+// UpdateDeviceTypeComponent persists field changes to one template entry.
+//
+// DeviceTypeID and Kind are carried over from the stored row, never taken
+// from the caller -- the same rule UpdateDeviceType applies to
+// manufacturer_id. Kind decides which columns Validate treats as meaningful
+// and which real table Task 4 instantiates a row into; flipping it, or moving
+// the row to a different device type, is not an edit to this entry, it is
+// declaring a different one. Correct a mis-typed kind by retiring the row and
+// declaring the right one.
+func (s *SQLStore) UpdateDeviceTypeComponent(ctx context.Context, p domain.Permit, c *domain.DeviceTypeComponent) error {
+	before, err := s.getDeviceTypeComponent(ctx, c.ID)
+	if err != nil {
+		return err
+	}
+	c.DeviceTypeID = before.DeviceTypeID
+	c.Kind = before.Kind
+	if err := c.Validate(); err != nil {
+		return err
+	}
+	c.CreatedAt = before.CreatedAt
+	c.UpdatedAt = domain.FormatTime(s.now())
+
+	return s.write(ctx, p, func(t *tx) error {
+		res, err := t.exec(ctx, `
+			UPDATE device_type_component
+			SET name = ?, position = ?, form_factor = ?, speed_mbps = ?, is_mgmt = ?,
+			    draw_va = ?, lifecycle = ?, updated_at = ?, row_version = row_version + 1
+			WHERE id = ? AND row_version = ?`,
+			c.Name, c.Position, c.FormFactor, c.SpeedMbps, c.IsMgmt,
+			c.DrawVA, c.Lifecycle, c.UpdatedAt, c.ID, c.RowVersion)
+		if err != nil {
+			return translateWriteErr(err, "updating device type component")
+		}
+		if err := requireVersion(res, "device_type_component", c.ID, &c.RowVersion); err != nil {
+			return err
+		}
+		return t.logUpdate(ctx, "device_type_component", c.ID, before, c)
+	})
+}
+
+// RetireDeviceTypeComponent withdraws one template entry.
+//
+// SOFT DELETE ONLY, matching every other lifecycle in this schema: the row
+// stays, its unique slot on (device_type_id, kind, name) frees up because the
+// index is scoped to lifecycle = 'active' (migration 00067), and a corrected
+// datasheet can redeclare the same name under a fresh row.
+func (s *SQLStore) RetireDeviceTypeComponent(ctx context.Context, p domain.Permit, id string) error {
+	before, err := s.getDeviceTypeComponent(ctx, id)
+	if err != nil {
+		return err
+	}
+	if before.IsRetired() {
+		// Already withdrawn: nothing changed, so nothing to log -- a second
+		// audit entry would claim a withdrawal that did not happen.
+		return nil
+	}
+	at := domain.FormatTime(s.now())
+	return s.write(ctx, p, func(t *tx) error {
+		if _, err := t.exec(ctx,
+			`UPDATE device_type_component SET lifecycle = ?, updated_at = ?, row_version = row_version + 1
+			 WHERE id = ?`, domain.LifecycleRetired, at, id); err != nil {
+			return translateWriteErr(err, "retiring device type component")
+		}
+		after := *before
+		after.Lifecycle = domain.LifecycleRetired
+		after.UpdatedAt = at
+		return t.logUpdate(ctx, "device_type_component", id, before, &after)
+	})
+}
