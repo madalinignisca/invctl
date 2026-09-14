@@ -28,6 +28,14 @@ func TestExpandRange(t *testing.T) {
 		{"non-numeric is refused", "eth[a-c]", nil, true},
 		{"two ranges are refused", "e[1-2]/[1-2]", nil, true},
 		{"over the cap is refused", "eth[1-4097]", nil, true},
+		// Atoi accepts "01" as 1 and Itoa never restores the padding, so
+		// without this guard "Port[01-48]" would silently produce
+		// "Port1".."Port48" -- names nobody typed, with no error telling
+		// them the width was dropped. Refused instead of silently
+		// mishandled (final whole-branch review, "also fix" item).
+		{"a zero-padded low bound is refused", "Port[01-48]", nil, true},
+		{"a zero-padded high bound is refused", "Port[1-048]", nil, true},
+		{"a bare zero low bound is not padding", "Port[0-4]", []string{"Port0", "Port1", "Port2", "Port3", "Port4"}, false},
 		// The cap is checked against last-first, not last-first+1, because the
 		// addition overflows here: this spec made the count MinInt64, which is
 		// not greater than the cap, so the guard passed and make() panicked

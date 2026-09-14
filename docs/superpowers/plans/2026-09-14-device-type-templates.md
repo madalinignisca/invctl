@@ -138,7 +138,7 @@ The cap is not decoration: `Ethernet[1-100000]` is a denial of service against y
 // becomes a denial of service against this database.
 const MaxRangeExpansion = 4096
 
-// ExpandRange turns "Ethernet1/[1-48]" into the names it stands for. A spec
+// ExpandRange turns "Ethernet[1-48]" into the names it stands for. A spec
 // with no bracket is one name, so callers need no special case.
 func ExpandRange(spec string) ([]string, error) {
 	open := strings.Index(spec, "[")

@@ -32,7 +32,7 @@ import (
 // value in a shape that could ask for both at once.
 type ComponentSpec struct {
 	Kind string
-	// NameSpec is a literal name ("psu1") or a range ("Ethernet1/[1-48]"),
+	// NameSpec is a literal name ("psu1") or a range ("Ethernet[1-48]"),
 	// exactly what domain.ExpandRange accepts.
 	NameSpec string
 
@@ -618,4 +618,25 @@ func (s *SQLStore) MissingTemplateCount(ctx context.Context, assetID string,
 		return 0, err
 	}
 	return len(missing), nil
+}
+
+// MissingTemplateNames is MissingTemplateCount's counterpart for a reader
+// rather than a number: the names ApplyTemplate would add if run right now,
+// in the same order missingTemplateComponents produces (device type's
+// declared position, then name). asset_detail.html's confirmation names a
+// few of these so an operator sees WHAT is about to be created, not only how
+// many -- a 48-name range that expanded wrong is invisible in a count and
+// obvious in a name.
+func (s *SQLStore) MissingTemplateNames(ctx context.Context, assetID string,
+	components []domain.DeviceTypeComponent) ([]string, error) {
+
+	missing, err := s.missingTemplateComponents(ctx, assetID, components)
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, len(missing))
+	for i, c := range missing {
+		names[i] = c.Name
+	}
+	return names, nil
 }

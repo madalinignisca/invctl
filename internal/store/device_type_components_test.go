@@ -36,7 +36,7 @@ func TestCreateDeviceTypeComponentsExpandsARange(t *testing.T) {
 			ff := "sfp28"
 			err := s.CreateDeviceTypeComponents(ctx, testPermit, dtID, ComponentSpec{
 				Kind:       domain.ComponentKindInterface,
-				NameSpec:   "Ethernet1/[1-48]",
+				NameSpec:   "Ethernet[1-48]",
 				FormFactor: &ff,
 			})
 			if err != nil {
@@ -51,19 +51,28 @@ func TestCreateDeviceTypeComponentsExpandsARange(t *testing.T) {
 				t.Fatalf("got %d components, want 48", len(rows))
 			}
 
-			// position orders "Ethernet1/2" before "Ethernet1/10", which a
-			// lexical sort of the name column would get wrong.
+			// position orders "Ethernet2" before "Ethernet10", which a lexical
+			// sort of the name column would get wrong.
+			//
+			// The names here match the estate's own convention deliberately.
+			// They used to read Ethernet1/2 and Ethernet1/10, copied from an
+			// example string that turned out to be wrong for the very model
+			// this feature was built for -- the demo's Arista switches call
+			// their ports Ethernet1..Ethernet48, so following that example
+			// produced 48 components matching nothing and left the drift
+			// finding silent. The example is fixed; a test still asserting the
+			// old shape would quietly keep it alive.
 			idx := map[string]int{}
 			for i, r := range rows {
 				idx[r.Name] = i
 			}
-			two, twoOK := idx["Ethernet1/2"]
-			ten, tenOK := idx["Ethernet1/10"]
+			two, twoOK := idx["Ethernet2"]
+			ten, tenOK := idx["Ethernet10"]
 			if !twoOK || !tenOK {
-				t.Fatalf("expected both Ethernet1/2 and Ethernet1/10 among the created rows: %v", idx)
+				t.Fatalf("expected both Ethernet2 and Ethernet10 among the created rows: %v", idx)
 			}
 			if two >= ten {
-				t.Errorf("Ethernet1/2 sorted at %d, Ethernet1/10 at %d -- want 2 before 10", two, ten)
+				t.Errorf("Ethernet2 sorted at %d, Ethernet10 at %d -- want 2 before 10", two, ten)
 			}
 
 			// And the list is genuinely ordered by kind, position, name --

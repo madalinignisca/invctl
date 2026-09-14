@@ -37,7 +37,7 @@ func TestAddingComponentsByARangeCreatesEveryName(t *testing.T) {
 	dtID := h.catalogueModel(t, "acme", "Acme Systems", "Switch-48", "2028-01-01")
 
 	resp := h.componentAdd(t, dtID, url.Values{
-		"name_spec":   {"Ethernet1/[1-48]"},
+		"name_spec":   {"Ethernet[1-48]"},
 		"form_factor": {"rj45"},
 	})
 	page := body(t, resp)
@@ -46,7 +46,7 @@ func TestAddingComponentsByARangeCreatesEveryName(t *testing.T) {
 	}
 
 	if got := h.count(`SELECT COUNT(*) FROM device_type_component WHERE device_type_id = ?`, dtID); got != 48 {
-		t.Fatalf("adding Ethernet1/[1-48] created %d rows, want 48", got)
+		t.Fatalf("adding Ethernet[1-48] created %d rows, want 48", got)
 	}
 	if got := h.count(`SELECT COUNT(*) FROM change_log WHERE entity_type = 'device_type_component'`); got != 1 {
 		t.Errorf("adding 48 ports wrote %d change_log rows, want exactly 1 -- one operator "+

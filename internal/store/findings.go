@@ -217,6 +217,17 @@ func (s *SQLStore) EstateFindings(ctx context.Context) ([]Finding, error) {
 	}
 	out = append(out, drift...)
 
+	// The counterpart: an asset with MORE interfaces than its device type's
+	// template declares (final whole-branch review, blocking #1c). Registered
+	// beside TemplateDriftFindings for the same reason -- see that finding's
+	// own comment, and template_drift.go's header on why this is a separate,
+	// narrower finding rather than a change to the "missing" one.
+	extra, err := s.TemplateExtraFindings(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("gathering template extra findings: %w", err)
+	}
+	out = append(out, extra...)
+
 	// Overlays that carry nothing, or carry it to one place.
 	overlays, err := s.ListL2VPNs(ctx)
 	if err != nil {

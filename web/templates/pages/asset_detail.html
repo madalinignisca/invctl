@@ -181,7 +181,7 @@
     {{if and ($.CanWriteEntity "asset" .Asset.ID) .MissingTemplateComponents}}
     <form method="post" action="/assets/{{.Asset.ID}}/apply-template" style="display:inline"
           hx-post="/assets/{{.Asset.ID}}/apply-template"
-          hx-confirm="Add {{.MissingTemplateComponents}} missing port{{if ne .MissingTemplateComponents 1}}s{{end}} from {{.TemplateSourceLabel}}? A port already recorded here is never touched.">
+          hx-confirm="Add {{.MissingTemplateComponents}} missing port{{if ne .MissingTemplateComponents 1}}s{{end}} from {{.TemplateSourceLabel}} ({{.MissingTemplatePreview}})? A port already recorded here is never touched.">
       <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
       <button class="btn btn-sm" type="submit">Add {{.MissingTemplateComponents}} missing port{{if ne .MissingTemplateComponents 1}}s{{end}} from {{.TemplateSourceLabel}}</button>
     </form>

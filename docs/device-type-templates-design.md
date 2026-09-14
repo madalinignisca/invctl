@@ -100,7 +100,7 @@ reserved for ever.
 ## Range expansion
 
 The template stores **one row per component**. The form accepts a range —
-`Ethernet1/[1-48]` — and expands it on submit.
+`Ethernet[1-48]` — and expands it on submit.
 
 Storage stays honest: 48 rows are 48 rows, each individually editable,
 withdrawable and auditable, and the template says plainly what it will produce.

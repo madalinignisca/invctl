@@ -108,6 +108,87 @@ func (s *SQLStore) TemplateDriftFindings(ctx context.Context) ([]Finding, error)
 		Count:    driftingAssets,
 		Label:    "asset missing a component its device type declares",
 		Detail:   detail,
-		Href:     "/assets",
+		Href:     "/assets/" + rows[0].AssetID,
+	}}, nil
+}
+
+// templateExtraQuery is templateDriftQuery's mirror image: it finds an
+// active interface on an asset whose name the asset's device type's active
+// template never declares, scoped to device types that declare a template AT
+// ALL (the EXISTS clause) so a model with no template yet does not make
+// every one of its assets' ordinary ports "extra".
+//
+// THIS IS DELIBERATELY NARROWER THAN "any unnamed port is suspicious" --
+// template_drift.go's own header explains at length why an operator-added
+// port beyond the model sheet is ordinary, and TestTemplateDriftFindingsIgnoresExtraInterfaces
+// pins that for TemplateDriftFindings, which must keep ignoring it. This
+// query exists for the opposite, narrower case a demo estate exposed: a
+// device type WITH a template whose declared names do not match the
+// estate's real naming (e.g. a range that expanded to "Ethernet1/1.."
+// instead of the switch's actual "Ethernet1.."), so applying the template
+// piles on phantom ports beside the real ones. A model with a template is
+// making a specific claim about every port it should have; an asset of that
+// model carrying a port outside that claim is worth a second look in a way a
+// model that never declared anything is not.
+const templateExtraQuery = `
+	SELECT a.id AS asset_id, a.name AS asset_name, i.name AS component_name
+	FROM asset a
+	JOIN interface i
+	  ON i.asset_id = a.id AND i.lifecycle = ?
+	LEFT JOIN device_type_component dtc
+	  ON dtc.device_type_id = a.device_type_id
+	 AND dtc.kind = ?
+	 AND dtc.lifecycle = ?
+	 AND dtc.name = i.name
+	WHERE a.lifecycle <> ?
+	  AND a.device_type_id IS NOT NULL
+	  AND dtc.id IS NULL
+	  AND EXISTS (
+	    SELECT 1 FROM device_type_component dtc2
+	    WHERE dtc2.device_type_id = a.device_type_id
+	      AND dtc2.kind = ?
+	      AND dtc2.lifecycle = ?
+	  )
+	ORDER BY a.name, i.name`
+
+// TemplateExtraFindings reports assets carrying an active interface that
+// their device type's active template never names, scoped to device types
+// that declare a template at all -- see templateExtraQuery's own comment for
+// why, and TemplateDriftFindings' header for why this is a SEPARATE finding
+// rather than a change to that one: extra ports are ordinary in general and
+// only worth flagging against a model that made a specific claim about what
+// it should have.
+func (s *SQLStore) TemplateExtraFindings(ctx context.Context) ([]Finding, error) {
+	var rows []templateDriftRow
+	if err := s.read(ctx, &rows, templateExtraQuery,
+		domain.LifecycleActive, domain.ComponentKindInterface, domain.LifecycleActive,
+		domain.LifecycleRetired, domain.ComponentKindInterface, domain.LifecycleActive,
+	); err != nil {
+		return nil, fmt.Errorf("finding assets with more interfaces than their template declares: %w", err)
+	}
+
+	seen := make(map[string]bool, len(rows))
+	var extraAssets int
+	var detail string
+	for _, r := range rows {
+		if seen[r.AssetID] {
+			continue
+		}
+		seen[r.AssetID] = true
+		extraAssets++
+		if detail == "" {
+			detail = fmt.Sprintf("%s has %s, which its template does not declare", r.AssetName, r.ComponentName)
+		}
+	}
+	if extraAssets == 0 {
+		return nil, nil
+	}
+
+	return []Finding{{
+		Severity: FindingGap,
+		Count:    extraAssets,
+		Label:    "asset with a component its device type's template does not declare",
+		Detail:   detail,
+		Href:     "/assets/" + rows[0].AssetID,
 	}}, nil
 }

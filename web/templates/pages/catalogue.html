@@ -373,9 +373,9 @@
                                class="mono {{if $.ComponentAdd.Err "name_spec"}}invalid{{end}}"
                                type="text" name="name_spec"
                                value="{{$.ComponentAdd.Value "name_spec" ""}}"
-                               placeholder="Ethernet1/[1-48]" required>
+                               placeholder="Ethernet[1-48]" required>
                         <div class="field-hint">
-                          A single name, or a range like <code>Ethernet1/[1-48]</code>
+                          A single name, or a range like <code>Ethernet[1-48]</code>
                           to declare every port on a switch in one go — up to
                           4096 names from one line.
                         </div>

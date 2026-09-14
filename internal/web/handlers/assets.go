@@ -556,6 +556,13 @@ type assetDetailPage struct {
 	// operator reading a bare count has no way to tell it apart from any
 	// other button on the page.
 	TemplateSourceLabel string
+	// MissingTemplatePreview names a few of the ports apply-template is about
+	// to create, not just how many (final whole-branch review, blocking #1).
+	// A count cannot show a wrong shape: 48 phantom "Ethernet1/1".."Ethernet1/48"
+	// rows beside the estate's real "Ethernet1".."Ethernet48" is a correct
+	// count and entirely wrong names, and only the names in the confirmation
+	// catch it before the click.
+	MissingTemplatePreview string
 }
 
 // interfaceRowData decorates one port for asset_detail.html with CanUnpatch,
@@ -629,6 +636,7 @@ func (a *App) renderAssetDetail(w http.ResponseWriter, r *http.Request, status i
 	// handler needing a separate "does it have a template" branch.
 	var missingTemplate int
 	var templateSourceLabel string
+	var missingTemplatePreview string
 	if asset.DeviceTypeID != nil {
 		components, err := a.Store.ListDeviceTypeComponents(r.Context(), *asset.DeviceTypeID)
 		if err != nil {
@@ -646,6 +654,14 @@ func (a *App) renderAssetDetail(w http.ResponseWriter, r *http.Request, status i
 			return
 		}
 		templateSourceLabel = asset.DeviceTypeLabel
+		if missingTemplate > 0 {
+			names, err := a.Store.MissingTemplateNames(r.Context(), asset.ID, components)
+			if err != nil {
+				a.serverError(w, r, err)
+				return
+			}
+			missingTemplatePreview = namePreview(names)
+		}
 	}
 	// Radios (WP-F1 Task 7b). Skipped entirely when the asset has no
 	// radio-form-factor interface, so an estate with no wireless pays
@@ -994,6 +1010,7 @@ func (a *App) renderAssetDetail(w http.ResponseWriter, r *http.Request, status i
 		Tags:                      tags,
 		MissingTemplateComponents: missingTemplate,
 		TemplateSourceLabel:       templateSourceLabel,
+		MissingTemplatePreview:    missingTemplatePreview,
 		Asset:                     asset,
 		Certificates:              certificates,
 		Costs:                     costs,

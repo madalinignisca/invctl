@@ -9,7 +9,9 @@
 package handlers
 
 import (
+	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/madalinignisca/invctl/internal/domain"
 	"github.com/madalinignisca/invctl/internal/store"
@@ -42,7 +44,7 @@ func componentAddEditID(deviceTypeID string) string {
 
 // DeviceTypeComponentCreate adds one port, or a whole range of them, to a
 // device type's component template in a single batch -- Task 3's
-// CreateDeviceTypeComponents, which expands "Ethernet1/[1-48]" into 48 rows
+// CreateDeviceTypeComponents, which expands "Ethernet[1-48]" into 48 rows
 // inserted in one transaction and audited as one change_log entry. A
 // 48-port switch is why domain.ExpandRange exists: the estate this ships
 // for has four of one model with fourteen interfaces declared between them
@@ -66,7 +68,8 @@ func (a *App) DeviceTypeComponentCreate(w http.ResponseWriter, r *http.Request) 
 	// handleStoreError: a 500, for a typo in a text box. CLAUDE.md's rule is
 	// 422 with the box still full, so the same check runs here first and is
 	// shaped as a field message against name_spec, where the mistake is.
-	if _, err := domain.ExpandRange(nameSpec); err != nil {
+	expanded, err := domain.ExpandRange(nameSpec)
+	if err != nil {
 		a.renderCatalogueComponents(w, r, http.StatusUnprocessableEntity, deviceTypeID, "",
 			rejected(r, componentAddEditID(deviceTypeID),
 				map[string]string{"name_spec": err.Error()}, componentAddFields...), nil)
@@ -96,8 +99,28 @@ func (a *App) DeviceTypeComponentCreate(w http.ResponseWriter, r *http.Request) 
 		a.handleStoreError(w, r, err)
 		return
 	}
-	a.setFlash(r, "success", "Component template updated.")
+	a.setFlash(r, "success", fmt.Sprintf("Component template updated: %s.", namePreview(expanded)))
 	render.Redirect(w, r, "/catalogue?edit="+deviceTypeID)
+}
+
+// namePreview names what a range expanded to, rather than only how many --
+// the confirmation an operator gets before 48 rows are created, or the flash
+// after. A count alone cannot show a wrong shape: "Ethernet1/[1-48]" against
+// an estate whose real ports are named "Ethernet1".."Ethernet48" is a correct
+// count (48) and an entirely wrong set of names, and only the names catch it.
+// Named a few, not all: a wall of 48 names is as unreadable as a bare count,
+// so this shows the first three and the last, which is enough to recognise
+// the shape (and catch a typo'd separator) without asking anyone to read a
+// list.
+func namePreview(names []string) string {
+	switch {
+	case len(names) == 0:
+		return "nothing"
+	case len(names) <= 4:
+		return strings.Join(names, ", ")
+	default:
+		return fmt.Sprintf("%s, … %s", strings.Join(names[:3], ", "), names[len(names)-1])
+	}
 }
 
 // DeviceTypeComponentUpdate corrects one template entry's name, form factor,

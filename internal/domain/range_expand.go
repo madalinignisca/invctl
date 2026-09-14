@@ -14,13 +14,19 @@ import (
 	"strings"
 )
 
+// isZeroPadded reports whether s is a leading-zero numeral like "01" or
+// "007" -- "0" itself is not padded, it is just zero.
+func isZeroPadded(s string) bool {
+	return len(s) > 1 && s[0] == '0'
+}
+
 // MaxRangeExpansion caps what one spec may produce. A 48-port switch needs 48
 // and the largest chassis in the wild needs a few hundred; 4096 is comfortably
 // above any real device and far below the point where a form submission
 // becomes a denial of service against this database.
 const MaxRangeExpansion = 4096
 
-// ExpandRange turns "Ethernet1/[1-48]" into the names it stands for. A spec
+// ExpandRange turns "Ethernet[1-48]" into the names it stands for. A spec
 // with no bracket is one name, so callers need no special case.
 func ExpandRange(spec string) ([]string, error) {
 	open := strings.Index(spec, "[")
@@ -44,6 +50,24 @@ func ExpandRange(spec string) ([]string, error) {
 	lo, hi, ok := strings.Cut(body, "-")
 	if !ok {
 		return nil, fmt.Errorf("%q is not a range: want [low-high]", spec)
+	}
+	// A ZERO-PADDED BOUND IS REFUSED RATHER THAN SILENTLY UNPADDED.
+	// strconv.Atoi accepts "01" as 1, and strconv.Itoa never puts the padding
+	// back -- so "Port[01-48]" would quietly produce "Port1".."Port48", names
+	// the operator never typed, with nothing telling them the width was
+	// dropped. Preserving the width is the other option, and it is not
+	// cheaper: it needs the original field's length carried through the loop,
+	// decided per bound (do "1" and "01" widen to the same output, or not?),
+	// and it is exactly the kind of subtlety that looks fine on the first
+	// example and wrong on the next one somebody types. Refusing costs one
+	// early return.
+	if isZeroPadded(lo) {
+		return nil, fmt.Errorf("%q: %q has leading zeros, which this does not preserve -- write it as %q",
+			spec, lo, strings.TrimLeft(lo, "0"))
+	}
+	if isZeroPadded(hi) {
+		return nil, fmt.Errorf("%q: %q has leading zeros, which this does not preserve -- write it as %q",
+			spec, hi, strings.TrimLeft(hi, "0"))
 	}
 	first, err := strconv.Atoi(lo)
 	if err != nil {

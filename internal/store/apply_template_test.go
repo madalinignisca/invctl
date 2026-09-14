@@ -346,6 +346,60 @@ func TestApplyTemplateRefusesAForeignAssetBeforeItReadsAnything(t *testing.T) {
 	}
 }
 
+// TestAProjectOwnerCanApplyATemplateToAnAssetTheyOwn is the positive
+// counterpart TestApplyTemplateRefusesAForeignAssetBeforeItReadsAnything was
+// missing (final whole-branch review, blocking #3): every OTHER test in this
+// file calls ApplyTemplate with testPermit, an AdministratorPermit whose
+// Covers is unconditional, so applyTemplateSubject's
+// ScopedEntities{"interface": newIDs} -- the permit the write transaction
+// actually runs under -- is never consulted by anything that passes. Gutting
+// it to an empty map would not fail a single existing test while refusing
+// every real project owner's own "Add N missing ports" click with a 403.
+//
+// f.permit is scoped to f.a1 only (newCostScopeFixture), the same fixture
+// CreateAssetInProject's positive guard
+// (TestAProjectOwnerCanCreateATemplatedAssetInTheirOwnProject) uses.
+//
+// Mutation: change applyTemplateSubject to mint
+// domain.ScopedEntities{"interface": {}} (drop newInterfaceIDs) and this goes
+// red with "forbidden" while every other test in this file, still on
+// testPermit, stays green.
+func TestAProjectOwnerCanApplyATemplateToAnAssetTheyOwn(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newCostScopeFixture(t, e)
+
+			dtID := mustDeviceTypeForComponents(t, f.s)
+			ff := "rj45"
+			if err := f.s.CreateDeviceTypeComponents(f.ctx, testPermit, dtID, ComponentSpec{
+				Kind: domain.ComponentKindInterface, NameSpec: "eth0", FormFactor: &ff,
+			}); err != nil {
+				t.Fatalf("declaring the template's eth0: %v", err)
+			}
+			if _, err := f.s.DB().Writer.Exec(f.s.DB().Writer.Rebind(
+				`UPDATE asset SET device_type_id = ? WHERE id = ?`), dtID, f.a1); err != nil {
+				t.Fatalf("giving a1 a device type: %v", err)
+			}
+
+			added, err := f.s.ApplyTemplate(f.ctx, f.permit, f.a1)
+			if err != nil {
+				t.Fatalf("ApplyTemplate for an asset within the permit's own scope: %v", err)
+			}
+			if added != 1 {
+				t.Fatalf("added = %d, want 1 (eth0)", added)
+			}
+
+			ifaces, err := f.s.ListInterfaces(f.ctx, f.a1)
+			if err != nil {
+				t.Fatalf("listing interfaces: %v", err)
+			}
+			if len(ifaces) != 1 || ifaces[0].Name != "eth0" {
+				t.Fatalf("interfaces on a1 = %+v, want exactly one, eth0", ifaces)
+			}
+		})
+	}
+}
+
 // TestTheOfferedCountMatchesWhatApplyTemplateAdds pins the page's number and
 // the action's behaviour to one rule.
 //
