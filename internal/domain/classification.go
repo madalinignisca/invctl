@@ -636,6 +636,20 @@ var DeclaredColumns = map[string][]string{
 		"eol_date", "notes", "lifecycle", "created_at", "updated_at",
 		"row_version",
 	},
+	// A device type's component template (migration 00067): the ports and
+	// power inputs every instance of the model has. Declared, the same
+	// class as device_type's own physical columns above -- somebody read a
+	// datasheet and asserted that this model carries this port. Nothing
+	// observes a template and nothing derives it; Task 4 reads the active
+	// rows to seed the real interface/power_input rows an asset gets when
+	// it is created from this device type, but the template row itself is
+	// intent, not a report about any physical box.
+	"device_type_component": {
+		"id", "device_type_id", "kind", "name", "position",
+		"form_factor", "speed_mbps", "is_mgmt", "draw_va",
+		"lifecycle", "created_at", "updated_at",
+		"row_version",
+	},
 	// Certificates (migration 00015). Declared: somebody asserts that this
 	// certificate, with this expiry, is deployed here. What a scanner finds
 	// actually being served is a different fact for the observed side, and the
