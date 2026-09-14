@@ -536,21 +536,9 @@ func (s *SQLStore) ApplyTemplate(ctx context.Context, p domain.Permit, assetID s
 
 	// EVERY EXISTING NAME, ANY LIFECYCLE -- see ApplyTemplate's own doc
 	// comment for why retired counts as "already there".
-	var existingNames []string
-	if err := s.read(ctx, &existingNames,
-		`SELECT name FROM interface WHERE asset_id = ?`, assetID); err != nil {
-		return 0, fmt.Errorf("reading asset %s's existing interfaces: %w", assetID, err)
-	}
-	have := make(map[string]bool, len(existingNames))
-	for _, name := range existingNames {
-		have[name] = true
-	}
-
-	missing := make([]domain.DeviceTypeComponent, 0, len(components))
-	for _, c := range components {
-		if c.Kind == domain.ComponentKindInterface && !have[c.Name] {
-			missing = append(missing, c)
-		}
+	missing, err := s.missingTemplateComponents(ctx, assetID, components)
+	if err != nil {
+		return 0, err
 	}
 	if len(missing) == 0 {
 		return 0, nil
@@ -584,4 +572,50 @@ func (s *SQLStore) ApplyTemplate(ctx context.Context, p domain.Permit, assetID s
 		return 0, err
 	}
 	return added, nil
+}
+
+// missingTemplateComponents is the ONE rule for "what does this asset lack that
+// its model declares". ApplyTemplate acts on it and MissingTemplateCount
+// reports it, so the number an operator is shown and the number they get are
+// the same number by construction rather than by two implementations agreeing.
+//
+// They did not agree before. The asset page counted against the asset's ACTIVE
+// interfaces while this counted against interfaces of ANY lifecycle -- so a
+// withdrawn eth0 made the page offer "add 1 missing port" for a port
+// ApplyTemplate would then decline to add, because a retired name counts as
+// already there (see ApplyTemplate's doc comment for why). A control that
+// promises more than it delivers is a control people stop believing.
+func (s *SQLStore) missingTemplateComponents(ctx context.Context, assetID string,
+	components []domain.DeviceTypeComponent) ([]domain.DeviceTypeComponent, error) {
+
+	// EVERY EXISTING NAME, ANY LIFECYCLE -- see ApplyTemplate's own doc
+	// comment for why retired counts as "already there".
+	var existingNames []string
+	if err := s.read(ctx, &existingNames,
+		`SELECT name FROM interface WHERE asset_id = ?`, assetID); err != nil {
+		return nil, fmt.Errorf("reading asset %s's existing interfaces: %w", assetID, err)
+	}
+	have := make(map[string]bool, len(existingNames))
+	for _, name := range existingNames {
+		have[name] = true
+	}
+	missing := make([]domain.DeviceTypeComponent, 0, len(components))
+	for _, c := range components {
+		if c.Kind == domain.ComponentKindInterface && !have[c.Name] {
+			missing = append(missing, c)
+		}
+	}
+	return missing, nil
+}
+
+// MissingTemplateCount is what the asset page asks before offering to backfill.
+// Read-only, no permit: it reports what the page already shows its reader.
+func (s *SQLStore) MissingTemplateCount(ctx context.Context, assetID string,
+	components []domain.DeviceTypeComponent) (int, error) {
+
+	missing, err := s.missingTemplateComponents(ctx, assetID, components)
+	if err != nil {
+		return 0, err
+	}
+	return len(missing), nil
 }

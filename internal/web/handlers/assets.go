@@ -558,36 +558,6 @@ type assetDetailPage struct {
 	TemplateSourceLabel string
 }
 
-// missingTemplateComponents counts a device type's active interface-kind
-// template entries that assetInterfaces does not already carry BY NAME --
-// the same "already there" test store.ApplyTemplate applies (see its own
-// doc comment), computed here against the interfaces this page already
-// loaded so the button's own count and what ApplyTemplate actually adds
-// agree for the ordinary case a page render sees: this asset's own active
-// ports, which is exactly the set ApplyTemplate cannot yet have changed.
-//
-// RETIRED PORTS ARE NOT IN interfaces (ListInterfaces excludes them), so a
-// retired name that collides with a template entry is not subtracted here
-// the way store.ApplyTemplate subtracts it. That is a narrow, accepted gap,
-// not an oversight: it can only ever overstate the count by the number of
-// such collisions, never understate it, and a withdrawn port colliding with
-// a template name is rare enough that the page recomputes nothing to close
-// it -- the same trade instantiateComponents' own doc comment makes about
-// reactivation not being re-checked at create time.
-func missingTemplateComponents(components []domain.DeviceTypeComponent, interfaces []store.InterfaceRow) int {
-	have := make(map[string]bool, len(interfaces))
-	for _, ifc := range interfaces {
-		have[ifc.Name] = true
-	}
-	missing := 0
-	for _, c := range components {
-		if c.Kind == domain.ComponentKindInterface && !have[c.Name] {
-			missing++
-		}
-	}
-	return missing
-}
-
 // interfaceRowData decorates one port for asset_detail.html with CanUnpatch,
 // computed once here in Go rather than re-derived by the template (fix-b
 // item 3/5). Editing the port itself is single-subject -- this asset is its
@@ -665,7 +635,16 @@ func (a *App) renderAssetDetail(w http.ResponseWriter, r *http.Request, status i
 			a.serverError(w, r, err)
 			return
 		}
-		missingTemplate = missingTemplateComponents(components, interfaces)
+		// THE STORE'S OWN RULE, not a second copy. ApplyTemplate acts on
+		// exactly this count, so the button cannot offer a port it will then
+		// decline to add -- which the page's own version did, because it
+		// diffed against ACTIVE interfaces while ApplyTemplate treats a
+		// RETIRED name as already there.
+		missingTemplate, err = a.Store.MissingTemplateCount(r.Context(), asset.ID, components)
+		if err != nil {
+			a.serverError(w, r, err)
+			return
+		}
 		templateSourceLabel = asset.DeviceTypeLabel
 	}
 	// Radios (WP-F1 Task 7b). Skipped entirely when the asset has no

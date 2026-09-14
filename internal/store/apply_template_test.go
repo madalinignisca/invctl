@@ -345,3 +345,63 @@ func TestApplyTemplateRefusesAForeignAssetBeforeItReadsAnything(t *testing.T) {
 		})
 	}
 }
+
+// TestTheOfferedCountMatchesWhatApplyTemplateAdds pins the page's number and
+// the action's behaviour to one rule.
+//
+// They were two rules and they disagreed. The asset page counted template
+// entries missing from the asset's ACTIVE interfaces; ApplyTemplate treats a
+// RETIRED port of the same name as already there and declines to re-add it. So
+// a withdrawn eth0 made the page offer "1 missing port" for a port that would
+// never appear -- a control promising more than it delivers, which is how an
+// operator learns to stop believing the number.
+func TestTheOfferedCountMatchesWhatApplyTemplateAdds(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			s, ctx := newStore(t, e)
+			assetID := mustAsset(t, s, ctx, domain.KindSwitch, "sw-count", nil)
+			dtID := mustDeviceTypeForComponents(t, s)
+			ff := "rj45"
+			for _, n := range []string{"eth0", "eth1"} {
+				if err := s.CreateDeviceTypeComponents(ctx, testPermit, dtID, ComponentSpec{
+					Kind: domain.ComponentKindInterface, NameSpec: n, FormFactor: &ff,
+				}); err != nil {
+					t.Fatalf("templating %s: %v", n, err)
+				}
+			}
+			if _, err := s.DB().Writer.Exec(s.DB().Writer.Rebind(
+				`UPDATE asset SET device_type_id = ? WHERE id = ?`), dtID, assetID); err != nil {
+				t.Fatalf("attaching the type: %v", err)
+			}
+
+			// eth0 exists and is then WITHDRAWN. ApplyTemplate will not bring
+			// it back, so the offered count must not include it.
+			ifaceID := mustInterface(t, s, ctx, assetID, "eth0")
+			if err := s.RetireInterface(ctx, testPermit, ifaceID); err != nil {
+				t.Fatalf("withdrawing eth0: %v", err)
+			}
+
+			components, err := s.ListDeviceTypeComponents(ctx, dtID)
+			if err != nil {
+				t.Fatalf("listing the template: %v", err)
+			}
+			offered, err := s.MissingTemplateCount(ctx, assetID, components)
+			if err != nil {
+				t.Fatalf("counting: %v", err)
+			}
+			added, err := s.ApplyTemplate(ctx, testPermit, assetID)
+			if err != nil {
+				t.Fatalf("applying: %v", err)
+			}
+			if offered != added {
+				t.Errorf("the page offered %d ports and applying added %d. A withdrawn "+
+					"port whose name a template entry shares is 'already there' to "+
+					"ApplyTemplate, so a count that diffs against ACTIVE ports alone "+
+					"promises something the button will not deliver.", offered, added)
+			}
+			if added != 1 {
+				t.Errorf("added = %d, want 1 (eth1 only; eth0 is withdrawn, not missing)", added)
+			}
+		})
+	}
+}
