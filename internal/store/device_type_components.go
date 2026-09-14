@@ -405,7 +405,7 @@ func (s *SQLStore) instantiateComponents(ctx context.Context, t *tx, a *domain.A
 
 // applyTemplateSubject is ApplyTemplate's counterpart to
 // authorizeInterfaceSubject: the caller's own permit must already cover the
-// asset, checked before anything is read, and the permit ApplyTemplate's
+// asset, checked as ApplyTemplate's first statement, before anything is read, and the permit ApplyTemplate's
 // transaction actually runs under is scoped narrowly to the specific
 // interface ids this call is about to mint -- ScopeSubjectDerived, so
 // Covers only ever admits an id the store put there itself, never one a
@@ -461,6 +461,28 @@ func applyTemplateSubject(p domain.Permit, assetID string, newInterfaceIDs []str
 // example. Silently overwriting an operator's own record is worse than the
 // feature not existing at all.
 func (s *SQLStore) ApplyTemplate(ctx context.Context, p domain.Permit, assetID string) (int, error) {
+	// THE CHECK IS THE FIRST STATEMENT, on the CALLER'S OWN permit, before a
+	// single row is read. CreateAssetInProject documents the same requirement
+	// and for the same reason.
+	//
+	// It used to sit further down, after the asset read, the template read, the
+	// interface read and three `return 0, nil` exits -- which made a foreign
+	// asset answer THREE ways instead of one: forbidden when something was
+	// missing, but a silent success when the asset had no device type, or no
+	// template, or was already complete. An out-of-scope caller could tell
+	// those apart and learn, one asset at a time, which assets carry a
+	// templated model and which are missing ports from it. That distinguishable
+	// third answer is exactly what
+	// TestRetireCostAuthorizationRunsBeforeTheAlreadyRetiredCheck was written
+	// to forbid elsewhere in this package.
+	//
+	// applyTemplateSubject checks it again before minting. That is not
+	// redundant: the census in permit_source_test.go can only see the minter,
+	// so the minter has to carry the check for the guard to mean anything.
+	if !p.Covers("asset", assetID) {
+		return 0, domain.ErrForbidden
+	}
+
 	var row struct {
 		DeviceTypeID *string `db:"device_type_id"`
 	}
@@ -521,5 +543,12 @@ func (s *SQLStore) ApplyTemplate(ctx context.Context, p domain.Permit, assetID s
 		added = n
 		return ierr
 	})
-	return added, err
+	if err != nil {
+		// ZERO ON FAILURE. `added` is a partial count from inside a transaction
+		// that has just rolled back, so returning it alongside the error tempts
+		// a caller into saying "added 3 ports" next to a failure, about three
+		// ports that do not exist.
+		return 0, err
+	}
+	return added, nil
 }

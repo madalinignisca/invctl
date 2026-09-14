@@ -10,6 +10,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/madalinignisca/invctl/internal/domain"
@@ -270,6 +271,76 @@ func TestApplyTemplateDoesNotReactivateARetiredInterfaceOfTheSameName(t *testing
 			}
 			if len(names) != 1 || names[0] != "eth0" {
 				t.Fatalf("interface rows on the asset = %v, want exactly one, eth0", names)
+			}
+		})
+	}
+}
+
+// TestApplyTemplateRefusesAForeignAssetBeforeItReadsAnything is the test the
+// auth review found missing: without it, deleting the authorization check
+// entirely left the whole suite green, because every other test here uses
+// testPermit -- an AdministratorPermit whose Covers is unconditional.
+//
+// THE FIRST CASE IS THE ONE THAT MATTERS, and it is the one a careless version
+// of this test would omit. When something IS missing, the write path refuses
+// and any ordering passes. When NOTHING is missing, a check placed after the
+// reads returns (0, nil) -- a silent success for a foreign asset -- and the
+// caller learns that asset is fully templated. Repeat per asset and the shape
+// of somebody else's estate falls out of the difference between "forbidden"
+// and "fine".
+//
+// That distinguishable third answer is what
+// TestRetireCostAuthorizationRunsBeforeTheAlreadyRetiredCheck forbids for
+// costs; this is the same rule for templates.
+func TestApplyTemplateRefusesAForeignAssetBeforeItReadsAnything(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newCostScopeFixture(t, e)
+			ff := "rj45"
+
+			// a2 is outside the permit. Give it a templated model whose
+			// template it ALREADY satisfies, so nothing is missing and the
+			// write path is never reached.
+			dtID := mustDeviceTypeForComponents(t, f.s)
+			if err := f.s.CreateDeviceTypeComponents(f.ctx, testPermit, dtID, ComponentSpec{
+				Kind: domain.ComponentKindInterface, NameSpec: "eth0", FormFactor: &ff,
+			}); err != nil {
+				t.Fatalf("creating the template: %v", err)
+			}
+			if _, err := f.s.DB().Writer.Exec(f.s.DB().Writer.Rebind(
+				`UPDATE asset SET device_type_id = ? WHERE id = ?`), dtID, f.a2); err != nil {
+				t.Fatalf("giving a2 a device type: %v", err)
+			}
+			if _, err := f.s.ApplyTemplate(f.ctx, testPermit, f.a2); err != nil {
+				t.Fatalf("seeding a2 to completeness: %v", err)
+			}
+
+			// Nothing is missing. An out-of-scope caller must still be refused.
+			added, err := f.s.ApplyTemplate(f.ctx, f.permit, f.a2)
+			if !errors.Is(err, domain.ErrForbidden) {
+				t.Errorf("a foreign asset with nothing missing answered (%d, %v), want ErrForbidden. "+
+					"A check that runs after the reads reports success here, which tells an "+
+					"out-of-scope caller that this asset is fully templated.", added, err)
+			}
+
+			// And the easy case: something missing, still refused, and nothing
+			// written on the way to refusing.
+			if err := f.s.CreateDeviceTypeComponents(f.ctx, testPermit, dtID, ComponentSpec{
+				Kind: domain.ComponentKindInterface, NameSpec: "eth1", FormFactor: &ff,
+			}); err != nil {
+				t.Fatalf("extending the template: %v", err)
+			}
+			if _, err := f.s.ApplyTemplate(f.ctx, f.permit, f.a2); !errors.Is(err, domain.ErrForbidden) {
+				t.Errorf("a foreign asset with a missing port = %v, want ErrForbidden", err)
+			}
+			var n int
+			if err := f.s.DB().Reader.Get(&n, f.s.DB().Reader.Rebind(
+				`SELECT COUNT(*) FROM interface WHERE asset_id = ? AND name = ?`),
+				f.a2, "eth1"); err != nil {
+				t.Fatalf("counting: %v", err)
+			}
+			if n != 0 {
+				t.Error("the refused call still wrote an interface")
 			}
 		})
 	}

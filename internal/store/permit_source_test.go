@@ -228,7 +228,10 @@ var storePermitMinters = map[string]string{
 	// same subject as authorizeInterfaceSubject, one hop from the asset, but
 	// scoped to a SET of freshly minted interface ids rather than one, because
 	// a single call can add several missing ports in one transaction. Checks
-	// p.Covers("asset", assetID) before anything is read, then scopes to
+	// p.Covers("asset", assetID) as ApplyTemplate's FIRST STATEMENT -- before
+	// any row is read, and before the early exits for "no device type", "no
+	// template" and "nothing missing", which otherwise let a foreign asset
+	// answer three distinguishable ways instead of one. Then scopes to
 	// exactly the ids ApplyTemplate is about to insert -- never an id a caller
 	// could have supplied, since they are minted by the store itself before
 	// the permit exists.
