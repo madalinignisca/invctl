@@ -83,16 +83,22 @@ one, and the old bundle is history. So the rule is: a cable may be in at most
 one bundle whose lifecycle is `active`, and in any number of retired ones —
 those are history, not a live claim.
 
-This can't be a database constraint: it needs `cable_bundle.lifecycle`, a
-column on the *parent* table, and neither SQLite nor PostgreSQL can write a
-unique/partial index on `cable_bundle_member` that sees across to it — the
-index has to be evaluable from the row being written alone. `cable_bundle_
-member_link_key` is gone from migration `00068` (unreleased, so free to
-change) and the guarantee now rests entirely on `SetBundleMembers` checking
-it inside its own transaction, scoped to members of non-retired bundles — the
-same trust CLAUDE.md already places in `tx.log` for the audit trail. Losing
-the database-level guarantee is a real cost, stated here rather than glossed
-over.
+This isn't a database constraint, not because it's impossible in general —
+a `cable_live_claim(link_id PRIMARY KEY, bundle_id)` table, written in the
+same transaction as the membership rows, would express it on both engines —
+but because that is a second table purely to hold a derived fact, and it
+isn't worth it: `cable_bundle.lifecycle` lives on the *parent* table, and
+neither SQLite nor PostgreSQL can write a unique/partial index on
+`cable_bundle_member` that sees across to it, so the index route is closed
+regardless. `cable_bundle_member_link_key` is gone from migration `00068`
+(unreleased, so free to change) and the guarantee rests instead on
+`SetBundleMembers` running under `SERIALIZABLE` (`store.writeSerializable`)
+and checking the rule inside that same transaction, scoped to members of
+non-retired bundles — the transaction's isolation level *is* the enforcement
+now that the index is gone, not merely a safety margin around it, the same
+trust CLAUDE.md already places in `tx.log` for the audit trail. Losing the
+index-level guarantee for a serializable-transaction one is a real cost,
+stated here rather than glossed over.
 
 **Editing a retired bundle's membership is refused.** Editing a withdrawn
 grouping is meaningless — `SetBundleMembers` refuses with a field message

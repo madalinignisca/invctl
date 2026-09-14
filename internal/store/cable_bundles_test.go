@@ -11,8 +11,12 @@ package store
 import (
 	"context"
 	"errors"
+	"os"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/madalinignisca/invctl/internal/domain"
 )
@@ -322,6 +326,143 @@ func TestSetBundleMembersRefusesEditingARetiredBundle(t *testing.T) {
 				t.Errorf("retired bundle members after a refused edit = %+v, want none (the refusal must not apply)", members)
 			}
 		})
+	}
+}
+
+// TestSetBundleMembersIsSerialised is PostgreSQL only, on purpose: SQLite's
+// writer pool holds one connection, so it cannot show the race
+// writeSerializable exists to close. Skipping when INV_TEST_POSTGRES_DSN is
+// unset is a declared precondition, not "the thing under test looked
+// missing" -- see CLAUDE.md's testing policy.
+//
+// Since migration 00068 there is no unique index behind one-bundle-per-cable
+// any more (the design doc explains why -- it needs the parent bundle's
+// lifecycle, which an index on cable_bundle_member cannot see), so the
+// check-then-act inside SetBundleMembers is ALL that enforces it. Two bundles
+// racing to claim the same cable must not both win.
+//
+// A barrier synchronised only on START is not enough -- the same finding
+// TestTwoSimultaneousDemotionsCannotRemoveTheLastAdministrator's comment
+// records: starting both goroutines together did not reproduce the
+// read-committed failure against the un-fixed `write` version in repeated
+// runs, because the window between the conflict SELECT and either racer's
+// commit is a handful of round trips, too narrow to hit by scheduling luck.
+// testAfterBundleConflictCheck rendezvouses both goroutines INSIDE the
+// conflict check, after both have read "no live claim" and before either has
+// inserted, which forces the exact interleaving this test is named for.
+//
+// Mutation: change SetBundleMembers's s.writeSerializable back to s.write.
+// This must then fail -- both racers observe no conflict under
+// read-committed and both commit, leaving the cable in two live bundles.
+func TestSetBundleMembersIsSerialised(t *testing.T) {
+	if os.Getenv(postgresDSNEnv) == "" {
+		t.Skipf("%s not set: this test exercises PostgreSQL's read-committed isolation "+
+			"and has no SQLite equivalent", postgresDSNEnv)
+	}
+	s := New(openTestPostgres(t))
+	ctx := context.Background()
+
+	a1 := mustAsset(t, s, ctx, domain.KindServer, "srv-a", nil)
+	a2 := mustAsset(t, s, ctx, domain.KindServer, "srv-b", nil)
+	pa := mustInterface(t, s, ctx, a1, "eth0")
+	pb := mustInterface(t, s, ctx, a2, "eth0")
+	cable := mustCable(t, s, ctx, pa, pb)
+
+	bundleA := mustBundle(t, s, ctx, "duct-a", "Duct A")
+	bundleB := mustBundle(t, s, ctx, "duct-b", "Duct B")
+
+	// See TestTwoSimultaneousDemotionsCannotRemoveTheLastAdministrator for
+	// why this needs an atomic counter plus a channel closed on the second
+	// arrival, rather than a plain sync.WaitGroup barrier: writeSerializable
+	// retries on a serialization failure, and a correct implementation's
+	// retry reaches this same hook again, so the rendezvous must open exactly
+	// once and get out of the way for every call after that.
+	var arrivals int32
+	proceed := make(chan struct{})
+	var closeOnce sync.Once
+	testAfterBundleConflictCheck = func() {
+		n := atomic.AddInt32(&arrivals, 1)
+		if n >= 3 {
+			// A retry: the loser was refused as unserialisable and is trying
+			// again, and must re-read after the winner's commit rather than
+			// race the same window a second time.
+			waitForLiveBundleClaims(t, s, ctx, cable, 1)
+			return
+		}
+		if n >= 2 {
+			closeOnce.Do(func() { close(proceed) })
+		}
+		select {
+		case <-proceed:
+		case <-time.After(5 * time.Second):
+			t.Error("rendezvous never reached a second arrival within 5s")
+		}
+	}
+	t.Cleanup(func() { testAfterBundleConflictCheck = nil })
+
+	results := make(chan error, 2)
+	var wg sync.WaitGroup
+	claim := func(bundleID string) {
+		defer wg.Done()
+		results <- s.SetBundleMembers(ctx, testPermit, bundleID, []string{cable})
+	}
+	wg.Add(2)
+	go claim(bundleA)
+	go claim(bundleB)
+	wg.Wait()
+	close(results)
+
+	succeeded := 0
+	for err := range results {
+		switch {
+		case err == nil:
+			succeeded++
+		case errors.Is(err, domain.ErrConflict):
+			// The loser: correctly refused.
+		default:
+			t.Errorf("unexpected error from a racing SetBundleMembers: %v", err)
+		}
+	}
+	if succeeded != 1 {
+		t.Errorf("%d of 2 racing SetBundleMembers calls succeeded, want exactly 1", succeeded)
+	}
+
+	var live int
+	if err := s.readOne(ctx, &live, `
+		SELECT COUNT(*) FROM cable_bundle_member m
+		JOIN cable_bundle b ON b.id = m.bundle_id
+		WHERE m.link_id = ? AND b.lifecycle <> 'retired'`, cable); err != nil {
+		t.Fatalf("counting live claims on the cable: %v", err)
+	}
+	if live != 1 {
+		t.Errorf("cable is claimed by %d live bundles (%d calls reported success), want exactly 1", live, succeeded)
+	}
+}
+
+// waitForLiveBundleClaims blocks until the cable is claimed by want live
+// bundles, so a retrying racer can wait on a committed effect instead of a
+// duration -- the same shape waitForAdministratorCount uses.
+func waitForLiveBundleClaims(t *testing.T, s *SQLStore, ctx context.Context, cable string, want int) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		var live int
+		if err := s.readOne(ctx, &live, `
+			SELECT COUNT(*) FROM cable_bundle_member m
+			JOIN cable_bundle b ON b.id = m.bundle_id
+			WHERE m.link_id = ? AND b.lifecycle <> 'retired'`, cable); err != nil {
+			t.Errorf("counting live claims while waiting for the winner to commit: %v", err)
+			return
+		}
+		if live == want {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Errorf("waited 5s for live claims on the cable to reach %d, still %d -- "+
+				"the winning claim never committed", want, live)
+			return
+		}
+		time.Sleep(2 * time.Millisecond)
 	}
 }
 

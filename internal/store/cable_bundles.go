@@ -323,6 +323,10 @@ func (s *SQLStore) RetireBundle(ctx context.Context, p domain.Permit, id string)
 // logUpdate's struct diff actually sees the change. Copying the pattern is
 // not trusted on its own -- TestSetBundleMembersProducesAnAuditDiff mutates
 // the fold out and watches the test go red.
+// testAfterBundleConflictCheck is a test-only rendezvous hook, always nil in
+// production. See its one call site inside SetBundleMembers.
+var testAfterBundleConflictCheck func()
+
 func (s *SQLStore) SetBundleMembers(ctx context.Context, p domain.Permit,
 	bundleID string, linkIDs []string) error {
 
@@ -359,7 +363,7 @@ func (s *SQLStore) SetBundleMembers(ctx context.Context, p domain.Permit,
 		unique = append(unique, id)
 	}
 
-	return s.write(ctx, p, func(t *tx) error {
+	return s.writeSerializable(ctx, p, func(t *tx) error {
 		// ONE BUNDLE PER CABLE, SCOPED TO LIVE BUNDLES (Task 2b) -- no longer
 		// a database constraint (see migration 00068's header), because the
 		// rule needs the parent's lifecycle and an index can't see across
@@ -367,6 +371,14 @@ func (s *SQLStore) SetBundleMembers(ctx context.Context, p domain.Permit,
 		// a RETIRED bundle is free to join a new one (that's the whole point
 		// -- a duct gets replaced and its cables re-pulled), a cable in a
 		// LIVE bundle is still refused with a field message naming which one.
+		//
+		// SERIALIZABLE IS THE ENFORCEMENT, NOT JUST A SAFETY MARGIN: with no
+		// unique index behind this check (it was deleted -- see the comment
+		// above), read-committed lets two concurrent calls both SELECT no
+		// conflict and both commit, putting the same cable in two live
+		// bundles. store.go's writeSerializable doc comment records that this
+		// exact race was forced and observed on PostgreSQL, not assumed;
+		// SQLite's single-writer pool cannot show it either way.
 		if len(unique) > 0 {
 			var conflicts []struct {
 				LinkID     string `db:"link_id"`
@@ -380,6 +392,15 @@ func (s *SQLStore) SetBundleMembers(ctx context.Context, p domain.Permit,
 			args := append([]any{bundleID}, anySlice(unique)...)
 			if err := t.selectAll(ctx, &conflicts, q, args...); err != nil {
 				return fmt.Errorf("checking bundle membership conflicts: %w", err)
+			}
+			// Test-only rendezvous point, nil in production -- see
+			// testAfterAdministratorCount's doc comment in users_admin.go
+			// for why a two-goroutine barrier synchronised only on start
+			// cannot reliably force this exact interleaving: the window
+			// between this SELECT and either racer's commit is a handful of
+			// round trips, too narrow to hit by scheduling luck alone.
+			if testAfterBundleConflictCheck != nil {
+				testAfterBundleConflictCheck()
 			}
 			if len(conflicts) > 0 {
 				c := conflicts[0]
