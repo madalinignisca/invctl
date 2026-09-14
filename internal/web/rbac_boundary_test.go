@@ -1207,7 +1207,13 @@ func TestNoWriteRouteIsReachableWithNoSessionAtAll(t *testing.T) {
 	// 214 -> 215: device-type-templates plan, Task 8 -- POST
 	// /assets/{id}/apply-template. Backfilling a template onto an asset that
 	// predates it, the reason the feature was built.
-	const pinnedNoSessionRouteCount = 215
+	// 215 -> 219: cable-bundles plan, Task 4 -- POST /bundles,
+	// /bundles/{id}, /bundles/{id}/members and /bundles/{id}/retire. The
+	// store methods (Task 2) had no route at all until this task wired
+	// them, the same shape unreachableRepairPaths named for UpdateBundle
+	// and RetireBundle -- both entries came out of that map the moment
+	// these routes landed.
+	const pinnedNoSessionRouteCount = 219
 
 	for _, eng := range boundaryEngines(t) {
 		t.Run(eng.name, func(t *testing.T) {

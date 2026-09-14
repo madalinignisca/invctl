@@ -1,0 +1,123 @@
+{{/*
+  invctl — infrastructure inventory
+  Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+
+  Licensed under the GNU Affero General Public License, version 3 only —
+  no later version applies. See LICENSE for the full text.
+
+  SPDX-License-Identifier: AGPL-3.0-only
+*/}}
+{{define "content"}}
+<div class="crumbs">
+  <a href="/bundles">Bundles</a><span class="sep">/</span><span>{{.Bundle.Name}}</span>
+</div>
+<div class="page-head">
+  <div class="eyebrow">
+    {{.Bundle.Code}}
+    {{if eq .Bundle.Lifecycle "retired"}}<span class="pill pill-muted">withdrawn</span>{{end}}
+  </div>
+  <h1>{{.Bundle.Name}}</h1>
+  {{if .Bundle.Description}}<p class="lede">{{.Bundle.Description}}</p>{{end}}
+</div>
+
+<div class="panel">
+  <div class="panel-head">
+    <h2>{{pluralise (len .Members) "cable" "cables"}}</h2>
+    <a class="btn btn-sm" href="/bundles/{{.Bundle.ID}}/impact">If this bundle is cut</a>
+  </div>
+  {{if .Members}}
+  <div class="scroll-x">
+    <table>
+      <thead><tr><th>Cable</th><th></th></tr></thead>
+      <tbody>
+        {{range .Members}}
+        <tr>
+          <td><a href="/links/{{.LinkID}}/impact">{{.Label}}</a></td>
+          <td>
+            {{if ne .Lifecycle "active"}}
+            <span class="pill pill-muted" title="Membership is history: a retired cable stays recorded here">retired — history</span>
+            {{end}}
+          </td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{else}}
+  <div class="empty"><strong>No cables in this bundle.</strong> It carries nothing and changes nothing.</div>
+  {{end}}
+
+  {{if and .IsAdmin (ne .Bundle.Lifecycle "retired")}}
+  <form class="panel-body" method="post" action="/bundles/{{.Bundle.ID}}/members">
+    <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+    <div class="field">
+      <label for="bd-members">Cables in this bundle</label>
+      <select id="bd-members" name="link_id" multiple size="8"
+              class="{{if .Edit.Err "link_id"}}invalid{{end}}">
+        {{$ticked := .LiveMemberIDs}}
+        {{if .Edit}}{{$ticked = index .Edit.Multi "link_id"}}{{end}}
+        {{range .Candidates}}
+        <option value="{{.LinkID}}" {{if has $ticked .LinkID}}selected{{end}}>{{.Label}}</option>
+        {{end}}
+      </select>
+      {{with .Edit.Err "link_id"}}<div class="field-error">{{.}}</div>{{end}}
+      <div class="field-hint">
+        Hold Ctrl or Cmd to select several. The whole live membership is
+        replaced by what is selected here; a retired cable already in this
+        bundle stays recorded regardless of what is picked above.
+      </div>
+    </div>
+    <button class="btn btn-primary" type="submit">Set cables</button>
+  </form>
+  {{end}}
+</div>
+
+{{if .IsAdmin}}
+<form class="panel" method="post" action="/bundles/{{.Bundle.ID}}">
+  <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+  <input type="hidden" name="row_version" value="{{itoa .Bundle.RowVersion}}">
+  <div class="panel-head"><h2>Correct this bundle</h2></div>
+  <div class="panel-body">
+    {{if eq .Bundle.Lifecycle "retired"}}
+    <p class="field-hint" style="margin-bottom:12px">
+      This bundle is withdrawn. Its code, name and description can still be
+      corrected -- it stays a record of what this duct used to be -- but its
+      membership cannot be edited (see above) and this form cannot bring it
+      back.
+    </p>
+    {{end}}
+    <div class="field-row">
+      <div class="field">
+        <label for="bd-ed-code">Code</label>
+        <input id="bd-ed-code" class="mono {{if .Edit.Err "code"}}invalid{{end}}" type="text"
+               name="code" value="{{.Edit.Value "code" .Bundle.Code}}" required>
+        {{with .Edit.Err "code"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="bd-ed-name">Name</label>
+        <input id="bd-ed-name" class="{{if .Edit.Err "name"}}invalid{{end}}" type="text"
+               name="name" value="{{.Edit.Value "name" .Bundle.Name}}" required>
+        {{with .Edit.Err "name"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="bd-ed-desc">Description</label>
+        <input id="bd-ed-desc" type="text" name="description"
+               value="{{.Edit.Value "description" (deref .Bundle.Description)}}">
+      </div>
+    </div>
+    <button class="btn btn-primary" type="submit">Save</button>
+  </div>
+</form>
+
+{{if ne .Bundle.Lifecycle "retired"}}
+<form class="panel" method="post" action="/bundles/{{.Bundle.ID}}/retire"
+      hx-post="/bundles/{{.Bundle.ID}}/retire"
+      hx-confirm="Withdraw this bundle? Every cable pulled through it stays exactly as it is -- withdrawing the grouping does not touch them.">
+  <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+  <div class="panel-body">
+    <button class="btn btn-danger" type="submit">Withdraw this bundle</button>
+  </div>
+</form>
+{{end}}
+{{end}}
+{{end}}

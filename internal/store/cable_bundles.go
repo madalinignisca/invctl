@@ -117,6 +117,75 @@ func (s *SQLStore) ListBundleMembers(ctx context.Context, bundleID string) ([]Bu
 	return rows, nil
 }
 
+// CandidateLinksForBundle lists every live cable this bundle's membership
+// editor may offer: every live link that is not currently claimed by another
+// LIVE bundle (Task 2b's one-bundle-per-cable rule), plus this bundle's own
+// current live members so an unrelated save does not make them vanish from
+// the picker they are already ticked in.
+//
+// THE PICKER IS KEPT HONEST, NOT THE ENFORCEMENT. Excluding an already-claimed
+// cable here is a courtesy so the operator is not offered a choice
+// SetBundleMembers will refuse anyway -- the refusal inside that same
+// transaction (see its own comment) is what actually guarantees the rule; a
+// TOCTOU window between this read and that write is closed by SetBundleMembers
+// re-checking, not by this list being accurate a moment ago.
+func (s *SQLStore) CandidateLinksForBundle(ctx context.Context, bundleID string) ([]BundleMemberRow, error) {
+	var rows []BundleMemberRow
+	err := s.read(ctx, &rows, `
+		SELECT l.id AS link_id, l.lifecycle,
+		       ia.name AS a_iface, aa.name AS a_asset_name,
+		       ib.name AS b_iface, ab.name AS b_asset_name
+		FROM link l
+		JOIN interface ia ON ia.id = l.a_interface_id
+		JOIN interface ib ON ib.id = l.b_interface_id
+		JOIN asset aa ON aa.id = ia.asset_id
+		JOIN asset ab ON ab.id = ib.asset_id
+		WHERE l.lifecycle = 'active'
+		  AND NOT EXISTS (
+		    SELECT 1 FROM cable_bundle_member m
+		    JOIN cable_bundle b ON b.id = m.bundle_id
+		    WHERE m.link_id = l.id AND b.lifecycle <> 'retired' AND m.bundle_id <> ?
+		  )
+		ORDER BY aa.name, ia.name`, bundleID)
+	if err != nil {
+		return nil, fmt.Errorf("listing bundle %s candidates: %w", bundleID, err)
+	}
+	return rows, nil
+}
+
+// LinksByID resolves a set of cables to their display rows regardless of
+// lifecycle or which bundle, if any, claims them.
+//
+// EXISTS FOR ONE READER: a refused membership save needs to redraw the picker
+// with what the operator actually picked still visible and selected, even
+// when that pick is a cable CandidateLinksForBundle would never offer --
+// exactly the case that was just refused for being claimed elsewhere. Making
+// the choice disappear on refusal would violate the house rule that a refused
+// form comes back with the typed input intact, so the handler adds these rows
+// into the option list it renders rather than trusting the ordinary candidate
+// query to already contain them.
+func (s *SQLStore) LinksByID(ctx context.Context, ids []string) ([]BundleMemberRow, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	var rows []BundleMemberRow
+	q := `
+		SELECT l.id AS link_id, l.lifecycle,
+		       ia.name AS a_iface, aa.name AS a_asset_name,
+		       ib.name AS b_iface, ab.name AS b_asset_name
+		FROM link l
+		JOIN interface ia ON ia.id = l.a_interface_id
+		JOIN interface ib ON ib.id = l.b_interface_id
+		JOIN asset aa ON aa.id = ia.asset_id
+		JOIN asset ab ON ab.id = ib.asset_id
+		WHERE l.id IN (` + placeholders(len(ids)) + `)
+		ORDER BY aa.name, ia.name`
+	if err := s.read(ctx, &rows, q, anySlice(ids)...); err != nil {
+		return nil, fmt.Errorf("resolving cables by id: %w", err)
+	}
+	return rows, nil
+}
+
 // CreateBundle declares a bundle. Membership is set separately via
 // SetBundleMembers -- a bundle can exist with no cables in it yet, which is
 // also why it stays ScopeTopology/Administrator-only (docs/AUDIT.md): "every

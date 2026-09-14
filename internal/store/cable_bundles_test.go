@@ -540,3 +540,55 @@ func TestUpdateBundleCannotRetireOrRevive(t *testing.T) {
 		})
 	}
 }
+
+// TestCandidateLinksForBundleExcludesWhatAnotherLiveBundleClaims is the
+// picker's own test: a cable claimed by a live bundle must not be offered to
+// a different one (SetBundleMembers would refuse it anyway), a cable in no
+// bundle must be offered, and this bundle's OWN live member must still be
+// offered -- an unrelated save must not make an already-ticked cable vanish
+// from its own picker.
+func TestCandidateLinksForBundleExcludesWhatAnotherLiveBundleClaims(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			s, ctx := newStore(t, e)
+			a1 := mustAsset(t, s, ctx, domain.KindServer, "cand-a", nil)
+			a2 := mustAsset(t, s, ctx, domain.KindServer, "cand-b", nil)
+			a3 := mustAsset(t, s, ctx, domain.KindServer, "cand-c", nil)
+
+			claimedCable := mustCable(t, s, ctx,
+				mustInterface(t, s, ctx, a1, "eth0"), mustInterface(t, s, ctx, a2, "eth0"))
+			freeCable := mustCable(t, s, ctx,
+				mustInterface(t, s, ctx, a1, "eth1"), mustInterface(t, s, ctx, a2, "eth1"))
+			ownCable := mustCable(t, s, ctx,
+				mustInterface(t, s, ctx, a1, "eth2"), mustInterface(t, s, ctx, a3, "eth0"))
+
+			other := mustBundle(t, s, ctx, "duct-other", "Other duct")
+			if err := s.SetBundleMembers(ctx, testPermit, other, []string{claimedCable}); err != nil {
+				t.Fatalf("claiming cable in the other bundle: %v", err)
+			}
+
+			mine := mustBundle(t, s, ctx, "duct-mine", "My duct")
+			if err := s.SetBundleMembers(ctx, testPermit, mine, []string{ownCable}); err != nil {
+				t.Fatalf("adding this bundle's own member: %v", err)
+			}
+
+			candidates, err := s.CandidateLinksForBundle(ctx, mine)
+			if err != nil {
+				t.Fatalf("listing candidates: %v", err)
+			}
+			ids := map[string]bool{}
+			for _, c := range candidates {
+				ids[c.LinkID] = true
+			}
+			if ids[claimedCable] {
+				t.Errorf("a cable claimed by a live bundle was offered as a candidate to another bundle")
+			}
+			if !ids[freeCable] {
+				t.Errorf("an unclaimed cable was not offered as a candidate")
+			}
+			if !ids[ownCable] {
+				t.Errorf("this bundle's own live member was not offered in its own picker")
+			}
+		})
+	}
+}

@@ -98,6 +98,11 @@ var navGroups = []NavGroup{
 		{Label: "Switches", Href: "/assets?kind=switch", Nav: "assets-switch"},
 		{Label: "Paths", Href: "/paths", Nav: "paths"},
 		{Label: "Circuits", Href: "/circuits", Nav: "circuits"},
+		// A duct, a tray, a trunk -- cables somebody pulled together and will
+		// replace together (docs/cable-bundles-design.md). Sits beside
+		// Circuits: both group cables into something an operator manages as
+		// one unit rather than strand by strand.
+		{Label: "Bundles", Href: "/bundles", Nav: "bundles"},
 		{Label: "Overlays", Href: "/overlays", Nav: "l2vpn"},
 		{Label: "Redundancy", Href: "/redundancy", Nav: "fhrp"},
 		// An SSID is a broadcast domain that lives on network hardware, not a

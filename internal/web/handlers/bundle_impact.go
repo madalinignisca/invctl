@@ -86,7 +86,7 @@ func (a *App) BundleImpact(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := bundleImpactPage{
-		Base:      a.base(r, "If "+bundle.Name+" is cut", "assets"),
+		Base:      a.base(r, "If "+bundle.Name+" is cut", "bundles"),
 		Bundle:    bundle,
 		Members:   members,
 		Result:    result,
