@@ -279,6 +279,138 @@
                     <a class="btn btn-sm" href="/catalogue">Cancel</a>
                   </div>
                 </form>
+
+                {{/* The component template (device-type-templates plan, Task 7):
+                     managed inside this same open row, not a separate page --
+                     an operator is already looking at the model when they need
+                     to declare its ports. */}}
+                <div class="components-panel" style="margin-top:16px; border-top:1px solid var(--border, #333); padding-top:16px">
+                  <h3>Component template — {{pluralise (len $.Components) "port" "ports"}}</h3>
+                  <p class="field-hint">
+                    Every asset created from this model gets these interfaces
+                    automatically. Withdrawing one here does not touch a port
+                    already recorded on an asset that already exists.
+                  </p>
+                  {{if $.Components}}
+                  <table class="grid">
+                    <thead>
+                      <tr><th>Name</th><th>Form factor</th><th>Speed</th><th>Mgmt</th><th></th></tr>
+                    </thead>
+                    <tbody>
+                      {{range $.Components}}
+                        {{/* ?component= rather than ?edit=: the device type's
+                             own form above already spends Editing/?edit=, and
+                             opening a component row must not close it. */}}
+                        {{if eq .ID $.ComponentEditing}}
+                        <tr class="row-editing">
+                          <td>
+                            <input form="dtc-{{.ID}}" class="mono {{if $.ComponentRow.Err "name"}}invalid{{end}}"
+                                   type="text" name="name" value="{{$.ComponentRow.Value "name" .Name}}"
+                                   aria-label="Component name" required>
+                            {{with $.ComponentRow.Err "name"}}<div class="field-error">{{.}}</div>{{end}}
+                          </td>
+                          <td>
+                            {{$ff := $.ComponentRow.Value "form_factor" (deref .FormFactor)}}
+                            <select form="dtc-{{.ID}}" name="form_factor" aria-label="Form factor" required>
+                              {{range $.FormFactors}}
+                                <option value="{{.Code}}" {{if eq .Code $ff}}selected{{end}}>{{.Label}}</option>
+                              {{end}}
+                            </select>
+                            {{with $.ComponentRow.Err "form_factor"}}<div class="field-error">{{.}}</div>{{end}}
+                          </td>
+                          <td>
+                            <input form="dtc-{{.ID}}" type="number" name="speed_mbps" min="0"
+                                   value="{{$.ComponentRow.Value "speed_mbps" (derefInt .SpeedMbps)}}"
+                                   aria-label="Speed in megabits" style="width:6em">
+                            {{with $.ComponentRow.Err "speed_mbps"}}<div class="field-error">{{.}}</div>{{end}}
+                          </td>
+                          <td>
+                            <label class="check">
+                              <input form="dtc-{{.ID}}" type="checkbox" name="is_mgmt" value="1"
+                                     {{if $.ComponentRow.Checked "is_mgmt" .IsMgmt}}checked{{end}}>
+                            </label>
+                          </td>
+                          <td class="row-actions" style="white-space:nowrap">
+                            <form id="dtc-{{.ID}}" method="post"
+                                  action="/catalogue/types/{{$.Editing}}/components/{{.ID}}" style="display:inline">
+                              <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+                              <input type="hidden" name="row_version"
+                                     value="{{$.ComponentRow.Value "row_version" (itoa .RowVersion)}}">
+                              <button class="btn btn-sm btn-primary" type="submit">Save</button>
+                            </form>
+                            <a class="btn btn-sm" href="/catalogue?edit={{$.Editing}}">Cancel</a>
+                          </td>
+                        </tr>
+                        {{else}}
+                        <tr>
+                          <td class="mono">{{.Name}}</td>
+                          <td class="mono">{{deref .FormFactor}}</td>
+                          <td class="mono">
+                            {{if .SpeedMbps}}{{derefInt .SpeedMbps}} Mb/s{{else}}<span class="muted">—</span>{{end}}
+                          </td>
+                          <td>{{if .IsMgmt}}yes{{else}}<span class="muted">no</span>{{end}}</td>
+                          <td class="row-actions">
+                            <a class="btn btn-sm" href="/catalogue?edit={{$.Editing}}&component={{.ID}}">Edit</a>
+                            <button class="btn btn-sm btn-danger" type="button"
+                                    hx-post="/catalogue/types/{{$.Editing}}/components/{{.ID}}/retire"
+                                    hx-confirm="Withdraw {{.Name}}? Every future asset of this model stops getting it. Anything that already has this port keeps it.">Withdraw</button>
+                          </td>
+                        </tr>
+                        {{end}}
+                      {{end}}
+                    </tbody>
+                  </table>
+                  {{else}}
+                  <p class="empty">No components declared for this model yet.</p>
+                  {{end}}
+
+                  <form method="post" action="/catalogue/types/{{$.Editing}}/components" style="margin-top:12px">
+                    <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+                    <div class="field-row">
+                      <div class="field">
+                        <label for="dtc-namespec-{{$.Editing}}">Name, or a range</label>
+                        <input id="dtc-namespec-{{$.Editing}}"
+                               class="mono {{if $.ComponentAdd.Err "name_spec"}}invalid{{end}}"
+                               type="text" name="name_spec"
+                               value="{{$.ComponentAdd.Value "name_spec" ""}}"
+                               placeholder="Ethernet1/[1-48]" required>
+                        <div class="field-hint">
+                          A single name, or a range like <code>Ethernet1/[1-48]</code>
+                          to declare every port on a switch in one go — up to
+                          4096 names from one line.
+                        </div>
+                        {{with $.ComponentAdd.Err "name_spec"}}<div class="field-error">{{.}}</div>{{end}}
+                      </div>
+                      <div class="field">
+                        <label for="dtc-ff-{{$.Editing}}">Form factor</label>
+                        {{$newFF := $.ComponentAdd.Value "form_factor" ""}}
+                        <select id="dtc-ff-{{$.Editing}}" name="form_factor" required>
+                          <option value="">Choose…</option>
+                          {{range $.FormFactors}}
+                            <option value="{{.Code}}" {{if eq .Code $newFF}}selected{{end}}>{{.Label}}</option>
+                          {{end}}
+                        </select>
+                        {{with $.ComponentAdd.Err "form_factor"}}<div class="field-error">{{.}}</div>{{end}}
+                      </div>
+                      <div class="field">
+                        <label for="dtc-speed-{{$.Editing}}">Speed (Mb/s)</label>
+                        <input id="dtc-speed-{{$.Editing}}" type="number" name="speed_mbps" min="0"
+                               value="{{$.ComponentAdd.Value "speed_mbps" ""}}" placeholder="10000">
+                        {{with $.ComponentAdd.Err "speed_mbps"}}<div class="field-error">{{.}}</div>{{end}}
+                      </div>
+                      <div class="field">
+                        <label class="check" style="margin-top:20px">
+                          <input type="checkbox" name="is_mgmt" value="1"
+                                 {{if $.ComponentAdd.Checked "is_mgmt" false}}checked{{end}}>
+                          Management port
+                        </label>
+                      </div>
+                    </div>
+                    <div class="form-actions">
+                      <button type="submit" class="btn">Add to template</button>
+                    </div>
+                  </form>
+                </div>
               </td>
             </tr>
             {{else}}

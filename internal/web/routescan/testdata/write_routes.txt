@@ -40,6 +40,9 @@ POST /catalogue/manufacturers/{id} | ManufacturerUpdate | write | true
 POST /catalogue/manufacturers/{id}/retire | ManufacturerRetire | write | true
 POST /catalogue/types | DeviceTypeCreate | write | true
 POST /catalogue/types/{id} | DeviceTypeUpdate | write | true
+POST /catalogue/types/{id}/components | DeviceTypeComponentCreate | write | true
+POST /catalogue/types/{id}/components/{componentID} | DeviceTypeComponentUpdate | write | true
+POST /catalogue/types/{id}/components/{componentID}/retire | DeviceTypeComponentRetire | write | true
 POST /catalogue/types/{id}/retire | DeviceTypeRetire | write | true
 POST /certificates | CertificateCreate | write | true
 POST /certificates/{id} | CertificateUpdate | write | true

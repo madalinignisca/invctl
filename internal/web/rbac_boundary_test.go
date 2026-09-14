@@ -1199,7 +1199,12 @@ func TestNoWriteRouteIsReachableWithNoSessionAtAll(t *testing.T) {
 	// length, typed wrong, could previously only be fixed by retiring and
 	// re-patching it, which would have written a pull and a re-patch into the
 	// cabling audit for a cable nobody touched.
-	const pinnedNoSessionRouteCount = 211
+	// 211 -> 214: device-type-templates plan, Task 7 -- POST
+	// /catalogue/types/{id}/components, .../{componentID} and
+	// .../{componentID}/retire. A model's port template, built by Tasks 1-6,
+	// finally reachable from the same row an operator already opens to
+	// correct the model's own fields.
+	const pinnedNoSessionRouteCount = 214
 
 	for _, eng := range boundaryEngines(t) {
 		t.Run(eng.name, func(t *testing.T) {

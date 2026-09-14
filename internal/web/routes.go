@@ -368,6 +368,12 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	write("POST /catalogue/types", app.DeviceTypeCreate)
 	write("POST /catalogue/types/{id}", app.DeviceTypeUpdate)
 	write("POST /catalogue/types/{id}/retire", app.DeviceTypeRetire)
+	// A model's component template (device-type-templates plan, Task 7):
+	// managed inside the same row as the model's own fields above, so it
+	// gets the same write gate rather than a separate admin-only one.
+	write("POST /catalogue/types/{id}/components", app.DeviceTypeComponentCreate)
+	write("POST /catalogue/types/{id}/components/{componentID}", app.DeviceTypeComponentUpdate)
+	write("POST /catalogue/types/{id}/components/{componentID}/retire", app.DeviceTypeComponentRetire)
 
 	write("POST /teams", app.TeamCreate)
 	write("POST /teams/{id}", app.TeamUpdate)
