@@ -397,6 +397,48 @@ func TestARetiredLinkStaysInItsBundle(t *testing.T) {
 	}
 }
 
+// TestBundleForLinkReturnsTheLiveBundleNotTheRetiredOne is finding 2 of the
+// final whole-branch review: a cable moved out of a retired bundle into a new
+// live one (the exact state TestSetBundleMembersAllowsAMovedCableFromARetiredBundle
+// builds) has TWO membership rows at once. Without a lifecycle filter and an
+// explicit LIMIT, BundleForLink's query is ambiguous and readOne silently
+// takes whichever row is returned first -- which, in insertion order, was the
+// RETIRED bundle, so the impact page pointed an operator at a withdrawn duct
+// and said nothing about the live one the cable is actually in.
+func TestBundleForLinkReturnsTheLiveBundleNotTheRetiredOne(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			s, ctx := newStore(t, e)
+			a1 := mustAsset(t, s, ctx, domain.KindServer, "srv-a", nil)
+			a2 := mustAsset(t, s, ctx, domain.KindServer, "srv-b", nil)
+			pa := mustInterface(t, s, ctx, a1, "eth0")
+			pb := mustInterface(t, s, ctx, a2, "eth0")
+			cable := mustCable(t, s, ctx, pa, pb)
+
+			oldBundle := mustBundle(t, s, ctx, "duct-old", "Old Duct")
+			if err := s.SetBundleMembers(ctx, testPermit, oldBundle, []string{cable}); err != nil {
+				t.Fatalf("adding to old bundle: %v", err)
+			}
+			if err := s.RetireBundle(ctx, testPermit, oldBundle); err != nil {
+				t.Fatalf("retiring old bundle: %v", err)
+			}
+
+			newBundle := mustBundle(t, s, ctx, "duct-new", "New Duct")
+			if err := s.SetBundleMembers(ctx, testPermit, newBundle, []string{cable}); err != nil {
+				t.Fatalf("moving cable to new bundle: %v", err)
+			}
+
+			got, err := s.BundleForLink(ctx, cable)
+			if err != nil {
+				t.Fatalf("BundleForLink after the move: %v", err)
+			}
+			if got.ID != newBundle {
+				t.Errorf("BundleForLink = %s (%s), want the LIVE bundle %s", got.ID, got.Code, newBundle)
+			}
+		})
+	}
+}
+
 // TestBundleForLinkNotFound: a cable in no bundle is ErrNotFound, not a
 // zero-value bundle -- Task 3's impact page treats that as "not bundled".
 func TestBundleForLinkNotFound(t *testing.T) {

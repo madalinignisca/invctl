@@ -92,15 +92,30 @@ func (s *SQLStore) GetBundle(ctx context.Context, id string) (*domain.CableBundl
 	return &b, nil
 }
 
-// BundleForLink finds the bundle a cable is in, if any. domain.ErrNotFound
+// BundleForLink finds the LIVE bundle a cable is in, if any. domain.ErrNotFound
 // when it is in none -- the impact page (Task 3) treats that as "not
 // bundled", not as an error.
+//
+// FILTERED TO LIVE BUNDLES, DELIBERATELY. Task 2b made it legal for a cable to
+// have several membership rows at once -- one live, any number of retired,
+// left behind on purpose when a duct is replaced and its cables re-pulled
+// into a new one (see docs/cable-bundles-design.md, "one bundle per cable").
+// Without the filter this query is ambiguous exactly in that state, and
+// readOne silently takes whichever row the scan happens to return first --
+// which, for TestSetBundleMembersAllowsAMovedCableFromARetiredBundle's
+// fixture, was the RETIRED bundle: the impact page told the operator the
+// cable ran through a withdrawn duct and said nothing about the live one it
+// is actually in. `AND b.lifecycle <> 'retired'` plus `LIMIT 1` make the
+// query unambiguous outright -- a cable has at most one live bundle, so a
+// single row is still the right answer, but it must not be a choice this
+// query makes silently.
 func (s *SQLStore) BundleForLink(ctx context.Context, linkID string) (*domain.CableBundle, error) {
 	var b domain.CableBundle
 	err := s.readOne(ctx, &b, `
 		SELECT b.* FROM cable_bundle b
 		JOIN cable_bundle_member m ON m.bundle_id = b.id
-		WHERE m.link_id = ?`, linkID)
+		WHERE m.link_id = ? AND b.lifecycle <> 'retired'
+		LIMIT 1`, linkID)
 	if err != nil {
 		return nil, fmt.Errorf("finding bundle for link %s: %w", linkID, err)
 	}
