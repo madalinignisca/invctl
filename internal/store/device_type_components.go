@@ -197,6 +197,21 @@ func (s *SQLStore) UpdateDeviceTypeComponent(ctx context.Context, p domain.Permi
 	}
 	c.DeviceTypeID = before.DeviceTypeID
 	c.Kind = before.Kind
+	// LIFECYCLE IS CARRIED FROM THE STORED ROW, and the UPDATE below does not
+	// name the column either. Both, deliberately.
+	//
+	// Without the pin this correction path is a SECOND WITHDRAWAL PATH with
+	// none of RetireDeviceTypeComponent's meaning -- and worse in the other
+	// direction, because a submitted 'active' would reactivate a component
+	// somebody withdrew, silently putting a port back on every asset the model
+	// instantiates from tomorrow.
+	//
+	// Dropping it from the SET keeps the ROW safe; pinning the struct keeps the
+	// AUDIT safe, because logUpdate diffs the structs and would otherwise
+	// record a withdrawal that never happened. Five sibling methods in this
+	// repo pin the struct alone, because their UPDATE never named the column;
+	// this one did, so it needs both.
+	c.Lifecycle = before.Lifecycle
 	if err := c.Validate(); err != nil {
 		return err
 	}
@@ -207,10 +222,10 @@ func (s *SQLStore) UpdateDeviceTypeComponent(ctx context.Context, p domain.Permi
 		res, err := t.exec(ctx, `
 			UPDATE device_type_component
 			SET name = ?, position = ?, form_factor = ?, speed_mbps = ?, is_mgmt = ?,
-			    draw_va = ?, lifecycle = ?, updated_at = ?, row_version = row_version + 1
+			    draw_va = ?, updated_at = ?, row_version = row_version + 1
 			WHERE id = ? AND row_version = ?`,
 			c.Name, c.Position, c.FormFactor, c.SpeedMbps, c.IsMgmt,
-			c.DrawVA, c.Lifecycle, c.UpdatedAt, c.ID, c.RowVersion)
+			c.DrawVA, c.UpdatedAt, c.ID, c.RowVersion)
 		if err != nil {
 			return translateWriteErr(err, "updating device type component")
 		}

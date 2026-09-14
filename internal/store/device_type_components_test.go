@@ -401,3 +401,100 @@ func TestRetireDeviceTypeComponentIsSoftDeleteAndIdempotent(t *testing.T) {
 		})
 	}
 }
+
+// TestUpdateDeviceTypeComponentCannotWithdrawOrReviveIt.
+//
+// THE SIXTH TIME THIS RULE HAS BEEN WRITTEN IN THIS REPO, and the first where
+// the ROW was genuinely at risk rather than only the audit. UpdateProvider,
+// UpdateInterface, UpdateNetGroup, UpdateNetAnchor and UpdateLink all pin
+// lifecycle from the stored row, and in every one of those the UPDATE never
+// named the column -- so the database was safe regardless and only logUpdate's
+// struct diff could record a withdrawal that did not happen.
+//
+// This one named `lifecycle = ?` and wrote the submitted value, which makes it
+// a real second withdrawal path: a correction could withdraw a component with
+// none of RetireDeviceTypeComponent's meaning. The reverse is worse -- a
+// submitted 'active' would REVIVE a withdrawn component, silently putting a
+// port back on every asset that model instantiates from then on, with no record
+// of anybody deciding it.
+//
+// Both halves are asserted because both can now fail independently: the row,
+// because the SET no longer names the column, and the audit, because the struct
+// is pinned.
+func TestUpdateDeviceTypeComponentCannotWithdrawOrReviveIt(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			s, ctx := newStore(t, e)
+			dtID := mustDeviceTypeForComponents(t, s)
+			ff := "rj45"
+			if err := s.CreateDeviceTypeComponents(ctx, testPermit, dtID, ComponentSpec{
+				Kind: domain.ComponentKindInterface, NameSpec: "eth0", FormFactor: &ff,
+			}); err != nil {
+				t.Fatalf("creating: %v", err)
+			}
+			rows, err := s.ListDeviceTypeComponents(ctx, dtID)
+			if err != nil {
+				t.Fatalf("listing: %v", err)
+			}
+			c := rows[0]
+
+			// A real change alongside the forged one, so an update is genuinely
+			// logged and there is a diff to inspect.
+			c.Name = "eth0-renamed"
+			c.Lifecycle = domain.LifecycleRetired
+			if err := s.UpdateDeviceTypeComponent(ctx, testPermit, &c); err != nil {
+				t.Fatalf("correcting with a forged lifecycle: %v", err)
+			}
+
+			var life string
+			if err := s.DB().Reader.Get(&life, s.DB().Reader.Rebind(
+				`SELECT lifecycle FROM device_type_component WHERE id = ?`), c.ID); err != nil {
+				t.Fatalf("reading back: %v", err)
+			}
+			if life != domain.LifecycleActive {
+				t.Errorf("the row is %q: a correction withdrew a template component, "+
+					"bypassing RetireDeviceTypeComponent entirely", life)
+			}
+
+			var diffs []string
+			if err := s.DB().Reader.Select(&diffs, s.DB().Reader.Rebind(
+				`SELECT COALESCE(diff, '') FROM change_log
+				  WHERE entity_id = ? AND action = 'update'`), c.ID); err != nil {
+				t.Fatalf("reading the change log: %v", err)
+			}
+			if len(diffs) == 0 {
+				t.Fatal("no update was logged at all, so this test is checking nothing")
+			}
+			for _, d := range diffs {
+				if strings.Contains(d, "lifecycle") {
+					t.Errorf("change_log records a lifecycle change for a component that "+
+						"is still active: %s", d)
+				}
+			}
+
+			// And the other direction: a withdrawn component must not come back
+			// through the correction path.
+			if err := s.RetireDeviceTypeComponent(ctx, testPermit, c.ID); err != nil {
+				t.Fatalf("withdrawing: %v", err)
+			}
+			revived, err := s.getDeviceTypeComponent(ctx, c.ID)
+			if err != nil {
+				t.Fatalf("reloading the withdrawn component: %v", err)
+			}
+			revived.Name = "eth0-again"
+			revived.Lifecycle = domain.LifecycleActive
+			if err := s.UpdateDeviceTypeComponent(ctx, testPermit, revived); err != nil {
+				t.Fatalf("correcting a withdrawn component: %v", err)
+			}
+			if err := s.DB().Reader.Get(&life, s.DB().Reader.Rebind(
+				`SELECT lifecycle FROM device_type_component WHERE id = ?`), c.ID); err != nil {
+				t.Fatalf("reading back: %v", err)
+			}
+			if life != domain.LifecycleRetired {
+				t.Error("a correction revived a withdrawn template component. Every asset " +
+					"of this model instantiated from now on gains a port nobody decided " +
+					"to put back.")
+			}
+		})
+	}
+}
