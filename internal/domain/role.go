@@ -474,20 +474,24 @@ var entityScope = map[string]ScopeClass{
 	// the catalogue/lookup tables and the project-linking tables themselves
 	// (linking an EXISTING entity to a project is Administrator-only; see
 	// §4's create-vs-link distinction).
-	"app_user":        ScopeEstateConfig,
-	"custom_field":    ScopeEstateConfig,
-	"device_type":     ScopeEstateConfig,
-	"environment":     ScopeEstateConfig,
-	"identity":        ScopeEstateConfig,
-	"inflation_rate":  ScopeEstateConfig,
-	"manufacturer":    ScopeEstateConfig,
-	"project":         ScopeEstateConfig,
-	"project_asset":   ScopeEstateConfig,
-	"project_circuit": ScopeEstateConfig,
-	"project_service": ScopeEstateConfig,
-	"provider":        ScopeEstateConfig,
-	"tag":             ScopeEstateConfig,
-	"team":            ScopeEstateConfig,
+	"app_user":     ScopeEstateConfig,
+	"custom_field": ScopeEstateConfig,
+	"device_type":  ScopeEstateConfig,
+	// A model's component template is catalogue data like the model itself:
+	// changing it changes what every future asset of that model is born with,
+	// which is an estate-wide decision, not one project's.
+	"device_type_component": ScopeEstateConfig,
+	"environment":           ScopeEstateConfig,
+	"identity":              ScopeEstateConfig,
+	"inflation_rate":        ScopeEstateConfig,
+	"manufacturer":          ScopeEstateConfig,
+	"project":               ScopeEstateConfig,
+	"project_asset":         ScopeEstateConfig,
+	"project_circuit":       ScopeEstateConfig,
+	"project_service":       ScopeEstateConfig,
+	"provider":              ScopeEstateConfig,
+	"tag":                   ScopeEstateConfig,
+	"team":                  ScopeEstateConfig,
 	// Who is assigned to which project (WP-G1 Task 11, migration 00059).
 	// ESTATE CONFIG, AND THIS ONE IS LOAD-BEARING: user_project is the table
 	// that decides a project owner's own scope, so a project owner able to
