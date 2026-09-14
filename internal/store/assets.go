@@ -957,6 +957,16 @@ func (s *SQLStore) insertAsset(ctx context.Context, t *tx, a *domain.Asset, envi
 	if err := t.logCreate(ctx, "asset", a.ID, auditedAsset(a, codes, "", "")); err != nil {
 		return err
 	}
+	// Task 4: bring the device type's component template into existence, in
+	// this same transaction. Every creation path routes through insertAsset
+	// (CreateAsset, CreateAssetInProject, both importers), so hooking here is
+	// the one place that gets templates without a second call site to forget.
+	// A no-op when a.DeviceTypeID is nil or the type carries no template --
+	// see instantiateComponents's own doc comment for the regression this
+	// preserves.
+	if err := s.instantiateComponents(ctx, t, a); err != nil {
+		return err
+	}
 	return s.indexAsset(ctx, t, a)
 }
 

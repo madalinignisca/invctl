@@ -265,3 +265,110 @@ func (s *SQLStore) RetireDeviceTypeComponent(ctx context.Context, p domain.Permi
 		return t.logUpdate(ctx, "device_type_component", id, before, &after)
 	})
 }
+
+// ---------- Task 4: bringing a device type's template into existence ----------
+
+// newInterfaceFromTemplate turns one interface-kind template component into
+// the live domain.Interface it becomes on a real asset. id and at are
+// supplied by the caller, per package convention.
+//
+// THE ONE PLACE THIS MAPPING IS WRITTEN. instantiateComponents (below) is one
+// caller, at asset-creation time; Task 5 ("add a component an asset is
+// missing, after its device type's template gained one") is the other,
+// reusing this exact function rather than a second copy of the field
+// mapping. Two copies drift, and the one that drifts is the rarely-run path
+// -- which is also the one that can overwrite an operator's own data on an
+// asset that already exists. Do not inline this into either caller.
+func newInterfaceFromTemplate(id, assetID string, c domain.DeviceTypeComponent, at string) (*domain.Interface, error) {
+	// FormFactor is required on an interface component and enforced twice
+	// already -- domain.DeviceTypeComponent.Validate's cross-check, and the
+	// dtc_interface_form_factor_check CHECK constraint (migration 00067) --
+	// so a nil here would mean one of those two has a bug, not that this
+	// function needs a third defence. Dereferencing directly, deliberately.
+	iface, err := domain.NewInterface(id, assetID, c.Name, *c.FormFactor)
+	if err != nil {
+		return nil, fmt.Errorf("instantiating interface %q from device type component %s: %w",
+			c.Name, c.ID, err)
+	}
+	iface.SpeedMbps = c.SpeedMbps
+	iface.IsMgmt = c.IsMgmt
+	iface.RowVersion = 1
+	iface.CreatedAt, iface.UpdatedAt = &at, &at
+	return iface, nil
+}
+
+// instantiateComponents seeds an asset's real component rows from its device
+// type's active template entries (Task 4), inside the SAME transaction t as
+// the asset's own INSERT -- see insertAsset, the only caller. Every row this
+// writes is declared state, exactly as if an operator had added it by hand
+// through CreateInterface, and gets its own change_log entry: the audit rule
+// has no exception for a row a template merely suggested.
+//
+// NOTHING SPECIAL HAPPENS FOR A TYPE WITH NO TEMPLATE, OR NO TYPE AT ALL --
+// ListDeviceTypeComponents-equivalent read returns zero rows and the loop
+// below does nothing, so every existing caller (CreateAsset,
+// CreateAssetInProject, both importers) is unaffected unless it names a
+// device_type_id that actually carries a template. That is the regression
+// this task's brief calls out by name.
+//
+// REACTIVATION AND VOCABULARY-EXISTENCE ARE NOT RE-CHECKED HERE, unlike
+// CreateInterface. Reactivation exists because a NAME can collide with a
+// RETIRED port on the SAME asset; a.ID was minted moments ago for this one
+// INSERT and nothing has ever written against it, so there is no retired
+// port to collide with. Vocabulary existence is guaranteed a different way:
+// device_type_component.form_factor already carries a REFERENCES
+// interface_form_factor(code) (migration 00067), so a value that passed
+// CreateDeviceTypeComponents cannot later name a code that does not exist --
+// the vocabulary row cannot be deleted out from under a template that still
+// references it.
+//
+// POWER INPUTS ARE NOT INSTANTIATED, and that is a deliberate limitation of
+// this task, not an oversight. power_input.feed_id is NOT NULL REFERENCES
+// power_feed(id) (migration 00023): a feed is a physical fact about which
+// panel circuit this ONE box was actually wired into, not a property of the
+// model, so a device type's template -- which knows only that "this model
+// has a C14 input" -- has nothing correct to put there. Inventing a
+// placeholder feed would be worse than not instantiating at all: it would
+// misrepresent which panel the asset draws from, silently, for every asset
+// of that type, until someone noticed and corrected however many rows had
+// accumulated. A power_input template component is therefore left as
+// documentation of what the model has, for an operator to wire up by hand
+// with CreatePowerInput once the real feed is known -- reported here and in
+// this task's own report, not silently skipped.
+func (s *SQLStore) instantiateComponents(ctx context.Context, t *tx, a *domain.Asset) error {
+	if a.DeviceTypeID == nil {
+		return nil
+	}
+	var components []domain.DeviceTypeComponent
+	if err := t.selectAll(ctx, &components, deviceTypeComponentSelect+`
+		WHERE device_type_id = ? AND lifecycle = ?
+		ORDER BY kind, position, name`, *a.DeviceTypeID, domain.LifecycleActive); err != nil {
+		return fmt.Errorf("reading device type %s's component template: %w", *a.DeviceTypeID, err)
+	}
+	at := domain.FormatTime(s.now())
+	for _, c := range components {
+		switch c.Kind {
+		case domain.ComponentKindInterface:
+			iface, err := newInterfaceFromTemplate(NewID(), a.ID, c, at)
+			if err != nil {
+				return err
+			}
+			_, err = t.exec(ctx, `
+				INSERT INTO interface (id, asset_id, name, form_factor, speed_mbps, mac, mtu,
+				                       lag_parent_id, is_mgmt, enabled, lifecycle,
+				                       created_at, updated_at)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				iface.ID, iface.AssetID, iface.Name, iface.FormFactor, iface.SpeedMbps, iface.MAC, iface.MTU,
+				iface.LagParentID, iface.IsMgmt, iface.Enabled, iface.Lifecycle, iface.CreatedAt, iface.UpdatedAt)
+			if err != nil {
+				return translateWriteErr(err, "instantiating interface from device type template")
+			}
+			if err := t.logCreate(ctx, "interface", iface.ID, iface); err != nil {
+				return err
+			}
+		case domain.ComponentKindPowerInput:
+			// See the doc comment above: deliberately not instantiated.
+		}
+	}
+	return nil
+}
