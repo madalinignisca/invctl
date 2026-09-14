@@ -111,6 +111,23 @@ var connectiveTablesOutsideTheGraph = map[string]string{
 		"plan). It describes what a MODEL has, not what an installed asset has -- " +
 		"the interface/power_input rows Task 4 creates from it are the ones the " +
 		"graph already reaches, under their own tables.",
+
+	// cable_bundle_member references cable_bundle and link -- the two-key
+	// shape this census flags -- but it names WHICH CABLES SHARE A DUCT, not
+	// a new propagation path: link is already read by LoadGraph (see the
+	// comment above), and the cable itself is what fails. A bundle adds no
+	// edge of its own -- it is a set predicate over the cables LoadGraph
+	// already loaded (docs/cable-bundles-design.md, "The cut"): BundleCutEffect
+	// (Task 3) reuses cutEffect, the same walker LinkCutEffect calls, with
+	// `u.LinkID IN bundle` in place of `u.LinkID == linkID`. Loading
+	// cable_bundle_member into LoadGraph itself would be a second, competing
+	// way to reach an edge the graph already has.
+	"cable_bundle_member": "declares which cables share a duct/tray/trunk " +
+		"(docs/cable-bundles-design.md). It adds no propagation edge of its " +
+		"own -- link is already read by LoadGraph and is what actually fails; " +
+		"BundleCutEffect (Task 3) reuses the existing cutEffect walker with a " +
+		"set predicate over the links LoadGraph already loaded, rather than " +
+		"giving the graph a second way to reach the same edge.",
 }
 
 // TestEveryConnectiveTableIsAccountedForInTheImpactGraph is WP-I1's recurring

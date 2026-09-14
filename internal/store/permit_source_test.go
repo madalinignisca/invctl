@@ -544,7 +544,7 @@ func TestAnUnclassifiedEntityTypeFailsLoudlyRatherThanBeingAllowed(t *testing.T)
 // those two edits cannot drift apart silently.
 var auditedEntityTypes = []string{
 	"aggregate", "app_user", "asn", "asset", "asset_cost", "asset_kind",
-	"backend_member", "backend_pool", "certificate", "circuit", "circuit_cost",
+	"backend_member", "backend_pool", "cable_bundle", "certificate", "circuit", "circuit_cost",
 	"circuit_termination", "cluster", "container_engine", "cost_kind",
 	"custom_field", "data_class", "dependency", "device_type",
 	"device_type_component", "endpoint",
