@@ -208,6 +208,15 @@ func (s *SQLStore) EstateFindings(ctx context.Context) ([]Finding, error) {
 			firstOfKind[k.kind], hrefOfKind[k.kind])
 	}
 
+	// Device type template drift (Task 6). An edit to a type never rewrites an
+	// asset already built from it -- see template_drift.go's own header for
+	// why -- so this is the only place that drift becomes visible at all.
+	drift, err := s.TemplateDriftFindings(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("gathering template drift findings: %w", err)
+	}
+	out = append(out, drift...)
+
 	// Overlays that carry nothing, or carry it to one place.
 	overlays, err := s.ListL2VPNs(ctx)
 	if err != nil {
