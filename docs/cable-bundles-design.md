@@ -116,7 +116,15 @@ now)` taking a spec (the positional-signature lesson from `00067`). Classify
 every column in `internal/domain/classification.go` — declared — and add
 `cable_bundle` to `entityScope` **and** `docs/AUDIT.md`'s write-authorization
 table, which `TestTheWriteScopeTableMatchesEntityScope` cross-checks. Scope:
-`ScopeTopology`, like `link` itself.
+`ScopeTopology` — and **not** for the reason this plan first
+gave. It said "like `link` itself"; `link` is actually `ScopeSubjectDerived`,
+resolving a subject through both cabled assets. A bundle has no such subject:
+it is many-to-many via `cable_bundle_member`, and "every member in scope" is
+**vacuously true for an empty bundle**, which would make a new empty one
+writable by every project owner. That is the reasoning `docs/AUDIT.md` already
+records for `cluster` and `certificate`, both `ScopeTopology` for it. Corrected
+2026-09-14 during execution, after Task 1 checked the analogy and found it
+false.
 
 ### Task 2 — store CRUD and membership
 `CreateBundle`, `UpdateBundle`, `RetireBundle`, `SetBundleMembers`,
