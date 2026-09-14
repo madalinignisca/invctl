@@ -1204,7 +1204,10 @@ func TestNoWriteRouteIsReachableWithNoSessionAtAll(t *testing.T) {
 	// .../{componentID}/retire. A model's port template, built by Tasks 1-6,
 	// finally reachable from the same row an operator already opens to
 	// correct the model's own fields.
-	const pinnedNoSessionRouteCount = 214
+	// 214 -> 215: device-type-templates plan, Task 8 -- POST
+	// /assets/{id}/apply-template. Backfilling a template onto an asset that
+	// predates it, the reason the feature was built.
+	const pinnedNoSessionRouteCount = 215
 
 	for _, eng := range boundaryEngines(t) {
 		t.Run(eng.name, func(t *testing.T) {

@@ -15,6 +15,7 @@ POST /asn/{id}/retire | ASNRetire | write | true
 POST /assets | AssetCreate | write | true
 POST /assets/tags/apply | AssetsBulkTagApply | write | true
 POST /assets/{id} | AssetUpdate | write | true
+POST /assets/{id}/apply-template | AssetApplyTemplate | write | true
 POST /assets/{id}/costs | CostAddToAsset | writeCost | true
 POST /assets/{id}/costs/{costID} | CostEditOnAsset | writeCost | true
 POST /assets/{id}/costs/{costID}/consumers | CostConsumersOnAsset | writeCost | true

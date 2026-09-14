@@ -166,6 +166,26 @@
   <div class="panel-head">
     <h2>Interfaces</h2>
     <span class="panel-note">Identity is (asset, port name) — a NIC swap keeps the port.</span>
+    {{/* THE APPLY-TEMPLATE CONTROL (device-type-templates plan, Task 8):
+         absent entirely unless there is something it could actually do --
+         MissingTemplateComponents covers "no device type", "type has no
+         template" and "already has every port the template names" all
+         alike, so this if is the only branch the template needs. "a control
+         that can only do nothing is worse than no control".
+
+         hx-post BESIDE hx-confirm, the same pairing every other confirmed
+         action on this page uses (see the port Withdraw button's own
+         comment below) -- hx-confirm only intercepts an htmx-driven
+         request; on a plain form submit it is decorative and the button
+         fires unconfirmed. */}}
+    {{if and ($.CanWriteEntity "asset" .Asset.ID) .MissingTemplateComponents}}
+    <form method="post" action="/assets/{{.Asset.ID}}/apply-template" style="display:inline"
+          hx-post="/assets/{{.Asset.ID}}/apply-template"
+          hx-confirm="Add {{.MissingTemplateComponents}} missing port{{if ne .MissingTemplateComponents 1}}s{{end}} from {{.TemplateSourceLabel}}? A port already recorded here is never touched.">
+      <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+      <button class="btn btn-sm" type="submit">Add {{.MissingTemplateComponents}} missing port{{if ne .MissingTemplateComponents 1}}s{{end}} from {{.TemplateSourceLabel}}</button>
+    </form>
+    {{end}}
   </div>
   {{if .Interfaces}}
   <div class="scroll-x">
