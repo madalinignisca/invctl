@@ -237,6 +237,148 @@ func TestPermitHoldsProjectAndCoversDeliberatelyDisagree(t *testing.T) {
 	}
 }
 
+// TestAProjectOwnerCanCreateATemplatedAssetInTheirOwnProject is the
+// regression test for the bug insertAsset's Task 4 hook introduced:
+// CreateAssetInProject used to mint its transaction permit scoped to
+// "asset"/a.ID only, but a device type carrying a component template makes
+// insertAsset write "interface" change_log rows too, in that SAME
+// transaction. "interface" classifies ScopeSubjectDerived
+// (internal/domain/role.go), so a permit that never names those ids covers
+// none of them, and a project owner creating an asset from a templated
+// device type got ErrForbidden from inside their own create -- found by an
+// auth review's probe, not by this suite, because
+// TestAProjectOwnerCanCreateAnAssetInTheirOwnProject never sets a device
+// type and so never exercises instantiateComponents at all.
+//
+// Mutation: revert CreateAssetInProject's permit widening (drop the
+// "interface" entry from txPermit's ScopedEntities) and this must go red
+// with "forbidden" -- see the mutation section of this task's own report for
+// the exact line.
+func TestAProjectOwnerCanCreateATemplatedAssetInTheirOwnProject(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			s, ctx := newStore(t, e)
+			frontend := mustProjectForAssignment(t, s, ctx, "frontend")
+			permit := projectOwnerPermit("po-7", frontend)
+
+			dtID := mustDeviceTypeForComponents(t, s)
+			rj45 := "rj45"
+			sfp28 := "sfp28"
+			if err := s.CreateDeviceTypeComponents(ctx, testPermit, dtID, ComponentSpec{
+				Kind: domain.ComponentKindInterface, NameSpec: "eth0",
+				FormFactor: &rj45,
+			}); err != nil {
+				t.Fatalf("declaring eth0: %v", err)
+			}
+			if err := s.CreateDeviceTypeComponents(ctx, testPermit, dtID, ComponentSpec{
+				Kind: domain.ComponentKindInterface, NameSpec: "eth1",
+				FormFactor: &sfp28,
+			}); err != nil {
+				t.Fatalf("declaring eth1: %v", err)
+			}
+
+			a, err := domain.NewAsset(NewID(), domain.KindServer, "templated-in-project", nil, s.Now())
+			if err != nil {
+				t.Fatalf("building asset: %v", err)
+			}
+			a.DeviceTypeID = &dtID
+			if err := s.CreateAssetInProject(ctx, permit, frontend, a); err != nil {
+				t.Fatalf("CreateAssetInProject: %v", err)
+			}
+
+			ifaces, err := s.ListInterfaces(ctx, a.ID)
+			if err != nil {
+				t.Fatalf("listing interfaces: %v", err)
+			}
+			if len(ifaces) != 2 {
+				t.Fatalf("got %d interfaces, want exactly 2: %+v", len(ifaces), ifaces)
+			}
+			byName := map[string]InterfaceRow{}
+			for _, i := range ifaces {
+				byName[i.Name] = i
+			}
+			for _, name := range []string{"eth0", "eth1"} {
+				iface, ok := byName[name]
+				if !ok {
+					t.Fatalf("%s was not instantiated: %+v", name, ifaces)
+				}
+				changes, err := s.ListChangesForEntity(ctx, "interface", iface.ID, 10)
+				if err != nil {
+					t.Fatalf("listing changes for %s: %v", name, err)
+				}
+				if len(changes) != 1 {
+					t.Fatalf("interface %s has %d change_log rows, want exactly 1", name, len(changes))
+				}
+				if changes[0].Action != domain.ActionCreate {
+					t.Errorf("interface %s's change_log action = %s, want create", name, changes[0].Action)
+				}
+			}
+
+			links, err := s.ListProjectAssets(ctx, frontend)
+			if err != nil {
+				t.Fatalf("listing project assets: %v", err)
+			}
+			var found bool
+			for _, l := range links {
+				if l.AssetID == a.ID {
+					found = true
+				}
+			}
+			if !found {
+				t.Error("the templated asset was not linked to the project that created it")
+			}
+		})
+	}
+}
+
+// TestAProjectOwnerStillCannotCreateATemplatedAssetInSomebodyElsesProject
+// proves the permit widening above stayed narrow: a project owner without
+// projectID in their permit is still refused, device type template or not.
+// Widening the SCOPE of what a held permit may write must not widen WHICH
+// permits are accepted -- domain.PermitHoldsProject still runs first, on the
+// caller's own permit, before the txPermit this fix touches is even built.
+func TestAProjectOwnerStillCannotCreateATemplatedAssetInSomebodyElsesProject(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			s, ctx := newStore(t, e)
+			frontend := mustProjectForAssignment(t, s, ctx, "frontend")
+			other := mustProjectForAssignment(t, s, ctx, "other")
+			// Holds frontend, not other -- the project in the URL.
+			permit := projectOwnerPermit("po-8", frontend)
+
+			dtID := mustDeviceTypeForComponents(t, s)
+			rj45 := "rj45"
+			if err := s.CreateDeviceTypeComponents(ctx, testPermit, dtID, ComponentSpec{
+				Kind: domain.ComponentKindInterface, NameSpec: "eth0",
+				FormFactor: &rj45,
+			}); err != nil {
+				t.Fatalf("declaring eth0: %v", err)
+			}
+
+			a, err := domain.NewAsset(NewID(), domain.KindServer, "should-not-exist-templated", nil, s.Now())
+			if err != nil {
+				t.Fatalf("building asset: %v", err)
+			}
+			a.DeviceTypeID = &dtID
+			err = s.CreateAssetInProject(ctx, permit, other, a)
+			if !errors.Is(err, domain.ErrForbidden) {
+				t.Fatalf("err = %v, want domain.ErrForbidden", err)
+			}
+
+			if _, err := s.GetAsset(ctx, a.ID); !errors.Is(err, domain.ErrNotFound) {
+				t.Errorf("the asset was created despite the refusal: err = %v", err)
+			}
+			ifaces, err := s.ListInterfaces(ctx, a.ID)
+			if err != nil {
+				t.Fatalf("listing interfaces: %v", err)
+			}
+			if len(ifaces) != 0 {
+				t.Errorf("interfaces were instantiated for a refused asset: %+v", ifaces)
+			}
+		})
+	}
+}
+
 // TestAProjectOwnerCannotLinkAnExistingAssetToTheirProject is the escalation
 // docs/rbac-design.md §4 forbids, written as a test against the store.
 //

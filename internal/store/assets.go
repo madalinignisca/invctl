@@ -887,7 +887,7 @@ func (s *SQLStore) CreateAsset(ctx context.Context, p domain.Permit, a *domain.A
 		return err
 	}
 	return s.write(ctx, p, func(t *tx) error {
-		return s.insertAsset(ctx, t, a, environmentIDs, codes)
+		return s.insertAsset(ctx, t, a, environmentIDs, codes, nil)
 	})
 }
 
@@ -905,7 +905,16 @@ func (s *SQLStore) CreateAsset(ctx context.Context, p domain.Permit, a *domain.A
 // Everything a single create does happens here, in the same order, including the
 // change_log row. An import is a declared-state mutation like any other and gets
 // one audit entry per asset, not one per file.
-func (s *SQLStore) insertAsset(ctx context.Context, t *tx, a *domain.Asset, environmentIDs, codes []string) error {
+// plannedInterfaceIDs is nil for every caller except CreateAssetInProject.
+// nil means "mint the interface ids inside this transaction, as always";
+// CreateAssetInProject instead hands down the ids it minted (with NewID(),
+// itself) BEFORE this transaction opened, because it had to fold them into
+// the scoped permit the transaction runs under -- see that method's own
+// comment for why the permit has to be built first. instantiateComponents
+// uses the supplied ids when given and mints its own when not; either way
+// every id an interface row ever gets under this path came from NewID() in
+// this package, never from a caller.
+func (s *SQLStore) insertAsset(ctx context.Context, t *tx, a *domain.Asset, environmentIDs, codes, plannedInterfaceIDs []string) error {
 	if err := t.requireVocabulary(ctx, vocabAssetKind, "kind", a.Kind); err != nil {
 		return err
 	}
@@ -964,7 +973,7 @@ func (s *SQLStore) insertAsset(ctx context.Context, t *tx, a *domain.Asset, envi
 	// A no-op when a.DeviceTypeID is nil or the type carries no template --
 	// see instantiateComponents's own doc comment for the regression this
 	// preserves.
-	if err := s.instantiateComponents(ctx, t, a); err != nil {
+	if err := s.instantiateComponents(ctx, t, a, plannedInterfaceIDs); err != nil {
 		return err
 	}
 	return s.indexAsset(ctx, t, a)
@@ -1014,18 +1023,58 @@ func (s *SQLStore) CreateAssetInProject(ctx context.Context, p domain.Permit, pr
 	if err := s.requireFreeRackSpace(ctx, a); err != nil {
 		return err
 	}
+	// THE FIX FOR THE REGRESSION insertAsset's Task 4 hook introduced: a
+	// device type's component template writes "interface" change_log rows
+	// inside the SAME transaction as the asset (see insertAsset), but
+	// txPermit below is scoped ONLY to "asset"/a.ID unless this widens it.
+	// "interface" classifies ScopeSubjectDerived (domain/role.go), so a
+	// permit that does not name these ids covers none of them, and a
+	// project owner creating an asset whose device type carries a template
+	// got ErrForbidden from inside their own create -- fail-closed, not an
+	// escalation, but it broke the very flow this method exists for.
+	//
+	// Read and minted BEFORE txPermit, not after: the permit has to name
+	// every id the transaction can legitimately write, and by the same
+	// argument PermitHoldsProject's doc comment makes for a.ID itself, an id
+	// that does not exist yet cannot be resolved from project membership --
+	// it has to be minted here and carried in. ListDeviceTypeComponents is
+	// the read ApplyTemplate and instantiateComponents already trust for
+	// this table (same query, same ORDER BY -- see that method's own
+	// comment on why position matters), so this is not a second, divergent
+	// read of the template shape.
+	var plannedInterfaceIDs []string
+	if a.DeviceTypeID != nil {
+		components, err := s.ListDeviceTypeComponents(ctx, *a.DeviceTypeID)
+		if err != nil {
+			return fmt.Errorf("reading device type %s's component template: %w", *a.DeviceTypeID, err)
+		}
+		for _, c := range components {
+			if c.Kind == domain.ComponentKindInterface {
+				plannedInterfaceIDs = append(plannedInterfaceIDs, NewID())
+			}
+		}
+	}
 	// The transaction itself runs under a SECOND, narrower permit -- not p.
 	// domain.scopedPermit.Covers cannot authorize "asset"/a.ID against a
 	// scope resolved before this request began, because a.ID did not exist
 	// then (see PermitHoldsProject's doc comment for the full argument).
 	// This permit is safe to mint BECAUSE the check above already proved p
-	// holds projectID for real: it is scoped to exactly the one project and
-	// the one freshly minted id this transaction writes, nothing wider.
-	txPermit := domain.ScopedPermit(p.Actor(), []string{projectID}, domain.ScopedEntities{
-		"asset": {a.ID: true},
-	})
+	// holds projectID for real: it is scoped to exactly the one project,
+	// the one freshly minted asset id, and the interface ids THIS METHOD
+	// JUST MINTED WITH NewID() a moment ago -- nothing a caller supplied and
+	// nothing reused across calls. See applyTemplateSubject's identical
+	// argument for the sibling path (Task 5) that established this shape.
+	entities := domain.ScopedEntities{"asset": {a.ID: true}}
+	if len(plannedInterfaceIDs) > 0 {
+		ifaceIDs := make(map[string]bool, len(plannedInterfaceIDs))
+		for _, id := range plannedInterfaceIDs {
+			ifaceIDs[id] = true
+		}
+		entities["interface"] = ifaceIDs
+	}
+	txPermit := domain.ScopedPermit(p.Actor(), []string{projectID}, entities)
 	return s.write(ctx, txPermit, func(t *tx) error {
-		if err := s.insertAsset(ctx, t, a, nil, nil); err != nil {
+		if err := s.insertAsset(ctx, t, a, nil, nil, plannedInterfaceIDs); err != nil {
 			return err
 		}
 		return s.insertProjectAssetLink(ctx, t, projectID, a.ID)

@@ -373,7 +373,28 @@ func (s *SQLStore) instantiateInterfaceComponents(ctx context.Context, t *tx, as
 // A DEVICE TYPE'S TEMPLATE CARRIES INTERFACES ONLY -- see migration 00067's
 // header for why power inputs were excluded from the kind vocabulary
 // entirely, rather than accepted and left uninstantiated here.
-func (s *SQLStore) instantiateComponents(ctx context.Context, t *tx, a *domain.Asset) error {
+//
+// plannedIDs IS NIL FOR EVERY CALLER EXCEPT CreateAssetInProject. nil means
+// "mint one id per interface component right here"; a non-nil slice means
+// the caller already minted these (with NewID(), before this transaction
+// opened) and folded them into the permit this transaction runs under --
+// CreateAssetInProject has to, because domain.scopedPermit.Covers can only
+// authorize an id that is already in its scope, and "interface" classifies
+// ScopeSubjectDerived (domain/role.go). See that method's own comment for
+// the regression this parameter fixes.
+//
+// A LENGTH MISMATCH IS A CONFLICT, NOT A PANIC. plannedIDs is positional
+// against the interface-kind components read here a moment ago, but that
+// read is a SECOND read of the same table -- CreateAssetInProject read it
+// once, before the transaction, to mint ids and build the permit; this reads
+// it again, inside the transaction, the same way every other caller of this
+// function always has. Nothing serializes the two, so a template edited
+// between them is a genuine (if narrow) race, and indexing ids[i] blind
+// would either panic or silently mismatch a minted id to the wrong
+// component. Erroring here instead turns a data race into a transaction
+// rollback, which is the property this whole package treats as the correct
+// failure shape for a lost race.
+func (s *SQLStore) instantiateComponents(ctx context.Context, t *tx, a *domain.Asset, plannedIDs []string) error {
 	if a.DeviceTypeID == nil {
 		return nil
 	}
@@ -392,9 +413,21 @@ func (s *SQLStore) instantiateComponents(ctx context.Context, t *tx, a *domain.A
 			ifaces = append(ifaces, c)
 		}
 	}
-	ids := make([]string, len(ifaces))
-	for i := range ids {
-		ids[i] = NewID()
+	var ids []string
+	if plannedIDs != nil {
+		if len(plannedIDs) != len(ifaces) {
+			return fmt.Errorf(
+				"instantiating device type %s's component template onto asset %s: "+
+					"planned %d interface id(s) but the template now has %d active interface "+
+					"component(s), which is a lost race between reading it and writing it: %w",
+				*a.DeviceTypeID, a.ID, len(plannedIDs), len(ifaces), domain.ErrConflict)
+		}
+		ids = plannedIDs
+	} else {
+		ids = make([]string, len(ifaces))
+		for i := range ids {
+			ids[i] = NewID()
+		}
 	}
 	at := domain.FormatTime(s.now())
 	_, err := s.instantiateInterfaceComponents(ctx, t, a.ID, ifaces, ids, at)

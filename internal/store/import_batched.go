@@ -225,7 +225,7 @@ func (s *SQLStore) ImportAssetsBatched(ctx context.Context, permit domain.Permit
 					}
 					asset.ParentID = &id
 				}
-				if err := s.insertAsset(ctx, t, asset, envIDs[i], envCodes[i]); err != nil {
+				if err := s.insertAsset(ctx, t, asset, envIDs[i], envCodes[i], nil); err != nil {
 					var ve *domain.ValidationError
 					if errors.As(err, &ve) {
 						for _, f := range ve.Fields {
