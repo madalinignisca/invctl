@@ -53,8 +53,17 @@ func TestAddingComponentsByARangeCreatesEveryName(t *testing.T) {
 			"action, one audit entry, not 48", got)
 	}
 
+	// Ethernet24 and Ethernet48, NOT Ethernet1: "Ethernet1" is a prefix of
+	// Ethernet10 through Ethernet19, so a Contains check on it passes even if
+	// the only thing rendered is Ethernet10. Two unambiguous names prove the
+	// expansion reached the page.
+	//
+	// These read Ethernet1/1 and Ethernet1/48 until the review found the
+	// example string they came from was wrong for the estate's own switches.
+	// The input was corrected here and the assertion was not, so the test kept
+	// asserting the shape the fix had just removed.
 	reopened := body(t, h.get("/catalogue?edit="+dtID, false))
-	if !strings.Contains(reopened, "Ethernet1/1") || !strings.Contains(reopened, "Ethernet1/48") {
+	if !strings.Contains(reopened, "Ethernet24") || !strings.Contains(reopened, "Ethernet48") {
 		t.Errorf("the reopened row does not list the range it just created:\n%s", reopened)
 	}
 }
