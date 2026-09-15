@@ -390,6 +390,17 @@ func (a *App) IdentityUpdate(w http.ResponseWriter, r *http.Request) {
 		a.renderIdentityWith(w, r, http.StatusUnprocessableEntity, numErrs, &spec, "")
 		return
 	}
+	// submittedString, not identitySpecFromForm's plain optionalString: a
+	// field that never rendered must not read as an operator clearing it.
+	// secret_ref specifically -- unlike realm or rotation_days -- is in
+	// domain.RedactedFields, so change_log records THAT it changed and never
+	// what from; of the six editable fields it is the only one where an
+	// accidental omission destroys information the audit trail cannot
+	// restore afterwards. Overwritten on spec itself, not just on updated
+	// below, so the value echoed back into the correction form on a refusal
+	// (renderIdentityWith's spec overlay) agrees with what was actually
+	// about to be written.
+	spec.SecretRef = submittedString(r, "secret_ref", existing.SecretRef)
 
 	updated := existing.Identity
 	updated.Kind = spec.Kind
@@ -428,9 +439,15 @@ func (a *App) IdentityRetire(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if err := a.Store.RetireIdentity(r.Context(), a.permit(r), id); err != nil {
 		if isStale(err) {
-			// The withdraw form carries the token like every other edit form,
-			// so a stale withdrawal is 409 rather than a silent second retire
-			// of a row somebody else has already changed.
+			// NOT because the withdraw form carries a token -- it deliberately
+			// does not (identities.html's own comment on that form says why,
+			// and TestEveryEditFormCarriesItsVersion's population, handlers
+			// that call submittedVersion, does not include IdentityRetire).
+			// RetireIdentity re-reads the row itself and guards its write
+			// against what it just read, so this branch is reachable only
+			// through THAT internal race -- two retires of the same
+			// credential landing between its own read and its own write --
+			// never through a stale value this handler submitted.
 			a.renderIdentity(w, r, http.StatusConflict, staleMessage("name"))
 			return
 		}
@@ -457,8 +474,22 @@ func (a *App) IdentityRetire(w http.ResponseWriter, r *http.Request) {
 func (a *App) IdentityRecordRotation(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	date := formValue(r, "last_rotated")
-	err := a.Store.RecordIdentityRotation(r.Context(), a.permit(r), id, date)
+
+	// Read BEFORE the store call so a same-date resubmission can be told
+	// apart from a real write -- RecordIdentityRotation's own doc comment:
+	// "a rotation recorded with the date already stored writes nothing at
+	// all... and returns nil". The audit trail is right either way (no
+	// change_log row for a no-op); only a flash claiming "recorded" over a
+	// write that did not happen would be wrong, and this product's whole
+	// argument is that it tells the truth about what it knows.
+	existing, err := a.Store.GetIdentity(r.Context(), id)
 	if err != nil {
+		a.handleStoreError(w, r, err)
+		return
+	}
+	alreadyRecorded := existing.LastRotated != nil && *existing.LastRotated == date
+
+	if err := a.Store.RecordIdentityRotation(r.Context(), a.permit(r), id, date); err != nil {
 		if errs, ok := validationErrors(err); ok {
 			a.renderIdentityWith(w, r, refusalStatus(err), errs, nil, date)
 			return
@@ -466,6 +497,10 @@ func (a *App) IdentityRecordRotation(w http.ResponseWriter, r *http.Request) {
 		a.handleStoreError(w, r, err)
 		return
 	}
-	a.setFlash(r, "success", "Rotation recorded.")
+	if alreadyRecorded {
+		a.setFlash(r, "info", "Already recorded as rotated on "+date+".")
+	} else {
+		a.setFlash(r, "success", "Rotation recorded.")
+	}
 	render.Redirect(w, r, "/identities/"+id)
 }

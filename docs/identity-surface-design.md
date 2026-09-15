@@ -398,11 +398,23 @@ button uses `hx-post` (`hx-confirm` requires it).
 
 ### Concurrency
 
-The create, correct and withdraw forms carry the `row_version` token and return
-**409** on a stale write, like every other edit form —
-`TestEveryEditFormCarriesItsVersion` derives its population from handlers that
-reach `submittedVersion`, and `00066`'s header warns that a correction path built
-without a token is not flagged by that census, it is simply *absent* from it.
+The correct form carries the `row_version` token and returns **409** on a
+stale write, like every other edit form — `TestEveryEditFormCarriesItsVersion`
+derives its population from handlers that reach `submittedVersion`, and
+`00066`'s header warns that a correction path built without a token is not
+flagged by that census, it is simply *absent* from it.
+
+**AMENDED 2026-09-15 (auth review, Task 5 fix round 1).** The original text
+here said the withdraw form carries the token too. It does not, and that is
+right rather than an oversight: `RetireIdentity` takes no client-submitted
+version at all — it re-reads the row itself and guards its own write against
+what it just read, the same shape `RetireBundle` and `RetireTeam` already
+use. A token on that form would be inert markup nothing reads, and would
+misrepresent to a reader that the withdraw path is optimistically locked
+against a submitted version when it is not. The narrow internal race this
+still leaves — two withdrawals of the same credential landing between
+`RetireIdentity`'s own read and its own write — surfaces as the same 409 a
+stale form would, but nothing the operator submitted made it stale.
 
 **The rotation action carries no token and bumps the version**, following
 `VerifyDependency` exactly. Two operators recording a rotation of the same

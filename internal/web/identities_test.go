@@ -892,3 +892,314 @@ func TestTheIdentityRetireButtonPairsHxConfirmWithHxPost(t *testing.T) {
 			"operator answers.")
 	}
 }
+
+// ---------- coverage for the isConflict branch (fix round 1) ----------
+//
+// The brief's given IdentityCreate/IdentityUpdate bodies fall through a
+// UNIQUE (realm, name) violation to handleStoreError's generic 409 page.
+// The auth review ruled the isConflict branch this implementation added
+// instead should stand, which means it needs the coverage the brief never
+// asked for.
+
+// TestADuplicateNameThroughCreateIs409: declaring a second live credential
+// under a realm and name a live one already holds is a 409 naming the
+// field, typed values echoed, and nothing written.
+func TestADuplicateNameThroughCreateIs409(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+	ctx := context.Background()
+	admin := domain.AdministratorPermit(domain.SystemActor)
+
+	existing, err := domain.NewIdentity(store.NewID(), domain.IdentitySpec{
+		Kind: domain.IdentityServiceAccount, Name: "svc-dup-create",
+		Realm: strPtr("vault"),
+	})
+	if err != nil {
+		t.Fatalf("building identity: %v", err)
+	}
+	if err := h.store.CreateIdentity(ctx, admin, existing); err != nil {
+		t.Fatalf("creating identity: %v", err)
+	}
+
+	before := h.count(`SELECT COUNT(*) FROM change_log`)
+	token := h.csrfToken("/identities")
+	resp := h.post("/identities", url.Values{
+		"csrf_token": {token},
+		"kind":       {domain.IdentityServiceAccount},
+		"name":       {"svc-dup-create"},
+		"realm":      {"vault"},
+	}, false)
+	page := body(t, resp)
+
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("declaring a duplicate (realm, name) returned %d, want 409", resp.StatusCode)
+	}
+	if !strings.Contains(page, "already exists") {
+		t.Error("the refusal does not say a matching identity already exists")
+	}
+	// Typed values survive: this is a create-form refusal, so .Spec carries
+	// them (renderIdentityList's own contract), not a stored row's fields.
+	if !strings.Contains(page, `value="svc-dup-create"`) {
+		t.Error("the refused create form did not hand back the name that was typed")
+	}
+	if after := h.count(`SELECT COUNT(*) FROM change_log`); after != before {
+		t.Errorf("change_log grew from %d to %d on a refused create", before, after)
+	}
+	if n := h.count(`SELECT COUNT(*) FROM identity WHERE name = ? AND lifecycle = ?`,
+		"svc-dup-create", domain.LifecycleActive); n != 1 {
+		t.Errorf("%d live rows named svc-dup-create, want exactly the one seeded above", n)
+	}
+}
+
+// TestADuplicateNameThroughUpdateIs409: correcting one live credential to
+// collide with another live credential's (realm, name) is the same refusal.
+func TestADuplicateNameThroughUpdateIs409(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+	ctx := context.Background()
+	admin := domain.AdministratorPermit(domain.SystemActor)
+
+	first, err := domain.NewIdentity(store.NewID(), domain.IdentitySpec{
+		Kind: domain.IdentityServiceAccount, Name: "svc-dup-target",
+		Realm: strPtr("vault"),
+	})
+	if err != nil {
+		t.Fatalf("building first identity: %v", err)
+	}
+	if err := h.store.CreateIdentity(ctx, admin, first); err != nil {
+		t.Fatalf("creating first identity: %v", err)
+	}
+	second, err := domain.NewIdentity(store.NewID(), domain.IdentitySpec{
+		Kind: domain.IdentityServiceAccount, Name: "svc-dup-mover",
+		Realm: strPtr("vault"),
+	})
+	if err != nil {
+		t.Fatalf("building second identity: %v", err)
+	}
+	if err := h.store.CreateIdentity(ctx, admin, second); err != nil {
+		t.Fatalf("creating second identity: %v", err)
+	}
+
+	before := h.count(`SELECT COUNT(*) FROM change_log`)
+	path := "/identities/" + second.ID
+	token := h.csrfToken(path)
+	resp := h.post(path, url.Values{
+		"csrf_token":  {token},
+		"kind":        {domain.IdentityServiceAccount},
+		"name":        {"svc-dup-target"},
+		"realm":       {"vault"},
+		"row_version": {"1"},
+	}, false)
+	page := body(t, resp)
+
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("correcting into a duplicate (realm, name) returned %d, want 409", resp.StatusCode)
+	}
+	if !strings.Contains(page, "already exists") {
+		t.Error("the refusal does not say a matching identity already exists")
+	}
+	if !strings.Contains(page, `value="svc-dup-target"`) {
+		t.Error("the refused correction form did not hand back the name that was typed")
+	}
+	if after := h.count(`SELECT COUNT(*) FROM change_log`); after != before {
+		t.Errorf("change_log grew from %d to %d on a refused correction", before, after)
+	}
+	stored := h.lookup(`SELECT name FROM identity WHERE id = ?`, second.ID)
+	if stored != "svc-dup-mover" {
+		t.Errorf("stored name = %q, want the credential's own name unchanged", stored)
+	}
+}
+
+// TestARetiredIdentitysNameIsImmediatelyReusable is the entire point of the
+// live-scoped uniqueness index (migration 00003): a withdrawn credential's
+// (realm, name) does not conflict with a new declaration under the same
+// name, which is what makes "retire it and create its replacement under the
+// same name" -- the documented response to a compromised credential -- work
+// during an incident rather than fail with the very refusal this task just
+// added coverage for.
+func TestARetiredIdentitysNameIsImmediatelyReusable(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+	ctx := context.Background()
+	admin := domain.AdministratorPermit(domain.SystemActor)
+
+	original, err := domain.NewIdentity(store.NewID(), domain.IdentitySpec{
+		Kind: domain.IdentityServiceAccount, Name: "svc-compromised-reuse",
+		Realm: strPtr("vault"),
+	})
+	if err != nil {
+		t.Fatalf("building identity: %v", err)
+	}
+	if err := h.store.CreateIdentity(ctx, admin, original); err != nil {
+		t.Fatalf("creating identity: %v", err)
+	}
+	if err := h.store.RetireIdentity(ctx, admin, original.ID); err != nil {
+		t.Fatalf("withdrawing: %v", err)
+	}
+
+	token := h.csrfToken("/identities")
+	resp := h.post("/identities", url.Values{
+		"csrf_token": {token},
+		"kind":       {domain.IdentityServiceAccount},
+		"name":       {"svc-compromised-reuse"},
+		"realm":      {"vault"},
+	}, false)
+	page := body(t, resp)
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("declaring a replacement under a WITHDRAWN credential's own name "+
+			"returned %d, want 303. The live-scoped uniqueness index exists precisely "+
+			"so retire-then-replace works during an incident: %s", resp.StatusCode, page)
+	}
+	if n := h.count(`SELECT COUNT(*) FROM identity WHERE name = ? AND lifecycle = ?`,
+		"svc-compromised-reuse", domain.LifecycleActive); n != 1 {
+		t.Errorf("%d live rows named svc-compromised-reuse, want exactly the replacement", n)
+	}
+	if n := h.count(`SELECT COUNT(*) FROM identity WHERE name = ? AND lifecycle = ?`,
+		"svc-compromised-reuse", domain.LifecycleRetired); n != 1 {
+		t.Errorf("%d retired rows named svc-compromised-reuse, want the original still there", n)
+	}
+}
+
+// ---------- fix round 1: an omitted secret_ref must not clear it ----------
+//
+// identitySpecFromForm originally read secret_ref through the plain
+// optionalString every other create-only field uses, which is nil whether
+// the field was absent from the form OR submitted empty. IdentityUpdate now
+// resolves it through submittedString instead, exactly as team_id already
+// does two lines below it -- secret_ref specifically, because it is in
+// domain.RedactedFields: change_log records THAT it changed and never what
+// from, so an accidental clear here is the one loss among these six fields
+// the audit trail cannot undo afterwards.
+
+// TestAnOmittedSecretRefOnCorrectionDoesNotClearIt.
+func TestAnOmittedSecretRefOnCorrectionDoesNotClearIt(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+	ctx := context.Background()
+	admin := domain.AdministratorPermit(domain.SystemActor)
+
+	identity, err := domain.NewIdentity(store.NewID(), domain.IdentitySpec{
+		Kind: domain.IdentityServiceAccount, Name: "svc-secret-preserve",
+		Realm: strPtr("vault"), SecretRef: strPtr("kv/prod/secret-preserve/db"),
+	})
+	if err != nil {
+		t.Fatalf("building identity: %v", err)
+	}
+	if err := h.store.CreateIdentity(ctx, admin, identity); err != nil {
+		t.Fatalf("creating identity: %v", err)
+	}
+
+	path := "/identities/" + identity.ID
+	token := h.csrfToken(path)
+	// secret_ref IS DELIBERATELY ABSENT: a correction about the credential's
+	// name must not also blank the path it never touched.
+	resp := h.post(path, url.Values{
+		"csrf_token":  {token},
+		"kind":        {domain.IdentityServiceAccount},
+		"name":        {"svc-secret-preserve-corrected"},
+		"realm":       {"vault"},
+		"row_version": {"1"},
+	}, false)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("the correction returned %d, want 303", resp.StatusCode)
+	}
+	if n := h.count(`SELECT COUNT(*) FROM identity WHERE id = ? AND secret_ref = ?`,
+		identity.ID, "kv/prod/secret-preserve/db"); n != 1 {
+		t.Error("secret_ref was cleared by a correction form that never rendered the " +
+			"field. An accidental omission destroying the only recorded path to a " +
+			"credential's material is not recoverable from change_log, which redacts " +
+			"secret_ref by design.")
+	}
+}
+
+// TestAnExplicitlyEmptiedSecretRefClearsIt: the flip side of the test above
+// -- an operator deliberately blanking the field must still work.
+func TestAnExplicitlyEmptiedSecretRefClearsIt(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+	ctx := context.Background()
+	admin := domain.AdministratorPermit(domain.SystemActor)
+
+	identity, err := domain.NewIdentity(store.NewID(), domain.IdentitySpec{
+		Kind: domain.IdentityServiceAccount, Name: "svc-secret-clear",
+		Realm: strPtr("vault"), SecretRef: strPtr("kv/prod/secret-clear/db"),
+	})
+	if err != nil {
+		t.Fatalf("building identity: %v", err)
+	}
+	if err := h.store.CreateIdentity(ctx, admin, identity); err != nil {
+		t.Fatalf("creating identity: %v", err)
+	}
+
+	path := "/identities/" + identity.ID
+	token := h.csrfToken(path)
+	resp := h.post(path, url.Values{
+		"csrf_token":  {token},
+		"kind":        {domain.IdentityServiceAccount},
+		"name":        {"svc-secret-clear"},
+		"realm":       {"vault"},
+		"secret_ref":  {""},
+		"row_version": {"1"},
+	}, false)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("the correction returned %d, want 303", resp.StatusCode)
+	}
+	if n := h.count(`SELECT COUNT(*) FROM identity WHERE id = ? AND secret_ref IS NULL`,
+		identity.ID); n != 1 {
+		t.Error("secret_ref was NOT cleared by a correction that explicitly emptied the " +
+			"field -- submittedString must still honour a deliberate clearance, the same " +
+			"rule its own doc comment states for team_id")
+	}
+}
+
+// ---------- fix round 1: the no-op rotation flash must tell the truth ----------
+
+// TestANoOpRotationFlashesAccurately: recording a rotation whose date equals
+// the one already stored writes nothing at all (RecordIdentityRotation's own
+// doc comment: no UPDATE, no change_log row, no row_version bump). The
+// confirmation must say so plainly rather than claim an action that did not
+// happen.
+func TestANoOpRotationFlashesAccurately(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+	ctx := context.Background()
+	admin := domain.AdministratorPermit(domain.SystemActor)
+
+	identity, err := domain.NewIdentity(store.NewID(), domain.IdentitySpec{
+		Kind: domain.IdentityServiceAccount, Name: "svc-noop-rotation",
+		Realm: strPtr("vault"),
+	})
+	if err != nil {
+		t.Fatalf("building identity: %v", err)
+	}
+	if err := h.store.CreateIdentity(ctx, admin, identity); err != nil {
+		t.Fatalf("creating identity: %v", err)
+	}
+	already := domain.FormatDate(h.store.Now().AddDate(0, 0, -10))
+	if err := h.store.RecordIdentityRotation(ctx, admin, identity.ID, already); err != nil {
+		t.Fatalf("seeding a rotation: %v", err)
+	}
+
+	path := "/identities/" + identity.ID
+	token := h.csrfToken(path)
+	resp := h.post(path+"/rotation", url.Values{
+		"csrf_token":   {token},
+		"last_rotated": {already},
+	}, false)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("resubmitting the already-recorded date returned %d, want 303", resp.StatusCode)
+	}
+
+	page := body(t, h.get(path, false))
+	if !strings.Contains(page, "Already recorded as rotated on "+already) {
+		t.Errorf("the confirmation does not say the date was already recorded; a flash " +
+			"reading \"Rotation recorded.\" over a write that did not happen claims an " +
+			"action RecordIdentityRotation's own no-op rule refused to perform")
+	}
+	if strings.Contains(page, "flash-success") {
+		t.Error("a no-op rotation rendered as a success flash rather than an info one")
+	}
+}

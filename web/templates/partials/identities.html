@@ -246,7 +246,14 @@
       <div class="field-row">
         <div class="field">
           <label for="i-ed-secret">Secret reference</label>
-          <input id="i-ed-secret" class="mono" type="text" name="secret_ref" value="{{deref .Identity.SecretRef}}">
+          {{/* .SecretRef, NEVER .Identity.SecretRef -- see this file's header
+               (lines 12-17): a template-side {{if .IsAdmin}} is one {{end}}
+               away from leaking it. .SecretRef is computed in
+               renderIdentityWith AFTER the spec overlay, so a rejected
+               correction still echoes what an Administrator typed, and this
+               field stays empty for anyone else even if the surrounding
+               {{if .IsAdmin}} block is ever moved or mis-nested. */}}
+          <input id="i-ed-secret" class="mono" type="text" name="secret_ref" value="{{.SecretRef}}">
           <div class="field-hint">A path. The material itself must never be entered here.</div>
         </div>
         <div class="field">
