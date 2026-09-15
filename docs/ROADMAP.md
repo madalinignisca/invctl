@@ -1182,39 +1182,51 @@ units and weight but nothing about compute, and this is the prerequisite for
 every figure in J4. Useful before any money is involved: it answers *"is this
 cluster oversubscribed?"*.
 
-**WP-J8 · Identity surface** — S — **NOT BUILT**
-`CreateIdentity` and `ListIdentities` exist in `internal/store/deps.go` and **no
-route reaches `CreateIdentity`**, so an identity cannot be declared, corrected or
-withdrawn through the application at all.
+**WP-J8 · Identity surface** — S — **DONE 2026-09-15**
 
-**Corrected 2026-09-15:** this entry said "no route reaches either of them",
-which is false for `ListIdentities` — `internal/web/handlers/deps.go:238` and
-`internal/web/handlers/services.go:340` both call it to populate the dependency
-identity `<select>`, and it returns retired identities too. The error was
-propagated into the design doc before a plan review caught it, where acting on
-it would have silently cleared `dependency.identity_id`. The unbuilt surface is
-the WRITE surface, which is what `writeSurfaceUnbuilt` actually asserts; there
-is no identity LIST PAGE, which is a different and smaller claim. The table carries
-`kind name realm secret_ref rotation_days last_rotated lifecycle team_id` — and
-`rotation_days`/`last_rotated` are the point of it, so a credential-rotation
-model that can never record a rotation is inert rather than merely incomplete.
+List and detail pages, create, correct, withdraw, and `POST /identities/{id}/rotation`
+— the explicit "record a rotation" action, which is the feature rather than a side
+effect of an edit form. `last_rotated` has exactly one writer, enforced by
+`internal/store/last_rotated_source_test.go`. Rotation is five-valued
+(`domain.RotationState`); the two-valued `RotationOverdue` is deleted, because it
+answered `false` both to "policy set, nothing ever recorded" and to an unparseable
+stored value. Migration `00069` added `row_version` and a date-shape `CHECK`.
+`writeSurfaceUnbuilt` is at **zero**. The demo estate seeds four of the five
+rotation states plus a retired credential still named by a live dependency.
 
-Wants: a list and detail page, create, correct, withdraw, and an explicit
-"record a rotation" action that stamps `last_rotated` — that last one is the
-feature, not a side effect of an edit form, because it is the thing somebody
-actually does.
+**NOT covered, deliberately:** a machine-recorded rotation (a Vault webhook
+stamping `last_rotated` needs the whole declared/observed argument redone from
+`docs/AUDIT.md` rules 1-7, and rule 6 currently forbids an agent-reachable
+handler from returning an identity row at all); indexing identities for global
+search (**`secret_ref` must never enter `search_index`**, which every
+authenticated user can read); a restore path (a retired identity's `(realm, name)`
+is immediately reusable by design, and a restore would put two live rows in
+contention for one name); a "due soon" finding band; and joining `cert_subject`
+identities to `certificate`, which has a real question in it — which of the two
+owns the expiry date.
 
-`secret_ref` holds a **path, never a secret** (CLAUDE.md), and it must stay
-redacted in `snapshotJSON`/`diffJSON` the way `CreateUser` already redacts
-`password_hash`. `team_id` answers "who do I ask", the same role it plays on
-`custom_field`.
+**Corrected 2026-09-15, and the correction survives DONE:** an earlier version of
+this entry said "no route reaches either of them", which was false for
+`ListIdentities` — `internal/web/handlers/deps.go:238` and
+`internal/web/handlers/services.go:340` both called it to populate the dependency
+identity `<select>` even before this work package, and it returned retired
+identities too. That error had propagated into the design doc before a plan
+review caught it, where acting on it would have silently cleared
+`dependency.identity_id`. What was actually unbuilt, before this work package,
+was the WRITE surface — which is what `writeSurfaceUnbuilt` asserted — plus the
+identity LIST and DETAIL PAGES, a narrower and different claim than "no route
+reaches either of them." Both are now built; see above.
 
-**Reclassified here on 2026-09-13** out of `writeSurfaceGaps`, where it had been
+`secret_ref` holds a **path, never a secret** (CLAUDE.md), and stays redacted in
+`snapshotJSON`/`diffJSON` the way `CreateUser` already redacts `password_hash`.
+`team_id` answers "who do I ask", the same role it plays on `custom_field`.
+
+**Reclassified on 2026-09-13** out of `writeSurfaceGaps`, where it had been
 filed as "neither, and no route today" alongside genuine repair gaps. That
 understated it: a gap means a working feature is missing a repair path, and this
-feature does not exist. `writeSurfaceUnbuilt` in
-`internal/store/write_surface_test.go` now points here, and fails if an entity
-listed there quietly grows both verbs.
+feature did not exist. `writeSurfaceUnbuilt` in
+`internal/store/write_surface_test.go` pointed here, and failed if an entity
+listed there quietly grew both verbs.
 
 **WP-J7 · Capacity findings** — M — **DONE**
 Three findings, three audiences. A project allocated **above what it was priced
