@@ -220,6 +220,14 @@ var IdentityKinds = []string{
 	IdentityCertSubject, IdentityHuman,
 }
 
+// RotationStates is the Go side of the rotation-state filter's option list.
+// NOT a database CHECK -- the state is DERIVED, never stored, so this exists
+// only to populate a <select> without the template guessing at the set.
+var RotationStates = []string{
+	string(RotationUnmanaged), string(RotationNeverRecorded),
+	string(RotationWithinWindow), string(RotationOverdue), string(RotationUnreadable),
+}
+
 // Identity is a principal used to authenticate a dependency.
 //
 // SecretRef holds a *path* (a Vault path or similar), never a secret value.
