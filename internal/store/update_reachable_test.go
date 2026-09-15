@@ -98,19 +98,15 @@ var unreachableRepairPaths = map[string]string{
 	// routes landed, the same as every pair before them.
 
 	// UpdateIdentity and RetireIdentity (docs/identity-surface-design.md,
-	// WP-J8) fill this map from Task 3 of that plan -- the store methods
-	// and RecordIdentityRotation -- until Task 4 wires
-	// POST /identities/{id}, POST /identities/{id}/retire and
-	// POST /identities/{id}/rotation. Both entries come out the moment
-	// those routes land, the same as every pair before them. Until then a
-	// declared identity genuinely cannot be corrected or withdrawn through
-	// the product, which is exactly what writeSurfaceUnbuilt described
-	// before ListIdentities and CreateIdentity had no route reaching them
-	// at all -- narrower now, but the same shape.
-	"UpdateIdentity": "WP-J8 Task 3 built the store method ahead of the route; " +
-		"Task 4 wires POST /identities/{id} and this entry comes out then.",
-	"RetireIdentity": "WP-J8 Task 3 built the store method ahead of the route; " +
-		"Task 4 wires POST /identities/{id}/retire and this entry comes out then.",
+	// WP-J8) filled this map from Task 3 of that plan -- the store methods
+	// and RecordIdentityRotation -- until Task 5 wired POST /identities/{id},
+	// POST /identities/{id}/retire and POST /identities/{id}/rotation. Both
+	// entries came out the moment those routes landed, the same as every
+	// pair before them. Before Task 5 a declared identity genuinely could
+	// not be corrected or withdrawn through the product, which is exactly
+	// what writeSurfaceUnbuilt described before ListIdentities and
+	// CreateIdentity had no route reaching them at all -- narrower, but the
+	// same shape.
 }
 
 // TestEveryUpdateMethodIsReachable fails when a store method written to correct

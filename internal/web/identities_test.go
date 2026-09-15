@@ -11,6 +11,9 @@ package web_test
 import (
 	"context"
 	"net/http"
+	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -503,5 +506,389 @@ func TestTheIdentityListFiltersFindARetiredCredential(t *testing.T) {
 			"unreachable through the application if this filter does not work -- and "+
 			"there is no restore path by design, so finding it is the only recourse.",
 			identity.Name)
+	}
+}
+
+// ---------- the write surface (WP-J8 Task 5) ----------
+
+// TestRecordingARotationThroughTheRoute is the end-to-end of the whole
+// package: POST the rotation route, see the date and a "within window" state
+// on the detail page, and see the change_log entry it produced in the
+// timeline -- change_log IS the rotation history (the table itself keeps
+// only the latest date).
+func TestRecordingARotationThroughTheRoute(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+	ctx := context.Background()
+	admin := domain.AdministratorPermit(domain.SystemActor)
+	ninety := 90
+
+	identity, err := domain.NewIdentity(store.NewID(), domain.IdentitySpec{
+		Kind: domain.IdentityServiceAccount, Name: "svc-rotate-through-route",
+		Realm: strPtr("vault"), RotationDays: &ninety,
+	})
+	if err != nil {
+		t.Fatalf("building identity: %v", err)
+	}
+	if err := h.store.CreateIdentity(ctx, admin, identity); err != nil {
+		t.Fatalf("creating identity: %v", err)
+	}
+
+	path := "/identities/" + identity.ID
+	token := h.csrfToken(path)
+	today := domain.FormatDate(h.store.Now())
+	resp := h.post(path+"/rotation", url.Values{
+		"csrf_token":   {token},
+		"last_rotated": {today},
+	}, false)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("recording a rotation returned %d, want 303", resp.StatusCode)
+	}
+
+	page := body(t, h.get(path, false))
+	if !strings.Contains(page, today) {
+		t.Error("the detail page does not show the just-recorded rotation date")
+	}
+	if !strings.Contains(page, "due in") {
+		t.Error("the detail page does not show a within-window state right after a fresh rotation")
+	}
+	// The TIMELINE shows the rotation as a last_rotated change, with an actor.
+	if !strings.Contains(page, "last_rotated") {
+		t.Error("the timeline does not show the rotation as a last_rotated change. " +
+			"change_log IS the rotation history -- the table keeps only the latest " +
+			"date -- so a rotation that does not appear here is a rotation nobody " +
+			"can audit afterwards.")
+	}
+}
+
+// TestAFutureRotationIs422WithTheFormReRendered. CLAUDE.md's rule and the
+// spec's: never a 200 with the error buried, never a flash-and-redirect.
+func TestAFutureRotationIs422WithTheFormReRendered(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+	ctx := context.Background()
+	admin := domain.AdministratorPermit(domain.SystemActor)
+
+	identity, err := domain.NewIdentity(store.NewID(), domain.IdentitySpec{
+		Kind: domain.IdentityServiceAccount, Name: "svc-future-rotation",
+		Realm: strPtr("vault"),
+	})
+	if err != nil {
+		t.Fatalf("building identity: %v", err)
+	}
+	if err := h.store.CreateIdentity(ctx, admin, identity); err != nil {
+		t.Fatalf("creating identity: %v", err)
+	}
+
+	path := "/identities/" + identity.ID
+	token := h.csrfToken(path)
+	tomorrow := domain.FormatDate(h.store.Now().AddDate(0, 0, 1))
+	resp := h.post(path+"/rotation", url.Values{
+		"csrf_token":   {token},
+		"last_rotated": {tomorrow},
+	}, false)
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("a post-dated rotation returned %d, want 422", resp.StatusCode)
+	}
+	page := body(t, resp)
+	// the typed value survives, and the message is against the field
+	if !strings.Contains(page, tomorrow) {
+		t.Error("the refused form did not hand back what the operator typed")
+	}
+	if !strings.Contains(page, "cannot be recorded in the future") {
+		t.Errorf("the refusal does not say why the date was rejected, so it reads as a " +
+			"generic failure on a date that is well-formed")
+	}
+	// and nothing was written
+	if n := h.count(`SELECT COUNT(*) FROM identity WHERE last_rotated IS NOT NULL`); n != 0 {
+		t.Errorf("%d identities carry a last_rotated after a refused rotation. A 422 that "+
+			"still wrote would be worse than no refusal at all, because the page says "+
+			"it failed.", n)
+	}
+}
+
+// TestARotationAgainstARetiredIdentityIs422AndNamesIt.
+func TestARotationAgainstARetiredIdentityIs422AndNamesIt(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+	ctx := context.Background()
+	admin := domain.AdministratorPermit(domain.SystemActor)
+	ninetyDays := 90
+
+	identity, err := domain.NewIdentity(store.NewID(), domain.IdentitySpec{
+		Kind: domain.IdentityServiceAccount, Name: "svc-withdrawn-rotation",
+		Realm: strPtr("vault"), RotationDays: &ninetyDays,
+	})
+	if err != nil {
+		t.Fatalf("building identity: %v", err)
+	}
+	if err := h.store.CreateIdentity(ctx, admin, identity); err != nil {
+		t.Fatalf("creating identity: %v", err)
+	}
+	if err := h.store.RetireIdentity(ctx, admin, identity.ID); err != nil {
+		t.Fatalf("withdrawing: %v", err)
+	}
+
+	path := "/identities/" + identity.ID
+	token := h.csrfToken(path)
+	today := domain.FormatDate(h.store.Now())
+	resp := h.post(path+"/rotation", url.Values{
+		"csrf_token":   {token},
+		"last_rotated": {today},
+	}, false)
+	page := body(t, resp)
+
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("recording a rotation against a withdrawn credential returned %d, want "+
+			"422. A 303 would tell the operator it worked; a 500 would tell them the "+
+			"software broke. Neither is true.", resp.StatusCode)
+	}
+	if !strings.Contains(page, identity.Name) {
+		t.Errorf("the refusal does not name %q. An operator with several credentials "+
+			"open needs to know which one was withdrawn.", identity.Name)
+	}
+	if !strings.Contains(page, "withdrawn") {
+		t.Errorf("the refusal does not say the credential was withdrawn, so it reads as " +
+			"a malformed-date error for a date that is fine")
+	}
+	// The form comes back, with what was typed still in it.
+	if !strings.Contains(page, today) {
+		t.Errorf("the refused form did not hand back the date the operator typed")
+	}
+	// And nothing was written.
+	if n := h.count(`SELECT COUNT(*) FROM identity WHERE id = ? AND last_rotated IS NOT NULL`,
+		identity.ID); n != 0 {
+		t.Errorf("last_rotated was written despite the refusal")
+	}
+}
+
+// TestAStaleIdentityCorrectionIs409. refusalStatus separates the two reasons a
+// save comes back: 422 says "what you typed is wrong", 409 says "somebody else
+// got there first".
+func TestAStaleIdentityCorrectionIs409(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+	ctx := context.Background()
+	admin := domain.AdministratorPermit(domain.SystemActor)
+
+	identity, err := domain.NewIdentity(store.NewID(), domain.IdentitySpec{
+		Kind: domain.IdentityServiceAccount, Name: "svc-concurrent",
+		Realm: strPtr("vault"),
+	})
+	if err != nil {
+		t.Fatalf("building identity: %v", err)
+	}
+	if err := h.store.CreateIdentity(ctx, admin, identity); err != nil {
+		t.Fatalf("creating identity: %v", err)
+	}
+
+	path := "/identities/" + identity.ID
+	// BOTH SUBMISSIONS CARRY row_version = 1, which is what two operators who
+	// opened the form at the same time would send. The token comes from the
+	// page each of them is looking at, not from the row.
+	form := func(name string) url.Values {
+		return url.Values{
+			"csrf_token":  {h.csrfToken(path)},
+			"kind":        {domain.IdentityServiceAccount},
+			"name":        {name},
+			"realm":       {"vault"},
+			"row_version": {"1"},
+		}
+	}
+
+	first := h.post(path, form("svc-concurrent-first"), false)
+	first.Body.Close()
+	if first.StatusCode != http.StatusSeeOther {
+		t.Fatalf("the first correction returned %d, want 303 -- if this did not succeed "+
+			"the second one is not stale and this test proves nothing", first.StatusCode)
+	}
+
+	second := h.post(path, form("svc-concurrent-second"), false)
+	page := body(t, second)
+	if second.StatusCode != http.StatusConflict {
+		t.Fatalf("the second correction returned %d, want 409. refusalStatus separates "+
+			"the two reasons a save comes back: 422 says what you typed is wrong, 409 "+
+			"says it was fine and somebody else got there first. Answering this with "+
+			"422 tells the operator to fix input that has nothing wrong with it.",
+			second.StatusCode)
+	}
+	if !strings.Contains(page, "svc-concurrent-second") {
+		t.Errorf("the 409 did not hand back what the second operator typed. Their text " +
+			"is the thing they are about to re-apply, and discarding it makes the " +
+			"message 'go and read the other edit first' into 'retype everything'.")
+	}
+	// The first operator's write stands: the loser overwrites nobody.
+	stored := h.lookup(`SELECT name FROM identity WHERE id = ?`, identity.ID)
+	if stored != "svc-concurrent-first" {
+		t.Errorf("stored name = %q, want the FIRST operator's. A stale write that landed "+
+			"is the silent revert this token exists to prevent, and change_log would "+
+			"record it as a deliberate act by whoever was slower.", stored)
+	}
+}
+
+// TestTheIdentityWriteRoutesAreAdministratorOnly is the route-gate assertion in
+// its own right, beside the generated census in rbac_boundary_test.go. identity
+// is ScopeEstateConfig, so tx.log would refuse a project owner's write anyway --
+// this DIVERGES DELIBERATELY and gates at the door, because a correction form
+// has to RENDER secret_ref to be a correction form, and a form that silently
+// omits a field blanks the column on save. Refusing before the form is filled in
+// is also the honest order.
+func TestTheIdentityWriteRoutesAreAdministratorOnly(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	admin := domain.AdministratorPermit(domain.SystemActor)
+
+	identity, err := domain.NewIdentity(store.NewID(), domain.IdentitySpec{
+		Kind: domain.IdentityServiceAccount, Name: "svc-gate-check",
+		Realm: strPtr("vault"),
+	})
+	if err != nil {
+		t.Fatalf("building identity: %v", err)
+	}
+	if err := h.store.CreateIdentity(ctx, admin, identity); err != nil {
+		t.Fatalf("creating identity: %v", err)
+	}
+	id := identity.ID
+
+	h.login("viewer", "viewer-password")
+	for _, path := range []string{
+		"/identities", "/identities/" + id, "/identities/" + id + "/retire",
+		"/identities/" + id + "/rotation",
+	} {
+		token := h.csrfToken("/identities")
+		resp := h.post(path, url.Values{"csrf_token": {token}}, false)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusForbidden {
+			t.Errorf("POST %s as a read-only user returned %d, want 403. All four writes "+
+				"are writeAdminOnly, and the reason is secret_ref: a correction form has "+
+				"to RENDER the stored path to be a correction form.", path, resp.StatusCode)
+		}
+	}
+	// and the GETs are NOT gated
+	for _, path := range []string{"/identities", "/identities/" + id} {
+		resp := h.get(path, false)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("GET %s as a read-only user returned %d, want 200. The GETs stay "+
+				"readable by any authenticated user: name, realm, kind, team and "+
+				"rotation status are what somebody needs mid-incident, and none of it "+
+				"is sensitive.", path, resp.StatusCode)
+		}
+	}
+}
+
+// TestTheIdentityEditFormIsNotRenderedToANonAdministrator.
+func TestTheIdentityEditFormIsNotRenderedToANonAdministrator(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	admin := domain.AdministratorPermit(domain.SystemActor)
+	ninetyDays := 90
+
+	identity, err := domain.NewIdentity(store.NewID(), domain.IdentitySpec{
+		Kind: domain.IdentityServiceAccount, Name: "svc-form-visibility",
+		Realm: strPtr("vault"), SecretRef: strPtr("kv/prod/form-visibility"),
+		RotationDays: &ninetyDays,
+	})
+	if err != nil {
+		t.Fatalf("building identity: %v", err)
+	}
+	if err := h.store.CreateIdentity(ctx, admin, identity); err != nil {
+		t.Fatalf("creating identity: %v", err)
+	}
+	path := "/identities/" + identity.ID
+
+	// The three controls, each identified by the route it posts to rather than
+	// by button text, so a reworded button does not silently empty this test.
+	controls := map[string]string{
+		"the correction form": `action="` + path + `"`,
+		"the rotation form":   `action="` + path + `/rotation"`,
+		"the withdraw button": `action="` + path + `/retire"`,
+	}
+
+	// A POSITIVE CONTROL FIRST. If the admin page does not carry these, the
+	// viewer assertions below pass because the markup does not exist at all,
+	// which is the vacuous-pass shape this repo keeps finding.
+	h.login("admin", "admin-password")
+	adminPage := body(t, h.get(path, false))
+	for name, marker := range controls {
+		if !strings.Contains(adminPage, marker) {
+			t.Fatalf("%s is absent from the page for an Administrator (looking for %q). "+
+				"The checks below would then prove nothing.", name, marker)
+		}
+	}
+
+	h.logout()
+	h.login("viewer", "viewer-password")
+	resp := h.get(path, false)
+	viewerPage := body(t, resp)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET %s as viewer returned %d, want 200 -- the read surface is open",
+			path, resp.StatusCode)
+	}
+	for name, marker := range controls {
+		if strings.Contains(viewerPage, marker) {
+			t.Errorf("%s is rendered to a read-only user. Every one of the four POSTs is "+
+				"writeAdminOnly, so a click answers 403 -- offering a form whose only "+
+				"outcome is a refusal is the same defect /imports was fixed for. Hiding "+
+				"is not the enforcement; the enforcement is "+
+				"middleware.RequireAdministrator, and this is the half that stops the "+
+				"page lying about what the reader can do.", name)
+		}
+	}
+	// The correction form is the one that would RENDER the secret path, which
+	// is why the write gate on these routes is stricter than the permit layer
+	// alone would require. Asserted here as well as in the disclosure test,
+	// because this is the mechanism and that one is the outcome.
+	if strings.Contains(viewerPage, "kv/prod/form-visibility") {
+		t.Error("the secret path reached a read-only user through the edit form")
+	}
+}
+
+// TestTheIdentityRetireButtonPairsHxConfirmWithHxPost is a template-level
+// guard for a bug this repo has shipped before: hx-confirm on a plain
+// method="post" form (no hx-post beside it) confirms and then submits a real
+// browser navigation, which is harmless here but silently defeats the point
+// of hx-confirm being asked for at all -- the confirmation dialog becomes
+// decorative because the request it is meant to gate is never the one that
+// runs.
+//
+// No general census of this shape exists anywhere in internal/web today
+// (checked: no file matches "hx-confirm requires hx-post" or an equivalent
+// scan). This is deliberately narrow -- one form, read from source -- rather
+// than a new package-wide scan invented for this task; extending it into a
+// general census is a separate decision for whoever next needs one.
+func TestTheIdentityRetireButtonPairsHxConfirmWithHxPost(t *testing.T) {
+	root := repoRoot(t)
+	path := filepath.Join(root, "web", "templates", "partials", "identities.html")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading %s: %v", path, err)
+	}
+	page := string(raw)
+
+	idx := strings.Index(page, `action="/identities/{{.Identity.ID}}/retire"`)
+	if idx == -1 {
+		t.Fatal("the withdraw form is not on the page at all; this test would then " +
+			"prove nothing about it")
+	}
+	// The whole opening <form ...> tag, wherever it starts relative to the
+	// action attribute found above.
+	start := strings.LastIndex(page[:idx], "<form")
+	end := strings.Index(page[idx:], ">")
+	if start == -1 || end == -1 {
+		t.Fatal("could not isolate the withdraw form's opening tag")
+	}
+	tag := page[start : idx+end]
+
+	if !strings.Contains(tag, "hx-confirm=") {
+		t.Fatal("the withdraw form carries no hx-confirm at all; this test would then " +
+			"prove nothing about pairing it with hx-post")
+	}
+	if !strings.Contains(tag, "hx-post=") {
+		t.Error("the withdraw form carries hx-confirm with no hx-post beside it. " +
+			"Without hx-post, htmx never intercepts the submit and the confirmation " +
+			"dialog guards nothing -- a plain form POST runs regardless of what the " +
+			"operator answers.")
 	}
 }

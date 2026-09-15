@@ -189,6 +189,105 @@
     {{end}}
   </div>
 
+  {{if .IsAdmin}}
+  <div class="panel">
+    <div class="panel-head"><h2>Record a rotation</h2></div>
+    {{/* THIS IS THE FEATURE, not a field on the correction form below --
+         docs/identity-surface-design.md, "One writer for last_rotated": a
+         create form that also stamped the date would bury the rotation
+         inside a create snapshot no reader looking for one would find. */}}
+    <form class="panel-body" method="post" action="/identities/{{.Identity.ID}}/rotation"
+          hx-post="/identities/{{.Identity.ID}}/rotation">
+      <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+      <div class="field">
+        <label for="i-rot">Rotated on</label>
+        {{/* Defaults to today, computed server-side. A browser-supplied
+             default would let a client's wrong clock post-date a rotation
+             past a check made against the server's. max is a courtesy, not
+             the enforcement: RecordIdentityRotation refuses a future date
+             and returns 422 -- .RotationInput carries back exactly what was
+             typed on that refusal, never a silently reset "today". */}}
+        <input id="i-rot" type="date" name="last_rotated"
+               value="{{.RotationInput}}" max="{{.RotationInput}}" required>
+        {{with index .Errors "last_rotated"}}<div class="field-error">{{.}}</div>{{end}}
+        <div class="field-hint">
+          Backdating is fine — record the day it actually happened. A future date is refused.
+        </div>
+      </div>
+      <button class="btn btn-primary" type="submit">Record rotation</button>
+    </form>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head"><h2>Correct this credential</h2></div>
+    <form class="panel-body" method="post" action="/identities/{{.Identity.ID}}"
+          hx-post="/identities/{{.Identity.ID}}">
+      <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+      {{/* The version the operator opened. See internal/domain/version.go. */}}
+      <input type="hidden" name="row_version" value="{{.Identity.RowVersion}}">
+      <div class="field-row">
+        <div class="field">
+          <label for="i-ed-kind">Kind</label>
+          <select id="i-ed-kind" name="kind" required>
+            {{range $.Kinds}}<option value="{{.}}" {{if eq . $.Identity.Kind}}selected{{end}}>{{title .}}</option>{{end}}
+          </select>
+          {{with index .Errors "kind"}}<div class="field-error">{{.}}</div>{{end}}
+        </div>
+        <div class="field">
+          <label for="i-ed-name">Name</label>
+          <input id="i-ed-name" type="text" name="name" value="{{.Identity.Name}}" required>
+          {{with index .Errors "name"}}<div class="field-error">{{.}}</div>{{end}}
+        </div>
+        <div class="field">
+          <label for="i-ed-realm">Realm</label>
+          <input id="i-ed-realm" class="mono" type="text" name="realm" value="{{deref .Identity.Realm}}">
+        </div>
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label for="i-ed-secret">Secret reference</label>
+          <input id="i-ed-secret" class="mono" type="text" name="secret_ref" value="{{deref .Identity.SecretRef}}">
+          <div class="field-hint">A path. The material itself must never be entered here.</div>
+        </div>
+        <div class="field">
+          <label for="i-ed-rotdays">Rotation policy (days)</label>
+          <input id="i-ed-rotdays" type="number" min="1" name="rotation_days"
+                 value="{{if .Identity.RotationDays}}{{derefInt .Identity.RotationDays}}{{end}}">
+          {{with index .Errors "rotation_days"}}<div class="field-error">{{.}}</div>{{end}}
+          <div class="field-hint">Blank means nobody has asked for this credential to be rotated.</div>
+        </div>
+        <div class="field">
+          <label for="i-ed-team">Team</label>
+          <select id="i-ed-team" name="team_id">
+            <option value="">— none —</option>
+            {{range $.Teams}}<option value="{{.ID}}" {{if eq .ID (deref $.Identity.TeamID)}}selected{{end}}>{{.Code}}</option>{{end}}
+          </select>
+        </div>
+      </div>
+      <button class="btn btn-primary" type="submit">Save</button>
+    </form>
+  </div>
+
+  {{if ne .Identity.Lifecycle "retired"}}
+  <div class="panel">
+    <div class="panel-head"><h2>Withdraw</h2></div>
+    {{/* NO row_version HERE, deliberately: RetireIdentity (WP-J8 Task 3)
+         takes no client-submitted version at all -- it re-reads the row and
+         guards its own write with what it just read, the same shape
+         RetireBundle and RetireTeam already use, and TestEveryEditFormCarriesItsVersion's
+         population is exactly the handlers that call submittedVersion, which
+         IdentityRetire does not. A token here would be inert markup nothing
+         reads. */}}
+    <form class="panel-body" method="post" action="/identities/{{.Identity.ID}}/retire"
+          hx-post="/identities/{{.Identity.ID}}/retire"
+          hx-confirm="Withdraw this credential? What still names it keeps displaying, marked retired -- nothing still using it is re-pointed automatically.">
+      <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+      <button class="btn btn-danger" type="submit">Withdraw this credential</button>
+    </form>
+  </div>
+  {{end}}
+  {{end}}
+
   {{template "timeline_panel" .Timeline}}
 </div>
 {{end}}

@@ -169,8 +169,8 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	// somebody needs mid-incident and none of it is sensitive. secret_ref is
 	// gated inside the detail handler's view model, not by the route -- see
 	// internal/web/handlers/identities.go's header. The write surface (create,
-	// correct, retire, record a rotation) is a separate task and is
-	// writeAdminOnly, not registered here.
+	// correct, retire, record a rotation) is writeAdminOnly and registered
+	// further down beside /users, for the same class of reason.
 	read("GET /identities", app.IdentityList)
 	read("GET /identities/{id}", app.IdentityDetail)
 	read("GET /catalogue", app.Catalogue)
@@ -333,6 +333,25 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	// owner writing it -- see TestAProjectOwnerCannotAssignThemselvesAProject.
 	writeAdminOnly("POST /users/{id}/projects", app.UserAssignProject)
 	writeAdminOnly("POST /users/{id}/projects/{projectID}/release", app.UserReleaseProject)
+
+	// Credential references (WP-J8). writeAdminOnly, NOT write, and identity is
+	// ScopeEstateConfig so tx.log would refuse a project owner's write
+	// regardless of the route gate -- `team` relies on exactly that and uses
+	// plain write(). THIS DIVERGES DELIBERATELY, and the reason is secret_ref: a
+	// correction form has to RENDER the stored path to be a correction form, and
+	// a form that silently omits a field blanks the column on save. Gating at
+	// the door keeps the only surface that renders a secret path behind the same
+	// gate that already protects it on the dependency page, and makes the
+	// refusal honest BEFORE a form is filled in rather than after it is
+	// submitted. /users and /users/{id}/projects take writeAdminOnly for the
+	// same class of reason.
+	//
+	// The two GETs are registered with read() further up: name, realm, kind,
+	// team and rotation status are what somebody needs mid-incident.
+	writeAdminOnly("POST /identities", app.IdentityCreate)
+	writeAdminOnly("POST /identities/{id}", app.IdentityUpdate)
+	writeAdminOnly("POST /identities/{id}/retire", app.IdentityRetire)
+	writeAdminOnly("POST /identities/{id}/rotation", app.IdentityRecordRotation)
 
 	write("POST /assets", app.AssetCreate)
 	write("POST /assets/{id}", app.AssetUpdate)
