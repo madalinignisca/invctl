@@ -794,6 +794,22 @@ var DeclaredColumns = map[string][]string{
 		"id", "user_id", "entity", "name", "params",
 		"lifecycle", "created_at", "updated_at", "row_version",
 	},
+	// Cable bundles (migration 00068, docs/cable-bundles-design.md).
+	// Declared throughout: a bundle exists because a person says these
+	// cables run together -- a duct, a tray, a trunk. Unlike net_group or
+	// dependency there is no source/confidence pair, because nothing ever
+	// proposes a bundle from observed data.
+	"cable_bundle": {
+		"id", "code", "name", "description",
+		"lifecycle", "created_at", "updated_at", "row_version",
+	},
+	// A SET table, replaced wholesale and folded into the bundle's audited
+	// value -- the same shape as cluster_member above. It carries no
+	// lifecycle of its own: a retired link stays in its bundle (design
+	// doc, "Rules"), so membership never needs a soft-delete state to
+	// express "still true but the cable is gone" -- that fact lives on
+	// link.lifecycle, not here.
+	"cable_bundle_member": {"bundle_id", "link_id"},
 }
 
 // ClassifyColumn returns the class of a column. ok is false when the column is

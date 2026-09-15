@@ -167,6 +167,12 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	read("GET /catalogue", app.Catalogue)
 	read("GET /interfaces/{id}/trace", app.TracePort)
 	read("GET /links/{id}/impact", app.LinkImpact)
+	// A bundle's own cut view (Task 3, docs/cable-bundles-design.md's "The
+	// cut"), and the bundle CRUD UI Task 4 built around it: list, detail,
+	// declare, correct, membership and withdraw.
+	read("GET /bundles", app.BundleList)
+	read("GET /bundles/{id}", app.BundleDetail)
+	read("GET /bundles/{id}/impact", app.BundleImpact)
 	read("GET /power", app.Power)
 	read("GET /power/feeds/{id}/impact", app.PowerFeedImpact)
 	read("GET /power/sources/{id}/impact", app.PowerSourceImpact)
@@ -499,6 +505,10 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	write("POST /clusters/{id}", app.ClusterUpdate)
 	write("POST /clusters/{id}/hosts", app.ClusterSetHosts)
 	write("POST /clusters/{id}/retire", app.ClusterRetire)
+	write("POST /bundles", app.BundleCreate)
+	write("POST /bundles/{id}", app.BundleUpdate)
+	write("POST /bundles/{id}/members", app.BundleSetMembers)
+	write("POST /bundles/{id}/retire", app.BundleRetire)
 	write("POST /circuits", app.CircuitCreate)
 	write("POST /circuits/{id}", app.CircuitUpdate)
 	write("POST /circuits/{id}/retire", app.CircuitRetire)

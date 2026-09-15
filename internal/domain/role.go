@@ -583,10 +583,17 @@ var entityScope = map[string]ScopeClass{
 	// Topology, cross-cutting facts, and everything not yet proven
 	// project-linked -- see ScopeTopology's doc comment for why the default
 	// lands here rather than being guessed into ScopeProjectLinked.
-	"aggregate":           ScopeTopology,
-	"asn":                 ScopeTopology,
-	"backend_member":      ScopeTopology,
-	"backend_pool":        ScopeTopology,
+	"aggregate":      ScopeTopology,
+	"asn":            ScopeTopology,
+	"backend_member": ScopeTopology,
+	"backend_pool":   ScopeTopology,
+	// Considered and rejected for a subject-derived scope, same shape as
+	// cluster and certificate above: many-to-many with link via
+	// cable_bundle_member, no single owning subject, and "every member in
+	// scope" is vacuously true for an empty bundle -- a freshly declared
+	// bundle with no cables added yet would be writable by every project
+	// owner. Stays Administrator-only.
+	"cable_bundle":        ScopeTopology,
 	"certificate":         ScopeTopology,
 	"circuit_cost":        ScopeTopology,
 	"circuit_termination": ScopeTopology,

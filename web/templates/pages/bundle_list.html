@@ -1,0 +1,82 @@
+{{/*
+  invctl — infrastructure inventory
+  Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+
+  Licensed under the GNU Affero General Public License, version 3 only —
+  no later version applies. See LICENSE for the full text.
+
+  SPDX-License-Identifier: AGPL-3.0-only
+*/}}
+{{define "content"}}
+<div class="page-head">
+  <div class="eyebrow">Cables managed as one unit</div>
+  <h1>Bundles</h1>
+  <p class="lede">
+    A duct, a tray, a trunk: cables somebody pulled together and will replace
+    together. Grouping them here is what makes
+    <a href="/links">a cable's own cut view</a> honest for one in a bundle --
+    a backhoe does not pick one strand.
+  </p>
+</div>
+
+<div class="panel">
+  <div class="panel-head">
+    <h2>{{pluralise (len .Bundles) "bundle" "bundles"}}</h2>
+  </div>
+  {{if .Bundles}}
+  <div class="scroll-x">
+    <table>
+      <thead><tr><th>Code</th><th>Name</th><th>Description</th><th class="num">Cables</th><th></th></tr></thead>
+      <tbody>
+        {{range .Bundles}}
+        <tr>
+          <td class="mono"><a href="/bundles/{{.ID}}">{{.Code}}</a></td>
+          <td>{{.Name}}</td>
+          <td>{{if .Description}}{{.Description}}{{else}}<span class="muted">—</span>{{end}}</td>
+          <td class="num">{{.Members}}</td>
+          <td style="white-space:nowrap">
+            <a class="btn btn-sm" href="/bundles/{{.ID}}/impact">If cut</a>
+          </td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{else}}
+  <div class="empty">
+    <strong>No bundles declared.</strong>
+    Every cable is tracked on its own, so cutting a duct today only ever
+    simulates the one strand asked about.
+  </div>
+  {{end}}
+</div>
+
+{{if .IsAdmin}}
+<form id="bundle-form" class="panel" method="post" action="/bundles">
+  <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+  <div class="panel-head"><h2>Declare a bundle</h2></div>
+  <div class="panel-body">
+    <div class="field-row">
+      <div class="field">
+        <label for="bd-code">Code</label>
+        <input id="bd-code" class="mono {{if index .Errors "code"}}invalid{{end}}" type="text"
+               name="code" placeholder="duct-a1-b2" value="{{index .Values "code"}}" required>
+        {{with index .Errors "code"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="bd-name">Name</label>
+        <input id="bd-name" class="{{if index .Errors "name"}}invalid{{end}}" type="text"
+               name="name" placeholder="Rack A1 to B2 duct" value="{{index .Values "name"}}" required>
+        {{with index .Errors "name"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="bd-desc">Description</label>
+        <input id="bd-desc" type="text" name="description"
+               value="{{index .Values "description"}}" placeholder="Under the raised floor, row A">
+      </div>
+    </div>
+    <button class="btn btn-primary" type="submit">Declare bundle</button>
+  </div>
+</form>
+{{end}}
+{{end}}

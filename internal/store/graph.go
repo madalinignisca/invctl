@@ -519,8 +519,30 @@ func (s *SQLStore) CircuitJoinsGroups(ctx context.Context, circuitID string) (bo
 type CircuitCut struct {
 	Joins     bool
 	Separates bool
-	// Groups are the codes of the two groups it joins, for the sentence.
-	Groups []string
+	// JoinedPairs is every distinct pair of groups this medium's edges touch,
+	// deduplicated so that two cables in a bundle landing on the same two
+	// groups report one boundary, not two. This is "what it touches" -- used
+	// for the "another path survives this" sentence, where nothing is cut off
+	// but the reader still wants to know what the medium connects.
+	//
+	// A single cable or a circuit contributes exactly one edge, so this is
+	// always a one-element slice for CircuitCutEffect and LinkCutEffect --
+	// only a bundle can produce more than one.
+	JoinedPairs []GroupPair
+	// SeparatedPairs is the subset of JoinedPairs that this medium is the
+	// ONLY path between -- what actually goes dark when it's cut. This is
+	// "what it opens", and it is the one the "cutting this separates the
+	// estate" sentence must use: reporting JoinedPairs there would be the
+	// exact bug this fix closes, restated with a bigger slice.
+	SeparatedPairs []GroupPair
+}
+
+// GroupPair is one boundary between two forwarder groups, in the order the
+// edge that produced it was recorded. Order is for readability only --
+// A-then-B and B-then-A are the same boundary, and dedup in cutEffect treats
+// them as such.
+type GroupPair struct {
+	A, B string
 }
 
 // CircuitCutEffect answers what cutting one circuit does.
@@ -541,6 +563,40 @@ func (s *SQLStore) CircuitCutEffect(ctx context.Context, circuitID string) (Circ
 func (s *SQLStore) LinkCutEffect(ctx context.Context, linkID string) (CircuitCut, error) {
 	return s.cutEffect(ctx, func(u impact.NetUplinkInfo) bool {
 		return u.LinkID == linkID
+	})
+}
+
+// BundleCutEffect answers what cutting a whole bundle does -- a duct, tray or
+// trunk severed by one backhoe rather than one strand at a time
+// (docs/cable-bundles-design.md, "The cut").
+//
+// THE SAME WALKER AS LinkCutEffect, with a set predicate instead of an
+// equality one -- not a second implementation. cutEffect's own doc comment is
+// explicit about why: duplicating the walk gives the cable page and the
+// bundle page two chances to disagree about what "separates" means.
+//
+// Only LIVE members count, and this is not a filter written here: it is
+// already loadNetGraph's own guarantee. Its edge query carries
+// "WHERE l.lifecycle = ?" scoped to active links (see the comment on
+// linkEdges above), so a retired cable never reaches g.Net.Uplinks in the
+// first place -- u.LinkID in cutEffect's walk can never be a retired link's
+// id, no matter what this predicate matches on. Filtering members here too
+// would be a second, redundant gate that could never be observed to do
+// anything (a member row's Lifecycle mirrors the link's own, per
+// bundleMemberQuery), so it is left out rather than carrying an
+// unfalsifiable line: a retired cable staying in its bundle as history
+// (Task 2's rule) is what this relies on, not a check of its own.
+func (s *SQLStore) BundleCutEffect(ctx context.Context, bundleID string) (CircuitCut, error) {
+	members, err := s.ListBundleMembers(ctx, bundleID)
+	if err != nil {
+		return CircuitCut{}, err
+	}
+	inBundle := make(map[string]bool, len(members))
+	for _, m := range members {
+		inBundle[m.LinkID] = true
+	}
+	return s.cutEffect(ctx, func(u impact.NetUplinkInfo) bool {
+		return inBundle[u.LinkID]
 	})
 }
 
@@ -580,19 +636,37 @@ func (s *SQLStore) cutEffect(ctx context.Context, carries func(impact.NetUplinkI
 		return out, nil
 	}
 	out.Joins = true
-	for _, code := range []string{ends[0][0], ends[0][1]} {
-		if gi, ok := g.Net.Groups[code]; ok {
-			out.Groups = append(out.Groups, gi.Code)
-		} else {
-			out.Groups = append(out.Groups, code)
+
+	groupCode := func(id string) string {
+		if gi, ok := g.Net.Groups[id]; ok {
+			return gi.Code
 		}
+		return id
 	}
 
-	// Still connected without it? A breadth-first walk over what is left.
+	// THE FIX: every distinct pair, not ends[0] alone. A bundle is many
+	// cables, so it routinely produces more than one edge -- a bundle that is
+	// the only path between A-Z AND between C-D must report both, or the
+	// sentence under-reports the one thing this feature exists to say
+	// correctly: what goes dark. Dedup by an order-independent key so two
+	// cables between the same two groups are one boundary, not two.
+	seen := map[[2]string]bool{}
 	for _, e := range ends {
+		key := [2]string{e[0], e[1]}
+		if key[0] > key[1] {
+			key[0], key[1] = key[1], key[0]
+		}
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		pair := GroupPair{A: groupCode(e[0]), B: groupCode(e[1])}
+		out.JoinedPairs = append(out.JoinedPairs, pair)
+
+		// Still connected without it? A breadth-first walk over what is left.
 		if !connected(adjacency, e[0], e[1]) {
 			out.Separates = true
-			break
+			out.SeparatedPairs = append(out.SeparatedPairs, pair)
 		}
 	}
 	return out, nil

@@ -183,6 +183,7 @@ subject but are excluded on purpose.
 | `asn` | addressing |
 | `backend_member` | load-balancing |
 | `backend_pool` | load-balancing |
+| `cable_bundle` | **considered and rejected**, same shape as `certificate` and `cluster` below. Many-to-many with `link` via `cable_bundle_member`, no single owning subject, and "every member in scope" is **vacuously true for an empty bundle** — a freshly declared bundle with no cables added yet would be writable by every project owner. Stays Administrator-only. |
 | `certificate` | **considered and rejected for WP-1.1** (`docs/ROADMAP.md`). A certificate is many-to-many with assets and services (`certificate_asset`, `certificate_service`) — it has no single owning subject the way `asset_cost` has one owning asset. "Every member in scope" is **vacuously true for an undeployed certificate** (no members to fail the check against), which would make every unattached certificate writable by every project owner in the estate. Stays Administrator-only until a real subject-resolution rule is designed, not merely "not needed yet". |
 | `circuit_cost` | explicitly excluded from the `asset_cost` carve-out — a circuit is already the unit of attribution, and nothing has asked for a project owner to write this |
 | `circuit_termination` | topology |

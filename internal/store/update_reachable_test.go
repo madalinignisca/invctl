@@ -90,6 +90,12 @@ var unreachableRepairPaths = map[string]string{
 	// WP-1.2 took for the six correction paths before them. The methods were
 	// never wrong; they were unreachable, and this test is what refused to
 	// let that stay quiet.
+	//
+	// UpdateBundle and RetireBundle (docs/cable-bundles-design.md) filled
+	// this map the same way, from Task 2 (the store methods, deliberately
+	// barred from the web layer) until Task 4 wired POST /bundles/{id} and
+	// POST /bundles/{id}/retire. Both entries came out the moment those
+	// routes landed, the same as every pair before them.
 }
 
 // TestEveryUpdateMethodIsReachable fails when a store method written to correct

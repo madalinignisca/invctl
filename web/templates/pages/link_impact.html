@@ -25,7 +25,25 @@
 
 <div style="margin-bottom:18px">
   <a class="btn btn-sm" href="/interfaces/{{.Link.AInterfaceID}}/trace">Trace this run</a>
+  {{if .Bundle}}
+  <a class="btn btn-sm" href="/bundles/{{.Bundle.ID}}/impact">See the whole bundle: {{.Bundle.Name}}</a>
+  {{end}}
 </div>
+
+{{if .Bundle}}
+{{/* Absence is the common case (see linkImpactPage.Bundle's doc comment) --
+     this panel only appears when the cable is actually in a bundle, so a
+     cable in none renders exactly the page it rendered before Task 3. */}}
+<div class="panel">
+  <div class="panel-body">
+    <p>
+      This cable runs in <strong>{{.Bundle.Name}}</strong> (<span class="mono">{{.Bundle.Code}}</span>).
+      A backhoe through that duct/tray/trunk does not pick one strand --
+      <a href="/bundles/{{.Bundle.ID}}/impact">see what else shares its fate</a>.
+    </p>
+  </div>
+</div>
+{{end}}
 
 {{if not .Cut.Joins}}
 {{/* THE COMMON CASE, and it must not render as an empty result. A cable with
@@ -62,7 +80,7 @@
   <div class="panel-body">
     <p>
       It is the <strong>only</strong> path between
-      {{range $i, $g := .Cut.Groups}}{{if $i}} and {{end}}<span class="mono">{{$g}}</span>{{end}},
+      {{template "group_pairs" .Cut.SeparatedPairs}},
       so unplugging it leaves the two sides unable to reach each other.
     </p>
     {{if not .HasNetworkFinding}}
@@ -82,7 +100,7 @@
   <div class="panel-body">
     <p>
       This cable joins
-      {{range $i, $g := .Cut.Groups}}{{if $i}} and {{end}}<span class="mono">{{$g}}</span>{{end}},
+      {{template "group_pairs" .Cut.JoinedPairs}},
       and cutting it separates nothing — another path already joins them. That is
       the answer redundancy is bought for, and it is worth knowing it is real
       rather than assumed.

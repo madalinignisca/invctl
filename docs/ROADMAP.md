@@ -459,17 +459,42 @@ date from the device type **and says which source it used** — `EOLSource`
 distinguishes `EOLFromAsset` from `EOLFromDeviceType`, which is the provenance
 that entry asked for. B3 is the only one.
 
-**WP-B4 · Cable profiles and bundles** — L — depends: B3 — **PANEL BREAKOUT DONE, CABLES AND BUNDLES NOT STARTED**
+**WP-B4 · Cable profiles and bundles** — L — depends: B3 — **PANEL BREAKOUT AND BUNDLES DONE, BREAKOUT CABLES NOT STARTED. Updated 2026-09-14**
 Panel breakout is delivered: `docs/panel-breakout-design.md` and
 `docs/superpowers/plans/2026-09-05-panel-breakout.md`. The tracer follows every
 recorded strand of a rear port's breakout as a tree, `port_pass_through.position`
 (already in the schema since WP-B3, no migration needed) is what it reads, and
-the patch form gained the field to record one. Breakout **cables** — a
-QSFP-to-4×SFP+ DAC with no panel in the middle, one end on one side and four on
-the other — and bundles representing runs managed as a unit are not: `link` has
-exactly two foreign-key columns and cannot express either, and both need a
-schema decision the panel case did not (see the design doc §5). This remains
-parity work against NetBox 4.5/4.6 for the cable/bundle half.
+the patch form gained the field to record one.
+
+**The bundle half is now done too**, `docs/cable-bundles-design.md`: migration
+`00068` (`cable_bundle`, `cable_bundle_member`), full store CRUD and
+wholesale-replace-and-fold-the-audit membership (`SetBundleMembers`),
+`BundleCutEffect` riding the same walker `LinkCutEffect` uses with a set
+predicate, and the UI -- list, detail, declare, correct, membership editing
+and withdraw, all reachable from `/bundles`. A bundle's own
+`/bundles/{id}/impact` answers "the backhoe went through the duct, what goes
+dark" honestly, cutting every LIVE cable pulled through it at once rather than
+one strand at a time.
+
+**Breakout cables remain not started, and this is a real gap, not a
+formality.** A QSFP-to-4×SFP+ DAC with no panel in the middle is one cable
+with one end on one side and four on the other; `link` has exactly two
+foreign-key columns and cannot express it. Fixing that means either a
+termination table (`circuit_termination`'s parent-plus-sides precedent) or *n*
+`link` rows sharing a profile id -- a schema change and a second cable model
+beside `link`, which migration `00028` already considered and rejected once
+for pass-throughs (NetBox's polymorphic `front_port`/`rear_port` shape). That
+argument against a standing precedent is its own document, per
+`docs/panel-breakout-design.md` §5, not a paragraph here.
+
+**"Cable profiles" in this entry's own title was never a specified
+deliverable.** It appears nowhere else in either design document; in
+`docs/panel-breakout-design.md` §5 it is named as one *implementation option*
+for breakout cables ("*n* `link` rows sharing a profile id"), not a separate
+thing to build. Nothing is dropped by not building it on its own.
+
+This remains parity work against NetBox 4.5/4.6 for the breakout-cable half
+only.
 
 **WP-B5 · Rack elevations** — M — **DONE**
 Units, position, orientation, depth, blade and slot occupancy. Utilisation derived,

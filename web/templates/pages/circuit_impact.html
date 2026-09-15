@@ -53,7 +53,7 @@
   <div class="panel-body">
     <p>
       It is the <strong>only</strong> path between
-      {{range $i, $g := .Cut.Groups}}{{if $i}} and {{end}}<span class="mono">{{$g}}</span>{{end}},
+      {{template "group_pairs" .Cut.SeparatedPairs}},
       so cutting it leaves the two sides unable to reach each other.
     </p>
     {{if not .HasNetworkFinding}}
@@ -73,7 +73,7 @@
   <div class="panel-body">
     <p>
       This circuit joins
-      {{range $i, $g := .Cut.Groups}}{{if $i}} and {{end}}<span class="mono">{{$g}}</span>{{end}},
+      {{template "group_pairs" .Cut.JoinedPairs}},
       and cutting it separates nothing — another path already joins them. That is
       the answer redundancy is bought for, and it is worth knowing it is real
       rather than assumed.
