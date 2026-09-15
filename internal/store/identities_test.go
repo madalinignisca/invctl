@@ -22,7 +22,9 @@ func TestTheIdentityDateShapeCheckIsEnforcedByBothEngines(t *testing.T) {
 	for _, e := range Engines(t) {
 		t.Run(e.Name, func(t *testing.T) {
 			s, ctx := newStore(t, e)
-			identity, err := domain.NewIdentity(NewID(), domain.IdentityServiceAccount, "svc-shape")
+			identity, err := domain.NewIdentity(NewID(), domain.IdentitySpec{
+				Kind: domain.IdentityServiceAccount, Name: "svc-shape",
+			})
 			if err != nil {
 				t.Fatalf("building identity: %v", err)
 			}
@@ -55,7 +57,9 @@ func TestAnIdentityIsCreatedWithNoRecordedRotation(t *testing.T) {
 	for _, e := range Engines(t) {
 		t.Run(e.Name, func(t *testing.T) {
 			s, ctx := newStore(t, e)
-			identity, err := domain.NewIdentity(NewID(), domain.IdentityServiceAccount, "svc-fresh")
+			identity, err := domain.NewIdentity(NewID(), domain.IdentitySpec{
+				Kind: domain.IdentityServiceAccount, Name: "svc-fresh",
+			})
 			if err != nil {
 				t.Fatalf("building identity: %v", err)
 			}

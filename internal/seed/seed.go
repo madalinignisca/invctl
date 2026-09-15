@@ -895,17 +895,20 @@ func (b *builder) identities() {
 		if !b.ok() {
 			return
 		}
-		identity, err := domain.NewIdentity(store.NewID(), i.kind, i.name)
+		identity, err := domain.NewIdentity(store.NewID(), domain.IdentitySpec{
+			Kind:  i.kind,
+			Name:  i.name,
+			Realm: str(i.realm),
+			// A path, never a secret. If this field ever held a credential the
+			// whole database would become a secret store, which it must not be.
+			SecretRef:    str(i.secretRef),
+			RotationDays: num(90),
+			TeamID:       b.team("platform"),
+		})
 		if err != nil {
 			b.fail(fmt.Errorf("building identity %s: %w", i.name, err))
 			return
 		}
-		identity.Realm = str(i.realm)
-		// A path, never a secret. If this field ever held a credential the
-		// whole database would become a secret store, which it must not be.
-		identity.SecretRef = str(i.secretRef)
-		identity.RotationDays = num(90)
-		identity.TeamID = b.team("platform")
 		if err := b.store.CreateIdentity(b.ctx, Permit, identity); err != nil {
 			b.fail(fmt.Errorf("seeding identity %s: %w", i.name, err))
 			return

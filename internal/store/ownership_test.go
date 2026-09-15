@@ -147,11 +147,12 @@ func (f *ownershipFixture) project(t *testing.T, code string, teamID *string, li
 // legal here and this helper does not pretend otherwise.
 func (f *ownershipFixture) identity(t *testing.T, name string, teamID *string, lifecycle string) string {
 	t.Helper()
-	id, err := domain.NewIdentity(NewID(), domain.IdentityServiceAccount, name)
+	id, err := domain.NewIdentity(NewID(), domain.IdentitySpec{
+		Kind: domain.IdentityServiceAccount, Name: name, TeamID: teamID,
+	})
 	if err != nil {
 		t.Fatalf("building identity %s: %v", name, err)
 	}
-	id.TeamID = teamID
 	if lifecycle != "" {
 		id.Lifecycle = lifecycle
 	}

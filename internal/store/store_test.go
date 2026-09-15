@@ -850,11 +850,12 @@ func TestSecretRefNeverReachesTheAuditTrail(t *testing.T) {
 			s, ctx := newStore(t, e)
 
 			const path = "kv/prod/orders/db-super-secret-path"
-			identity, err := domain.NewIdentity(NewID(), domain.IdentityServiceAccount, "svc-orders")
+			identity, err := domain.NewIdentity(NewID(), domain.IdentitySpec{
+				Kind: domain.IdentityServiceAccount, Name: "svc-orders", SecretRef: strPtr(path),
+			})
 			if err != nil {
 				t.Fatalf("building identity: %v", err)
 			}
-			identity.SecretRef = strPtr(path)
 			if err := s.CreateIdentity(ctx, testPermit, identity); err != nil {
 				t.Fatalf("creating identity: %v", err)
 			}
