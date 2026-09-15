@@ -517,7 +517,49 @@ func TestBulkOwnershipBumpsIdentityRowVersion(t *testing.T) {
 
 // TestReassignTeamOwnershipBumpsIdentityRowVersion is the same property for the
 // team-retirement path, which uses WHERE team_id = ? rather than IS NULL.
-func TestReassignTeamOwnershipBumpsIdentityRowVersion(t *testing.T) { /* same shape */ }
+func TestReassignTeamOwnershipBumpsIdentityRowVersion(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newOwnershipFixture(t, e)
+			from := f.team(t, "from-team", "", strp("from@example.com"))
+			to := f.team(t, "to-team", "", strp("to@example.com"))
+			id := f.identity(t, "reassigned-identity", &from, "")
+
+			before := f.rowVersion(t, id)
+			outcomes, err := f.s.ReassignTeamOwnership(f.ctx, testPermit, from, to)
+			if err != nil {
+				t.Fatalf("ReassignTeamOwnership: %v", err)
+			}
+			if len(outcomes) == 0 {
+				t.Fatal("no outcomes at all; the reassignment found nothing to move and " +
+					"the assertion below would pass on an untouched row")
+			}
+			if after := f.rowVersion(t, id); after != before+1 {
+				t.Errorf("row_version = %d after a team reassignment, want %d. The guard "+
+					"here is WHERE team_id = fromTeamID and stays that way -- the bump is "+
+					"additive, so an open correction form's token stops validating once "+
+					"the row moved underneath it.", after, before+1)
+			}
+			// The guard is untouched: reassigning again from the OLD team finds
+			// nothing and reports it, rather than 409'ing or bumping.
+			mid := f.rowVersion(t, id)
+			again, err := f.s.ReassignTeamOwnership(f.ctx, testPermit, from, to)
+			if err != nil {
+				t.Fatalf("second ReassignTeamOwnership: %v", err)
+			}
+			for _, o := range again {
+				if o.EntityType == "identity" && o.Result != ReassignStale {
+					t.Errorf("outcome = %+v, want ReassignStale -- the WHERE team_id = ? "+
+						"guard is still the whole eligibility check", o)
+				}
+			}
+			if after := f.rowVersion(t, id); after != mid {
+				t.Errorf("row_version moved %d -> %d on a reassignment that matched nothing",
+					mid, after)
+			}
+		})
+	}
+}
 ```
 
 `f.rowVersion` is a small helper added to `ownershipFixture` in `internal/store/ownership_test.go`:
@@ -702,12 +744,21 @@ func TestNewIdentityValidates(t *testing.T) {
 				}
 				return
 			}
-			var ve *ValidationError
-			if !errors.As(err, &ve) {
-				t.Fatalf("NewIdentity(%+v) = %v, want a ValidationError", tc.spec, err)
+			// AsValidation, not errors.As by hand: it is the accessor the rest
+			// of this package and every handler already use
+			// (internal/domain/errors.go:114), and Messages() is the field ->
+			// message map. ValidationError.Fields is a SLICE of FieldError, not
+			// a map, so indexing it is a compile error rather than a lookup.
+			ve, ok := AsValidation(err)
+			if !ok {
+				t.Fatalf("NewIdentity(%+v) = %v (%T), want a *ValidationError -- the "+
+					"handler maps that to 422 with the form re-rendered, and anything "+
+					"else to a 500", tc.spec, err, err)
 			}
-			if _, named := ve.Fields()[tc.wantErr]; !named {
-				t.Errorf("the error does not name %q: %v", tc.wantErr, ve)
+			if _, named := ve.Messages()[tc.wantErr]; !named {
+				t.Errorf("the refusal names %v, not %q. A message on the wrong field "+
+					"lands nowhere near the input the operator has to fix.",
+					ve.Messages(), tc.wantErr)
 			}
 		})
 	}
@@ -718,16 +769,44 @@ func TestNewIdentityValidates(t *testing.T) {
 // inside NewEnvironment, so UpdateEnvironment wrote whatever it was handed and
 // the table CHECK was the only thing standing between a form and a blank name."
 func TestValidateIsReachableWithoutTheConstructor(t *testing.T) {
-	i := &Identity{ID: "id-1", Kind: IdentityServiceAccount, Name: "svc", Lifecycle: LifecycleActive}
-	i.Name = ""
-	if err := i.Validate(); err == nil {
-		t.Error("Validate accepted a blank name on an existing value; the update path " +
-			"would write it and the DB CHECK would be the only defence")
+	// A value that already exists and is then corrupted by an update path,
+	// which is exactly what UpdateIdentity is handed. The constructor is not
+	// involved, so if the checks lived inside it this would pass silently.
+	for _, tc := range []struct {
+		name  string
+		spoil func(i *Identity)
+		field string
+	}{
+		{"a blank name", func(i *Identity) { i.Name = "" }, "name"},
+		{"whitespace for a name", func(i *Identity) { i.Name = "  " }, "name"},
+		{"an unknown kind", func(i *Identity) { i.Kind = "robot" }, "kind"},
+		{"a zero rotation policy", func(i *Identity) { n := 0; i.RotationDays = &n }, "rotation_days"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			i := &Identity{
+				ID: "id-1", Kind: IdentityServiceAccount, Name: "svc",
+				Lifecycle: LifecycleActive, RowVersion: 3,
+			}
+			tc.spoil(i)
+
+			err := i.Validate()
+			if err == nil {
+				t.Fatalf("Validate accepted %s on an existing value. UpdateIdentity would "+
+					"write it and the DB CHECK would be the only thing standing between "+
+					"a form and a bad row -- the defect Environment.Validate's own doc "+
+					"comment records.", tc.name)
+			}
+			ve, ok := AsValidation(err)
+			if !ok {
+				t.Fatalf("error = %v (%T), want a *ValidationError", err, err)
+			}
+			if _, named := ve.Messages()[tc.field]; !named {
+				t.Errorf("the refusal names %v, not %q", ve.Messages(), tc.field)
+			}
+		})
 	}
 }
 ```
-
-> `ve.Fields()` — if `ValidationError` exposes its map under a different name, read `internal/domain/errors.go` and use the real one rather than adding an accessor.
 
 - [ ] **Step 2: Run it and watch it fail**
 
@@ -834,6 +913,21 @@ const (
 )
 
 // RotationStatus answers what the policy says about this credential now.
+//
+// THE FIRST TWO STATES ARE OPPOSITE FACTS AND MUST NEVER BE COLLAPSED, which is
+// the whole reason this returns a state rather than a bool. `unmanaged` means
+// there is NO RULE TO BREAK -- nobody asked for this credential to be rotated,
+// and a cert_subject or a human row is often legitimately here. `never_recorded`
+// means THE ESTATE HAS A RULE FOR THIS CREDENTIAL AND NO EVIDENCE IT HAS EVER
+// BEEN FOLLOWED: either it has never been rotated since the day it was created,
+// or it has and nobody wrote it down, and invctl cannot tell which. Both are
+// worth somebody's attention; neither is "fine".
+//
+// The boolean this replaced answered `false` to both, which is how a credential
+// that has never been rotated in four years rendered identically to one nobody
+// ever intended to rotate -- and all three identities in the demo estate were in
+// the second state, so the surface would have reported the whole estate as
+// healthy. Collapsing them again is the defect this work package exists to kill.
 func (i *Identity) RotationStatus(now time.Time) RotationState {
 	if i.RotationDays == nil {
 		return RotationUnmanaged
@@ -959,6 +1053,144 @@ git commit   # why: a boolean answered "fine" to two opposite facts and to an
 
 Add to `internal/store/identities_test.go`. Every one runs `for _, e := range Engines(t)`.
 
+First the fixture the behavioural ones share. It builds the smallest estate that
+can hold a dependency naming a credential, reusing `mustEnvironment`
+(`internal/store/store_test.go:31`) and `mustAsset` (`:44`) rather than
+inventing new helpers:
+
+```go
+// identityFixture is an estate small enough to reason about and large enough to
+// hold an edge: one environment, one host, a consumer service, a provider
+// service with an endpoint, and whatever identities a test declares.
+type identityFixture struct {
+	s          *SQLStore
+	ctx        context.Context
+	consumerID string
+	endpointID string
+}
+
+func newIdentityFixture(t *testing.T, e Engine) *identityFixture {
+	t.Helper()
+	s, ctx := newStore(t, e)
+	envID := mustEnvironment(t, s, ctx, "prod", domain.EnvRoleProduction)
+	mustAsset(t, s, ctx, domain.KindServer, "app-01", nil, envID)
+
+	mkService := func(code string) string {
+		svc, err := domain.NewService(NewID(), domain.ServiceSpec{
+			Code: code, Name: code, Kind: domain.SvcAPI,
+			EnvironmentID: envID, Availability: domain.AvailStandalone, Tier: 2,
+		}, s.Now())
+		if err != nil {
+			t.Fatalf("building service %s: %v", code, err)
+		}
+		if err := s.CreateService(ctx, testPermit, svc); err != nil {
+			t.Fatalf("creating service %s: %v", code, err)
+		}
+		return svc.ID
+	}
+	consumer, provider := mkService("orders"), mkService("orders-db")
+
+	port := 5432
+	ep, err := domain.NewEndpoint(NewID(), provider, "sql", domain.ProtoTCP, &port, domain.BindHost)
+	if err != nil {
+		t.Fatalf("building endpoint: %v", err)
+	}
+	if err := s.CreateEndpoint(ctx, testPermit, ep); err != nil {
+		t.Fatalf("creating endpoint: %v", err)
+	}
+	return &identityFixture{s: s, ctx: ctx, consumerID: consumer, endpointID: ep.ID}
+}
+
+// identity declares a credential. rotationDays of 0 means no policy at all.
+func (f *identityFixture) identity(t *testing.T, name string, rotationDays int) *domain.Identity {
+	t.Helper()
+	spec := domain.IdentitySpec{
+		Kind: domain.IdentityServiceAccount, Name: name, Realm: strPtr("vault"),
+		SecretRef: strPtr("kv/prod/" + name),
+	}
+	if rotationDays > 0 {
+		spec.RotationDays = &rotationDays
+	}
+	i, err := domain.NewIdentity(NewID(), spec)
+	if err != nil {
+		t.Fatalf("building identity %s: %v", name, err)
+	}
+	if err := f.s.CreateIdentity(f.ctx, testPermit, i); err != nil {
+		t.Fatalf("creating identity %s: %v", name, err)
+	}
+	return i
+}
+
+// dependency declares an edge from the consumer to the provider endpoint,
+// authenticating as identityID.
+func (f *identityFixture) dependency(t *testing.T, identityID string) *domain.Dependency {
+	t.Helper()
+	endpoint, identity := f.endpointID, identityID
+	d, err := domain.NewDependency(NewID(), domain.DependencySpec{
+		ConsumerServiceID:  f.consumerID,
+		ProviderEndpointID: &endpoint,
+		Nature:             domain.NatureHard,
+		FailureMode:        "orders cannot be written",
+		IdentityID:         &identity,
+		AuthMethod:         strPtr("scram-sha-256"),
+	}, f.s.Now())
+	if err != nil {
+		t.Fatalf("building dependency: %v", err)
+	}
+	if err := f.s.CreateDependency(f.ctx, testPermit, d, nil); err != nil {
+		t.Fatalf("creating dependency: %v", err)
+	}
+	return d
+}
+
+// rowVersionOf and lastRotatedOf read the two columns these tests assert on,
+// straight from the row rather than through GetIdentity -- a bug in the read
+// path must not be able to make a write assertion pass.
+func (f *identityFixture) rowVersionOf(t *testing.T, id string) int {
+	t.Helper()
+	var v int
+	if err := f.s.readOne(f.ctx, &v, `SELECT row_version FROM identity WHERE id = ?`, id); err != nil {
+		t.Fatalf("reading row_version for %s: %v", id, err)
+	}
+	return v
+}
+
+func (f *identityFixture) lastRotatedOf(t *testing.T, id string) *string {
+	t.Helper()
+	var v *string
+	if err := f.s.readOne(f.ctx, &v, `SELECT last_rotated FROM identity WHERE id = ?`, id); err != nil {
+		t.Fatalf("reading last_rotated for %s: %v", id, err)
+	}
+	return v
+}
+
+func (f *identityFixture) nameOf(t *testing.T, id string) string {
+	t.Helper()
+	var v string
+	if err := f.s.readOne(f.ctx, &v, `SELECT name FROM identity WHERE id = ?`, id); err != nil {
+		t.Fatalf("reading name for %s: %v", id, err)
+	}
+	return v
+}
+
+func (f *identityFixture) auditCount(t *testing.T, id string) int {
+	t.Helper()
+	var n int
+	if err := f.s.readOne(f.ctx, &n,
+		`SELECT COUNT(*) FROM change_log WHERE entity_type = ? AND entity_id = ?`,
+		"identity", id); err != nil {
+		t.Fatalf("counting audit entries for %s: %v", id, err)
+	}
+	return n
+}
+```
+
+**Every assertion below sits outside any `if err == nil` block.** A reviewer's
+patch for one of these once put the assertions *inside* one, so an error made the
+test silently pass — the same defect class the test was written to catch. The
+rule is: fail loudly on the error with `t.Fatalf`, then assert unconditionally.
+
+
 ```go
 // TestRecordIdentityRotationWritesExactlyOneChangeLogRow is the audit shape the
 // spec specifies literally: a one-field diff carrying WHEN the rotation happened
@@ -967,17 +1199,58 @@ Add to `internal/store/identities_test.go`. Every one runs `for _, e := range En
 // in every respect, and adding a value to the change_log CHECK would mean
 // rebuilding the table on SQLite (docs/AUDIT.md rule 10).
 func TestRecordIdentityRotationWritesExactlyOneChangeLogRow(t *testing.T) {
-	// ... create an identity with RotationDays 90 ...
-	before := s.count(ctx, `SELECT COUNT(*) FROM change_log WHERE entity_id = ?`, id)
-	if err := s.RecordIdentityRotation(ctx, testPermit, id, "2026-09-08"); err != nil { ... }
-	changes, err := s.ListChangesForEntity(ctx, "identity", id, 50)
-	// exactly one new entry, action "update", diff exactly:
-	//   {"last_rotated":{"old":null,"new":"2026-09-08"}}
-	if changes[0].Diff != `{"last_rotated":{"old":null,"new":"2026-09-08"}}` {
-		t.Errorf("diff = %s, want exactly the one-field last_rotated change", changes[0].Diff)
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newIdentityFixture(t, e)
+			i := f.identity(t, "svc-audited", 90)
+			before := f.auditCount(t, i.ID)
+
+			const rotated = "2026-09-08"
+			if err := f.s.RecordIdentityRotation(f.ctx, testPermit, i.ID, rotated); err != nil {
+				t.Fatalf("recording the rotation: %v", err)
+			}
+
+			if got := f.auditCount(t, i.ID); got != before+1 {
+				t.Fatalf("change_log went %d -> %d, want exactly one new entry. Every "+
+					"declared mutation writes one row in the same transaction; two would "+
+					"mean the write is happening twice.", before, got)
+			}
+			changes, err := f.s.ListChangesForEntity(f.ctx, "identity", i.ID, 50)
+			if err != nil {
+				t.Fatalf("reading the audit trail: %v", err)
+			}
+			newest := changes[0]
+			if newest.Action != domain.ActionUpdate {
+				t.Errorf("action = %q, want %q. The change_log CHECK allows exactly "+
+					"create|update|delete|retire, and adding a value to it would mean "+
+					"rebuilding the table on SQLite (docs/AUDIT.md rule 10). "+
+					"VerifyDependency is the precedent: a distinct method and route that "+
+					"stamp one column and log as an ordinary update.",
+					newest.Action, domain.ActionUpdate)
+			}
+			// The one-field diff the spec specifies literally. It carries WHEN
+			// the rotation happened (new), and change_log supplies when it was
+			// recorded (at) and who recorded it (actor).
+			const want = `{"last_rotated":{"old":null,"new":"2026-09-08"}}`
+			if newest.Diff != want {
+				t.Errorf("diff = %s, want %s. A wider diff means the rotation path is "+
+					"writing columns it should not.", newest.Diff, want)
+			}
+			if newest.Actor == "" {
+				t.Error("the entry has no actor, so the audit trail cannot say who " +
+					"recorded the rotation -- which is half of what it is for")
+			}
+			if got := f.rowVersionOf(t, i.ID); got != 2 {
+				t.Errorf("row_version = %d after one rotation, want 2. The rotation action "+
+					"carries no token and BUMPS one, following VerifyDependency: a token "+
+					"that does not move when the row changes is worse than a spurious 409.",
+					got)
+			}
+			if got := f.lastRotatedOf(t, i.ID); got == nil || *got != rotated {
+				t.Errorf("last_rotated = %v, want %q", derefOr(got, "NULL"), rotated)
+			}
+		})
 	}
-	// and the row moved
-	if v := rowVersionOf(t, s, ctx, id); v != 2 { ... }
 }
 
 // TestRecordingTheStoredRotationDateWritesNothingAtAll is the rule the spec
@@ -988,20 +1261,38 @@ func TestRecordIdentityRotationWritesExactlyOneChangeLogRow(t *testing.T) {
 // an untraceable change. RetireEnvironment's "already retired returns nil" is
 // the same shape, for the same reason: never claim a thing that did not happen.
 func TestRecordingTheStoredRotationDateWritesNothingAtAll(t *testing.T) {
-	// record 2026-09-08 once
-	entriesAfterFirst := s.count(ctx, `SELECT COUNT(*) FROM change_log WHERE entity_id = ?`, id)
-	versionAfterFirst := rowVersionOf(t, s, ctx, id)
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newIdentityFixture(t, e)
+			i := f.identity(t, "svc-idempotent", 90)
 
-	if err := s.RecordIdentityRotation(ctx, testPermit, id, "2026-09-08"); err != nil {
-		t.Fatalf("re-recording the stored date must return nil: %v", err)
-	}
-	if n := s.count(ctx, `SELECT COUNT(*) FROM change_log WHERE entity_id = ?`, id); n != entriesAfterFirst {
-		t.Errorf("change_log grew from %d to %d on a no-op rotation", entriesAfterFirst, n)
-	}
-	if v := rowVersionOf(t, s, ctx, id); v != versionAfterFirst {
-		t.Errorf("row_version moved from %d to %d with no change_log row -- that is a "+
-			"declared-state write with no audit entry, which since WP-G1 is an "+
-			"authorization bypass", versionAfterFirst, v)
+			const rotated = "2026-09-08"
+			if err := f.s.RecordIdentityRotation(f.ctx, testPermit, i.ID, rotated); err != nil {
+				t.Fatalf("recording the first rotation: %v", err)
+			}
+			auditAfterFirst := f.auditCount(t, i.ID)
+			versionAfterFirst := f.rowVersionOf(t, i.ID)
+
+			// The same date again -- two operators recording the same rotation,
+			// or one double-submitting a form.
+			if err := f.s.RecordIdentityRotation(f.ctx, testPermit, i.ID, rotated); err != nil {
+				t.Fatalf("re-recording the stored date must return nil, like "+
+					"RetireEnvironment does for an already-retired row: %v", err)
+			}
+
+			if got := f.auditCount(t, i.ID); got != auditAfterFirst {
+				t.Errorf("change_log grew %d -> %d on a no-op rotation. An audit trail "+
+					"full of entries for things that did not happen is worse than one "+
+					"without them.", auditAfterFirst, got)
+			}
+			if got := f.rowVersionOf(t, i.ID); got != versionAfterFirst {
+				t.Errorf("row_version moved %d -> %d WITH NO change_log ROW. That is a "+
+					"declared-state write with no audit entry, which since WP-G1 is an "+
+					"authorization bypass and not merely an untraceable change -- and it "+
+					"would also invalidate every open edit form for nothing.",
+					versionAfterFirst, got)
+			}
+		})
 	}
 }
 
@@ -1011,33 +1302,171 @@ func TestRecordingTheStoredRotationDateWritesNothingAtAll(t *testing.T) {
 // not happened -- the one direction that turns this feature into a way of
 // silencing itself.
 func TestARotationMayBeBackdatedAndNeverPostDated(t *testing.T) {
-	// s is on a fixed clock: s.WithClock(func() time.Time { return fixed })
-	for _, tc := range []struct{ name, date string; wantErr bool }{
-		{"today is fine", "2026-09-15", false},
-		{"yesterday is fine -- somebody catching up on Thursday", "2026-09-14", false},
-		{"long ago is fine", "2020-01-01", false},
-		{"tomorrow is refused", "2026-09-16", true},
-		{"next year is refused", "2027-01-01", true},
-		{"a malformed date is refused before it reaches the CHECK", "2026-9-8", true},
-		{"a timestamp is refused", "2026-09-15T00:00:00Z", true},
-		{"an empty date is refused", "", true},
-	} { ... assert a *domain.ValidationError naming "last_rotated" for wantErr ... }
+	// A FIXED CLOCK, so "tomorrow" is a constant rather than something computed
+	// from the wall clock at both ends -- a test that derives its input and its
+	// expectation from the same moving source can pass while the boundary is
+	// wrong by a day.
+	fixed := time.Date(2026, 9, 15, 11, 30, 0, 0, time.UTC)
 
-	// NO MONOTONICITY RULE: a date EARLIER than the stored one is allowed,
-	// because the stored one may simply have been wrong. change_log records
-	// both values and the actor; the audit trail is the control here, not a
-	// constraint. (Compare inflation_rate: "a revised index for 2024 was always
-	// one figure somebody had wrong.")
-	if err := s.RecordIdentityRotation(ctx, testPermit, id, "2026-09-10"); err != nil { ... }
-	if err := s.RecordIdentityRotation(ctx, testPermit, id, "2026-09-01"); err != nil {
-		t.Errorf("an earlier correction was refused: %v", err)
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			for _, tc := range []struct {
+				name, date string
+				wantErr    bool
+			}{
+				{"today is fine", "2026-09-15", false},
+				{"yesterday is fine -- somebody catching up on Thursday", "2026-09-14", false},
+				{"long ago is fine", "2020-01-01", false},
+				{"tomorrow is refused", "2026-09-16", true},
+				{"next year is refused", "2027-01-01", true},
+				{"a malformed date is refused before it reaches the CHECK", "2026-9-8", true},
+				{"a timestamp is refused", "2026-09-15T00:00:00Z", true},
+				{"an empty date is refused", "", true},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					f := newIdentityFixture(t, e)
+					f.s = f.s.WithClock(func() time.Time { return fixed })
+					i := f.identity(t, "svc-dated", 90)
+
+					err := f.s.RecordIdentityRotation(f.ctx, testPermit, i.ID, tc.date)
+
+					if !tc.wantErr {
+						if err != nil {
+							t.Fatalf("RecordIdentityRotation(%q): %v. Refusing a backdated "+
+								"rotation forces an operator to record a date they know is "+
+								"wrong, which is worse than the thing the refusal was "+
+								"protecting.", tc.date, err)
+						}
+						got := f.lastRotatedOf(t, i.ID)
+						if got == nil || *got != tc.date {
+							t.Errorf("last_rotated = %v, want %q",
+								derefOr(got, "NULL"), tc.date)
+						}
+						return
+					}
+
+					// Fail loudly, then assert unconditionally.
+					if err == nil {
+						t.Fatalf("RecordIdentityRotation(%q) was accepted. A future date "+
+							"hides an overdue finding for a rotation that has not "+
+							"happened, which is the one direction that turns this "+
+							"feature into a way of silencing itself.", tc.date)
+					}
+					ve, ok := domain.AsValidation(err)
+					if !ok {
+						t.Fatalf("error = %v (%T), want a *domain.ValidationError so the "+
+							"handler returns 422 with the form re-rendered", err, err)
+					}
+					if _, named := ve.Messages()["last_rotated"]; !named {
+						t.Errorf("the refusal names %v, not last_rotated -- the message has "+
+							"to land on the field the operator was filling in",
+							ve.Messages())
+					}
+					if got := f.lastRotatedOf(t, i.ID); got != nil {
+						t.Errorf("last_rotated = %q after a refused rotation, want NULL", *got)
+					}
+				})
+			}
+
+			// NO MONOTONICITY RULE: a date EARLIER than the stored one is
+			// allowed, because the stored one may simply have been wrong.
+			// change_log records both values and the actor; the audit trail is
+			// the control here, not a constraint. (Compare inflation_rate,
+			// "corrected in place rather than superseded... a revised index for
+			// 2024 was always one figure somebody had wrong.")
+			t.Run("a correction may move the date backwards", func(t *testing.T) {
+				f := newIdentityFixture(t, e)
+				f.s = f.s.WithClock(func() time.Time { return fixed })
+				i := f.identity(t, "svc-corrected", 90)
+
+				if err := f.s.RecordIdentityRotation(f.ctx, testPermit, i.ID, "2026-09-10"); err != nil {
+					t.Fatalf("recording the first date: %v", err)
+				}
+				if err := f.s.RecordIdentityRotation(f.ctx, testPermit, i.ID, "2026-09-01"); err != nil {
+					t.Fatalf("an EARLIER correction was refused: %v. The stored date may "+
+						"simply have been wrong, and a monotonicity rule would leave the "+
+						"operator no way to fix it.", err)
+				}
+				got := f.lastRotatedOf(t, i.ID)
+				if got == nil || *got != "2026-09-01" {
+					t.Errorf("last_rotated = %v, want the corrected earlier date",
+						derefOr(got, "NULL"))
+				}
+				// Both values survive in the audit trail, which is what makes
+				// the permissiveness safe.
+				changes, err := f.s.ListChangesForEntity(f.ctx, "identity", i.ID, 50)
+				if err != nil {
+					t.Fatalf("reading the audit trail: %v", err)
+				}
+				if len(changes) < 2 {
+					t.Fatalf("got %d audit entries, want one per recorded rotation -- the "+
+						"log IS the rotation history", len(changes))
+				}
+				if !strings.Contains(changes[0].Diff, "2026-09-10") {
+					t.Errorf("the correction's diff is %s and does not carry the value it "+
+						"replaced, so nobody can see what was corrected", changes[0].Diff)
+				}
+			})
+		})
 	}
 }
 
 // TestRecordIdentityRotationRefusesARetiredIdentity. Rotating a withdrawn
 // credential is not a thing that happened. The message names the identity, the
 // shape SetBundleMembers uses for a retired bundle.
-func TestRecordIdentityRotationRefusesARetiredIdentity(t *testing.T) { ... }
+func TestRecordIdentityRotationRefusesARetiredIdentity(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newIdentityFixture(t, e)
+			i := f.identity(t, "svc-withdrawn", 90)
+			if err := f.s.RetireIdentity(f.ctx, testPermit, i.ID); err != nil {
+				t.Fatalf("retiring identity: %v", err)
+			}
+			auditBefore := f.auditCount(t, i.ID)
+			versionBefore := f.rowVersionOf(t, i.ID)
+
+			err := f.s.RecordIdentityRotation(f.ctx, testPermit, i.ID,
+				domain.FormatDate(f.s.Now()))
+
+			// Fail loudly first, then assert unconditionally. An assertion
+			// nested in an `if err == nil` would pass on every error, which is
+			// the shape this whole file exists to avoid.
+			if err == nil {
+				t.Fatal("a rotation was recorded against a withdrawn credential. " +
+					"Rotating a credential nobody may use any more is not a thing that " +
+					"happened, and recording it would put a false fact in change_log " +
+					"permanently.")
+			}
+			ve, ok := domain.AsValidation(err)
+			if !ok {
+				t.Fatalf("error = %v (%T), want a *domain.ValidationError so the handler "+
+					"can return 422 with the form re-rendered rather than a 500", err, err)
+			}
+			msg, named := ve.Messages()["last_rotated"]
+			if !named {
+				t.Fatalf("the refusal names fields %v, not last_rotated -- the message has "+
+					"to land on the field the operator was filling in", ve.Messages())
+			}
+			if !strings.Contains(msg, i.Name) {
+				t.Errorf("the message is %q and does not name %q. SetBundleMembers names "+
+					"the retired bundle for the same reason: an operator with several tabs "+
+					"open needs to know WHICH one was withdrawn.", msg, i.Name)
+			}
+
+			// And nothing was written. A refusal that still moved the row would
+			// be worse than no refusal, because the page would look unchanged.
+			if got := f.lastRotatedOf(t, i.ID); got != nil {
+				t.Errorf("last_rotated = %q after a refused rotation, want NULL", *got)
+			}
+			if got := f.rowVersionOf(t, i.ID); got != versionBefore {
+				t.Errorf("row_version moved %d -> %d on a refused rotation", versionBefore, got)
+			}
+			if got := f.auditCount(t, i.ID); got != auditBefore {
+				t.Errorf("change_log grew %d -> %d on a refused rotation", auditBefore, got)
+			}
+		})
+	}
+}
 
 // TestRetireIdentityRefusesNothingAndRewritesNothing is migration 00003's case
 // carried forward: "the natural response to a compromised credential is to
@@ -1063,21 +1492,352 @@ func TestRetireIdentityRefusesNothingAndRewritesNothing(t *testing.T) {
 // TestIdentityUsageNamesWhatWouldNotice is what makes withdrawal an informed act
 // rather than a blind one -- the shape TeamOwnershipCounts feeds the
 // team-retirement screen.
-func TestIdentityUsageNamesWhatWouldNotice(t *testing.T) { ... }
+func TestIdentityUsageNamesWhatWouldNotice(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newIdentityFixture(t, e)
+			named := f.identity(t, "svc-named", 90)
+			unused := f.identity(t, "svc-unused", 90)
+
+			live := f.dependency(t, named.ID)
+			withdrawn := f.dependency(t, named.ID)
+			if err := f.s.RetireDependency(f.ctx, testPermit, withdrawn.ID); err != nil {
+				t.Fatalf("retiring the second dependency: %v", err)
+			}
+
+			usage, err := f.s.IdentityUsage(f.ctx, named.ID)
+			if err != nil {
+				t.Fatalf("IdentityUsage: %v", err)
+			}
+			if len(usage.Dependencies) != 1 {
+				t.Fatalf("IdentityUsage returned %d dependencies, want 1. A RETIRED edge is "+
+					"history; the question the withdrawal screen asks is what is still "+
+					"running, and counting history would overstate the blast radius.",
+					len(usage.Dependencies))
+			}
+			got := usage.Dependencies[0]
+			if got.DependencyID != live.ID {
+				t.Errorf("the surviving dependency is %s, want the live one %s",
+					got.DependencyID, live.ID)
+			}
+			// The panel has to say something an operator can act on, not an id.
+			if got.ConsumerCode != "orders" {
+				t.Errorf("consumer code = %q, want %q -- the panel names WHO would notice",
+					got.ConsumerCode, "orders")
+			}
+			if got.ProviderName != "sql" {
+				t.Errorf("provider name = %q, want %q", got.ProviderName, "sql")
+			}
+			if got.AuthMethod != "scram-sha-256" {
+				t.Errorf("auth method = %q, want %q", got.AuthMethod, "scram-sha-256")
+			}
+
+			// A credential nothing names must report nothing, or the panel says
+			// "this is in use" about every credential in the estate.
+			empty, err := f.s.IdentityUsage(f.ctx, unused.ID)
+			if err != nil {
+				t.Fatalf("IdentityUsage for an unused credential: %v", err)
+			}
+			if len(empty.Dependencies) != 0 || len(empty.Windows) != 0 {
+				t.Errorf("an unused credential reports %d dependencies and %d windows "+
+					"services, want none of either",
+					len(empty.Dependencies), len(empty.Windows))
+			}
+
+			// THE rt_windows HALF IS COVERED IN internal/web, NOT HERE, and the
+			// reason is that the seeded estate already has the real thing:
+			// seed_services.go:260 makes svc-backup$ the logon account of a
+			// Windows service, because "the run-as account is the usual reason a
+			// Windows service dies after a credential rotation". Rebuilding a
+			// service_instance and an rt_windows row by hand here to assert the
+			// same join would be a second, weaker fixture of something the
+			// fixture suite already carries -- see
+			// TestTheIdentityDetailPageNamesWhatWouldNotice in Task 4.
+		})
+	}
+}
 
 // TestListIdentitiesFilters covers each filter and, specifically, that a retired
 // identity is findable: "what is stored keeps displaying".
-func TestListIdentitiesFilters(t *testing.T) { ... }
+func TestListIdentitiesFilters(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newIdentityFixture(t, e)
+
+			// Five rows spanning every axis the page filters on.
+			orders := f.identity(t, "svc-orders", 90)   // within window, once rotated
+			sso := f.identity(t, "svc-sso", 90)         // overdue
+			backup := f.identity(t, "svc-backup", 90)   // never recorded
+			metrics := f.identity(t, "metrics-scrape", 0) // unmanaged
+			legacy := f.identity(t, "svc-legacy", 90)   // retired
+
+			now := f.s.Now()
+			if err := f.s.RecordIdentityRotation(f.ctx, testPermit, orders.ID,
+				domain.FormatDate(now.AddDate(0, 0, -30))); err != nil {
+				t.Fatalf("rotating svc-orders: %v", err)
+			}
+			if err := f.s.RecordIdentityRotation(f.ctx, testPermit, sso.ID,
+				domain.FormatDate(now.AddDate(0, 0, -200))); err != nil {
+				t.Fatalf("rotating svc-sso: %v", err)
+			}
+			// metrics-scrape is an api_token so the kind filter has something to
+			// separate; correcting it here rather than widening the fixture.
+			mk := *metrics
+			mk.Kind = domain.IdentityAPIToken
+			if err := f.s.UpdateIdentity(f.ctx, testPermit, &mk); err != nil {
+				t.Fatalf("setting the kind on metrics-scrape: %v", err)
+			}
+			if err := f.s.RetireIdentity(f.ctx, testPermit, legacy.ID); err != nil {
+				t.Fatalf("retiring svc-legacy: %v", err)
+			}
+
+			names := func(rows []IdentityRow) []string {
+				out := make([]string, 0, len(rows))
+				for _, r := range rows {
+					out = append(out, r.Name)
+				}
+				sort.Strings(out)
+				return out
+			}
+
+			for _, tc := range []struct {
+				name   string
+				filter IdentityFilter
+				want   []string
+			}{
+				{
+					// The default omits the retired one, because the default is
+					// what a picker and a list both start from.
+					"the default is live rows only",
+					IdentityFilter{},
+					[]string{"metrics-scrape", "svc-backup", "svc-orders", "svc-sso"},
+				},
+				{
+					// "so a retired credential can be found" -- what is stored
+					// keeps displaying; it just stops being newly selectable.
+					"IncludeRetired finds the withdrawn one",
+					IdentityFilter{IncludeRetired: true},
+					[]string{"metrics-scrape", "svc-backup", "svc-legacy", "svc-orders", "svc-sso"},
+				},
+				{"kind", IdentityFilter{Kind: domain.IdentityAPIToken}, []string{"metrics-scrape"}},
+				{"name substring", IdentityFilter{Query: "orders"}, []string{"svc-orders"}},
+				{"realm substring", IdentityFilter{Query: "vault"},
+					[]string{"metrics-scrape", "svc-backup", "svc-orders", "svc-sso"}},
+				{"query is case-insensitive", IdentityFilter{Query: "ORDERS"}, []string{"svc-orders"}},
+				{"rotation: overdue", IdentityFilter{Rotation: domain.RotationOverdue},
+					[]string{"svc-sso"}},
+				{"rotation: never recorded", IdentityFilter{Rotation: domain.RotationNeverRecorded},
+					[]string{"svc-backup"}},
+				{"rotation: within window", IdentityFilter{Rotation: domain.RotationWithinWindow},
+					[]string{"svc-orders"}},
+				{"rotation: unmanaged", IdentityFilter{Rotation: domain.RotationUnmanaged},
+					[]string{"metrics-scrape"}},
+				{
+					// Two filters compose rather than one winning. The findings
+					// page links in with a rotation state and the operator then
+					// narrows by name, which is this case.
+					"rotation and query compose",
+					IdentityFilter{Rotation: domain.RotationNeverRecorded, Query: "backup"},
+					[]string{"svc-backup"},
+				},
+				{"a filter matching nothing returns nothing, not everything",
+					IdentityFilter{Query: "no-such-credential"}, []string{}},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					rows, err := f.s.ListIdentities(f.ctx, tc.filter)
+					if err != nil {
+						t.Fatalf("ListIdentities(%+v): %v", tc.filter, err)
+					}
+					if got := names(rows); !slices.Equal(got, tc.want) {
+						t.Errorf("ListIdentities(%+v) = %v, want %v", tc.filter, got, tc.want)
+					}
+				})
+			}
+
+			// The team filter needs a team, which the fixture has none of --
+			// built here so the assertion is about the filter rather than about
+			// the fixture's shape.
+			t.Run("team", func(t *testing.T) {
+				team, err := domain.NewTeam(NewID(), domain.TeamSpec{
+					Code: "platform", Name: "Platform",
+					ContactRef: strPtr("platform@example.com"),
+				}, f.s.Now())
+				if err != nil {
+					t.Fatalf("building team: %v", err)
+				}
+				if err := f.s.CreateTeam(f.ctx, testPermit, team); err != nil {
+					t.Fatalf("creating team: %v", err)
+				}
+				owned := *backup
+				owned.TeamID = &team.ID
+				if err := f.s.UpdateIdentity(f.ctx, testPermit, &owned); err != nil {
+					t.Fatalf("assigning the team: %v", err)
+				}
+				rows, err := f.s.ListIdentities(f.ctx, IdentityFilter{TeamID: team.ID})
+				if err != nil {
+					t.Fatalf("ListIdentities by team: %v", err)
+				}
+				if got := names(rows); !slices.Equal(got, []string{"svc-backup"}) {
+					t.Errorf("ListIdentities by team = %v, want [svc-backup]", got)
+				}
+			})
+		})
+	}
+}
 
 // TestUpdateIdentityRefusesAStaleToken.
 func TestUpdateIdentityRefusesAStaleToken(t *testing.T) {
-	// two reads of the same row, two writes; the second is domain.ErrStale
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newIdentityFixture(t, e)
+			i := f.identity(t, "svc-contended", 90)
+
+			// TWO READS OF THE SAME ROW, which is what two operators with the
+			// form open at the same time are holding.
+			first, err := f.s.GetIdentity(f.ctx, i.ID)
+			if err != nil {
+				t.Fatalf("first read: %v", err)
+			}
+			second, err := f.s.GetIdentity(f.ctx, i.ID)
+			if err != nil {
+				t.Fatalf("second read: %v", err)
+			}
+
+			a := first.Identity
+			a.Name = "svc-contended-first"
+			if err := f.s.UpdateIdentity(f.ctx, testPermit, &a); err != nil {
+				t.Fatalf("the first write must succeed, or the second is not stale and "+
+					"this test proves nothing: %v", err)
+			}
+
+			b := second.Identity
+			b.Name = "svc-contended-second"
+			err = f.s.UpdateIdentity(f.ctx, testPermit, &b)
+
+			if err == nil {
+				t.Fatal("the second write succeeded against a token from before the first. " +
+					"That is the silent revert row_version exists to prevent, and " +
+					"change_log would record it as a deliberate act by whoever was slower.")
+			}
+			if !errors.Is(err, domain.ErrStale) {
+				t.Fatalf("error = %v, want domain.ErrStale. The handler maps ErrStale to "+
+					"409 and everything else to 422 or 500 -- a plain ErrConflict here "+
+					"would tell the operator to choose a different name, which is not "+
+					"the problem.", err)
+			}
+			// Never a 404: the row is there, it simply moved.
+			if errors.Is(err, domain.ErrNotFound) {
+				t.Error("a stale write reported ErrNotFound, which would tell the operator " +
+					"their credential had vanished")
+			}
+
+			stored := f.nameOf(t, i.ID)
+			if stored != "svc-contended-first" {
+				t.Errorf("stored name = %q, want the first writer's", stored)
+			}
+
+			// And the caller's own token advanced on the write that DID land, so
+			// a second save from the same struct is not a conflict against
+			// nobody (requireVersion's doc comment).
+			if a.RowVersion != first.RowVersion+1 {
+				t.Errorf("the successful writer's RowVersion is %d, want %d -- a caller "+
+					"updating the same struct twice would otherwise compare a stale token "+
+					"against a row it moved itself", a.RowVersion, first.RowVersion+1)
+			}
+		})
+	}
 }
 
 // TestUpdateIdentityNeverWritesLifecycleOrLastRotated. UpdateEnvironment pins
 // lifecycle for exactly this reason: a correction path that can also withdraw is
 // a second withdrawal path with none of RetireIdentity's audit shape.
-func TestUpdateIdentityNeverWritesLifecycleOrLastRotated(t *testing.T) { ... }
+func TestUpdateIdentityNeverWritesLifecycleOrLastRotated(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newIdentityFixture(t, e)
+			i := f.identity(t, "svc-pinned", 90)
+
+			// A REAL rotation first, so last_rotated is non-NULL and an attempt
+			// to overwrite it has something to overwrite. Pinning a NULL against
+			// a NULL proves nothing.
+			const rotated = "2026-06-01"
+			if err := f.s.RecordIdentityRotation(f.ctx, testPermit, i.ID, rotated); err != nil {
+				t.Fatalf("recording the first rotation: %v", err)
+			}
+			stored, err := f.s.GetIdentity(f.ctx, i.ID)
+			if err != nil {
+				t.Fatalf("reading it back: %v", err)
+			}
+
+			// NOW ATTEMPT THE FORBIDDEN THING. A test that simply never submits
+			// these fields passes whether or not the pinning exists, which makes
+			// it decoration. This submission carries a changed lifecycle, a
+			// changed last_rotated AND a changed name -- the name so that the
+			// update genuinely happens, because a write that was rejected
+			// wholesale would leave both pinned fields unmoved for the wrong
+			// reason and the test would pass on a no-op.
+			attempt := stored.Identity
+			attempt.Name = "svc-pinned-renamed"
+			attempt.Lifecycle = domain.LifecycleRetired
+			attempt.LastRotated = strPtr("2020-01-01")
+
+			if err := f.s.UpdateIdentity(f.ctx, testPermit, &attempt); err != nil {
+				t.Fatalf("UpdateIdentity: %v", err)
+			}
+
+			after, err := f.s.GetIdentity(f.ctx, i.ID)
+			if err != nil {
+				t.Fatalf("reading after the update: %v", err)
+			}
+
+			// The legitimate change landed, so the update was not a no-op.
+			if after.Name != "svc-pinned-renamed" {
+				t.Fatalf("name = %q, want the corrected one -- the update did not happen at "+
+					"all, so the two assertions below would pass for the wrong reason",
+					after.Name)
+			}
+			// lifecycle is pinned from the stored row. UpdateEnvironment and
+			// UpdateInterface pin theirs for the identical reason: this method
+			// would otherwise be a SECOND WITHDRAWAL PATH with none of
+			// RetireIdentity's audit shape -- it would log a plain field diff
+			// rather than a withdrawal, and the change_log entry an auditor
+			// looks for would not be there.
+			if after.Lifecycle != domain.LifecycleActive {
+				t.Errorf("lifecycle = %q after a correction submitting 'retired'. A "+
+					"correction form must not be able to withdraw a credential: that is "+
+					"RetireIdentity's job and it writes a different audit entry.",
+					after.Lifecycle)
+			}
+			// last_rotated is pinned because it has exactly one writer and this
+			// is not it. A correction form that could also stamp the date would
+			// let somebody silence an overdue finding through the edit screen,
+			// with the change buried in a multi-field diff.
+			if after.LastRotated == nil || *after.LastRotated != rotated {
+				t.Errorf("last_rotated = %v after a correction submitting 2020-01-01, want %q. "+
+					"RecordIdentityRotation is the only writer (see "+
+					"internal/store/last_rotated_source_test.go).",
+					derefOr(after.LastRotated, "NULL"), rotated)
+			}
+
+			// And the audit entry for the correction mentions neither pinned
+			// column, so a reader of change_log is not told about a change that
+			// did not happen.
+			changes, err := f.s.ListChangesForEntity(f.ctx, "identity", i.ID, 10)
+			if err != nil {
+				t.Fatalf("reading the audit trail: %v", err)
+			}
+			if len(changes) == 0 {
+				t.Fatal("no audit entries at all; this assertion is checking nothing")
+			}
+			newest := changes[0].Diff
+			if strings.Contains(newest, "lifecycle") || strings.Contains(newest, "last_rotated") {
+				t.Errorf("the correction's diff is %s and names a pinned column. The diff "+
+					"must describe what actually changed, or the audit trail reports a "+
+					"withdrawal or a rotation that never happened.", newest)
+			}
+		})
+	}
+}
 ```
 
 And the structural guard, `internal/store/last_rotated_source_test.go`:
@@ -1574,8 +2334,30 @@ func (s *SQLStore) IdentityUsage(ctx context.Context, id string) (*IdentityUsage
 		return nil, fmt.Errorf("listing windows services naming identity %s: %w", id, err)
 	}
 	// Sorted in Go, for the collation reason ListIdentities states.
-	sort.SliceStable(deps, func(a, b int) bool { ... })
-	sort.SliceStable(wins, func(a, b int) bool { ... })
+	// Sorted in Go, for the collation reason ListIdentities states. Ties broken
+	// on the id so the order is total: two edges from the same consumer to the
+	// same endpoint are legitimate, and an unstable order between them makes a
+	// golden test flap on one engine and not the other.
+	sort.SliceStable(deps, func(a, b int) bool {
+		x, y := deps[a], deps[b]
+		if x.ConsumerCode != y.ConsumerCode {
+			return x.ConsumerCode < y.ConsumerCode
+		}
+		if x.ProviderName != y.ProviderName {
+			return x.ProviderName < y.ProviderName
+		}
+		return x.DependencyID < y.DependencyID
+	})
+	sort.SliceStable(wins, func(a, b int) bool {
+		x, y := wins[a], wins[b]
+		if x.ServiceCode != y.ServiceCode {
+			return x.ServiceCode < y.ServiceCode
+		}
+		if x.ServiceName != y.ServiceName {
+			return x.ServiceName < y.ServiceName
+		}
+		return x.InstanceID < y.InstanceID
+	})
 	return &IdentityUsageRows{Dependencies: deps, Windows: wins}, nil
 }
 ```
@@ -1596,6 +2378,22 @@ func (s *SQLStore) IdentityUsage(ctx context.Context, id string) (*IdentityUsage
 	// option, and SAVING THE CORRECTION ROW WOULD SILENTLY CLEAR identity_id --
 	// a data change nobody asked for, on a form about something else.
 	//
+	// AND THE REASON A LIVE EDGE NAMING A RETIRED CREDENTIAL IS NORMAL rather
+	// than a mess to tidy up: migration 00003 records that "the natural response
+	// to a compromised credential is to retire it and create its replacement
+	// under the same name", which is exactly why the uniqueness index is scoped
+	// to lifecycle = 'active'. So the sequence the estate is BUILT for -- retire
+	// the compromised credential now, re-point the edges as the services are
+	// redeployed over the following days -- leaves live dependencies naming a
+	// retired identity for as long as that takes, by design. RetireIdentity
+	// refuses nothing and rewrites nothing precisely so that it can. The edit
+	// form must therefore keep displaying what is STORED, marked retired, the
+	// same rule RetireEnvironment states for every label that behaves this way.
+	//
+	// Without that reasoning written here, the next person narrows this to live
+	// rows believing it is tidy-up, and the tidy-up silently clears identity_id
+	// on the edges of exactly the credential somebody is mid-incident about.
+	//
 	// The consequence is that a retired credential is still offered on the
 	// CREATE form, which is the pre-WP-J8 behaviour (ListIdentities took no
 	// filter and returned everything). Narrowing only the create half needs two
@@ -1613,9 +2411,71 @@ Add a regression test for exactly this, in `internal/web/identities_test.go`:
 // sites: an option that vanishes from a <select> does not leave the field
 // unchanged, it clears it.
 func TestADependencyNamingARetiredIdentityKeepsIt(t *testing.T) {
-	// seed estate + an identity named by a dependency, then retire it
-	// open the service page with ?edit=<dependencyID>
-	// assert the body contains `value="<identityID>"` AND `selected`
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+	ctx := context.Background()
+	admin := domain.AdministratorPermit(domain.SystemActor)
+
+	identity, err := domain.NewIdentity(store.NewID(), domain.IdentitySpec{
+		Kind: domain.IdentityServiceAccount, Name: "svc-still-named",
+		Realm: strPtr("vault"),
+	})
+	if err != nil {
+		t.Fatalf("building identity: %v", err)
+	}
+	if err := h.store.CreateIdentity(ctx, admin, identity); err != nil {
+		t.Fatalf("creating identity: %v", err)
+	}
+
+	consumer := h.refs.Services["orders-api"]
+	endpoint := h.lookup(`SELECT id FROM endpoint ORDER BY id LIMIT 1`)
+	dep, err := domain.NewDependency(store.NewID(), domain.DependencySpec{
+		ConsumerServiceID:  consumer,
+		ProviderEndpointID: &endpoint,
+		Nature:             domain.NatureHard,
+		FailureMode:        "orders cannot authenticate",
+		IdentityID:         &identity.ID,
+	}, h.store.Now())
+	if err != nil {
+		t.Fatalf("building dependency: %v", err)
+	}
+	if err := h.store.CreateDependency(ctx, admin, dep, nil); err != nil {
+		t.Fatalf("creating dependency: %v", err)
+	}
+
+	page := "/services/" + consumer + "?edit=" + dep.ID
+	marker := `value="` + identity.ID + `"`
+
+	// POSITIVE CONTROL: the option is there while the credential is live, so
+	// the assertion after the withdrawal is about the filter and not about the
+	// picker never having rendered.
+	before := body(t, h.get(page, false))
+	if !strings.Contains(before, marker) {
+		t.Fatalf("the correction row does not offer %s even while it is live; this test "+
+			"would then prove nothing", identity.Name)
+	}
+
+	if err := h.store.RetireIdentity(ctx, admin, identity.ID); err != nil {
+		t.Fatalf("withdrawing the credential: %v", err)
+	}
+
+	after := body(t, h.get(page, false))
+	if !strings.Contains(after, marker) {
+		t.Fatalf("the correction row no longer offers the RETIRED credential the "+
+			"dependency names. An option that vanishes from a <select> does not leave "+
+			"the field unchanged -- the browser falls back to the empty first option, "+
+			"and saving the row silently clears identity_id on the edges of exactly "+
+			"the credential somebody is mid-incident about. ListIdentities is called "+
+			"with IncludeRetired: true at internal/web/handlers/deps.go and "+
+			"services.go for this reason.")
+	}
+	// And it is still the SELECTED one, not merely present in the list.
+	idx := strings.Index(after, marker)
+	option := after[idx:min(idx+200, len(after))]
+	if !strings.Contains(option, "selected") {
+		t.Errorf("the retired credential is offered but not selected, so the form would "+
+			"still save a different value than the one stored: %q", option)
+	}
 }
 ```
 
@@ -1695,7 +2555,7 @@ func TestTheIdentityListNeverRendersASecretPath(t *testing.T) {
 	}
 	for _, who := range []struct{ user, pass string }{
 		{"admin", "admin-password"},
-		{"observer", "observer-password"},
+		{"viewer", "viewer-password"},
 	} {
 		h.login(who.user, who.pass)
 		page := body(t, h.get("/identities", false))
@@ -1715,7 +2575,62 @@ func TestTheIdentityListNeverRendersASecretPath(t *testing.T) {
 // .Dep.IdentitySecretRef is one {{end}} away from leaking it, and it does
 // nothing at all for a CSV export, which never passes through a template." So
 // it is computed in the view model, and this drives both sides.
-func TestSecretRefOnTheDetailPageIsAdministratorOnly(t *testing.T) { ... }
+func TestSecretRefOnTheDetailPageIsAdministratorOnly(t *testing.T) {
+	h := newHarness(t)
+
+	// The fixture builds its own credential rather than leaning on the seed, so
+	// this task's tests do not depend on Task 6 having landed. The path is
+	// distinctive enough that finding it in a page cannot be a coincidence.
+	const path = "kv/prod/identity-disclosure-test/db"
+	// strPtr already lives in this package (users_test.go:29). There is no
+	// intPtr, and adding one for two call sites is worse than a named
+	// variable that says what the number means.
+	ninetyDays := 90
+	ctx := context.Background()
+	admin := domain.AdministratorPermit(domain.SystemActor)
+	identity, err := domain.NewIdentity(store.NewID(), domain.IdentitySpec{
+		Kind: domain.IdentityServiceAccount, Name: "svc-disclosure-test",
+		Realm: strPtr("vault"), SecretRef: strPtr(path), RotationDays: &ninetyDays,
+	})
+	if err != nil {
+		t.Fatalf("building identity: %v", err)
+	}
+	if err := h.store.CreateIdentity(ctx, admin, identity); err != nil {
+		t.Fatalf("creating identity: %v", err)
+	}
+
+	t.Run("an administrator sees the path", func(t *testing.T) {
+		h.login("admin", "admin-password")
+		page := body(t, h.get("/identities/"+identity.ID, false))
+		if !strings.Contains(page, path) {
+			t.Errorf("the detail page does not render the secret path to an Administrator. "+
+				"The path renders HERE, one credential at a time -- that is the whole "+
+				"trade the list page's blanket refusal buys.")
+		}
+	})
+
+	t.Run("a read-only user sees the page and not the path", func(t *testing.T) {
+		h.login("viewer", "viewer-password")
+		resp := h.get("/identities/"+identity.ID, false)
+		page := body(t, resp)
+		// The GET is deliberately NOT gated: name, realm, kind, team and
+		// rotation status are what somebody needs mid-incident.
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("GET the detail page as viewer returned %d, want 200 -- the read "+
+				"surface is open to any authenticated user", resp.StatusCode)
+		}
+		if !strings.Contains(page, identity.Name) {
+			t.Errorf("the page does not name the credential at all, so the assertion " +
+				"below would pass on an error page rather than on redaction")
+		}
+		if strings.Contains(page, path) {
+			t.Errorf("the detail page rendered %q to a read-only user. The gate lives in "+
+				"the handler's view model, not the template -- depRowData.SecretRef's "+
+				"comment: a template-side {{if .IsAdmin}} is one {{end}} away from "+
+				"leaking it, and it does nothing at all for a CSV export.", path)
+		}
+	})
+}
 
 // TestTheIdentityListRendersEveryRotationState is the reason the page exists.
 // Five identities, five pills, and RotationUnreadable must NOT read as healthy.
@@ -1727,25 +2642,235 @@ func TestTheIdentityListRendersEveryRotationState(t *testing.T) {
 	// but ParseDate does not: "2026-02-31" is ten characters with dashes in
 	// positions 5 and 8, so the database accepts it and Go will not parse it.
 	// THAT COMBINATION IS THE WHOLE POINT of the state existing.
+	//
+	// THIS IS WHY TASK 4 TESTS THE STATE AND TASK 6 DOES NOT SEED IT. A test may
+	// write 2026-02-31 straight past the Go layer because a test is entitled to
+	// manufacture a corrupt row in order to prove the software survives one; the
+	// demo estate deliberately seeds four of the five states and never this one,
+	// because a seeded corrupt row teaches every reader of the demo that the
+	// estate produces them, which it does not and must not.
 	for _, want := range []string{"no policy", "never recorded", "due in", "overdue by", "date unreadable"} {
 		if !strings.Contains(page, want) { t.Errorf("the list never renders %q", want) }
 	}
-	if strings.Contains(unreadableRow, "within") { ... }
+	// The unreadable row must not carry ANY of the healthy vocabulary. Asserted
+	// against the row rather than the page, because "due in" legitimately
+	// appears on the within-window row three lines above it.
+	for _, healthy := range []string{"due in", "within", "no policy"} {
+		if strings.Contains(unreadableRow, healthy) {
+			t.Errorf("the row for a credential whose stored date will not parse renders "+
+				"%q. A state that cannot be READ must never render as a state that is "+
+				"FINE -- the boolean this replaced returned false on a parse error, "+
+				"which is exactly how an unreadable value read as healthy.", healthy)
+		}
+	}
 }
 
 // TestTheIdentityDetailPageStatesAllThreeRotationFactsPlainly: the policy, the
 // last recorded rotation (never a blank -- "never recorded"), and the derived
 // state.
-func TestTheIdentityDetailPageStatesAllThreeRotationFactsPlainly(t *testing.T) { ... }
+func TestTheIdentityDetailPageStatesAllThreeRotationFactsPlainly(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+	ctx := context.Background()
+	admin := domain.AdministratorPermit(domain.SystemActor)
+	now := h.store.Now()
+
+	mk := func(t *testing.T, name string, rotationDays int, rotatedDaysAgo int) string {
+		t.Helper()
+		spec := domain.IdentitySpec{
+			Kind: domain.IdentityServiceAccount, Name: name, Realm: strPtr("vault"),
+		}
+		if rotationDays > 0 {
+			spec.RotationDays = &rotationDays
+		}
+		i, err := domain.NewIdentity(store.NewID(), spec)
+		if err != nil {
+			t.Fatalf("building %s: %v", name, err)
+		}
+		if err := h.store.CreateIdentity(ctx, admin, i); err != nil {
+			t.Fatalf("creating %s: %v", name, err)
+		}
+		if rotatedDaysAgo > 0 {
+			date := domain.FormatDate(now.AddDate(0, 0, -rotatedDaysAgo))
+			if err := h.store.RecordIdentityRotation(ctx, admin, i.ID, date); err != nil {
+				t.Fatalf("rotating %s: %v", name, err)
+			}
+		}
+		return i.ID
+	}
+
+	withinID := mk(t, "svc-within", 90, 30)
+	neverID := mk(t, "svc-never", 90, 0)
+	unmanagedID := mk(t, "svc-unmanaged", 0, 0)
+
+	t.Run("a rotated credential states the policy, the date and the state", func(t *testing.T) {
+		page := body(t, h.get("/identities/"+withinID, false))
+		for _, want := range []string{
+			"every 90 days",                                        // the policy
+			domain.FormatDate(now.AddDate(0, 0, -30)),              // the last recorded rotation
+			"due in",                                               // the derived state
+		} {
+			if !strings.Contains(page, want) {
+				t.Errorf("the rotation panel does not state %q. All three facts are stated "+
+					"plainly and none is collapsed into another.", want)
+			}
+		}
+	})
+
+	t.Run("a credential with a policy and no record says so, never a blank", func(t *testing.T) {
+		page := body(t, h.get("/identities/"+neverID, false))
+		if !strings.Contains(page, "every 90 days") {
+			t.Error("the policy is not stated, so a reader cannot tell there is a rule at all")
+		}
+		if !strings.Contains(page, "never recorded") {
+			t.Error("the last rotation reads as something other than 'never recorded'. A " +
+				"BLANK here is the defect: it reads as a field nobody filled in rather " +
+				"than as the estate having a rule with no evidence it was ever followed.")
+		}
+	})
+
+	t.Run("an unmanaged credential says there is no policy, and is not overdue", func(t *testing.T) {
+		page := body(t, h.get("/identities/"+unmanagedID, false))
+		if !strings.Contains(page, "no rotation policy") {
+			t.Error("the panel does not say there is no rotation policy")
+		}
+		// The two states this page must never confuse. `unmanaged` has no rule
+		// to break; reporting it as late is how a page teaches people to ignore
+		// it, which is the reasoning EstateFindings already applies to expected
+		// power convergence.
+		for _, wrong := range []string{"overdue", "never recorded"} {
+			if strings.Contains(page, wrong) {
+				t.Errorf("a credential with no rotation policy renders %q. There is nothing "+
+					"for it to be late for, and nothing anybody failed to record.", wrong)
+			}
+		}
+	})
+}
 
 // TestTheIdentityDetailPageNamesWhatWouldNotice drives the used-by panel,
 // including the case the spec names: a LIVE dependency naming a RETIRED identity
 // still displays it, marked retired.
-func TestTheIdentityDetailPageNamesWhatWouldNotice(t *testing.T) { ... }
+func TestTheIdentityDetailPageNamesWhatWouldNotice(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+	ctx := context.Background()
+	admin := domain.AdministratorPermit(domain.SystemActor)
+	ninetyDays := 90
+
+	t.Run("a Windows service naming a credential appears", func(t *testing.T) {
+		// THE SEEDED ESTATE ALREADY HAS THIS ONE, and it is the real thing
+		// rather than a fixture: seed_services.go:260 makes svc-backup$ the
+		// logon account of a Windows service, because "the run-as account is
+		// the usual reason a Windows service dies after a credential rotation".
+		id := h.lookup(`SELECT id FROM identity WHERE name = ?`, "svc-backup$")
+		if id == "" {
+			t.Fatal("svc-backup$ is not in the fixture, so the rt_windows join is " +
+				"checked nowhere -- seed it rather than letting this pass")
+		}
+		page := body(t, h.get("/identities/"+id, false))
+		if !strings.Contains(page, "Veeam") {
+			t.Error("the used-by panel does not name the Windows service that logs on as " +
+				"this credential. That panel is what makes withdrawal an informed act.")
+		}
+	})
+
+	t.Run("a live dependency naming a RETIRED credential still shows it", func(t *testing.T) {
+		// Built here rather than taken from the seed, so this task does not
+		// depend on Task 6. The state is normal by design: migration 00003's
+		// response to a compromise is retire-then-replace, so edges keep naming
+		// the withdrawn credential until they are re-pointed.
+		identity, err := domain.NewIdentity(store.NewID(), domain.IdentitySpec{
+			Kind: domain.IdentityServiceAccount, Name: "svc-compromised",
+			Realm: strPtr("vault"), RotationDays: &ninetyDays,
+		})
+		if err != nil {
+			t.Fatalf("building identity: %v", err)
+		}
+		if err := h.store.CreateIdentity(ctx, admin, identity); err != nil {
+			t.Fatalf("creating identity: %v", err)
+		}
+
+		consumer := h.refs.Services["orders-api"]
+		// Any seeded endpoint will do: this test is about the identity panel,
+		// not about which edge it is. lookup fails the test loudly if the
+		// fixture has none, rather than substituting an id that resolves to
+		// nothing and producing a page that renders empty for the wrong reason.
+		endpoint := h.lookup(`SELECT id FROM endpoint ORDER BY id LIMIT 1`)
+		dep, err := domain.NewDependency(store.NewID(), domain.DependencySpec{
+			ConsumerServiceID:  consumer,
+			ProviderEndpointID: &endpoint,
+			Nature:             domain.NatureHard,
+			FailureMode:        "orders cannot authenticate",
+			IdentityID:         &identity.ID,
+		}, h.store.Now())
+		if err != nil {
+			t.Fatalf("building dependency: %v", err)
+		}
+		if err := h.store.CreateDependency(ctx, admin, dep, nil); err != nil {
+			t.Fatalf("creating dependency: %v", err)
+		}
+		if err := h.store.RetireIdentity(ctx, admin, identity.ID); err != nil {
+			t.Fatalf("withdrawing the credential: %v", err)
+		}
+
+		page := body(t, h.get("/identities/"+identity.ID, false))
+		if !strings.Contains(page, "orders-api") {
+			t.Error("the used-by panel is empty for a WITHDRAWN credential that a live " +
+				"dependency still names. RetireEnvironment's ruling carries over: what " +
+				"is stored keeps displaying. Hiding it here is how somebody concludes " +
+				"the withdrawal was clean when a service is still authenticating with it.")
+		}
+		if !strings.Contains(page, "retired") {
+			t.Error("the page does not mark the credential retired, so a reader cannot " +
+				"tell the difference between a live credential and a withdrawn one")
+		}
+	})
+}
 
 // TestTheIdentityListFiltersFindARetiredCredential: "so a retired credential can
 // be found".
-func TestTheIdentityListFiltersFindARetiredCredential(t *testing.T) { ... }
+func TestTheIdentityListFiltersFindARetiredCredential(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+	ctx := context.Background()
+	admin := domain.AdministratorPermit(domain.SystemActor)
+
+	identity, err := domain.NewIdentity(store.NewID(), domain.IdentitySpec{
+		Kind: domain.IdentityServiceAccount, Name: "svc-findable-after-withdrawal",
+		Realm: strPtr("vault"),
+	})
+	if err != nil {
+		t.Fatalf("building identity: %v", err)
+	}
+	if err := h.store.CreateIdentity(ctx, admin, identity); err != nil {
+		t.Fatalf("creating identity: %v", err)
+	}
+
+	// A positive control: it is on the default list BEFORE withdrawal, so the
+	// assertion after it is about the filter and not about the row never having
+	// rendered at all.
+	if page := body(t, h.get("/identities", false)); !strings.Contains(page, identity.Name) {
+		t.Fatalf("%s is not on the default list before withdrawal; this test would then "+
+			"prove nothing about the filter", identity.Name)
+	}
+	if err := h.store.RetireIdentity(ctx, admin, identity.ID); err != nil {
+		t.Fatalf("withdrawing: %v", err)
+	}
+
+	if page := body(t, h.get("/identities", false)); strings.Contains(page, identity.Name) {
+		t.Errorf("%s is still on the DEFAULT list after withdrawal. The default is what a "+
+			"picker starts from, and a withdrawn credential must not be offered as a new "+
+			"choice.", identity.Name)
+	}
+	page := body(t, h.get("/identities?lifecycle=retired", false))
+	if !strings.Contains(page, identity.Name) {
+		t.Errorf("%s cannot be found under the retired filter. A credential somebody "+
+			"withdrew by mistake, or one an incident review needs to look at, is "+
+			"unreachable through the application if this filter does not work -- and "+
+			"there is no restore path by design, so finding it is the only recourse.",
+			identity.Name)
+	}
+}
 ```
 
 Add the row to `internal/web/detail_pages_render_test.go:47-62`:
@@ -2045,7 +3170,7 @@ INV_TEST_POSTGRES_DSN="..." go test ./internal/web/... -count=1
 | Mutation | Test that must go red |
 |---|---|
 | Add `SecretRef string` to `identityListRow`, populate it, and render it in the list template | `TestTheIdentityListNeverRendersASecretPath` — for **both** users |
-| Drop `base.IsAdmin &&` from the detail handler's `secretRef` assignment | `TestSecretRefOnTheDetailPageIsAdministratorOnly` (the observer half) |
+| Drop `base.IsAdmin &&` from the detail handler's `secretRef` assignment | `TestSecretRefOnTheDetailPageIsAdministratorOnly` (the viewer half) |
 | In the template, render the `unreadable` branch with `pill-ok` and the text `within window` | `TestTheIdentityListRendersEveryRotationState` |
 
 **Layer note for the first mutation:** if you instead delete the whole secret-ref column from the template, the test still passes — it asserts absence. That is why the test opens with a positive control asserting the fixture *has* a path, and asserts the `recorded` marker is present. State that when you run it.
@@ -2080,7 +3205,12 @@ func TestRecordingARotationThroughTheRoute(t *testing.T) {
 	// POST /identities/{id}/rotation with last_rotated = today -> 303
 	// the detail page now shows the date and a "within window" state
 	// the TIMELINE shows the rotation as a last_rotated change, with an actor
-	if !strings.Contains(page, "last_rotated") { ... }
+	if !strings.Contains(page, "last_rotated") {
+		t.Error("the timeline does not show the rotation as a last_rotated change. " +
+			"change_log IS the rotation history -- the table keeps only the latest " +
+			"date -- so a rotation that does not appear here is a rotation nobody " +
+			"can audit afterwards.")
+	}
 }
 
 // TestAFutureRotationIs422WithTheFormReRendered. CLAUDE.md's rule and the
@@ -2096,18 +3226,136 @@ func TestAFutureRotationIs422WithTheFormReRendered(t *testing.T) {
 	if !strings.Contains(page, tomorrow) {
 		t.Error("the refused form did not hand back what the operator typed")
 	}
-	if !strings.Contains(page, "cannot be recorded in the future") { ... }
+	if !strings.Contains(page, "cannot be recorded in the future") {
+		t.Errorf("the refusal does not say why the date was rejected, so it reads as a " +
+			"generic failure on a date that is well-formed")
+	}
 	// and nothing was written
-	if h.count(`SELECT COUNT(*) FROM identity WHERE last_rotated IS NOT NULL`) != 0 { ... }
+	if n := h.count(`SELECT COUNT(*) FROM identity WHERE last_rotated IS NOT NULL`); n != 0 {
+		t.Errorf("%d identities carry a last_rotated after a refused rotation. A 422 that "+
+			"still wrote would be worse than no refusal at all, because the page says "+
+			"it failed.", n)
+	}
 }
 
 // TestARotationAgainstARetiredIdentityIs422AndNamesIt.
-func TestARotationAgainstARetiredIdentityIs422AndNamesIt(t *testing.T) { ... }
+func TestARotationAgainstARetiredIdentityIs422AndNamesIt(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+	ctx := context.Background()
+	admin := domain.AdministratorPermit(domain.SystemActor)
+	ninetyDays := 90
+
+	identity, err := domain.NewIdentity(store.NewID(), domain.IdentitySpec{
+		Kind: domain.IdentityServiceAccount, Name: "svc-withdrawn-rotation",
+		Realm: strPtr("vault"), RotationDays: &ninetyDays,
+	})
+	if err != nil {
+		t.Fatalf("building identity: %v", err)
+	}
+	if err := h.store.CreateIdentity(ctx, admin, identity); err != nil {
+		t.Fatalf("creating identity: %v", err)
+	}
+	if err := h.store.RetireIdentity(ctx, admin, identity.ID); err != nil {
+		t.Fatalf("withdrawing: %v", err)
+	}
+
+	path := "/identities/" + identity.ID
+	token := h.csrfToken(path)
+	today := domain.FormatDate(h.store.Now())
+	resp := h.post(path+"/rotation", url.Values{
+		"csrf_token":   {token},
+		"last_rotated": {today},
+	}, false)
+	page := body(t, resp)
+
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("recording a rotation against a withdrawn credential returned %d, want "+
+			"422. A 303 would tell the operator it worked; a 500 would tell them the "+
+			"software broke. Neither is true.", resp.StatusCode)
+	}
+	if !strings.Contains(page, identity.Name) {
+		t.Errorf("the refusal does not name %q. An operator with several credentials "+
+			"open needs to know which one was withdrawn.", identity.Name)
+	}
+	if !strings.Contains(page, "withdrawn") {
+		t.Errorf("the refusal does not say the credential was withdrawn, so it reads as "+
+			"a malformed-date error for a date that is fine")
+	}
+	// The form comes back, with what was typed still in it.
+	if !strings.Contains(page, today) {
+		t.Errorf("the refused form did not hand back the date the operator typed")
+	}
+	// And nothing was written.
+	if n := h.count(`SELECT COUNT(*) FROM identity WHERE id = ? AND last_rotated IS NOT NULL`,
+		identity.ID); n != 0 {
+		t.Errorf("last_rotated was written despite the refusal")
+	}
+}
 
 // TestAStaleIdentityCorrectionIs409. refusalStatus separates the two reasons a
 // save comes back: 422 says "what you typed is wrong", 409 says "somebody else
 // got there first".
-func TestAStaleIdentityCorrectionIs409(t *testing.T) { ... }
+func TestAStaleIdentityCorrectionIs409(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+	ctx := context.Background()
+	admin := domain.AdministratorPermit(domain.SystemActor)
+
+	identity, err := domain.NewIdentity(store.NewID(), domain.IdentitySpec{
+		Kind: domain.IdentityServiceAccount, Name: "svc-concurrent",
+		Realm: strPtr("vault"),
+	})
+	if err != nil {
+		t.Fatalf("building identity: %v", err)
+	}
+	if err := h.store.CreateIdentity(ctx, admin, identity); err != nil {
+		t.Fatalf("creating identity: %v", err)
+	}
+
+	path := "/identities/" + identity.ID
+	// BOTH SUBMISSIONS CARRY row_version = 1, which is what two operators who
+	// opened the form at the same time would send. The token comes from the
+	// page each of them is looking at, not from the row.
+	form := func(name string) url.Values {
+		return url.Values{
+			"csrf_token":  {h.csrfToken(path)},
+			"kind":        {domain.IdentityServiceAccount},
+			"name":        {name},
+			"realm":       {"vault"},
+			"row_version": {"1"},
+		}
+	}
+
+	first := h.post(path, form("svc-concurrent-first"), false)
+	first.Body.Close()
+	if first.StatusCode != http.StatusSeeOther {
+		t.Fatalf("the first correction returned %d, want 303 -- if this did not succeed "+
+			"the second one is not stale and this test proves nothing", first.StatusCode)
+	}
+
+	second := h.post(path, form("svc-concurrent-second"), false)
+	page := body(t, second)
+	if second.StatusCode != http.StatusConflict {
+		t.Fatalf("the second correction returned %d, want 409. refusalStatus separates "+
+			"the two reasons a save comes back: 422 says what you typed is wrong, 409 "+
+			"says it was fine and somebody else got there first. Answering this with "+
+			"422 tells the operator to fix input that has nothing wrong with it.",
+			second.StatusCode)
+	}
+	if !strings.Contains(page, "svc-concurrent-second") {
+		t.Errorf("the 409 did not hand back what the second operator typed. Their text " +
+			"is the thing they are about to re-apply, and discarding it makes the " +
+			"message 'go and read the other edit first' into 'retype everything'.")
+	}
+	// The first operator's write stands: the loser overwrites nobody.
+	stored := h.lookup(`SELECT name FROM identity WHERE id = ?`, identity.ID)
+	if stored != "svc-concurrent-first" {
+		t.Errorf("stored name = %q, want the FIRST operator's. A stale write that landed "+
+			"is the silent revert this token exists to prevent, and change_log would "+
+			"record it as a deliberate act by whoever was slower.", stored)
+	}
+}
 
 // TestTheIdentityWriteRoutesAreAdministratorOnly is the route-gate assertion in
 // its own right, beside the generated census in rbac_boundary_test.go. identity
@@ -2117,19 +3365,98 @@ func TestAStaleIdentityCorrectionIs409(t *testing.T) { ... }
 // omits a field blanks the column on save. Refusing before the form is filled in
 // is also the honest order.
 func TestTheIdentityWriteRoutesAreAdministratorOnly(t *testing.T) {
-	h.login("observer", "observer-password")
+	h.login("viewer", "viewer-password")
 	for _, path := range []string{
 		"/identities", "/identities/" + id, "/identities/" + id + "/retire",
 		"/identities/" + id + "/rotation",
 	} {
-		if resp := h.post(path, url.Values{}, false); resp.StatusCode != http.StatusForbidden { ... }
+		token := h.csrfToken("/identities")
+		resp := h.post(path, url.Values{"csrf_token": {token}}, false)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusForbidden {
+			t.Errorf("POST %s as a read-only user returned %d, want 403. All four writes "+
+				"are writeAdminOnly, and the reason is secret_ref: a correction form has "+
+				"to RENDER the stored path to be a correction form.", path, resp.StatusCode)
+		}
 	}
 	// and the GETs are NOT gated
-	if resp := h.get("/identities", false); resp.StatusCode != http.StatusOK { ... }
+	for _, path := range []string{"/identities", "/identities/" + id} {
+		resp := h.get(path, false)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("GET %s as a read-only user returned %d, want 200. The GETs stay "+
+				"readable by any authenticated user: name, realm, kind, team and "+
+				"rotation status are what somebody needs mid-incident, and none of it "+
+				"is sensitive.", path, resp.StatusCode)
+		}
+	}
 }
 
 // TestTheIdentityEditFormIsNotRenderedToANonAdministrator.
-func TestTheIdentityEditFormIsNotRenderedToANonAdministrator(t *testing.T) { ... }
+func TestTheIdentityEditFormIsNotRenderedToANonAdministrator(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	admin := domain.AdministratorPermit(domain.SystemActor)
+	ninetyDays := 90
+
+	identity, err := domain.NewIdentity(store.NewID(), domain.IdentitySpec{
+		Kind: domain.IdentityServiceAccount, Name: "svc-form-visibility",
+		Realm: strPtr("vault"), SecretRef: strPtr("kv/prod/form-visibility"),
+		RotationDays: &ninetyDays,
+	})
+	if err != nil {
+		t.Fatalf("building identity: %v", err)
+	}
+	if err := h.store.CreateIdentity(ctx, admin, identity); err != nil {
+		t.Fatalf("creating identity: %v", err)
+	}
+	path := "/identities/" + identity.ID
+
+	// The three controls, each identified by the route it posts to rather than
+	// by button text, so a reworded button does not silently empty this test.
+	controls := map[string]string{
+		"the correction form": `action="` + path + `"`,
+		"the rotation form":   `action="` + path + `/rotation"`,
+		"the withdraw button": `action="` + path + `/retire"`,
+	}
+
+	// A POSITIVE CONTROL FIRST. If the admin page does not carry these, the
+	// viewer assertions below pass because the markup does not exist at all,
+	// which is the vacuous-pass shape this repo keeps finding.
+	h.login("admin", "admin-password")
+	adminPage := body(t, h.get(path, false))
+	for name, marker := range controls {
+		if !strings.Contains(adminPage, marker) {
+			t.Fatalf("%s is absent from the page for an Administrator (looking for %q). "+
+				"The checks below would then prove nothing.", name, marker)
+		}
+	}
+
+	h.login("viewer", "viewer-password")
+	resp := h.get(path, false)
+	viewerPage := body(t, resp)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET %s as viewer returned %d, want 200 -- the read surface is open",
+			path, resp.StatusCode)
+	}
+	for name, marker := range controls {
+		if strings.Contains(viewerPage, marker) {
+			t.Errorf("%s is rendered to a read-only user. Every one of the four POSTs is "+
+				"writeAdminOnly, so a click answers 403 -- offering a form whose only "+
+				"outcome is a refusal is the same defect /imports was fixed for. Hiding "+
+				"is not the enforcement; the enforcement is "+
+				"middleware.RequireAdministrator, and this is the half that stops the "+
+				"page lying about what the reader can do.", name)
+		}
+	}
+	// The correction form is the one that would RENDER the secret path, which
+	// is why the write gate on these routes is stricter than the permit layer
+	// alone would require. Asserted here as well as in the disclosure test,
+	// because this is the mechanism and that one is the outcome.
+	if strings.Contains(viewerPage, "kv/prod/form-visibility") {
+		t.Error("the secret path reached a read-only user through the edit form")
+	}
+}
 ```
 
 - [ ] **Step 2: Run them and watch them fail**
@@ -2192,7 +3519,24 @@ func (a *App) IdentityUpdate(w http.ResponseWriter, r *http.Request) {
 	render.Redirect(w, r, "/identities/"+id)
 }
 
-func (a *App) IdentityRetire(w http.ResponseWriter, r *http.Request) { ...; render.Redirect(w, r, "/identities") }
+func (a *App) IdentityRetire(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if err := a.Store.RetireIdentity(r.Context(), a.permit(r), id); err != nil {
+		if isStale(err) {
+			// The withdraw form carries the token like every other edit form, so
+			// a stale withdrawal is 409 rather than a silent second retire of a
+			// row somebody else has already changed.
+			a.renderIdentity(w, r, http.StatusConflict, staleMessage("name"))
+			return
+		}
+		a.handleStoreError(w, r, err)
+		return
+	}
+	// Back to the list rather than the detail page: the credential the operator
+	// was looking at is gone from the default view, and leaving them on a page
+	// that now says "retired" reads as a failed action.
+	render.Redirect(w, r, "/identities")
+}
 
 func (a *App) IdentityRecordRotation(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
@@ -2359,49 +3703,76 @@ git commit   # why: "record a rotation" is the feature, not a side effect of an
 `internal/seed/seed_identities_test.go`:
 
 ```go
+// THE HARNESS HERE IS internal/seed's OWN, not the store suite's. package
+// store's Engines lives in its test files and is not importable, and
+// seed_test.go's header records the scoping decision: SQLite only, because the
+// seeder writes no SQL of its own -- every statement it issues comes from a
+// store method the store suite already runs against both engines. These tests
+// therefore use newFixture / eachEngine (internal/seed/seed_test.go:46,69).
+
 // TestTheSeededEstateShowsEveryRotationState is the "two features shipped as
 // empty pages" rule, applied before the page exists rather than after somebody
-// notices. All five states and a retired credential still named by a live
-// dependency, so every pill and all three findings have a row.
+// notices. Four of the five states and a retired credential still named by a
+// live dependency, so every pill and all three findings have a row.
 func TestTheSeededEstateShowsEveryRotationState(t *testing.T) {
-	for _, e := range store.Engines(t) {
-		t.Run(e.Name, func(t *testing.T) {
-			s, ctx := ...
-			if _, err := seed.Load(ctx, s); err != nil { t.Fatalf("seeding: %v", err) }
+	eachEngine(t, func(t *testing.T, f *fixture) {
+		rows, err := f.store.ListIdentities(f.ctx, store.IdentityFilter{IncludeRetired: true})
+		if err != nil {
+			t.Fatalf("listing identities: %v", err)
+		}
+		if len(rows) == 0 {
+			t.Fatal("the fixture seeds no identities at all; this test proves nothing")
+		}
 
-			rows, err := s.ListIdentities(ctx, store.IdentityFilter{IncludeRetired: true})
-			if err != nil { t.Fatalf("listing: %v", err) }
+		now := f.store.Now()
+		seen := map[domain.RotationState]string{}
+		for _, r := range rows {
+			if r.Lifecycle == domain.LifecycleRetired {
+				continue
+			}
+			seen[r.RotationStatus(now)] = r.Name
+		}
+		for _, want := range []domain.RotationState{
+			domain.RotationUnmanaged,
+			domain.RotationNeverRecorded,
+			domain.RotationWithinWindow,
+			domain.RotationOverdue,
+		} {
+			if seen[want] == "" {
+				t.Errorf("no seeded identity is in state %q, so the demo shows that pill "+
+					"-- and any finding built on it -- nowhere. A fresh estate "+
+					"demonstrating one of five states is how two features have already "+
+					"shipped rendering as empty pages.", want)
+			}
+		}
+		// RotationUnreadable is DELIBERATELY NOT SEEDED: reaching it needs a
+		// value the database CHECK accepts and domain.ParseDate rejects, which
+		// is a corrupt row, and seeding one would teach every reader of the demo
+		// that the estate produces them. It is covered at the unit layer
+		// (TestRotationStatus) and the web layer
+		// (TestTheIdentityListRendersEveryRotationState).
+		if _, ok := seen[domain.RotationUnreadable]; ok {
+			t.Errorf("the fixture seeds a credential whose stored date will not parse. " +
+				"That is a corrupt row, and a demo estate must not contain one.")
+		}
 
-			seen := map[domain.RotationState]string{}
-			for _, r := range rows {
-				seen[r.RotationStatus(s.Now())] = r.Name
-			}
-			for _, want := range []domain.RotationState{
-				domain.RotationUnmanaged, domain.RotationNeverRecorded,
-				domain.RotationWithinWindow, domain.RotationOverdue,
-			} {
-				if seen[want] == "" {
-					t.Errorf("no seeded identity is in state %q, so the demo shows that pill "+
-						"and any finding built on it nowhere", want)
-				}
-			}
-			// RotationUnreadable is DELIBERATELY NOT SEEDED: reaching it needs a
-			// value the database CHECK accepts and domain.ParseDate rejects,
-			// which is a corrupt row, and seeding one would teach a reader that
-			// the estate produces them. It is covered by unit and web tests.
-
-			// A retired credential still named by a live dependency: the third
-			// finding, and the "what is stored keeps displaying" rule, both
-			// visible on a fresh estate.
-			var n int
-			if err := ...`SELECT COUNT(*) FROM dependency d JOIN identity i ON i.id = d.identity_id
-			              WHERE d.lifecycle <> 'retired' AND i.lifecycle = 'retired'`...; err != nil { ... }
-			if n == 0 {
-				t.Error("no live dependency names a retired identity, so the finding that " +
-					"catches a withdrawn credential still in use has nothing to show")
-			}
-		})
-	}
+		// A retired credential still named by a live dependency: the third
+		// finding, and the "what is stored keeps displaying" rule, both visible
+		// on a fresh estate.
+		reader := f.store.DB().Reader
+		var n int
+		if err := reader.Get(&n, reader.Rebind(`
+			SELECT COUNT(*) FROM dependency d
+			JOIN identity i ON i.id = d.identity_id
+			WHERE d.lifecycle <> 'retired' AND i.lifecycle = 'retired'`)); err != nil {
+			t.Fatalf("counting live edges on withdrawn credentials: %v", err)
+		}
+		if n == 0 {
+			t.Error("no live dependency names a retired identity, so the finding that " +
+				"catches a withdrawn credential still in use has nothing to show, and " +
+				"neither does the used-by panel's most interesting case")
+		}
+	})
 }
 
 // TestASeededRotationHasARealChangeLogEntry. At least one rotation goes through
@@ -2409,35 +3780,99 @@ func TestTheSeededEstateShowsEveryRotationState(t *testing.T) {
 // shows a real rotation in its history -- and so the seeder is not the first
 // caller tempted to set last_rotated on the struct.
 func TestASeededRotationHasARealChangeLogEntry(t *testing.T) {
-	// exactly one change_log row whose diff names last_rotated, per rotated
-	// identity, with actor_kind = system (the seeder writes as SystemActor)
+	eachEngine(t, func(t *testing.T, f *fixture) {
+		rows, err := f.store.ListIdentities(f.ctx, store.IdentityFilter{IncludeRetired: true})
+		if err != nil {
+			t.Fatalf("listing identities: %v", err)
+		}
+
+		rotated := 0
+		for _, r := range rows {
+			if r.LastRotated == nil {
+				continue
+			}
+			rotated++
+			changes, err := f.store.ListChangesForEntity(f.ctx, "identity", r.ID, 50)
+			if err != nil {
+				t.Fatalf("reading the audit trail for %s: %v", r.Name, err)
+			}
+			found := false
+			for _, c := range changes {
+				if strings.Contains(c.Diff, "last_rotated") {
+					found = true
+					if c.ActorKind == "" {
+						t.Errorf("%s's rotation entry has no actor_kind. Every view "+
+							"rendering actor renders actor_kind beside it.", r.Name)
+					}
+					break
+				}
+			}
+			if !found {
+				t.Errorf("%s carries last_rotated = %q and NO change_log entry naming "+
+					"last_rotated. The date was written on the struct instead of through "+
+					"RecordIdentityRotation, so the demo's detail page shows a rotation "+
+					"with no history behind it -- which is the exact failure the "+
+					"one-writer rule exists to prevent.", r.Name, *r.LastRotated)
+			}
+		}
+		if rotated == 0 {
+			t.Fatal("no seeded identity has a recorded rotation at all, so the demo " +
+				"detail page has no rotation history to show and this test is checking " +
+				"nothing")
+		}
+	})
 }
 
 // TestTheSeededRotationDatesAreRelativeToTheClock is the mutation-proof for the
 // "never literals" rule, and it is the ONLY shape that works. A literal date
 // passes on the day it is written and fails months later -- this repo has
-// already shipped a test with exactly that defect. Loading into a store whose
-// clock is a year away makes a literal fail IMMEDIATELY.
+// already shipped a test with exactly that defect, and production was unaffected
+// while only the calendar exposed it. Loading the estate into a store whose
+// clock is years away makes a literal fail IMMEDIATELY.
 func TestTheSeededRotationDatesAreRelativeToTheClock(t *testing.T) {
-	for _, e := range store.Engines(t) {
-		t.Run(e.Name, func(t *testing.T) {
-			future := time.Date(2029, 3, 4, 10, 0, 0, 0, time.UTC)
-			s := store.New(e.Open(t)).WithClock(func() time.Time { return future })
-			if _, err := seed.Load(context.Background(), s); err != nil { t.Fatalf("seeding: %v", err) }
+	future := time.Date(2029, 3, 4, 10, 0, 0, 0, time.UTC)
 
-			rows, _ := s.ListIdentities(ctx, store.IdentityFilter{IncludeRetired: true})
-			seen := map[domain.RotationState]bool{}
-			for _, r := range rows {
-				seen[r.RotationStatus(future)] = true
-			}
-			if !seen[domain.RotationWithinWindow] {
-				t.Error("no identity is within its window when the estate is seeded in 2029. " +
-					"A literal date in b.identities() drifts: the within-window row " +
-					"silently becomes overdue some weeks after the fixture was written, " +
-					"and the demo stops demonstrating the state it was built for.")
-			}
-			if !seen[domain.RotationOverdue] { ... }
-		})
+	dsn := "file:" + filepath.Join(t.TempDir(), "seed-future.db")
+	db, err := store.Open(store.DriverSQLite, dsn)
+	if err != nil {
+		t.Fatalf("opening database: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+
+	ctx := context.Background()
+	if err := store.Migrate(ctx, db); err != nil {
+		t.Fatalf("migrating: %v", err)
+	}
+	// WithClock BEFORE Load, so b.now is the future date and every seeded date
+	// is derived from it.
+	s := store.New(db).WithClock(func() time.Time { return future })
+	if _, err := seed.Load(ctx, s); err != nil {
+		t.Fatalf("seeding: %v", err)
+	}
+
+	rows, err := s.ListIdentities(ctx, store.IdentityFilter{IncludeRetired: true})
+	if err != nil {
+		t.Fatalf("listing identities: %v", err)
+	}
+	seen := map[domain.RotationState]bool{}
+	for _, r := range rows {
+		if r.Lifecycle == domain.LifecycleRetired {
+			continue
+		}
+		seen[r.RotationStatus(future)] = true
+	}
+
+	if !seen[domain.RotationWithinWindow] {
+		t.Error("no identity is within its window when the estate is seeded in 2029. " +
+			"A literal date in b.identityHistory() drifts: the within-window row " +
+			"silently becomes overdue some weeks after the fixture was written, and " +
+			"the demo stops demonstrating the state it was built for. Dates are " +
+			"relative to b.now, the rule lifetimes() already follows.")
+	}
+	if !seen[domain.RotationOverdue] {
+		t.Error("no identity is overdue when the estate is seeded in 2029, so a " +
+			"literal date has replaced the b.now-relative one and the Fault finding " +
+			"has nothing to show on any demo reset after that date")
 	}
 }
 ```
@@ -2622,11 +4057,130 @@ git commit   # why: two features have now shipped rendering as empty pages, and
 // non-findings: an unmanaged credential produces nothing, and a within-window
 // one produces nothing.
 func TestRotationFindings(t *testing.T) {
-	// unmanaged + within_window only -> no findings at all
-	// + one overdue -> one Fault
-	// + one never_recorded -> one Gap, SEPARATE from the Fault
-	// + a live dependency naming a retired identity -> a third row
-	// each finding carries a Count and a concrete Detail naming an example
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newIdentityFixture(t, e)
+			now := f.s.Now()
+
+			// Neither of these is a finding: no rule to break, and a rule that
+			// is being met.
+			f.identity(t, "metrics-scrape", 0)
+			current := f.identity(t, "svc-current", 90)
+			if err := f.s.RecordIdentityRotation(f.ctx, testPermit, current.ID,
+				domain.FormatDate(now.AddDate(0, 0, -10))); err != nil {
+				t.Fatalf("rotating svc-current: %v", err)
+			}
+
+			// A rule the estate set for itself and has not met for 110 days.
+			overdue := f.identity(t, "svc-overdue", 90)
+			if err := f.s.RecordIdentityRotation(f.ctx, testPermit, overdue.ID,
+				domain.FormatDate(now.AddDate(0, 0, -200))); err != nil {
+				t.Fatalf("rotating svc-overdue: %v", err)
+			}
+
+			// A rule with no evidence it has ever been followed.
+			f.identity(t, "svc-unrecorded", 90)
+
+			// A withdrawn credential a live edge still names.
+			withdrawn := f.identity(t, "svc-withdrawn", 90)
+			f.dependency(t, withdrawn.ID)
+			if err := f.s.RetireIdentity(f.ctx, testPermit, withdrawn.ID); err != nil {
+				t.Fatalf("withdrawing svc-withdrawn: %v", err)
+			}
+
+			findings, err := f.s.RotationFindings(f.ctx)
+			if err != nil {
+				t.Fatalf("RotationFindings: %v", err)
+			}
+
+			byLabel := map[string]Finding{}
+			for _, x := range findings {
+				if _, dup := byLabel[x.Label]; dup {
+					t.Errorf("two findings share the label %q. One row per KIND is the "+
+						"rule -- forty overdue credentials is one decision.", x.Label)
+				}
+				byLabel[x.Label] = x
+			}
+			if len(findings) != 3 {
+				t.Fatalf("got %d findings, want 3 (overdue, never recorded, withdrawn "+
+					"but still named): %+v", len(findings), findings)
+			}
+
+			for _, tc := range []struct {
+				what         string
+				wantSeverity string
+				wantCount    int
+				wantExample  string
+				why          string
+			}{
+				{
+					what: "past its own rotation rule", wantSeverity: FindingFault,
+					wantCount: 1, wantExample: "svc-overdue",
+					why: "the estate's own declared rule says 90 days and it has been 200. " +
+						"Something is wrong NOW -- the same shape as a contract having " +
+						"lapsed, which findings.go names as the archetypal Fault.",
+				},
+				{
+					what: "no rotation ever recorded", wantSeverity: FindingGap,
+					wantCount: 1, wantExample: "svc-unrecorded",
+					why: "the inventory does not know when this was last rotated, so it " +
+						"cannot say whether the rule is met. Calling it a Fault would " +
+						"claim knowledge nobody has; Gap is the severity that makes the " +
+						"other two trustworthy.",
+				},
+				{
+					what: "withdrawn credential", wantSeverity: FindingGap,
+					wantCount: 1, wantExample: "svc-withdrawn",
+					why: "the inventory contradicts itself: either the edge is stale or " +
+						"the service is authenticating with a withdrawn credential, and " +
+						"it is not knowable from here.",
+				},
+			} {
+				t.Run(tc.what, func(t *testing.T) {
+					var got Finding
+					var found bool
+					for label, x := range byLabel {
+						if strings.Contains(label, tc.what) ||
+							strings.Contains(x.Detail, tc.wantExample) {
+							got, found = x, true
+							break
+						}
+					}
+					if !found {
+						t.Fatalf("no finding for %q. %s", tc.what, tc.why)
+					}
+					if got.Severity != tc.wantSeverity {
+						t.Errorf("severity = %q, want %q. %s",
+							got.Severity, tc.wantSeverity, tc.why)
+					}
+					if got.Count != tc.wantCount {
+						t.Errorf("count = %d, want %d", got.Count, tc.wantCount)
+					}
+					if !strings.Contains(got.Detail, tc.wantExample) {
+						t.Errorf("detail = %q and does not name %q. One row per kind is "+
+							"exactly why the row has to carry a concrete example, or it "+
+							"is only a number.", got.Detail, tc.wantExample)
+					}
+					if got.Href == "" {
+						t.Error("the finding has no Href, so the dashboard row is a dead " +
+							"end and the reader has to go and find the credential by hand")
+					}
+				})
+			}
+
+			// The two non-findings, asserted rather than assumed: neither the
+			// unmanaged credential nor the current one may appear anywhere.
+			for _, x := range findings {
+				for _, quiet := range []string{"metrics-scrape", "svc-current"} {
+					if strings.Contains(x.Detail, quiet) {
+						t.Errorf("finding %q names %q. A credential nobody intended to "+
+							"rotate is not a problem, and one that is inside its window "+
+							"is the rule being MET.", x.Label, quiet)
+					}
+				}
+			}
+		})
+	}
 }
 
 // TestAnUnmanagedCredentialIsNotAFinding, on its own, because it is the
@@ -2634,7 +4188,68 @@ func TestRotationFindings(t *testing.T) {
 // intended to rotate is not a problem, and flagging every cert_subject and human
 // row would swamp the page" -- the reasoning EstateFindings already applies to
 // expected power convergence and template_drift applies to extra components.
-func TestAnUnmanagedCredentialIsNotAFinding(t *testing.T) { ... }
+func TestAnUnmanagedCredentialIsNotAFinding(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newIdentityFixture(t, e)
+			now := f.s.Now()
+
+			// An estate of credentials nobody asked to have rotated, plus one
+			// that is rotated and current. Neither is a problem.
+			f.identity(t, "metrics-scrape", 0)
+			f.identity(t, "cert-subject-web", 0)
+			f.identity(t, "human-oncall", 0)
+			current := f.identity(t, "svc-current", 90)
+			if err := f.s.RecordIdentityRotation(f.ctx, testPermit, current.ID,
+				domain.FormatDate(now.AddDate(0, 0, -10))); err != nil {
+				t.Fatalf("rotating svc-current: %v", err)
+			}
+
+			findings, err := f.s.RotationFindings(f.ctx)
+			if err != nil {
+				t.Fatalf("RotationFindings: %v", err)
+			}
+			if len(findings) != 0 {
+				t.Fatalf("an estate with three unmanaged credentials and one current one "+
+					"produced %d findings: %+v.\nA credential nobody intended to rotate "+
+					"is not a problem. Flagging every cert_subject and human row would "+
+					"swamp the page and teach people to ignore it -- the reasoning "+
+					"EstateFindings already applies to expected power convergence and "+
+					"template_drift applies to extra components. It renders as `no "+
+					"policy` on the list, which is enough.", len(findings), findings)
+			}
+
+			// Now one credential with a rule and no evidence it was followed.
+			// EXACTLY ONE finding must appear, and it must be the never-recorded
+			// one -- which is also what proves the three unmanaged rows are
+			// still contributing nothing rather than having been folded in.
+			f.identity(t, "svc-unrecorded", 90)
+			findings, err = f.s.RotationFindings(f.ctx)
+			if err != nil {
+				t.Fatalf("RotationFindings after adding an unrecorded credential: %v", err)
+			}
+			if len(findings) != 1 {
+				t.Fatalf("got %d findings, want exactly 1: %+v", len(findings), findings)
+			}
+			got := findings[0]
+			if got.Count != 1 {
+				t.Errorf("finding count = %d, want 1 -- the three unmanaged credentials "+
+					"have been folded into this finding", got.Count)
+			}
+			if got.Severity != FindingGap {
+				t.Errorf("severity = %q, want %q. Calling it a Fault would claim knowledge "+
+					"nobody has: it might have been rotated last week by somebody who did "+
+					"not write it down. Gap is the severity that makes the other two "+
+					"trustworthy.", got.Severity, FindingGap)
+			}
+			if !strings.Contains(got.Detail, "svc-unrecorded") {
+				t.Errorf("detail = %q and names no example. One row per KIND of finding is "+
+					"the rule, which is exactly why the row has to carry a concrete "+
+					"example or it is only a number.", got.Detail)
+			}
+		})
+	}
+}
 ```
 
 - [ ] **Step 2: Run it and watch it fail**
@@ -2753,7 +4368,19 @@ func (s *SQLStore) RotationFindings(ctx context.Context) ([]Finding, error) {
 		return nil, fmt.Errorf("gathering withdrawn-credential findings: %w", err)
 	}
 	if len(stale) > 0 {
-		sort.SliceStable(stale, func(a, b int) bool { ... }) // Go, for collation
+		// Go, for collation -- and the first row becomes the finding's example
+		// and its Href, so an unstable order would make the dashboard link
+		// somewhere different on each render.
+		sort.SliceStable(stale, func(a, b int) bool {
+			x, y := stale[a], stale[b]
+			if x.ConsumerCode != y.ConsumerCode {
+				return x.ConsumerCode < y.ConsumerCode
+			}
+			if x.IdentityName != y.IdentityName {
+				return x.IdentityName < y.IdentityName
+			}
+			return x.IdentityID < y.IdentityID
+		})
 		out = append(out, Finding{Severity: FindingGap, Count: len(stale),
 			Label:  "live dependency naming a withdrawn credential",
 			Detail: fmt.Sprintf("%s still authenticates as %s", stale[0].ConsumerCode, stale[0].IdentityName),
