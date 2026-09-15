@@ -170,6 +170,7 @@ func Load(ctx context.Context, s *store.SQLStore) (*Refs, error) {
 	// ductBundle(): it names cables, and networking() is where cables come
 	// from.
 	b.componentTemplates()
+	b.ductBundle()
 	// Power after the estate: a board names its site and an input names an
 	// asset. It reads both and nothing reads it, so it can sit here.
 	b.power()
