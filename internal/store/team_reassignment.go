@@ -120,13 +120,19 @@ func (o ReassignOutcome) Assigned() bool { return o.Result == ReassignAssigned }
 //
 // EACH UPDATE IS GUARDED BY THE CONDITION THAT MADE IT ELIGIBLE --
 // `WHERE team_id = fromTeamID` (or `owner_team_id` for custom_field) -- never
-// by row_version, even for asset, service and project, which carry one.
-// Zero rows affected means the entity is no longer this team's, which is
-// ReassignStale, not an error. identity and custom_field need no row_version
-// to make this atomic: the same guard is the whole eligibility check either
-// way (design §4 -- this was decided against a first draft that gave
-// identity a row_version it had never had, and that decision is not to be
-// revisited here).
+// by row_version, even for asset, service, project and now identity, all of
+// which carry one. Zero rows affected means the entity is no longer this
+// team's, which is ReassignStale, not an error. custom_field needs no
+// row_version to make this atomic and neither does identity: the same guard is
+// the whole eligibility check either way (design §4).
+//
+// identity ACQUIRED a row_version in migration 00069 (WP-J8), and the
+// statements here bump it -- but they still do not GUARD on it, for the reason
+// above. design §4 refused the column for THIS path and that refusal stands
+// unchanged; what changed is that identity grew a correction form elsewhere,
+// which is the circumstance 00066 added a token to `link` for. The condition
+// §4 set was "do not add a token you are not going to maintain everywhere";
+// WP-J8 pays it, and this is one of the three places paying it.
 //
 // ONE change_log ROW PER ENTITY, ALL SHARING ONE batch_id -- never one row
 // for the whole batch (design §4: "a single row saying 'assigned 11 things'
@@ -208,9 +214,11 @@ func (s *SQLStore) ReassignTeamOwnership(ctx context.Context, p domain.Permit, f
 			}))
 	}
 
-	// identity carries no updated_at and no row_version (shared/00003) -- see
-	// the function doc: the WHERE team_id = fromTeamID guard is the whole
-	// eligibility check, and that is deliberate, not a gap to fill in later.
+	// identity carries no updated_at (00003) but now carries row_version
+	// (00069, WP-J8's correction path). The guard below is UNCHANGED and is
+	// still the whole eligibility check -- see the function doc; the bump is
+	// additive, so an open correction form's token stops validating after a
+	// reassignment moved the row underneath it.
 	var identities []candidate
 	if err := s.read(ctx, &identities,
 		`SELECT id, name FROM identity WHERE team_id = ? AND lifecycle <> ? ORDER BY name`,
@@ -221,7 +229,8 @@ func (s *SQLStore) ReassignTeamOwnership(ctx context.Context, p domain.Permit, f
 		outcomes = append(outcomes, s.reassignEntity(ctx, p, "identity", c.ID, c.Name, fromTeamID, toTeamID, batchID,
 			func(t *tx) (sql.Result, error) {
 				return t.exec(ctx,
-					`UPDATE identity SET team_id = ? WHERE id = ? AND team_id = ?`,
+					`UPDATE identity SET team_id = ?, row_version = row_version + 1
+					 WHERE id = ? AND team_id = ?`,
 					toTeamID, c.ID, fromTeamID)
 			}))
 	}
