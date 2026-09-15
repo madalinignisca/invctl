@@ -179,7 +179,12 @@ const (
 )
 
 func (i *Identity) RotationStatus(now time.Time) RotationState
-func (i *Identity) RotationDueOn() *string // nil unless both fields are set
+// RotationDueOn returns nil unless the status is within_window or overdue.
+// NOT merely "unless both fields are set": both ARE set when last_rotated is
+// 2026-02-31, a value the CHECK accepts and ParseDate refuses, and a due date
+// computed from a zero time is the same class of lie RotationUnreadable exists
+// to prevent.
+func (i *Identity) RotationDueOn() *string
 ```
 
 `RotationOverdue` is **deleted, not kept beside this**. A two-valued answer to a
@@ -441,9 +446,32 @@ Filters: name substring, `kind`, `lifecycle` (so a retired credential can be
 found), `team`, and **rotation state** — the last one is what the findings link
 into.
 
-`ListIdentities` gains an `IdentityFilter` parameter. Its signature changes;
-nothing outside tests calls it today, which is the whole problem this work-package
-exists to fix.
+`ListIdentities` gains an `IdentityFilter` parameter.
+
+**CORRECTED 2026-09-15, and the correction is load-bearing.** An earlier draft of
+this section said *"nothing outside tests calls it today"*, inherited from
+`docs/ROADMAP.md`'s claim that *"no route reaches either of them"*. That is true
+of `CreateIdentity` and **false of `ListIdentities`**, which has two production
+callers: `internal/web/handlers/deps.go:238` and
+`internal/web/handlers/services.go:340`. Both feed the dependency identity
+`<select>` (`web/templates/partials/rows.html:69`,
+`web/templates/partials/forms.html:646`), and today it returns **every**
+identity, retired ones included.
+
+**So a live-only default at those call sites silently clears `identity_id`.**
+The correction row renders `<option value="">—</option>` first and marks
+`selected` on the matching id; drop a retired identity from the slice and no
+option matches, the browser falls back to the empty one, and saving a correction
+about the *auth method* posts `identity_id=""` and wipes the column. A data
+change on a form about something else, with no error and no way to notice.
+
+Both existing call sites therefore pass `IncludeRetired: true`, with the reason
+in a comment beside each and a regression test. This is the same rule
+`RetireEnvironment` already states and this document already repeats: **what is
+stored keeps displaying.** What changes is only what is offered as a *new*
+choice — and narrowing the dependency *create* form alone needs two slices and
+the "marked retired, not newly selectable" treatment, which is out of scope
+here.
 
 ### Detail — `GET /identities/{id}`
 
@@ -459,8 +487,17 @@ The used-by panel lists live dependencies and Windows services naming this
 identity. It is what makes the page worth opening and what makes withdrawal an
 informed act.
 
-The history panel is the entity's `change_log`, where a rotation reads as a
-`last_rotated` change with its actor and `actor_kind`.
+The history panel is `TimelineForEntityAndNeighbours`, which every entity detail
+page uses (`docs/AUDIT.md` rule 15) — not `ListChangesForEntity`, whose own doc
+comment says *"No page calls this any more, and that is deliberate."* A rotation
+reads there as a `last_rotated` change with its actor and `actor_kind`.
+
+`NeighbourRefs` has no `identity` case, so the timeline degrades to the
+subject's own history. That is correct and is what this section describes, but
+note the consequence: the used-by panel and the timeline disagree about what a
+neighbour of an identity is. **Widening `NeighbourRefs` so an identity's
+timeline folds in the dependencies that name it is a genuine improvement to the
+03:00 question and a separate decision — not this work.**
 
 ### The rotation action
 
@@ -498,6 +535,14 @@ and the list already sorts by days remaining. Add it when somebody asks, with
 pages, and this one starts from three identities that are all in the *same*
 state (`rotation_days = 90`, `last_rotated` NULL) — so a fresh estate would
 demonstrate exactly one of five rotation states and one of three findings.
+
+**Four states are seeded, not five.** `RotationUnreadable` is unreachable through
+the application by design — `RecordIdentityRotation` refuses anything `ParseDate`
+rejects and the `CHECK` refuses anything of the wrong shape, so the only values
+that reach it are ten-character near-dates like `2026-02-31` in a corrupt or
+hand-edited row. Seeding one would teach a reader that the estate produces them,
+which it does not. It is covered by unit tests and by a web test that writes the
+value past the Go layer.
 
 `b.identities()` (`internal/seed/seed.go:888`) declares, at minimum:
 

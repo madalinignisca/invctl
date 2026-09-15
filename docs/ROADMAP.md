@@ -1184,8 +1184,17 @@ cluster oversubscribed?"*.
 
 **WP-J8 · Identity surface** — S — **NOT BUILT**
 `CreateIdentity` and `ListIdentities` exist in `internal/store/deps.go` and **no
-route reaches either of them**, so an identity cannot be declared, listed,
-corrected or withdrawn through the application at all. The table carries
+route reaches `CreateIdentity`**, so an identity cannot be declared, corrected or
+withdrawn through the application at all.
+
+**Corrected 2026-09-15:** this entry said "no route reaches either of them",
+which is false for `ListIdentities` — `internal/web/handlers/deps.go:238` and
+`internal/web/handlers/services.go:340` both call it to populate the dependency
+identity `<select>`, and it returns retired identities too. The error was
+propagated into the design doc before a plan review caught it, where acting on
+it would have silently cleared `dependency.identity_id`. The unbuilt surface is
+the WRITE surface, which is what `writeSurfaceUnbuilt` actually asserts; there
+is no identity LIST PAGE, which is a different and smaller claim. The table carries
 `kind name realm secret_ref rotation_days last_rotated lifecycle team_id` — and
 `rotation_days`/`last_rotated` are the point of it, so a credential-rotation
 model that can never record a rotation is inert rather than merely incomplete.
