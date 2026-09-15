@@ -95,6 +95,13 @@ type builder struct {
 	interfaceIDs map[string]string // "asset/interface" -> id
 	identityIDs  map[string]string // name -> id
 	poolIDs      map[string]string // name -> id
+	// linkIDs keys a cable by the two interface keys it joins,
+	// "hv-01/eno3->sw-core-2/Ethernet1". A cable has no name of its own --
+	// store.LinkEnds says the same thing for display -- so its two ends are
+	// the only stable handle a later phase can name it by. ductBundle() is
+	// that phase; without this map it would have to re-read the plant and
+	// match on interface ids it would first have to look up anyway.
+	linkIDs map[string]string
 }
 
 // ObserveDemo makes Load stage a set of demo observations after the inventory,
@@ -113,6 +120,7 @@ func Load(ctx context.Context, s *store.SQLStore) (*Refs, error) {
 		interfaceIDs: map[string]string{},
 		identityIDs:  map[string]string{},
 		poolIDs:      map[string]string{},
+		linkIDs:      map[string]string{},
 
 		refs: &Refs{
 			Environments: map[string]string{},
@@ -149,6 +157,19 @@ func Load(ctx context.Context, s *store.SQLStore) (*Refs, error) {
 	// inherits its host's attachment through asset_closure, which is the same
 	// thing every guest already does.
 	b.virtual()
+	// The catalogue's component templates, and the duct the fibre runs in.
+	// BOTH MUST FOLLOW networking(), and for different reasons.
+	//
+	// componentTemplates(): a device type's template is instantiated onto an
+	// asset at CREATION and never reaches back afterwards, so declaring it
+	// here is what leaves the two hand-recorded core switches drifting from
+	// their own model -- the state the drift finding reports and ApplyTemplate
+	// repairs. Before networking() it would have silently filled both in and
+	// neither would have anything to show. See that function's own comment.
+	//
+	// ductBundle(): it names cables, and networking() is where cables come
+	// from.
+	b.componentTemplates()
 	// Power after the estate: a board names its site and an input names an
 	// asset. It reads both and nothing reads it, so it can sit here.
 	b.power()
@@ -857,6 +878,7 @@ func (b *builder) networking() {
 			b.fail(fmt.Errorf("seeding link %s-%s: %w", c.a, c.b, err))
 			return
 		}
+		b.linkIDs[c.a+"->"+c.b] = link.ID
 	}
 }
 

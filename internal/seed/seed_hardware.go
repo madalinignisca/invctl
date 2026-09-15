@@ -233,3 +233,64 @@ func (b *builder) power() {
 		}
 	}
 }
+
+// componentTemplates declares what the catalogue says a model HAS, as opposed
+// to what any one instance of it was recorded with.
+//
+// RUNS AFTER networking(), AND THAT ORDERING IS THE WHOLE DEMONSTRATION. A
+// device type's template is instantiated onto an asset once, at creation, and
+// an edit afterwards never reaches back (template_drift.go's header). Both
+// core switches were recorded port by port -- six ports each, the ones
+// somebody patched -- long before anyone opened the datasheet, so declaring
+// the template here leaves them drifting from their own model. That is
+// precisely the state TemplateDriftFindings reports and precisely what
+// ApplyTemplate exists to fix. Declared before networking(), every port would
+// have been instantiated automatically, the switches would agree with their
+// type, and neither the finding nor the backfill would have anything to show.
+//
+// sw-dr-1 IS THE CONTRAST, AND IT IS FREE: company() builds it after this
+// phase, so it is created FROM the template and carries all forty-nine ports
+// without anybody typing one. One estate, both halves of the feature -- the
+// switch the catalogue filled in, and the two it cannot.
+//
+// THE NAMES MATCH THE ESTATE, NOT A PLAUSIBLE-LOOKING RANGE. An earlier draft
+// of this example said "Ethernet1/[1-48]" -- right for a chassis switch,
+// wrong for these, whose ports are Ethernet1..Ethernet48. That template would
+// have declared fifty-five ports on a forty-eight-port switch, matched
+// nothing in the estate, and turned one honest finding into noise on every
+// asset of the model. The form factors match for the same reason: a reader
+// comparing the template against the ports should see one story, not two.
+func (b *builder) componentTemplates() {
+	if !b.ok() {
+		return
+	}
+	id, ok := b.refs.DeviceTypes["DCS-7050SX3-48YC8"]
+	if !ok {
+		b.skip("no DCS-7050SX3-48YC8 in the catalogue, so no component template was declared")
+		return
+	}
+	// Four calls rather than one: ComponentSpec describes ports of ONE shape
+	// at a time, deliberately (its own doc comment), and these ports are four
+	// shapes. position continues across calls rather than restarting, so the
+	// template still reads in port order -- which is what makes Ethernet2 sort
+	// before Ethernet10 instead of after it.
+	batches := []store.ComponentSpec{
+		{Kind: domain.ComponentKindInterface, NameSpec: "Ethernet[1-45]",
+			FormFactor: str(domain.FFSFP28), SpeedMbps: num(25000)},
+		{Kind: domain.ComponentKindInterface, NameSpec: "Ethernet[46-47]",
+			FormFactor: str(domain.FFQSFP28), SpeedMbps: num(100000)},
+		{Kind: domain.ComponentKindInterface, NameSpec: "Ethernet48",
+			FormFactor: str(domain.FFSFPPlus), SpeedMbps: num(10000)},
+		{Kind: domain.ComponentKindInterface, NameSpec: "Management1",
+			FormFactor: str(domain.FFRJ45), SpeedMbps: num(1000), IsMgmt: true},
+	}
+	for _, spec := range batches {
+		if !b.ok() {
+			return
+		}
+		if err := b.store.CreateDeviceTypeComponents(b.ctx, Permit, id, spec); err != nil {
+			b.fail(fmt.Errorf("declaring %s on the core switch model: %w", spec.NameSpec, err))
+			return
+		}
+	}
+}
