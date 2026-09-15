@@ -581,6 +581,13 @@ func TestAFutureRotationIs422WithTheFormReRendered(t *testing.T) {
 		t.Fatalf("creating identity: %v", err)
 	}
 
+	// Captured BEFORE the refused POST, and compared as a delta rather than
+	// against a literal 0: the seeded estate (WP-J8 Task 6) now carries two
+	// real rotations of its own (svc-orders, svc-sso), so an absolute count
+	// would fail on a fixture that behaves correctly and start passing again
+	// only if the seeder regressed to writing none at all.
+	before := h.count(`SELECT COUNT(*) FROM identity WHERE last_rotated IS NOT NULL`)
+
 	path := "/identities/" + identity.ID
 	token := h.csrfToken(path)
 	tomorrow := domain.FormatDate(h.store.Now().AddDate(0, 0, 1))
@@ -600,11 +607,11 @@ func TestAFutureRotationIs422WithTheFormReRendered(t *testing.T) {
 		t.Errorf("the refusal does not say why the date was rejected, so it reads as a " +
 			"generic failure on a date that is well-formed")
 	}
-	// and nothing was written
-	if n := h.count(`SELECT COUNT(*) FROM identity WHERE last_rotated IS NOT NULL`); n != 0 {
-		t.Errorf("%d identities carry a last_rotated after a refused rotation. A 422 that "+
+	// and nothing new was written
+	if after := h.count(`SELECT COUNT(*) FROM identity WHERE last_rotated IS NOT NULL`); after != before {
+		t.Errorf("last_rotated count went from %d to %d after a refused rotation. A 422 that "+
 			"still wrote would be worse than no refusal at all, because the page says "+
-			"it failed.", n)
+			"it failed.", before, after)
 	}
 }
 

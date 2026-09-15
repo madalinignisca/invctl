@@ -183,6 +183,9 @@ func Load(ctx context.Context, s *store.SQLStore) (*Refs, error) {
 	b.endpoints()
 	b.routing()
 	b.dependencies()
+	// What has happened to the credentials since they were declared. After
+	// dependencies() on purpose -- see the function's own comment.
+	b.identityHistory()
 	// Last of the declared phases: a project links to assets and services, so
 	// it needs both to exist. It reads them and writes nothing they depend on,
 	// which is why it can sit at the end rather than being threaded through.
@@ -886,25 +889,43 @@ func (b *builder) networking() {
 // ---------- identities ----------
 
 func (b *builder) identities() {
-	identities := []struct{ kind, name, realm, secretRef string }{
-		{domain.IdentityServiceAccount, "svc-orders", "vault", "kv/prod/orders/db"},
-		{domain.IdentityServiceAccount, "svc-sso", "vault", "kv/prod/sso/db"},
-		{domain.IdentityMachineAccount, "svc-backup$", "AD", "kv/prod/backup/windows"},
+	identities := []struct {
+		kind, name, realm, secretRef string
+		rotationDays                 int // 0 means no policy at all
+	}{
+		{domain.IdentityServiceAccount, "svc-orders", "vault", "kv/prod/orders/db", 90},
+		{domain.IdentityServiceAccount, "svc-sso", "vault", "kv/prod/sso/db", 90},
+		{domain.IdentityMachineAccount, "svc-backup$", "AD", "kv/prod/backup/windows", 90},
+		// UNMANAGED, and legitimately so: a metrics scrape token nobody has
+		// asked to be rotated on a schedule. The spec is explicit that
+		// rotation_days IS NULL is NOT a finding -- flagging every cert_subject
+		// and human row would swamp the page and teach people to ignore it --
+		// so this row exists to show what "no policy" looks like beside the
+		// rows that have one.
+		{domain.IdentityAPIToken, "metrics-scrape", "vault", "kv/prod/observability/scrape", 0},
+		// THE ONE THAT GETS WITHDRAWN, in b.identityHistory() below, while a
+		// live dependency still names it. Migration 00003's scenario exactly:
+		// "the natural response to a compromised credential is to retire it and
+		// create its replacement under the same name."
+		{domain.IdentityServiceAccount, "svc-legacy-etl", "vault", "kv/prod/etl/legacy", 90},
 	}
 	for _, i := range identities {
 		if !b.ok() {
 			return
 		}
-		identity, err := domain.NewIdentity(store.NewID(), domain.IdentitySpec{
+		spec := domain.IdentitySpec{
 			Kind:  i.kind,
 			Name:  i.name,
 			Realm: str(i.realm),
 			// A path, never a secret. If this field ever held a credential the
 			// whole database would become a secret store, which it must not be.
-			SecretRef:    str(i.secretRef),
-			RotationDays: num(90),
-			TeamID:       b.team("platform"),
-		})
+			SecretRef: str(i.secretRef),
+			TeamID:    b.team("platform"),
+		}
+		if i.rotationDays > 0 {
+			spec.RotationDays = num(i.rotationDays)
+		}
+		identity, err := domain.NewIdentity(store.NewID(), spec)
 		if err != nil {
 			b.fail(fmt.Errorf("building identity %s: %w", i.name, err))
 			return
@@ -914,6 +935,70 @@ func (b *builder) identities() {
 			return
 		}
 		b.identityIDs[i.name] = identity.ID
+	}
+}
+
+// identityHistory records what has happened to the seeded credentials since
+// they were declared: two rotations and one withdrawal.
+//
+// IT IS A SEPARATE, LATE PHASE and it has to be. Two reasons.
+//
+// THE ROTATIONS GO THROUGH RecordIdentityRotation, never through the create
+// call, because last_rotated has exactly one writer
+// (internal/store/last_rotated_source_test.go) and because the demo detail page
+// must show a REAL rotation entry in its change history -- a date that appeared
+// in a create snapshot demonstrates nothing about the feature. The seeder is the
+// first caller that would otherwise be tempted to set the field on the struct.
+//
+// THE WITHDRAWAL RUNS AFTER dependencies(), because the fact being demonstrated
+// is a LIVE dependency still naming a RETIRED credential: the finding that
+// catches a withdrawn credential still in use, and the "what is stored keeps
+// displaying" rule. Retiring it in identities() would leave the dependency
+// pointing at a row that was already dead when the edge was declared, which is a
+// different and less interesting story.
+//
+// DATES ARE RELATIVE TO b.now AND NEVER LITERALS, the rule lifetimes() already
+// follows. A literal would drift: the within-window row silently becomes overdue
+// some weeks after this fixture was written, and the demo stops demonstrating
+// the state it was built for. TestTheSeededRotationDatesAreRelativeToTheClock
+// seeds into a store whose clock is years away, which is the only shape that
+// catches a literal on the day it is written.
+func (b *builder) identityHistory() {
+	rotations := []struct {
+		name    string
+		daysAgo int
+		why     string
+	}{
+		// WITHIN WINDOW: rotated a month ago against a 90-day policy.
+		{"svc-orders", 30, "rotated last month, comfortably inside its window"},
+		// OVERDUE: 200 days against a 90-day policy, so the Fault finding has a
+		// row and the pill reads "overdue by 110 d".
+		{"svc-sso", 200, "rotated over six months ago against a 90-day rule"},
+		// svc-backup$ is deliberately NOT rotated: policy set, nothing ever
+		// recorded, which is the Gap finding and the state all three seeded
+		// identities were in before WP-J8.
+	}
+	for _, r := range rotations {
+		if !b.ok() {
+			return
+		}
+		id, ok := b.identityIDs[r.name]
+		if !ok {
+			b.fail(fmt.Errorf("rotating %s: no such seeded identity", r.name))
+			return
+		}
+		date := domain.FormatDate(b.now.AddDate(0, 0, -r.daysAgo))
+		if err := b.store.RecordIdentityRotation(b.ctx, Permit, id, date); err != nil {
+			b.fail(fmt.Errorf("seeding rotation for %s: %w", r.name, err))
+			return
+		}
+	}
+
+	if id, ok := b.identityIDs["svc-legacy-etl"]; ok {
+		if err := b.store.RetireIdentity(b.ctx, Permit, id); err != nil {
+			b.fail(fmt.Errorf("withdrawing svc-legacy-etl: %w", err))
+			return
+		}
 	}
 }
 
