@@ -306,7 +306,16 @@ var DeclaredColumns = map[string][]string{
 	},
 	"identity": {
 		"id", "kind", "name", "realm", "secret_ref", "rotation_days",
+		// last_rotated is DECLARED and the naming is the trap this table exists
+		// for: it reads like a fact the estate reports about itself and it is
+		// not. Somebody rotated a credential and somebody typed the date. No
+		// monitoring credential may write it -- a machine that could would be
+		// able to silence an overdue finding for a rotation that never happened
+		// (docs/AUDIT.md rule 6, and the spec's backdate/post-date asymmetry).
 		"last_rotated", "team_id", "lifecycle",
+		// Bookkeeping, declared under this file's own rule above: an observed
+		// writer may touch none of it.
+		"row_version",
 	},
 	"interface": {
 		"id", "asset_id", "name", "form_factor", "speed_mbps", "mac", "mtu",

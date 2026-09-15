@@ -240,6 +240,11 @@ type Identity struct {
 	LastRotated  *string `db:"last_rotated"`
 	TeamID       *string `db:"team_id"`
 	Lifecycle    string  `db:"lifecycle"`
+	// RowVersion is the optimistic-concurrency token, migration 00069. See
+	// internal/domain/version.go. auditFields (internal/store/diff.go:80-86)
+	// excludes it from every diff: "an audit entry reading row_version: 4 -> 5
+	// tells a reader nothing they can use".
+	RowVersion int `db:"row_version"`
 }
 
 // NewIdentity validates and constructs a principal.
@@ -250,7 +255,7 @@ func NewIdentity(id, kind, name string) (*Identity, error) {
 	if err := ve.OrNil(); err != nil {
 		return nil, err
 	}
-	return &Identity{ID: id, Kind: kind, Name: name, Lifecycle: LifecycleActive}, nil
+	return &Identity{ID: id, Kind: kind, Name: name, Lifecycle: LifecycleActive, RowVersion: 1}, nil
 }
 
 // RotationOverdue reports whether the credential is past its rotation window.
