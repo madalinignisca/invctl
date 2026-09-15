@@ -886,12 +886,24 @@ func realmOrEmpty(realm *string) string {
 
 func (s *SQLStore) CreateIdentity(ctx context.Context, p domain.Permit, i *domain.Identity) error {
 	return s.write(ctx, p, func(t *tx) error {
+		// last_rotated IS DELIBERATELY ABSENT from this column list and must
+		// stay absent. It has exactly one writer, RecordIdentityRotation
+		// (WP-J8, docs/identity-surface-design.md): declaring a credential that
+		// already exists and recording when it was last rotated are TWO ACTS
+		// and two audit entries, both of which are true. A create that also
+		// stamped the date would bury the rotation inside a create snapshot
+		// where no reader looking for a rotation will ever find it.
+		// internal/store/last_rotated_source_test.go fails on any other writer.
+		//
+		// row_version is written explicitly rather than left to DEFAULT 1, so
+		// the Go struct and the row agree from the first read -- the same shape
+		// every other create in this package uses.
 		_, err := t.exec(ctx, `
 			INSERT INTO identity (id, kind, name, realm, secret_ref, rotation_days,
-			                      last_rotated, team_id, lifecycle)
+			                      team_id, lifecycle, row_version)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			i.ID, i.Kind, i.Name, realmOrEmpty(i.Realm), i.SecretRef, i.RotationDays,
-			i.LastRotated, i.TeamID, i.Lifecycle)
+			i.TeamID, i.Lifecycle, i.RowVersion)
 		if err != nil {
 			return translateWriteErr(err, "creating identity")
 		}
