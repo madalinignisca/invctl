@@ -161,6 +161,19 @@ func (f *ownershipFixture) identity(t *testing.T, name string, teamID *string, l
 	return id.ID
 }
 
+// rowVersion reads back an identity's optimistic-concurrency token, migration
+// 00069 (WP-J8). Used to prove the two bulk writers bump it while keeping
+// their existing WHERE guards.
+func (f *ownershipFixture) rowVersion(t *testing.T, identityID string) int {
+	t.Helper()
+	var v int
+	if err := f.s.readOne(f.ctx, &v,
+		`SELECT row_version FROM identity WHERE id = ?`, identityID); err != nil {
+		t.Fatalf("reading row_version for %s: %v", identityID, err)
+	}
+	return v
+}
+
 // customField creates a live custom field. teamID nil produces the ONE state
 // domain.NewCustomField itself refuses to create -- a live field with no
 // owner at all -- reproduced the same way seed_customfields.go's
