@@ -48,7 +48,16 @@ func TestAddingComponentsByARangeCreatesEveryName(t *testing.T) {
 	if got := h.count(`SELECT COUNT(*) FROM device_type_component WHERE device_type_id = ?`, dtID); got != 48 {
 		t.Fatalf("adding Ethernet[1-48] created %d rows, want 48", got)
 	}
-	if got := h.count(`SELECT COUNT(*) FROM change_log WHERE entity_type = 'device_type_component'`); got != 1 {
+	// SCOPED TO THIS DEVICE TYPE, like the row count above it. It counted
+	// every device_type_component entry in the database until the seed grew a
+	// component template of its own -- four batches on the core switch model,
+	// four perfectly correct audit entries -- and this read them as this
+	// test's own. The claim was always "ONE operator action writes ONE entry",
+	// never "this database contains one entry", and an unscoped count cannot
+	// tell those apart. entity_id for a batch is the device type (logCreate in
+	// CreateDeviceTypeComponents), not a component.
+	if got := h.count(`SELECT COUNT(*) FROM change_log
+		WHERE entity_type = 'device_type_component' AND entity_id = ?`, dtID); got != 1 {
 		t.Errorf("adding 48 ports wrote %d change_log rows, want exactly 1 -- one operator "+
 			"action, one audit entry, not 48", got)
 	}

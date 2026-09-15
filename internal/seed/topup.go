@@ -52,6 +52,12 @@ func TopUp(ctx context.Context, s *store.SQLStore) (*Refs, error) {
 		interfaceIDs: map[string]string{},
 		identityIDs:  map[string]string{},
 		poolIDs:      map[string]string{},
+		// Initialised although no phase in TopUp's list writes to it: a
+		// builder map that is nil PANICS on the first write rather than
+		// misbehaving quietly, which is exactly how VLANs and WirelessLANs
+		// surfaced above. The cost of the line is nothing; the cost of
+		// omitting it is a crash on whichever phase joins the list next.
+		linkIDs: map[string]string{},
 
 		refs: &Refs{
 			Environments:  map[string]string{},

@@ -235,6 +235,13 @@ func TestTheOverviewFindsAllOfIt(t *testing.T) {
 			"redundancy group with one member",
 			"overlay with one end",
 			"circuit missing an end",
+			// WP-C1's finding. It is here for the same reason as the three
+			// above: the fixture is the only place it can be demonstrated,
+			// and componentTemplates()' position in Load is the ONLY thing
+			// that produces it -- move that phase ahead of networking() and
+			// the template silently fills both switches in, this row
+			// vanishes, and every other test in the suite stays green.
+			"asset missing a component its device type declares",
 		} {
 			if !labels[want] {
 				t.Errorf("the overview has no %q row; the fixture stopped demonstrating it", want)
