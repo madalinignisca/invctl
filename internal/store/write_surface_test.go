@@ -135,28 +135,32 @@ var writeSurfaceByDesign = map[string]string{
 }
 
 // writeSurfaceUnbuilt is the third answer, and it exists because the other two
-// were both wrong for `identity`.
+// were both wrong for `identity` -- and it stays, empty, because the third
+// answer is still needed for whatever entity ships with no surface at all next.
 //
 // A GAP means a working feature is missing a repair path -- somebody uses this
 // every day and one day needs to fix a typo. BY DESIGN means the verb genuinely
-// should not exist. `identity` is neither: CreateIdentity and ListIdentities sit
-// in the store with NO ROUTE REACHING THEM, so there is no page, no create form
-// and no list. Filing that as "no correction path" understated it by a long way
-// -- rotation_days and last_rotated are the point of the table, and nothing can
-// record a rotation, so the feature is inert rather than imperfect.
+// should not exist. Neither fits an entity with NO ROUTE REACHING IT AT ALL:
+// filing that as "no correction path" understates it by a long way -- there is
+// no page, no create form, no list, nothing to correct or withdraw in the first
+// place.
 //
 // Two-directional like the maps above: an entity that grows both verbs while
 // still listed here fails, because an entry nobody deletes stops being read.
 //
 // Each entry names where the real work is tracked. This census is not the place
 // to plan a feature; it is the place to stop one being mistaken for a defect.
-var writeSurfaceUnbuilt = map[string]string{
-	"Identity": "the whole surface is unbuilt, not just the repair path: no " +
-		"route reaches CreateIdentity or ListIdentities, so an identity cannot be " +
-		"declared, listed or rotated through the application at all. Tracked as " +
-		"WP-J8 in docs/ROADMAP.md. RECLASSIFIED 2026-09-13 out of writeSurfaceGaps, " +
-		"where it read as a missing correction on a working feature.",
-}
+//
+// WP-J8 CLOSED THIS CENSUS TO ZERO on 2026-09-15 (store half, Task 3 of the
+// identity-surface plan), and the empty map stays rather than being deleted:
+// it is the third answer, and an entity that ships with no surface at all in
+// future needs somewhere to be recorded that is not "a working feature
+// missing a repair path". Identity was the only entry and it leaves this
+// census now that internal/store/identities.go gives it UpdateIdentity,
+// RetireIdentity and RecordIdentityRotation -- this test scans store methods,
+// not routes, so it closes here even though the routes in front of them are
+// Task 4 of the same plan and land separately.
+var writeSurfaceUnbuilt = map[string]string{}
 
 // writeSurfaceGaps is the backlog: entities somebody can create and then cannot
 // fix, cannot take back, or neither. Each entry says what the operator loses.
