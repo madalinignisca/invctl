@@ -1,0 +1,66 @@
+{{/*
+  invctl — infrastructure inventory
+  Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+
+  Licensed under the GNU Affero General Public License, version 3 only —
+  no later version applies. See LICENSE for the full text.
+
+  SPDX-License-Identifier: AGPL-3.0-only
+*/}}
+{{define "content"}}
+<div class="page-head">
+  <div class="eyebrow">inventory</div>
+  <h1>Identities</h1>
+  <p class="lede">
+    What a service authenticates as, and whether anybody has recorded rotating
+    it. <span class="mono">secret_ref</span> is a path to credential material,
+    never the material — it renders on the detail page, to an Administrator,
+    one credential at a time. This list shows only whether one is recorded.
+  </p>
+</div>
+
+<div class="panel">
+  <div class="panel-body">
+    <form class="toolbar" hx-get="/identities" hx-target="#identity-list"
+          hx-swap="outerHTML" hx-push-url="true"
+          hx-trigger="keyup changed delay:250ms, search, change">
+      <div class="field" style="margin-bottom:0">
+        <label for="iq">Find</label>
+        <input id="iq" type="search" name="q" value="{{.Filter.Query}}" placeholder="name or realm">
+      </div>
+      <div class="field" style="margin-bottom:0">
+        <label for="ikind">Kind</label>
+        <select id="ikind" name="kind">
+          <option value="">any</option>
+          {{range $.Kinds}}<option value="{{.}}" {{if eq . $.Filter.Kind}}selected{{end}}>{{title .}}</option>{{end}}
+        </select>
+      </div>
+      <div class="field" style="margin-bottom:0">
+        <label for="iteam">Team</label>
+        <select id="iteam" name="team">
+          <option value="">any</option>
+          {{range $.Teams}}<option value="{{.ID}}" {{if eq .ID $.Filter.TeamID}}selected{{end}}>{{.Code}}</option>{{end}}
+        </select>
+      </div>
+      <div class="field" style="margin-bottom:0">
+        <label for="irot">Rotation</label>
+        <select id="irot" name="rotation">
+          <option value="">any</option>
+          {{range $.States}}<option value="{{.}}" {{if eq . (printf "%s" $.Filter.Rotation)}}selected{{end}}>{{title .}}</option>{{end}}
+        </select>
+      </div>
+      <div class="field" style="margin-bottom:0">
+        <label for="ilife">Lifecycle</label>
+        <select id="ilife" name="lifecycle">
+          <option value="">active</option>
+          <option value="retired">retired</option>
+          <option value="any">any</option>
+        </select>
+        <div class="field-hint">So a withdrawn credential can still be found.</div>
+      </div>
+    </form>
+  </div>
+</div>
+
+{{template "identity_list_panel" .}}
+{{end}}

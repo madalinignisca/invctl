@@ -1,0 +1,25 @@
+{{/*
+  invctl — infrastructure inventory
+  Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+
+  Licensed under the GNU Affero General Public License, version 3 only —
+  no later version applies. See LICENSE for the full text.
+
+  SPDX-License-Identifier: AGPL-3.0-only
+*/}}
+{{define "content"}}
+<div class="crumbs">
+  <a href="/identities">identities</a><span class="sep">/</span><span>{{.Identity.Name}}</span>
+</div>
+
+<div class="page-head">
+  <div class="eyebrow">{{if .Identity.Realm}}{{deref .Identity.Realm}}{{else}}realm not recorded{{end}}</div>
+  <h1>{{.Identity.Name}}</h1>
+  <div class="tag-list" style="margin-top:8px">
+    <span class="{{lifecycleClass .Identity.Lifecycle}}">{{.Identity.Lifecycle}}</span>
+    <span class="pill pill-muted">{{title .Identity.Kind}}</span>
+  </div>
+</div>
+
+{{template "identity_panel" .}}
+{{end}}

@@ -164,6 +164,15 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	read("GET /assets/{id}/neighbourhood", app.AssetNeighbourhood)
 	read("GET /certificates", app.CertificateList)
 	read("GET /certificates/{id}", app.CertificateDetail)
+	// Credential references (WP-J8). THE GETs ARE READABLE BY ANY AUTHENTICATED
+	// USER, deliberately: name, realm, kind, team and rotation status are what
+	// somebody needs mid-incident and none of it is sensitive. secret_ref is
+	// gated inside the detail handler's view model, not by the route -- see
+	// internal/web/handlers/identities.go's header. The write surface (create,
+	// correct, retire, record a rotation) is a separate task and is
+	// writeAdminOnly, not registered here.
+	read("GET /identities", app.IdentityList)
+	read("GET /identities/{id}", app.IdentityDetail)
 	read("GET /catalogue", app.Catalogue)
 	read("GET /interfaces/{id}/trace", app.TracePort)
 	read("GET /links/{id}/impact", app.LinkImpact)
