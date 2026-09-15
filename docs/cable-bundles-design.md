@@ -107,6 +107,39 @@ what makes the live-scoped uniqueness rule above load-bearing rather than
 academic: it is the only way a cable ever gets *out* of a retired bundle's
 "claim" on it.
 
+## One bundle per cable, and why the objection does not apply here
+
+The final review argued this rule should be dropped: a cable can pass through an
+outside **duct** and then a riser **tray**, and those are two different disasters
+with two different member sets — so recording only one leaves the other
+unanswerable, which is the wrong-by-omission this feature exists to fix, one
+level up. Partial overlap makes the same point: two cables sharing a duct
+between manholes 3 and 7, one continuing in a different duct to manhole 12.
+
+**The argument is sound in general and does not apply to this estate.** Asked
+directly, Gabriel confirmed these cables do not pass through more than one shared
+thing on their way. Where that holds, one bundle per cable is not a limitation —
+it is the truth, and it buys a singular answer on the cable page, a simpler
+picker, and one unambiguous "what else goes with this".
+
+**Recorded rather than left flagged**, because the reviewer's case is a good one
+and the next person to make it deserves the answer rather than the argument
+again.
+
+**What changes if that stops being true** — if outside plant, risers or
+inter-site runs arrive:
+- `cable_bundle_member` is **already** many-to-many; no migration is needed.
+- `cutEffect` takes a set predicate either way, so `BundleCutEffect` is untouched.
+- `BundleForLink` becomes `BundlesForLink` returning a slice, and the cable page
+  lists them rather than naming one.
+- **The single-claim race disappears with the rule.** `SetBundleMembers` needs
+  `writeSerializable` only because it asserts an invariant it just SELECTed; with
+  no uniqueness to assert there is nothing to race on, and
+  `TestOnlyOneFunctionWritesBundleMembership` stops being load-bearing.
+
+That last point is worth knowing before anybody hardens the current rule further:
+the cheapest fix for the race is deleting the rule, not defending it.
+
 ## The cut
 
 `cutEffect` (`internal/store/graph.go:547`) already takes a predicate over
