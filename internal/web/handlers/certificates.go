@@ -52,8 +52,19 @@ func (a *App) CertificateList(w http.ResponseWriter, r *http.Request) {
 	a.renderCertificateList(w, r, http.StatusOK, nil, domain.CertificateSpec{})
 }
 
-func (a *App) renderCertificateList(w http.ResponseWriter, r *http.Request, status int,
-	errs map[string]string, spec domain.CertificateSpec) {
+// renderCertificateListPage assembles the certificates page and renders ONE of
+// its two swappable regions: the list, or the create form.
+//
+// THE QUERY IS NOT OPTIONAL ON THE REFUSAL PATH, and the design document's
+// suggestion that a form-only refusal "drops a ListCertificates query" is wrong
+// -- ruled on 2026-09-16. Respond renders the WHOLE PAGE when the request is
+// not an HX-Request, and pages/certificate_list.html dereferences .Certificates
+// and .Filter. Handing it a struct with an empty list would show "No
+// certificates match." to a JavaScript-off operator looking at a populated
+// estate. One extra read on a path that only runs when somebody typed something
+// wrong is the correct trade.
+func (a *App) renderCertificateListPage(w http.ResponseWriter, r *http.Request, status int,
+	errs map[string]string, spec domain.CertificateSpec, region string) {
 
 	q := r.URL.Query()
 	filter := store.CertificateFilter{
@@ -68,7 +79,7 @@ func (a *App) renderCertificateList(w http.ResponseWriter, r *http.Request, stat
 	}
 	teams, roles := a.responsibilityOptions(r)
 
-	a.Render.Respond(w, r, status, "certificate_list", "certificate_list_panel", certificateListPage{
+	a.Render.Respond(w, r, status, "certificate_list", region, certificateListPage{
 		Base:         a.base(r, "Certificates", "certificates"),
 		Errors:       orEmpty(errs),
 		Certificates: certificates,
@@ -77,6 +88,20 @@ func (a *App) renderCertificateList(w http.ResponseWriter, r *http.Request, stat
 		Spec:         spec,
 		Filter:       filter,
 	})
+}
+
+// renderCertificateList is a read: the list is what changed.
+func (a *App) renderCertificateList(w http.ResponseWriter, r *http.Request, status int,
+	errs map[string]string, spec domain.CertificateSpec) {
+	a.renderCertificateListPage(w, r, status, errs, spec, "certificate_list_panel")
+}
+
+// refuseCertificateCreate is a refusal: THE FORM is what changed, and it is the
+// only place .Errors and .Spec are rendered. See certificate_form's own comment.
+func (a *App) refuseCertificateCreate(w http.ResponseWriter, r *http.Request,
+	errs map[string]string, spec domain.CertificateSpec) {
+	a.renderCertificateListPage(w, r, http.StatusUnprocessableEntity, errs, spec,
+		"certificate_form")
 }
 
 // CertificateCreate stores a new certificate.
@@ -88,7 +113,7 @@ func (a *App) CertificateCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		if errs, ok := validationErrors(err); ok {
-			a.renderCertificateList(w, r, http.StatusUnprocessableEntity, errs, spec)
+			a.refuseCertificateCreate(w, r, errs, spec)
 			return
 		}
 		a.handleStoreError(w, r, err)

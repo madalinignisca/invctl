@@ -264,3 +264,78 @@ func TestATeamShowsTheCertificatesItRenews(t *testing.T) {
 		t.Error("a certificate another team renews is on the platform page")
 	}
 }
+
+// TestACertificateRefusalRerendersTheFormAndNotTheList.
+//
+// POSTED WITH HX-Request TRUE, and that is the whole point. The existing case in
+// TestCertificateCreateAndTheValidationPath posts with htmx=false, so it gets the
+// whole page back -- which contains the form AND the list, so the wrong region
+// name is invisible from it. That test has passed throughout the life of the bug.
+//
+// What would be true if this were broken: the 422 body would be the list panel.
+// Once the form declares hx-target="#certificate-form", htmx would swap a list
+// into a form-shaped hole, or -- if the target were #certificate-list instead --
+// redraw the list, leave the form untouched, and show the operator nothing at
+// all. Both are silent refusals, which is the failure this work package exists
+// to remove.
+func TestACertificateRefusalRerendersTheFormAndNotTheList(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	resp := h.post("/certificates", url.Values{
+		"csrf_token": {h.csrfToken("/certificates")},
+		"subject_cn": {"backwards.example.com"},
+		"not_before": {"2030-01-01"},
+		"not_after":  {"2020-01-01"}, // THE FAILURE: expiry before validity
+	}, true)
+	b := body(t, resp)
+
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422; body: %s", resp.StatusCode, b)
+	}
+	if !strings.Contains(b, `id="certificate-form"`) {
+		t.Errorf("the 422 body is not the create form. The form declares "+
+			"hx-target=\"#certificate-form\", so this lands nowhere. Body: %s", b)
+	}
+	if strings.Contains(b, `id="certificate-list"`) {
+		t.Errorf("the 422 body is the LIST panel -- the pre-existing deviation "+
+			"this task exists to fix. Body: %s", b)
+	}
+	if !strings.Contains(b, `class="field-error"`) {
+		t.Errorf("the re-rendered form carries no field error, so the operator is "+
+			"handed back a form that looks accepted. Body: %s", b)
+	}
+	if !strings.Contains(b, "backwards.example.com") {
+		t.Errorf("the re-rendered form lost the subject that was typed. Body: %s", b)
+	}
+}
+
+// TestACertificateCreateStillRedirectsOnSuccess is the other half, and it is the
+// evidence behind this whole work package's claim that success paths cannot
+// change.
+//
+// render.Redirect answers an HX-Request with 204 + HX-Redirect. htmx 2.0.4
+// handles that header in handleAjaxResponse and RETURNS before it resolves a
+// target or picks a swap style -- so no value of hx-target or hx-swap can reach
+// a successful create. Asserted here rather than argued from htmx's
+// documentation, because "the docs say so" is what this repo's own comments warn
+// against.
+func TestACertificateCreateStillRedirectsOnSuccess(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	resp := h.post("/certificates", url.Values{
+		"csrf_token": {h.csrfToken("/certificates")},
+		"subject_cn": {"target-sweep.example.com"},
+	}, true)
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("a successful create answered %d, want 204", resp.StatusCode)
+	}
+	if got := resp.Header.Get("HX-Redirect"); !strings.HasPrefix(got, "/certificates/") {
+		t.Errorf("HX-Redirect = %q, want /certificates/<id>. Without it htmx would "+
+			"swap the response body into #certificate-form and the operator would "+
+			"sit on the list looking at a form that appears unsubmitted", got)
+	}
+}

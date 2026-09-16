@@ -61,9 +61,16 @@
 {{end}}
 
 {{define "certificate_form"}}
-<div class="panel">
+{{/* A STABLE ID BECAUSE THIS PARTIAL IS ITS OWN REFUSAL TARGET, not decoration.
+     CertificateCreate used to answer a validation failure by re-rendering
+     certificate_list_panel -- the LIST -- which does not contain this form, so
+     the errors and the re-filled values below were rendered into a fragment
+     nobody could see. CLAUDE.md: "Validation errors re-render the form partial."
+     partials/user_row.html:59 is the shape. */}}
+<div class="panel" id="certificate-form">
   <div class="panel-head"><h2>Add a certificate</h2></div>
-  <form class="panel-body" method="post" action="/certificates" hx-post="/certificates">
+  <form class="panel-body" method="post" action="/certificates" hx-post="/certificates"
+        hx-target="#certificate-form" hx-swap="outerHTML">
     <input type="hidden" name="csrf_token" value="{{.CSRF}}">
     <div class="field-row">
       <div class="field">
