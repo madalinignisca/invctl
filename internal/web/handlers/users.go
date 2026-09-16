@@ -146,8 +146,16 @@ func (a *App) UserList(w http.ResponseWriter, r *http.Request) {
 	a.renderUserList(w, r, http.StatusOK, nil, "")
 }
 
-func (a *App) renderUserList(w http.ResponseWriter, r *http.Request, status int,
-	errs map[string]string, formUsername string) {
+// renderUserListPage assembles the users page and renders ONE of its two
+// swappable regions. See renderCertificateListPage / renderTeamListPage for
+// why the roster queries stay on the refusal path too: pagePartial renders
+// the WHOLE page on a non-HTMX request, and user_list.html dereferences
+// .Rows, .Roles and .ActiveAdminCount regardless of which region is being
+// swapped for an HTMX caller. Reducing this struct on the refusal path would
+// make a JavaScript-off refusal render an empty roster over a populated
+// estate.
+func (a *App) renderUserListPage(w http.ResponseWriter, r *http.Request, status int,
+	errs map[string]string, formUsername string, region string) {
 
 	users, err := a.Store.ListUsers(r.Context())
 	if err != nil {
@@ -180,7 +188,7 @@ func (a *App) renderUserList(w http.ResponseWriter, r *http.Request, status int,
 		rows[i] = row
 	}
 
-	a.Render.Respond(w, r, status, "user_list", "user_list_panel", userListPage{
+	a.Render.Respond(w, r, status, "user_list", region, userListPage{
 		Base:             b,
 		Rows:             rows,
 		Roles:            domain.Roles,
@@ -188,6 +196,18 @@ func (a *App) renderUserList(w http.ResponseWriter, r *http.Request, status int,
 		Errors:           orEmpty(errs),
 		FormUsername:     formUsername,
 	})
+}
+
+// renderUserList is a read: the roster is what changed.
+func (a *App) renderUserList(w http.ResponseWriter, r *http.Request, status int,
+	errs map[string]string, formUsername string) {
+	a.renderUserListPage(w, r, status, errs, formUsername, "user_list_panel")
+}
+
+// refuseUserCreate re-renders THE FORM. See user_form.html's own comment.
+func (a *App) refuseUserCreate(w http.ResponseWriter, r *http.Request,
+	errs map[string]string, formUsername string) {
+	a.renderUserListPage(w, r, http.StatusUnprocessableEntity, errs, formUsername, "user_form")
 }
 
 // UserCreate adds a local account. Always an Observer to start -- NewAppUser's
@@ -200,12 +220,11 @@ func (a *App) UserCreate(w http.ResponseWriter, r *http.Request) {
 	password := formValue(r, "password")
 
 	if password == "" {
-		a.renderUserList(w, r, http.StatusUnprocessableEntity,
-			map[string]string{"password": "is required"}, username)
+		a.refuseUserCreate(w, r, map[string]string{"password": "is required"}, username)
 		return
 	}
 	if len(password) < minPasswordLength {
-		a.renderUserList(w, r, http.StatusUnprocessableEntity,
+		a.refuseUserCreate(w, r,
 			map[string]string{"password": "must be at least 12 characters"}, username)
 		return
 	}
@@ -213,7 +232,7 @@ func (a *App) UserCreate(w http.ResponseWriter, r *http.Request) {
 	u, err := domain.NewAppUser(store.NewID(), username, domain.UserSourceLocal, a.Store.Now())
 	if err != nil {
 		if errs, ok := validationErrors(err); ok {
-			a.renderUserList(w, r, http.StatusUnprocessableEntity, errs, username)
+			a.refuseUserCreate(w, r, errs, username)
 			return
 		}
 		a.handleStoreError(w, r, err)
@@ -228,7 +247,7 @@ func (a *App) UserCreate(w http.ResponseWriter, r *http.Request) {
 
 	if err := a.Store.CreateUser(r.Context(), a.permit(r), u); err != nil {
 		if isConflict(err) {
-			a.renderUserList(w, r, http.StatusUnprocessableEntity,
+			a.refuseUserCreate(w, r,
 				map[string]string{"username": "an account with that username already exists"}, username)
 			return
 		}

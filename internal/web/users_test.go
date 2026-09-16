@@ -533,3 +533,67 @@ func TestASecretReferenceIsAbsentFromEveryCSVExportForANonAdministrator(t *testi
 		}
 	}
 }
+
+// TestAUserRefusalRerendersTheCreateFormAndNotTheRoster.
+//
+// The third instance of the certificates/teams defect, found by reading every
+// handler behind the untargeted forms rather than by trusting the brief's list
+// of two. user_form already carries id="user-form" -- the markup was right and
+// the handler named the wrong region, which is why nothing pointed at it.
+//
+// A SHORT PASSWORD, because it needs no fixture and no second account: the
+// length check is UserCreate's own, before any store call, so this test writes
+// nothing at all. <input type="password" required> has no minlength, so a
+// browser submits it happily -- the same refusal the E2E spec drives.
+func TestAUserRefusalRerendersTheCreateFormAndNotTheRoster(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	resp := h.post("/users", url.Values{
+		"csrf_token": {h.csrfToken("/users")},
+		"username":   {"sweep-tester"},
+		"password":   {"short"}, // THE FAILURE: under minPasswordLength
+	}, true)
+	b := body(t, resp)
+
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422; body: %s", resp.StatusCode, b)
+	}
+	if !strings.Contains(b, `id="user-form"`) {
+		t.Errorf("the 422 body is not the create form. Body: %s", b)
+	}
+	if strings.Contains(b, `id="user-list"`) {
+		t.Errorf("the 422 body is the ROSTER. Body: %s", b)
+	}
+	if !strings.Contains(b, `class="field-error"`) {
+		t.Errorf("the re-rendered form carries no field error. Body: %s", b)
+	}
+	if !strings.Contains(b, "sweep-tester") {
+		t.Errorf("the re-rendered form lost the username that was typed. Body: %s", b)
+	}
+	// NOTHING WAS CREATED. A refusal that half-wrote would be a worse bug than
+	// the one being fixed, and this is the cheapest place to say so.
+	if got := h.count(`SELECT COUNT(*) FROM app_user WHERE username = ?`, "sweep-tester"); got != 0 {
+		t.Errorf("a refused create left %d app_user row(s) behind", got)
+	}
+}
+
+// TestAUserCreateStillRedirectsOnSuccess -- see the certificates counterpart.
+func TestAUserCreateStillRedirectsOnSuccess(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	resp := h.post("/users", url.Values{
+		"csrf_token": {h.csrfToken("/users")},
+		"username":   {"sweep-accepted"},
+		"password":   {"a-sufficiently-long-password"},
+	}, true)
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("a successful create answered %d, want 204", resp.StatusCode)
+	}
+	if got := resp.Header.Get("HX-Redirect"); got != "/users" {
+		t.Errorf("HX-Redirect = %q, want /users", got)
+	}
+}
