@@ -393,8 +393,15 @@ sensitive. `internal/web/rbac_boundary_test.go` drives every generated write
 route, so the four POSTs join its population automatically and must be refused
 for a project owner.
 
-The edit-form partial is rendered only for an Administrator, and the rotation
-button uses `hx-post` (`hx-confirm` requires it).
+The edit-form partial is rendered only for an Administrator. `hx-confirm` is
+on **withdraw**, which is why that form keeps `hx-post` — htmx never shows the
+confirmation dialog for a plain form submission. The declare form and the
+correct form deliberately do **not** carry `hx-post`: each can end in an
+ordinary 409 (a duplicate `(realm, name)` on declare; either that or somebody
+else recording a rotation while the correct form sat open, a cost this spec
+prices explicitly below), and htmx 2 does not swap a 409 by default, so
+`hx-post` there would leave the button doing nothing visible. The rotation
+form keeps `hx-post`: its only conflict status is 422, which does swap.
 
 ### Concurrency
 

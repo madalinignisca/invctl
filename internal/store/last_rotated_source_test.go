@@ -39,6 +39,16 @@ import (
 // costs nothing and a future read query is a deliberate edit to the map below
 // rather than a diff nobody reads.
 //
+// ITS SCOPE IS NARROWER THAN THE CLAIM ABOVE SOUNDS, and worth naming rather
+// than leaving for the next reader to discover by trying it: it walks only
+// the TOP-LEVEL .go files of internal/store (os.ReadDir, not filepath.Walk),
+// so a future subpackage under internal/store is invisible to it; and it
+// inspects only STRING LITERALS inside function bodies (ast.Inspect over
+// fn.Body), so a package-level const or a literal built by concatenation
+// outside a function is invisible too. Both are currently true of nothing in
+// this codebase, which is exactly why the gap is inert today and worth
+// stating before it stops being inert.
+//
 // WALKS AND PARSES ONE FILE AT A TIME (goStringLiterals's own technique,
 // prune_test.go) RATHER THAN go/parser.ParseDir: ParseDir is deprecated since
 // Go 1.25 -- it does not consider build tags when associating files with
