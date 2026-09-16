@@ -1217,6 +1217,17 @@ was the WRITE surface — which is what `writeSurfaceUnbuilt` asserted — plus 
 identity LIST and DETAIL PAGES, a narrower and different claim than "no route
 reaches either of them." Both are now built; see above.
 
+`secret_ref` holds a **path, never a secret** (CLAUDE.md), and stays redacted in
+`snapshotJSON`/`diffJSON` the way `CreateUser` already redacts `password_hash`.
+`team_id` answers "who do I ask", the same role it plays on `custom_field`.
+
+**Reclassified on 2026-09-13** out of `writeSurfaceGaps`, where it had been
+filed as "neither, and no route today" alongside genuine repair gaps. That
+understated it: a gap means a working feature is missing a repair path, and this
+feature did not exist. `writeSurfaceUnbuilt` in
+`internal/store/write_surface_test.go` pointed here, and failed if an entity
+listed there quietly grew both verbs.
+
 **WP-J9 · HTMX swap targets** — S — **DONE 2026-09-16**
 
 Every `hx-post` element in `web/templates` declares `hx-target` and `hx-swap`, enforced by
@@ -1234,17 +1245,6 @@ exemption criterion refuses to depend on it); plain `method="post"` forms with n
 (outside this census, correct by a different route — they navigate and never swap); redesigning
 which partial each handler re-renders on 422 in general (only the three surfaces where
 targeting alone inverted the failure were touched); a behavioural test per element.
-
-`secret_ref` holds a **path, never a secret** (CLAUDE.md), and stays redacted in
-`snapshotJSON`/`diffJSON` the way `CreateUser` already redacts `password_hash`.
-`team_id` answers "who do I ask", the same role it plays on `custom_field`.
-
-**Reclassified on 2026-09-13** out of `writeSurfaceGaps`, where it had been
-filed as "neither, and no route today" alongside genuine repair gaps. That
-understated it: a gap means a working feature is missing a repair path, and this
-feature did not exist. `writeSurfaceUnbuilt` in
-`internal/store/write_surface_test.go` pointed here, and failed if an entity
-listed there quietly grew both verbs.
 
 **WP-J7 · Capacity findings** — M — **DONE**
 Three findings, three audiences. A project allocated **above what it was priced
