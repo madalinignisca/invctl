@@ -137,7 +137,7 @@
           {{else if eq .Rotation "never_recorded"}}
             <span class="pill pill-degraded">never recorded</span>
           {{else if eq .Rotation "within_window"}}
-            <span class="pill pill-ok">due in {{.DueOn}}</span>
+            <span class="pill pill-ok">due on {{.DueOn}}</span>
           {{else if eq .Rotation "overdue"}}
             <span class="pill pill-down">overdue — was due {{.DueOn}}</span>
           {{else}}
@@ -207,8 +207,12 @@
              the enforcement: RecordIdentityRotation refuses a future date
              and returns 422 -- .RotationInput carries back exactly what was
              typed on that refusal, never a silently reset "today". */}}
+        {{/* max is .Today, NEVER .RotationInput: after a refused future date,
+             .RotationInput carries back exactly what was rejected so the
+             typed value survives, and a max bound to it would grant the
+             browser permission to resubmit the very date just refused. */}}
         <input id="i-rot" type="date" name="last_rotated"
-               value="{{.RotationInput}}" max="{{.RotationInput}}" required>
+               value="{{.RotationInput}}" max="{{.Today}}" required>
         {{with index .Errors "last_rotated"}}<div class="field-error">{{.}}</div>{{end}}
         <div class="field-hint">
           Backdating is fine — record the day it actually happened. A future date is refused.

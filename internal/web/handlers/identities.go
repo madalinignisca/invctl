@@ -103,6 +103,12 @@ type identityPage struct {
 	// opposite of "the typed value survives" -- see
 	// TestAFutureRotationIs422WithTheFormReRendered.
 	RotationInput string
+	// Today feeds the rotation input's max= attribute, a browser courtesy
+	// only -- RecordIdentityRotation is the enforcement. Kept separate from
+	// RotationInput so a refused future date does not also raise the ceiling
+	// that let it through: value="{{.RotationInput}}" echoes what was typed,
+	// max="{{.Today}}" never moves.
+	Today string
 }
 
 // IdentityList shows every credential reference, live ones by default.
@@ -273,6 +279,12 @@ func (a *App) renderIdentityWith(w http.ResponseWriter, r *http.Request, status 
 		Kinds:         domain.IdentityKinds,
 		Teams:         teams,
 		RotationInput: rotIn,
+		// Today is the browser's `max=` courtesy on the rotation input. NOT
+		// RotationInput -- after a refused future date, RotationInput carries
+		// that same rejected date back so the operator's typed value survives,
+		// and a max bound to it would grant the browser permission to submit
+		// exactly the date the server just refused.
+		Today: domain.FormatDate(now),
 	})
 }
 

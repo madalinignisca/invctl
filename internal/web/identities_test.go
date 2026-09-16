@@ -345,7 +345,7 @@ func TestTheIdentityDetailPageStatesAllThreeRotationFactsPlainly(t *testing.T) {
 		for _, want := range []string{
 			"every 90 days", // the policy
 			domain.FormatDate(now.AddDate(0, 0, -30)), // the last recorded rotation
-			"due in", // the derived state
+			"due on", // the derived state
 		} {
 			if !strings.Contains(page, want) {
 				t.Errorf("the rotation panel does not state %q. All three facts are stated "+
@@ -550,7 +550,7 @@ func TestRecordingARotationThroughTheRoute(t *testing.T) {
 	if !strings.Contains(page, today) {
 		t.Error("the detail page does not show the just-recorded rotation date")
 	}
-	if !strings.Contains(page, "due in") {
+	if !strings.Contains(page, "due on") {
 		t.Error("the detail page does not show a within-window state right after a fresh rotation")
 	}
 	// The TIMELINE shows the rotation as a last_rotated change, with an actor.
