@@ -281,8 +281,8 @@ var (
 	// watching the count drop from 90 to 89 with the test still green.
 	hxOpenTagRe = regexp.MustCompile(`(?i)<(form|button)\b`)
 	hxPostRe    = regexp.MustCompile(`(?is)\bhx-post="([^"]*)"`)
-	hxTargetRe = regexp.MustCompile(`(?is)\bhx-target="([^"]*)"`)
-	hxSwapRe   = regexp.MustCompile(`(?is)\bhx-swap="([^"]*)"`)
+	hxTargetRe  = regexp.MustCompile(`(?is)\bhx-target="([^"]*)"`)
+	hxSwapRe    = regexp.MustCompile(`(?is)\bhx-swap="([^"]*)"`)
 	// An id attribute on any element. hx-swap-oob is deliberately not excluded:
 	// #flash-dock is declared by partials/flash.html and by layouts/base.html,
 	// and both are real places a response can land.

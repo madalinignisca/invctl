@@ -9,6 +9,7 @@
 package web_test
 
 import (
+	"net/http"
 	"net/url"
 	"regexp"
 	"strings"
@@ -102,7 +103,7 @@ func TestCertificateRefusalsCarryAFieldErrorForEveryKeyTheValidatorCanEmit(t *te
 			}
 			resp := h.post("/certificates", form, true)
 			b := body(t, resp)
-			if resp.StatusCode != 422 {
+			if resp.StatusCode != http.StatusUnprocessableEntity {
 				t.Fatalf("status = %d, want 422; body: %s", resp.StatusCode, b)
 			}
 			assertFieldError(t, b, tc.wantText, "create", tc.key)
@@ -124,7 +125,7 @@ func TestCertificateRefusalsCarryAFieldErrorForEveryKeyTheValidatorCanEmit(t *te
 			"lifecycle":  {"not-a-real-lifecycle"},
 		}, true)
 		b := body(t, resp)
-		if resp.StatusCode != 422 {
+		if resp.StatusCode != http.StatusUnprocessableEntity {
 			t.Fatalf("status = %d, want 422; body: %s", resp.StatusCode, b)
 		}
 		// NOT asserting a field error here: this is the one key the create
@@ -176,7 +177,7 @@ func TestCertificateRefusalsCarryAFieldErrorForEveryKeyTheValidatorCanEmit(t *te
 			}
 			resp := h.post("/certificates/"+certID, form, true)
 			b := body(t, resp)
-			if resp.StatusCode != 422 {
+			if resp.StatusCode != http.StatusUnprocessableEntity {
 				t.Fatalf("status = %d, want 422; body: %s", resp.StatusCode, b)
 			}
 			assertFieldError(t, b, tc.wantText, "update", tc.key)
