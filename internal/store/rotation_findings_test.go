@@ -111,11 +111,20 @@ func TestRotationFindings(t *testing.T) {
 				wantSeverity string
 				wantCount    int
 				wantExample  string
-				why          string
+				// wantHref is the FILTERED LIST for overdue and never-recorded
+				// (blocking #3, final whole-branch review): the dashboard's own
+				// "For example" column already carries wantExample, so a Href
+				// pointing at that same one credential would strand the other
+				// eleven. The withdrawn-credential finding is the one deliberate
+				// exception -- there is no /identities filter for it -- and
+				// keeps pointing at the identity itself.
+				wantHref string
+				why      string
 			}{
 				{
 					what: "past its own rotation rule", wantSeverity: FindingFault,
 					wantCount: 1, wantExample: "svc-overdue",
+					wantHref: "/identities?rotation=overdue",
 					why: "the estate's own declared rule says 90 days and it has been 200. " +
 						"Something is wrong NOW -- the same shape as a contract having " +
 						"lapsed, which findings.go names as the archetypal Fault.",
@@ -123,6 +132,7 @@ func TestRotationFindings(t *testing.T) {
 				{
 					what: "no rotation ever recorded", wantSeverity: FindingGap,
 					wantCount: 2, wantExample: "svc-unrecorded",
+					wantHref: "/identities?rotation=never_recorded",
 					why: "the inventory does not know when this was last rotated, so it " +
 						"cannot say whether the rule is met. Calling it a Fault would " +
 						"claim knowledge nobody has; Gap is the severity that makes the " +
@@ -135,9 +145,11 @@ func TestRotationFindings(t *testing.T) {
 				{
 					what: "withdrawn credential", wantSeverity: FindingGap,
 					wantCount: 1, wantExample: "svc-withdrawn",
+					wantHref: "/identities/" + withdrawn.ID,
 					why: "the inventory contradicts itself: either the edge is stale or " +
 						"the service is authenticating with a withdrawn credential, and " +
-						"it is not knowable from here.",
+						"it is not knowable from here. There is no /identities filter for " +
+						"this one, so it keeps pointing at the credential itself.",
 				},
 			} {
 				t.Run(tc.what, func(t *testing.T) {
@@ -165,9 +177,8 @@ func TestRotationFindings(t *testing.T) {
 							"exactly why the row has to carry a concrete example, or it "+
 							"is only a number.", got.Detail, tc.wantExample)
 					}
-					if got.Href == "" {
-						t.Error("the finding has no Href, so the dashboard row is a dead " +
-							"end and the reader has to go and find the credential by hand")
+					if got.Href != tc.wantHref {
+						t.Errorf("href = %q, want %q. %s", got.Href, tc.wantHref, tc.why)
 					}
 				})
 			}
@@ -220,6 +231,42 @@ func TestRotationFindings(t *testing.T) {
 						"unparseable date must never render as a lapse")
 				}
 			})
+		})
+	}
+}
+
+// TestEstateFindingsReachesRotationFindings is the registration proof the
+// final whole-branch review asked for (blocking #2), following
+// TestEstateFindingsReachesTemplateDriftFindings' own precedent
+// (template_drift_test.go): deleting the "rotation, err :=
+// s.RotationFindings..." block and its append from EstateFindings in
+// findings.go left the whole suite green before this test existed, because
+// every rotation test in this file calls s.RotationFindings(ctx) directly
+// and findings_test.go never mentions rotation at all.
+//
+// Mutation: delete that block and this goes red with "credential past its
+// own rotation rule" never appearing in what EstateFindings returns;
+// restore to go green again.
+func TestEstateFindingsReachesRotationFindings(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newIdentityFixture(t, e)
+			now := f.s.Now()
+
+			overdue := f.identity(t, "svc-overdue", 90)
+			if err := f.s.RecordIdentityRotation(f.ctx, testPermit, overdue.ID,
+				domain.FormatDate(now.AddDate(0, 0, -200))); err != nil {
+				t.Fatalf("rotating svc-overdue: %v", err)
+			}
+
+			by := findingsByLabel(t, f.s, f.ctx)
+			finding, ok := by["credential past its own rotation rule"]
+			if !ok {
+				t.Fatalf("EstateFindings did not carry the rotation finding: %+v", by)
+			}
+			if finding.Count != 1 {
+				t.Errorf("count = %d, want 1", finding.Count)
+			}
 		})
 	}
 }

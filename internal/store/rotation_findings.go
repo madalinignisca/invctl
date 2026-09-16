@@ -64,7 +64,6 @@ func (s *SQLStore) RotationFindings(ctx context.Context) ([]Finding, error) {
 
 	var overdue, never int
 	var firstOverdue, firstNever string
-	var overdueHref, neverHref string
 	for _, r := range rows {
 		if r.Lifecycle == domain.LifecycleRetired {
 			continue
@@ -75,14 +74,12 @@ func (s *SQLStore) RotationFindings(ctx context.Context) ([]Finding, error) {
 			if firstOverdue == "" {
 				firstOverdue = fmt.Sprintf("%s was last rotated %s, against a %v-day rule",
 					r.Name, derefOr(r.LastRotated, "?"), derefOrInt(r.RotationDays))
-				overdueHref = "/identities/" + r.ID
 			}
 		case domain.RotationNeverRecorded:
 			never++
 			if firstNever == "" {
 				firstNever = fmt.Sprintf("%s has a %v-day rule and no rotation has ever been recorded",
 					r.Name, derefOrInt(r.RotationDays))
-				neverHref = "/identities/" + r.ID
 			}
 		case domain.RotationUnreadable:
 			// Folded into `never`: the inventory cannot say when this was last
@@ -91,7 +88,6 @@ func (s *SQLStore) RotationFindings(ctx context.Context) ([]Finding, error) {
 			never++
 			if firstNever == "" {
 				firstNever = r.Name + " has a rotation date that will not parse"
-				neverHref = "/identities/" + r.ID
 			}
 		case domain.RotationUnmanaged, domain.RotationWithinWindow:
 			// No finding. RotationUnmanaged is the "no policy" non-finding this
@@ -109,9 +105,17 @@ func (s *SQLStore) RotationFindings(ctx context.Context) ([]Finding, error) {
 		// 200. Something is wrong NOW -- the same shape as "a contract has
 		// lapsed", which findings.go's severity comment names as the archetypal
 		// Fault.
+		//
+		// Href IS THE FILTERED LIST, not the one example -- "/identities" is
+		// what /identities?rotation=overdue exists for, and the dashboard's
+		// own "For example" column already carries Detail's single credential;
+		// linking Href to that same one would strand the other eleven behind
+		// a page nobody reaches. domain.RotationStates is the source for the
+		// query value, so this cannot drift from what the list's own <select>
+		// accepts.
 		out = append(out, Finding{Severity: FindingFault, Count: overdue,
 			Label: "credential past its own rotation rule", Detail: firstOverdue,
-			Href: overdueHref})
+			Href: "/identities?rotation=" + string(domain.RotationOverdue)})
 	}
 	if never > 0 {
 		// GAP, not Fault, and this is the call that makes the other two
@@ -122,7 +126,7 @@ func (s *SQLStore) RotationFindings(ctx context.Context) ([]Finding, error) {
 		// not know' is a report that guesses."
 		out = append(out, Finding{Severity: FindingGap, Count: never,
 			Label:  "credential with a rotation rule and no rotation ever recorded",
-			Detail: firstNever, Href: neverHref})
+			Detail: firstNever, Href: "/identities?rotation=" + string(domain.RotationNeverRecorded)})
 	}
 
 	// The third: a LIVE dependency naming a RETIRED credential. GAP, for the
