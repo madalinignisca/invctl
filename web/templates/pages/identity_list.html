@@ -52,9 +52,9 @@
       <div class="field" style="margin-bottom:0">
         <label for="ilife">Lifecycle</label>
         <select id="ilife" name="lifecycle">
-          <option value="">active</option>
-          <option value="retired">retired</option>
-          <option value="any">any</option>
+          <option value="" {{if eq $.Lifecycle ""}}selected{{end}}>active</option>
+          <option value="retired" {{if eq $.Lifecycle "retired"}}selected{{end}}>retired</option>
+          <option value="any" {{if eq $.Lifecycle "any"}}selected{{end}}>any</option>
         </select>
         <div class="field-hint">So a withdrawn credential can still be found.</div>
       </div>

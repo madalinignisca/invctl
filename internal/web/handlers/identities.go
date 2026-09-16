@@ -70,6 +70,16 @@ type identityListPage struct {
 	Kinds      []string
 	States     []string
 	Filter     store.IdentityFilter
+	// Lifecycle is the raw `?lifecycle=` value: "", "retired" or "any". NOT
+	// derivable from Filter.IncludeRetired, which is a bool and collapses
+	// "retired" and "any" into the same true -- the control has three
+	// options and a template needs the one the operator actually chose to
+	// bind `selected` to it. Without this the lifecycle <select> always
+	// rendered "active" regardless of what was requested, so a page refresh
+	// or a shared `?lifecycle=retired` link silently reset the control while
+	// the rows underneath stayed retired, and the next keystroke in the
+	// search box resubmitted lifecycle="" and dropped the filter entirely.
+	Lifecycle string
 	// Spec carries what was just typed into the declare form, so a refused
 	// create does not make the operator retype every field -- bundleListPage's
 	// Values field states the same rule; this is that rule with a typed spec
@@ -171,6 +181,7 @@ func (a *App) renderIdentityList(w http.ResponseWriter, r *http.Request, status 
 		Kinds:      domain.IdentityKinds,
 		States:     domain.RotationStates,
 		Filter:     filter,
+		Lifecycle:  q.Get("lifecycle"),
 		Spec:       spec,
 	})
 }
