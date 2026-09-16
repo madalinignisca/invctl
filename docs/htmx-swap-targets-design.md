@@ -349,7 +349,88 @@ handler question wearing a template question's clothes.
    new dependency. AGPL-3.0-only header on the new test file, blank line before
    `package`.
 
-## Open questions — answer before planning
+## Rulings — decided 2026-09-16, answered from the code rather than preference
+
+### 1. Certificates and teams: the form re-renders ITSELF. In scope, and first.
+
+**The handler is the defect, not the markup.** CLAUDE.md is literal: *"Validation
+errors re-render **the form partial** with error state and return HTTP 422."*
+`CertificateCreate` re-renders `certificate_list_panel` — the **list**. That is a
+pre-existing deviation from the stated convention, and it is the root cause of the
+targeting problem, not a complication of it. Fixing it is bringing two handlers into
+line with the rule everything else already follows.
+
+It is also *smaller* than what it replaces. `renderCertificateList`
+(`internal/web/handlers/certificates.go:55-80`) assembles `Certificates` and `Filter`,
+which the form does not use, alongside `Teams`, `Roles`, `Spec` and `Errors`, which
+it does. A form-only refusal path drops a `ListCertificates` query that a validation
+failure never needed.
+
+So: give `certificate_form` and the team create form a wrapping element with a stable
+id; add a refusal path that re-renders that partial alone with
+`responsibilityOptions` + spec + errors; the form targets its own id with
+`outerHTML`. `partials/user_row.html:59` is the shape.
+
+**These two land BEFORE any of the 38 gets a target**, because targeting them without
+this makes the refusal invisible — strictly worse than today.
+
+### 2. `handleStoreError`'s `ErrInvalid`: in scope, and it stops being swapped at all.
+
+`ErrInvalid` is not a field validation failure. It is an invariant violation raised
+deep in the store — *"a pool cannot hold itself"*, *"a retired asset houses nobody"*,
+*"no entities were selected"* — with **no field to attach an error to**. A person
+mistyping a value gets `validationErrors()` and a proper field-level 422; this path is
+what is left when something got past the form's own checks.
+
+Three options, and two of them are worse than today once targets exist:
+
+- **Status 400.** HTMX does not swap it, so the operator sees nothing happen. That is
+  precisely the silent failure this whole work package exists to eliminate. Rejected.
+- **Keep 422 with `http.Error`'s plain text.** Once targets are declared this replaces
+  a whole panel with one sentence. Rejected.
+- **422, an out-of-band flash, and `HX-Reswap: none`.** The operator gets a message,
+  the form keeps everything they typed, and nothing is destroyed. Chosen.
+
+`oobFlash` already exists for exactly this and its own doc comment says why: *"a
+handler can report what happened without the caller having arranged anywhere to put
+the message."* That is the definition of this case — a refusal with no form of its own.
+
+**It does not break "a refusal is rendered, not flashed."** That test's property is
+narrow and stated: *"a function that CLASSIFIES a refusal (calls `refusalMessages` or
+`validationErrors`) must not FLASH one."* `handleStoreError` calls neither. And the
+harm the rule names — *"the redirect discards the form, so an operator who mistyped
+one field retypes all of them"* — cannot occur here: there is no redirect, and
+`HX-Reswap: none` leaves the form untouched with the typed values in it.
+
+**Risk to carry into the plan:** `HX-Reswap` appears nowhere in this codebase today
+(only inside the vendored `htmx.min.js`). It is a real HTMX response header, but it is
+unprecedented here, so it needs its own test and a browser check rather than a reading
+of the docs.
+
+### 3. Yes — the census also proves each named id exists.
+
+Cheap, catches failure mode (c), and it is the two-directional discipline every census
+here already uses: `unreachableRepairPaths` fails both when a method is unreachable
+*and* when a listed one has become reachable. Normalise both sides
+(`#user-row-{{.User.ID}}` → `#user-row-*`) the way `matchRoutes` normalises actions.
+It will not catch a conditional id, and the test's comment must say so rather than
+reading as stronger than it is.
+
+### 4. The partial owns its id.
+
+`partials/journal.html:48` serves eight routes and `partials/costs.html` posts to
+`{{$.Action}}`, but each renders into one place. The id belongs to the partial, not to
+the dict — a partial whose target arrives from its host is the same
+not-standalone-renderable fault rule 2 rejects.
+
+### 5. Floor the positive control at 80, and label it.
+
+Not a budget and not a target: a "did the scan stop matching the markup" control. The
+population is 90 today and will grow, so the comment must say the number is a smoke
+floor — if it ever needs *raising* to keep the test passing, the scan is broken, not
+the floor.
+
+## Superseded — the questions these rulings answered
 
 1. **The certificates/teams silent-refusal class.** Two shapes are available: the
    handler re-renders a partial that contains the form, or the form becomes its own
