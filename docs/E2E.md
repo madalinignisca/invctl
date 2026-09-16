@@ -188,6 +188,23 @@ reached the database, which is the thing that matters for a mutation, and this
 spec asserts on what a browser actually rendered, which is the thing they
 cannot see.
 
+## Why health override clear is not in refusal-targets.spec.js
+
+`HealthOverrideClear` is on `refusalFlashExceptions` **by name**
+(`internal/web/handlers/refusal_status_test.go`), with the reason already
+written: "there is nothing to preserve. Clearing an override is a button with
+no fields, so a re-render would hand back an empty form the operator never
+filled in." Its refusal is a flash and a redirect, it declares
+`hx-target="this" hx-swap="none"`, and there is no fragment, no field error and
+no typed value -- so the three assertions `refusal-targets.spec.js` makes
+everywhere else have nothing to assert against. Reaching its refusal at all
+needs a second clear of an already-cleared override, and the Clear button is
+gone by then.
+
+Its success path is covered by the Go web suite. This is a split, not a gap,
+and it is recorded here so the next reader does not read the absence as an
+oversight.
+
 ## The project-owner fixture (WP-G1 Task 17)
 
 `rbac-project-owner-edit-boundary.spec.js` and
@@ -312,6 +329,23 @@ come back to these two files and remove the `test.fail()` calls.
   suite gated by `INV_E2E_DISPOSABLE=true` rather than the shared-demo
   denylist the other writing specs use -- see "This suite is read-only by
   default" above and the spec's own header for why.
+
+- **`refusal-targets.spec.js`** -- docs/htmx-swap-targets-design.md's whole
+  point: that every `hx-post` element's declared swap target actually lands
+  the response where a person can see it, and never nests a fragment whose own
+  root carries the id it was targeted at. Drives a real, non-destructive
+  refusal on certificate create, team create, user create, team
+  reassign-retire (via `form.noValidate`, deliberately not a real reassignment
+  -- see the spec's own header) and identity rotation (the already-fixed
+  control), and asserts three things per surface: the field error is visible,
+  the operator's typed value survived, and exactly one element in the DOM
+  carries the target id. Also drives `handleStoreError`'s `ErrInvalid` path
+  (a nonexistent `service_id` on a certificate) and asserts a flash appears
+  while the panel is not replaced by a sentence. Every test in this file
+  writes nothing -- see the file's own header for why that needs no
+  `INV_E2E_DISPOSABLE` opt-in or hostname denylist. Needs
+  `INV_SEED_COMPANY=true` for the "commerce" team and the
+  "sso.example.com" certificate fixtures.
 
 ## Adding a spec
 
