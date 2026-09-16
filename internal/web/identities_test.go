@@ -511,6 +511,80 @@ func TestTheIdentityListFiltersFindARetiredCredential(t *testing.T) {
 	}
 }
 
+// TestTheLifecycleFilterSurvivesAReload is the registration proof the final
+// whole-branch review asked for (residual #2 -- finding #7 was correctly
+// fixed, but nothing protected it): the re-reviewer reverted
+// identityListPage.Lifecycle and all three `selected` bindings in the
+// lifecycle <select>, and `go test ./internal/web/...` stayed green.
+// TestTheIdentityListFiltersFindARetiredCredential (above) proves the
+// rows are right; it never once looks at the control itself, so a control
+// that always renders "active" selected -- regardless of what was asked
+// for -- would still pass it.
+func TestTheLifecycleFilterSurvivesAReload(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	for _, tc := range []struct {
+		query string
+		want  string // the option VALUE that must carry `selected`
+	}{
+		{"/identities", ""},
+		{"/identities?lifecycle=retired", "retired"},
+		{"/identities?lifecycle=any", "any"},
+	} {
+		t.Run("lifecycle="+tc.want, func(t *testing.T) {
+			page := body(t, h.get(tc.query, false))
+			sel := lifecycleSelectTag(t, page)
+			for _, opt := range []string{"", "retired", "any"} {
+				tag := optionTag(t, sel, opt)
+				selected := strings.Contains(tag, "selected")
+				switch {
+				case opt == tc.want && !selected:
+					t.Errorf("%s: <option value=%q> is not marked selected, so a "+
+						"refresh or a shared link renders the wrong control -- the "+
+						"exact regression this test exists to catch.", tc.query, opt)
+				case opt != tc.want && selected:
+					t.Errorf("%s: <option value=%q> is marked selected but should not "+
+						"be; only one option may carry it.", tc.query, opt)
+				}
+			}
+		})
+	}
+}
+
+// lifecycleSelectTag returns the identity list's lifecycle <select>...</select>,
+// so an assertion about which option is selected cannot be answered by some
+// other control on the page.
+func lifecycleSelectTag(t *testing.T, page string) string {
+	t.Helper()
+	i := strings.Index(page, `id="ilife"`)
+	if i < 0 {
+		t.Fatal("no lifecycle select (#ilife) on the identity list page")
+	}
+	end := strings.Index(page[i:], "</select>")
+	if end < 0 {
+		t.Fatal("the lifecycle select is never closed")
+	}
+	return page[i : i+end]
+}
+
+// optionTag returns one <option ...> opening tag from sel, identified by its
+// value attribute, so `selected` can be checked against exactly that option
+// and not against text belonging to a sibling option.
+func optionTag(t *testing.T, sel, value string) string {
+	t.Helper()
+	marker := `value="` + value + `"`
+	i := strings.Index(sel, marker)
+	if i < 0 {
+		t.Fatalf("no <option %s> in the lifecycle select", marker)
+	}
+	end := strings.Index(sel[i:], ">")
+	if end < 0 {
+		t.Fatal("the option tag is never closed")
+	}
+	return sel[i : i+end]
+}
+
 // ---------- the write surface (WP-J8 Task 5) ----------
 
 // TestRecordingARotationThroughTheRoute is the end-to-end of the whole
