@@ -34,37 +34,6 @@
 {{template "team_list_panel" .}}
 
 {{if .IsAdmin}}
-<div class="panel">
-  <div class="panel-head"><h2>Add a team</h2></div>
-  <form class="panel-body" method="post" action="/teams" hx-post="/teams">
-    <input type="hidden" name="csrf_token" value="{{.CSRF}}">
-    <div class="field-row">
-      <div class="field">
-        <label for="t-code">Code</label>
-        <input id="t-code" class="mono" type="text" name="code" value="{{.Spec.Code}}" required>
-        {{with index .Errors "code"}}<div class="field-error">{{.}}</div>{{end}}
-      </div>
-      <div class="field">
-        <label for="t-name">Name</label>
-        <input id="t-name" type="text" name="name" value="{{.Spec.Name}}" required>
-        {{with index .Errors "name"}}<div class="field-error">{{.}}</div>{{end}}
-      </div>
-      <div class="field">
-        <label for="t-contact">Contact</label>
-        <input id="t-contact" class="mono" type="text" name="contact_ref"
-               placeholder="platform@example.com · #platform-oncall · QUEUE-INFRA">
-        <div class="field-hint">
-          A group address, a queue or a channel — <strong>never a person</strong>.
-          This database is kept forever and its audit trail cannot be edited.
-        </div>
-      </div>
-    </div>
-    <div class="field">
-      <label for="t-desc">Description</label>
-      <input id="t-desc" type="text" name="description" placeholder="what this team is answerable for">
-    </div>
-    <button class="btn btn-primary" type="submit">Add team</button>
-  </form>
-</div>
+{{template "team_create_form" .}}
 {{end}}
 {{end}}

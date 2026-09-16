@@ -350,6 +350,69 @@ func TestTheTeamPickersAreActuallyPopulated(t *testing.T) {
 	}
 }
 
+// TestATeamRefusalRerendersTheCreateFormAndNotTheRoster.
+//
+// HX-Request true. TestCreatingATeamAndTheValidationPath above posts with
+// htmx=false and therefore reads a whole page, which contains both the roster
+// and the form -- so it cannot see which region the handler chose, and has not
+// been able to for the life of this bug.
+//
+// A SINGLE SPACE, not an empty string, and that is deliberate: <input required>
+// refuses to submit an empty field client-side, so an empty name is a refusal no
+// browser can produce. checkRequired trims, so " " is refused by the server and
+// accepted by the browser -- the same refusal the E2E spec drives, reached the
+// same way.
+func TestATeamRefusalRerendersTheCreateFormAndNotTheRoster(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	resp := h.post("/teams", url.Values{
+		"csrf_token": {h.csrfToken("/teams")},
+		"code":       {"netsec"},
+		"name":       {" "}, // THE FAILURE: whitespace is not a name
+	}, true)
+	b := body(t, resp)
+
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422; body: %s", resp.StatusCode, b)
+	}
+	if !strings.Contains(b, `id="team-create-form"`) {
+		t.Errorf("the 422 body is not the create form. Body: %s", b)
+	}
+	if strings.Contains(b, `id="team-list"`) {
+		t.Errorf("the 422 body is the ROSTER panel, which carries no error state "+
+			"and no typed value -- targeted at #team-list it would redraw cleanly "+
+			"and say nothing. Body: %s", b)
+	}
+	if !strings.Contains(b, `class="field-error"`) {
+		t.Errorf("the re-rendered form carries no field error. Body: %s", b)
+	}
+	if !strings.Contains(b, "netsec") {
+		t.Errorf("the re-rendered form lost the code that was typed. Body: %s", b)
+	}
+}
+
+// TestATeamCreateStillRedirectsOnSuccess -- see the certificates counterpart for
+// why this is asserted rather than argued from htmx's documentation.
+func TestATeamCreateStillRedirectsOnSuccess(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	resp := h.post("/teams", url.Values{
+		"csrf_token": {h.csrfToken("/teams")},
+		"code":       {"target-sweep"},
+		"name":       {"Target Sweep"},
+	}, true)
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("a successful create answered %d, want 204", resp.StatusCode)
+	}
+	if got := resp.Header.Get("HX-Redirect"); !strings.HasPrefix(got, "/teams/") {
+		t.Errorf("HX-Redirect = %q, want /teams/<id>", got)
+	}
+}
+
 // optionCount counts the <option> elements in the named select.
 func optionCount(t *testing.T, page, name string) int {
 	t.Helper()

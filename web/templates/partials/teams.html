@@ -48,6 +48,57 @@
 </div>
 {{end}}
 
+{{/* The create form, extracted from pages/team_list.html so it can be its own
+     refusal target.
+
+     TeamCreate used to answer a validation failure by re-rendering
+     team_list_panel -- the ROSTER -- which does not contain this form. The
+     .Errors and .Spec below were rendered into a fragment the operator never
+     saw, and on an HX-Request the roster was all that came back. Same defect as
+     certificate_form and user_form; CLAUDE.md: "Validation errors re-render the
+     form partial with error state and return HTTP 422."
+
+     Moved here rather than left on the page because its two siblings (team_panel,
+     team_retire_confirm) are here and a reader looking for "where does a team
+     refusal render" should find all three in one file. */}}
+{{define "team_create_form"}}
+<div class="panel" id="team-create-form">
+  <div class="panel-head"><h2>Add a team</h2></div>
+  <form class="panel-body" method="post" action="/teams" hx-post="/teams"
+        hx-target="#team-create-form" hx-swap="outerHTML">
+    <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+    <div class="field-row">
+      <div class="field">
+        <label for="t-code">Code</label>
+        <input id="t-code" class="mono" type="text" name="code" value="{{.Spec.Code}}" required>
+        {{with index .Errors "code"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="t-name">Name</label>
+        <input id="t-name" type="text" name="name" value="{{.Spec.Name}}" required>
+        {{with index .Errors "name"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="t-contact">Contact</label>
+        <input id="t-contact" class="mono" type="text" name="contact_ref"
+               value="{{deref .Spec.ContactRef}}"
+               placeholder="platform@example.com · #platform-oncall · QUEUE-INFRA">
+        <div class="field-hint">
+          A group address, a queue or a channel — <strong>never a person</strong>.
+          This database is kept forever and its audit trail cannot be edited.
+        </div>
+      </div>
+    </div>
+    <div class="field">
+      <label for="t-desc">Description</label>
+      <input id="t-desc" type="text" name="description" value="{{deref .Spec.Description}}"
+             placeholder="what this team is answerable for">
+    </div>
+    <button class="btn btn-primary" type="submit">Add team</button>
+  </form>
+</div>
+{{end}}
+
 {{define "team_panel"}}
 <div id="team">
   {{if eq .Team.Lifecycle "retired"}}
