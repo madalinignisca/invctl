@@ -52,8 +52,18 @@
   {{if .CanWriteEntity "asset" .Asset.ID}}
     <a class="btn" href="/assets/{{.Asset.ID}}?edit={{.Asset.ID}}#edit">Edit</a>
     {{if ne .Asset.Lifecycle "retired"}}
+    {{/* hx-target="this" hx-swap="none" -- a declaration, not an exemption
+         (docs/htmx-swap-targets-design.md rule 1): if AssetRetire ever grows
+         a path that renders a fragment, "none" declines to swap it rather
+         than swallowing it into this element, and stays correct even if
+         app.js's force-swap ever widens past 422. Argued from the handler,
+         per rule 4: AssetRetire (handlers/assets.go) answers
+         flash+render.Redirect on success and handleStoreError on failure on
+         every other path, never a fragment. See partials/teams.html's
+         retire forms for the full reasoning; the other five forms on this
+         page point back here rather than repeating it. */}}
     <form method="post" action="/assets/{{.Asset.ID}}/retire" style="display:inline"
-          hx-post="/assets/{{.Asset.ID}}/retire"
+          hx-post="/assets/{{.Asset.ID}}/retire" hx-target="this" hx-swap="none"
           hx-confirm="Retire {{.Asset.Name}}? Nothing is deleted — the row and its history stay.">
       <input type="hidden" name="csrf_token" value="{{.CSRF}}">
       <button class="btn btn-danger" type="submit">Retire</button>
@@ -179,8 +189,12 @@
          request; on a plain form submit it is decorative and the button
          fires unconfirmed. */}}
     {{if and ($.CanWriteEntity "asset" .Asset.ID) .MissingTemplateComponents}}
+    {{/* hx-target="this" hx-swap="none" -- same declaration as the retire
+         form above. AssetApplyTemplate (handlers/assets.go) answers
+         flash+render.Redirect on success and handleStoreError on failure,
+         never a fragment. */}}
     <form method="post" action="/assets/{{.Asset.ID}}/apply-template" style="display:inline"
-          hx-post="/assets/{{.Asset.ID}}/apply-template"
+          hx-post="/assets/{{.Asset.ID}}/apply-template" hx-target="this" hx-swap="none"
           hx-confirm="Add {{.MissingTemplateComponents}} missing port{{if ne .MissingTemplateComponents 1}}s{{end}} from {{.TemplateSourceLabel}} ({{.MissingTemplatePreview}})? A port already recorded here is never touched.">
       <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
       <button class="btn btn-sm" type="submit">Add {{.MissingTemplateComponents}} missing port{{if ne .MissingTemplateComponents 1}}s{{end}} from {{.TemplateSourceLabel}}</button>
@@ -276,8 +290,13 @@
                      finds it. An endpoint binding is not visible from this row,
                      so that refusal still surfaces as a flash on click. */}}
                 {{if not .FHRPGroupID}}
+                {{/* hx-target="this" hx-swap="none" -- same declaration as
+                     the retire form near the top of this page.
+                     IPAddressRetire (handlers/network.go) answers
+                     flash+render.Redirect on success and handleStoreError on
+                     failure, never a fragment. */}}
                 <form method="post" action="/addresses/{{.ID}}/retire" style="display:inline"
-                      hx-post="/addresses/{{.ID}}/retire"
+                      hx-post="/addresses/{{.ID}}/retire" hx-target="this" hx-swap="none"
                       hx-confirm="Withdraw {{.AddrText}}? The record is kept.">
                   <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
                   <button class="btn btn-sm btn-danger" type="submit">Withdraw</button>
@@ -373,16 +392,25 @@
                  and the button fires with no confirmation at all. Both sibling
                  forms on this page pair them; this one did not, and one stray
                  click withdrew a port. */}}
+            {{/* hx-target="this" hx-swap="none" -- same declaration as the
+                 retire form near the top of this page. InterfaceRetire
+                 (handlers/network.go) answers flash+render.Redirect on
+                 success and handleStoreError on failure on every other
+                 path, never a fragment. */}}
             <form method="post" action="/interfaces/{{.ID}}/retire" style="display:inline"
-                  hx-post="/interfaces/{{.ID}}/retire"
+                  hx-post="/interfaces/{{.ID}}/retire" hx-target="this" hx-swap="none"
                   hx-confirm="Withdraw {{.Name}}? Re-adding a port of the same name brings it back with its history.">
               <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
               <button class="btn btn-sm btn-danger" type="submit">Withdraw</button>
             </form>
             {{end}}
             {{if .CanUnpatch}}
+            {{/* hx-target="this" hx-swap="none" -- same declaration as the
+                 retire form near the top of this page. LinkRetire
+                 (handlers/network.go) answers render.Redirect on success and
+                 handleStoreError on failure, never a fragment. */}}
             <form method="post" action="/links/{{.LinkID}}/retire" style="display:inline"
-                  hx-post="/links/{{.LinkID}}/retire"
+                  hx-post="/links/{{.LinkID}}/retire" hx-target="this" hx-swap="none"
                   hx-confirm="Unpatch {{.Name}}? The record is kept.">
               <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
               <input type="hidden" name="asset_id" value="{{$.Asset.ID}}">
@@ -705,8 +733,13 @@
     {{/* Storage claims are also folded into the asset's own audited value
          (SetStorageClaim logs "asset") -- asset-scoped. */}}
     {{if $.CanWriteEntity "asset" .Asset.ID}}
+    {{/* hx-target="this" hx-swap="none" -- same declaration as the retire
+         form near the top of this page. AssetStorageClaim
+         (handlers/assets.go) answers flash+render.Redirect on every branch
+         -- success, refused claim and handleStoreError alike -- never a
+         fragment. */}}
     <form class="toolbar" method="post" action="/assets/{{.Asset.ID}}/storage"
-          hx-post="/assets/{{.Asset.ID}}/storage">
+          hx-post="/assets/{{.Asset.ID}}/storage" hx-target="this" hx-swap="none">
       <input type="hidden" name="csrf_token" value="{{.CSRF}}">
       <div class="field">
         <label for="st-pool">Pool</label>
