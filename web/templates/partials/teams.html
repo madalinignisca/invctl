@@ -323,7 +323,22 @@
            whatever handleStoreError wrote. "this" plus "none" says what is
            true -- this route answers with a navigation or a flash, never a
            fragment -- and the sibling reassign-retire form four panels down
-           names a real target for exactly the opposite reason. */}}
+           names a real target for exactly the opposite reason.
+
+           STATED PLAINLY, because the 15 elements elsewhere that point back
+           here for "the full reasoning" repeated a framing that reads as a
+           safety property and is not one: this declaration is correct
+           because TeamRetire renders no fragment TODAY, not because "none"
+           is self-correcting if that ever stops being true. "none" is a
+           LATCH, not a guard -- if TeamRetire (or DependencyRetire, or any
+           of the other handlers behind these 15 elements) is ever changed to
+           answer a refusal with an in-band fragment, this attribute will
+           discard that fragment SILENTLY, not decline to swap it visibly.
+           Nothing in this codebase re-checks that claim when the handler
+           changes; whoever changes what a handler answers with must update
+           the declaration in the same commit, on their own attention, same
+           as when a target's id changes. WP-J9 whole-branch review, finding
+           7. */}}
       <form method="post" action="/teams/{{.Team.ID}}/retire" hx-post="/teams/{{.Team.ID}}/retire"
             hx-target="this" hx-swap="none">
         <input type="hidden" name="csrf_token" value="{{.CSRF}}">

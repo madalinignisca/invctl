@@ -1244,7 +1244,14 @@ it is exactly the change that would re-arm any status-based exemption — which 
 exemption criterion refuses to depend on it); plain `method="post"` forms with no `hx-post`
 (outside this census, correct by a different route — they navigate and never swap); redesigning
 which partial each handler re-renders on 422 in general (only the three surfaces where
-targeting alone inverted the failure were touched); a behavioural test per element.
+targeting alone inverted the failure were touched); a behavioural test per element; and DRIFT
+DETECTION for the 15 `hx-swap="none"` declarations that point to `partials/teams.html`'s retire
+forms for their reasoning — each is correct because its handler renders no fragment today, not
+because `"none"` is self-correcting if that stops being true, and nothing here re-checks the
+claim when a handler changes what it answers with. Building an element→route→handler join to
+catch that automatically was considered and rejected (it is the `matchRoutes` complexity this
+work package's own design doc already ruled out); the corrected comment says so instead of
+implying a safety property the attribute does not have.
 
 **WP-J7 · Capacity findings** — M — **DONE**
 Three findings, three audiences. A project allocated **above what it was priced
