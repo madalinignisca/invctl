@@ -1217,7 +1217,7 @@ was the WRITE surface — which is what `writeSurfaceUnbuilt` asserted — plus 
 identity LIST and DETAIL PAGES, a narrower and different claim than "no route
 reaches either of them." Both are now built; see above.
 
-**WP-?? · HTMX swap targets** — S — **DONE 2026-09-16**
+**WP-J9 · HTMX swap targets** — S — **DONE 2026-09-16**
 
 Every `hx-post` element in `web/templates` declares `hx-target` and `hx-swap`, enforced by
 `internal/web/hx_target_test.go` with an empty exemption map. Three handlers stopped
