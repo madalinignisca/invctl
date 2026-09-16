@@ -102,8 +102,20 @@
                  declared between this render and the click is still caught
                  there and reported back as a flash. */}}
             {{if and (not .Children) (not .Addresses)}}
+            {{/* hx-target="this" hx-swap="none" -- a declaration, not an
+                 exemption (docs/htmx-swap-targets-design.md rule 1): if
+                 PrefixRetire ever grows a path that renders a fragment,
+                 "none" declines to swap it rather than swallowing it into
+                 this element, and stays correct even if app.js's
+                 force-swap ever widens past 422. Argued from the handler,
+                 per rule 4: PrefixRetire (handlers/network.go) answers
+                 flash+render.Redirect on every path -- success, the
+                 conflict refusal and handleStoreError alike -- never a
+                 fragment. See partials/teams.html's retire forms for the
+                 full reasoning; the ip-ranges form below points back here
+                 rather than repeating it. */}}
             <form method="post" action="/prefixes/{{.ID}}/retire" style="display:inline"
-                  hx-post="/prefixes/{{.ID}}/retire"
+                  hx-post="/prefixes/{{.ID}}/retire" hx-target="this" hx-swap="none"
                   hx-confirm="Withdraw {{.CIDRText}}? The record is kept.">
               <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
               <button class="btn btn-sm btn-danger" type="submit">Withdraw</button>
@@ -184,8 +196,14 @@
           {{if $.IsAdmin}}
           <td style="white-space:nowrap">
             <a class="btn btn-sm" href="/prefixes?edit={{.ID}}">Edit</a>
+            {{/* hx-target="this" hx-swap="none" -- same declaration as the
+                 prefix-retire form above. IPRangeRetire
+                 (handlers/ipranges.go) answers flash+render.Redirect on
+                 success and handleStoreError on failure, never a
+                 fragment. */}}
             <form method="post" action="/ip-ranges/{{.ID}}/retire"
-                  hx-post="/ip-ranges/{{.ID}}/retire" style="display:inline">
+                  hx-post="/ip-ranges/{{.ID}}/retire" hx-target="this" hx-swap="none"
+                  style="display:inline">
               <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
               <button class="btn btn-sm btn-danger" type="submit">Withdraw</button>
             </form>
