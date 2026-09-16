@@ -45,6 +45,12 @@ type certificatePage struct {
 	Teams       []store.TeamRow
 	Roles       []store.VocabularyTerm
 	Lifecycles  []string
+	// SubmittedSANs is non-nil on exactly a refused CertificateUpdate: what the
+	// operator typed, so a "sans" validation error does not also silently
+	// revert their edit back to the stored names with no message at all. Every
+	// other read of this page leaves it nil, and the template falls back to
+	// .Certificate.SANs.
+	SubmittedSANs []string
 }
 
 // CertificateList shows every certificate, soonest expiry first.
@@ -139,10 +145,11 @@ func (a *App) CertificateCreate(w http.ResponseWriter, r *http.Request) {
 
 // CertificateDetail is the page somebody opens from the expiry report.
 func (a *App) CertificateDetail(w http.ResponseWriter, r *http.Request) {
-	a.renderCertificate(w, r, http.StatusOK, nil)
+	a.renderCertificate(w, r, http.StatusOK, nil, nil)
 }
 
-func (a *App) renderCertificate(w http.ResponseWriter, r *http.Request, status int, errs map[string]string) {
+func (a *App) renderCertificate(w http.ResponseWriter, r *http.Request, status int,
+	errs map[string]string, submittedSANs []string) {
 	id := r.PathValue("id")
 	certificate, err := a.Store.GetCertificate(r.Context(), id)
 	if err != nil {
@@ -172,16 +179,17 @@ func (a *App) renderCertificate(w http.ResponseWriter, r *http.Request, status i
 	teams, roles := a.responsibilityOptions(r)
 
 	a.Render.Respond(w, r, status, "certificate_detail", "certificate_panel", certificatePage{
-		Base:        a.base(r, "Certificate: "+certificate.SubjectCN, "certificates"),
-		Errors:      orEmpty(errs),
-		Certificate: certificate,
-		Assets:      assets,
-		Services:    services,
-		AllAssets:   allAssets,
-		AllServices: allServices,
-		Teams:       teams,
-		Roles:       roles,
-		Lifecycles:  domain.CertificateLifecycles,
+		Base:          a.base(r, "Certificate: "+certificate.SubjectCN, "certificates"),
+		Errors:        orEmpty(errs),
+		Certificate:   certificate,
+		Assets:        assets,
+		Services:      services,
+		AllAssets:     allAssets,
+		AllServices:   allServices,
+		Teams:         teams,
+		Roles:         roles,
+		Lifecycles:    domain.CertificateLifecycles,
+		SubmittedSANs: submittedSANs,
 	})
 }
 
@@ -214,7 +222,10 @@ func (a *App) CertificateUpdate(w http.ResponseWriter, r *http.Request) {
 
 	if err := a.Store.UpdateCertificate(r.Context(), a.permit(r), &updated); err != nil {
 		if errs, ok := validationErrors(err); ok {
-			a.renderCertificate(w, r, http.StatusUnprocessableEntity, errs)
+			// spec.SANs, not updated.SANs: what the operator typed, so a "sans"
+			// refusal re-fills the textarea instead of silently reverting it to
+			// the stored names with no message at all (WP-J9 whole-branch review).
+			a.renderCertificate(w, r, http.StatusUnprocessableEntity, errs, spec.SANs)
 			return
 		}
 		a.handleStoreError(w, r, err)
@@ -265,7 +276,7 @@ func (a *App) CertificateUndeployService(w http.ResponseWriter, r *http.Request)
 func (a *App) afterCertificateWrite(w http.ResponseWriter, r *http.Request, err error, id string) {
 	if err != nil {
 		if errs, ok := validationErrors(err); ok {
-			a.renderCertificate(w, r, http.StatusUnprocessableEntity, errs)
+			a.renderCertificate(w, r, http.StatusUnprocessableEntity, errs, nil)
 			return
 		}
 		a.handleStoreError(w, r, err)

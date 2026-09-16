@@ -83,10 +83,12 @@
         <label for="c-issuer">Issuer</label>
         <input id="c-issuer" type="text" name="issuer" value="{{deref .Spec.Issuer}}"
                placeholder="Let's Encrypt · internal CA">
+        {{with index .Errors "issuer"}}<div class="field-error">{{.}}</div>{{end}}
       </div>
       <div class="field">
         <label for="c-from">Valid from</label>
         <input id="c-from" type="date" name="not_before" value="{{deref .Spec.NotBefore}}">
+        {{with index .Errors "not_before"}}<div class="field-error">{{.}}</div>{{end}}
       </div>
       <div class="field">
         <label for="c-until">Expires</label>
@@ -98,7 +100,8 @@
     <div class="field">
       <label for="c-sans">Also covers</label>
       <textarea id="c-sans" class="mono" name="sans" rows="3"
-                placeholder="www.example.com&#10;*.api.example.com"></textarea>
+                placeholder="www.example.com&#10;*.api.example.com">{{join .Spec.SANs "\n"}}</textarea>
+      {{with index .Errors "sans"}}<div class="field-error">{{.}}</div>{{end}}
       <div class="field-hint">
         One per line, or commas. A paste from <span class="mono">openssl x509 -text</span>
         works unedited — the <span class="mono">DNS:</span> prefixes are stripped.
@@ -114,11 +117,13 @@
       <div class="field">
         <label for="c-serial">Serial</label>
         <input id="c-serial" class="mono" type="text" name="serial" value="{{deref .Spec.Serial}}">
+        {{with index .Errors "serial"}}<div class="field-error">{{.}}</div>{{end}}
       </div>
       <div class="field">
         <label for="c-key">Key reference</label>
         <input id="c-key" class="mono" type="text" name="key_ref" value="{{deref .Spec.KeyRef}}"
                placeholder="vault:secret/tls/orders">
+        {{with index .Errors "key_ref"}}<div class="field-error">{{.}}</div>{{end}}
         <div class="field-hint">
           A path to the key — <strong>never the key itself</strong>. This database
           is not a secret store.
@@ -345,10 +350,12 @@
         <div class="field">
           <label for="ce-issuer">Issuer</label>
           <input id="ce-issuer" type="text" name="issuer" value="{{deref .Certificate.Issuer}}">
+          {{with index .Errors "issuer"}}<div class="field-error">{{.}}</div>{{end}}
         </div>
         <div class="field">
           <label for="ce-from">Valid from</label>
           <input id="ce-from" type="date" name="not_before" value="{{deref .Certificate.NotBefore}}">
+          {{with index .Errors "not_before"}}<div class="field-error">{{.}}</div>{{end}}
         </div>
         <div class="field">
           <label for="ce-until">Expires</label>
@@ -360,11 +367,18 @@
           <select id="ce-life" name="lifecycle">
             {{range $.Lifecycles}}<option value="{{.}}" {{if eq . $.Certificate.Lifecycle}}selected{{end}}>{{.}}</option>{{end}}
           </select>
+          {{with index .Errors "lifecycle"}}<div class="field-error">{{.}}</div>{{end}}
         </div>
       </div>
       <div class="field">
         <label for="ce-sans">Also covers</label>
-        <textarea id="ce-sans" class="mono" name="sans" rows="3">{{join .Certificate.SANs "\n"}}</textarea>
+        {{/* SubmittedSANs is non-nil on exactly a refused save: what the operator
+             typed, not .Certificate.SANs (the stored value) -- otherwise a "sans"
+             validation error silently reverts the edit with no visible message.
+             See renderCertificate's doc comment. */}}
+        {{$sans := .Certificate.SANs}}{{if .SubmittedSANs}}{{$sans = .SubmittedSANs}}{{end}}
+        <textarea id="ce-sans" class="mono" name="sans" rows="3">{{join $sans "\n"}}</textarea>
+        {{with index .Errors "sans"}}<div class="field-error">{{.}}</div>{{end}}
         <div class="field-hint">The subject is always included; you do not need to repeat it.</div>
       </div>
       <div class="field-row">
@@ -376,10 +390,12 @@
         <div class="field">
           <label for="ce-serial">Serial</label>
           <input id="ce-serial" class="mono" type="text" name="serial" value="{{deref .Certificate.Serial}}">
+          {{with index .Errors "serial"}}<div class="field-error">{{.}}</div>{{end}}
         </div>
         <div class="field">
           <label for="ce-key">Key reference</label>
           <input id="ce-key" class="mono" type="text" name="key_ref" value="{{deref .Certificate.KeyRef}}">
+          {{with index .Errors "key_ref"}}<div class="field-error">{{.}}</div>{{end}}
           <div class="field-hint">A path — <strong>never the key itself</strong>.</div>
         </div>
         <div class="field">
