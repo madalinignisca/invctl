@@ -98,6 +98,21 @@ func (a *App) renderCertificateList(w http.ResponseWriter, r *http.Request, stat
 
 // refuseCertificateCreate is a refusal: THE FORM is what changed, and it is the
 // only place .Errors and .Spec are rendered. See certificate_form's own comment.
+//
+// Note on who can reach this refusal: POST /certificates is registered "write",
+// not "writeAdminOnly" (routes.go), so a project owner who is not an
+// Administrator can post here. The form this renders is rendered through
+// pagePartial, which executes the "certificate_form" {{define}} directly -- it
+// is NOT inside the page's {{if .IsAdmin}} wrapper that hides it from the nav
+// for a non-Administrator. That is a real behaviour change: today such a
+// caller's refusal renders the list (also outside any admin gate) instead. It
+// is deliberately left as-is rather than "fixed" here, because it grants no
+// new capability -- "certificate" classifies as domain.ScopeTopology, which
+// defaults to Administrator-only at the store's permit check, but that check
+// never runs: domain validation fails first, exactly as for team (whose scope
+// is ScopeEstateConfig) -- and the form discloses nothing beyond what the
+// caller just submitted plus the CSRF token already scoped to their own
+// session.
 func (a *App) refuseCertificateCreate(w http.ResponseWriter, r *http.Request,
 	errs map[string]string, spec domain.CertificateSpec) {
 	a.renderCertificateListPage(w, r, http.StatusUnprocessableEntity, errs, spec,
