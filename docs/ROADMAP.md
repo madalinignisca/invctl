@@ -1217,6 +1217,24 @@ was the WRITE surface — which is what `writeSurfaceUnbuilt` asserted — plus 
 identity LIST and DETAIL PAGES, a narrower and different claim than "no route
 reaches either of them." Both are now built; see above.
 
+**WP-?? · HTMX swap targets** — S — **DONE 2026-09-16**
+
+Every `hx-post` element in `web/templates` declares `hx-target` and `hx-swap`, enforced by
+`internal/web/hx_target_test.go` with an empty exemption map. Three handlers stopped
+answering a validation failure by re-rendering a list the form is not inside:
+`CertificateCreate`, `TeamCreate` and `UserCreate` now re-render `certificate_form`,
+`team_create_form` and `user_form`. `handleStoreError`'s `domain.ErrInvalid` branch stopped
+being swapped at all — 422, an out-of-band flash and `HX-Reswap: none`, the first use of that
+header in this codebase.
+
+**NOT covered, deliberately:** widening `app.js`'s force-swap beyond 422 (409 is the obvious
+candidate, it changes the behaviour of all 90 elements at once and needs its own evidence, and
+it is exactly the change that would re-arm any status-based exemption — which is why the
+exemption criterion refuses to depend on it); plain `method="post"` forms with no `hx-post`
+(outside this census, correct by a different route — they navigate and never swap); redesigning
+which partial each handler re-renders on 422 in general (only the three surfaces where
+targeting alone inverted the failure were touched); a behavioural test per element.
+
 `secret_ref` holds a **path, never a secret** (CLAUDE.md), and stays redacted in
 `snapshotJSON`/`diffJSON` the way `CreateUser` already redacts `password_hash`.
 `team_id` answers "who do I ask", the same role it plays on `custom_field`.
