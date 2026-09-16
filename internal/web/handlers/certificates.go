@@ -48,9 +48,37 @@ type certificatePage struct {
 	// SubmittedSANs is non-nil on exactly a refused CertificateUpdate: what the
 	// operator typed, so a "sans" validation error does not also silently
 	// revert their edit back to the stored names with no message at all. Every
-	// other read of this page leaves it nil, and the template falls back to
+	// other read of this page leaves it nil, and SANsToShow falls back to
 	// .Certificate.SANs.
-	SubmittedSANs []string
+	//
+	// A POINTER, DELIBERATELY, not a []string -- WP-J9 whole-branch review
+	// (round 2). splitNames returns an unappended `var out []string` on empty
+	// input, i.e. nil, and nil is FALSY in html/template regardless of why the
+	// slice is empty. `{{if .SubmittedSANs}}` on a bare []string could not
+	// distinguish "the operator cleared the textarea on purpose" from
+	// "nothing was submitted at all" -- both render as the zero value -- so a
+	// refusal caused by an unrelated field (a bad fingerprint, say) would
+	// silently revert a deliberate deletion back to the stored names. Exactly
+	// the class finding 1 exists to close, reached through this field's own
+	// fix. A *[]string has no such ambiguity: nil means "not this request",
+	// a non-nil pointer to an empty slice means "submitted, and it was
+	// empty" -- and SANsToShow resolves it in Go, not with template
+	// truthiness, so the same mistake cannot recur in a future template edit.
+	SubmittedSANs *[]string
+}
+
+// SANsToShow is what the certificate edit form's textarea renders: the
+// operator's own submission on a refused save, the stored value everywhere
+// else. See SubmittedSANs's doc comment for why this is a pointer check in Go
+// rather than an {{if}} in the template.
+func (p certificatePage) SANsToShow() []string {
+	if p.SubmittedSANs != nil {
+		return *p.SubmittedSANs
+	}
+	if p.Certificate != nil {
+		return p.Certificate.SANs
+	}
+	return nil
 }
 
 // CertificateList shows every certificate, soonest expiry first.
@@ -159,7 +187,7 @@ func (a *App) CertificateDetail(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) renderCertificate(w http.ResponseWriter, r *http.Request, status int,
-	errs map[string]string, submittedSANs []string) {
+	errs map[string]string, submittedSANs *[]string) {
 	id := r.PathValue("id")
 	certificate, err := a.Store.GetCertificate(r.Context(), id)
 	if err != nil {
@@ -232,10 +260,16 @@ func (a *App) CertificateUpdate(w http.ResponseWriter, r *http.Request) {
 
 	if err := a.Store.UpdateCertificate(r.Context(), a.permit(r), &updated); err != nil {
 		if errs, ok := validationErrors(err); ok {
-			// spec.SANs, not updated.SANs: what the operator typed, so a "sans"
-			// refusal re-fills the textarea instead of silently reverting it to
-			// the stored names with no message at all (WP-J9 whole-branch review).
-			a.renderCertificate(w, r, http.StatusUnprocessableEntity, errs, spec.SANs)
+			// &spec.SANs, not updated.SANs and not a bare spec.SANs: what the
+			// operator typed, so a "sans" refusal re-fills the textarea
+			// instead of silently reverting it to the stored names with no
+			// message at all (WP-J9 whole-branch review). The pointer is
+			// mandatory, not decoration -- a bare spec.SANs is nil whenever
+			// the operator cleared the textarea on purpose, indistinguishable
+			// in the template from "not submitted" and reverting that
+			// deliberate deletion just as silently on ANY unrelated
+			// validation failure (round 2 of the same review).
+			a.renderCertificate(w, r, http.StatusUnprocessableEntity, errs, &spec.SANs)
 			return
 		}
 		a.handleStoreError(w, r, err)

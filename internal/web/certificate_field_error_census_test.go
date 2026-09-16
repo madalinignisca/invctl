@@ -185,6 +185,92 @@ func TestCertificateRefusalsCarryAFieldErrorForEveryKeyTheValidatorCanEmit(t *te
 	}
 }
 
+// TestCertificateEditRefusalRespectsADeliberatelyClearedSANsField is round 2
+// of the same WP-J9 whole-branch review: fixing the "sans" hook (above)
+// introduced a NEW way to silently revert an operator's edit, through the
+// exact mechanism finding 1 was closing.
+//
+// splitNames returns an unappended `var out []string` on empty input --
+// nil -- and nil is FALSY in html/template regardless of why the slice is
+// empty. certificatePage.SubmittedSANs was originally a bare []string, so
+// `{{if .SubmittedSANs}}` could not tell "the operator cleared this
+// textarea on purpose" from "nothing was submitted for this field at all":
+// both are nil, both read as false, and the template fell back to
+// .Certificate.SANs -- the STORED value. An operator who clears "also
+// covers" and fails validation on a completely unrelated field (a bad
+// fingerprint, say) got their deliberate deletion silently undone, with the
+// error pointing somewhere else entirely.
+//
+// Fixed by making SubmittedSANs a *[]string and resolving it in Go
+// (certificatePage.SANsToShow), where a nil pointer and a non-nil pointer to
+// an empty slice are simply not the same value -- no truthiness involved.
+//
+// This is deliberately its OWN test, not a case squeezed into the
+// table above: every case in that table drives its refusal through a
+// key with a non-empty invalid value, or leaves "sans" untouched
+// entirely, so none of them can exercise "submitted empty, refused on
+// something else" at all.
+func TestCertificateEditRefusalRespectsADeliberatelyClearedSANsField(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	// Seed a certificate that actually has SANs to lose.
+	seedResp := h.post("/certificates", url.Values{
+		"csrf_token": {h.csrfToken("/certificates")},
+		"subject_cn": {"census-clear-sans-seed.example.com"},
+		"sans":       {"extra.census-clear-sans-seed.example.com"},
+	}, true)
+	seedResp.Body.Close()
+	redirect := seedResp.Header.Get("HX-Redirect")
+	if redirect == "" {
+		t.Fatalf("seeding the certificate did not redirect; response: %+v", seedResp)
+	}
+	certID := strings.TrimPrefix(redirect, "/certificates/")
+
+	page := body(t, h.get("/certificates/"+certID, false))
+	if !strings.Contains(page, "extra.census-clear-sans-seed.example.com") {
+		t.Fatalf("the seeded certificate's SAN is not on its own page; seeding failed. Page: %s", page)
+	}
+
+	// Clear "sans" deliberately (submit it as "", not omit it), and fail
+	// validation on a COMPLETELY UNRELATED field.
+	resp := h.post("/certificates/"+certID, url.Values{
+		"csrf_token":  {h.csrfToken("/certificates/" + certID)},
+		"row_version": {versionInFirstForm(t, page)},
+		"subject_cn":  {"census-clear-sans-seed.example.com"},
+		"lifecycle":   {"active"},
+		"sans":        {""},           // the deliberate deletion
+		"fingerprint": {"not-hex-zz"}, // the unrelated failure
+	}, true)
+	b := body(t, resp)
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422; body: %s", resp.StatusCode, b)
+	}
+	assertFieldError(t, b, "must be hexadecimal", "update", "fingerprint")
+
+	// NOT a blanket strings.Contains(b, theOldSAN) check: certificate_panel
+	// ALSO renders a read-only "Covers" summary straight off .Certificate.SANs
+	// (the row this failed write never touched), and that summary is CORRECT
+	// to still show the stored name -- the write did not happen. The claim
+	// under test is specifically about the EDIT FORM's own textarea, the one
+	// field the operator's refused submission should be reflected in.
+	textarea := ceSansTextareaContent(t, b)
+	if strings.TrimSpace(textarea) != "" {
+		t.Errorf("ce-sans should render empty (what the operator submitted), got %q", textarea)
+	}
+}
+
+// ceSansTextareaContent extracts what is between <textarea id="ce-sans" ...>
+// and </textarea>.
+func ceSansTextareaContent(t *testing.T, page string) string {
+	t.Helper()
+	m := regexp.MustCompile(`(?s)<textarea id="ce-sans"[^>]*>(.*?)</textarea>`).FindStringSubmatch(page)
+	if m == nil {
+		t.Fatal("no ce-sans textarea on the page")
+	}
+	return m[1]
+}
+
 // assertFieldError requires the exact validation message for one key to
 // appear inside a field-error element -- not merely somewhere in the body,
 // and not merely `class="field-error"` with no text tying it to this case.

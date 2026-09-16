@@ -223,7 +223,7 @@ func TestEveryPostingElementDeclaresItsSwapTarget(t *testing.T) {
 				t.Errorf("%s declares hx-target=%q, which is neither an id "+
 					"selector (starting with #) nor a recognised htmx extended "+
 					"selector (this, closest/find/next/previous, body, "+
-					"document, window).\n"+
+					"document, window, root, host).\n"+
 					"htmx resolves an unrecognised value as a plain CSS type "+
 					"selector at request time: it will not match this element's "+
 					"own markup, and the response has nowhere to land.",
@@ -486,10 +486,20 @@ func declaredIDs(t *testing.T, root string) map[string]bool {
 // selector; "next" and "previous" may or may not. Anything else is not one of
 // these and resolves as a literal CSS selector against the document, which is
 // almost never what a bare word like "bundle-panel" was meant to be.
+//
+// SOURCED FROM THE VENDORED htmx.min.js ITSELF (web/static/htmx.min.js, 2.0.4),
+// not from memory of the docs -- `grep -o` for the literal keyword strings
+// there is what caught "root" and "host" (shadow-DOM targets) missing from an
+// earlier version of this list. No template in this tree uses either today,
+// so their absence was not a live hole -- a future legitimate
+// hx-target="root" would have failed this census LOUDLY, which is the safe
+// direction to be wrong in -- but the list's own comment claims to be sourced
+// from htmx's real extended selectors, and it was not quite true until this.
 var extendedSelectorKeywords = map[string]bool{
 	"this": true, "closest": true, "find": true,
 	"next": true, "previous": true,
 	"body": true, "document": true, "window": true,
+	"root": true, "host": true,
 }
 
 // isExtendedSelector reports whether target is one of htmx's keyword targets

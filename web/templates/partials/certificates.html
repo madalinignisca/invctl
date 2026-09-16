@@ -372,12 +372,13 @@
       </div>
       <div class="field">
         <label for="ce-sans">Also covers</label>
-        {{/* SubmittedSANs is non-nil on exactly a refused save: what the operator
-             typed, not .Certificate.SANs (the stored value) -- otherwise a "sans"
-             validation error silently reverts the edit with no visible message.
-             See renderCertificate's doc comment. */}}
-        {{$sans := .Certificate.SANs}}{{if .SubmittedSANs}}{{$sans = .SubmittedSANs}}{{end}}
-        <textarea id="ce-sans" class="mono" name="sans" rows="3">{{join $sans "\n"}}</textarea>
+        {{/* SANsToShow, not .Certificate.SANs and not an {{if .SubmittedSANs}}
+             in this template -- see certificatePage.SANsToShow's doc comment.
+             A template-side slice-truthiness check cannot tell "the operator
+             cleared this on purpose" from "nothing was submitted", because
+             splitNames returns nil for both; the resolution is a pointer
+             check in Go instead. */}}
+        <textarea id="ce-sans" class="mono" name="sans" rows="3">{{join .SANsToShow "\n"}}</textarea>
         {{with index .Errors "sans"}}<div class="field-error">{{.}}</div>{{end}}
         <div class="field-hint">The subject is always included; you do not need to repeat it.</div>
       </div>
