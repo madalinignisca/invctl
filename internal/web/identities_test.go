@@ -976,6 +976,88 @@ func TestTheIdentityRetireButtonPairsHxConfirmWithHxPost(t *testing.T) {
 	}
 }
 
+// TestTheRotationAndRetireFormsDeclareAnExplicitSwapTarget is the fix for a
+// defect the browser smoke check found after this same wave's max= fix: the
+// rotation form carried hx-post with no hx-target and no hx-swap, so htmx's
+// default target is the form ELEMENT ITSELF and its default swap is
+// innerHTML. A 422's body is the whole #identity partial -- What it is /
+// Rotation / What would notice / Record a rotation / Correct this credential
+// / Withdraw / Timeline -- so it landed nested inside the form instead of
+// replacing it, and the tester confirmed every panel heading rendered twice
+// with the layout visibly broken.
+//
+// STATIC, NOT A DOM ASSERTION, AND THAT CHOICE IS DELIBERATE. A Go
+// server-side test has no htmx runtime and cannot observe an actual swap;
+// the property CLAUDE.md actually requires -- "swap targets are declared in
+// the template, not chosen by the handler. Default to hx-swap='outerHTML' on
+// a wrapping element with a stable id" -- is exactly the one this test CAN
+// observe, by reading the rendered template's own markup, the same
+// technique TestTheIdentityRetireButtonPairsHxConfirmWithHxPost already uses
+// on this file for the confirm/post pairing.
+//
+// WHY IT WAS INVISIBLE UNTIL A BROWSER LOOKED: the date input's
+// max="{{.Today}}" makes a same-origin browser refuse to submit a future
+// date client-side before the request is ever sent, so no server-side test
+// -- which posts directly, bypassing that client-side enforcement -- ever
+// reached the 422 path a browser's own htmx runtime would have swapped
+// wrongly. One dropped attribute, one non-Chromium client, or one
+// accessibility tool that strips max, and it is visible on the feature's
+// central action.
+//
+// Covers retire too: it carries hx-post with the identical missing-target
+// shape. app.js only forces a swap on 422 today, so retire's one reachable
+// conflict (409, an internal race between two retires) is not currently
+// swapped by htmx's default behaviour either way -- but the rule is
+// "declared in the template", not "whichever status happens not to trigger
+// the default today", so it gets the same explicit target.
+func TestTheRotationAndRetireFormsDeclareAnExplicitSwapTarget(t *testing.T) {
+	root := repoRoot(t)
+	path := filepath.Join(root, "web", "templates", "partials", "identities.html")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading %s: %v", path, err)
+	}
+	page := string(raw)
+
+	for _, tc := range []struct {
+		name   string
+		action string
+	}{
+		{"rotation", `action="/identities/{{.Identity.ID}}/rotation"`},
+		{"retire", `action="/identities/{{.Identity.ID}}/retire"`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			idx := strings.Index(page, tc.action)
+			if idx == -1 {
+				t.Fatalf("the %s form is not on the page at all; this test would then "+
+					"prove nothing about it", tc.name)
+			}
+			start := strings.LastIndex(page[:idx], "<form")
+			end := strings.Index(page[idx:], ">")
+			if start == -1 || end == -1 {
+				t.Fatalf("could not isolate the %s form's opening tag", tc.name)
+			}
+			tag := page[start : idx+end]
+
+			if !strings.Contains(tag, "hx-post=") {
+				t.Fatalf("the %s form carries no hx-post at all; this test would then "+
+					"prove nothing about its swap target", tc.name)
+			}
+			if !strings.Contains(tag, `hx-target="#identity"`) {
+				t.Errorf("the %s form has no explicit hx-target=\"#identity\". Without "+
+					"it, htmx's default target is the form element itself, so a "+
+					"response whose body is the whole #identity partial lands NESTED "+
+					"inside the form instead of replacing it, and every panel heading "+
+					"renders twice.", tc.name)
+			}
+			if !strings.Contains(tag, `hx-swap="outerHTML"`) {
+				t.Errorf("the %s form has no explicit hx-swap=\"outerHTML\", the default "+
+					"CLAUDE.md names for a wrapping element with a stable id.", tc.name)
+			}
+		})
+	}
+}
+
 // ---------- coverage for the isConflict branch (fix round 1) ----------
 //
 // The brief's given IdentityCreate/IdentityUpdate bodies fall through a

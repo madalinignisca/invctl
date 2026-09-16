@@ -196,8 +196,25 @@
          docs/identity-surface-design.md, "One writer for last_rotated": a
          create form that also stamped the date would bury the rotation
          inside a create snapshot no reader looking for one would find. */}}
+    {{/* hx-target="#identity" hx-swap="outerHTML", EXPLICITLY -- CLAUDE.md:
+         "Swap targets are declared in the template, not chosen by the
+         handler. Default to hx-swap='outerHTML' on a wrapping element with a
+         stable id." Without this, htmx's default target is the form element
+         itself and its default swap is innerHTML, so a 422 -- whose body is
+         the WHOLE #identity partial (What it is / Rotation / ... /
+         Timeline) -- lands nested inside this form instead of replacing it.
+         Every panel heading then renders twice and the layout breaks. Masked
+         today only because the date input's max="{{.Today}}" makes a
+         same-origin browser refuse to submit a future date client-side
+         before the request is ever sent -- one dropped attribute, one
+         non-Chromium client, or one accessibility tool that strips max, and
+         it is visible on this form's central action. Found by a browser
+         smoke check after this max fix landed, not by any server-side test.
+         Success is unaffected: HX-Redirect (render.Redirect) makes htmx
+         navigate the whole page regardless of target/swap. */}}
     <form class="panel-body" method="post" action="/identities/{{.Identity.ID}}/rotation"
-          hx-post="/identities/{{.Identity.ID}}/rotation">
+          hx-post="/identities/{{.Identity.ID}}/rotation"
+          hx-target="#identity" hx-swap="outerHTML">
       <input type="hidden" name="csrf_token" value="{{.CSRF}}">
       <div class="field">
         <label for="i-rot">Rotated on</label>
@@ -298,8 +315,16 @@
          population is exactly the handlers that call submittedVersion, which
          IdentityRetire does not. A token here would be inert markup nothing
          reads. */}}
+    {{/* hx-target/hx-swap explicit for the same CLAUDE.md reason as the
+         rotation form above -- app.js only forces a swap on 422, so today's
+         only reachable conflict here (409, an internal race between two
+         retires) is not actually swapped by htmx's default behaviour. Set
+         explicitly anyway rather than relying on that default staying what
+         it is: the rule is "declared in the template", not "whichever
+         status happens not to trigger the default today". */}}
     <form class="panel-body" method="post" action="/identities/{{.Identity.ID}}/retire"
           hx-post="/identities/{{.Identity.ID}}/retire"
+          hx-target="#identity" hx-swap="outerHTML"
           hx-confirm="Withdraw this credential? What still names it keeps displaying, marked retired -- nothing still using it is re-pointed automatically.">
       <input type="hidden" name="csrf_token" value="{{.CSRF}}">
       <button class="btn btn-danger" type="submit">Withdraw this credential</button>
