@@ -360,18 +360,30 @@ pre-existing deviation from the stated convention, and it is the root cause of t
 targeting problem, not a complication of it. Fixing it is bringing two handlers into
 line with the rule everything else already follows.
 
-It is also *smaller* than what it replaces. `renderCertificateList`
-(`internal/web/handlers/certificates.go:55-80`) assembles `Certificates` and `Filter`,
-which the form does not use, alongside `Teams`, `Roles`, `Spec` and `Errors`, which
-it does. A form-only refusal path drops a `ListCertificates` query that a validation
-failure never needed.
+**CORRECTED 2026-09-16 (plan review, D2).** This ruling originally added that the fix
+is *smaller* than what it replaces, because a form-only path would drop the
+`ListCertificates` query. **That is false and the sentence is struck.** `Respond`'s
+non-HTMX branch calls `Page` and renders the WHOLE page, and
+`pages/certificate_list.html` dereferences `.Filter` (lines 28, 32, 40) and
+`.Certificates`. Passing a reduced struct would make a JavaScript-off refusal render
+"No certificates match." over a populated estate. The query stays, for teams and users
+too. The decision is unchanged — only the reason was wrong, and a wrong reason in a
+spec is how the next person justifies the wrong change.
 
 So: give `certificate_form` and the team create form a wrapping element with a stable
 id; add a refusal path that re-renders that partial alone with
 `responsibilityOptions` + spec + errors; the form targets its own id with
 `outerHTML`. `partials/user_row.html:59` is the shape.
 
-**These two land BEFORE any of the 38 gets a target**, because targeting them without
+**EXTENDED 2026-09-16 (plan review, D1): there are THREE, not two.** `UserCreate`
+(`internal/web/handlers/users.go`) answers all four of its 422 sites with
+`renderUserList` → `user_list_panel`, the roster, while the create form is
+`{{define "user_form"}}` rendered separately by `pages/user_list.html:25`. Identical
+shape, verified. It is the cheapest of the three: `user_form`'s root already carries
+`id="user-form"`, so only the handler moves. Leaving it out would break success
+criterion 5 on a form nobody had noticed.
+
+**These three land BEFORE any of the 38 gets a target**, because targeting them without
 this makes the refusal invisible — strictly worse than today.
 
 ### 2. `handleStoreError`'s `ErrInvalid`: in scope, and it stops being swapped at all.
@@ -406,6 +418,37 @@ one field retypes all of them"* — cannot occur here: there is no redirect, and
 (only inside the vendored `htmx.min.js`). It is a real HTMX response header, but it is
 unprecedented here, so it needs its own test and a browser check rather than a reading
 of the docs.
+
+### 2b. Class 2 — 28 elements whose handler renders no fragment at all — declare `this`/`none`.
+
+**Added 2026-09-16 (plan review, D3), and it is the largest correction to this spec.**
+The rule "the target is the stable id of the partial that handler re-renders on 422"
+has **no referent for 28 of the 38**. Reading every handler splits them cleanly:
+
+- **Class 1 — 10 elements** whose handler can emit a 422 fragment. These get
+  `hx-target="#<partial id>" hx-swap="outerHTML"` as this document describes.
+- **Class 2 — 28 elements** whose handler answers only `render.Redirect` on success,
+  `setFlash` + `render.Redirect` on refusal, or `handleStoreError`. Spot-verified:
+  `AssetRetire`, `BundleRetire` and `FHRPRetire` all do exactly this and render no
+  fragment on any path. Three groups — `pages/asset_detail.html` ×6,
+  `pages/net_group_detail.html` ×4, `partials/journal.html` — have no stable wrapping
+  id anywhere in scope, because `renderAssetDetail` calls `Render.Page`, not `Respond`.
+
+**Class 2 declares `hx-target="this" hx-swap="none"`.** Rule 1 above already blesses
+it: *"`hx-swap="none"` is a legitimate declaration, not an exemption."* It needs no new
+ids, it is argued from the handler per element exactly as Rule 4 demands, and it
+preserves today's behaviour for every status `app.js` does not force-swap. It also
+composes with Ruling 2: an `ErrInvalid` 422 sends `HX-Reswap: none` and an
+out-of-band flash, so a class-2 refusal shows a message and destroys nothing.
+
+It makes Ruling 4 moot exactly where Ruling 4 was hardest — `journal_panel` and
+`costs.html`'s `{{$.Action}}` forms need no id from the dict *and* none of their own.
+
+The rule reads per element rather than per file, and one cell proves why:
+`partials/rows.html:154` (Verify) targets `#dep-{{.Dep.ID}}` because `deps.go:206`
+really does render `dependency_row`; `rows.html:158` (Retire) is `this`/`none` because
+`DependencyRetire` redirects. Two buttons, one cell, two declarations, both read off
+the handler.
 
 ### 3. Yes — the census also proves each named id exists.
 
@@ -505,3 +548,41 @@ CLAUDE.md's, in full, and binding rather than background:
 - **No new dependency.**
 - **`make test` green on both engines.** `go test ./...` alone silently skips the
   Postgres half.
+
+
+## Corrections from the plan review, 2026-09-16
+
+**Browser evidence (D4): two of the five named surfaces cannot supply it.**
+`HealthOverrideClear` is on `refusalFlashExceptions` **by name** — its refusal is
+`setFlash` + `render.Redirect`, there is no form and no typed value, and its target is
+`this`; the three assertions are unsatisfiable, and reaching the refusal needs a
+double-clear when the button is gone after the first. Team reassign-retire's only
+browser-reachable refusal is an empty `target_team_id`, which `<select … required>`
+blocks at submit, and choosing a valid option **permanently retires a team and writes
+`change_log`**, which `docs/E2E.md` forbids against a shared instance.
+
+So: **user create replaces health-override-clear** (a short password is a real,
+browser-submittable, zero-write refusal — and D1 puts that surface in scope anyway).
+Reassign-retire stays, driven with `form.noValidate = true`, stated loudly rather than
+discovered. `docs/E2E.md` gains a section saying health-override-clear cannot supply
+behavioural swap evidence, and why — an unstated gap is indistinguishable from an
+oversight.
+
+**Measurements corrected (D5).** This document said "78 `hx-target` … 78 `hx-swap`".
+Measured at `bc74a71`: **74** and **75**. And the pairwise check this document left to
+an implementer has been run: of 90 `hx-post` elements, **38 carry neither attribute and
+0 carry a target without a swap** — no element joins scope on that basis. The plan
+re-runs the scan as its Task 0 so the claim is re-measured rather than inherited.
+
+**A census blind spot, named rather than hidden.** `partials/projects.html:391` takes
+`hx-target="{{.Target}}"` from the dict — the exact shape Ruling 4 forbids. It sits in
+the already-correct 52, so it is out of scope, but the census cannot resolve its id and
+its comment must say so rather than appearing to check what it cannot.
+
+**Verified against the vendored `htmx.min.js` 2.0.4, not its documentation:**
+`HX-Reswap` is supported and composes with `app.js`'s forced `shouldSwap` at 422;
+out-of-band swaps still fire under `swapStyle: "none"`, because OOB processing runs
+before the primary swap and `case "none"` skips only the primary; `HX-Redirect` returns
+*before* target resolution, so success paths cannot be affected by any of this; and a
+missing target id fails at **request** time, not response time — so failure mode (c) is
+silent from the very first click, not only on a refusal.
