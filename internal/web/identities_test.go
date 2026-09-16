@@ -11,6 +11,7 @@ package web_test
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -19,6 +20,7 @@ import (
 
 	"github.com/madalinignisca/invctl/internal/domain"
 	"github.com/madalinignisca/invctl/internal/store"
+	"github.com/madalinignisca/invctl/internal/web/handlers"
 )
 
 // TestADependencyNamingARetiredIdentityKeepsIt is the regression the filter
@@ -1208,5 +1210,81 @@ func TestANoOpRotationFlashesAccurately(t *testing.T) {
 	}
 	if strings.Contains(page, "flash-success") {
 		t.Error("a no-op rotation rendered as a success flash rather than an info one")
+	}
+}
+
+// TestIdentityPanelNeverRendersIdentitySecretRef is the guard the final
+// whole-branch review asked for (blocking #4). identity_panel.html reads the
+// GATED .SecretRef -- never .Identity.SecretRef -- in both the "What it is"
+// panel and the correction form's secret_ref input; see
+// internal/web/handlers/identities.go's header on why the gate lives in the
+// handler and not the template.
+//
+// NO BEHAVIOURAL TEST THROUGH THE REAL HANDLER CAN CATCH A REGRESSION HERE.
+// The two values cannot diverge for an Administrator -- renderIdentityWith
+// always sets .SecretRef from .Identity.SecretRef when IsAdmin is true -- and
+// a non-Administrator never reaches the correction form that would expose the
+// difference at all. Driving the real handler therefore proves nothing about
+// which binding the template actually uses.
+//
+// So this drives the template directly, respond_partial_test.go's own
+// technique of exercising a template in isolation, against a value the real
+// handler can never produce: an Administrator whose .Identity carries a
+// secret_ref and whose gated .SecretRef is deliberately empty. The probe type
+// is not handlers.identityPage -- that type is unexported outside the
+// handlers package -- but html/template resolves fields by name through
+// reflection, not by type identity, so a local struct exposing the same
+// exported field names drives the exact same template paths.
+//
+// Mutation: change either `.SecretRef` reference in
+// web/templates/partials/identities.html back to `.Identity.SecretRef` and
+// this goes red on `strings.Contains(page, "SENTINEL")`; restore to green.
+func TestIdentityPanelNeverRendersIdentitySecretRef(t *testing.T) {
+	r, err := testRenderer(t)
+	if err != nil {
+		t.Fatalf("building renderer: %v", err)
+	}
+
+	rotDays := 90
+	probe := struct {
+		handlers.Base
+		Errors        map[string]string
+		Identity      *store.IdentityRow
+		SecretRef     string
+		Rotation      string
+		DueOn         string
+		Usage         *store.IdentityUsageRows
+		Timeline      []store.TimelineEntry
+		Kinds         []string
+		Teams         []store.TeamRow
+		RotationInput string
+		Today         string
+	}{
+		Base: handlers.Base{IsAdmin: true, CSRF: "csrf-token"},
+		Identity: &store.IdentityRow{
+			Identity: domain.Identity{
+				ID: "id-1", Kind: domain.IdentityServiceAccount, Name: "svc-probe",
+				SecretRef: strPtr("SENTINEL"), RotationDays: &rotDays,
+				Lifecycle: domain.LifecycleActive, RowVersion: 1,
+			},
+		},
+		// The divergence a real request cannot produce: an Administrator, a
+		// stored secret_ref, and a gated SecretRef that is empty anyway.
+		SecretRef:     "",
+		Rotation:      string(domain.RotationNeverRecorded),
+		Usage:         &store.IdentityUsageRows{},
+		Kinds:         domain.IdentityKinds,
+		RotationInput: "2026-09-15",
+		Today:         "2026-09-15",
+	}
+
+	rec := httptest.NewRecorder()
+	r.Partial(rec, http.StatusOK, "identity_panel", probe)
+	page := rec.Body.String()
+	if strings.Contains(page, "SENTINEL") {
+		t.Error("identity_panel rendered .Identity.SecretRef rather than the gated " +
+			".SecretRef. This is the one rule in the identity surface whose violation " +
+			"leaks a credential path to a reader the handler never vetted for it, and " +
+			"the only one with no behavioural signal -- see this test's own header.")
 	}
 }
