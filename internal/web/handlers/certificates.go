@@ -116,9 +116,19 @@ func (a *App) renderCertificateList(w http.ResponseWriter, r *http.Request, stat
 // new capability -- "certificate" classifies as domain.ScopeTopology, which
 // defaults to Administrator-only at the store's permit check, but that check
 // never runs: domain validation fails first, exactly as for team (whose scope
-// is ScopeEstateConfig) -- and the form discloses nothing beyond what the
-// caller just submitted plus the CSRF token already scoped to their own
-// session.
+// is ScopeEstateConfig).
+//
+// What the form actually discloses, stated rather than copied wrong from
+// team_create_form's comment: certificate_form is NOT a bare echo of the
+// caller's own submission. It also `{{range .Teams}}` and `{{range .Roles}}`
+// (partials/certificates.html) -- every team's id and code, and the manager
+// role vocabulary. That is already readable regardless: GET /teams is
+// `read(...)` in routes.go, so any authenticated session, including a
+// project owner's, can already list every team by name. The conclusion
+// (no new capability) survives; the earlier claim that the form discloses
+// "nothing beyond what the caller just submitted" did not, and this project
+// has already struck a whole spec ruling for carrying a wrong reason forward
+// -- a wrong reason here is how the next person justifies the wrong change.
 func (a *App) refuseCertificateCreate(w http.ResponseWriter, r *http.Request,
 	errs map[string]string, spec domain.CertificateSpec) {
 	a.renderCertificateListPage(w, r, http.StatusUnprocessableEntity, errs, spec,
