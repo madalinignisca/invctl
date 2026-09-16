@@ -158,7 +158,7 @@ func TestCertificateRefusalsCarryAFieldErrorForEveryKeyTheValidatorCanEmit(t *te
 		t.Run("update/"+tc.key, func(t *testing.T) {
 			page := body(t, h.get("/certificates/"+certID, false))
 			form := url.Values{
-				"csrf_token": {h.csrfToken("/certificates/" + certID)},
+				"csrf_token":  {h.csrfToken("/certificates/" + certID)},
 				"row_version": {versionInFirstForm(t, page)},
 				"subject_cn":  {"census-edit-" + tc.key + ".example.com"},
 				// A REAL lifecycle by default. CertificateUpdate reads

@@ -197,10 +197,38 @@ func TestEveryPostingElementDeclaresItsSwapTarget(t *testing.T) {
 		// {{if .IsAdmin}} passes here and can still be absent at render time.
 		// That half is the per-element check in the plan and the browser spec.
 		if !strings.HasPrefix(el.target, "#") {
-			// An extended selector: "this", "closest ...", "find ...", "next",
-			// "previous". Declared, so the rule above is satisfied; there is no
-			// id to look for. "this" is what the twenty-eight
+			// An extended selector -- ALLOW-LISTED, not merely "not an id".
+			// "does not start with #" was the ORIGINAL check here, and it let
+			// `hx-target="bundle-panel"` -- the likeliest typo in a sweep that
+			// just hand-wrote 28 target values -- through as if it were "this"
+			// or "closest ...". htmx resolves an unrecognised value as a bare
+			// CSS type selector, matches no element named "bundle-panel", and
+			// fires htmx:targetError at REQUEST time: the element does
+			// nothing from the very first click, and this census reported it
+			// as a declared, valid target. "this" is what the twenty-eight
 			// redirect-or-flash routes use.
+			//
+			// A target that is ITSELF a template expression -- entirely, not
+			// merely containing one -- is not a typo candidate: nothing in
+			// the markup says whether it will render to "#some-id" or to a
+			// keyword, so this census genuinely cannot classify it. Exactly
+			// one element takes this shape, partials/projects.html:391's
+			// `hx-target="{{.Target}}"`; see globsOverlap's doc comment for
+			// why it is recorded as an accepted, argued exception rather than
+			// silently treated as either case.
+			if hxExprRe.MatchString(el.target) && hxExprRe.ReplaceAllString(el.target, "") == "" {
+				continue
+			}
+			if !isExtendedSelector(el.target) {
+				t.Errorf("%s declares hx-target=%q, which is neither an id "+
+					"selector (starting with #) nor a recognised htmx extended "+
+					"selector (this, closest/find/next/previous, body, "+
+					"document, window).\n"+
+					"htmx resolves an unrecognised value as a plain CSS type "+
+					"selector at request time: it will not match this element's "+
+					"own markup, and the response has nowhere to land.",
+					where, el.target)
+			}
 			continue
 		}
 		want := normaliseID(strings.TrimPrefix(el.target, "#"))
@@ -240,8 +268,19 @@ var (
 	// the rule, because a two-rule census has to decide which applies from the
 	// tag name and the population is not stable -- partials/rows.html already
 	// has a <button hx-post> carrying its own target and swap.
-	hxOpenRe   = regexp.MustCompile(`(?is)<(?:form|button)\b[^>]*>`)
-	hxPostRe   = regexp.MustCompile(`(?is)\bhx-post="([^"]*)"`)
+	//
+	// FINDS ONLY THE OPENING <form OR <button; findOpenTags below does the
+	// quote-aware scan to the tag's closing '>'. A single `[^>]*>` regex
+	// stops at the FIRST '>' regardless of quoting, and CLAUDE.md explicitly
+	// blesses Alpine on these elements ("Alpine handles local UI state...")
+	// where a `>` inside a quoted expression is routine --
+	// `x-bind:disabled="n > 0"` truncates a `[^>]*>` match mid-attribute, the
+	// rest of the tag (including hx-target/hx-swap, if they come after) is
+	// left unscanned, and the element silently drops out of the population
+	// this census measures. Found by mistake during the whole-branch review,
+	// watching the count drop from 90 to 89 with the test still green.
+	hxOpenTagRe = regexp.MustCompile(`(?i)<(form|button)\b`)
+	hxPostRe    = regexp.MustCompile(`(?is)\bhx-post="([^"]*)"`)
 	hxTargetRe = regexp.MustCompile(`(?is)\bhx-target="([^"]*)"`)
 	hxSwapRe   = regexp.MustCompile(`(?is)\bhx-swap="([^"]*)"`)
 	// An id attribute on any element. hx-swap-oob is deliberately not excluded:
@@ -323,6 +362,51 @@ func blockContextAt(tag string) func(pos int) string {
 	}
 }
 
+// findOpenTags returns the [start, end) span of every <form ...> or
+// <button ...> opening tag in page, end being just past its closing '>'.
+//
+// QUOTE-AWARE, unlike a single `[^>]*>` regex: a '>' inside a quoted
+// attribute value -- an Alpine expression such as
+// `x-bind:disabled="n > 0"` is the routine case CLAUDE.md's own conventions
+// invite on these elements -- does not end the tag. Only an UNQUOTED '>'
+// does. Missing this deleted an element from the population silently: the
+// regex-based scan stopped at the '>' inside the quote, left everything
+// after it (including hx-target/hx-swap, when they come later in the tag)
+// unscanned, and the element dropped out with the test still green.
+func findOpenTags(page string) [][2]int {
+	var spans [][2]int
+	for _, loc := range hxOpenTagRe.FindAllStringIndex(page, -1) {
+		start := loc[0]
+		var quote byte
+		end := -1
+		for i := loc[1]; i < len(page); i++ {
+			c := page[i]
+			if quote != 0 {
+				if c == quote {
+					quote = 0
+				}
+				continue
+			}
+			switch c {
+			case '"', '\'':
+				quote = c
+			case '>':
+				end = i + 1
+			}
+			if end != -1 {
+				break
+			}
+		}
+		if end == -1 {
+			// Unterminated tag (or the quote never closed before EOF) --
+			// nothing this census can scan; skip rather than guess.
+			continue
+		}
+		spans = append(spans, [2]int{start, end})
+	}
+	return spans
+}
+
 // postingElements finds every hx-post element in the template tree.
 //
 // Glob per subdirectory rather than filepath.Walk: the three directories are the
@@ -345,7 +429,7 @@ func postingElements(t *testing.T, root string) []hxElement {
 			}
 			page := string(raw)
 			rel := sub + "/" + filepath.Base(path)
-			for _, loc := range hxOpenRe.FindAllStringIndex(page, -1) {
+			for _, loc := range findOpenTags(page) {
 				tag := page[loc[0]:loc[1]]
 				post := hxPostRe.FindStringSubmatchIndex(tag)
 				if post == nil {
@@ -394,6 +478,28 @@ func declaredIDs(t *testing.T, root string) map[string]bool {
 		}
 	}
 	return ids
+}
+
+// extendedSelectorKeywords are htmx's non-CSS target keywords: htmx.org's
+// "Extended CSS Selectors" -- https://htmx.org/docs/#targets at the time this
+// census was written. "closest" and "find" always carry a following CSS
+// selector; "next" and "previous" may or may not. Anything else is not one of
+// these and resolves as a literal CSS selector against the document, which is
+// almost never what a bare word like "bundle-panel" was meant to be.
+var extendedSelectorKeywords = map[string]bool{
+	"this": true, "closest": true, "find": true,
+	"next": true, "previous": true,
+	"body": true, "document": true, "window": true,
+}
+
+// isExtendedSelector reports whether target is one of htmx's keyword targets
+// (with or without a trailing CSS selector, e.g. "closest .row"), rather than
+// an id this census should have found in declaredIDs. Allow-listed, not
+// merely "does not start with #" -- see the caller's comment for the typo
+// that check let through silently.
+func isExtendedSelector(target string) bool {
+	first, _, _ := strings.Cut(strings.TrimSpace(target), " ")
+	return extendedSelectorKeywords[first]
 }
 
 // normaliseID collapses every template expression to a single "*", so
