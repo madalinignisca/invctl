@@ -109,13 +109,26 @@ they never saw. Skip it, assign the rest, and say plainly which were skipped
 and why. All-or-nothing would punish the operator for someone else's
 correctly-made edit.
 
-**`identity` has no `row_version`** while `asset`, `service` and `project`
-do. The first draft preferred adding one. **That was wrong and the review was
-right**: it introduces versioning into an entity type that has never had it,
-so older instances would not increment it and the schema drifts. Use the
-guard that matches the condition instead — `UPDATE ... WHERE team_id IS NULL`
-is itself an atomic eligibility check, and zero rows affected IS the
-"no longer unowned" outcome. Simpler, and it needs no migration.
+**`identity` had no `row_version` when this was written, and the bulk-assignment
+guard still does not use one.** The first draft preferred adding one for *this*
+path. That was the wrong tool for this job and the review was right to refuse it:
+`UPDATE ... WHERE team_id IS NULL` is itself an atomic eligibility check, zero
+rows affected IS the "no longer unowned" outcome, and a token here would convert
+a skip-and-report into a 409 — the opposite behaviour for the same event. That
+reasoning is unchanged and this paragraph is not a retraction of it.
+
+The refusal carried a condition: **do not add a token you are not going to
+maintain everywhere.** Nobody was offering to maintain one at the time, so no
+was the right answer. **WP-J8 pays that condition and the column now exists**
+(migration `00069`) — not for bulk assignment, but for the **correction form**
+the identity surface adds, which is the exact circumstance `00066` added a token
+to `link` for: an entity that had likewise never had one, growing a repair path,
+where "two operators correcting the same row at the same time silently overwrite
+each other". There are exactly three statements that write `identity` in this
+codebase and all three now maintain the column — `CreateIdentity` inserts `1`,
+and both bulk branches do `row_version = row_version + 1` **beside** their
+existing `WHERE` guards, which are untouched. Adding a token to *this* path
+would still be wrong. SIGNED OFF by Gabriel, 2026-09-15.
 
 **Report a per-item outcome, not a count.** "10 updated, 1 skipped" tells the
 operator nothing: they cannot tell whether the skipped row was claimed by a

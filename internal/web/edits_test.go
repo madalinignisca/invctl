@@ -169,10 +169,21 @@ func TestSettingAPlacementToStoppedDoesNotWithdrawIt(t *testing.T) {
 	resp.Body.Close()
 
 	after := body(t, h.get("/services/"+serviceID, false))
-	if strings.Contains(after, "withdrawn") {
+	// Scoped to the instances panel, not the whole page: the dependency
+	// form further down the same page offers every identity in the estate,
+	// including a withdrawn one seeded elsewhere (b.identityHistory), and
+	// its option now reads "(withdrawn)" (WP-J8 final whole-branch review,
+	// #8) -- an unscoped Contains would fail on that unrelated text.
+	i := strings.Index(after, `id="instances"`)
+	j := strings.Index(after, `id="endpoints"`)
+	if i < 0 || j < 0 || j < i {
+		t.Fatal("the service page no longer has both panels in the expected order")
+	}
+	instancesPanel := after[i:j]
+	if strings.Contains(instancesPanel, "withdrawn") {
 		t.Error("a placement asked to stop was recorded as withdrawn from the estate")
 	}
-	if !strings.Contains(after, `href="/services/`+serviceID+`?edit=`+instanceID) {
+	if !strings.Contains(instancesPanel, `href="/services/`+serviceID+`?edit=`+instanceID) {
 		t.Error("the placement is no longer editable, so it is no longer live")
 	}
 }
@@ -1147,12 +1158,38 @@ func TestAnEndpointWithLiveDependantsCannotBeWithdrawn(t *testing.T) {
 	resp.Body.Close()
 
 	after := body(t, h.get("/services/"+serviceID, false))
-	if strings.Contains(after, "withdrawn") && !strings.Contains(before, "withdrawn") {
+	// Scoped to the endpoints panel, not the whole page (WP-J8 final
+	// whole-branch review, residual #1): the "Add a dependency" form further
+	// down offers every identity in the estate, including a withdrawn one
+	// seeded elsewhere, and its option now reads "(withdrawn)" (#8's label).
+	// That form renders for an Administrator on EVERY load of this page, so
+	// `before` already contained "withdrawn" unconditionally --
+	// !strings.Contains(before, "withdrawn") was permanently false and this
+	// assertion could never go red no matter what the handler did.
+	beforePanel := endpointsPanel(t, before)
+	afterPanel := endpointsPanel(t, after)
+	if strings.Contains(afterPanel, "withdrawn") && !strings.Contains(beforePanel, "withdrawn") {
 		t.Error("an endpoint with a live dependant was withdrawn")
 	}
 	if !strings.Contains(after, "still has something depending on it") {
 		t.Error("the operator was not told why it was refused")
 	}
+}
+
+// endpointsPanel returns the endpoints panel's own markup, bounded the same
+// way firstEndpointEditID already bounds it on the lower end, plus an upper
+// bound at the always-rendered "Depends on" heading (not behind any {{if}},
+// unlike the Routes panel that sometimes sits between them) -- so an
+// assertion about this panel cannot be answered by the dependency-declare
+// form's identity picker further down the same page.
+func endpointsPanel(t *testing.T, page string) string {
+	t.Helper()
+	i := strings.Index(page, `id="endpoints"`)
+	j := strings.Index(page, "<h2>Depends on</h2>")
+	if i < 0 || j < 0 || j < i {
+		t.Fatal("the service page no longer has an endpoints panel followed by Depends on")
+	}
+	return page[i:j]
 }
 
 // withdrawableEndpoint adds a fresh socket and returns its service, id and

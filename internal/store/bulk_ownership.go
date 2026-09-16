@@ -296,11 +296,22 @@ func (s *SQLStore) assignOneEntity(ctx context.Context, p domain.Permit, entityT
 				toTeamID, t.at, id)
 		}
 	case "identity":
-		// No updated_at, no row_version (shared/00003) -- see
-		// ReassignTeamOwnership's own comment on identity; the same "guard is
-		// the whole eligibility check" reasoning applies unchanged here.
+		// THE GUARD IS UNCHANGED AND IS STILL THE WHOLE ELIGIBILITY CHECK.
+		// `WHERE team_id IS NULL` is what produces the per-item
+		// assigned / no_longer_unowned outcome the ownership report argues for
+		// on its own merits -- "All-or-nothing would punish the operator for
+		// someone else's correctly-made edit". DO NOT "simplify" this into a
+		// row_version comparison: that silently converts a skip-and-report into
+		// a 409, which is the opposite behaviour for the same event.
+		//
+		// THE BUMP IS ADDITIVE, migration 00069. Without it a bulk assignment
+		// changes team_id under an open correction form whose token still
+		// validates, and the form's save silently reverts the assignment.
+		// Still no updated_at: identity has none, by 00069's decision.
 		do = func(t *tx) (sql.Result, error) {
-			return t.exec(ctx, `UPDATE identity SET team_id = ? WHERE id = ? AND team_id IS NULL`, toTeamID, id)
+			return t.exec(ctx,
+				`UPDATE identity SET team_id = ?, row_version = row_version + 1
+				 WHERE id = ? AND team_id IS NULL`, toTeamID, id)
 		}
 	case "custom_field":
 		diffKey = "owner_team_id"

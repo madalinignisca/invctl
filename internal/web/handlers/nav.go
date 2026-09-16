@@ -119,6 +119,11 @@ var navGroups = []NavGroup{
 	{Label: "Services", Links: []NavLink{
 		{Label: "Services", Href: "/services", Nav: "services"},
 		{Label: "Certificates", Href: "/certificates", Nav: "certificates"},
+		// What a service authenticates AS, beside what it is served OVER. Not
+		// AdminOnly: the GETs are readable by anybody, and the one sensitive
+		// field is gated in the handler, not by hiding the link (hiding is not
+		// enforcement -- see AdminOnly's own comment).
+		{Label: "Identities", Href: "/identities", Nav: "identities"},
 	}},
 	{Label: "Reports", Links: []NavLink{
 		{Label: "What expires", Href: "/reports/expiry", Nav: "expiry"},

@@ -481,8 +481,17 @@ func (b *builder) dependencies() {
 			identity:    "svc-orders", authMethod: "approle",
 			dataClasses: []string{"credential"}},
 
+		// Named by a credential the estate has since WITHDRAWN
+		// (b.identityHistory). The dependency stays exactly as it is:
+		// RetireIdentity refuses nothing and rewrites nothing, because
+		// rewriting it would attribute a dependency change to whoever
+		// clicked withdraw. What the demo shows is the inventory
+		// contradicting itself -- either the edge is stale or this service
+		// is authenticating with a withdrawn credential, and it is not
+		// knowable from here. That is the Gap finding.
 		{consumer: "backup-agent", endpoint: "pgsql-core/sql", nature: domain.NatureOptional,
 			failureMode: "Backup job fails and retries on the next window",
+			identity:    "svc-legacy-etl", authMethod: "scram-sha-256",
 			dataClasses: []string{"pii"}},
 	}
 

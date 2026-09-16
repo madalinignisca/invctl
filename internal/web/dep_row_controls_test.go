@@ -121,12 +121,13 @@ func setupDepRowFixture(t *testing.T, ctx context.Context, h *harness, fx *bound
 
 	// A second, dedicated dependency for the secret-ref check, both ends
 	// owned, carrying an identity with a real (path-shaped) secret_ref.
-	identity, err := domain.NewIdentity(store.NewID(), domain.IdentityServiceAccount, "dep-row-secret-identity")
+	vaultRef := "kv/prod/dep-row-controls/fixture"
+	identity, err := domain.NewIdentity(store.NewID(), domain.IdentitySpec{
+		Kind: domain.IdentityServiceAccount, Name: "dep-row-secret-identity", SecretRef: &vaultRef,
+	})
 	if err != nil {
 		t.Fatalf("building identity: %v", err)
 	}
-	vaultRef := "kv/prod/dep-row-controls/fixture"
-	identity.SecretRef = &vaultRef
 	if err := h.store.CreateIdentity(ctx, admin, identity); err != nil {
 		t.Fatalf("creating identity: %v", err)
 	}

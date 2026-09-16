@@ -88,6 +88,10 @@ POST /endpoints/{id}/retire | EndpointRetire | write | true
 POST /environments | EnvironmentCreate | write | true
 POST /environments/{id} | EnvironmentUpdate | write | true
 POST /environments/{id}/retire | EnvironmentRetire | write | true
+POST /identities | IdentityCreate | writeAdminOnly | true
+POST /identities/{id} | IdentityUpdate | writeAdminOnly | true
+POST /identities/{id}/retire | IdentityRetire | writeAdminOnly | true
+POST /identities/{id}/rotation | IdentityRecordRotation | writeAdminOnly | true
 POST /import/assets | AssetImportRun | writeAdminOnly | true
 POST /import/device-types | DeviceTypeImportRun | writeAdminOnly | true
 POST /inflation | InflationSet | write | true

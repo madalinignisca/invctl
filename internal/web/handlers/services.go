@@ -337,7 +337,40 @@ func (a *App) renderServiceDetail(w http.ResponseWriter, r *http.Request, status
 		a.serverError(w, r, err)
 		return
 	}
-	identities, err := a.Store.ListIdentities(r.Context())
+	// IncludeRetired, deliberately, and this is NOT the identity list page's
+	// default. This slice feeds the dependency identity <select> -- both the
+	// create form (partials/forms.html:646) and the inline correction row
+	// (partials/rows.html:69). A dependency may legitimately name a RETIRED
+	// credential: RetireIdentity refuses nothing and rewrites nothing, so
+	// "what is stored keeps displaying" (migration 00003, and RetireEnvironment's
+	// ruling). Narrowing this to live rows would drop the currently-selected
+	// option out of the <select>, the browser would fall back to the empty first
+	// option, and SAVING THE CORRECTION ROW WOULD SILENTLY CLEAR identity_id --
+	// a data change nobody asked for, on a form about something else.
+	//
+	// AND THE REASON A LIVE EDGE NAMING A RETIRED CREDENTIAL IS NORMAL rather
+	// than a mess to tidy up: migration 00003 records that "the natural response
+	// to a compromised credential is to retire it and create its replacement
+	// under the same name", which is exactly why the uniqueness index is scoped
+	// to lifecycle = 'active'. So the sequence the estate is BUILT for -- retire
+	// the compromised credential now, re-point the edges as the services are
+	// redeployed over the following days -- leaves live dependencies naming a
+	// retired identity for as long as that takes, by design. RetireIdentity
+	// refuses nothing and rewrites nothing precisely so that it can. The edit
+	// form must therefore keep displaying what is STORED, marked retired, the
+	// same rule RetireEnvironment states for every label that behaves this way.
+	//
+	// Without that reasoning written here, the next person narrows this to live
+	// rows believing it is tidy-up, and the tidy-up silently clears identity_id
+	// on the edges of exactly the credential somebody is mid-incident about.
+	//
+	// The consequence is that a retired credential is still offered on the
+	// CREATE form, which is the pre-WP-J8 behaviour (ListIdentities took no
+	// filter and returned everything). Narrowing only the create half needs two
+	// slices and the "marked retired, not newly selectable" treatment the
+	// custom_field_option / environment pickers get; that is a separate piece of
+	// work and is deliberately not done here.
+	identities, err := a.Store.ListIdentities(r.Context(), store.IdentityFilter{IncludeRetired: true})
 	if err != nil {
 		a.serverError(w, r, err)
 		return

@@ -220,6 +220,14 @@ var IdentityKinds = []string{
 	IdentityCertSubject, IdentityHuman,
 }
 
+// RotationStates is the Go side of the rotation-state filter's option list.
+// NOT a database CHECK -- the state is DERIVED, never stored, so this exists
+// only to populate a <select> without the template guessing at the set.
+var RotationStates = []string{
+	string(RotationUnmanaged), string(RotationNeverRecorded),
+	string(RotationWithinWindow), string(RotationOverdue), string(RotationUnreadable),
+}
+
 // Identity is a principal used to authenticate a dependency.
 //
 // SecretRef holds a *path* (a Vault path or similar), never a secret value.
@@ -240,30 +248,188 @@ type Identity struct {
 	LastRotated  *string `db:"last_rotated"`
 	TeamID       *string `db:"team_id"`
 	Lifecycle    string  `db:"lifecycle"`
+	// RowVersion is the optimistic-concurrency token, migration 00069. See
+	// internal/domain/version.go. auditFields (internal/store/diff.go:80-86)
+	// excludes it from every diff: "an audit entry reading row_version: 4 -> 5
+	// tells a reader nothing they can use".
+	RowVersion int `db:"row_version"`
+}
+
+// IdentitySpec is everything a person declares about a credential reference.
+//
+// A SPEC RATHER THAN A POSITIONAL SIGNATURE, and this repo has now recorded the
+// reason twice -- CableBundleSpec: "a positional signature had to be replaced
+// mid-branch when it could not accept a required field, so a constructor that
+// cannot pass a required value cannot build a valid one." NewIdentity(id, kind,
+// name) could accept none of realm, secret_ref, rotation_days or team_id, so the
+// seeder assigned four fields AFTER construction and the validation the
+// constructor performed was not the validation the row got.
+//
+// IT DELIBERATELY HAS NO LastRotated. last_rotated has exactly one writer,
+// RecordIdentityRotation (docs/identity-surface-design.md, "One writer for
+// last_rotated"): declaring a credential that already exists and recording when
+// it was last rotated are two acts and two audit entries, both of which are
+// true. A field here would be a fifth way to stamp it.
+type IdentitySpec struct {
+	Kind, Name   string
+	Realm        *string
+	SecretRef    *string
+	RotationDays *int
+	TeamID       *string
 }
 
 // NewIdentity validates and constructs a principal.
-func NewIdentity(id, kind, name string) (*Identity, error) {
-	ve := &ValidationError{}
-	name = checkRequired(ve, "name", name)
-	checkEnum(ve, "kind", kind, IdentityKinds)
-	if err := ve.OrNil(); err != nil {
+//
+// NO `now` PARAMETER, unlike almost every other constructor in this package,
+// because the table has no timestamp to stamp -- migration 00069 gave identity
+// row_version ONLY, for the reasons 00066 gave link. Worth saying out loud, or
+// the next person adds the parameter back out of habit and then has to invent a
+// column for it to fill.
+func NewIdentity(id string, spec IdentitySpec) (*Identity, error) {
+	i := &Identity{
+		ID: id, Kind: spec.Kind, Name: spec.Name,
+		Realm: spec.Realm, SecretRef: spec.SecretRef,
+		RotationDays: spec.RotationDays, TeamID: spec.TeamID,
+		Lifecycle:  LifecycleActive,
+		RowVersion: 1,
+	}
+	if err := i.Validate(); err != nil {
 		return nil, err
 	}
-	return &Identity{ID: id, Kind: kind, Name: name, Lifecycle: LifecycleActive}, nil
+	return i, nil
 }
 
-// RotationOverdue reports whether the credential is past its rotation window.
-// A nil rotation policy is not overdue — it is simply unmanaged.
-func (i *Identity) RotationOverdue(now time.Time) bool {
-	if i.RotationDays == nil || i.LastRotated == nil {
-		return false
+// Validate checks an identity against its business rules and normalises what the
+// constructor always normalised.
+//
+// SEPARATE FROM THE CONSTRUCTOR because the update path has to run the same
+// rules. Environment.Validate is the shape and its doc comment names the defect
+// this prevents: the checks lived inside NewEnvironment, so UpdateEnvironment
+// wrote whatever it was handed and the table CHECK was the only thing standing
+// between a form and a blank name.
+func (i *Identity) Validate() error {
+	ve := &ValidationError{}
+	i.Name = checkRequired(ve, "name", i.Name)
+	checkEnum(ve, "kind", i.Kind, IdentityKinds)
+	// Matches identity_rotation_days_check (migration 00003): a policy of zero
+	// days is not a policy, it is a row that is overdue the moment it is saved.
+	checkPositive(ve, "rotation_days", i.RotationDays)
+	return ve.OrNil()
+}
+
+// RotationState is what this credential's rotation policy currently says about
+// it. FIVE STATES RATHER THAN A BOOLEAN, and the split that matters is the first
+// two: `rotation_days IS NULL` means nobody asked for this to be rotated and
+// there is nothing to be late for, while `rotation_days` set with no recorded
+// rotation means THE ESTATE HAS A RULE FOR THIS CREDENTIAL AND NO EVIDENCE IT
+// HAS EVER BEEN FOLLOWED. Those are opposite facts. The boolean this replaced
+// answered `false` to both, which is how a credential that has never been
+// rotated in four years rendered identically to one nobody ever intended to
+// rotate -- and all three identities in the demo estate were in the second state.
+type RotationState string
+
+const (
+	// RotationUnmanaged: no policy. A cert_subject or a human row is often
+	// legitimately here, and it is NOT a finding -- flagging every one would
+	// swamp the page and teach people to ignore it.
+	RotationUnmanaged RotationState = "unmanaged"
+	// RotationNeverRecorded: a policy, and nothing has ever recorded a
+	// rotation against it. Either it has never been rotated since the day it
+	// was created, or it has and nobody wrote it down. invctl cannot tell
+	// which, and both are worth somebody's attention -- which is exactly why
+	// the finding for it is a Gap and not a Fault.
+	RotationNeverRecorded RotationState = "never_recorded"
+	RotationWithinWindow  RotationState = "within_window"
+	RotationOverdue       RotationState = "overdue"
+	// RotationUnreadable: the stored value will not parse, OR IT PARSES BUT
+	// LIES ABOUT THE FUTURE. Both are the same claim -- the stored value
+	// cannot be relied on -- and the same severity: RotationFindings already
+	// folds unreadable into its Gap bucket, which is the right one for "the
+	// inventory does not know", not the Fault bucket that would assert a
+	// lapse from a value nobody can trust. A last_rotated after today cannot
+	// arrive through the handler (RecordIdentityRotation refuses it with a
+	// 422), but it can arrive through a hand-edited row, a restore, or clock
+	// skew, and it must not read as a policy being met by something that has
+	// not happened yet -- the exact defect this state exists to kill: the
+	// boolean this replaced returned `false` on a parse error, so an
+	// unreadable value read as HEALTHY. A state that cannot be trusted must
+	// never render as a state that is fine.
+	RotationUnreadable RotationState = "unreadable"
+)
+
+// RotationStatus answers what the policy says about this credential now.
+//
+// THE FIRST TWO STATES ARE OPPOSITE FACTS AND MUST NEVER BE COLLAPSED, which is
+// the whole reason this returns a state rather than a bool. `unmanaged` means
+// there is NO RULE TO BREAK -- nobody asked for this credential to be rotated,
+// and a cert_subject or a human row is often legitimately here. `never_recorded`
+// means THE ESTATE HAS A RULE FOR THIS CREDENTIAL AND NO EVIDENCE IT HAS EVER
+// BEEN FOLLOWED: either it has never been rotated since the day it was created,
+// or it has and nobody wrote it down, and invctl cannot tell which. Both are
+// worth somebody's attention; neither is "fine".
+//
+// The boolean this replaced answered `false` to both, which is how a credential
+// that has never been rotated in four years rendered identically to one nobody
+// ever intended to rotate -- and all three identities in the demo estate were in
+// the second state, so the surface would have reported the whole estate as
+// healthy. Collapsing them again is the defect this work package exists to kill.
+func (i *Identity) RotationStatus(now time.Time) RotationState {
+	if i.RotationDays == nil {
+		return RotationUnmanaged
 	}
-	last, err := ParseTime(*i.LastRotated)
+	if i.LastRotated == nil {
+		return RotationNeverRecorded
+	}
+	last, err := ParseDate(*i.LastRotated)
 	if err != nil {
-		return false
+		return RotationUnreadable
 	}
-	return now.UTC().After(last.AddDate(0, 0, *i.RotationDays))
+	// Compare by CALENDAR DAY, not by instant. due is always midnight UTC
+	// (ParseDate never produces a time-of-day), so a `now` taken from the
+	// wall clock at any hour on the due day itself must still read as
+	// within the window -- "exactly on the due day is still inside" is the
+	// case that would otherwise flip to overdue by early afternoon.
+	today := time.Date(now.UTC().Year(), now.UTC().Month(), now.UTC().Day(), 0, 0, 0, 0, time.UTC)
+	// A future last_rotated cannot arrive through the handler (422) but can
+	// arrive through a hand-edited row, a restore, or clock skew, and it must
+	// never read as a policy being met by something that has not happened
+	// yet. Folded into RotationUnreadable rather than a sixth state: the
+	// claim is identical -- the stored value cannot be relied on -- and
+	// RotationFindings already folds unreadable into the Gap bucket, which is
+	// the right severity for "the inventory does not know", not the Fault
+	// bucket that a future-reads-as-overdue answer would risk if this were
+	// ever "fixed" the other way.
+	if last.After(today) {
+		return RotationUnreadable
+	}
+	due := last.AddDate(0, 0, *i.RotationDays)
+	if today.After(due) {
+		return RotationOverdue
+	}
+	return RotationWithinWindow
+}
+
+// RotationDueOn is the date the next rotation is due, or nil when the question
+// has no answer: no policy, no record, a stored value that will not parse, or
+// a stored value that lies about the future. The last two are worth naming
+// together -- a due date computed from either is a lie with a date on it, and
+// RotationStatus already answers RotationUnreadable for both, so this must
+// agree rather than quietly answering a date RotationStatus has just refused
+// to vouch for.
+func (i *Identity) RotationDueOn(now time.Time) *string {
+	if i.RotationDays == nil || i.LastRotated == nil {
+		return nil
+	}
+	last, err := ParseDate(*i.LastRotated)
+	if err != nil {
+		return nil
+	}
+	today := time.Date(now.UTC().Year(), now.UTC().Month(), now.UTC().Day(), 0, 0, 0, 0, time.UTC)
+	if last.After(today) {
+		return nil
+	}
+	due := FormatDate(last.AddDate(0, 0, *i.RotationDays))
+	return &due
 }
 
 // itoa avoids pulling strconv into every call site for small positive ints.

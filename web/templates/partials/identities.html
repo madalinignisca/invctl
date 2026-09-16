@@ -1,0 +1,338 @@
+{{/*
+  invctl — infrastructure inventory
+  Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+
+  Licensed under the GNU Affero General Public License, version 3 only —
+  no later version applies. See LICENSE for the full text.
+
+  SPDX-License-Identifier: AGPL-3.0-only
+*/}}
+{{/* Credential references: what a service authenticates as.
+
+     THE LIST NEVER RENDERS secret_ref, FOR ANYBODY -- only whether one is
+     recorded. One screen listing every credential path in the estate is a
+     reconnaissance gift in its most convenient possible form, and it is one
+     CSV export away from leaving the building. The path itself renders on
+     the DETAIL page, to an Administrator, one credential at a time, via
+     .SecretRef -- never .Identity.SecretRef, which the handler never trusts
+     a template to gate. See internal/web/handlers/identities.go's header. */}}
+{{define "identity_list_panel"}}
+<div id="identity-list" class="panel">
+  <div class="panel-head">
+    <h2>{{pluralise (len .Identities) "identity" "identities"}}</h2>
+    <span class="panel-note">A rotation policy nobody can see is the same as no policy.</span>
+  </div>
+  {{if .Identities}}
+  <div class="scroll-x">
+    <table>
+      <thead>
+        <tr><th>Name</th><th>Realm</th><th>Kind</th><th>Team</th><th>Rotation</th>
+            <th>Secret ref</th><th>Uses</th><th>Lifecycle</th></tr>
+      </thead>
+      <tbody>
+        {{range .Identities}}
+        <tr>
+          <td><a class="id" href="/identities/{{.ID}}">{{.Name}}</a></td>
+          <td class="mono" style="font-size:12.5px">{{if .Realm}}{{.Realm}}{{else}}—{{end}}</td>
+          <td><span class="pill pill-muted">{{title .Kind}}</span></td>
+          <td>
+            {{if .TeamCode}}<a class="id" href="/teams/{{.TeamID}}">{{.TeamCode}}</a>
+            {{else}}<span class="pill pill-degraded" title="Nobody is recorded as owning this">unassigned</span>{{end}}
+          </td>
+          <td>
+            {{if eq .Rotation "unmanaged"}}
+              <span class="pill pill-muted" title="Nobody asked for this credential to be rotated.">no policy</span>
+            {{else if eq .Rotation "never_recorded"}}
+              <span class="pill pill-degraded"
+                    title="The estate has a rule for this credential and no evidence it has ever been followed.">never recorded</span>
+            {{else if eq .Rotation "within_window"}}
+              <span class="pill pill-ok">due in {{.DaysUntilDue}} d</span>
+              <div style="color:var(--muted);font-size:11.5px">{{.DueOn}}</div>
+            {{else if eq .Rotation "overdue"}}
+              <span class="pill pill-down">overdue by {{sub 0 .DaysUntilDue}} d</span>
+              <div style="color:var(--muted);font-size:11.5px">was due {{.DueOn}}</div>
+            {{else}}
+              {{/* A state that cannot be READ must never render as a state
+                   that is FINE. This pill is deliberately alarming rather
+                   than muted. */}}
+              <span class="pill pill-down" title="The stored date will not parse.">date unreadable</span>
+            {{end}}
+          </td>
+          <td>
+            {{/* WHETHER, never WHAT. The path renders on the detail page, to
+                 an Administrator, one credential at a time. */}}
+            {{if .HasSecretRef}}<span class="pill pill-muted">recorded</span>
+            {{else}}<span class="pill pill-degraded" title="Nobody has recorded where the material lives">none</span>{{end}}
+          </td>
+          <td class="num">{{.Uses}}</td>
+          <td><span class="{{lifecycleClass .Lifecycle}}">{{.Lifecycle}}</span></td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{else}}
+  <div class="empty">
+    <strong>No identities match.</strong>
+    A credential nobody recorded is one this page cannot say anything about.
+  </div>
+  {{end}}
+</div>
+{{end}}
+
+{{define "identity_panel"}}
+<div id="identity">
+  <div class="panel">
+    <div class="panel-head"><h2>What it is</h2></div>
+    <div class="panel-body">
+      <dl class="kv">
+        <dt>Kind</dt>
+        <dd><span class="pill pill-muted">{{title .Identity.Kind}}</span></dd>
+        <dt>Realm</dt>
+        <dd class="mono">{{if .Identity.Realm}}{{deref .Identity.Realm}}{{else}}—{{end}}</dd>
+        <dt>Lifecycle</dt>
+        <dd><span class="{{lifecycleClass .Identity.Lifecycle}}">{{.Identity.Lifecycle}}</span></dd>
+        <dt>Team</dt>
+        <dd>
+          {{if .Identity.TeamName}}<a href="/teams/{{deref .Identity.TeamID}}">{{.Identity.TeamName}}</a>
+          {{else}}<span style="color:var(--faint)">nobody recorded</span>{{end}}
+        </dd>
+        <dt>Secret reference</dt>
+        <dd class="mono" style="word-break:break-all">
+          {{/* SecretRef, NEVER .Identity.SecretRef -- see the handler's header.
+               .SecretRef is already gated: empty for anyone who is not a full
+               Administrator, and empty when the credential carries none. */}}
+          {{if .SecretRef}}{{.SecretRef}}
+            <div class="field-hint">A path. The material itself is not in this database and must never be.</div>
+          {{else if not .IsAdmin}}
+            <span style="color:var(--faint)" title="Visible to an Administrator only">restricted</span>
+          {{else}}—{{end}}
+        </dd>
+      </dl>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head"><h2>Rotation</h2></div>
+    <div class="panel-body">
+      {{/* All three facts, stated plainly, never collapsed into one another:
+           the policy, the last recorded rotation (never a blank), and the
+           derived state. */}}
+      <dl class="kv">
+        <dt>Policy</dt>
+        <dd>
+          {{if .Identity.RotationDays}}every {{derefInt .Identity.RotationDays}} days
+          {{else}}<span style="color:var(--faint)">no rotation policy</span>{{end}}
+        </dd>
+        <dt>Last recorded</dt>
+        <dd class="mono">
+          {{if .Identity.LastRotated}}{{deref .Identity.LastRotated}}
+          {{else if .Identity.RotationDays}}<span class="pill pill-degraded">never recorded</span>
+          {{else}}—{{end}}
+        </dd>
+        <dt>State</dt>
+        <dd>
+          {{if eq .Rotation "unmanaged"}}
+            <span class="pill pill-muted">no policy</span>
+          {{else if eq .Rotation "never_recorded"}}
+            <span class="pill pill-degraded">never recorded</span>
+          {{else if eq .Rotation "within_window"}}
+            <span class="pill pill-ok">due on {{.DueOn}}</span>
+          {{else if eq .Rotation "overdue"}}
+            <span class="pill pill-down">overdue — was due {{.DueOn}}</span>
+          {{else}}
+            <span class="pill pill-down" title="The stored date will not parse.">date unreadable</span>
+          {{end}}
+        </dd>
+      </dl>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head">
+      <h2>What would notice</h2>
+      <span class="panel-note">What is stored keeps displaying, including a live edge naming a withdrawn credential.</span>
+    </div>
+    {{if or .Usage.Dependencies .Usage.Windows}}
+    <div class="scroll-x">
+      <table>
+        <thead><tr><th>What</th><th>Kind</th><th>Detail</th></tr></thead>
+        <tbody>
+          {{range .Usage.Dependencies}}
+          <tr>
+            <td><a class="id" href="/services/{{.ConsumerID}}">{{.ConsumerCode}}</a></td>
+            <td><span class="pill pill-info">dependency</span></td>
+            <td style="color:var(--muted);font-size:12.5px">
+              authenticates to {{if .ProviderName}}{{.ProviderName}}{{else}}—{{end}}
+              {{if .AuthMethod}} · {{.AuthMethod}}{{end}}
+            </td>
+          </tr>
+          {{end}}
+          {{range .Usage.Windows}}
+          <tr>
+            <td>
+              {{if .ServiceCode}}<a class="id" href="/services/{{.ServiceID}}">{{.ServiceCode}}</a>
+              {{else}}{{.ServiceName}}{{end}}
+            </td>
+            <td><span class="pill pill-muted">Windows service</span></td>
+            <td style="color:var(--muted);font-size:12.5px">{{.ServiceName}}</td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+    {{else}}
+    <div class="empty">
+      <strong>Nothing recorded as using this credential.</strong>
+      Either nothing does, or nobody wrote it down.
+    </div>
+    {{end}}
+  </div>
+
+  {{if .IsAdmin}}
+  <div class="panel">
+    <div class="panel-head"><h2>Record a rotation</h2></div>
+    {{/* THIS IS THE FEATURE, not a field on the correction form below --
+         docs/identity-surface-design.md, "One writer for last_rotated": a
+         create form that also stamped the date would bury the rotation
+         inside a create snapshot no reader looking for one would find. */}}
+    {{/* hx-target="#identity" hx-swap="outerHTML", EXPLICITLY -- CLAUDE.md:
+         "Swap targets are declared in the template, not chosen by the
+         handler. Default to hx-swap='outerHTML' on a wrapping element with a
+         stable id." Without this, htmx's default target is the form element
+         itself and its default swap is innerHTML, so a 422 -- whose body is
+         the WHOLE #identity partial (What it is / Rotation / ... /
+         Timeline) -- lands nested inside this form instead of replacing it.
+         Every panel heading then renders twice and the layout breaks. Masked
+         today only because the date input's max="{{.Today}}" makes a
+         same-origin browser refuse to submit a future date client-side
+         before the request is ever sent -- one dropped attribute, one
+         non-Chromium client, or one accessibility tool that strips max, and
+         it is visible on this form's central action. Found by a browser
+         smoke check after this max fix landed, not by any server-side test.
+         Success is unaffected: HX-Redirect (render.Redirect) makes htmx
+         navigate the whole page regardless of target/swap. */}}
+    <form class="panel-body" method="post" action="/identities/{{.Identity.ID}}/rotation"
+          hx-post="/identities/{{.Identity.ID}}/rotation"
+          hx-target="#identity" hx-swap="outerHTML">
+      <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+      <div class="field">
+        <label for="i-rot">Rotated on</label>
+        {{/* Defaults to today, computed server-side. A browser-supplied
+             default would let a client's wrong clock post-date a rotation
+             past a check made against the server's. max is a courtesy, not
+             the enforcement: RecordIdentityRotation refuses a future date
+             and returns 422 -- .RotationInput carries back exactly what was
+             typed on that refusal, never a silently reset "today". */}}
+        {{/* max is .Today, NEVER .RotationInput: after a refused future date,
+             .RotationInput carries back exactly what was rejected so the
+             typed value survives, and a max bound to it would grant the
+             browser permission to resubmit the very date just refused. */}}
+        <input id="i-rot" type="date" name="last_rotated"
+               value="{{.RotationInput}}" max="{{.Today}}" required>
+        {{with index .Errors "last_rotated"}}<div class="field-error">{{.}}</div>{{end}}
+        <div class="field-hint">
+          Backdating is fine — record the day it actually happened. A future date is refused.
+        </div>
+      </div>
+      <button class="btn btn-primary" type="submit">Record rotation</button>
+    </form>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head"><h2>Correct this credential</h2></div>
+    {{/* NO hx-post, deliberately: this form can end in an ORDINARY 409 two
+         ways -- a duplicate (realm, name), or somebody else recording a
+         rotation while this form sat open (the spec accepts this cost
+         explicitly). htmx 2 does not swap a 409 by default (app.js:649 only
+         swaps 422), so hx-post here would leave Save doing nothing visible
+         on a credential form during an incident. A plain POST/redirect
+         renders the 409 as a full page instead -- bundle_detail.html's
+         correction form is the existing precedent for this exact shape.
+         hx-post stays on the rotation form above (only 422, which swaps)
+         and on withdraw below (hx-confirm requires it). */}}
+    <form class="panel-body" method="post" action="/identities/{{.Identity.ID}}">
+      <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+      {{/* The version the operator opened. See internal/domain/version.go. */}}
+      <input type="hidden" name="row_version" value="{{.Identity.RowVersion}}">
+      <div class="field-row">
+        <div class="field">
+          <label for="i-ed-kind">Kind</label>
+          <select id="i-ed-kind" name="kind" required>
+            {{range $.Kinds}}<option value="{{.}}" {{if eq . $.Identity.Kind}}selected{{end}}>{{title .}}</option>{{end}}
+          </select>
+          {{with index .Errors "kind"}}<div class="field-error">{{.}}</div>{{end}}
+        </div>
+        <div class="field">
+          <label for="i-ed-name">Name</label>
+          <input id="i-ed-name" type="text" name="name" value="{{.Identity.Name}}" required>
+          {{with index .Errors "name"}}<div class="field-error">{{.}}</div>{{end}}
+        </div>
+        <div class="field">
+          <label for="i-ed-realm">Realm</label>
+          <input id="i-ed-realm" class="mono" type="text" name="realm" value="{{deref .Identity.Realm}}">
+        </div>
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label for="i-ed-secret">Secret reference</label>
+          {{/* .SecretRef, NEVER .Identity.SecretRef -- see this file's header
+               (lines 12-17): a template-side {{if .IsAdmin}} is one {{end}}
+               away from leaking it. .SecretRef is computed in
+               renderIdentityWith AFTER the spec overlay, so a rejected
+               correction still echoes what an Administrator typed, and this
+               field stays empty for anyone else even if the surrounding
+               {{if .IsAdmin}} block is ever moved or mis-nested. */}}
+          <input id="i-ed-secret" class="mono" type="text" name="secret_ref" value="{{.SecretRef}}">
+          <div class="field-hint">A path. The material itself must never be entered here.</div>
+        </div>
+        <div class="field">
+          <label for="i-ed-rotdays">Rotation policy (days)</label>
+          <input id="i-ed-rotdays" type="number" min="1" name="rotation_days"
+                 value="{{if .Identity.RotationDays}}{{derefInt .Identity.RotationDays}}{{end}}">
+          {{with index .Errors "rotation_days"}}<div class="field-error">{{.}}</div>{{end}}
+          <div class="field-hint">Blank means nobody has asked for this credential to be rotated.</div>
+        </div>
+        <div class="field">
+          <label for="i-ed-team">Team</label>
+          <select id="i-ed-team" name="team_id">
+            <option value="">— none —</option>
+            {{range $.Teams}}<option value="{{.ID}}" {{if eq .ID (deref $.Identity.TeamID)}}selected{{end}}>{{.Code}}</option>{{end}}
+          </select>
+        </div>
+      </div>
+      <button class="btn btn-primary" type="submit">Save</button>
+    </form>
+  </div>
+
+  {{if ne .Identity.Lifecycle "retired"}}
+  <div class="panel">
+    <div class="panel-head"><h2>Withdraw</h2></div>
+    {{/* NO row_version HERE, deliberately: RetireIdentity (WP-J8 Task 3)
+         takes no client-submitted version at all -- it re-reads the row and
+         guards its own write with what it just read, the same shape
+         RetireBundle and RetireTeam already use, and TestEveryEditFormCarriesItsVersion's
+         population is exactly the handlers that call submittedVersion, which
+         IdentityRetire does not. A token here would be inert markup nothing
+         reads. */}}
+    {{/* hx-target/hx-swap explicit for the same CLAUDE.md reason as the
+         rotation form above -- app.js only forces a swap on 422, so today's
+         only reachable conflict here (409, an internal race between two
+         retires) is not actually swapped by htmx's default behaviour. Set
+         explicitly anyway rather than relying on that default staying what
+         it is: the rule is "declared in the template", not "whichever
+         status happens not to trigger the default today". */}}
+    <form class="panel-body" method="post" action="/identities/{{.Identity.ID}}/retire"
+          hx-post="/identities/{{.Identity.ID}}/retire"
+          hx-target="#identity" hx-swap="outerHTML"
+          hx-confirm="Withdraw this credential? What still names it keeps displaying, marked retired -- nothing still using it is re-pointed automatically.">
+      <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+      <button class="btn btn-danger" type="submit">Withdraw this credential</button>
+    </form>
+  </div>
+  {{end}}
+  {{end}}
+
+  {{template "timeline_panel" .Timeline}}
+</div>
+{{end}}

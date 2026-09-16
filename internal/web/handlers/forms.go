@@ -335,7 +335,7 @@ type dependencyFormData struct {
 	// estate has to offer, filtered or not). See pickerHint.
 	EndpointHint string
 	RouteHint    string
-	Identities   []domain.Identity
+	Identities   []store.IdentityRow
 	Natures      []string
 	ClassOptions []store.VocabularyTerm
 }
@@ -609,7 +609,7 @@ func (a *App) newEndpointEditForm(r *http.Request, e *domain.Endpoint, errs map[
 // add a third subject-resolution path, give it a case there. For an
 // Administrator, whose permit covers everything, the filter removes nothing:
 // this is a widening for a project owner, never a narrowing for anyone else.
-func (a *App) newDependencyForm(r *http.Request, serviceID string, errs map[string]string, spec domain.DependencySpec, endpoints []store.EndpointRow, routes []store.RouteRow, identities []domain.Identity, classes []store.VocabularyTerm) dependencyFormData {
+func (a *App) newDependencyForm(r *http.Request, serviceID string, errs map[string]string, spec domain.DependencySpec, endpoints []store.EndpointRow, routes []store.RouteRow, identities []store.IdentityRow, classes []store.VocabularyTerm) dependencyFormData {
 	base := a.base(r, "Services", "services")
 	filteredEndpoints := writableEndpoints(base, endpoints)
 	filteredRoutes := writableRoutes(base, routes)
@@ -876,7 +876,7 @@ type depRowData struct {
 type depEditForm struct {
 	Natures      []string
 	ClassOptions []store.VocabularyTerm
-	Identities   []domain.Identity
+	Identities   []store.IdentityRow
 	// Edit is the refused submission, or nil. Every accessor is nil-safe.
 	Edit *editState
 }

@@ -1,0 +1,125 @@
+{{/*
+  invctl — infrastructure inventory
+  Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+
+  Licensed under the GNU Affero General Public License, version 3 only —
+  no later version applies. See LICENSE for the full text.
+
+  SPDX-License-Identifier: AGPL-3.0-only
+*/}}
+{{define "content"}}
+<div class="page-head">
+  <div class="eyebrow">inventory</div>
+  <h1>Identities</h1>
+  <p class="lede">
+    What a service authenticates as, and whether anybody has recorded rotating
+    it. <span class="mono">secret_ref</span> is a path to credential material,
+    never the material — it renders on the detail page, to an Administrator,
+    one credential at a time. This list shows only whether one is recorded.
+  </p>
+</div>
+
+<div class="panel">
+  <div class="panel-body">
+    <form class="toolbar" hx-get="/identities" hx-target="#identity-list"
+          hx-swap="outerHTML" hx-push-url="true"
+          hx-trigger="keyup changed delay:250ms, search, change">
+      <div class="field" style="margin-bottom:0">
+        <label for="iq">Find</label>
+        <input id="iq" type="search" name="q" value="{{.Filter.Query}}" placeholder="name or realm">
+      </div>
+      <div class="field" style="margin-bottom:0">
+        <label for="ikind">Kind</label>
+        <select id="ikind" name="kind">
+          <option value="">any</option>
+          {{range $.Kinds}}<option value="{{.}}" {{if eq . $.Filter.Kind}}selected{{end}}>{{title .}}</option>{{end}}
+        </select>
+      </div>
+      <div class="field" style="margin-bottom:0">
+        <label for="iteam">Team</label>
+        <select id="iteam" name="team">
+          <option value="">any</option>
+          {{range $.Teams}}<option value="{{.ID}}" {{if eq .ID $.Filter.TeamID}}selected{{end}}>{{.Code}}</option>{{end}}
+        </select>
+      </div>
+      <div class="field" style="margin-bottom:0">
+        <label for="irot">Rotation</label>
+        <select id="irot" name="rotation">
+          <option value="">any</option>
+          {{range $.States}}<option value="{{.}}" {{if eq . (printf "%s" $.Filter.Rotation)}}selected{{end}}>{{title .}}</option>{{end}}
+        </select>
+      </div>
+      <div class="field" style="margin-bottom:0">
+        <label for="ilife">Lifecycle</label>
+        <select id="ilife" name="lifecycle">
+          <option value="" {{if eq $.Lifecycle ""}}selected{{end}}>active</option>
+          <option value="retired" {{if eq $.Lifecycle "retired"}}selected{{end}}>retired</option>
+          <option value="any" {{if eq $.Lifecycle "any"}}selected{{end}}>any</option>
+        </select>
+        <div class="field-hint">So a withdrawn credential can still be found.</div>
+      </div>
+    </form>
+  </div>
+</div>
+
+{{template "identity_list_panel" .}}
+
+{{if .IsAdmin}}
+<div class="panel">
+  <div class="panel-head"><h2>Declare a credential</h2></div>
+  {{/* NO hx-post, deliberately: a duplicate (realm, name) here is an ORDINARY
+       typo and gets a 409, which htmx 2 does not swap by default
+       (app.js:649 only swaps 422). A plain POST/redirect renders that 409 as
+       a full page the operator can actually read, the same shape
+       bundle_detail.html's correction form already uses for the same
+       reason. hx-post stays on the rotation form below, whose only conflict
+       status is 422, which does swap correctly. */}}
+  <form class="panel-body" method="post" action="/identities">
+    <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+    <div class="field-row">
+      <div class="field">
+        <label for="i-kind">Kind</label>
+        <select id="i-kind" name="kind" required>
+          <option value="">— choose —</option>
+          {{range $.Kinds}}<option value="{{.}}" {{if eq . $.Spec.Kind}}selected{{end}}>{{title .}}</option>{{end}}
+        </select>
+        {{with index .Errors "kind"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="i-name">Name</label>
+        <input id="i-name" type="text" name="name" value="{{.Spec.Name}}" required>
+        {{with index .Errors "name"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="i-realm">Realm</label>
+        <input id="i-realm" class="mono" type="text" name="realm" value="{{deref .Spec.Realm}}"
+               placeholder="a Windows domain, a Vault namespace, or leave blank">
+      </div>
+    </div>
+    <div class="field-row">
+      <div class="field">
+        <label for="i-secret">Secret reference</label>
+        <input id="i-secret" class="mono" type="text" name="secret_ref" value="{{deref .Spec.SecretRef}}"
+               placeholder="a path, e.g. kv/prod/service-name/credential">
+        <div class="field-hint">A path. The material itself must never be entered here.</div>
+      </div>
+      <div class="field">
+        <label for="i-rotdays">Rotation policy (days)</label>
+        <input id="i-rotdays" type="number" min="1" name="rotation_days"
+               value="{{if .Spec.RotationDays}}{{derefInt .Spec.RotationDays}}{{end}}">
+        {{with index .Errors "rotation_days"}}<div class="field-error">{{.}}</div>{{end}}
+        <div class="field-hint">Blank means nobody has asked for this credential to be rotated.</div>
+      </div>
+      <div class="field">
+        <label for="i-team">Team</label>
+        <select id="i-team" name="team_id">
+          <option value="">— none —</option>
+          {{range $.Teams}}<option value="{{.ID}}" {{if eq .ID (deref $.Spec.TeamID)}}selected{{end}}>{{.Code}}</option>{{end}}
+        </select>
+      </div>
+    </div>
+    <button class="btn btn-primary" type="submit">Declare</button>
+  </form>
+</div>
+{{end}}
+{{end}}

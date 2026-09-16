@@ -455,11 +455,12 @@ func dependencyWithSecretRef(t *testing.T, h *harness, ref string) (serviceID, s
 	t.Helper()
 	ctx := context.Background()
 
-	identity, err := domain.NewIdentity(store.NewID(), domain.IdentityServiceAccount, "svc-redaction-test")
+	identity, err := domain.NewIdentity(store.NewID(), domain.IdentitySpec{
+		Kind: domain.IdentityServiceAccount, Name: "svc-redaction-test", SecretRef: strPtr(ref),
+	})
 	if err != nil {
 		t.Fatalf("building identity: %v", err)
 	}
-	identity.SecretRef = strPtr(ref)
 	if err := h.store.CreateIdentity(ctx, domain.AdministratorPermit(domain.SystemActor), identity); err != nil {
 		t.Fatalf("creating identity: %v", err)
 	}

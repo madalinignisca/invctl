@@ -228,6 +228,16 @@ func (s *SQLStore) EstateFindings(ctx context.Context) ([]Finding, error) {
 	}
 	out = append(out, extra...)
 
+	// Credential rotation (WP-J8). Three findings and two deliberate
+	// non-findings; rotation_findings.go's header argues each. This is the only
+	// place a rotation rule the estate set for itself becomes visible without
+	// somebody opening /identities.
+	rotation, err := s.RotationFindings(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("gathering rotation findings: %w", err)
+	}
+	out = append(out, rotation...)
+
 	// Overlays that carry nothing, or carry it to one place.
 	overlays, err := s.ListL2VPNs(ctx)
 	if err != nil {

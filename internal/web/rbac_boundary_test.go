@@ -929,9 +929,17 @@ func TestAProjectOwnerIsRefusedOnEveryNonProjectLinkableWriteRoute(t *testing.T)
 			// bucket, for the same reason -- user_project is the table that
 			// decides a project owner's own scope, so it stays
 			// Administrator-only alongside the rest of user administration.
-			if administratorGate != 14 {
-				t.Errorf("RequireAdministrator refusals = %d, want 14 (six import routes "+
-					"and eight /users routes)", administratorGate)
+			//
+			// 14 -> 18: the four /identities POSTs. writeAdminOnly rather than
+			// write, and the reason is secret_ref on the correction form --
+			// see routes.go. identity is ScopeEstateConfig, so a project
+			// owner would be refused by permit.Covers anyway; gating at the
+			// door means they are refused BEFORE filling in a form, and means
+			// the one surface that renders a credential path never renders it
+			// to them at all.
+			if administratorGate != 18 {
+				t.Errorf("RequireAdministrator refusals = %d, want 18 (six import routes, "+
+					"eight /users routes and four /identities routes)", administratorGate)
 			}
 			// 10 -> 11: POST /network/groups/{id}/retire. net_group is
 			// ScopeTopology, so a project owner passes RequireWrite and is
@@ -1213,7 +1221,12 @@ func TestNoWriteRouteIsReachableWithNoSessionAtAll(t *testing.T) {
 	// them, the same shape unreachableRepairPaths named for UpdateBundle
 	// and RetireBundle -- both entries came out of that map the moment
 	// these routes landed.
-	const pinnedNoSessionRouteCount = 219
+	// 219 -> 223: identity-surface plan, Task 5 -- POST /identities,
+	// /identities/{id}, /identities/{id}/retire and /identities/{id}/rotation.
+	// The store methods had no route at all until this task, the fourth is
+	// the one the work package exists for, and it is the only route in the
+	// router whose whole job is to stamp a date.
+	const pinnedNoSessionRouteCount = 223
 
 	for _, eng := range boundaryEngines(t) {
 		t.Run(eng.name, func(t *testing.T) {

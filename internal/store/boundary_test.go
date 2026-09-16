@@ -732,22 +732,25 @@ func TestSnapshotRedactsSecretRef(t *testing.T) {
 		t.Run(e.Name, func(t *testing.T) {
 			s, ctx := newStore(t, e)
 
-			identity, err := domain.NewIdentity(NewID(), domain.IdentityServiceAccount, "svc-orders")
+			identity, err := domain.NewIdentity(NewID(), domain.IdentitySpec{
+				Kind: domain.IdentityServiceAccount, Name: "svc-orders", SecretRef: strPtr(vaultPath),
+			})
 			if err != nil {
 				t.Fatalf("building identity: %v", err)
 			}
-			identity.SecretRef = strPtr(vaultPath)
 			if err := s.CreateIdentity(ctx, testPermit, identity); err != nil {
 				t.Fatalf("creating identity: %v", err)
 			}
 
 			// A second identity reached through a dependency, so the leak has a
 			// second route to the log if one exists.
-			other, err := domain.NewIdentity(NewID(), domain.IdentityServiceAccount, "svc-billing")
+			other, err := domain.NewIdentity(NewID(), domain.IdentitySpec{
+				Kind: domain.IdentityServiceAccount, Name: "svc-billing",
+				SecretRef: strPtr("kv/prod/billing/api-token"),
+			})
 			if err != nil {
 				t.Fatalf("building identity: %v", err)
 			}
-			other.SecretRef = strPtr("kv/prod/billing/api-token")
 			if err := s.CreateIdentity(ctx, testPermit, other); err != nil {
 				t.Fatalf("creating identity: %v", err)
 			}

@@ -66,7 +66,7 @@
     {{$idv := .EditForm.Edit.Value "identity_id" (deref .Dep.IdentityID)}}
     <select form="dep-f-{{.Dep.ID}}" name="identity_id" aria-label="Identity">
       <option value="">—</option>
-      {{range .EditForm.Identities}}<option value="{{.ID}}" {{if eq .ID $idv}}selected{{end}}>{{.Realm}} · {{.Name}}</option>{{end}}
+      {{range .EditForm.Identities}}<option value="{{.ID}}" {{if eq .ID $idv}}selected{{end}}>{{.Realm}} · {{.Name}}{{if eq .Lifecycle "retired"}} (withdrawn){{end}}</option>{{end}}
     </select>
     <input form="dep-f-{{.Dep.ID}}" type="text" name="auth_method" style="width:9em;margin-top:4px"
            value="{{.EditForm.Edit.Value "auth_method" (deref .Dep.AuthMethod)}}"

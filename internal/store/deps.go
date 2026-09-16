@@ -868,45 +868,10 @@ func (s *SQLStore) DataClassesFor(ctx context.Context, dependencyIDs []string) (
 }
 
 // ---------- identities ----------
-
-// CreateIdentity inserts a principal.
-// realmOrEmpty normalises an unset realm to the empty string.
 //
-// identity.realm became NOT NULL in 00003 because a NULL one made
-// UNIQUE (realm, name) silently not fire -- NULL <> NULL, so two realm-less
-// identities called 'svc-orders' were both accepted, which is exactly the pair
-// the constraint existed to stop. Normalising here rather than at every call
-// site keeps "no realm" expressible in Go as a nil pointer.
-func realmOrEmpty(realm *string) string {
-	if realm == nil {
-		return ""
-	}
-	return *realm
-}
-
-func (s *SQLStore) CreateIdentity(ctx context.Context, p domain.Permit, i *domain.Identity) error {
-	return s.write(ctx, p, func(t *tx) error {
-		_, err := t.exec(ctx, `
-			INSERT INTO identity (id, kind, name, realm, secret_ref, rotation_days,
-			                      last_rotated, team_id, lifecycle)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			i.ID, i.Kind, i.Name, realmOrEmpty(i.Realm), i.SecretRef, i.RotationDays,
-			i.LastRotated, i.TeamID, i.Lifecycle)
-		if err != nil {
-			return translateWriteErr(err, "creating identity")
-		}
-		return t.logCreate(ctx, "identity", i.ID, i)
-	})
-}
-
-// ListIdentities returns every principal.
-func (s *SQLStore) ListIdentities(ctx context.Context) ([]domain.Identity, error) {
-	var identities []domain.Identity
-	if err := s.read(ctx, &identities, `SELECT * FROM identity ORDER BY realm, name`); err != nil {
-		return nil, fmt.Errorf("listing identities: %w", err)
-	}
-	return identities, nil
-}
+// Moved to internal/store/identities.go (WP-J8, Task 3): CreateIdentity,
+// ListIdentities (now filtered), UpdateIdentity, RetireIdentity,
+// RecordIdentityRotation and IdentityUsage all live there now.
 
 // ---------- change log ----------
 

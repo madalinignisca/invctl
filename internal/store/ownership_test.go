@@ -147,11 +147,12 @@ func (f *ownershipFixture) project(t *testing.T, code string, teamID *string, li
 // legal here and this helper does not pretend otherwise.
 func (f *ownershipFixture) identity(t *testing.T, name string, teamID *string, lifecycle string) string {
 	t.Helper()
-	id, err := domain.NewIdentity(NewID(), domain.IdentityServiceAccount, name)
+	id, err := domain.NewIdentity(NewID(), domain.IdentitySpec{
+		Kind: domain.IdentityServiceAccount, Name: name, TeamID: teamID,
+	})
 	if err != nil {
 		t.Fatalf("building identity %s: %v", name, err)
 	}
-	id.TeamID = teamID
 	if lifecycle != "" {
 		id.Lifecycle = lifecycle
 	}
@@ -159,6 +160,19 @@ func (f *ownershipFixture) identity(t *testing.T, name string, teamID *string, l
 		t.Fatalf("creating identity %s: %v", name, err)
 	}
 	return id.ID
+}
+
+// rowVersion reads back an identity's optimistic-concurrency token, migration
+// 00069 (WP-J8). Used to prove the two bulk writers bump it while keeping
+// their existing WHERE guards.
+func (f *ownershipFixture) rowVersion(t *testing.T, identityID string) int {
+	t.Helper()
+	var v int
+	if err := f.s.readOne(f.ctx, &v,
+		`SELECT row_version FROM identity WHERE id = ?`, identityID); err != nil {
+		t.Fatalf("reading row_version for %s: %v", identityID, err)
+	}
+	return v
 }
 
 // customField creates a live custom field. teamID nil produces the ONE state
