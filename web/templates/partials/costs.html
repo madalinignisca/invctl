@@ -180,8 +180,22 @@
              point of the action is that the old figure survives untouched. */}}
         <tr>
           <td colspan="7">
+            {{/* hx-target="this" hx-swap="none" -- a declaration, not an
+                 exemption (docs/htmx-swap-targets-design.md rule 1): if
+                 afterCostWrite ever grows a path that renders a fragment,
+                 "none" declines to swap it rather than swallowing it into
+                 this element, and stays correct even if app.js's
+                 force-swap ever widens past 422. Argued from the handler,
+                 per rule 4: every route on this page ends in afterCostWrite
+                 (handlers/costs.go), which answers flash+render.Redirect on
+                 a validation refusal and handleStoreError otherwise, never
+                 a fragment -- it is already named in refusalFlashExceptions
+                 (refusal_status_test.go) for exactly that reason. See
+                 partials/teams.html's retire forms for the full reasoning;
+                 the other two forms on this page point back here rather
+                 than repeating it. */}}
             <form method="post" action="{{$.Action}}/{{.ID}}/reprice"
-                  hx-post="{{$.Action}}/{{.ID}}/reprice">
+                  hx-post="{{$.Action}}/{{.ID}}/reprice" hx-target="this" hx-swap="none">
               <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
               <div class="field-row">
                 <div class="field">
@@ -233,8 +247,13 @@
             {{if ne .Period "once"}}
             <a class="btn btn-sm" href="{{$.Return}}?reprice={{.ID}}#costs">Reprice</a>
             {{end}}
+            {{/* hx-target="this" hx-swap="none" -- same declaration as the
+                 reprice form above; both end in afterCostWrite
+                 (handlers/costs.go), already named in
+                 refusalFlashExceptions. */}}
             <form method="post" action="{{$.Action}}/{{.ID}}/retire"
-                  hx-post="{{$.Action}}/{{.ID}}/retire" style="display:inline">
+                  hx-post="{{$.Action}}/{{.ID}}/retire" hx-target="this" hx-swap="none"
+                  style="display:inline">
               <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
               <button class="btn btn-sm btn-danger" type="submit">Remove</button>
             </form>
@@ -250,7 +269,11 @@
   {{end}}
 
   {{if .CanWrite}}
-  <form class="panel-body" method="post" action="{{.Action}}" hx-post="{{.Action}}">
+  {{/* hx-target="this" hx-swap="none" -- same declaration as the reprice
+       form above; this route too ends in afterCostWrite
+       (handlers/costs.go), already named in refusalFlashExceptions. */}}
+  <form class="panel-body" method="post" action="{{.Action}}" hx-post="{{.Action}}"
+        hx-target="this" hx-swap="none">
     <input type="hidden" name="csrf_token" value="{{.CSRF}}">
     <div class="field-row">
       <div class="field">
