@@ -26,6 +26,88 @@ PostgreSQL. Playwright for the browser half (`tests/e2e/`, opt-in, never part of
 the spec disagree, the spec wins**, except on the five points listed in "Where this plan
 departs from the spec" below, each of which was signed off before implementation began.
 
+## Amendments from the plan review, 2026-09-16 — these OVERRIDE the task text below
+
+Two reviewers attacked this plan before implementation. Codex verified its factual
+claims and found zero defects. The items below come from the comprehension review and
+from my own verification; where they differ from a task's text, these win.
+
+### A1. Task 0 Step 2's vector check is a MANUAL OBSERVATION, not a self-checking test
+
+`TestVectorReachesErrInvalid` calls `t.Fatalf` unconditionally and prints values. It
+does not verify itself. **The expected output is:**
+
+```
+status=422, body="That request was not valid.", reswap=""
+```
+
+**Read it. If any of the three differs, STOP and find a different vector — do not
+proceed to Task 4.** The plan as written handles a 403/404 outcome but not "422 with a
+different body", and that is the dangerous one: Task 4's tests would then pass while
+asserting against a refusal path they never actually reach. That is the defect this
+codebase has hit repeatedly — a green test proving nothing. Only after the three
+values match do you delete the vector file.
+
+### A2. The class-1 / class-2 table is a starting point, not an authority
+
+Tasks 5 and 6 both begin with this, and it is not optional:
+
+**For every element in your task, open its handler and read it before you touch the
+template.** Confirm a class-2 handler really answers only `render.Redirect`,
+`setFlash` + `render.Redirect`, or `handleStoreError` on *every* path. **If you find
+any path that renders a fragment, STOP and raise it** — that element is class 1 and
+declaring `none` on it would silently swallow a real refusal, which is this bug
+reintroduced by its own fix.
+
+The table was built by reading every handler, and Codex re-verified a sample. Neither
+is a substitute for checking the one in front of you: handlers change, and the plan is
+a document written at a point in time.
+
+### A3. `none` is a declaration about the future, not a description of today
+
+The class-2 comment must say why `none` rather than any other value, because "the
+handler renders no fragment today" does not explain it. It is a safety layer: **if
+that handler later grows a path that renders a fragment, `none` declines to swap it
+rather than swallowing it into the element.** That is what makes it a declaration —
+stating what should happen — rather than an exemption skirting a rule.
+
+Add the point the spec makes and the plan omits: were `app.js`'s force-swap ever
+widened beyond 422 (409 is the obvious candidate), these `none` declarations stay
+correct, whereas a status-based exemption would break silently. That asymmetry is the
+whole reason the exemption map is not keyed on status.
+
+### A4. Task 8 Step 4 names the wrong thing to revert
+
+"Revert the certificate form" is ambiguous across three edits this plan makes to that
+file. It means: **revert `hx-target` and `hx-swap` on the opening `<form>` tag at
+`web/templates/partials/certificates.html:66`** — the create form, the one Task 1
+touched. Re-run, and record *which assertion* went red, not that the suite did.
+
+### A5. The shape of the 38, stated once so nobody has to infer it
+
+- **Tasks 1-3** — three handlers re-rendering the wrong partial (certificates, teams,
+  users). Handler changes, not markup. They land first because targeting these
+  without fixing them makes the refusal invisible.
+- **Task 4** — `handleStoreError`'s `ErrInvalid` path. Required before the sweep,
+  because declaring targets is what turns its plain-text body into a panel-eater.
+- **Task 5** — the remaining class-1 elements, whose handlers do render fragments.
+- **Task 6** — the 28 class-2 elements.
+- **Tasks 7-9** — the census, browser evidence, roadmap and gate.
+
+### A6. Verified myself, so no implementer needs to re-derive it
+
+Codex could not confirm two claims by inspection because the file is minified, and
+marked them "trusted". Trusted is not verified, and the whole `ErrInvalid` design
+rests on them. All three are now confirmed in `web/static/htmx.min.js` 2.0.4:
+
+- **`HX-Reswap` is honoured** — `HX-Reswap:/i)){g=s.getResponseHeader("HX-Reswap")}`.
+- **OOB fires under `swap: none`** — the `hx-swap-oob` pass ends immediately before
+  `function $e(...)`, which is what dispatches `_e(r.swapStyle,…)`; `case"none":return`
+  therefore skips only the primary swap.
+- **`HX-Redirect` returns before target resolution** —
+  `HX-Redirect:/i)){i.keepIndicators=true;location.href=…;return`. Success paths cannot
+  be affected by anything this plan declares.
+
 ## Global Constraints
 
 Copied verbatim from the spec's "Global constraints" section. Every task's requirements
