@@ -132,9 +132,12 @@ func savedViewListPath(entity, params string) string {
 // nothing here overrides it. domain.ErrInvalid is the one case this project's
 // own rule ("Validation errors re-render the form partial with error state
 // and return HTTP 422", CLAUDE.md) actually requires more than
-// handleStoreError gives: a bare "That request was not valid." text body,
-// returned to a plain (non-hx-post) form post, would navigate the whole tab
-// away and silently drop the filters the operator had open. See
+// handleStoreError gives: since the swap-target sweep it answers an
+// HX-Request with an out-of-band flash and HX-Reswap: none, which destroys
+// nothing but also redraws nothing -- so the operator keeps their filters and
+// is told the write failed, without the saved-view menu coming back showing
+// what they actually asked for. A plain (non-hx-post) form post still gets the
+// bare sentence and would navigate the whole tab away. See
 // SavedViewCreate for the entity/currentFilters/name it passes so the
 // re-render can put the operator back where they were -- the only caller
 // that hits this path today; SavedViewUpdate never existed as a route (see

@@ -312,9 +312,11 @@ func (s *SQLStore) UpsertVocabularyTerm(ctx context.Context, p domain.Permit, ta
 	// A *ValidationError, not a wrapped sentinel. validationErrors() extracts
 	// field messages with errors.As and only recognises this type; a plain
 	// wrapped ErrInvalid falls through to handleStoreError, which answers 422
-	// with the bare string "That request was not valid." -- no form, no field
-	// highlighted, and whatever was typed lost. The template already has the
-	// per-field hooks; they were unreachable from this path. Found by review.
+	// with an out-of-band flash and HX-Reswap: none -- no form, no field
+	// highlighted, and nothing pointing at which of these two is wrong. The
+	// typed values survive now, which they did not before the swap-target
+	// sweep, but the operator is still left guessing. The template already has
+	// the per-field hooks; they were unreachable from this path. Found by review.
 	ve := &domain.ValidationError{}
 	if term.Code == "" {
 		ve.Add("code", "is required")

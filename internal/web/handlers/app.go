@@ -439,10 +439,69 @@ func (a *App) handleStoreError(w http.ResponseWriter, r *http.Request, err error
 	case errors.Is(err, domain.ErrConflict):
 		http.Error(w, "That conflicts with something that already exists.", http.StatusConflict)
 	case errors.Is(err, domain.ErrInvalid):
-		http.Error(w, "That request was not valid.", http.StatusUnprocessableEntity)
+		a.refuseInvariant(w, r)
 	default:
 		a.serverError(w, r, err)
 	}
+}
+
+// refuseInvariant answers a store invariant violation without destroying the
+// caller's form.
+//
+// domain.ErrInvalid is NOT a field validation failure. It is what is left when
+// something got past the form's own checks -- "a pool cannot hold itself", "a
+// retired asset houses nobody", "references something that does not exist" --
+// so there is no field to mark and nothing for the operator to correct in place.
+// A person who mistyped a value gets validationErrors() and a proper field-level
+// 422 long before reaching here.
+//
+// IT USED TO BE http.Error's PLAIN SENTENCE, AND THAT STOPPED BEING SAFE. app.js
+// force-swaps on STATUS, not on body (see its htmx:beforeSwap listener and the
+// comment above it), so the sentence was swapped in like any partial: untargeted,
+// it wiped a form's insides. Once every hx-post element declares a target -- which
+// is what docs/htmx-swap-targets-design.md does -- it would replace a whole panel
+// with one line of text, and for the retire forms that panel is the page's main
+// content. Declaring a target made this path strictly worse, so this path changed
+// in the same branch.
+//
+// Three options, two of them worse than what they replace:
+//   - 400. htmx does not swap it and the operator sees nothing happen. That is
+//     the silent failure the whole work package exists to remove.
+//   - 422 with the plain text. The panel-replacement above.
+//   - 422, an out-of-band flash, HX-Reswap: none. Chosen.
+//
+// It does NOT break "a refusal is rendered, not flashed"
+// (refusal_status_test.go). That test's property is narrow and stated: a
+// function that CLASSIFIES a refusal -- calls refusalMessages or
+// validationErrors -- must not FLASH one. handleStoreError calls neither. And
+// the harm that rule names ("the redirect discards the form, so an operator who
+// mistyped one field retypes all of them") cannot occur here: there is no
+// redirect, and HX-Reswap: none leaves the form exactly as it was, typed values
+// and all.
+//
+// The message is unchanged from what http.Error sent. Saying MORE would mean
+// putting a wrapped store error in front of an operator, which is a separate
+// question with a separate answer.
+func (a *App) refuseInvariant(w http.ResponseWriter, r *http.Request) {
+	const message = "That request was not valid."
+	if !render.IsHTMX(r) {
+		// A plain browser navigation has nowhere to put an out-of-band fragment:
+		// it would render `<div id="flash-dock" hx-swap-oob=...>` as the entire
+		// document. The sentence is still the right answer for that caller.
+		http.Error(w, message, http.StatusUnprocessableEntity)
+		return
+	}
+	// Set before the body: Partial writes the status line.
+	//
+	// HX-Reswap overrides the element's own hx-swap (htmx.min.js 2.0.4 reads it
+	// into swapOverride, and $e processes hx-swap-oob BEFORE the primary swap,
+	// so "none" suppresses the destruction and keeps the flash).
+	w.Header().Set("HX-Reswap", "none")
+	// oobFlash, so the template name lives in exactly one place -- and its own
+	// doc comment is the definition of this case: "a handler can report what
+	// happened without the caller having arranged anywhere to put the message."
+	flash := oobFlash("error", message)
+	a.Render.Partial(w, http.StatusUnprocessableEntity, flash.Template, flash.Data)
 }
 
 func (a *App) notFound(w http.ResponseWriter, r *http.Request) {

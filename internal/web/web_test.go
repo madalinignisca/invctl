@@ -1832,6 +1832,111 @@ func TestVocabularyValidationRerendersTheForm(t *testing.T) {
 	}
 }
 
+// TestAnInvariantRefusalFlashesAndSwapsNothing.
+//
+// handleStoreError's domain.ErrInvalid branch is what is left when something got
+// past the form's own checks -- an invariant the store enforces, with no field to
+// attach a message to. It answered 422 with the plain sentence "That request was
+// not valid.", and app.js force-swaps on STATUS, not on body: once the elements
+// around it declare hx-target, that sentence replaces a whole panel.
+//
+// So it stops being swapped at all: 422, an out-of-band flash, HX-Reswap: none.
+// The operator is told; the form keeps everything they typed; nothing is
+// destroyed.
+//
+// THE VECTOR IS A FOREIGN-KEY VIOLATION, chosen because almost every handler in
+// this package catches domain.ErrInvalid itself (bulkApplyTag, OwnershipAssign,
+// AssetStorageClaim, TeamReassignAndRetire all do) and a vector that never
+// reaches handleStoreError would make this test pass for the wrong reason.
+// deployCertificate inserts straight into certificate_service; an unknown
+// service_id is a foreign key violation, which translateWriteErr maps to
+// ErrInvalid, and afterCertificateWrite's validationErrors() does not recognise
+// a wrapped sentinel. Verified against the UNMODIFIED handler before this test
+// was written (plan Task 0 Step 2).
+func TestAnInvariantRefusalFlashesAndSwapsNothing(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	certID := h.lookup(`SELECT id FROM certificate LIMIT 1`)
+	if certID == "" {
+		t.Fatal("no certificate in the fixture, so this vector cannot be driven -- " +
+			"seed one rather than letting this test skip")
+	}
+	resp := h.post("/certificates/"+certID+"/services", url.Values{
+		"csrf_token": {h.csrfToken("/certificates/" + certID)},
+		"service_id": {"00000000-0000-7000-8000-000000000000"}, // no such service
+	}, true)
+	b := body(t, resp)
+
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422; body: %s", resp.StatusCode, b)
+	}
+	if got := resp.Header.Get("HX-Reswap"); got != "none" {
+		t.Errorf("HX-Reswap = %q, want \"none\". Without it app.js's forced swap "+
+			"puts this body wherever the element points -- and every element in "+
+			"this codebase now points somewhere", got)
+	}
+	if !strings.Contains(b, `hx-swap-oob=`) {
+		t.Errorf("the body carries no out-of-band fragment, so with HX-Reswap: none "+
+			"the operator is told nothing at all -- a silent refusal, which is "+
+			"strictly worse than the sentence this replaced. Body: %s", b)
+	}
+	if !strings.Contains(b, `id="flash-dock"`) {
+		t.Errorf("the out-of-band fragment does not name #flash-dock, so htmx fires "+
+			"htmx:oobErrorNoTarget and drops it. Body: %s", b)
+	}
+	if !strings.Contains(b, "That request was not valid.") {
+		t.Errorf("the flash carries no message. Body: %s", b)
+	}
+	// NOT A WHOLE PAGE and not a panel. The failure being fixed is a body big
+	// enough to destroy something.
+	if strings.Contains(b, "<html") || strings.Contains(b, "<!doctype") {
+		t.Errorf("the body is a whole document. Body: %s", b)
+	}
+}
+
+// TestAnInvariantRefusalStillAnswersPlainTextToAPlainPost.
+//
+// The out-of-band fragment above is meaningless without htmx: a browser with
+// JavaScript off, navigating a plain method="post" form, would render
+// `<div id="flash-dock" hx-swap-oob="beforeend">...` as the entire page. That is
+// worse than the sentence it replaced, so the branch keeps the sentence for a
+// request that did not come from htmx.
+//
+// ONE BRANCH IN ONE SHARED ERROR MAPPER, not the per-handler HX-Request check
+// CLAUDE.md forbids -- there is no render.Respond shape for "a response with no
+// primary fragment", and inventing one for a single call site would be a bigger
+// change than the branch.
+func TestAnInvariantRefusalStillAnswersPlainTextToAPlainPost(t *testing.T) {
+	h := newHarness(t)
+	h.login("admin", "admin-password")
+
+	certID := h.lookup(`SELECT id FROM certificate LIMIT 1`)
+	if certID == "" {
+		t.Fatal("no certificate in the fixture")
+	}
+	resp := h.post("/certificates/"+certID+"/services", url.Values{
+		"csrf_token": {h.csrfToken("/certificates/" + certID)},
+		"service_id": {"00000000-0000-7000-8000-000000000000"},
+	}, false) // NOT an HX-Request
+	b := body(t, resp)
+
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422; body: %s", resp.StatusCode, b)
+	}
+	if !strings.Contains(b, "That request was not valid.") {
+		t.Errorf("a JavaScript-off operator got %q instead of a sentence", b)
+	}
+	if strings.Contains(b, `hx-swap-oob=`) {
+		t.Errorf("a plain form post was answered with an out-of-band fragment, "+
+			"which a browser renders as the whole page. Body: %s", b)
+	}
+	if got := resp.Header.Get("HX-Reswap"); got != "" {
+		t.Errorf("HX-Reswap = %q on a non-HTMX response; harmless but it means the "+
+			"branch is not where it looks", got)
+	}
+}
+
 // HSTS follows the deployment's own statement that it is behind TLS.
 //
 // Sent unconditionally it would be a lie from a development box and, worse, a
