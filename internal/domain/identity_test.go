@@ -44,8 +44,11 @@ func TestRotationStatus(t *testing.T) {
 
 		// A future date cannot arrive through the handler (422) but can
 		// arrive through a hand-edited database, and it must not read as a
-		// policy being met by something that has not happened.
-		{"a future date is within the window, not overdue", days(90), on("2026-12-01"), RotationWithinWindow},
+		// policy being met by something that has not happened. Folded into
+		// RotationUnreadable, not a new state: the claim is identical -- the
+		// stored value cannot be relied on -- and RotationFindings already
+		// folds unreadable into its Gap bucket, the right severity for this.
+		{"a future date is unreadable, not the healthiest state there is", days(90), on("2026-12-01"), RotationUnreadable},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			i := &Identity{RotationDays: tc.days, LastRotated: tc.last}
@@ -57,6 +60,7 @@ func TestRotationStatus(t *testing.T) {
 }
 
 func TestRotationDueOn(t *testing.T) {
+	now := time.Date(2026, 9, 15, 12, 0, 0, 0, time.UTC)
 	days := func(n int) *int { return &n }
 	on := func(s string) *string { return &s }
 	for _, tc := range []struct {
@@ -71,9 +75,13 @@ func TestRotationDueOn(t *testing.T) {
 		// A due date computed from a value that will not parse is a lie with a
 		// date on it, which is worse than no answer.
 		{"unreadable", days(90), on("not-a-date"), ""},
+		// Same reasoning, for a future date: RotationStatus answers
+		// RotationUnreadable for this, and a due date here would be a second
+		// answer that disagrees with it.
+		{"a future date has no due date either", days(90), on("2026-12-01"), ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got := (&Identity{RotationDays: tc.days, LastRotated: tc.last}).RotationDueOn()
+			got := (&Identity{RotationDays: tc.days, LastRotated: tc.last}).RotationDueOn(now)
 			switch {
 			case tc.want == "" && got != nil:
 				t.Errorf("RotationDueOn = %q, want nil", *got)

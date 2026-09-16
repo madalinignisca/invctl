@@ -341,11 +341,19 @@ const (
 	RotationNeverRecorded RotationState = "never_recorded"
 	RotationWithinWindow  RotationState = "within_window"
 	RotationOverdue       RotationState = "overdue"
-	// RotationUnreadable: the stored value will not parse. It exists because
-	// the alternative is the failure this repo keeps finding -- the boolean
-	// this replaced returned `false` on a parse error, so an unreadable value
-	// read as HEALTHY. A state that cannot be read must never render as a
-	// state that is fine.
+	// RotationUnreadable: the stored value will not parse, OR IT PARSES BUT
+	// LIES ABOUT THE FUTURE. Both are the same claim -- the stored value
+	// cannot be relied on -- and the same severity: RotationFindings already
+	// folds unreadable into its Gap bucket, which is the right one for "the
+	// inventory does not know", not the Fault bucket that would assert a
+	// lapse from a value nobody can trust. A last_rotated after today cannot
+	// arrive through the handler (RecordIdentityRotation refuses it with a
+	// 422), but it can arrive through a hand-edited row, a restore, or clock
+	// skew, and it must not read as a policy being met by something that has
+	// not happened yet -- the exact defect this state exists to kill: the
+	// boolean this replaced returned `false` on a parse error, so an
+	// unreadable value read as HEALTHY. A state that cannot be trusted must
+	// never render as a state that is fine.
 	RotationUnreadable RotationState = "unreadable"
 )
 
@@ -376,13 +384,25 @@ func (i *Identity) RotationStatus(now time.Time) RotationState {
 	if err != nil {
 		return RotationUnreadable
 	}
-	due := last.AddDate(0, 0, *i.RotationDays)
 	// Compare by CALENDAR DAY, not by instant. due is always midnight UTC
 	// (ParseDate never produces a time-of-day), so a `now` taken from the
 	// wall clock at any hour on the due day itself must still read as
 	// within the window -- "exactly on the due day is still inside" is the
 	// case that would otherwise flip to overdue by early afternoon.
 	today := time.Date(now.UTC().Year(), now.UTC().Month(), now.UTC().Day(), 0, 0, 0, 0, time.UTC)
+	// A future last_rotated cannot arrive through the handler (422) but can
+	// arrive through a hand-edited row, a restore, or clock skew, and it must
+	// never read as a policy being met by something that has not happened
+	// yet. Folded into RotationUnreadable rather than a sixth state: the
+	// claim is identical -- the stored value cannot be relied on -- and
+	// RotationFindings already folds unreadable into the Gap bucket, which is
+	// the right severity for "the inventory does not know", not the Fault
+	// bucket that a future-reads-as-overdue answer would risk if this were
+	// ever "fixed" the other way.
+	if last.After(today) {
+		return RotationUnreadable
+	}
+	due := last.AddDate(0, 0, *i.RotationDays)
 	if today.After(due) {
 		return RotationOverdue
 	}
@@ -390,15 +410,22 @@ func (i *Identity) RotationStatus(now time.Time) RotationState {
 }
 
 // RotationDueOn is the date the next rotation is due, or nil when the question
-// has no answer: no policy, no record, or a stored value that will not parse.
-// The last of those is the one worth naming -- a due date computed from an
-// unreadable value is a lie with a date on it.
-func (i *Identity) RotationDueOn() *string {
+// has no answer: no policy, no record, a stored value that will not parse, or
+// a stored value that lies about the future. The last two are worth naming
+// together -- a due date computed from either is a lie with a date on it, and
+// RotationStatus already answers RotationUnreadable for both, so this must
+// agree rather than quietly answering a date RotationStatus has just refused
+// to vouch for.
+func (i *Identity) RotationDueOn(now time.Time) *string {
 	if i.RotationDays == nil || i.LastRotated == nil {
 		return nil
 	}
 	last, err := ParseDate(*i.LastRotated)
 	if err != nil {
+		return nil
+	}
+	today := time.Date(now.UTC().Year(), now.UTC().Month(), now.UTC().Day(), 0, 0, 0, 0, time.UTC)
+	if last.After(today) {
 		return nil
 	}
 	due := FormatDate(last.AddDate(0, 0, *i.RotationDays))
