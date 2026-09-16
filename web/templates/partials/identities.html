@@ -224,8 +224,17 @@
 
   <div class="panel">
     <div class="panel-head"><h2>Correct this credential</h2></div>
-    <form class="panel-body" method="post" action="/identities/{{.Identity.ID}}"
-          hx-post="/identities/{{.Identity.ID}}">
+    {{/* NO hx-post, deliberately: this form can end in an ORDINARY 409 two
+         ways -- a duplicate (realm, name), or somebody else recording a
+         rotation while this form sat open (the spec accepts this cost
+         explicitly). htmx 2 does not swap a 409 by default (app.js:649 only
+         swaps 422), so hx-post here would leave Save doing nothing visible
+         on a credential form during an incident. A plain POST/redirect
+         renders the 409 as a full page instead -- bundle_detail.html's
+         correction form is the existing precedent for this exact shape.
+         hx-post stays on the rotation form above (only 422, which swaps)
+         and on withdraw below (hx-confirm requires it). */}}
+    <form class="panel-body" method="post" action="/identities/{{.Identity.ID}}">
       <input type="hidden" name="csrf_token" value="{{.CSRF}}">
       {{/* The version the operator opened. See internal/domain/version.go. */}}
       <input type="hidden" name="row_version" value="{{.Identity.RowVersion}}">

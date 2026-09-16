@@ -67,7 +67,14 @@
 {{if .IsAdmin}}
 <div class="panel">
   <div class="panel-head"><h2>Declare a credential</h2></div>
-  <form class="panel-body" method="post" action="/identities" hx-post="/identities">
+  {{/* NO hx-post, deliberately: a duplicate (realm, name) here is an ORDINARY
+       typo and gets a 409, which htmx 2 does not swap by default
+       (app.js:649 only swaps 422). A plain POST/redirect renders that 409 as
+       a full page the operator can actually read, the same shape
+       bundle_detail.html's correction form already uses for the same
+       reason. hx-post stays on the rotation form below, whose only conflict
+       status is 422, which does swap correctly. */}}
+  <form class="panel-body" method="post" action="/identities">
     <input type="hidden" name="csrf_token" value="{{.CSRF}}">
     <div class="field-row">
       <div class="field">
