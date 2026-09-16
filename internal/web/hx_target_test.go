@@ -70,6 +70,33 @@ import (
 // true. See partials/teams.html's retire forms.
 var hxTargetExempt = map[string]string{}
 
+// CO-LOCATION, added in review round 1 (2026-09-16). A regex over tag text has
+// no notion of {{if}}/{{end}}, so an attribute wrapped in a template
+// conditional read as unconditionally present -- the census below was passing
+// this, live, before this fix:
+//
+//	<form hx-post="/{{$.JournalResource}}/{{$.JournalID}}/journal/{{.ID}}/retire"
+//	      {{if $.SomeCondition}}hx-target="this" hx-swap="none"{{end}}
+//	      hx-confirm="...">
+//
+// hx-post is unconditional; hx-target and hx-swap are not. When the condition
+// is false the element posts with no target at all -- the exact silent
+// refusal this census exists to prevent -- and the census reported green,
+// because the regex found hx-target="this" hx-swap="none" as plain text
+// regardless of what gated it.
+//
+// The shape already exists twice, safely, in the tree:
+// partials/rows.html:260 and partials/asset_table.html:64, both
+// `<form {{if $bulkTag}}hx-post=... hx-target=... hx-swap=...{{end}}>`. They
+// are safe only because hx-post, hx-target and hx-swap all sit inside the
+// SAME {{if}}...{{end}} -- all three render or none do. Nothing in the census
+// required that co-location; it was accidental correctness.
+//
+// The rule enforced below: within one matched tag, hx-post, hx-target and
+// hx-swap must share one {{if}} context -- all three outside every {{if}}, or
+// all three inside the same one. A tag that splits them across a boundary
+// fails, naming the element.
+
 // hxTargetFloor is a "did the scan stop matching the markup" control, not a
 // budget and not a target.
 //
@@ -106,6 +133,30 @@ func TestEveryPostingElementDeclaresItsSwapTarget(t *testing.T) {
 				t.Errorf("%s declares hx-target=%q hx-swap=%q but is listed as exempt: %q. "+
 					"Delete the entry.", where, el.target, el.swap, why)
 			}
+			continue
+		}
+
+		// CO-LOCATION, checked before "is it declared at all": a target found
+		// as text is not the same as a target that is ACTUALLY THERE when
+		// hx-post is. If hx-target (or hx-swap) sits inside a different
+		// {{if}} nesting than hx-post, the three attributes do not all render
+		// together, and the element can post with none of them -- see the
+		// comment on hxTargetExempt above for the live evasion this closes.
+		if el.target != "" && el.targetCtx != el.postCtx {
+			t.Errorf("%s posts to %q (context %q) but hx-target=%q sits in a different "+
+				"{{if}} context (%q).\n"+
+				"hx-post, hx-target and hx-swap must all sit outside every {{if}}, or all "+
+				"three inside the SAME one -- see partials/rows.html:260 for the safe shape. "+
+				"Split across a boundary, the element can post with hx-post present and "+
+				"hx-target absent, landing the response wherever htmx's default takes it.",
+				where, el.action, el.postCtx, el.target, el.targetCtx)
+			continue
+		}
+		if el.swap != "" && el.swapCtx != el.postCtx {
+			t.Errorf("%s posts to %q (context %q) but hx-swap=%q sits in a different "+
+				"{{if}} context (%q).\n"+
+				"Same rule as hx-target: all three must share one {{if}} context.",
+				where, el.action, el.postCtx, el.swap, el.swapCtx)
 			continue
 		}
 
@@ -175,6 +226,12 @@ type hxElement struct {
 	file, line   string
 	action       string
 	target, swap string
+	// postCtx, targetCtx, swapCtx are the {{if}}-nesting path in effect at
+	// each attribute's position within the tag, from blockContextAt. Equal
+	// paths mean the attributes are gated the same way (or not gated at all);
+	// unequal means one can render without the other -- see the co-location
+	// comment on hxTargetExempt.
+	postCtx, targetCtx, swapCtx string
 }
 
 var (
@@ -194,7 +251,77 @@ var (
 	// A template expression anywhere in an attribute value, the way
 	// edit_form_version_test.go's exprRe normalises an action.
 	hxExprRe = regexp.MustCompile(`{{[^}]*}}`)
+	// A bare {{if ...}}, {{else ...}} or {{end}} block token, used to track
+	// {{if}} nesting within a matched tag for the co-location check.
+	// {{range}}/{{with}} are deliberately not tracked -- see blockContextAt's
+	// doc comment on what that leaves undisclosed... covered, not silently
+	// assumed safe.
+	hxBlockRe = regexp.MustCompile(`\{\{-?\s*(if|else|end)\b[^}]*-?\}\}`)
 )
+
+// blockContextAt returns a function reporting the {{if}}-nesting path in
+// effect at any byte offset within tag: "" outside every {{if}}, "if1" inside
+// the first one encountered, "if1/if2" inside a nested one, and so on. Two
+// attributes with equal paths are gated by the same set of conditions (or by
+// none); unequal paths mean one can be present in the rendered tag without
+// the other.
+//
+// {{else}}/{{else if}} do NOT change the path -- a then-branch and its
+// else-branch are treated as the same context, because the co-location rule
+// this feeds is "gated by the same {{if}}", not "gated by the same boolean
+// outcome". THIS IS A KNOWN GAP, not an oversight: a tag that puts hx-post in
+// the then-branch and hx-target in the else-branch of one {{if}} would still
+// pass, because the two branches are mutually exclusive and neither attribute
+// combination this check compares ever coexists in a render either way. No
+// element in this tree takes that shape today; if one ever does, this
+// function will not catch it.
+//
+// {{range}} and {{with}} are not tracked at all -- only {{if}}/{{else}}/{{end}}
+// are recognised block tokens. A tag using either to gate an attribute is
+// invisible to this check, exactly as it always was to the rest of the
+// census.
+//
+// Nesting is matched by TEXTUAL position, not by condition identity: two
+// separate {{if $.SameCondition}}...{{end}} blocks around different
+// attributes get different paths ("if1" and "if2") even though the condition
+// text is identical, and are therefore flagged as split even if a human would
+// read them as always co-present. That is the conservative direction to be
+// wrong in -- a false positive here is a comment explaining why the split is
+// safe; a false negative is the failure mode this whole fix exists to close.
+func blockContextAt(tag string) func(pos int) string {
+	type event struct {
+		pos  int
+		id   string // "" for a closing {{end}}
+		open bool
+	}
+	var events []event
+	n := 0
+	for _, loc := range hxBlockRe.FindAllStringSubmatchIndex(tag, -1) {
+		kw := tag[loc[2]:loc[3]]
+		switch kw {
+		case "if":
+			n++
+			events = append(events, event{pos: loc[0], open: true, id: "if" + strconv.Itoa(n)})
+		case "end":
+			events = append(events, event{pos: loc[0], open: false})
+		}
+		// "else" adds no event: see the doc comment above.
+	}
+	return func(pos int) string {
+		var stack []string
+		for _, e := range events {
+			if e.pos >= pos {
+				break
+			}
+			if e.open {
+				stack = append(stack, e.id)
+			} else if len(stack) > 0 {
+				stack = stack[:len(stack)-1]
+			}
+		}
+		return strings.Join(stack, "/")
+	}
+}
 
 // postingElements finds every hx-post element in the template tree.
 //
@@ -220,20 +347,24 @@ func postingElements(t *testing.T, root string) []hxElement {
 			rel := sub + "/" + filepath.Base(path)
 			for _, loc := range hxOpenRe.FindAllStringIndex(page, -1) {
 				tag := page[loc[0]:loc[1]]
-				post := hxPostRe.FindStringSubmatch(tag)
+				post := hxPostRe.FindStringSubmatchIndex(tag)
 				if post == nil {
 					continue
 				}
+				ctxAt := blockContextAt(tag)
 				el := hxElement{
-					file:   rel,
-					line:   strconv.Itoa(1 + strings.Count(page[:loc[0]], "\n")),
-					action: post[1],
+					file:    rel,
+					line:    strconv.Itoa(1 + strings.Count(page[:loc[0]], "\n")),
+					action:  tag[post[2]:post[3]],
+					postCtx: ctxAt(post[0]),
 				}
-				if m := hxTargetRe.FindStringSubmatch(tag); m != nil {
-					el.target = m[1]
+				if m := hxTargetRe.FindStringSubmatchIndex(tag); m != nil {
+					el.target = tag[m[2]:m[3]]
+					el.targetCtx = ctxAt(m[0])
 				}
-				if m := hxSwapRe.FindStringSubmatch(tag); m != nil {
-					el.swap = m[1]
+				if m := hxSwapRe.FindStringSubmatchIndex(tag); m != nil {
+					el.swap = tag[m[2]:m[3]]
+					el.swapCtx = ctxAt(m[0])
 				}
 				out = append(out, el)
 			}
