@@ -643,7 +643,7 @@
       <label for="dep-identity">Identity</label>
       <select id="dep-identity" name="identity_id">
         <option value="">—</option>
-        {{range .Identities}}<option value="{{.ID}}">{{deref .Realm}}/{{.Name}}</option>{{end}}
+        {{range .Identities}}<option value="{{.ID}}">{{deref .Realm}}/{{.Name}}{{if eq .Lifecycle "retired"}} (withdrawn){{end}}</option>{{end}}
       </select>
     </div>
     <div class="field">

@@ -169,10 +169,21 @@ func TestSettingAPlacementToStoppedDoesNotWithdrawIt(t *testing.T) {
 	resp.Body.Close()
 
 	after := body(t, h.get("/services/"+serviceID, false))
-	if strings.Contains(after, "withdrawn") {
+	// Scoped to the instances panel, not the whole page: the dependency
+	// form further down the same page offers every identity in the estate,
+	// including a withdrawn one seeded elsewhere (b.identityHistory), and
+	// its option now reads "(withdrawn)" (WP-J8 final whole-branch review,
+	// #8) -- an unscoped Contains would fail on that unrelated text.
+	i := strings.Index(after, `id="instances"`)
+	j := strings.Index(after, `id="endpoints"`)
+	if i < 0 || j < 0 || j < i {
+		t.Fatal("the service page no longer has both panels in the expected order")
+	}
+	instancesPanel := after[i:j]
+	if strings.Contains(instancesPanel, "withdrawn") {
 		t.Error("a placement asked to stop was recorded as withdrawn from the estate")
 	}
-	if !strings.Contains(after, `href="/services/`+serviceID+`?edit=`+instanceID) {
+	if !strings.Contains(instancesPanel, `href="/services/`+serviceID+`?edit=`+instanceID) {
 		t.Error("the placement is no longer editable, so it is no longer live")
 	}
 }
