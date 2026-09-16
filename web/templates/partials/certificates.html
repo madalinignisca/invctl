@@ -207,8 +207,38 @@
             <td style="color:var(--muted);font-size:12.5px">{{if .Note}}{{deref .Note}}{{end}}</td>
             {{if $.IsAdmin}}
             <td>
+              {{/* hx-target="#certificate" hx-swap="outerHTML" on every posting
+                   element in this panel, and the id is this partial's own root
+                   (certificate_panel, above). CLAUDE.md: "Swap targets are
+                   declared in the template, not chosen by the handler. Default
+                   to hx-swap='outerHTML' on a wrapping element with a stable
+                   id."
+
+                   Read off the handler, not guessed: every one of these routes
+                   ends in afterCertificateWrite or CertificateUpdate, both of
+                   which answer a validation failure with renderCertificate ->
+                   Respond(..., "certificate_detail", "certificate_panel", ...).
+                   The 422 body is therefore this whole panel, and without a
+                   target htmx's default puts it inside the <form> that sent it:
+                   every heading rendered twice, two elements carrying
+                   id="certificate", and every later hx-target="#certificate"
+                   resolving to whichever the browser finds first. That exact
+                   failure was seen in a browser on the identity rotation form
+                   (068d91c).
+
+                   #certificate is certificate_panel's unconditional root, so it
+                   is present on every render that can show these forms -- the
+                   forms are inside {{if $.IsAdmin}} blocks WITHIN it, never
+                   outside. Checked per element, not assumed: a target inside a
+                   conditional the element is not fails at REQUEST time with
+                   htmx:targetError, silently.
+
+                   Success is unaffected: render.Redirect answers an HX-Request
+                   with HX-Redirect, and htmx returns from handleAjaxResponse at
+                   that header before it resolves a target or picks a swap. */}}
               <form method="post" action="/certificates/{{$.Certificate.ID}}/assets/{{.EntityID}}/retire"
-                    hx-post="/certificates/{{$.Certificate.ID}}/assets/{{.EntityID}}/retire" style="display:inline">
+                    hx-post="/certificates/{{$.Certificate.ID}}/assets/{{.EntityID}}/retire" style="display:inline"
+                    hx-target="#certificate" hx-swap="outerHTML">
                 <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
                 <button class="btn btn-sm btn-danger" type="submit">Remove</button>
               </form>
@@ -223,8 +253,11 @@
             <td style="color:var(--muted);font-size:12.5px">{{if .Note}}{{deref .Note}}{{end}}</td>
             {{if $.IsAdmin}}
             <td>
+              {{/* hx-target="#certificate" hx-swap="outerHTML" -- see the
+                   comment above the asset-undeploy form for the full argument. */}}
               <form method="post" action="/certificates/{{$.Certificate.ID}}/services/{{.EntityID}}/retire"
-                    hx-post="/certificates/{{$.Certificate.ID}}/services/{{.EntityID}}/retire" style="display:inline">
+                    hx-post="/certificates/{{$.Certificate.ID}}/services/{{.EntityID}}/retire" style="display:inline"
+                    hx-target="#certificate" hx-swap="outerHTML">
                 <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
                 <button class="btn btn-sm btn-danger" type="submit">Remove</button>
               </form>
@@ -248,8 +281,12 @@
   <div class="grid-2">
     <div class="panel">
       <div class="panel-head"><h2>Deploy to an asset</h2></div>
+      {{/* hx-target="#certificate" hx-swap="outerHTML" -- see the comment
+           above the asset-undeploy form (this panel, first table) for the
+           full argument. CertificateDeployAsset -> afterCertificateWrite. */}}
       <form class="panel-body" method="post" action="/certificates/{{.Certificate.ID}}/assets"
-            hx-post="/certificates/{{.Certificate.ID}}/assets">
+            hx-post="/certificates/{{.Certificate.ID}}/assets"
+            hx-target="#certificate" hx-swap="outerHTML">
         <input type="hidden" name="csrf_token" value="{{.CSRF}}">
         <div class="field">
           <label for="cd-asset">Asset</label>
@@ -266,8 +303,12 @@
     </div>
     <div class="panel">
       <div class="panel-head"><h2>Deploy to a service</h2></div>
+      {{/* hx-target="#certificate" hx-swap="outerHTML" -- see the comment
+           above the asset-undeploy form (this panel, first table) for the
+           full argument. CertificateDeployService -> afterCertificateWrite. */}}
       <form class="panel-body" method="post" action="/certificates/{{.Certificate.ID}}/services"
-            hx-post="/certificates/{{.Certificate.ID}}/services">
+            hx-post="/certificates/{{.Certificate.ID}}/services"
+            hx-target="#certificate" hx-swap="outerHTML">
         <input type="hidden" name="csrf_token" value="{{.CSRF}}">
         <div class="field">
           <label for="cd-service">Service</label>
@@ -286,8 +327,12 @@
 
   <div class="panel">
     <div class="panel-head"><h2>Edit</h2></div>
+    {{/* hx-target="#certificate" hx-swap="outerHTML" -- see the comment above
+         the asset-undeploy form (this panel, first table) for the full
+         argument. CertificateUpdate -> renderCertificate directly. */}}
     <form class="panel-body" method="post" action="/certificates/{{.Certificate.ID}}"
-          hx-post="/certificates/{{.Certificate.ID}}">
+          hx-post="/certificates/{{.Certificate.ID}}"
+          hx-target="#certificate" hx-swap="outerHTML">
       <input type="hidden" name="csrf_token" value="{{.CSRF}}">
       <input type="hidden" name="row_version" value="{{.Certificate.RowVersion}}">
       <div class="field-row">
