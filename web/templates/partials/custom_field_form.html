@@ -90,8 +90,18 @@
     {{if eq $row.Kind "select"}}
     <a class="btn btn-sm" href="/custom-fields?options={{$row.ID}}">Options</a>
     {{end}}
+    {{/* hx-target="this" hx-swap="none" -- a declaration, not an exemption
+         (docs/htmx-swap-targets-design.md rule 1): if CustomFieldRetire
+         ever grows a path that renders a fragment, "none" declines to swap
+         it rather than swallowing it into this button, and stays correct
+         even if app.js's force-swap ever widens past 422. Argued from the
+         handler, per rule 4: CustomFieldRetire (handlers/customfields.go)
+         answers flash+render.Redirect on success and handleStoreError on
+         failure, never a fragment. See partials/teams.html's retire forms
+         for the full reasoning. */}}
     <button class="btn btn-sm btn-danger" type="button"
             hx-post="/custom-fields/{{$row.ID}}/retire"
+            hx-target="this" hx-swap="none"
             hx-confirm="Retire this field? Every value it already holds is kept.">Retire</button>
     {{end}}
   </td>
