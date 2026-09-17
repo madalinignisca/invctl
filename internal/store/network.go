@@ -933,6 +933,8 @@ func authorizeBreakoutSubjects(ctx context.Context, q dbGetter, p domain.Permit,
 	return domain.ScopedPermit(p.Actor(), nil, domain.ScopedEntities{"link": scope}), nil
 }
 
+// CreateBreakout declares one breakout cable: one moulded assembly, one a-end
+//
 // THERE IS NO "ADD A STRAND", AND THAT IS NOT A MISSING REPAIR PATH.
 // writeSurfaceGaps reached zero on 2026-09-17 and this is deliberately not a
 // new entry in it. A breakout is one moulded assembly: a QSFP-to-4xSFP+ DAC
@@ -947,7 +949,6 @@ func authorizeBreakoutSubjects(ctx context.Context, q dbGetter, p domain.Permit,
 // entry in writeSurfaceAliases points Breakout at UpdateLink/RetireLink for
 // it: a strand IS a link, corrected and withdrawn as one.
 //
-// CreateBreakout declares one breakout cable: one moulded assembly, one a-end
 // interface, and n b-end interfaces it fans out to. It writes n `link` rows
 // in a single transaction, sharing one generated breakout id, positions
 // 1..n in the order spec.BInterfaceIDs was given.
