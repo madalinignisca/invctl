@@ -151,20 +151,53 @@ type Link struct {
 	Lifecycle    string  `db:"lifecycle"`
 	// RowVersion is the optimistic-concurrency token (migration 00066).
 	RowVersion int `db:"row_version"`
+	// BreakoutID and BreakoutPosition (migration 00071,
+	// docs/breakout-cables-design.md) are how a QSFP-to-4xSFP+ DAC is
+	// recorded: n link rows sharing one BreakoutID, positions 1..n, all with
+	// the SAME a-end interface. Nil on every ordinary two-ended cable --
+	// only a breakout strand carries either. The store, not this struct,
+	// enforces that every live row sharing a BreakoutID agrees on Medium and
+	// LengthM (the drift guard, design doc D4): that rule needs to see
+	// SIBLING rows, which nothing at the single-row domain layer can see.
+	BreakoutID       *string `db:"breakout_id"`
+	BreakoutPosition *int    `db:"breakout_position"`
 }
 
 // NewLink validates and constructs a cable.
 func NewLink(id, aID, bID string) (*Link, error) {
-	ve := &ValidationError{}
-	checkRequired(ve, "a_interface_id", aID)
-	checkRequired(ve, "b_interface_id", bID)
-	if aID == bID {
-		ve.Add("b_interface_id", "an interface cannot be linked to itself")
-	}
-	if err := ve.OrNil(); err != nil {
+	l := &Link{ID: id, AInterfaceID: aID, BInterfaceID: bID, Lifecycle: LifecycleActive}
+	if err := l.Validate(); err != nil {
 		return nil, err
 	}
-	return &Link{ID: id, AInterfaceID: aID, BInterfaceID: bID, Lifecycle: LifecycleActive}, nil
+	return l, nil
+}
+
+// Validate checks a cable against its business rules.
+//
+// SEPARATE FROM THE CONSTRUCTOR so UpdateLink and CreateBreakout run the same
+// rules an ordinary create does -- the shape every other Validate method in
+// this file already follows.
+func (l *Link) Validate() error {
+	ve := &ValidationError{}
+	checkRequired(ve, "a_interface_id", l.AInterfaceID)
+	checkRequired(ve, "b_interface_id", l.BInterfaceID)
+	if l.AInterfaceID != "" && l.AInterfaceID == l.BInterfaceID {
+		ve.Add("b_interface_id", "an interface cannot be linked to itself")
+	}
+	// Both set or both nil. A position with no group, or a group with no
+	// position, is a half-written breakout -- docs/breakout-cables-design.md
+	// D4. This is the half of the breakout invariant a single row CAN answer
+	// on its own; the rest (shared medium/length_m, one a-end, distinct
+	// b-ends) needs sibling rows and lives in the store instead.
+	switch {
+	case l.BreakoutID != nil && l.BreakoutPosition == nil:
+		ve.Add("breakout_position", "a breakout id requires a position")
+	case l.BreakoutID == nil && l.BreakoutPosition != nil:
+		ve.Add("breakout_id", "a breakout position requires a breakout id")
+	case l.BreakoutPosition != nil && *l.BreakoutPosition <= 0:
+		ve.Add("breakout_position", "must be a positive number")
+	}
+	return ve.OrNil()
 }
 
 // IsRetired reports whether this cable has been unpatched.
