@@ -8,26 +8,146 @@
 
 name: Release
 
-# Tag-driven, and the tag is the only input. Pushing v0.2.0 produces the 0.2.0
-# release; there is no button that builds "whatever is on main right now", which
-# is how a release ends up containing a commit nobody meant to ship.
+# TWO WAYS IN, ONE SOURCE OF TRUTH.
+#
+# This file used to say: "there is no button that builds 'whatever is on main
+# right now', which is how a release ends up containing a commit nobody meant to
+# ship." That danger is real and the button below does not reintroduce it --
+# because the button does not build a moving target. It takes a version AND a
+# commit, verifies that exact commit, and creates the tag only once the gate is
+# green. The tag is still what the release is cut from; the button just spares
+# somebody typing `git tag` and `git push` correctly at the end of a long day.
+#
+#   1. Push a tag yourself         -> releases that tag, exactly as before.
+#   2. Actions -> Release -> Run   -> type the version, pick the commit, go.
+#
+# The second is the one to use. Nothing is created until the tests pass, so a
+# failed run leaves no tag to clean up -- strictly safer than tagging by hand,
+# where a red build leaves a tag already pushed.
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release, WITHOUT the leading v. Example: 1.1.0"
+        required: true
+        type: string
+      ref:
+        description: "Branch or commit to release from"
+        required: true
+        default: main
+        type: string
 
-# The tag is the source of truth for the version string, so nothing here writes
-# to the repository. contents: write is for creating the release and uploading
-# the artefacts, and nothing else.
+# contents: write covers creating the release, uploading the artefacts, and --
+# for the button path only -- creating the tag once the gate is green.
 permissions:
   contents: write
 
 jobs:
+  # EVERYTHING THAT CAN BE KNOWN IN TEN SECONDS IS CHECKED IN TEN SECONDS.
+  #
+  # The changelog check used to live in the `release` job, at the very end. So a
+  # version with no changelog section verified for eight minutes, built,
+  # packaged, computed its checksums, and THEN failed -- leaving a red release
+  # on a green commit, fixable only by moving a tag. It nearly happened on
+  # 1.1.0, where the section was still called [Unreleased].
+  #
+  # This job answers every such question before a single test runs.
+  preflight:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+      tag: ${{ steps.resolve.outputs.tag }}
+      sha: ${{ steps.resolve.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # THE COMMIT IS PINNED HERE AND NOWHERE ELSE. The button takes a
+          # branch name, and a branch moves; resolving it to a sha once, up
+          # front, is what stops the later jobs building three slightly
+          # different trees if somebody merges while this runs. Every job below
+          # checks out this sha, never the branch.
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.ref }}
+          fetch-depth: 0
+
+      - name: resolve the version and the commit
+        id: resolve
+        env:
+          # Through the environment, never interpolated into the script. A
+          # workflow that pastes user input straight into a shell command is an
+          # injection surface, and `inputs.version` is user input.
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${INPUT_VERSION#v}"      # tolerate someone typing the v
+          else
+            VERSION="${GITHUB_REF_NAME#v}"
+          fi
+
+          # Semver, loosely: three numbers and an optional pre-release. Catches
+          # the typo that would otherwise produce a release called "1..1" or
+          # "v 1.1.0" and be awkward to withdraw.
+          if ! printf '%s' "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$'; then
+            echo "::error::\"$VERSION\" is not a version. Expected something like 1.1.0 (no leading v)."
+            exit 1
+          fi
+
+          SHA="$(git rev-parse HEAD)"
+          echo "version=$VERSION"  >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION"     >> "$GITHUB_OUTPUT"
+          echo "sha=$SHA"          >> "$GITHUB_OUTPUT"
+
+          {
+            echo "## Releasing \`$VERSION\`"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| tag | \`v$VERSION\` |"
+            echo "| commit | \`$SHA\` |"
+            echo "| subject | $(git log -1 --format=%s) |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: the tag must not exist yet
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          TAG: ${{ steps.resolve.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            echo "::error::$TAG already exists. Releasing over a published tag changes"
+            echo "::error::what people already downloaded. Pick the next version instead."
+            exit 1
+          fi
+          echo "$TAG is free."
+
+      - name: the changelog must have a section for this version
+        env:
+          VERSION: ${{ steps.resolve.outputs.version }}
+        run: |
+          set -euo pipefail
+          # The same extraction the release step does, run here so a missing
+          # section costs ten seconds instead of a whole pipeline.
+          NOTES=$(awk -v v="$VERSION" '
+            $0 ~ "^## \\[" v "\\]" {found=1; next}
+            found && /^## \[/ {exit}
+            found {print}
+          ' CHANGELOG.md)
+          if [ -z "$NOTES" ]; then
+            echo "::error::CHANGELOG.md has no '## [$VERSION]' section."
+            echo "::error::Rename the [Unreleased] heading to [$VERSION] — <today> and try again."
+            exit 1
+          fi
+          echo "Found $(printf '%s' "$NOTES" | grep -c '^- ') changelog entries for $VERSION."
+
   # THE GATE RUNS AGAIN ON THE TAG, and yes, CI already ran it on the commit.
   # A tag can be pushed to any commit, including one that never went through a
   # pull request, so "main was green" is not the same statement as "this tag is
   # green". Releasing an unbuilt binary is the one mistake here that reaches
   # other people's servers.
   verify:
+    needs: preflight
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -46,6 +166,8 @@ jobs:
       INV_TEST_POSTGRES_DSN: postgres://invctl:invctl@127.0.0.1:5433/invctl?sslmode=disable
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.sha }}
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
@@ -84,13 +206,14 @@ jobs:
         run: go test ./... -count=1 -timeout 30m
 
   build:
-    needs: verify
+    needs: [preflight, verify]
     runs-on: ubuntu-latest
     steps:
       # Full history and tags: the version string comes from `git describe`, and
       # a shallow clone would produce a build that cannot name itself.
       - uses: actions/checkout@v4
         with:
+          ref: ${{ needs.preflight.outputs.sha }}
           fetch-depth: 0
 
       - uses: actions/setup-go@v5
@@ -118,8 +241,9 @@ jobs:
       # The name says what it is and what it runs on. Somebody downloading this
       # in six months has only the filename to go on.
       - name: package
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
           mkdir -p dist
           cp bin/invctl "dist/invctl_${VERSION}_linux_amd64"
           cp LICENSE README.md CHANGELOG.md dist/
@@ -130,11 +254,33 @@ jobs:
           sha256sum "invctl_${VERSION}_linux_amd64" > "invctl_${VERSION}_checksums.txt"
           cat "invctl_${VERSION}_checksums.txt"
 
+      # THE TAG IS CREATED HERE, AFTER THE GATE, AND ONLY FOR THE BUTTON.
+      #
+      # Tagging by hand pushes the tag first and finds out afterwards, so a red
+      # build leaves a tag already published that somebody has to delete. This
+      # way round, a failed run leaves nothing behind.
+      #
+      # Pushing with GITHUB_TOKEN deliberately does NOT start another run of
+      # this workflow -- GitHub suppresses that to stop workflows triggering
+      # themselves -- so the tag-push trigger above stays quiet and this run
+      # continues straight into the release below.
+      - name: create the tag
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          TAG: ${{ needs.preflight.outputs.tag }}
+          SHA: ${{ needs.preflight.outputs.sha }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          set -euo pipefail
+          git tag -a "$TAG" "$SHA" -m "invctl $VERSION"
+          git push origin "$TAG"
+
       - name: release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+          TAG: ${{ needs.preflight.outputs.tag }}
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
           # --notes-from-tag would use the tag message; the changelog is the
           # curated version and is what somebody upgrading needs to read.
           # Extracted here rather than duplicated into the release body by hand.
@@ -147,8 +293,21 @@ jobs:
             echo "::error::CHANGELOG.md has no section for $VERSION"
             exit 1
           fi
-          printf '%s\n\n---\n\nSee CHANGELOG.md for the full history.\n' "$NOTES" > notes.md
-          gh release create "$GITHUB_REF_NAME" \
+          # The body somebody actually lands on: the changelog for this
+          # version, then the install and verification boilerplate from
+          # .github/release-footer.md.
+          #
+          # The footer is a FILE rather than a heredoc in this workflow, for two
+          # reasons. A heredoc containing "---" at column zero terminates the
+          # YAML block scalar this step is written in, which is a confusing
+          # failure to debug; and boilerplate somebody will want to reword
+          # should not live inside workflow syntax. Substitution is envsubst
+          # over a named allow-list, so nothing else in the file can expand.
+          {
+            printf '%s\n' "$NOTES"
+            envsubst '$GITHUB_REPOSITORY $TAG $VERSION' < .github/release-footer.md
+          } > notes.md
+          gh release create "$TAG" \
             --title "invctl $VERSION" \
             --notes-file notes.md \
             "dist/invctl_${VERSION}_linux_amd64" \
