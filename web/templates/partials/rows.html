@@ -205,6 +205,30 @@
                        any of these", and the list of them is the answer. */}}
                   {{else if eq .EntityType "device_type"}}<a class="id" href="/assets?device_type_id={{.EntityID}}">{{.Title}}</a>
                   {{else if eq .EntityType "wireless_lan"}}<a class="id" href="/wireless/{{.EntityID}}">{{.Title}}</a>
+                  {{else if eq .EntityType "identity"}}<a class="id" href="/identities/{{.EntityID}}">{{.Title}}</a>
+                  {{else if eq .EntityType "certificate"}}<a class="id" href="/certificates/{{.EntityID}}">{{.Title}}</a>
+                  {{else if eq .EntityType "circuit"}}<a class="id" href="/circuits/{{.EntityID}}">{{.Title}}</a>
+                  {{else if eq .EntityType "cluster"}}<a class="id" href="/clusters/{{.EntityID}}">{{.Title}}</a>
+                  {{else if eq .EntityType "project"}}<a class="id" href="/projects/{{.EntityID}}">{{.Title}}</a>
+                  {{else if eq .EntityType "team"}}<a class="id" href="/teams/{{.EntityID}}">{{.Title}}</a>
+                  {{else if eq .EntityType "vlan"}}<a class="id" href="/vlans/{{.EntityID}}">{{.Title}}</a>
+                  {{else if eq .EntityType "cable_bundle"}}<a class="id" href="/bundles/{{.EntityID}}">{{.Title}}</a>
+                  {{/* An L2VPN's page is /overlays/{id} and an FHRP group's is
+                       /redundancy/{id} -- the URLs are named for what an operator
+                       calls the CONCEPT, while the index is keyed on the table.
+                       These two are the only places the two vocabularies differ,
+                       which is why they are the two easiest branches to get
+                       wrong by guessing the path from the entity_type. */}}
+                  {{else if eq .EntityType "l2vpn"}}<a class="id" href="/overlays/{{.EntityID}}">{{.Title}}</a>
+                  {{else if eq .EntityType "fhrp_group"}}<a class="id" href="/redundancy/{{.EntityID}}">{{.Title}}</a>
+                  {{/* NO DETAIL PAGE EXISTS for these four, so they fall through
+                       to the unlinked span below, and searchHitUnlinked (in
+                       internal/web/search_link_test.go) lists them with that
+                       reason. A prefix, an aggregate, an ASN and an IP range are
+                       all rows on a list page rather than pages of their own.
+                       Linking them to a bare list would be worse than not
+                       linking: the reader clicks, lands on hundreds of rows, and
+                       has to find by eye the thing search had already found. */}}
                   {{else}}<span class="id">{{.Title}}</span>{{end}}
                   {{if .Subtitle}}<div class="mono" style="color:var(--faint);font-size:11.5px">{{.Subtitle}}</div>{{end}}
                 </td>

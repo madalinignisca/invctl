@@ -1004,3 +1004,118 @@ func TestUpdateIdentityNeverWritesLifecycleOrLastRotated(t *testing.T) {
 		})
 	}
 }
+
+// TestAnIdentityIsFindable is the behavioural half of the search package.
+//
+// TestEveryCreatableEntityIsIndexedOrArgued proves the CALL exists. It cannot
+// prove the call works, and the distinction is not academic: an indexEntity
+// with the wrong entity_type, an empty Title, or a document written outside the
+// transaction would all satisfy the census and leave search exactly as broken
+// as it was. WP-J9 recorded this rule after four fixes reintroduced the defect
+// they were fixing -- prove the guard against the SPECIFIC bug, not its shape.
+func TestAnIdentityIsFindable(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newIdentityFixture(t, e)
+			id := f.identity(t, "svc-payments-gateway", 90)
+
+			results, err := f.s.Search(f.ctx, "svc-payments-gateway", 25)
+			if err != nil {
+				t.Fatalf("searching: %v", err)
+			}
+			if !hasResult(results, "identity", id.ID) {
+				t.Fatalf("an identity declared through CreateIdentity is not findable "+
+					"by its own name. This is the WP-J8 defect verbatim: the whole "+
+					"surface works and the credential is invisible to search.\n"+
+					"got: %+v", results)
+			}
+		})
+	}
+}
+
+// TestAnIdentityRenameReachesTheIndex covers the update path separately.
+//
+// A create-only fix passes the census and still leaves a corrected name
+// answering with the typo forever, with nothing on screen to say so.
+func TestAnIdentityRenameReachesTheIndex(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newIdentityFixture(t, e)
+			id := f.identity(t, "svc-typoo", 0)
+
+			row, err := f.s.GetIdentity(f.ctx, id.ID)
+			if err != nil {
+				t.Fatalf("getting identity: %v", err)
+			}
+			corrected := row.Identity
+			corrected.Name = "svc-corrected"
+			if err := f.s.UpdateIdentity(f.ctx, testPermit, &corrected); err != nil {
+				t.Fatalf("updating identity: %v", err)
+			}
+
+			results, err := f.s.Search(f.ctx, "svc-corrected", 25)
+			if err != nil {
+				t.Fatalf("searching: %v", err)
+			}
+			if !hasResult(results, "identity", id.ID) {
+				t.Errorf("a corrected identity name did not reach the index: %+v", results)
+			}
+
+			stale, err := f.s.Search(f.ctx, "svc-typoo", 25)
+			if err != nil {
+				t.Fatalf("searching: %v", err)
+			}
+			if hasResult(stale, "identity", id.ID) {
+				t.Errorf("the OLD name still resolves. indexEntity is an upsert for "+
+					"exactly this reason; a stale document means the delete-then-insert "+
+					"half did not run.\ngot: %+v", stale)
+			}
+		})
+	}
+}
+
+// TestSearchNeverDisclosesASecretRef is the security assertion of this package.
+//
+// secret_ref holds a PATH, never material, so this is not about leaking a
+// credential -- it is about not publishing a map of where the estate keeps
+// them. Search is the widest read surface in the product: no project scope, no
+// cost gate, every authenticated reader. CLAUDE.md keeps secret_ref out of the
+// audit trail; the index is wider than the audit trail, so it stays out of here
+// too. Asserted behaviourally rather than by reading indexIdentity, because the
+// field could arrive in the document from Title, Subtitle or Body and only a
+// query proves all three.
+func TestSearchNeverDisclosesASecretRef(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newIdentityFixture(t, e)
+			id := f.identity(t, "svc-vaulted", 90)
+
+			// The exact value newIdentityFixture stores. The FTS5 tokenizer
+			// declares '/' a token character (migration 00001), so this is one
+			// token and a match would be a real disclosure rather than a
+			// coincidental word hit.
+			for _, probe := range []string{"kv/prod/svc-vaulted", "kv", "vault"} {
+				results, err := f.s.Search(f.ctx, probe, 25)
+				if err != nil {
+					t.Fatalf("searching %q: %v", probe, err)
+				}
+				if probe == "vault" {
+					// realm IS indexed and is deliberately findable; this probe
+					// exists to prove the query shape can match at all, so the
+					// two negative probes below mean something.
+					if !hasResult(results, "identity", id.ID) {
+						t.Errorf("realm %q did not resolve, so the negative probes "+
+							"in this test prove nothing", probe)
+					}
+					continue
+				}
+				if hasResult(results, "identity", id.ID) {
+					t.Errorf("searching %q returned the identity: secret_ref reached "+
+						"the search index. It holds the location of a credential and "+
+						"search is the widest read surface there is.\ngot: %+v",
+						probe, results)
+				}
+			}
+		})
+	}
+}
