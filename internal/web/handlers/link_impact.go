@@ -62,8 +62,18 @@ func (a *App) LinkImpact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Every LIVE sibling of a breakout strand is cut alongside it -- one
+	// connector, one moulded assembly (docs/breakout-cables-design.md,
+	// store.BreakoutStrandIDs's own comment). For an ordinary cable this is
+	// just []string{id}, unchanged from before breakouts existed.
+	strandIDs, err := a.Store.BreakoutStrandIDs(r.Context(), id)
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
+
 	result, err := a.Store.Simulate(r.Context(), impact.Request{
-		CutLinkIDs:    []string{id},
+		CutLinkIDs:    strandIDs,
 		WindowSeconds: queryInt(r, "window", 180, 1, 3650),
 	})
 	if err != nil {
