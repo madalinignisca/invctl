@@ -273,6 +273,63 @@ func (s *SQLStore) UpdateVLANGroup(ctx context.Context, p domain.Permit, g *doma
 	})
 }
 
+// RetireVLANGroup withdraws a numbering scope.
+//
+// REFUSED, NOT CASCADED, for the reason RetireVLAN gives for its own children:
+// a live VLAN still numbering within this scope is a fact somebody else
+// declared. Silently retiring the group underneath it would leave the VLAN
+// pointing at a scope that no longer exists in any live sense while the row
+// itself still claims to belong there -- the same standing contradiction
+// RetireVLAN refuses to create in the other direction. Withdraw the VLANs
+// first, or move them to a different group, then withdraw the now-empty
+// scope.
+//
+// Serializable, for the reason RetireVLAN's own comment gives: the COUNT below
+// asserts an invariant this transaction is about to depend on, and at
+// read-committed a VLAN declared into this group concurrently is invisible to
+// it.
+func (s *SQLStore) RetireVLANGroup(ctx context.Context, p domain.Permit, id string) error {
+	before, err := s.GetVLANGroup(ctx, id)
+	if err != nil {
+		return err
+	}
+	if before.Lifecycle == domain.LifecycleRetired {
+		// Already withdrawn: a second audit entry would claim a withdrawal
+		// that did not happen. RetireVLAN and RetireIdentity do the same.
+		return nil
+	}
+	at := domain.FormatTime(s.now())
+	after := *before
+	after.Lifecycle = domain.LifecycleRetired
+	after.UpdatedAt = &at
+
+	return s.writeSerializable(ctx, p, func(t *tx) error {
+		var vlans int
+		if err := t.get(ctx, &vlans, `
+			SELECT COUNT(*) FROM vlan WHERE group_id = ? AND lifecycle <> ?`,
+			id, domain.LifecycleRetired); err != nil {
+			return fmt.Errorf("checking vlan group %s for members: %w", id, err)
+		}
+		if vlans > 0 {
+			return fmt.Errorf("vlan group %s cannot be withdrawn while %d live VLAN(s) number within it: %w",
+				before.Name, vlans, domain.ErrConflict)
+		}
+
+		res, err := t.exec(ctx, `
+			UPDATE vlan_group SET lifecycle = ?, updated_at = ?,
+			                      row_version = row_version + 1
+			WHERE id = ? AND row_version = ?`,
+			domain.LifecycleRetired, at, id, before.RowVersion)
+		if err != nil {
+			return translateWriteErr(err, "retiring vlan group")
+		}
+		if err := requireVersion(res, "vlan_group", id, &before.RowVersion); err != nil {
+			return err
+		}
+		return t.logUpdate(ctx, "vlan_group", id, before, &after)
+	})
+}
+
 // ---------- port membership ----------
 
 // VLANPort is one port in a VLAN, with the box it is in.

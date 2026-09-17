@@ -131,6 +131,24 @@ var unreachableRepairPaths = map[string]string{
 	// priority cannot be corrected through the product either.
 	"UpdateBackendPool": "no route yet (write-surface-gaps Task 5); a pool's name or lb_algorithm cannot be corrected through the product until then.",
 	"UpdateRoute":       "no route yet (write-surface-gaps Task 5); a route's match_value, tls_termination or priority cannot be corrected through the product until then.",
+
+	// RetireRIR, RetireVLANGroup, RetireBackendPool and RetireRoute are
+	// Task 4's withdrawal paths for the write-surface-gaps plan, built ahead
+	// of Task 5's web layer the same order the five corrections above took.
+	// Each refuses rather than cascades -- RetireRIR while a live aggregate
+	// still names the registry, RetireVLANGroup while a live VLAN still
+	// numbers within the scope, RetireBackendPool while a live route or
+	// member still uses the pool, RetireRoute while a live dependency still
+	// resolves through it -- but nothing in the product can call any of them
+	// yet. Until Task 5 wires POST /rirs/{id}/retire, .../vlan-groups/{id}/
+	// retire, .../pools/{id}/retire and .../routes/{id}/retire, a wrongly
+	// declared registry, numbering scope, pool or route genuinely cannot be
+	// taken back through the product. All four entries come out the moment
+	// their routes land.
+	"RetireRIR":         "no route yet (write-surface-gaps Task 5); a wrongly declared registry cannot be withdrawn through the product until then.",
+	"RetireVLANGroup":   "no route yet (write-surface-gaps Task 5); a wrongly declared numbering scope cannot be withdrawn through the product until then.",
+	"RetireBackendPool": "no route yet (write-surface-gaps Task 5); a wrongly declared pool cannot be withdrawn through the product until then.",
+	"RetireRoute":       "no route yet (write-surface-gaps Task 5); a wrongly declared route cannot be withdrawn through the product until then.",
 }
 
 // TestEveryUpdateMethodIsReachable fails when a store method written to correct

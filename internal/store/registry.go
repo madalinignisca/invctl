@@ -329,6 +329,62 @@ func (s *SQLStore) UpdateRIR(ctx context.Context, p domain.Permit, r *domain.RIR
 	})
 }
 
+// RetireRIR withdraws a registry.
+//
+// REFUSED, NOT CASCADED, for the reason RetirePrefix and RetireVLAN both give:
+// a live aggregate naming this RIR is a fact somebody else declared -- an
+// operator recorded that a specific delegation came from this registry -- and
+// silently orphaning that record (or worse, silently retiring the aggregate
+// underneath them) would write a change_log entry nobody asked for. The
+// registry withdrawal has to come after the delegations it covers are gone,
+// the same order retiring a prefix already requires of what lives inside it.
+//
+// Serializable, for the reason RetireVLAN's own comment gives: the COUNT below
+// asserts an invariant this transaction is about to depend on, and at
+// read-committed a live aggregate declared concurrently against this RIR is
+// invisible to it.
+func (s *SQLStore) RetireRIR(ctx context.Context, p domain.Permit, id string) error {
+	before, err := s.GetRIR(ctx, id)
+	if err != nil {
+		return err
+	}
+	if before.Lifecycle == domain.LifecycleRetired {
+		// Already withdrawn: a second audit entry would claim a withdrawal
+		// that did not happen. RetireIdentity does the same.
+		return nil
+	}
+	at := domain.FormatTime(s.now())
+	after := *before
+	after.Lifecycle = domain.LifecycleRetired
+	after.UpdatedAt = &at
+
+	return s.writeSerializable(ctx, p, func(t *tx) error {
+		var aggregates int
+		if err := t.get(ctx, &aggregates, `
+			SELECT COUNT(*) FROM aggregate WHERE rir_id = ? AND lifecycle <> ?`,
+			id, domain.LifecycleRetired); err != nil {
+			return fmt.Errorf("checking registry %s for delegations: %w", id, err)
+		}
+		if aggregates > 0 {
+			return fmt.Errorf("registry %s cannot be withdrawn while %d live aggregate(s) name it: %w",
+				before.Name, aggregates, domain.ErrConflict)
+		}
+
+		res, err := t.exec(ctx, `
+			UPDATE rir SET lifecycle = ?, updated_at = ?,
+			               row_version = row_version + 1
+			WHERE id = ? AND row_version = ?`,
+			domain.LifecycleRetired, at, id, before.RowVersion)
+		if err != nil {
+			return translateWriteErr(err, "retiring registry")
+		}
+		if err := requireVersion(res, "rir", id, &before.RowVersion); err != nil {
+			return err
+		}
+		return t.logUpdate(ctx, "rir", id, before, &after)
+	})
+}
+
 // ---------- autonomous systems ----------
 
 // ASNRow is an AS number with its registry resolved.
