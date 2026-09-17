@@ -226,7 +226,17 @@ var DeclaredColumns = map[string][]string{
 	"asset_storage_claim": {"asset_id", "pool_id", "allocated_gb", "note",
 		"created_at", "updated_at"},
 	"backend_member": {"pool_id", "endpoint_id", "weight", "is_backup"},
-	"backend_pool":   {"id", "service_id", "name", "lb_algorithm"},
+	// lifecycle/row_version/created_at/updated_at arrived in migration 00070
+	// (write-surface-gaps Task 1), catching this table up to every other
+	// entity that can be corrected and withdrawn. Declared throughout, the
+	// same as user_project and inflation_rate below: a pool exists because
+	// somebody declared it, nothing observes or reports on a pool's own
+	// existence, and it changes only because a person decided to correct or
+	// retire it.
+	"backend_pool": {
+		"id", "service_id", "name", "lb_algorithm",
+		"lifecycle", "row_version", "created_at", "updated_at",
+	},
 	// The seven domain vocabularies (migration 00004). Declared, and not a
 	// close call: a lookup row is somebody asserting that a kind of thing
 	// exists in this estate. Nothing observes it, nothing reports it, and it
@@ -703,9 +713,15 @@ var DeclaredColumns = map[string][]string{
 	"inflation_rate": {
 		"year", "basis_points", "source", "created_at", "updated_at", "row_version",
 	},
+	// lifecycle/row_version/created_at/updated_at arrived in migration 00070
+	// (write-surface-gaps Task 1); see backend_pool's comment above -- the
+	// same reasoning applies here. A route is declared, a person corrects or
+	// withdraws it, and nothing observes it directly (its HEALTH is derived
+	// from its pool's members, which is a computed finding, not a column).
 	"route": {
 		"id", "frontend_endpoint_id", "match_type", "match_value",
 		"backend_pool_id", "tls_termination", "priority",
+		"lifecycle", "row_version", "created_at", "updated_at",
 	},
 	"rt_container": {
 		"instance_id", "engine", "container_name", "compose_project", "compose_service",

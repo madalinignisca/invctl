@@ -153,11 +153,24 @@ func (e *Endpoint) Addr() string {
 }
 
 // BackendPool is a set of endpoints behind a proxy.
+//
+// Lifecycle/RowVersion/CreatedAt/UpdatedAt arrived in migration 00070
+// (write-surface-gaps Task 1), which caught the whole table up to the
+// convention every other entity already follows. This struct only carries the
+// four fields so `SELECT *` scans still succeed -- sqlx's StructScan fails
+// outright ("missing destination name") the moment a query returns a column
+// with no matching field, and graph.go and deps.go both do `SELECT *` /
+// `SELECT r.*` against these tables. Correction (UpdateBackendPool) and
+// withdrawal (RetireBackendPool) that actually use these fields are Task 3/4.
 type BackendPool struct {
 	ID          string  `db:"id"`
 	ServiceID   string  `db:"service_id"`
 	Name        string  `db:"name"`
 	LBAlgorithm *string `db:"lb_algorithm"`
+	Lifecycle   string  `db:"lifecycle"`
+	RowVersion  int     `db:"row_version"`
+	CreatedAt   string  `db:"created_at"`
+	UpdatedAt   string  `db:"updated_at"`
 }
 
 // BackendMember places an endpoint into a pool.
@@ -180,6 +193,13 @@ var TLSTerminations = []string{"passthrough", "terminate", "reencrypt"}
 // dependency on a route resolves to its pool, and the pool's health derives
 // from its members. That is what surfaces "the proxy is up but every backend
 // sits on the node you are about to reboot".
+// Lifecycle/RowVersion/CreatedAt/UpdatedAt arrived in migration 00070
+// (write-surface-gaps Task 1) -- see BackendPool's doc comment above for why
+// they exist here even though nothing yet writes them: `SELECT * FROM route`
+// (graph.go) and `SELECT r.*` (deps.go's routeSelect, embedded via RouteRow)
+// need a matching field for every column or sqlx's StructScan refuses the
+// whole row. Correction (UpdateRoute) and withdrawal (RetireRoute) that
+// actually use these fields are Task 3/4.
 type Route struct {
 	ID                 string  `db:"id"`
 	FrontendEndpointID string  `db:"frontend_endpoint_id"`
@@ -188,6 +208,10 @@ type Route struct {
 	BackendPoolID      string  `db:"backend_pool_id"`
 	TLSTermination     *string `db:"tls_termination"`
 	Priority           int     `db:"priority"`
+	Lifecycle          string  `db:"lifecycle"`
+	RowVersion         int     `db:"row_version"`
+	CreatedAt          string  `db:"created_at"`
+	UpdatedAt          string  `db:"updated_at"`
 }
 
 // NewRoute validates and constructs a routing rule.
