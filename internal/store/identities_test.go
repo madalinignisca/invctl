@@ -1119,3 +1119,63 @@ func TestSearchNeverDisclosesASecretRef(t *testing.T) {
 		})
 	}
 }
+
+// TestReindexIdentitiesRecoversAPreFixEstate simulates exactly what the demo
+// and any upgraded deployment look like: identity rows that exist and have no
+// search document, because they were written before CreateIdentity indexed.
+//
+// The simulation is a direct DELETE from search_index rather than a mocked
+// store, so what is being tested is the real recovery path against the real
+// index on both engines.
+func TestReindexIdentitiesRecoversAPreFixEstate(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newIdentityFixture(t, e)
+			live := f.identity(t, "svc-legacy-live", 90)
+			retired := f.identity(t, "svc-legacy-retired", 0)
+			if err := f.s.RetireIdentity(f.ctx, testPermit, retired.ID); err != nil {
+				t.Fatalf("retiring identity: %v", err)
+			}
+
+			// Back to the pre-fix world.
+			exec(t, f.s.db, `DELETE FROM search_index WHERE entity_type = 'identity'`)
+			gone, err := f.s.Search(f.ctx, "svc-legacy-live", 25)
+			if err != nil {
+				t.Fatalf("searching: %v", err)
+			}
+			if hasResult(gone, "identity", live.ID) {
+				t.Fatal("the setup did not actually clear the index, so this test " +
+					"would pass without the reindex doing anything")
+			}
+
+			written, err := f.s.ReindexIdentities(f.ctx, domain.SystemPermit("test"))
+			if err != nil {
+				t.Fatalf("reindexing: %v", err)
+			}
+			if written != 2 {
+				t.Errorf("reindexed %d identities, want 2", written)
+			}
+
+			back, err := f.s.Search(f.ctx, "svc-legacy-live", 25)
+			if err != nil {
+				t.Fatalf("searching: %v", err)
+			}
+			if !hasResult(back, "identity", live.ID) {
+				t.Errorf("a live identity is still unfindable after a reindex: %+v", back)
+			}
+
+			// Retired ones too: RetireIdentity leaves the document in place, so a
+			// backfill that skipped them would make a retired credential findable
+			// only by accident of when it was written.
+			retiredHits, err := f.s.Search(f.ctx, "svc-legacy-retired", 25)
+			if err != nil {
+				t.Fatalf("searching: %v", err)
+			}
+			if !hasResult(retiredHits, "identity", retired.ID) {
+				t.Errorf("a retired identity was skipped by the reindex. "+
+					"RetireIdentity deliberately leaves the document in place, so "+
+					"the backfill has to agree with it.\ngot: %+v", retiredHits)
+			}
+		})
+	}
+}

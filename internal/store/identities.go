@@ -496,3 +496,51 @@ func (s *SQLStore) IdentityUsage(ctx context.Context, id string) (*IdentityUsage
 	})
 	return &IdentityUsageRows{Dependencies: deps, Windows: wins}, nil
 }
+
+// ReindexIdentities rebuilds the search document for every identity, and
+// returns how many it wrote.
+//
+// WHY THIS EXISTS AND WHY IT IS NARROW. Identities were created by a version of
+// this code that did not index them (WP-J8 shipped the surface, nothing wrote a
+// search document). The fix makes every FUTURE write index; it cannot reach
+// rows that already exist. An upgrade whose release note reads "now open and
+// re-save each of your credentials by hand" is not an upgrade path, so the
+// operator gets `invctl -reindex-identities` instead.
+//
+// NOT A GENERAL "REBUILD THE SEARCH INDEX", and the reason is a measurement
+// rather than a preference. Only six of the nineteen indexed entity types have
+// an index<Entity> helper; the other thirteen build their searchDoc inline
+// inside each Create and Update. A general reindex would therefore have to
+// either duplicate thirteen document-building blocks -- which would drift from
+// the real ones silently, the exact failure this package exists to close -- or
+// extract thirteen helpers across thirteen files first. That extraction is the
+// real prerequisite, and it is worth doing the day a SECOND type needs
+// backfilling. Today exactly one does, and a narrow function that is obviously
+// correct beats a general one that is quietly wrong.
+//
+// WRITES NO change_log, and that is not an omission. search_index is named in
+// CLAUDE.md's list of set and index tables that hold "the current value of
+// something the parent owns" -- rebuilding one changes no fact about the
+// estate, nobody decided anything, and an audit entry claiming otherwise would
+// be false. A domain.SystemPermit is the honest actor for the same reason.
+//
+// INCLUDES RETIRED IDENTITIES deliberately: RetireIdentity does not remove the
+// document (see indexIdentity), so a backfill that skipped them would leave a
+// retired credential findable only if it happened to be written after this fix.
+func (s *SQLStore) ReindexIdentities(ctx context.Context, p domain.Permit) (int, error) {
+	rows, err := s.ListIdentities(ctx, IdentityFilter{IncludeRetired: true})
+	if err != nil {
+		return 0, fmt.Errorf("listing identities to reindex: %w", err)
+	}
+	written := 0
+	for i := range rows {
+		identity := rows[i].Identity
+		if err := s.write(ctx, p, func(t *tx) error {
+			return s.indexIdentity(ctx, t, &identity)
+		}); err != nil {
+			return written, fmt.Errorf("reindexing identity %s: %w", identity.ID, err)
+		}
+		written++
+	}
+	return written, nil
+}

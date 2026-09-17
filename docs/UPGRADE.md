@@ -154,6 +154,32 @@ That is the shape to look for in every release note: not "what changed in the
 schema" but "who can now see or do something different". `CHANGELOG.md` puts
 those under **Action required** for exactly this reason.
 
+### A behaviour fix can also leave existing rows behind
+
+Not every gap closes retroactively. A change that makes future writes correct
+does nothing for rows already written, and the symptom is indistinguishable
+from the bug still being there.
+
+> **Identities became searchable.** Credential references declared before this
+> release have a row and no search document, because the code that created
+> them never wrote one. Every identity created or edited from now on indexes
+> itself; the existing ones will not, however long you wait.
+>
+> **After upgrading, once:**
+>
+> ```
+> invctl -reindex-identities
+> ```
+>
+> It writes a search document for every identity, live and retired, reports
+> the count and exits. Safe to repeat — the write is an upsert, so running it
+> twice changes nothing. It touches no declared state and writes no
+> `change_log` row: rebuilding an index table changes no fact about your
+> estate.
+
+Skipping it is not dangerous, it is just disappointing: search keeps returning
+nothing for credentials you can see on `/identities`.
+
 ## After the upgrade
 
 ```
