@@ -238,6 +238,21 @@ var storePermitMinters = map[string]string{
 	"applyTemplateSubject": "ApplyTemplate's subject is the asset it backfills interfaces onto: " +
 		"checks p.Covers(\"asset\", assetID), then scopes to exactly the interface ids this " +
 		"call is about to insert",
+
+	// authorizeBreakoutSubjects (network.go): a breakout has 1+n owners --
+	// the asset behind the shared a-end, plus the asset behind each b-end --
+	// the same widening applyTemplateSubject already does from "one id" to
+	// "a set of ids", but on the CHECK side rather than the scope side: every
+	// one of those 1+n assets must be in p.Covers("asset", ...), so a project
+	// owner cannot fan one of their own ports out to an interface on an
+	// asset they do not own, any more than authorizeLinkSubjects lets them
+	// do it for an ordinary two-ended cable. linkIDs are minted by
+	// CreateBreakout BEFORE this call, never supplied by a caller, for the
+	// identical reason applyTemplateSubject's interface ids are -- see
+	// CreateBreakout's own comment. Then scopes to exactly those link ids.
+	"authorizeBreakoutSubjects": "a breakout has 1+n owners, the asset behind the shared a-end " +
+		"and the asset behind each b-end: checks p.Covers on all of them before scoping to " +
+		"exactly the link ids this call is about to insert",
 }
 
 // permitMinterNames is the exact, named set TestOnlyTheNamedFunctionsMintAPermit

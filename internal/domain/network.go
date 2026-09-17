@@ -203,6 +203,52 @@ func (l *Link) Validate() error {
 // IsRetired reports whether this cable has been unpatched.
 func (l *Link) IsRetired() bool { return l.Lifecycle == LifecycleRetired }
 
+// BreakoutSpec is what a caller asserts when declaring one breakout cable --
+// one QSFP-to-4xSFP+ DAC, say, moulded as one assembly with a-end plugged into
+// the switch and its four legs plugged into b-end ports. The store turns this
+// into len(BInterfaceIDs) link rows sharing a generated BreakoutID, positions
+// 1..len(BInterfaceIDs) in the order given.
+type BreakoutSpec struct {
+	AInterfaceID  string
+	BInterfaceIDs []string
+	Medium        *string
+	LengthM       *int
+}
+
+// Validate checks a breakout declaration against its business rules.
+//
+// AT LEAST TWO STRANDS: a "breakout" of one leg is an ordinary link with two
+// unused columns, not a smaller breakout -- docs/breakout-cables-design.md
+// §5 names "asymmetric breakouts beyond one-to-many" as out of scope, and a
+// single-strand breakout is the degenerate case that same reasoning refuses.
+//
+// WHAT THIS CANNOT CHECK: whether any b-end (or the a-end) is already
+// patched to something else. That needs a database read, which is the
+// store's job in the same transaction that writes the rows -- checking here
+// and again there would be a TOCTOU gap between the two.
+func (b BreakoutSpec) Validate() error {
+	ve := &ValidationError{}
+	checkRequired(ve, "a_interface_id", b.AInterfaceID)
+	if len(b.BInterfaceIDs) < 2 {
+		ve.Add("b_interface_ids", "a breakout needs at least two strands")
+	}
+	seen := map[string]bool{}
+	for i, bID := range b.BInterfaceIDs {
+		if bID == "" {
+			ve.Add("b_interface_ids", "position %d: choose a port", i+1)
+			continue
+		}
+		if bID == b.AInterfaceID {
+			ve.Add("b_interface_ids", "position %d: an interface cannot be linked to itself", i+1)
+		}
+		if seen[bID] {
+			ve.Add("b_interface_ids", "position %d: the same port cannot appear twice in one breakout", i+1)
+		}
+		seen[bID] = true
+	}
+	return ve.OrNil()
+}
+
 // Prefix is a network. Bounds are stored as big-endian bytes so containment is
 // a range scan (§4.1); the text form is kept for display and uniqueness.
 type Prefix struct {

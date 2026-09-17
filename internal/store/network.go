@@ -511,6 +511,13 @@ func (s *SQLStore) UpdateLink(ctx context.Context, p domain.Permit, l *domain.Li
 	l.AInterfaceID = before.AInterfaceID
 	l.BInterfaceID = before.BInterfaceID
 	l.Lifecycle = before.Lifecycle
+	// BreakoutID and BreakoutPosition are pinned from the stored row for the
+	// identical reason a_interface_id/b_interface_id/lifecycle are: this
+	// method corrects medium and length_m, not what strand of what breakout
+	// a row belongs to -- a submitted struct has nothing left to forge a
+	// different group or position from.
+	l.BreakoutID = before.BreakoutID
+	l.BreakoutPosition = before.BreakoutPosition
 
 	// Subjects come from the STORED row, the only one there is here -- both
 	// endpoints are pinned above, so a submitted struct has nothing left for a
@@ -521,6 +528,18 @@ func (s *SQLStore) UpdateLink(ctx context.Context, p domain.Permit, l *domain.Li
 	}
 
 	return s.write(ctx, linkPermit, func(t *tx) error {
+		// THE DRIFT GUARD (docs/breakout-cables-design.md D4). Only a strand
+		// of a breakout has siblings to disagree with; an ordinary cable's
+		// BreakoutID is nil and this is a no-op. Checked INSIDE the write
+		// transaction, against the values this update is about to write --
+		// not against `before`, which is what makes it catch the actual bug
+		// (one strand corrected to a different medium than its siblings)
+		// rather than only a row that was already wrong.
+		if before.BreakoutID != nil {
+			if err := requireNoBreakoutDrift(ctx, t, *before.BreakoutID, l.ID, l.Medium, l.LengthM); err != nil {
+				return err
+			}
+		}
 		res, err := t.exec(ctx, `
 			UPDATE link SET medium = ?, length_m = ?, row_version = row_version + 1
 			WHERE id = ? AND row_version = ?`,
@@ -875,6 +894,216 @@ func (s *SQLStore) RetireLink(ctx context.Context, p domain.Permit, id string) e
 		diff := fmt.Sprintf(`{"lifecycle":{"old":%q,"new":%q}}`, before.Lifecycle, domain.LifecycleRetired)
 		return t.log(ctx, "link", id, domain.ActionRetire, diff, "")
 	})
+}
+
+// authorizeBreakoutSubjects derives EVERY subject a breakout touches -- the
+// asset behind the shared a-end, plus the asset behind each b-end -- and
+// requires the caller's real permit to cover all of them before any row is
+// written. Same reasoning as authorizeLinkSubjects, widened from two subjects
+// to 1+n: a project owner may not fan one of their own ports out to four
+// interfaces on assets they do not own, any more than they could cable to
+// one such port under the ordinary two-ended rule.
+//
+// linkIDs must already be generated (not minted inside the transaction) for
+// the identical reason authorizeLinkSubjects' doc comment gives: writeSerializable
+// needs a scoped permit before the transaction it gates ever opens.
+func authorizeBreakoutSubjects(ctx context.Context, q dbGetter, p domain.Permit,
+	spec domain.BreakoutSpec, linkIDs []string,
+) (domain.Permit, error) {
+	var aAssetID string
+	if err := q.get(ctx, &aAssetID, `SELECT asset_id FROM interface WHERE id = ?`, spec.AInterfaceID); err != nil {
+		return nil, fmt.Errorf("resolving breakout a-end asset: %w", err)
+	}
+	if !p.Covers("asset", aAssetID) {
+		return nil, fmt.Errorf("declaring breakout at a-end asset %s: %w", aAssetID, domain.ErrForbidden)
+	}
+	for _, bID := range spec.BInterfaceIDs {
+		var bAssetID string
+		if err := q.get(ctx, &bAssetID, `SELECT asset_id FROM interface WHERE id = ?`, bID); err != nil {
+			return nil, fmt.Errorf("resolving breakout b-end asset for %s: %w", bID, err)
+		}
+		if !p.Covers("asset", bAssetID) {
+			return nil, fmt.Errorf("declaring breakout at b-end asset %s: %w", bAssetID, domain.ErrForbidden)
+		}
+	}
+	scope := map[string]bool{}
+	for _, id := range linkIDs {
+		scope[id] = true
+	}
+	return domain.ScopedPermit(p.Actor(), nil, domain.ScopedEntities{"link": scope}), nil
+}
+
+// CreateBreakout declares one breakout cable: one moulded assembly, one a-end
+// interface, and n b-end interfaces it fans out to. It writes n `link` rows
+// in a single transaction, sharing one generated breakout id, positions
+// 1..n in the order spec.BInterfaceIDs was given.
+//
+// WHY THE A-END IS SHARED AND THE B-ENDS ARE NOT: that is the physical
+// object. A QSFP-to-4xSFP+ DAC has one connector on one side and four on the
+// other -- the a-end is the SAME PORT on every row on purpose, and the
+// ordinary one-patch-per-port predicate (see CreateLink above) would refuse
+// row two the moment row one existed. THE RELAXATION IS NARROW: the a-end is
+// checked for a pre-existing cable exactly ONCE, before any strand is
+// written, not once per strand -- an already-patched a-end still refuses the
+// whole breakout, same as an already-patched port refuses an ordinary
+// CreateLink. The b-ends get NO relaxation at all: each is checked against
+// every live link (including the strands this very call already inserted),
+// so two legs of one breakout landing on the same far port is refused
+// exactly like patching two ordinary cables into one port would be.
+//
+// WHAT A DRIFTED BREAKOUT WOULD MEAN: an operator reading the cable list
+// would see four rows that all claim to be the same physical assembly, and
+// one of them disagreeing about its medium or length is lying about what is
+// actually plugged in -- there is only one connector on that end, so it has
+// exactly one medium and one length, whatever four rows in the database
+// happen to say. Every row here is built from the SAME spec.Medium/
+// spec.LengthM, so a fresh breakout cannot drift on creation; the guard
+// earns its keep on UpdateLink, which is the only path that could make one
+// row disagree with its siblings after the fact.
+func (s *SQLStore) CreateBreakout(ctx context.Context, p domain.Permit, spec domain.BreakoutSpec) ([]*domain.Link, error) {
+	if err := spec.Validate(); err != nil {
+		return nil, err
+	}
+
+	// IDs are generated here, before the permit is minted and before the
+	// transaction opens -- see authorizeBreakoutSubjects' doc comment.
+	breakoutID := NewID()
+	linkIDs := make([]string, len(spec.BInterfaceIDs))
+	for i := range linkIDs {
+		linkIDs[i] = NewID()
+	}
+
+	linkPermit, err := authorizeBreakoutSubjects(ctx, s, p, spec, linkIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	var links []*domain.Link
+	err = s.writeSerializable(ctx, linkPermit, func(t *tx) error {
+		links = nil // writeSerializable can retry fn; a partial slice from a
+		// rolled-back attempt must not leak into a retry's result.
+
+		if err := requireLiveInterface(ctx, t, "a_interface_id", spec.AInterfaceID); err != nil {
+			return err
+		}
+		// The a-end is checked ONCE, before any strand exists -- see the
+		// method doc comment for why this is the narrow relaxation and not
+		// a dropped check.
+		var an int
+		if err := t.get(ctx, &an, `
+			SELECT COUNT(*) FROM link
+			WHERE lifecycle = 'active' AND (a_interface_id = ? OR b_interface_id = ?)`,
+			spec.AInterfaceID, spec.AInterfaceID); err != nil {
+			return fmt.Errorf("checking breakout a-end: %w", err)
+		}
+		if an > 0 {
+			return fmt.Errorf("declaring breakout at %s: that port is already patched: %w",
+				spec.AInterfaceID, domain.ErrConflict)
+		}
+
+		for i, bID := range spec.BInterfaceIDs {
+			field := fmt.Sprintf("b_interface_id_%d", i+1)
+			if err := requireLiveInterface(ctx, t, field, bID); err != nil {
+				return err
+			}
+			// No relaxation for the b-end: checked against every live link,
+			// including strands THIS call already inserted a moment ago, so
+			// the same far port cannot take two legs of one breakout any
+			// more than it could take two unrelated cables.
+			var bn int
+			if err := t.get(ctx, &bn, `
+				SELECT COUNT(*) FROM link
+				WHERE lifecycle = 'active' AND (a_interface_id = ? OR b_interface_id = ?)`,
+				bID, bID); err != nil {
+				return fmt.Errorf("checking breakout b-end %s: %w", bID, err)
+			}
+			if bn > 0 {
+				return fmt.Errorf("cabling %s to %s: one of those ports is already patched: %w",
+					spec.AInterfaceID, bID, domain.ErrConflict)
+			}
+
+			pos := i + 1
+			l := &domain.Link{
+				ID: linkIDs[i], AInterfaceID: spec.AInterfaceID, BInterfaceID: bID,
+				Medium: spec.Medium, LengthM: spec.LengthM, Lifecycle: domain.LifecycleActive,
+				BreakoutID: &breakoutID, BreakoutPosition: &pos,
+			}
+			if err := l.Validate(); err != nil {
+				return err
+			}
+			if _, err := t.exec(ctx, `
+				INSERT INTO link (id, a_interface_id, b_interface_id, medium, length_m,
+				                   lifecycle, breakout_id, breakout_position)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+				l.ID, l.AInterfaceID, l.BInterfaceID, l.Medium, l.LengthM, l.Lifecycle,
+				l.BreakoutID, l.BreakoutPosition); err != nil {
+				return translateWriteErr(err, "creating breakout strand")
+			}
+			if err := t.logCreate(ctx, "link", l.ID, l); err != nil {
+				return err
+			}
+			links = append(links, l)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return links, nil
+}
+
+// requireNoBreakoutDrift refuses a write that would leave a live breakout
+// disagreeing with itself -- docs/breakout-cables-design.md D4. Reads its
+// siblings INSIDE the transaction, so it sees rows this same transaction
+// already wrote (CreateBreakout) as well as committed ones (UpdateLink).
+//
+// excludeLinkID is the row being written -- comparing against its OWN
+// not-yet-committed values would be comparing something to itself; every
+// OTHER live member of the breakout has to agree with the medium/length_m
+// about to be written, not with whatever is already on disk for this row.
+//
+// THIS CANNOT BE A CHECK CONSTRAINT ON EITHER ENGINE, the same reason
+// migration 00068's one-bundle-per-cable rule cannot be: it needs to see
+// sibling ROWS, and a CHECK (SQLite or PostgreSQL) only ever sees the row
+// being written.
+func requireNoBreakoutDrift(ctx context.Context, t *tx, breakoutID, excludeLinkID string, medium *string, lengthM *int) error {
+	var siblings []struct {
+		Medium  *string `db:"medium"`
+		LengthM *int    `db:"length_m"`
+	}
+	if err := t.selectAll(ctx, &siblings, `
+		SELECT medium, length_m FROM link
+		WHERE breakout_id = ? AND id <> ? AND lifecycle = 'active'`,
+		breakoutID, excludeLinkID); err != nil {
+		return fmt.Errorf("checking breakout %s for drift: %w", breakoutID, err)
+	}
+	for _, sib := range siblings {
+		if !strPtrEqual(sib.Medium, medium) || !intPtrEqual(sib.LengthM, lengthM) {
+			ve := &domain.ValidationError{}
+			ve.Add("medium", "every strand of a breakout cable must share the same medium and length")
+			return ve
+		}
+	}
+	return nil
+}
+
+// strPtrEqual and intPtrEqual compare two nullable columns the way SQL NULL
+// equality does NOT: two nils are equal, exactly one nil is not, and two
+// non-nils are equal when the pointed-to values are. Ordinary Go `==` on the
+// pointers would compare addresses, which is never what a caller means for a
+// value scanned fresh out of two different rows.
+func strPtrEqual(a, b *string) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
+}
+
+func intPtrEqual(a, b *int) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
 }
 
 // ---------- addressing ----------

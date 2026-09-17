@@ -92,6 +92,20 @@ var writeSurfaceAliases = map[string]struct{ correct, withdraw []string }{
 		correct:  []string{"UpdateDeviceTypeComponent"},
 		withdraw: []string{"RetireDeviceTypeComponent"},
 	},
+	// CreateBreakout writes n plain `link` rows sharing a breakout id
+	// (docs/breakout-cables-design.md) -- there is no separate Breakout
+	// entity in the schema, and Link is already the correction/withdrawal
+	// unit: UpdateLink corrects one strand's medium/length_m (refusing a
+	// value that would disagree with its live siblings, the drift guard),
+	// and RetireLink withdraws one strand at a time, exactly the way
+	// unpatching one leg of a physical breakout leaves the rest connected.
+	// The operator-facing form for driving this (Task 6 of the breakout
+	// plan) is not built yet -- that is a UI gap, not a store gap, and
+	// tracked in the plan rather than here.
+	"Breakout": {
+		correct:  []string{"UpdateLink"},
+		withdraw: []string{"RetireLink"},
+	},
 }
 
 // writeSurfaceByDesign are entities where a missing verb is correct, with the
