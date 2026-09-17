@@ -85,6 +85,14 @@ func run() error {
 		// mean one set of options guarding two different risks.
 		pruneUnmatched = flag.Bool("prune-unmatched", false,
 			"delete resolved drift-queue entries older than -prune-keep-days and exit")
+
+		// Upgrade path for the search fix. Identities created before
+		// CreateIdentity indexed them have a row and no search document, and
+		// nothing a future write does can reach them. See
+		// store.ReindexIdentities for why this is narrow rather than a general
+		// "rebuild the search index".
+		reindexIdentities = flag.Bool("reindex-identities", false,
+			"write a search document for every existing identity and exit")
 	)
 	flag.Parse()
 
@@ -137,6 +145,20 @@ func run() error {
 	// run should show the honest empty state, not readings nobody sent.
 	seed.ObserveDemo = cfg.SeedObservations
 	seed.CompanyEstate = cfg.SeedCompany
+
+	if *reindexIdentities {
+		// No -*-as actor, unlike the prunes. A prune destroys telemetry and is
+		// recorded as somebody's act; this writes an index table, changes no
+		// fact about the estate and produces no change_log row, so demanding an
+		// operator identity would imply an accountability this operation does
+		// not carry.
+		written, err := st.ReindexIdentities(ctx, domain.SystemPermit("reindex"))
+		if err != nil {
+			return err
+		}
+		slog.Info("reindexed identities", "count", written)
+		return nil
+	}
 
 	if *pruneObserved {
 		return pruneObservedTransitions(ctx, st, cfg, *pruneKeepDays, *pruneAs, *pruneDryRun)

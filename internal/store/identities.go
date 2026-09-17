@@ -68,7 +68,38 @@ func (s *SQLStore) CreateIdentity(ctx context.Context, p domain.Permit, i *domai
 		if err != nil {
 			return translateWriteErr(err, "creating identity")
 		}
-		return t.logCreate(ctx, "identity", i.ID, i)
+		if err := t.logCreate(ctx, "identity", i.ID, i); err != nil {
+			return err
+		}
+		return s.indexIdentity(ctx, t, i)
+	})
+}
+
+// indexIdentity makes a credential reference findable by name and realm.
+//
+// SECRET_REF IS DELIBERATELY ABSENT, and it is the one field on Identity a
+// reader might expect to find here. It holds a PATH -- `vault://kv/prod/...` --
+// never a credential, so indexing it would disclose no secret value. It would
+// still be wrong. Search is the widest read surface in this product: it answers
+// every authenticated reader, with no project scope and no cost gate, and a
+// list of where this estate keeps its credentials is a reconnaissance map
+// whether or not the values behind it are reachable from here. CLAUDE.md keeps
+// secret_ref out of the audit trail on the same reasoning, and the index is a
+// wider surface than the audit trail, not a narrower one.
+//
+// NOT REINDEXED ON RETIREMENT, unlike a team. indexTeam is reindexed by
+// RetireTeam because a team's document carries `contact_ref`, and search_index
+// holds only the CURRENT value -- that is what makes an erasure request
+// answerable by editing the team. An identity's document is name, kind and
+// realm: no personal data, nothing an erasure request reaches, so the general
+// rule applies and a retired identity stays findable. It has to: "the natural
+// response to a compromised credential is to retire it and create its
+// replacement under the same name" (migration 00003), and an operator asking
+// what happened to the old one should still be able to find it.
+func (s *SQLStore) indexIdentity(ctx context.Context, t *tx, i *domain.Identity) error {
+	return s.indexEntity(ctx, t, searchDoc{
+		EntityType: "identity", EntityID: i.ID,
+		Title: i.Name, Subtitle: i.Kind, Body: realmOrEmpty(i.Realm),
 	})
 }
 
@@ -231,7 +262,14 @@ func (s *SQLStore) UpdateIdentity(ctx context.Context, p domain.Permit, i *domai
 		if err := requireVersion(res, "identity", i.ID, &i.RowVersion); err != nil {
 			return err
 		}
-		return t.logUpdate(ctx, "identity", i.ID, &before.Identity, i)
+		if err := t.logUpdate(ctx, "identity", i.ID, &before.Identity, i); err != nil {
+			return err
+		}
+		// Reindexed on every edit for the same reason hardware.go reindexes a
+		// corrected part number: a name fixed in the form and not in the index
+		// leaves search answering with the typo forever, and the operator who
+		// corrected it has no way to tell.
+		return s.indexIdentity(ctx, t, i)
 	})
 }
 
@@ -457,4 +495,52 @@ func (s *SQLStore) IdentityUsage(ctx context.Context, id string) (*IdentityUsage
 		return x.InstanceID < y.InstanceID
 	})
 	return &IdentityUsageRows{Dependencies: deps, Windows: wins}, nil
+}
+
+// ReindexIdentities rebuilds the search document for every identity, and
+// returns how many it wrote.
+//
+// WHY THIS EXISTS AND WHY IT IS NARROW. Identities were created by a version of
+// this code that did not index them (WP-J8 shipped the surface, nothing wrote a
+// search document). The fix makes every FUTURE write index; it cannot reach
+// rows that already exist. An upgrade whose release note reads "now open and
+// re-save each of your credentials by hand" is not an upgrade path, so the
+// operator gets `invctl -reindex-identities` instead.
+//
+// NOT A GENERAL "REBUILD THE SEARCH INDEX", and the reason is a measurement
+// rather than a preference. Only six of the nineteen indexed entity types have
+// an index<Entity> helper; the other thirteen build their searchDoc inline
+// inside each Create and Update. A general reindex would therefore have to
+// either duplicate thirteen document-building blocks -- which would drift from
+// the real ones silently, the exact failure this package exists to close -- or
+// extract thirteen helpers across thirteen files first. That extraction is the
+// real prerequisite, and it is worth doing the day a SECOND type needs
+// backfilling. Today exactly one does, and a narrow function that is obviously
+// correct beats a general one that is quietly wrong.
+//
+// WRITES NO change_log, and that is not an omission. search_index is named in
+// CLAUDE.md's list of set and index tables that hold "the current value of
+// something the parent owns" -- rebuilding one changes no fact about the
+// estate, nobody decided anything, and an audit entry claiming otherwise would
+// be false. A domain.SystemPermit is the honest actor for the same reason.
+//
+// INCLUDES RETIRED IDENTITIES deliberately: RetireIdentity does not remove the
+// document (see indexIdentity), so a backfill that skipped them would leave a
+// retired credential findable only if it happened to be written after this fix.
+func (s *SQLStore) ReindexIdentities(ctx context.Context, p domain.Permit) (int, error) {
+	rows, err := s.ListIdentities(ctx, IdentityFilter{IncludeRetired: true})
+	if err != nil {
+		return 0, fmt.Errorf("listing identities to reindex: %w", err)
+	}
+	written := 0
+	for i := range rows {
+		identity := rows[i].Identity
+		if err := s.write(ctx, p, func(t *tx) error {
+			return s.indexIdentity(ctx, t, &identity)
+		}); err != nil {
+			return written, fmt.Errorf("reindexing identity %s: %w", identity.ID, err)
+		}
+		written++
+	}
+	return written, nil
 }
