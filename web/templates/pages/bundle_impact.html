@@ -27,18 +27,39 @@
 <div class="panel" style="margin-bottom:18px">
   <div class="panel-head">
     <h2>Cables in this bundle</h2>
-    <span class="panel-note">{{pluralise (len .Members) "cable" "cables"}}</span>
+    {{/* Grouped by breakout_id (docs/breakout-cables-design.md D5): a QSFP-
+         to-4xSFP+ DAC pulled through this duct is four cable_bundle_member
+         rows, and counting each of those as its own "cable" would overstate
+         what one backhoe actually severs. The store still holds four rows --
+         only what this page counts as one entry changes. */}}
+    <span class="panel-note">{{pluralise (len .Groups) "cable" "cables"}}</span>
   </div>
   <div class="panel-body">
-    {{if not .Members}}
+    {{if not .Groups}}
       <div class="empty">No cables are in this bundle.</div>
     {{else}}
       <ul>
-        {{range .Members}}
+        {{range .Groups}}
+        {{if .IsBreakout}}
+        <li>
+          1 breakout cable ({{pluralise (len .Strands) "strand" "strands"}})
+          <ul>
+            {{range .Strands}}
+            <li>
+              <a href="/links/{{.LinkID}}/impact">{{.Label}}</a>
+              {{if ne .Lifecycle "active"}}<span class="pill">retired — not cut</span>{{end}}
+            </li>
+            {{end}}
+          </ul>
+        </li>
+        {{else}}
+        {{with index .Strands 0}}
         <li>
           <a href="/links/{{.LinkID}}/impact">{{.Label}}</a>
           {{if ne .Lifecycle "active"}}<span class="pill">retired — not cut</span>{{end}}
         </li>
+        {{end}}
+        {{end}}
         {{end}}
       </ul>
     {{end}}

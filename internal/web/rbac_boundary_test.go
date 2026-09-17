@@ -1231,7 +1231,9 @@ func TestNoWriteRouteIsReachableWithNoSessionAtAll(t *testing.T) {
 	// /overlays/{id}, /rirs/{id} (+/retire), /vlan-groups/{id} (+/retire),
 	// /pools/{id} (+/retire) and /routes/{id} (+/retire). Every one of these
 	// store methods (Tasks 3 and 4) had no route reaching it until now.
-	const pinnedNoSessionRouteCount = 234
+	// 234 -> 235: breakout-cables plan, Task 6 -- POST /breakouts. The store
+	// method (Task 3, CreateBreakout) had no route reaching it until now.
+	const pinnedNoSessionRouteCount = 235
 
 	for _, eng := range boundaryEngines(t) {
 		t.Run(eng.name, func(t *testing.T) {

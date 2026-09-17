@@ -89,6 +89,10 @@ var searchExempt = map[string]string{
 	"Link": "a cable, and a cable has no name of its own -- seed_bundles.go keys them " +
 		"by the two interfaces they join for exactly this reason. Both ends' assets " +
 		"are indexed.",
+	"Breakout": "the SAME reason as Link, one level up: a breakout is n cable rows -- " +
+		"CreateBreakout writes plain `link` rows, one Create* call producing several " +
+		"of an entity that is already exempt above. It has no name of its own either; " +
+		"the shared a-end asset and every b-end asset are indexed.",
 	"Dependency": "an edge between two services, both of which are indexed.",
 	"Instance":   "a placement of a service on a host. Both the service and the host are indexed.",
 	"Interface": "a port. `Ethernet46` is meaningful only beside its asset, which is " +

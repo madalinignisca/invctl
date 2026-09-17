@@ -103,6 +103,18 @@ func TestUpdateLinkCannotMoveOrWithdrawACableThatWasNotTouched(t *testing.T) {
 			forged.Medium = strPtr("mmf")              // the real change
 			forged.BInterfaceID = ifC                  // the forged move
 			forged.Lifecycle = domain.LifecycleRetired // the forged withdrawal
+			// The forged breakout claim. UpdateLink's UPDATE never names these
+			// columns, so the database is safe either way -- but logUpdate
+			// diffs STRUCTS, so without the pin a submitted breakout_id puts
+			// "this strand moved to another breakout" into change_log,
+			// describing a cable plant that does not exist. Same class as the
+			// endpoint forge above, which is why it belongs in the same test:
+			// an auth review found the pin's deletion left every other test on
+			// this path green.
+			forgedBreakout := "00000000-0000-0000-0000-00000000beef"
+			forgedPosition := 3
+			forged.BreakoutID = &forgedBreakout
+			forged.BreakoutPosition = &forgedPosition
 			if err := s.UpdateLink(ctx, testPermit, &forged); err != nil {
 				t.Fatalf("UpdateLink with a forged endpoint and lifecycle: %v", err)
 			}
@@ -117,6 +129,10 @@ func TestUpdateLinkCannotMoveOrWithdrawACableThatWasNotTouched(t *testing.T) {
 			}
 			if after.Lifecycle != domain.LifecycleActive {
 				t.Errorf("lifecycle = %q, want active -- nobody unpatched this cable", after.Lifecycle)
+			}
+			if after.BreakoutID != nil || after.BreakoutPosition != nil {
+				t.Errorf("the cable joined a breakout it was never part of: id=%v position=%v",
+					after.BreakoutID, after.BreakoutPosition)
 			}
 			if after.Medium == nil || *after.Medium != "mmf" {
 				t.Fatalf("the real change (medium) did not land, so this test cannot tell "+
@@ -133,6 +149,11 @@ func TestUpdateLinkCannotMoveOrWithdrawACableThatWasNotTouched(t *testing.T) {
 				t.Fatal("no update was logged at all, so this test is checking nothing")
 			}
 			for _, d := range diffs {
+				if strings.Contains(d, "breakout_id") || strings.Contains(d, "breakout_position") {
+					t.Errorf("change_log records a breakout move that did not happen: %s\n"+
+						"The audit says this ordinary cable became a strand of a moulded "+
+						"assembly -- nobody touched it.", d)
+				}
 				if strings.Contains(d, "a_interface_id") || strings.Contains(d, "b_interface_id") {
 					t.Errorf("change_log records an endpoint move that did not happen: %s\n"+
 						"The audit says this cable was re-patched to a different port -- "+

@@ -169,11 +169,29 @@ func (t *tx) log(ctx context.Context, entityType, entityID, action, diff, batchI
 
 // logCreate records a full snapshot of a newly created row.
 func (t *tx) logCreate(ctx context.Context, entityType, entityID string, entity any) error {
+	return t.logCreateBatch(ctx, entityType, entityID, entity, "")
+}
+
+// logCreateBatch is logCreate with a batch id attached, for one act that brings
+// SEVERAL rows into existence at once.
+//
+// The create-side counterpart of logUpdateBatch, added when CreateBreakout
+// needed it. A breakout cable is one moulded assembly declared in one act and
+// stored as n link rows; without a batch id, four change_log rows read as four
+// separate cablings by the same person in the same second, and a reader has to
+// infer the grouping from breakout_id inside the snapshots. That inference
+// works, which is why an auth review called this hardening rather than a hole.
+//
+// IT IS DONE NOW BECAUSE IT CANNOT BE DONE LATER. change_log is append-only --
+// no UPDATE, ever -- so a batch id missing from a row is missing from it
+// permanently. Every breakout declared before this existed would have carried
+// the gap for the life of the estate, and the fix costs one argument.
+func (t *tx) logCreateBatch(ctx context.Context, entityType, entityID string, entity any, batchID string) error {
 	snapshot, err := snapshotJSON(entity)
 	if err != nil {
 		return err
 	}
-	return t.log(ctx, entityType, entityID, domain.ActionCreate, snapshot, "")
+	return t.log(ctx, entityType, entityID, domain.ActionCreate, snapshot, batchID)
 }
 
 // logUpdate records the field-level difference. A no-op update writes nothing:

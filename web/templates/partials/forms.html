@@ -796,6 +796,166 @@
 {{end}}
 
 
+{{define "breakout_form"}}
+{{/* One moulded assembly, one a-end on this asset, several b-ends elsewhere.
+     docs/breakout-cables-design.md. A FIXED number of strand pickers is
+     rendered (breakoutMaxStrands, internal/web/handlers/forms.go) rather
+     than one the server grows on request, because every row still has to
+     POST as an ordinary form field -- name="b_interface_ids" repeated --
+     and a disabled <select> is simply not submitted at all, which is what
+     keeps "add/remove a strand" a pure client-side toggle (Alpine local UI
+     state, CLAUDE.md's own scope for it) instead of a round trip to change
+     how many pickers exist.
+
+     x-show/x-on/x-bind are all BARE IDENTIFIERS naming a getter or method
+     on the breakoutForm component (web/static/app.js), never an inline
+     expression -- this ships the CSP build of Alpine, which does not
+     evaluate expressions in an attribute at all (alpine_csp_test.go). The
+     component exposes one showN/disabledN getter per row rather than an
+     indexed lookup, because the CSP build cannot evaluate `strands[i]`
+     either. data-initial-strands is how the server tells the component
+     how many rows a REFUSED submission had picked -- x-data itself must
+     stay a bare component name, so there is nowhere else to carry it. */}}
+<form id="breakout-form" class="panel" method="post" action="/breakouts"
+      hx-post="/breakouts" hx-target="#breakout-form" hx-swap="outerHTML"
+      x-data="breakoutForm" data-initial-strands="{{.StrandCount}}">
+  <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+  <input type="hidden" name="asset_id" value="{{.AssetID}}">
+  <div class="panel-head"><h2>Declare a breakout cable</h2></div>
+  <div class="panel-body">
+    <p class="field-note">
+      One connector on this side, several on the far side -- a QSFP-to-4xSFP+
+      DAC, say. Recorded as strands of ONE physical assembly, not as several
+      unrelated cables: sever the connector and every strand goes at once.
+    </p>
+    <div class="field-row">
+      <div class="field">
+        <label for="breakout-from">From (this asset)</label>
+        <select id="breakout-from" name="a_interface_id">
+          {{range .Interfaces}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
+        </select>
+        {{if not .Interfaces}}<div class="field-hint">Every port here is already patched, or none exist yet.</div>{{end}}
+        {{with index .Errors "a_interface_id"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="breakout-medium">Medium</label>
+        <input id="breakout-medium" type="text" name="medium" placeholder="dac">
+      </div>
+      <div class="field">
+        <label for="breakout-length">Length (m)</label>
+        <input id="breakout-length" type="number" name="length_m" min="0">
+      </div>
+    </div>
+    {{with index .Errors "b_interface_ids"}}<div class="field-error">{{.}}</div>{{end}}
+    {{/* EIGHT ROWS, WRITTEN OUT RATHER THAN range-GENERATED OR FACTORED INTO
+         A SHARED SUB-TEMPLATE, and this is not a style choice.
+         alpine_csp_test.go scans the TEMPLATE SOURCE FILE ITSELF, not
+         rendered output -- so a show/hide attribute built from a Go template
+         action fails the census even when it always resolves to a safe bare
+         identifier at render time, because the census never renders
+         anything, and a SHARED sub-template carrying the same action in its
+         OWN attribute fails identically because that file's source is
+         scanned too. The only text that passes the census is a literal
+         identifier already sitting in this file at the point it is scanned.
+         Everything that is NOT one of those attributes -- the option list,
+         the error lookup, the id/label numbering -- is still an ordinary,
+         data-driven template expression. */}}
+    <div class="field-row" x-show="show0">
+      <div class="field">
+        <label for="breakout-strand-0">Strand 1</label>
+        <select id="breakout-strand-0" name="b_interface_ids" x-bind:disabled="disabled0">
+          <option value="">Choose…</option>
+          {{range .Targets}}<option value="{{.ID}}" {{if eq .ID (index $.Strands 0)}}selected{{end}}>{{.AssetName}} / {{.Name}}</option>{{end}}
+        </select>
+        {{with index .Errors "b_interface_id_1"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <button type="button" class="btn btn-sm" x-show="canRemove" x-on:click="remove">Remove strand</button>
+    </div>
+    <div class="field-row" x-show="show1">
+      <div class="field">
+        <label for="breakout-strand-1">Strand 2</label>
+        <select id="breakout-strand-1" name="b_interface_ids" x-bind:disabled="disabled1">
+          <option value="">Choose…</option>
+          {{range .Targets}}<option value="{{.ID}}" {{if eq .ID (index $.Strands 1)}}selected{{end}}>{{.AssetName}} / {{.Name}}</option>{{end}}
+        </select>
+        {{with index .Errors "b_interface_id_2"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <button type="button" class="btn btn-sm" x-show="canRemove" x-on:click="remove">Remove strand</button>
+    </div>
+    <div class="field-row" x-show="show2">
+      <div class="field">
+        <label for="breakout-strand-2">Strand 3</label>
+        <select id="breakout-strand-2" name="b_interface_ids" x-bind:disabled="disabled2">
+          <option value="">Choose…</option>
+          {{range .Targets}}<option value="{{.ID}}" {{if eq .ID (index $.Strands 2)}}selected{{end}}>{{.AssetName}} / {{.Name}}</option>{{end}}
+        </select>
+        {{with index .Errors "b_interface_id_3"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <button type="button" class="btn btn-sm" x-show="canRemove" x-on:click="remove">Remove strand</button>
+    </div>
+    <div class="field-row" x-show="show3">
+      <div class="field">
+        <label for="breakout-strand-3">Strand 4</label>
+        <select id="breakout-strand-3" name="b_interface_ids" x-bind:disabled="disabled3">
+          <option value="">Choose…</option>
+          {{range .Targets}}<option value="{{.ID}}" {{if eq .ID (index $.Strands 3)}}selected{{end}}>{{.AssetName}} / {{.Name}}</option>{{end}}
+        </select>
+        {{with index .Errors "b_interface_id_4"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <button type="button" class="btn btn-sm" x-show="canRemove" x-on:click="remove">Remove strand</button>
+    </div>
+    <div class="field-row" x-show="show4">
+      <div class="field">
+        <label for="breakout-strand-4">Strand 5</label>
+        <select id="breakout-strand-4" name="b_interface_ids" x-bind:disabled="disabled4">
+          <option value="">Choose…</option>
+          {{range .Targets}}<option value="{{.ID}}" {{if eq .ID (index $.Strands 4)}}selected{{end}}>{{.AssetName}} / {{.Name}}</option>{{end}}
+        </select>
+        {{with index .Errors "b_interface_id_5"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <button type="button" class="btn btn-sm" x-show="canRemove" x-on:click="remove">Remove strand</button>
+    </div>
+    <div class="field-row" x-show="show5">
+      <div class="field">
+        <label for="breakout-strand-5">Strand 6</label>
+        <select id="breakout-strand-5" name="b_interface_ids" x-bind:disabled="disabled5">
+          <option value="">Choose…</option>
+          {{range .Targets}}<option value="{{.ID}}" {{if eq .ID (index $.Strands 5)}}selected{{end}}>{{.AssetName}} / {{.Name}}</option>{{end}}
+        </select>
+        {{with index .Errors "b_interface_id_6"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <button type="button" class="btn btn-sm" x-show="canRemove" x-on:click="remove">Remove strand</button>
+    </div>
+    <div class="field-row" x-show="show6">
+      <div class="field">
+        <label for="breakout-strand-6">Strand 7</label>
+        <select id="breakout-strand-6" name="b_interface_ids" x-bind:disabled="disabled6">
+          <option value="">Choose…</option>
+          {{range .Targets}}<option value="{{.ID}}" {{if eq .ID (index $.Strands 6)}}selected{{end}}>{{.AssetName}} / {{.Name}}</option>{{end}}
+        </select>
+        {{with index .Errors "b_interface_id_7"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <button type="button" class="btn btn-sm" x-show="canRemove" x-on:click="remove">Remove strand</button>
+    </div>
+    <div class="field-row" x-show="show7">
+      <div class="field">
+        <label for="breakout-strand-7">Strand 8</label>
+        <select id="breakout-strand-7" name="b_interface_ids" x-bind:disabled="disabled7">
+          <option value="">Choose…</option>
+          {{range .Targets}}<option value="{{.ID}}" {{if eq .ID (index $.Strands 7)}}selected{{end}}>{{.AssetName}} / {{.Name}}</option>{{end}}
+        </select>
+        {{with index .Errors "b_interface_id_8"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <button type="button" class="btn btn-sm" x-show="canRemove" x-on:click="remove">Remove strand</button>
+    </div>
+    <button type="button" class="btn btn-sm" x-show="canAdd" x-on:click="add">Add strand</button>
+    {{if .TargetHint}}<div class="field-hint">{{.TargetHint}}</div>{{end}}
+    <button class="btn btn-primary" type="submit" {{if or (not .Interfaces) (not .Targets)}}disabled{{end}}>Declare breakout</button>
+  </div>
+</form>
+{{end}}
+
+
 {{define "pass_through_form"}}
 <form id="pass-through-form" method="post" action="/assets/{{.AssetID}}/patch"
       hx-post="/assets/{{.AssetID}}/patch" hx-target="#pass-through-form" hx-swap="outerHTML"

@@ -468,7 +468,10 @@ type assetDetailPage struct {
 	InterfaceForm interfaceFormData
 	IPAddressForm ipAddressFormData
 	LinkForm      linkFormData
-	OverrideForm  overrideFormData
+	// BreakoutForm is the "declare a breakout" panel, present (with Errors
+	// set) when a create was refused -- see BreakoutCreate.
+	BreakoutForm breakoutFormData
+	OverrideForm overrideFormData
 	// Where it takes power from, and the feeds it could take it from.
 	PowerInputs []store.PowerInputRow
 	PowerFeeds  []store.PowerFeedRow
@@ -1031,6 +1034,7 @@ func (a *App) renderAssetDetail(w http.ResponseWriter, r *http.Request, status i
 		InterfaceForm:             a.newInterfaceForm(r, id, nil, formFactors),
 		IPAddressForm:             a.newIPAddressForm(r, id, nil, interfaces, ipRoles),
 		LinkForm:                  a.newLinkForm(r, id, nil, interfaces, linkTargets),
+		BreakoutForm:              a.newBreakoutForm(r, id, nil, interfaces, linkTargets, nil),
 		PassThroughForm:           a.newPassThroughForm(r, id, nil, interfaces),
 		OverrideForm:              a.newOverrideForm(r, targets, nil, overrideForm{}),
 	})

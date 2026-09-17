@@ -119,6 +119,72 @@ document.addEventListener('alpine:init', () => {
     },
   }));
 
+  // Breakout cable form (Task 6, docs/breakout-cables-design.md): a fixed
+  // number of strand pickers ship in the markup -- breakoutMaxStrands (8) in
+  // internal/web/handlers/forms.go, kept in sync by hand since there is no
+  // shared source of truth between Go and this file -- and this component
+  // only decides how many are ENABLED. A disabled <select> is not submitted
+  // at all, which is what lets "add/remove a strand" be pure client-side
+  // state instead of a round trip that changes how many pickers exist.
+  //
+  // One showN/disabledN getter per row rather than an indexed lookup: the
+  // CSP build cannot evaluate `strands[i] < count` in an attribute any more
+  // than it can evaluate a comparison (see endpointForm.notUnix above for
+  // the same constraint on negation), so each of the 8 possible rows gets
+  // its own bare getter that forms.html's breakout_form names literally
+  // (`x-show="show0"`, `x-show="show1"`, ...).
+  Alpine.data('breakoutForm', () => ({
+    count: 2,
+    // Reads its starting count off data-initial-strands rather than an
+    // x-data argument -- the CSP build only accepts a bare component name
+    // there, so a server-computed number (how many strands a REFUSED
+    // submission had picked) has nowhere else to travel. Same shape as
+    // endpointForm.init() reading the select's own value.
+    init() {
+      const raw = this.$el.dataset.initialStrands;
+      const n = raw ? parseInt(raw, 10) : NaN;
+      if (!Number.isNaN(n) && n >= 2) {
+        this.count = n;
+      }
+    },
+    get canAdd() {
+      return this.count < 8;
+    },
+    get canRemove() {
+      return this.count > 2;
+    },
+    add() {
+      if (this.canAdd) {
+        this.count++;
+      }
+    },
+    remove() {
+      if (this.canRemove) {
+        this.count--;
+      }
+    },
+    get show0() { return this.count > 0; },
+    get show1() { return this.count > 1; },
+    get show2() { return this.count > 2; },
+    get show3() { return this.count > 3; },
+    get show4() { return this.count > 4; },
+    get show5() { return this.count > 5; },
+    get show6() { return this.count > 6; },
+    get show7() { return this.count > 7; },
+    // Same reason as endpointForm.notUnix and dependencyForm.notRoute: a
+    // negation is an expression the CSP build cannot evaluate, so the
+    // complement gets its own named getter rather than `x-bind:disabled`
+    // referencing `!show0`.
+    get disabled0() { return !this.show0; },
+    get disabled1() { return !this.show1; },
+    get disabled2() { return !this.show2; },
+    get disabled3() { return !this.show3; },
+    get disabled4() { return !this.show4; },
+    get disabled5() { return !this.show5; },
+    get disabled6() { return !this.show6; },
+    get disabled7() { return !this.show7; },
+  }));
+
   // Service form: min_healthy only means something for active_active, and
   // failover_mode only for active_passive.
   Alpine.data('serviceForm', (availability = 'standalone') => ({

@@ -238,6 +238,46 @@ var storePermitMinters = map[string]string{
 	"applyTemplateSubject": "ApplyTemplate's subject is the asset it backfills interfaces onto: " +
 		"checks p.Covers(\"asset\", assetID), then scopes to exactly the interface ids this " +
 		"call is about to insert",
+
+	// authorizeBreakoutSubjects (network.go): a breakout has 1+n owners --
+	// the asset behind the shared a-end, plus the asset behind each b-end --
+	// the same widening applyTemplateSubject already does from "one id" to
+	// "a set of ids", but on the CHECK side rather than the scope side: every
+	// one of those 1+n assets must be in p.Covers("asset", ...), so a project
+	// owner cannot fan one of their own ports out to an interface on an
+	// asset they do not own, any more than authorizeLinkSubjects lets them
+	// do it for an ordinary two-ended cable. linkIDs are minted by
+	// CreateBreakout BEFORE this call, never supplied by a caller, for the
+	// identical reason applyTemplateSubject's interface ids are -- see
+	// CreateBreakout's own comment. Then scopes to exactly those link ids.
+	//
+	// REVIEWED AND SIGNED OFF 2026-09-17, the two approvals this map's own
+	// failure message demands, recorded because a sign-off nobody can find is
+	// the same as one that never happened.
+	//
+	// auth-reviewer BLOCKED it first, and was right: deleting the per-b-end
+	// p.Covers check left the whole internal/store and internal/web suites
+	// green. Every test in breakout_test.go passed an administrator permit,
+	// whose Covers is unconditionally true, so the refusal branch was never
+	// reached -- the logic that is the entire reason this function exists
+	// rather than reusing authorizeLinkSubjects had no test at all. The
+	// exploit: a project owner covering the switch at the shared a-end fans
+	// strands onto ports of servers owned by a project they are not in, and
+	// gets n link rows and n change_log rows attributed to them. That is the
+	// ReparentAsset shape.
+	//
+	// Closed by TestBreakoutScopeRefusesAForeignLastBEnd and its three
+	// siblings (link_scope_test.go), which exercise the foreign b-end at the
+	// LAST position as well as the first -- a regression checking "the first
+	// strand" or "any strand" passes a first-position case and fails nobody --
+	// plus a positive control, since three refusal tests prove nothing if
+	// CreateBreakout simply refuses everything. Mutation-proven on both
+	// engines: removing the check turns both position tests red.
+	//
+	// Owner sign-off: Gabriel, 2026-09-17, on that evidence.
+	"authorizeBreakoutSubjects": "a breakout has 1+n owners, the asset behind the shared a-end " +
+		"and the asset behind each b-end: checks p.Covers on all of them before scoping to " +
+		"exactly the link ids this call is about to insert",
 }
 
 // permitMinterNames is the exact, named set TestOnlyTheNamedFunctionsMintAPermit

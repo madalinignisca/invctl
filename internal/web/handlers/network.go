@@ -159,6 +159,68 @@ func (a *App) LinkCreate(w http.ResponseWriter, r *http.Request) {
 	render.Redirect(w, r, "/assets/"+assetID)
 }
 
+// BreakoutCreate declares one breakout cable: one moulded assembly, one
+// shared a-end on this asset, several b-ends elsewhere -- a QSFP-to-4xSFP+
+// DAC, say (docs/breakout-cables-design.md). It writes n `link` rows in one
+// call via store.CreateBreakout, not one strand at a time the way
+// PassThroughCreate does -- a breakout's strands are not independent
+// declarations, they are one physical object, and a partial write (three
+// strands committed, the fourth refused) would leave the estate holding a
+// cable with the wrong strand count and no way to tell that from one that
+// was always three-wide.
+//
+// A REFUSAL RE-RENDERS THE FORM AT 422 -- LinkCreate's own shape, and for
+// the same reason PassThroughCreate's doc comment gives: whatever the
+// operator already picked (a-end, medium, length, and EVERY strand chosen so
+// far) survives the round trip via renderBreakoutFormError re-fetching the
+// pickers and re-selecting what was submitted.
+func (a *App) BreakoutCreate(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Could not read that form.", http.StatusBadRequest)
+		return
+	}
+	assetID := formValue(r, "asset_id")
+	// r.Form, not formValues: a blank entry is a real, positioned "choose a
+	// port" refusal (domain.BreakoutSpec.Validate names the position), not
+	// something to silently drop and shift every later strand's position by
+	// one. Same reasoning as bundles.go's r.Form["link_id"].
+	chosen := r.Form["b_interface_ids"]
+
+	nums := optionalNumbers(r)
+	spec := domain.BreakoutSpec{
+		AInterfaceID:  formValue(r, "a_interface_id"),
+		BInterfaceIDs: chosen,
+		Medium:        optionalString(r, "medium"),
+		LengthM:       nums.opt("length_m"),
+	}
+	var err error
+	if msgs := nums.messages(); msgs != nil {
+		err = domain.NewValidationFrom(msgs)
+	} else {
+		_, err = a.Store.CreateBreakout(r.Context(), a.permit(r), spec)
+	}
+	if err != nil {
+		messages, ok := validationErrors(err)
+		if !ok {
+			if isConflict(err) {
+				// CreateBreakout's own refusal already names which port and
+				// says why (network.go: "that port is already patched") --
+				// reused verbatim rather than re-derived, the same choice
+				// BundleSetMembers makes for its own conflict.
+				messages = map[string]string{"b_interface_ids": err.Error()}
+			} else {
+				a.handleStoreError(w, r, err)
+				return
+			}
+		}
+		a.renderBreakoutFormError(w, r, assetID, messages, chosen)
+		return
+	}
+
+	a.setFlash(r, "success", "Breakout cable patched.")
+	render.Redirect(w, r, "/assets/"+assetID)
+}
+
 // LinkUpdate corrects a cable's medium and length.
 //
 // NOT its endpoints. There is no a_interface_id or target_interface_id field
@@ -265,6 +327,21 @@ func (a *App) renderLinkFormError(w http.ResponseWriter, r *http.Request, assetI
 	}
 	a.Render.Partial(w, http.StatusUnprocessableEntity, "link_form",
 		a.newLinkForm(r, assetID, messages, interfaces, targets))
+}
+
+func (a *App) renderBreakoutFormError(w http.ResponseWriter, r *http.Request, assetID string, messages map[string]string, chosen []string) {
+	interfaces, err := a.Store.ListInterfaces(r.Context(), assetID)
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
+	targets, err := a.Store.ListAvailableInterfaces(r.Context(), "")
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
+	a.Render.Partial(w, http.StatusUnprocessableEntity, "breakout_form",
+		a.newBreakoutForm(r, assetID, messages, interfaces, targets, chosen))
 }
 
 // ---------- prefixes ----------

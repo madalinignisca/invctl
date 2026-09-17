@@ -560,10 +560,61 @@ func (s *SQLStore) CircuitCutEffect(ctx context.Context, circuitID string) (Circ
 // top-of-rack switch has both ends in one forwarder group, so it joins nothing
 // and cutting it partitions nothing. It is the inter-rack and inter-site runs
 // that carry a partition, and those are the ones somebody asks about.
+//
+// WIDENED FOR A BREAKOUT STRAND, AND THIS DOES NOT FALL OUT FOR FREE.
+// docs/breakout-cables-design.md: "one connector, one moulded assembly" --
+// sever a QSFP-to-4xSFP+ DAC and all four strands go, not just the one an
+// operator happened to click through to. But each strand is its own `link`
+// row contributing its OWN edge to the graph (linkEdges above keys strictly
+// on l.id), so before this, LinkCutEffect(strand1) only ever withdrew
+// strand1's edge -- the other three stayed in the graph as if the cable were
+// untouched. BreakoutStrandIDs is what closes that gap: every LIVE sibling
+// sharing linkID's breakout_id is treated as cut alongside it. An ordinary
+// cable (BreakoutID nil) answers just itself, unchanged from before this
+// existed -- TestSingleCableCutReportsOnePairUnchanged pins that.
 func (s *SQLStore) LinkCutEffect(ctx context.Context, linkID string) (CircuitCut, error) {
+	ids, err := s.BreakoutStrandIDs(ctx, linkID)
+	if err != nil {
+		return CircuitCut{}, err
+	}
+	cut := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		cut[id] = true
+	}
 	return s.cutEffect(ctx, func(u impact.NetUplinkInfo) bool {
-		return u.LinkID == linkID
+		return cut[u.LinkID]
 	})
+}
+
+// BreakoutStrandIDs answers which link ids go dark together when linkID is
+// cut -- docs/breakout-cables-design.md's "one connector, one moulded
+// assembly." An ordinary cable (BreakoutID nil) shares its fate with nobody,
+// so the answer is just itself. A breakout strand shares a breakout_id with
+// every other strand of the SAME physical cable, and severing it severs them
+// all at once.
+//
+// Used by both LinkCutEffect (the graph-partition question) and the
+// /links/{id}/impact handler (the service-simulation question, via
+// impact.Request.CutLinkIDs) -- one query, so the two answers cannot drift
+// apart about which strands one physical cut takes down.
+//
+// Only LIVE siblings, for BundleCutEffect's own reason: a retired strand
+// already derives no edge and is not "cut" by anything, it is already gone.
+func (s *SQLStore) BreakoutStrandIDs(ctx context.Context, linkID string) ([]string, error) {
+	link, err := s.GetLink(ctx, linkID)
+	if err != nil {
+		return nil, err
+	}
+	if link.BreakoutID == nil {
+		return []string{linkID}, nil
+	}
+	var ids []string
+	if err := s.read(ctx, &ids, `
+		SELECT id FROM link WHERE breakout_id = ? AND lifecycle = ?`,
+		*link.BreakoutID, domain.LifecycleActive); err != nil {
+		return nil, fmt.Errorf("resolving breakout %s strands: %w", *link.BreakoutID, err)
+	}
+	return ids, nil
 }
 
 // BundleCutEffect answers what cutting a whole bundle does -- a duct, tray or

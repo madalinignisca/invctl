@@ -348,3 +348,148 @@ func TestLinkScopeAdministrator(t *testing.T) {
 		})
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Breakout, and the reason these exist at all.
+//
+// An auth review found that DELETING the per-b-end Covers check in
+// authorizeBreakoutSubjects left the whole internal/store and internal/web
+// suites green. Every test in breakout_test.go passes testPermit, which is
+// domain.AdministratorPermit -- its Covers is unconditionally true, so nothing
+// ever reached the refusal branch. The authorization logic that is the entire
+// reason authorizeBreakoutSubjects exists, rather than reusing
+// authorizeLinkSubjects, had no test.
+//
+// The exploit that guards: a project owner whose permit covers the switch at
+// the a-end fans four strands onto ports of servers owned by a project they are
+// not in, and gets four link rows and four change_log rows attributed to them.
+// That is the ReparentAsset shape.
+//
+// EACH B-END IS EXERCISED AT ITS OWN POSITION, deliberately. A regression that
+// checked "the first b-end" or "any b-end" instead of "every b-end" passes a
+// first-position case and fails nobody. So the last strand gets its own test.
+
+// breakoutSpecFor builds a spec fanning the a-end interface onto bs.
+func breakoutSpecFor(a string, bs ...string) domain.BreakoutSpec {
+	medium, length := "dac", 3
+	return domain.BreakoutSpec{
+		AInterfaceID: a, BInterfaceIDs: bs, Medium: &medium, LengthM: &length,
+	}
+}
+
+// assertNoBreakoutWritten fails if any link row or change_log row survived a
+// refused declaration. A refusal that still wrote rows is worse than no
+// refusal: it denies the operator and changes the estate anyway.
+func assertNoBreakoutWritten(t *testing.T, f *linkScopeFixture, links []*domain.Link) {
+	t.Helper()
+	if len(links) != 0 {
+		t.Errorf("a refused breakout returned %d links; it must return none", len(links))
+	}
+	var count int
+	if err := f.s.DB().Reader.Get(&count,
+		`SELECT COUNT(*) FROM link WHERE breakout_id IS NOT NULL`); err != nil {
+		t.Fatalf("counting breakout links: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("%d breakout link rows were written by a refused declaration", count)
+	}
+}
+
+// TestBreakoutScopeRefusesAForeignLastBEnd is the case a "checks the first one"
+// regression would survive.
+func TestBreakoutScopeRefusesAForeignLastBEnd(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newLinkScopeFixture(t, e)
+			// Two more ports on the in-scope asset, so every strand but the
+			// last is legitimately writable.
+			inScopeB1 := mustInterface(t, f.s, f.ctx, f.a1, "eth1")
+			inScopeB2 := mustInterface(t, f.s, f.ctx, f.a1, "eth2")
+			aEnd := mustInterface(t, f.s, f.ctx, f.a1, "eth9")
+
+			links, err := f.s.CreateBreakout(f.ctx, f.permit,
+				breakoutSpecFor(aEnd, inScopeB1, inScopeB2, f.if2))
+			if !errors.Is(err, domain.ErrForbidden) {
+				t.Fatalf("CreateBreakout with a foreign LAST b-end = %v, want ErrForbidden.\n"+
+					"    The a-end and the first two strands are in scope; only the last is "+
+					"not. A check that stops at the first strand, or accepts if ANY strand "+
+					"is covered, passes every other case and fails here.", err)
+			}
+			assertNoBreakoutWritten(t, f, links)
+		})
+	}
+}
+
+// TestBreakoutScopeRefusesAForeignFirstBEnd is its mirror, so neither
+// direction can be the only one covered.
+func TestBreakoutScopeRefusesAForeignFirstBEnd(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newLinkScopeFixture(t, e)
+			inScopeB := mustInterface(t, f.s, f.ctx, f.a1, "eth1")
+			aEnd := mustInterface(t, f.s, f.ctx, f.a1, "eth9")
+
+			links, err := f.s.CreateBreakout(f.ctx, f.permit,
+				breakoutSpecFor(aEnd, f.if2, inScopeB))
+			if !errors.Is(err, domain.ErrForbidden) {
+				t.Fatalf("CreateBreakout with a foreign FIRST b-end = %v, want ErrForbidden", err)
+			}
+			assertNoBreakoutWritten(t, f, links)
+		})
+	}
+}
+
+// TestBreakoutScopeRefusesAForeignAEnd covers the other half of the two-ended
+// rule: owning every far port buys nothing if the shared near port is not
+// yours.
+func TestBreakoutScopeRefusesAForeignAEnd(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newLinkScopeFixture(t, e)
+			inScopeB1 := mustInterface(t, f.s, f.ctx, f.a1, "eth1")
+			inScopeB2 := mustInterface(t, f.s, f.ctx, f.a1, "eth2")
+
+			links, err := f.s.CreateBreakout(f.ctx, f.permit,
+				breakoutSpecFor(f.if2, inScopeB1, inScopeB2))
+			if !errors.Is(err, domain.ErrForbidden) {
+				t.Fatalf("CreateBreakout with a foreign a-end = %v, want ErrForbidden", err)
+			}
+			assertNoBreakoutWritten(t, f, links)
+		})
+	}
+}
+
+// TestBreakoutScopeAcceptsWhenEveryEndIsCovered is the positive control. Three
+// refusal tests prove nothing if the permitted case also fails -- they would
+// all be passing because CreateBreakout refuses everything.
+func TestBreakoutScopeAcceptsWhenEveryEndIsCovered(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			f := newLinkScopeFixture(t, e)
+			b1 := mustInterface(t, f.s, f.ctx, f.a1, "eth1")
+			b2 := mustInterface(t, f.s, f.ctx, f.a1, "eth2")
+			aEnd := mustInterface(t, f.s, f.ctx, f.a1, "eth9")
+
+			links, err := f.s.CreateBreakout(f.ctx, f.permit, breakoutSpecFor(aEnd, b1, b2))
+			if err != nil {
+				t.Fatalf("CreateBreakout with every end in scope: %v", err)
+			}
+			if len(links) != 2 {
+				t.Fatalf("got %d strands, want 2", len(links))
+			}
+			// One audit row per strand, attributed to the scoped permit's
+			// actor and never to whatever the caller might have supplied.
+			for _, l := range links {
+				changes := mustChangesForLink(t, f, l.ID)
+				if len(changes) != 1 {
+					t.Errorf("strand %s has %d change_log rows, want 1", l.ID, len(changes))
+					continue
+				}
+				if changes[0].Actor != "po-21" {
+					t.Errorf("strand %s attributed to %q, want the permit's actor",
+						l.ID, changes[0].Actor)
+				}
+			}
+		})
+	}
+}
