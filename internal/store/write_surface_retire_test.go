@@ -267,7 +267,25 @@ func TestRetireBackendPoolRefusesWhileALiveRoutePointsAtIt(t *testing.T) {
 // TestRetireBackendPoolRefusesWhileAMemberIsDeclared proves the second hold,
 // independent of the first: a pool with no routes but a live member is still
 // in service.
-func TestRetireBackendPoolRefusesWhileAMemberIsDeclared(t *testing.T) {
+// TestRetireBackendPoolIsNotHeldByItsOwnMembership pins a ruling that was made
+// the other way first, and shipped, before being caught.
+//
+// The plan for RetireBackendPool specified a second guard: refuse while any
+// backend_member row exists. It was implemented. It was a trap --
+// AddBackendMember exists and RemoveBackendMember does not, so a pool that
+// ever gained one member could never be withdrawn by anybody through any path.
+// A refusal with no way to clear what it refuses on is the write-surface gap
+// this work package exists to close, rebuilt inside the fix for it.
+//
+// The structure agrees with the ruling: backend_member is a SET owned by the
+// pool (composite PK, no id, no lifecycle, no row_version), structurally the
+// same as cable_bundle_member, and RetireBundle -- the direct sibling -- has no
+// member guard at all. A set owned by a parent does not get a vote on the
+// parent's withdrawal.
+//
+// This test is deliberately the inverse of the one it replaces, so the guard
+// cannot come back without a red test naming the reason.
+func TestRetireBackendPoolIsNotHeldByItsOwnMembership(t *testing.T) {
 	for _, e := range Engines(t) {
 		t.Run(e.Name, func(t *testing.T) {
 			s, ctx := newStore(t, e)
@@ -285,20 +303,33 @@ func TestRetireBackendPoolRefusesWhileAMemberIsDeclared(t *testing.T) {
 				t.Fatalf("adding backend member: %v", err)
 			}
 
-			err = s.RetireBackendPool(ctx, testPermit, pool.ID)
-			if !errors.Is(err, domain.ErrConflict) {
-				t.Fatalf("retiring a pool with a live member = %v, want ErrConflict", err)
-			}
-			if !containsMsg(err, "member") {
-				t.Errorf("refusal %q does not name what is still in the way", err)
+			if err := s.RetireBackendPool(ctx, testPermit, pool.ID); err != nil {
+				t.Fatalf("a pool with a declared member refused withdrawal: %v\n"+
+					"    There is no RemoveBackendMember and no SetBackendMembers, so a "+
+					"member guard here means this pool can never be withdrawn by anyone, "+
+					"ever -- the exact gap writeSurfaceGaps records, rebuilt inside its "+
+					"own fix. RetireBundle, the same shape, has no member guard.", err)
 			}
 
 			after, err := s.GetBackendPool(ctx, pool.ID)
 			if err != nil {
 				t.Fatalf("re-reading pool: %v", err)
 			}
-			if after.Lifecycle != domain.LifecycleActive {
-				t.Errorf("lifecycle = %q, want %q", after.Lifecycle, domain.LifecycleActive)
+			if after.Lifecycle != domain.LifecycleRetired {
+				t.Errorf("lifecycle = %q, want %q", after.Lifecycle, domain.LifecycleRetired)
+			}
+
+			// The membership rows stay, describing a pool no longer in service,
+			// exactly as a retired bundle keeps its cables.
+			var members int
+			if err := s.DB().Reader.Get(&members, s.DB().Reader.Rebind(
+				`SELECT COUNT(*) FROM backend_member WHERE pool_id = ?`), pool.ID); err != nil {
+				t.Fatalf("counting members: %v", err)
+			}
+			if members != 1 {
+				t.Errorf("backend_member rows = %d, want 1. Withdrawal must not cascade "+
+					"into the membership set -- that would write somebody else's "+
+					"decision under this operator's name.", members)
 			}
 		})
 	}

@@ -368,23 +368,35 @@ func (s *SQLStore) AddBackendMember(ctx context.Context, p domain.Permit, m *dom
 // RetireBackendPool withdraws a pool, refusing while it is still fronted or
 // still staffed.
 //
-// TWO SEPARATE HOLDS, not one, because they are two separate facts:
+// ONE HOLD: a live route still pointing at this pool. That is what
+// RetireEndpoint's own comment calls out -- withdrawing what a route feeds
+// traffic to would leave the route resolving to nothing, silently, with
+// nothing on the route's own row to say why.
+// MEMBERSHIP DOES NOT HOLD IT, AND THAT WAS DECIDED THE OTHER WAY FIRST. The
+// plan for this method specified a second guard: refuse while any
+// backend_member row exists, on the reasoning that "a pool whose members are
+// still declared is still in service". That guard was written, and it was a
+// trap.
 //
-//   - A live route still pointing at this pool is what RetireEndpoint's own
-//     comment calls out for backend_member -- withdrawing what a route feeds
-//     traffic to would leave the route resolving to nothing, silently, with
-//     nothing on the route's own row to say why.
-//   - A live backend_member row is the pool's declared capacity. backend_member
-//     CARRIES NO lifecycle COLUMN (migration 00004 never gave it one, and
-//     00070 -- which is Task 1's own migration -- did not add one either), so
-//     "live member" has an honest and deliberately narrow answer here: any row
-//     at all. There is no way to mark a member row withdrawn without also
-//     retiring it, i.e. deleting the row -- which is AddBackendMember's
-//     opposite number and outside this task's scope. A pool with members still
-//     declared against it is still in service by definition; the operator's
-//     path to withdrawing it is to remove the members first (todo: no
-//     RemoveBackendMember exists yet either -- both are future write-surface
-//     gaps, not something this method can paper over by cascading).
+// AddBackendMember exists. RemoveBackendMember does not, and neither does
+// SetBackendMembers. So a pool that ever gained one member could never be
+// withdrawn by anybody, through any path -- a refusal with no way to clear
+// what it refuses on. That is the write-surface gap this whole work package
+// exists to close, rebuilt inside the fix for it, which is the third time that
+// exact shape has appeared in two days (see the match_type pin above, and
+// WP-J9's four).
+//
+// The structural answer agrees. backend_member is a SET owned by the pool --
+// composite primary key, no id, no lifecycle, no row_version -- structurally
+// identical to cable_bundle_member, and CLAUDE.md names that class explicitly.
+// RetireBundle, the direct sibling, has no member guard at all: a set owned by
+// a parent does not get a vote on the parent's withdrawal, because it is not a
+// separate thing that depends on it. A route is; membership is the pool
+// describing itself.
+//
+// So the member rows stay, describing a pool that is no longer in service,
+// exactly as a retired bundle keeps its cables. If a genuine need for
+// SetBackendMembers appears it is its own work, and it does not change this.
 //
 // REFUSED, NOT CASCADED, for the same reason every other guard in this file
 // gives: a route or a membership is a fact somebody else declared, and
@@ -392,10 +404,9 @@ func (s *SQLStore) AddBackendMember(ctx context.Context, p domain.Permit, m *dom
 // a change_log entry attributing that decision to an operator who never made
 // it.
 //
-// Serializable, for the reason RetireEndpoint's own comment gives: the two
-// COUNTs below assert an invariant this transaction is about to depend on, and
-// at read-committed a route or member declared concurrently is invisible to
-// it.
+// Serializable, for the reason RetireEndpoint's own comment gives: the COUNT
+// below asserts an invariant this transaction is about to depend on, and at
+// read-committed a route declared concurrently is invisible to it.
 func (s *SQLStore) RetireBackendPool(ctx context.Context, p domain.Permit, id string) error {
 	before, err := s.GetBackendPool(ctx, id)
 	if err != nil {
@@ -421,16 +432,6 @@ func (s *SQLStore) RetireBackendPool(ctx context.Context, p domain.Permit, id st
 		if routes > 0 {
 			return fmt.Errorf("pool %s cannot be withdrawn while %d live route(s) point at it: %w",
 				before.Name, routes, domain.ErrConflict)
-		}
-
-		var members int
-		if err := t.get(ctx, &members,
-			`SELECT COUNT(*) FROM backend_member WHERE pool_id = ?`, id); err != nil {
-			return fmt.Errorf("checking pool %s for members: %w", id, err)
-		}
-		if members > 0 {
-			return fmt.Errorf("pool %s cannot be withdrawn while %d backend member(s) are still declared in it: %w",
-				before.Name, members, domain.ErrConflict)
 		}
 
 		res, err := t.exec(ctx, `
