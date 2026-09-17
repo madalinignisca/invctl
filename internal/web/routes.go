@@ -616,6 +616,11 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	// history to fix a typo.
 	write("POST /vlans/{id}", app.VLANUpdate)
 	write("POST /vlans/{id}/retire", app.VLANRetire)
+	// A numbering scope has no create route either (VLANGroup is seeded, the
+	// same story RIR's comment above tells). UpdateVLANGroup and
+	// RetireVLANGroup are Task 3/4 of write-surface-gaps; this is Task 5.
+	write("POST /vlan-groups/{id}", app.VLANGroupUpdate)
+	write("POST /vlan-groups/{id}/retire", app.VLANGroupRetire)
 	write("POST /vlans/{id}/ports", app.VLANPortAdd)
 	write("POST /vlans/{id}/ports/{ifaceID}/remove", app.VLANPortRemove)
 	write("POST /wireless", app.WirelessCreate)

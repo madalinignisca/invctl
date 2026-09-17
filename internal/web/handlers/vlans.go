@@ -20,6 +20,11 @@ type vlanListPage struct {
 	Base
 	VLANs  []store.VLANRow
 	Groups []store.VLANGroupRow
+	// Assets is the numbering scope picker for a group's scope_asset_id -- a
+	// site, a rack, a cluster -- the same trick wirelessFormData's Assets
+	// makes for scope_asset_id there, and for the same reason: nothing in the
+	// schema restricts this to a "site-shaped" kind.
+	Assets []store.AssetRow
 	// Edit is set only when a correction was refused; see editState. The
 	// template calls through it unguarded, which is safe because every
 	// editState method checks for a nil receiver.
@@ -64,6 +69,11 @@ func (a *App) renderVLANs(w http.ResponseWriter, r *http.Request, status int,
 		a.serverError(w, r, err)
 		return
 	}
+	assets, err := a.Store.ListAssets(r.Context(), store.AssetFilter{})
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
 	base := a.base(r, "VLANs", "vlans")
 	// A refused correction reopens the row it was refused on, rather than
 	// collapsing it and making the operator find it again -- renderPrefixes
@@ -75,6 +85,7 @@ func (a *App) renderVLANs(w http.ResponseWriter, r *http.Request, status int,
 		Base:     base,
 		VLANs:    vlans,
 		Groups:   groups,
+		Assets:   assets,
 		Edit:     edit,
 		FormData: a.newVLANForm(r, errs, groups, envs),
 	})
@@ -341,5 +352,64 @@ func (a *App) VLANRetire(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.setFlash(r, "success", "VLAN withdrawn.")
+	render.Redirect(w, r, "/vlans")
+}
+
+// VLANGroupUpdate corrects a numbering scope's name, scope asset or
+// description (write-surface-gaps Task 5). No create route exists for a group
+// -- see routes.go's own comment -- so this and VLANGroupRetire are the whole
+// surface.
+//
+// Copy-then-overwrite, UpdateVLAN's shape: UpdateVLANGroup writes every
+// column, so building a fresh VLANGroup from the form would blank whatever
+// the form does not carry.
+func (a *App) VLANGroupUpdate(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Could not read that form.", http.StatusBadRequest)
+		return
+	}
+	id := r.PathValue("id")
+	existing, err := a.Store.GetVLANGroup(r.Context(), id)
+	if err != nil {
+		a.handleStoreError(w, r, err)
+		return
+	}
+
+	updated := *existing
+	updated.Name = formValue(r, "name")
+	updated.ScopeAssetID = optionalString(r, "scope_asset_id")
+	updated.Description = optionalString(r, "description")
+	updated.RowVersion = submittedVersion(r, updated.RowVersion)
+
+	if err := a.Store.UpdateVLANGroup(r.Context(), a.permit(r), &updated); err != nil {
+		messages, ok := refusalMessages(err, map[string]string{
+			"name": "a numbering scope with that name already exists",
+		})
+		if !ok {
+			a.handleStoreError(w, r, err)
+			return
+		}
+		a.renderVLANs(w, r, refusalStatus(err), nil,
+			rejected(r, id, messages, "name", "scope_asset_id", "description"))
+		return
+	}
+	a.setFlash(r, "success", "Numbering scope "+updated.Name+" updated.")
+	render.Redirect(w, r, "/vlans")
+}
+
+// VLANGroupRetire withdraws a numbering scope, refusing while a live VLAN
+// still numbers within it.
+func (a *App) VLANGroupRetire(w http.ResponseWriter, r *http.Request) {
+	if err := a.Store.RetireVLANGroup(r.Context(), a.permit(r), r.PathValue("id")); err != nil {
+		if isConflict(err) {
+			a.setFlash(r, "error", "That numbering scope still has live VLANs in it. "+
+				"Withdraw them, or move them to another group, first.")
+			render.Redirect(w, r, "/vlans")
+			return
+		}
+		a.handleStoreError(w, r, err)
+		return
+	}
+	a.setFlash(r, "success", "Numbering scope withdrawn.")
 	render.Redirect(w, r, "/vlans")
 }
