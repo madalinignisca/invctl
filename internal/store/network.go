@@ -1053,7 +1053,10 @@ func (s *SQLStore) CreateBreakout(ctx context.Context, p domain.Permit, spec dom
 				l.BreakoutID, l.BreakoutPosition); err != nil {
 				return translateWriteErr(err, "creating breakout strand")
 			}
-			if err := t.logCreate(ctx, "link", l.ID, l); err != nil {
+			// One batch id for the whole assembly. Four strands declared in
+			// one act are one act; see logCreateBatch on why this cannot be
+			// added after the fact.
+			if err := t.logCreateBatch(ctx, "link", l.ID, l, breakoutID); err != nil {
 				return err
 			}
 			links = append(links, l)

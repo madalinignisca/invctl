@@ -326,3 +326,48 @@ func TestRetiringABreakoutStrandFreesItsPosition(t *testing.T) {
 		})
 	}
 }
+
+// TestBreakoutStrandsShareOneBatchID pins the audit grouping.
+//
+// Four strands declared in one act are one act. Without a batch id the audit
+// reads as four separate cablings by the same person in the same second, and a
+// reader has to infer the grouping from breakout_id inside each snapshot --
+// which works, and is inference rather than the column built for it.
+//
+// Asserted rather than assumed because change_log is append-only: a batch id
+// missing from a row is missing permanently, so this is the only moment it can
+// be got right.
+func TestBreakoutStrandsShareOneBatchID(t *testing.T) {
+	for _, e := range Engines(t) {
+		t.Run(e.Name, func(t *testing.T) {
+			s, ctx := newStore(t, e)
+			links := breakoutFixture(t, s, ctx)
+
+			var batches []string
+			for _, l := range links {
+				var b string
+				if err := s.DB().Reader.Get(&b, s.DB().Reader.Rebind(
+					`SELECT COALESCE(batch_id, '') FROM change_log
+					  WHERE entity_type = 'link' AND action = 'create' AND entity_id = ?`,
+				), l.ID); err != nil {
+					t.Fatalf("reading the change log for strand %s: %v", l.ID, err)
+				}
+				batches = append(batches, b)
+			}
+			if len(batches) != len(links) {
+				t.Fatalf("got %d create rows for %d strands", len(batches), len(links))
+			}
+			for _, b := range batches {
+				if b == "" {
+					t.Fatalf("a strand's create row has no batch_id. change_log admits no "+
+						"UPDATE, so this row can never be grouped with its siblings "+
+						"afterwards: %v", batches)
+				}
+				if b != batches[0] {
+					t.Errorf("strands carry different batch ids %v -- one assembly, one "+
+						"act, one batch", batches)
+				}
+			}
+		})
+	}
+}
