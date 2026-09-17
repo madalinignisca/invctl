@@ -247,8 +247,11 @@ and this project has already been bitten by the difference.
 8. **No private keys**, and no field that could become a place to paste one.
    → `TestAKeyReferenceNeverReachesTheAuditTrail`, `TestTheNamesFieldRefusesAPaste`
 9. **No delivery to the estate.** Render, export, display — never push. This is
-   the line that keeps the security claim true. Config *rendering* is fine
-   (WP-H1); an SSH or API push is not, ever.
+   the line that keeps the security claim true. Producing text somebody else
+   acts on is fine; an SSH or API push is not, ever. (This used to cite WP-H1
+   as the example. That package was dropped 2026-09-17 — partly *because* a
+   boundary whose only defence is what a button is called is a boundary worth
+   not approaching. The invariant never depended on it.)
    → `TestNothingReachesOutOfThisProcess`
 
 ### Negotiable
@@ -459,7 +462,7 @@ date from the device type **and says which source it used** — `EOLSource`
 distinguishes `EOLFromAsset` from `EOLFromDeviceType`, which is the provenance
 that entry asked for. B3 is the only one.
 
-**WP-B4 · Cable profiles and bundles** — L — depends: B3 — **PANEL BREAKOUT AND BUNDLES DONE, BREAKOUT CABLES NOT STARTED. Updated 2026-09-14**
+**WP-B4 · Cable profiles and bundles** — L — depends: B3 — **PANEL BREAKOUT AND BUNDLES DONE. BREAKOUT CABLES NOT STARTED, SHAPE DECIDED 2026-09-17 (n `link` rows sharing a breakout id). Updated 2026-09-17**
 Panel breakout is delivered: `docs/panel-breakout-design.md` and
 `docs/superpowers/plans/2026-09-05-panel-breakout.md`. The tracer follows every
 recorded strand of a rear port's breakout as a tree, `port_pass_through.position`
@@ -486,6 +489,53 @@ beside `link`, which migration `00028` already considered and rejected once
 for pass-throughs (NetBox's polymorphic `front_port`/`rear_port` shape). That
 argument against a standing precedent is its own document, per
 `docs/panel-breakout-design.md` §5, not a paragraph here.
+
+***Decided 2026-09-17: n `link` rows sharing a breakout id.*** *Two nullable
+columns on `link` -- `breakout_id` and `breakout_position` -- and no new table.
+The design doc still owes the full argument; what it has to argue is recorded
+here so the ruling is not re-litigated from memory.*
+
+- ***It agrees with `00028` rather than overturning it.** That migration's
+  principle was not "never add a table" -- it was ONE SMALL CHANGE TO AN
+  EXISTING EDGE TYPE OVER A SECOND POLYMORPHIC MODEL: it added `position` to a
+  small table instead of NetBox's `front_port`/`rear_port` pair. Two columns on
+  `link` is the same move. A `cable` + `cable_termination` pair is the shape
+  `00028` refused, and it would put the second cable model beside `link` that
+  its comment names in so many words.*
+- ***No constraint migration under live data.** One-patch-per-port is a Go
+  predicate (`internal/store/network.go:464`, "one of those ports is already
+  patched"), NOT a unique index -- checked, because the opposite was assumed
+  first. So the breakout a-end needs one predicate relaxed, not an index
+  dropped underneath existing rows.*
+- ***Every existing `link` consumer keeps working.** The impact walker, the
+  breakout tracer, `BundleCutEffect` and the unpatch control all read `link`
+  today. Under a termination table each would be wrong by omission until it
+  learned the new table; under this, a breakout reads as four cables that share
+  an id, which is physically what it is.*
+
+***The cost, and it is real: `medium` and `length_m` are duplicated across the
+member rows and can drift apart.** One cable's rows must agree, or the breakout
+is lying about itself. That guard ships in the same commit as the columns, and
+it is proven against a deliberately-drifted row rather than against the general
+shape -- the WP-J9 rule, which was earned four times on one branch.*
+
+***The one place the shape leaks into what an operator reads, and the ruling on
+it.** `cable_bundle_member` keys on `link_id`, so one physical breakout pulled
+through a duct is four member rows and `/bundles/{id}/impact` would say "4
+cables go dark" where a backhoe cut ONE cable with one connector. The set of
+things going dark is identical and correct either way; only the count is
+overstated. **Decided: group by `breakout_id` in the display** -- the store
+keeps four rows, the bundle and impact pages fold them into "1 breakout cable
+(4 strands)". Display logic in one place, no schema change, and it gets its own
+guard. This was the question that could have flipped the ruling to a
+termination table: if bundle membership had needed to name one physical cable
+in the SCHEMA, a real parent row would have been the honest place for it.*
+
+***What is NOT a reason to revisit this:** a breakout needing its own serial or
+warranty. `link` carries no such columns -- only `medium`, `length_m`,
+`lifecycle`, `row_version` -- and nothing asks for them. That concern was
+raised during the ruling and checked; there is no per-cable identity attribute
+to duplicate.*
 
 **"Cable profiles" in this entry's own title was never a specified
 deliverable.** It appears nowhere else in either design document; in
@@ -981,16 +1031,56 @@ transaction and a different audit story — twelve `change_log` rows, not one.*
 
 ### Group H — Configuration data
 
-**WP-H1 · Config contexts and config templates** — L — depends: A4 helps
-Context data assembled by scope (site, role, platform, cluster, tenancy) with
-declared precedence, and templates rendering that data into text.
+**WP-H1 · Config contexts and config templates** — L — **DROPPED AS WRITTEN,
+2026-09-17.** Not rejected on principle, and not deferred — the entry below
+describes a package this system should not build, and a much smaller one it
+might.
 
-**Render only. No delivery.** The output is displayed, downloaded, or fetched via
-the read-only API by something else that does the pushing. Invariant 9 holds:
-invctl still has no credentials to the estate and no code path that touches it.
-NetBox does exactly this and remains a source of truth rather than a config
-manager. Keep the boundary visible in the UI — call the button *Render*, never
-*Deploy*.
+The original entry: *context data assembled by scope (site, role, platform,
+cluster, tenancy) with declared precedence, and templates rendering that data
+into text.* Render only, no delivery, the button called *Render* and never
+*Deploy*, invariant 9 intact throughout. That framing was sound. The problem is
+what is underneath it.
+
+**The scope list was NetBox's, not this system's.** Three of the five named
+scopes do not exist here and never have: there is no `platform` table, no
+`tenancy`, and no `role` outside the vocabularies (`environment_role`,
+`ip_address_role`, `responsibility_role`). A **site is an `asset`** — see
+`power_panel.site_id REFERENCES asset(id)` — so scoping by site resolves
+through `asset_closure`, a fundamentally different shape from an FK to a scope
+table. Meanwhile this system has four dimensions the entry never mentions:
+`environment`, `project`, `team` and `tag`. Specifying precedence over a scope
+list that was three-fifths imaginary would have produced a design arguing about
+the wrong nouns.
+
+**The template half duplicates the consumer.** Anything pulling from invctl is
+running Ansible, which renders Jinja at the point of use with the playbook's own
+variables in scope. invctl rendering router config is a worse copy of a step
+already in that pipeline, it is the larger half of the build, and it is the half
+that sits closest to invariant 9 — held on the right side of the line only by
+what a button is called. A boundary defended by naming is a boundary worth not
+approaching.
+
+**What was actually missing is much smaller, and most of it is built.**
+`GET /api/v1/ansible` already composes the full dynamic-inventory document and
+already ships per-host vars (`ansible_host`, `invctl_id`, `invctl_kind`,
+`invctl_site`) plus groups on three dimensions. Custom fields (migration
+`00051`) already carry typed, audited, per-entity data — their limit is
+`CHECK (entity_type IN ('asset','service'))`: per entity, no scope, no
+inheritance. So the residue worth building, **if a real consumer ever asks for
+it**, is one thing: *scope-inherited key-values that flow into the Ansible
+view's hostvars* — "every asset at dc-oslo gets these NTP servers", inherited
+down `asset_closure`. That is an M at most, it reuses the delivery mechanism
+that already exists, and it is closer to "custom fields, but inherited" than to
+anything in the entry above.
+
+**Why it is dropped rather than shrunk and kept.** Nobody has asked for it. This
+file opens with *"Nothing is gated on a client asking for it"*, which was the
+right principle when the project had no users and is the wrong one now that a
+deployment is imminent: a real consumer's stated need is a better specification
+than parity with NetBox's feature list, and it would arrive with the scope
+dimensions already named. Writing the smaller package speculatively would mean
+guessing those a second time.
 
 ---
 
