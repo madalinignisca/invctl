@@ -82,6 +82,49 @@ func (s *SQLStore) CreateL2VPN(ctx context.Context, p domain.Permit, v *domain.L
 	})
 }
 
+// UpdateL2VPN corrects an overlay's descriptive attributes: name, kind,
+// identifier and description.
+//
+// lifecycle IS PINNED FROM THE STORED ROW, for the reason every other Update
+// method in this file pins theirs: RetireL2VPN is the only withdrawal path,
+// and the only one that refuses while a live termination still names it. This
+// method must not become a second, guardless way to reach the same lifecycle
+// column.
+func (s *SQLStore) UpdateL2VPN(ctx context.Context, p domain.Permit, v *domain.L2VPN) error {
+	before, err := s.GetL2VPN(ctx, v.ID)
+	if err != nil {
+		return err
+	}
+	v.Lifecycle = before.Lifecycle
+	v.CreatedAt = before.CreatedAt
+	if err := v.Validate(); err != nil {
+		return err
+	}
+	at := domain.FormatTime(s.now())
+	v.UpdatedAt = &at
+
+	return s.write(ctx, p, func(t *tx) error {
+		res, err := t.exec(ctx, `
+			UPDATE l2vpn SET name = ?, kind = ?, identifier = ?, description = ?,
+			                 updated_at = ?, row_version = row_version + 1
+			WHERE id = ? AND row_version = ?`,
+			v.Name, v.Kind, v.Identifier, v.Description, at, v.ID, v.RowVersion)
+		if err != nil {
+			return translateWriteErr(err, "updating overlay")
+		}
+		if err := requireVersion(res, "l2vpn", v.ID, &v.RowVersion); err != nil {
+			return err
+		}
+		if err := t.logUpdate(ctx, "l2vpn", v.ID, before, v); err != nil {
+			return err
+		}
+		return s.indexEntity(ctx, t, searchDoc{
+			EntityType: "l2vpn", EntityID: v.ID,
+			Title: v.Name, Subtitle: v.Kind, Body: v.Name + " " + v.Kind,
+		})
+	})
+}
+
 // RetireL2VPN withdraws an overlay, refusing while anything still terminates
 // into it -- the same rule a VLAN with ports follows, for the same reason.
 func (s *SQLStore) RetireL2VPN(ctx context.Context, p domain.Permit, id string) error {

@@ -31,13 +31,19 @@ func TestARetiredBackendPoolNameCanBeReused(t *testing.T) {
 			s, ctx := newStore(t, e)
 			svc := mustService(t, s, ctx, "lb-svc")
 
-			first := &domain.BackendPool{ID: NewID(), ServiceID: svc, Name: "web-backends"}
+			first, err := domain.NewBackendPool(NewID(), svc, "web-backends", nil)
+			if err != nil {
+				t.Fatalf("building the first pool: %v", err)
+			}
 			if err := s.CreateBackendPool(ctx, testPermit, first); err != nil {
 				t.Fatalf("creating the first pool: %v", err)
 			}
 
 			t.Run("a second live pool with the same name is refused", func(t *testing.T) {
-				dup := &domain.BackendPool{ID: NewID(), ServiceID: svc, Name: "web-backends"}
+				dup, err := domain.NewBackendPool(NewID(), svc, "web-backends", nil)
+				if err != nil {
+					t.Fatalf("building the duplicate pool: %v", err)
+				}
 				if err := s.CreateBackendPool(ctx, testPermit, dup); err == nil {
 					t.Error("web-backends was declared twice for the same service while both " +
 						"were live -- the uniqueness constraint did not fire at all")
@@ -52,7 +58,10 @@ func TestARetiredBackendPoolNameCanBeReused(t *testing.T) {
 			}
 
 			t.Run("a new pool can now be declared under the withdrawn name", func(t *testing.T) {
-				second := &domain.BackendPool{ID: NewID(), ServiceID: svc, Name: "web-backends"}
+				second, err := domain.NewBackendPool(NewID(), svc, "web-backends", nil)
+				if err != nil {
+					t.Fatalf("building the second pool: %v", err)
+				}
 				if err := s.CreateBackendPool(ctx, testPermit, second); err != nil {
 					t.Errorf("a retired pool's name could not be reused: %v -- the unique "+
 						"index is still scoped to every row, not just the live ones", err)

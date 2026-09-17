@@ -166,6 +166,62 @@ func (s *SQLStore) CreateAggregate(ctx context.Context, p domain.Permit, a *doma
 	})
 }
 
+// GetAggregate loads one delegation by id.
+func (s *SQLStore) GetAggregate(ctx context.Context, id string) (*domain.Aggregate, error) {
+	var a domain.Aggregate
+	if err := s.readOne(ctx, &a, `SELECT * FROM aggregate WHERE id = ?`, id); err != nil {
+		return nil, fmt.Errorf("getting aggregate %s: %w", id, err)
+	}
+	return &a, nil
+}
+
+// UpdateAggregate corrects a delegation's descriptive attributes: cidr_text
+// (and the addr_* columns SetCIDR derives from it), rir_id, allocated_on and
+// description.
+//
+// lifecycle IS PINNED FROM THE STORED ROW, never taken from the caller. This
+// method would otherwise be a second withdrawal path with none of
+// RetireAggregate's own gate, letting a correction form silently reactivate or
+// retire a delegation as a side effect of fixing a typo in its allocation
+// date -- the same reasoning UpdateVLAN and UpdateNetGroup give for pinning
+// theirs.
+func (s *SQLStore) UpdateAggregate(ctx context.Context, p domain.Permit, a *domain.Aggregate) error {
+	before, err := s.GetAggregate(ctx, a.ID)
+	if err != nil {
+		return err
+	}
+	a.Lifecycle = before.Lifecycle
+	a.CreatedAt = before.CreatedAt
+	if err := a.Validate(); err != nil {
+		return err
+	}
+	at := domain.FormatTime(s.now())
+	a.UpdatedAt = &at
+
+	return s.write(ctx, p, func(t *tx) error {
+		res, err := t.exec(ctx, `
+			UPDATE aggregate SET cidr_text = ?, addr_family = ?, addr_start = ?, addr_end = ?,
+			                     rir_id = ?, allocated_on = ?, description = ?,
+			                     updated_at = ?, row_version = row_version + 1
+			WHERE id = ? AND row_version = ?`,
+			a.CIDRText, a.AddrFamily, a.AddrStart, a.AddrEnd,
+			a.RIRID, a.AllocatedOn, a.Description, at, a.ID, a.RowVersion)
+		if err != nil {
+			return translateWriteErr(err, "updating aggregate")
+		}
+		if err := requireVersion(res, "aggregate", a.ID, &a.RowVersion); err != nil {
+			return err
+		}
+		if err := t.logUpdate(ctx, "aggregate", a.ID, before, a); err != nil {
+			return err
+		}
+		return s.indexEntity(ctx, t, searchDoc{
+			EntityType: "aggregate", EntityID: a.ID,
+			Title: a.CIDRText, Subtitle: "delegation", Body: a.CIDRText,
+		})
+	})
+}
+
 // RetireAggregate withdraws a delegation.
 func (s *SQLStore) RetireAggregate(ctx context.Context, p domain.Permit, id string) error {
 	var before domain.Aggregate
@@ -227,6 +283,52 @@ func (s *SQLStore) CreateRIR(ctx context.Context, p domain.Permit, r *domain.RIR
 	})
 }
 
+// GetRIR loads one registry by id.
+func (s *SQLStore) GetRIR(ctx context.Context, id string) (*domain.RIR, error) {
+	var r domain.RIR
+	if err := s.readOne(ctx, &r, `SELECT * FROM rir WHERE id = ?`, id); err != nil {
+		return nil, fmt.Errorf("getting registry %s: %w", id, err)
+	}
+	return &r, nil
+}
+
+// UpdateRIR corrects a registry's descriptive attributes: name, is_private
+// and description.
+//
+// lifecycle IS PINNED FROM THE STORED ROW, never taken from the caller, for
+// the reason UpdateAggregate's own comment gives: this method must not become
+// a second, guardless withdrawal path. RetireRIR (Task 4) is the only thing
+// allowed to withdraw one, and it refuses while a live aggregate still
+// references it.
+func (s *SQLStore) UpdateRIR(ctx context.Context, p domain.Permit, r *domain.RIR) error {
+	before, err := s.GetRIR(ctx, r.ID)
+	if err != nil {
+		return err
+	}
+	r.Lifecycle = before.Lifecycle
+	r.CreatedAt = before.CreatedAt
+	if err := r.Validate(); err != nil {
+		return err
+	}
+	at := domain.FormatTime(s.now())
+	r.UpdatedAt = &at
+
+	return s.write(ctx, p, func(t *tx) error {
+		res, err := t.exec(ctx, `
+			UPDATE rir SET name = ?, is_private = ?, description = ?,
+			               updated_at = ?, row_version = row_version + 1
+			WHERE id = ? AND row_version = ?`,
+			r.Name, r.IsPrivate, r.Description, at, r.ID, r.RowVersion)
+		if err != nil {
+			return translateWriteErr(err, "updating registry")
+		}
+		if err := requireVersion(res, "rir", r.ID, &r.RowVersion); err != nil {
+			return err
+		}
+		return t.logUpdate(ctx, "rir", r.ID, before, r)
+	})
+}
+
 // ---------- autonomous systems ----------
 
 // ASNRow is an AS number with its registry resolved.
@@ -272,6 +374,76 @@ func (s *SQLStore) CreateASN(ctx context.Context, p domain.Permit, a *domain.ASN
 			return translateWriteErr(err, "creating AS number")
 		}
 		if err := t.logCreate(ctx, "asn", a.ID, a); err != nil {
+			return err
+		}
+		return s.indexEntity(ctx, t, searchDoc{
+			EntityType: "asn", EntityID: a.ID,
+			Title:    fmt.Sprintf("AS%d", a.Number),
+			Subtitle: derefString(a.Name),
+			Body:     fmt.Sprintf("AS%d %s", a.Number, derefString(a.Name)),
+		})
+	})
+}
+
+// GetASN loads one AS number by id.
+func (s *SQLStore) GetASN(ctx context.Context, id string) (*domain.ASN, error) {
+	var a domain.ASN
+	if err := s.readOne(ctx, &a, `SELECT * FROM asn WHERE id = ?`, id); err != nil {
+		return nil, fmt.Errorf("getting AS number %s: %w", id, err)
+	}
+	return &a, nil
+}
+
+// UpdateASN corrects an AS number's declared attributes.
+//
+// THE NUMBER ITSELF IS CORRECTABLE, unlike a route's frontend or a pool's
+// service: the roadmap entry this closes says it plainly -- "a mistyped AS
+// number is withdraw-and-redeclare" -- and that IS the gap. An AS number is a
+// value somebody typed, not an identity another row depends on the way a
+// route depends on its pool, so there is no seizure to guard against.
+//
+// Uniqueness still applies: asn_number_key (migration 00033) is a partial
+// unique index scoped to live rows, so this method can hand a number already
+// declared by another live row straight to it rather than pre-checking and
+// racing. What is NOT acceptable is surfacing the resulting constraint
+// failure as a raw domain.ErrConflict, which a form has no field to hang off
+// -- so a unique violation here is caught and turned into a *ValidationError
+// naming "number", the same 422-able shape every other refused input takes.
+//
+// lifecycle IS PINNED FROM THE STORED ROW, for the reason every other Update
+// method in this file pins theirs: RetireASN is the only withdrawal path, and
+// it is the only one with a guard.
+func (s *SQLStore) UpdateASN(ctx context.Context, p domain.Permit, a *domain.ASN) error {
+	before, err := s.GetASN(ctx, a.ID)
+	if err != nil {
+		return err
+	}
+	a.Lifecycle = before.Lifecycle
+	a.CreatedAt = before.CreatedAt
+	if err := a.Validate(); err != nil {
+		return err
+	}
+	at := domain.FormatTime(s.now())
+	a.UpdatedAt = &at
+
+	return s.write(ctx, p, func(t *tx) error {
+		res, err := t.exec(ctx, `
+			UPDATE asn SET number = ?, name = ?, rir_id = ?, description = ?,
+			               updated_at = ?, row_version = row_version + 1
+			WHERE id = ? AND row_version = ?`,
+			a.Number, a.Name, a.RIRID, a.Description, at, a.ID, a.RowVersion)
+		if err != nil {
+			if isUniqueViolation(err) {
+				ve := &domain.ValidationError{}
+				ve.Add("number", "AS%d is already declared by another AS number", a.Number)
+				return ve
+			}
+			return translateWriteErr(err, "updating AS number")
+		}
+		if err := requireVersion(res, "asn", a.ID, &a.RowVersion); err != nil {
+			return err
+		}
+		if err := t.logUpdate(ctx, "asn", a.ID, before, a); err != nil {
 			return err
 		}
 		return s.indexEntity(ctx, t, searchDoc{

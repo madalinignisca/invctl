@@ -228,6 +228,51 @@ func (s *SQLStore) CreateVLANGroup(ctx context.Context, p domain.Permit, g *doma
 	})
 }
 
+// GetVLANGroup loads one numbering scope by id.
+func (s *SQLStore) GetVLANGroup(ctx context.Context, id string) (*domain.VLANGroup, error) {
+	var g domain.VLANGroup
+	if err := s.readOne(ctx, &g, `SELECT * FROM vlan_group WHERE id = ?`, id); err != nil {
+		return nil, fmt.Errorf("getting vlan group %s: %w", id, err)
+	}
+	return &g, nil
+}
+
+// UpdateVLANGroup corrects a numbering scope's descriptive attributes: name,
+// scope_asset_id and description.
+//
+// lifecycle IS PINNED FROM THE STORED ROW. RetireVLANGroup (Task 4) is the
+// only withdrawal path, and the only one that will refuse while a live VLAN
+// still numbers within this scope -- this method must not become a second,
+// guardless way to flip the same column.
+func (s *SQLStore) UpdateVLANGroup(ctx context.Context, p domain.Permit, g *domain.VLANGroup) error {
+	before, err := s.GetVLANGroup(ctx, g.ID)
+	if err != nil {
+		return err
+	}
+	g.Lifecycle = before.Lifecycle
+	g.CreatedAt = before.CreatedAt
+	if err := g.Validate(); err != nil {
+		return err
+	}
+	at := domain.FormatTime(s.now())
+	g.UpdatedAt = &at
+
+	return s.write(ctx, p, func(t *tx) error {
+		res, err := t.exec(ctx, `
+			UPDATE vlan_group SET name = ?, scope_asset_id = ?, description = ?,
+			                      updated_at = ?, row_version = row_version + 1
+			WHERE id = ? AND row_version = ?`,
+			g.Name, g.ScopeAssetID, g.Description, at, g.ID, g.RowVersion)
+		if err != nil {
+			return translateWriteErr(err, "updating vlan group")
+		}
+		if err := requireVersion(res, "vlan_group", g.ID, &g.RowVersion); err != nil {
+			return err
+		}
+		return t.logUpdate(ctx, "vlan_group", g.ID, before, g)
+	})
+}
+
 // ---------- port membership ----------
 
 // VLANPort is one port in a VLAN, with the box it is in.

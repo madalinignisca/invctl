@@ -107,6 +107,30 @@ var unreachableRepairPaths = map[string]string{
 	// what writeSurfaceUnbuilt described before ListIdentities and
 	// CreateIdentity had no route reaching them at all -- narrower, but the
 	// same shape.
+
+	// The write-surface-gaps plan (2026-09-17): UpdateAggregate, UpdateRIR,
+	// UpdateASN, UpdateL2VPN and UpdateVLANGroup are Task 3's store methods,
+	// deliberately built ahead of Task 5's web layer the same order every
+	// pair above took. Before Task 5 wires a route to each, a mistyped
+	// registry name, a wrong AS number, an overlay's kind or a numbering
+	// scope's scope asset genuinely cannot be fixed through the product --
+	// the operator's only recourse is withdraw-and-redeclare, which is
+	// exactly the defect writeSurfaceGaps records for each of them. All five
+	// entries come out the moment their routes land.
+	"UpdateAggregate": "no route yet (write-surface-gaps Task 5); a wrong CIDR, RIR link, allocation date or description cannot be corrected through the product until then.",
+	"UpdateRIR":       "no route yet (write-surface-gaps Task 5); a mistyped registry name cannot be corrected through the product until then.",
+	"UpdateASN":       "no route yet (write-surface-gaps Task 5); the roadmap's own gap -- a mistyped AS number is withdraw-and-redeclare -- stays true until then.",
+	"UpdateL2VPN":     "no route yet (write-surface-gaps Task 5); an overlay's name, kind, identifier or description cannot be corrected through the product until then.",
+	"UpdateVLANGroup": "no route yet (write-surface-gaps Task 5); a numbering scope's name or scope asset cannot be corrected through the product until then.",
+	// UpdateBackendPool and UpdateRoute are the same shape, one step behind:
+	// migration 00070 (Task 1) gave backend_pool and route the columns a
+	// correction needs, Task 2 gave both entities a Validate() reachable
+	// without their constructors, and these are Task 3's store methods.
+	// Until Task 5 wires POST /pools/{id} and POST /routes/{id}, a pool's
+	// name or algorithm and a route's match value, tls_termination or
+	// priority cannot be corrected through the product either.
+	"UpdateBackendPool": "no route yet (write-surface-gaps Task 5); a pool's name or lb_algorithm cannot be corrected through the product until then.",
+	"UpdateRoute":       "no route yet (write-surface-gaps Task 5); a route's match_value, tls_termination or priority cannot be corrected through the product until then.",
 }
 
 // TestEveryUpdateMethodIsReachable fails when a store method written to correct

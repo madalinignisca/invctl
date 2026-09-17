@@ -49,7 +49,10 @@ func mustEndpoint(t *testing.T, s *SQLStore, ctx context.Context, serviceID, nam
 func mustRoute(t *testing.T, s *SQLStore, ctx context.Context, serviceID, name string, port int) string {
 	t.Helper()
 	frontend := mustEndpoint(t, s, ctx, serviceID, name+"-front", port)
-	pool := &domain.BackendPool{ID: NewID(), ServiceID: serviceID, Name: name + "-pool"}
+	pool, err := domain.NewBackendPool(NewID(), serviceID, name+"-pool", nil)
+	if err != nil {
+		t.Fatalf("building backend pool for route %s: %v", name, err)
+	}
 	if err := s.CreateBackendPool(ctx, testPermit, pool); err != nil {
 		t.Fatalf("creating backend pool for route %s: %v", name, err)
 	}
