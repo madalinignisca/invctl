@@ -38,6 +38,19 @@ footnote.
 
 ### Action required
 
+- **Run `invctl -reindex-identities` once after upgrading.** Credential
+  references are searchable from this release (see **Fixed**), but only ones
+  written by the new code index themselves. Identities declared before the
+  upgrade have a row and no search document, and nothing a later write does
+  reaches them — the symptom is indistinguishable from the bug still being
+  present. The command writes a document for every identity, live and
+  retired, reports the count and exits. Safe to repeat: the write is an
+  upsert, so running it twice changes nothing. It touches no declared state
+  and writes no `change_log` row, because rebuilding an index table changes
+  no fact about your estate. Skipping it is not dangerous, just
+  disappointing — search keeps returning nothing for credentials you can see
+  on `/identities`.
+
 - **A project owner needs both write scope and the `can_see_costs` grant to
   manage a cost line — granting only one is not enough.** Project owners can
   now add, reprice and remove `asset_cost` lines on assets linked to their
@@ -69,6 +82,34 @@ footnote.
   only through the API.
 
 ### Added
+
+- **Breakout cables.** A QSFP-to-4×SFP+ DAC is one cable with one end on one
+  side and four on the other, and until now `link` could not express it — you
+  either recorded four unrelated cables and lost the fact that one connector
+  failing takes all four, or recorded one and lost three ports. A breakout is
+  now declared from an asset's page as a single act: one near port, up to
+  eight far ports. **It changes what impact tells you**: cutting any strand
+  reports every strand as lost, because one connector is one failure. A duct
+  containing a breakout reports it as one cable rather than four, so the cut
+  page stops overstating a backhoe by a factor of four. Migration `00071`,
+  additive.
+
+- **Every entity you can create can now be corrected and withdrawn.**
+  Aggregates, ASNs, L2VPNs, RIRs, VLAN groups, backend pools and routes were
+  the last seven that could be brought into existence and then not fixed or
+  taken back. A mistyped AS number is a correction now, not a
+  withdraw-and-redeclare. RIRs, VLAN groups and backend pools gained list
+  panels, having had none. Withdrawals **refuse rather than cascade** and name
+  what is in the way — retiring an RIR while a live aggregate points at it
+  tells you which, instead of quietly retiring the aggregate under somebody.
+  Migration `00070`, additive.
+
+- **Search results link where they should.** Eleven more kinds of hit are now
+  clickable: identities, certificates, circuits, clusters, projects, teams,
+  VLANs, cable bundles, L2VPNs and FHRP groups. Prefixes, aggregates, ASNs, IP
+  ranges and environments stay unlinked deliberately — they have no page of
+  their own, and sending you to a list of hundreds to find by eye what search
+  had already found would be worse than not linking.
 
 - **Wireless LANs.** A new `/wireless` page declares SSIDs — name, security
   mode, an optional scope (site, rack, cluster — any asset), an optional VLAN
@@ -137,6 +178,24 @@ footnote.
   export is an importable table, not a picture of the page.
 
 ### Fixed
+
+- **Credential references were invisible to search.** Identities could be
+  declared, edited, audited and shown on `/identities`, and typing the name
+  into search returned nothing — the surface worked and the thing was
+  unfindable. Fixed for everything written from this release; existing rows
+  need the one command under **Action required**. The stored secret *path*
+  (`secret_ref`) is deliberately **not** indexed: it holds a location rather
+  than a credential, so indexing it would disclose no secret value, but
+  search is the widest read surface in the product — no project scope, no
+  cost gate, every signed-in reader — and a list of where your estate keeps
+  its credentials is a reconnaissance map either way.
+
+- **Most search results were findable but not clickable.** Fifteen of the
+  nineteen indexed kinds of thing rendered as plain text rather than a link,
+  several of them since the day they became searchable. You could see that
+  the thing existed and had no way to reach it, which is arguably worse than
+  not finding it. Eleven now link; the remaining four plus environments are
+  argued in the code, because no detail page exists to link to.
 
 - **Two more money surfaces were readable by a viewer without the
   `can_see_costs` grant: the price-movement panel** (an asset or circuit's
