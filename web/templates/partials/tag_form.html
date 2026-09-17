@@ -56,8 +56,18 @@
   <td style="white-space:nowrap">
     {{if $p.IsAdmin}}
     <a class="btn btn-sm" href="/tags?edit={{$row.ID}}">Edit</a>
+    {{/* hx-target="this" hx-swap="none" -- a declaration, not an exemption
+         (docs/htmx-swap-targets-design.md rule 1): if TagRetire ever grows
+         a path that renders a fragment, "none" declines to swap it rather
+         than swallowing it into this button, and stays correct even if
+         app.js's force-swap ever widens past 422. Argued from the handler,
+         per rule 4: TagRetire (handlers/tags.go) answers
+         flash+render.Redirect on success and handleStoreError on failure,
+         never a fragment. See partials/teams.html's retire forms for the
+         full reasoning. */}}
     <button class="btn btn-sm btn-danger" type="button"
             hx-post="/tags/{{$row.ID}}/retire"
+            hx-target="this" hx-swap="none"
             hx-confirm="Retire this tag? Anything already carrying it keeps it.">Retire</button>
     {{end}}
   </td>

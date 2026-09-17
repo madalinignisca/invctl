@@ -14,7 +14,12 @@
 {{define "user_form"}}
 <div class="panel" id="user-form">
   <div class="panel-head"><h2>Add a user</h2></div>
-  <form class="panel-body" method="post" action="/users" hx-post="/users">
+  {{/* This partial IS its own refusal target. UserCreate used to answer all four
+       of its 422s with user_list_panel -- the roster -- which holds no .Errors
+       and no .FormUsername, so the refusal arrived somewhere nobody could see it.
+       The id below was already here; only the handler was looking elsewhere. */}}
+  <form class="panel-body" method="post" action="/users" hx-post="/users"
+        hx-target="#user-form" hx-swap="outerHTML">
     <input type="hidden" name="csrf_token" value="{{.CSRF}}">
     <div class="field-row">
       <div class="field">

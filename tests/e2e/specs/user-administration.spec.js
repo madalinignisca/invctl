@@ -145,7 +145,7 @@ describeHere('user administration (mutates -- local instance only)', () => {
     await expect(colleaguePage.locator('.rail-foot .id')).toBeVisible();
 
     // /teams is a stable, pre-existing write-gated page (web/templates/pages/
-    // team_list.html): the "Add a team" form only renders {{if .CanWrite}}.
+    // team_list.html): the "Add a team" form only renders {{if .IsAdmin}}.
     await colleaguePage.goto('/teams');
     await expect(colleaguePage.locator('form[action="/teams"]')).toBeVisible();
     await expect(colleaguePage.locator('.rail-foot')).toContainText('read / write');

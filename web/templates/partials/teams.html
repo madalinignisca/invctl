@@ -48,6 +48,57 @@
 </div>
 {{end}}
 
+{{/* The create form, extracted from pages/team_list.html so it can be its own
+     refusal target.
+
+     TeamCreate used to answer a validation failure by re-rendering
+     team_list_panel -- the ROSTER -- which does not contain this form. The
+     .Errors and .Spec below were rendered into a fragment the operator never
+     saw, and on an HX-Request the roster was all that came back. Same defect as
+     certificate_form and user_form; CLAUDE.md: "Validation errors re-render the
+     form partial with error state and return HTTP 422."
+
+     Moved here rather than left on the page because its two siblings (team_panel,
+     team_retire_confirm) are here and a reader looking for "where does a team
+     refusal render" should find all three in one file. */}}
+{{define "team_create_form"}}
+<div class="panel" id="team-create-form">
+  <div class="panel-head"><h2>Add a team</h2></div>
+  <form class="panel-body" method="post" action="/teams" hx-post="/teams"
+        hx-target="#team-create-form" hx-swap="outerHTML">
+    <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+    <div class="field-row">
+      <div class="field">
+        <label for="t-code">Code</label>
+        <input id="t-code" class="mono" type="text" name="code" value="{{.Spec.Code}}" required>
+        {{with index .Errors "code"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="t-name">Name</label>
+        <input id="t-name" type="text" name="name" value="{{.Spec.Name}}" required>
+        {{with index .Errors "name"}}<div class="field-error">{{.}}</div>{{end}}
+      </div>
+      <div class="field">
+        <label for="t-contact">Contact</label>
+        <input id="t-contact" class="mono" type="text" name="contact_ref"
+               value="{{deref .Spec.ContactRef}}"
+               placeholder="platform@example.com · #platform-oncall · QUEUE-INFRA">
+        <div class="field-hint">
+          A group address, a queue or a channel — <strong>never a person</strong>.
+          This database is kept forever and its audit trail cannot be edited.
+        </div>
+      </div>
+    </div>
+    <div class="field">
+      <label for="t-desc">Description</label>
+      <input id="t-desc" type="text" name="description" value="{{deref .Spec.Description}}"
+             placeholder="what this team is answerable for">
+    </div>
+    <button class="btn btn-primary" type="submit">Add team</button>
+  </form>
+</div>
+{{end}}
+
 {{define "team_panel"}}
 <div id="team">
   {{if eq .Team.Lifecycle "retired"}}
@@ -170,8 +221,29 @@
   {{if .IsAdmin}}
   <div class="panel">
     <div class="panel-head"><h2>Edit</h2></div>
+    {{/* hx-target="#team" hx-swap="outerHTML" -- CLAUDE.md: "Swap targets are
+         declared in the template, not chosen by the handler. Default to
+         hx-swap='outerHTML' on a wrapping element with a stable id."
+
+         Read off the handler: TeamUpdate (handlers/teams.go) answers a
+         validation failure with renderTeam -> Respond(..., "team_detail",
+         "team_panel", ...), so the 422 body is this whole panel. Without a
+         target htmx's default (this element, innerHTML) nests the panel
+         inside this <form> -- the identity rotation form's bug
+         (docs/htmx-swap-targets-design.md), fixed there in 068d91c.
+
+         #team is team_panel's unconditional root (l.103), and this form sits
+         inside the {{if .IsAdmin}} at l.221 which is itself WITHIN that
+         root, never outside it -- so the target id is present on every
+         render that can show this form. Checked per element: a target
+         inside a conditional the element is not fails at request time,
+         silently.
+
+         Success is unaffected: render.Redirect answers HX-Redirect, and
+         htmx returns before it resolves a target or picks a swap. */}}
     <form class="panel-body" method="post" action="/teams/{{.Team.ID}}"
-          hx-post="/teams/{{.Team.ID}}">
+          hx-post="/teams/{{.Team.ID}}"
+          hx-target="#team" hx-swap="outerHTML">
       <input type="hidden" name="csrf_token" value="{{.CSRF}}">
       {{/* The version the operator opened. See internal/domain/version.go. */}}
       <input type="hidden" name="row_version" value="{{.Team.RowVersion}}">
@@ -232,7 +304,43 @@
       <span class="panel-note">Nothing is currently assigned to this team.</span>
     </div>
     <div class="panel-body">
-      <form method="post" action="/teams/{{.Team.ID}}/retire" hx-post="/teams/{{.Team.ID}}/retire">
+      {{/* hx-target="this" hx-swap="none", and that is a DECLARATION rather
+           than an exemption -- docs/htmx-swap-targets-design.md, rule 1:
+           "hx-swap='none' is a legitimate declaration, not an exemption."
+
+           Argued from the handler, which is what rule 4 demands of any claim
+           that a response has no in-band body: TeamRetire (handlers/teams.go)
+           answers render.Redirect on success and handleStoreError on failure,
+           and nothing else. handleStoreError's only swappable status is 422
+           (app.js force-swaps that alone), and since the ErrInvalid branch
+           became an out-of-band flash it sends HX-Reswap: none itself -- so
+           the server and this attribute agree, and the flash still lands
+           because htmx processes hx-swap-oob before it consults the swap
+           style at all.
+
+           NOT a nearby panel id: naming one would mean that the day somebody
+           widens app.js's force-swap to 409, a whole panel is replaced by
+           whatever handleStoreError wrote. "this" plus "none" says what is
+           true -- this route answers with a navigation or a flash, never a
+           fragment -- and the sibling reassign-retire form four panels down
+           names a real target for exactly the opposite reason.
+
+           STATED PLAINLY, because the 15 elements elsewhere that point back
+           here for "the full reasoning" repeated a framing that reads as a
+           safety property and is not one: this declaration is correct
+           because TeamRetire renders no fragment TODAY, not because "none"
+           is self-correcting if that ever stops being true. "none" is a
+           LATCH, not a guard -- if TeamRetire (or DependencyRetire, or any
+           of the other handlers behind these 15 elements) is ever changed to
+           answer a refusal with an in-band fragment, this attribute will
+           discard that fragment SILENTLY, not decline to swap it visibly.
+           Nothing in this codebase re-checks that claim when the handler
+           changes; whoever changes what a handler answers with must update
+           the declaration in the same commit, on their own attention, same
+           as when a target's id changes. WP-J9 whole-branch review, finding
+           7. */}}
+      <form method="post" action="/teams/{{.Team.ID}}/retire" hx-post="/teams/{{.Team.ID}}/retire"
+            hx-target="this" hx-swap="none">
         <input type="hidden" name="csrf_token" value="{{.CSRF}}">
         <button class="btn btn-danger" type="submit">Retire team</button>
         <a class="btn btn-sm" href="/teams/{{.Team.ID}}">Cancel</a>
@@ -269,8 +377,18 @@
       <h2>Reassign, then retire</h2>
       <span class="panel-note">Moves everything above to the team you choose, then retires {{.Team.Code}}.</span>
     </div>
+    {{/* hx-target="#team-retire-confirm" hx-swap="outerHTML" -- CLAUDE.md's
+         swap-target rule. TeamReassignAndRetire (handlers/teams.go) has
+         THREE 422 sites (empty target, validationErrors, the ErrInvalid
+         "cannot be the reassignment target" branch), all
+         renderTeamRetireConfirm -> Respond(..., "team_retire_confirm",
+         "team_retire_confirm", ...), so every refusal's body is this whole
+         partial. #team-retire-confirm is team_retire_confirm's unconditional
+         root (above), outside the {{if eq .Counts.Total 0}} branch this
+         form sits in -- present on every render that can show it. */}}
     <form class="panel-body" method="post" action="/teams/{{.Team.ID}}/reassign-retire"
-          hx-post="/teams/{{.Team.ID}}/reassign-retire">
+          hx-post="/teams/{{.Team.ID}}/reassign-retire"
+          hx-target="#team-retire-confirm" hx-swap="outerHTML">
       <input type="hidden" name="csrf_token" value="{{.CSRF}}">
       <div class="field">
         <label for="rr-target">Reassign to</label>
@@ -295,7 +413,11 @@
       </span>
     </div>
     <div class="panel-body">
-      <form method="post" action="/teams/{{.Team.ID}}/retire" hx-post="/teams/{{.Team.ID}}/retire">
+      {{/* hx-target="this" hx-swap="none" -- same TeamRetire route as the
+           zero-count "Retire team" button above; see the comment there for
+           the full argument. */}}
+      <form method="post" action="/teams/{{.Team.ID}}/retire" hx-post="/teams/{{.Team.ID}}/retire"
+            hx-target="this" hx-swap="none">
         <input type="hidden" name="csrf_token" value="{{.CSRF}}">
         <button class="btn btn-danger" type="submit">Retire {{.Team.Code}} without reassigning</button>
       </form>

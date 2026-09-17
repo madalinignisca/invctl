@@ -92,8 +92,20 @@
             <a class="btn btn-sm" href="/environments/{{.ID}}/map">Map — all three layers</a>
             {{if $.IsAdmin}}<a class="btn btn-sm" href="/environments?edit={{.ID}}">Edit</a>{{end}}
             {{if and $.IsAdmin (ne .Lifecycle "retired")}}
+            {{/* hx-target="this" hx-swap="none" -- a declaration, not an
+                 exemption (docs/htmx-swap-targets-design.md rule 1): if
+                 EnvironmentRetire ever grows a path that renders a
+                 fragment, "none" declines to swap it rather than
+                 swallowing it into this button, and stays correct even if
+                 app.js's force-swap ever widens past 422. Argued from the
+                 handler, per rule 4: EnvironmentRetire (handlers/assets.go)
+                 answers flash+render.Redirect on every path -- success and
+                 handleStoreError alike, no conflict branch -- never a
+                 fragment. See partials/teams.html's retire forms for the
+                 full reasoning. */}}
             <button class="btn btn-sm btn-danger" type="button"
                     hx-post="/environments/{{.ID}}/retire"
+                    hx-target="this" hx-swap="none"
                     hx-confirm="Withdraw {{.Code}}? Nothing that already carries it is touched -- it stays assigned, and this label just stops being offered for new assignments. Re-declaring the same code brings it back.">Withdraw</button>
             {{end}}
           </td>

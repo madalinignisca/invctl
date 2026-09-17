@@ -43,8 +43,21 @@
           <td>{{.Role}}</td>
           {{if $.IsAdmin}}
           <td style="white-space:nowrap">
+            {{/* hx-target="this" hx-swap="none" -- a declaration, not an
+                 exemption (docs/htmx-swap-targets-design.md rule 1): if
+                 NetworkGroupMemberRetire ever grows a path that renders a
+                 fragment, "none" declines to swap it rather than swallowing
+                 it into this element, and stays correct even if app.js's
+                 force-swap ever widens past 422. Argued from the handler,
+                 per rule 4: NetworkGroupMemberRetire
+                 (handlers/reach_repair.go) answers flash+render.Redirect on
+                 success and handleStoreError on failure, never a fragment.
+                 See partials/teams.html's retire forms for the full
+                 reasoning; the other three forms on this page point back
+                 here rather than repeating it. */}}
             <form method="post" action="/network/groups/{{$.Group.ID}}/members/{{.AssetID}}/retire"
                   hx-post="/network/groups/{{$.Group.ID}}/members/{{.AssetID}}/retire"
+                  hx-target="this" hx-swap="none"
                   hx-confirm="Remove {{.AssetName}} from {{$.Group.Code}}? The record is kept."
                   style="display:inline">
               <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
@@ -80,8 +93,14 @@
           <td>{{.Source}}</td>
           {{if $.IsAdmin}}
           <td style="white-space:nowrap">
+            {{/* hx-target="this" hx-swap="none" -- same declaration as the
+                 member-retire form above. NetworkUplinkRetire
+                 (handlers/reach_repair.go) answers flash+render.Redirect on
+                 success and handleStoreError on failure, never a
+                 fragment. */}}
             <form method="post" action="/network/groups/{{$.Group.ID}}/uplinks/{{.ID}}/retire"
                   hx-post="/network/groups/{{$.Group.ID}}/uplinks/{{.ID}}/retire"
+                  hx-target="this" hx-swap="none"
                   hx-confirm="Withdraw this uplink? The record is kept."
                   style="display:inline">
               <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
@@ -120,8 +139,14 @@
           <td>{{.Source}}</td>
           {{if $.IsAdmin}}
           <td style="white-space:nowrap">
+            {{/* hx-target="this" hx-swap="none" -- same declaration as the
+                 member-retire form above. NetworkAttachmentRetire
+                 (handlers/reach_repair.go) answers flash+render.Redirect on
+                 success and handleStoreError on failure, never a
+                 fragment. */}}
             <form method="post" action="/network/groups/{{$.Group.ID}}/attachments/{{.ID}}/retire"
                   hx-post="/network/groups/{{$.Group.ID}}/attachments/{{.ID}}/retire"
+                  hx-target="this" hx-swap="none"
                   hx-confirm="Detach {{.AssetName}}? The record is kept."
                   style="display:inline">
               <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
@@ -247,8 +272,12 @@
       Nothing hangs off this group, so only the group itself is withdrawn.
       {{end}}
     </p>
+    {{/* hx-target="this" hx-swap="none" -- same declaration as the
+         member-retire form above. NetworkGroupRetire
+         (handlers/reach_repair.go) answers flash+render.Redirect on success
+         and handleStoreError on failure, never a fragment. */}}
     <form method="post" action="/network/groups/{{.Group.ID}}/retire"
-          hx-post="/network/groups/{{.Group.ID}}/retire"
+          hx-post="/network/groups/{{.Group.ID}}/retire" hx-target="this" hx-swap="none"
           hx-confirm="Withdraw {{.Group.Code}} and everything hanging off it? The records are kept.">
       <input type="hidden" name="csrf_token" value="{{.CSRF}}">
       <button class="btn btn-danger" type="submit">Withdraw {{.Group.Code}}</button>

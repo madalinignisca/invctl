@@ -107,6 +107,64 @@ export async function resolveServicePath(page, code) {
   return href;
 }
 
+/**
+ * Resolves a team's URL path by its CODE, never a hardcoded ID -- same
+ * reasoning as the resolvers above: team ids are fresh UUIDv7s every seed
+ * run. web/templates/partials/teams.html's list table links each row's code
+ * cell to the team's own detail page.
+ *
+ * @param {import('@playwright/test').Page} page
+ * @param {string} code
+ * @returns {Promise<string>} the team's detail path, e.g. "/teams/<id>"
+ */
+export async function resolveTeamPath(page, code) {
+  await page.goto('/teams', { waitUntil: 'networkidle' });
+  const link = page.locator('table a', { hasText: new RegExp(`^${escapeRegExp(code)}$`) }).first();
+  const count = await link.count();
+  if (count === 0) {
+    throw new Error(
+      `no team coded "${code}" was found on /teams -- this suite expects ` +
+        'the demo estate. See docs/E2E.md (INV_SEED=true INV_SEED_COMPANY=true).',
+    );
+  }
+  const href = await link.getAttribute('href');
+  if (!href) {
+    throw new Error(`team row for "${code}" has no href`);
+  }
+  return href;
+}
+
+/**
+ * Resolves a certificate's URL path by its SUBJECT, never a hardcoded ID --
+ * same reasoning as the resolvers above. certificate_list_panel's table links
+ * each row's Subject cell (web/templates/partials/certificates.html) to the
+ * certificate's own detail page, and the list's own filter
+ * (web/templates/pages/certificate_list.html, `?q=`) searches subject/issuer.
+ *
+ * @param {import('@playwright/test').Page} page
+ * @param {string} subject
+ * @returns {Promise<string>} the certificate's detail path, e.g. "/certificates/<id>"
+ */
+export async function resolveCertificatePath(page, subject) {
+  await page.goto(`/certificates?q=${encodeURIComponent(subject)}`, {
+    waitUntil: 'networkidle',
+  });
+  const link = page.locator('#certificate-list a.id', { hasText: new RegExp(`^${escapeRegExp(subject)}$`) }).first();
+  const count = await link.count();
+  if (count === 0) {
+    throw new Error(
+      `no certificate with subject "${subject}" was found via ` +
+        `/certificates?q=${subject} -- this suite expects the demo estate. ` +
+        'See docs/E2E.md (INV_SEED=true INV_SEED_COMPANY=true).',
+    );
+  }
+  const href = await link.getAttribute('href');
+  if (!href) {
+    throw new Error(`certificate row for "${subject}" has no href`);
+  }
+  return href;
+}
+
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }

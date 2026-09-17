@@ -50,8 +50,11 @@ func (a *App) TeamList(w http.ResponseWriter, r *http.Request) {
 	a.renderTeamList(w, r, http.StatusOK, nil, domain.TeamSpec{})
 }
 
-func (a *App) renderTeamList(w http.ResponseWriter, r *http.Request, status int,
-	errs map[string]string, spec domain.TeamSpec) {
+// renderTeamListPage assembles the teams page and renders ONE of its two
+// swappable regions. See renderCertificateListPage for why the ListTeams query
+// stays on the refusal path.
+func (a *App) renderTeamListPage(w http.ResponseWriter, r *http.Request, status int,
+	errs map[string]string, spec domain.TeamSpec, region string) {
 
 	query := r.URL.Query().Get("q")
 	teams, err := a.Store.ListTeams(r.Context(), store.TeamFilter{Query: query})
@@ -59,13 +62,38 @@ func (a *App) renderTeamList(w http.ResponseWriter, r *http.Request, status int,
 		a.serverError(w, r, err)
 		return
 	}
-	a.Render.Respond(w, r, status, "team_list", "team_list_panel", teamListPage{
+	a.Render.Respond(w, r, status, "team_list", region, teamListPage{
 		Base:   a.base(r, "Teams", "teams"),
 		Errors: orEmpty(errs),
 		Teams:  teams,
 		Spec:   spec,
 		Query:  query,
 	})
+}
+
+// renderTeamList is a read: the roster is what changed.
+func (a *App) renderTeamList(w http.ResponseWriter, r *http.Request, status int,
+	errs map[string]string, spec domain.TeamSpec) {
+	a.renderTeamListPage(w, r, status, errs, spec, "team_list_panel")
+}
+
+// refuseTeamCreate re-renders THE FORM, which is where .Errors and .Spec are.
+//
+// Note on who can reach this refusal: POST /teams is registered "write", not
+// "writeAdminOnly" (routes.go), so a project owner who is not an
+// Administrator can post here. The form this renders is rendered through
+// pagePartial, which executes the "team_create_form" {{define}} directly --
+// it is NOT inside the page's {{if .IsAdmin}} wrapper that hides it from the
+// nav for a non-Administrator. That is a real behaviour change: today such a
+// caller's refusal renders the roster (also outside any admin gate) instead.
+// It is deliberately left as-is rather than "fixed" here, because it grants
+// no new capability -- that caller could already reach TeamCreate itself, and
+// domain validation runs before any permit check either way -- and the form
+// discloses nothing beyond what the caller just submitted plus the CSRF
+// token already scoped to their own session.
+func (a *App) refuseTeamCreate(w http.ResponseWriter, r *http.Request,
+	errs map[string]string, spec domain.TeamSpec) {
+	a.renderTeamListPage(w, r, http.StatusUnprocessableEntity, errs, spec, "team_create_form")
 }
 
 // TeamCreate adds a team.
@@ -83,7 +111,7 @@ func (a *App) TeamCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		if errs, ok := validationErrors(err); ok {
-			a.renderTeamList(w, r, http.StatusUnprocessableEntity, errs, spec)
+			a.refuseTeamCreate(w, r, errs, spec)
 			return
 		}
 		a.handleStoreError(w, r, err)

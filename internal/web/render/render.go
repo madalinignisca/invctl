@@ -172,6 +172,16 @@ func (r *Renderer) Respond(w http.ResponseWriter, req *http.Request, status int,
 // silently rendering the other's, which a single flattened namespace would
 // allow. Respond is the only caller because it is the only place that knows
 // both names.
+//
+// A {{define}} RENDERED THIS WAY IS NOT INSIDE ANY OF THE PAGE'S OWN
+// CONDITIONALS. ExecuteTemplate runs the named define directly -- it does not
+// first walk the page body to decide whether that define would have been
+// reached. A page that wraps a form in {{if .IsAdmin}} to hide it from the
+// nav does not thereby stop this from rendering that form's partial for a
+// non-Administrator; the page's {{if}} only ever gated whether that page's
+// OWN render reaches the define, never whether pagePartial can be asked for
+// it directly. Anything a handler re-renders through Respond on a refusal
+// must therefore carry no display gate it depends on the page to enforce.
 func (r *Renderer) pagePartial(w http.ResponseWriter, status int, page, partial string, data any) {
 	if r.dev {
 		if err := r.parse(); err != nil {

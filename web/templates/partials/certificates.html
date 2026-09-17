@@ -61,9 +61,16 @@
 {{end}}
 
 {{define "certificate_form"}}
-<div class="panel">
+{{/* A STABLE ID BECAUSE THIS PARTIAL IS ITS OWN REFUSAL TARGET, not decoration.
+     CertificateCreate used to answer a validation failure by re-rendering
+     certificate_list_panel -- the LIST -- which does not contain this form, so
+     the errors and the re-filled values below were rendered into a fragment
+     nobody could see. CLAUDE.md: "Validation errors re-render the form partial."
+     partials/user_row.html:59 is the shape. */}}
+<div class="panel" id="certificate-form">
   <div class="panel-head"><h2>Add a certificate</h2></div>
-  <form class="panel-body" method="post" action="/certificates" hx-post="/certificates">
+  <form class="panel-body" method="post" action="/certificates" hx-post="/certificates"
+        hx-target="#certificate-form" hx-swap="outerHTML">
     <input type="hidden" name="csrf_token" value="{{.CSRF}}">
     <div class="field-row">
       <div class="field">
@@ -76,10 +83,12 @@
         <label for="c-issuer">Issuer</label>
         <input id="c-issuer" type="text" name="issuer" value="{{deref .Spec.Issuer}}"
                placeholder="Let's Encrypt · internal CA">
+        {{with index .Errors "issuer"}}<div class="field-error">{{.}}</div>{{end}}
       </div>
       <div class="field">
         <label for="c-from">Valid from</label>
         <input id="c-from" type="date" name="not_before" value="{{deref .Spec.NotBefore}}">
+        {{with index .Errors "not_before"}}<div class="field-error">{{.}}</div>{{end}}
       </div>
       <div class="field">
         <label for="c-until">Expires</label>
@@ -91,7 +100,8 @@
     <div class="field">
       <label for="c-sans">Also covers</label>
       <textarea id="c-sans" class="mono" name="sans" rows="3"
-                placeholder="www.example.com&#10;*.api.example.com"></textarea>
+                placeholder="www.example.com&#10;*.api.example.com">{{join .Spec.SANs "\n"}}</textarea>
+      {{with index .Errors "sans"}}<div class="field-error">{{.}}</div>{{end}}
       <div class="field-hint">
         One per line, or commas. A paste from <span class="mono">openssl x509 -text</span>
         works unedited — the <span class="mono">DNS:</span> prefixes are stripped.
@@ -107,11 +117,13 @@
       <div class="field">
         <label for="c-serial">Serial</label>
         <input id="c-serial" class="mono" type="text" name="serial" value="{{deref .Spec.Serial}}">
+        {{with index .Errors "serial"}}<div class="field-error">{{.}}</div>{{end}}
       </div>
       <div class="field">
         <label for="c-key">Key reference</label>
         <input id="c-key" class="mono" type="text" name="key_ref" value="{{deref .Spec.KeyRef}}"
                placeholder="vault:secret/tls/orders">
+        {{with index .Errors "key_ref"}}<div class="field-error">{{.}}</div>{{end}}
         <div class="field-hint">
           A path to the key — <strong>never the key itself</strong>. This database
           is not a secret store.
@@ -200,8 +212,38 @@
             <td style="color:var(--muted);font-size:12.5px">{{if .Note}}{{deref .Note}}{{end}}</td>
             {{if $.IsAdmin}}
             <td>
+              {{/* hx-target="#certificate" hx-swap="outerHTML" on every posting
+                   element in this panel, and the id is this partial's own root
+                   (certificate_panel, above). CLAUDE.md: "Swap targets are
+                   declared in the template, not chosen by the handler. Default
+                   to hx-swap='outerHTML' on a wrapping element with a stable
+                   id."
+
+                   Read off the handler, not guessed: every one of these routes
+                   ends in afterCertificateWrite or CertificateUpdate, both of
+                   which answer a validation failure with renderCertificate ->
+                   Respond(..., "certificate_detail", "certificate_panel", ...).
+                   The 422 body is therefore this whole panel, and without a
+                   target htmx's default puts it inside the <form> that sent it:
+                   every heading rendered twice, two elements carrying
+                   id="certificate", and every later hx-target="#certificate"
+                   resolving to whichever the browser finds first. That exact
+                   failure was seen in a browser on the identity rotation form
+                   (068d91c).
+
+                   #certificate is certificate_panel's unconditional root, so it
+                   is present on every render that can show these forms -- the
+                   forms are inside {{if $.IsAdmin}} blocks WITHIN it, never
+                   outside. Checked per element, not assumed: a target inside a
+                   conditional the element is not fails at REQUEST time with
+                   htmx:targetError, silently.
+
+                   Success is unaffected: render.Redirect answers an HX-Request
+                   with HX-Redirect, and htmx returns from handleAjaxResponse at
+                   that header before it resolves a target or picks a swap. */}}
               <form method="post" action="/certificates/{{$.Certificate.ID}}/assets/{{.EntityID}}/retire"
-                    hx-post="/certificates/{{$.Certificate.ID}}/assets/{{.EntityID}}/retire" style="display:inline">
+                    hx-post="/certificates/{{$.Certificate.ID}}/assets/{{.EntityID}}/retire" style="display:inline"
+                    hx-target="#certificate" hx-swap="outerHTML">
                 <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
                 <button class="btn btn-sm btn-danger" type="submit">Remove</button>
               </form>
@@ -216,8 +258,11 @@
             <td style="color:var(--muted);font-size:12.5px">{{if .Note}}{{deref .Note}}{{end}}</td>
             {{if $.IsAdmin}}
             <td>
+              {{/* hx-target="#certificate" hx-swap="outerHTML" -- see the
+                   comment above the asset-undeploy form for the full argument. */}}
               <form method="post" action="/certificates/{{$.Certificate.ID}}/services/{{.EntityID}}/retire"
-                    hx-post="/certificates/{{$.Certificate.ID}}/services/{{.EntityID}}/retire" style="display:inline">
+                    hx-post="/certificates/{{$.Certificate.ID}}/services/{{.EntityID}}/retire" style="display:inline"
+                    hx-target="#certificate" hx-swap="outerHTML">
                 <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
                 <button class="btn btn-sm btn-danger" type="submit">Remove</button>
               </form>
@@ -241,8 +286,12 @@
   <div class="grid-2">
     <div class="panel">
       <div class="panel-head"><h2>Deploy to an asset</h2></div>
+      {{/* hx-target="#certificate" hx-swap="outerHTML" -- see the comment
+           above the asset-undeploy form (this panel, first table) for the
+           full argument. CertificateDeployAsset -> afterCertificateWrite. */}}
       <form class="panel-body" method="post" action="/certificates/{{.Certificate.ID}}/assets"
-            hx-post="/certificates/{{.Certificate.ID}}/assets">
+            hx-post="/certificates/{{.Certificate.ID}}/assets"
+            hx-target="#certificate" hx-swap="outerHTML">
         <input type="hidden" name="csrf_token" value="{{.CSRF}}">
         <div class="field">
           <label for="cd-asset">Asset</label>
@@ -259,8 +308,12 @@
     </div>
     <div class="panel">
       <div class="panel-head"><h2>Deploy to a service</h2></div>
+      {{/* hx-target="#certificate" hx-swap="outerHTML" -- see the comment
+           above the asset-undeploy form (this panel, first table) for the
+           full argument. CertificateDeployService -> afterCertificateWrite. */}}
       <form class="panel-body" method="post" action="/certificates/{{.Certificate.ID}}/services"
-            hx-post="/certificates/{{.Certificate.ID}}/services">
+            hx-post="/certificates/{{.Certificate.ID}}/services"
+            hx-target="#certificate" hx-swap="outerHTML">
         <input type="hidden" name="csrf_token" value="{{.CSRF}}">
         <div class="field">
           <label for="cd-service">Service</label>
@@ -279,8 +332,12 @@
 
   <div class="panel">
     <div class="panel-head"><h2>Edit</h2></div>
+    {{/* hx-target="#certificate" hx-swap="outerHTML" -- see the comment above
+         the asset-undeploy form (this panel, first table) for the full
+         argument. CertificateUpdate -> renderCertificate directly. */}}
     <form class="panel-body" method="post" action="/certificates/{{.Certificate.ID}}"
-          hx-post="/certificates/{{.Certificate.ID}}">
+          hx-post="/certificates/{{.Certificate.ID}}"
+          hx-target="#certificate" hx-swap="outerHTML">
       <input type="hidden" name="csrf_token" value="{{.CSRF}}">
       <input type="hidden" name="row_version" value="{{.Certificate.RowVersion}}">
       <div class="field-row">
@@ -293,10 +350,12 @@
         <div class="field">
           <label for="ce-issuer">Issuer</label>
           <input id="ce-issuer" type="text" name="issuer" value="{{deref .Certificate.Issuer}}">
+          {{with index .Errors "issuer"}}<div class="field-error">{{.}}</div>{{end}}
         </div>
         <div class="field">
           <label for="ce-from">Valid from</label>
           <input id="ce-from" type="date" name="not_before" value="{{deref .Certificate.NotBefore}}">
+          {{with index .Errors "not_before"}}<div class="field-error">{{.}}</div>{{end}}
         </div>
         <div class="field">
           <label for="ce-until">Expires</label>
@@ -308,11 +367,19 @@
           <select id="ce-life" name="lifecycle">
             {{range $.Lifecycles}}<option value="{{.}}" {{if eq . $.Certificate.Lifecycle}}selected{{end}}>{{.}}</option>{{end}}
           </select>
+          {{with index .Errors "lifecycle"}}<div class="field-error">{{.}}</div>{{end}}
         </div>
       </div>
       <div class="field">
         <label for="ce-sans">Also covers</label>
-        <textarea id="ce-sans" class="mono" name="sans" rows="3">{{join .Certificate.SANs "\n"}}</textarea>
+        {{/* SANsToShow, not .Certificate.SANs and not an {{if .SubmittedSANs}}
+             in this template -- see certificatePage.SANsToShow's doc comment.
+             A template-side slice-truthiness check cannot tell "the operator
+             cleared this on purpose" from "nothing was submitted", because
+             splitNames returns nil for both; the resolution is a pointer
+             check in Go instead. */}}
+        <textarea id="ce-sans" class="mono" name="sans" rows="3">{{join .SANsToShow "\n"}}</textarea>
+        {{with index .Errors "sans"}}<div class="field-error">{{.}}</div>{{end}}
         <div class="field-hint">The subject is always included; you do not need to repeat it.</div>
       </div>
       <div class="field-row">
@@ -324,10 +391,12 @@
         <div class="field">
           <label for="ce-serial">Serial</label>
           <input id="ce-serial" class="mono" type="text" name="serial" value="{{deref .Certificate.Serial}}">
+          {{with index .Errors "serial"}}<div class="field-error">{{.}}</div>{{end}}
         </div>
         <div class="field">
           <label for="ce-key">Key reference</label>
           <input id="ce-key" class="mono" type="text" name="key_ref" value="{{deref .Certificate.KeyRef}}">
+          {{with index .Errors "key_ref"}}<div class="field-error">{{.}}</div>{{end}}
           <div class="field-hint">A path — <strong>never the key itself</strong>.</div>
         </div>
         <div class="field">

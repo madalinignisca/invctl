@@ -45,6 +45,40 @@ type certificatePage struct {
 	Teams       []store.TeamRow
 	Roles       []store.VocabularyTerm
 	Lifecycles  []string
+	// SubmittedSANs is non-nil on exactly a refused CertificateUpdate: what the
+	// operator typed, so a "sans" validation error does not also silently
+	// revert their edit back to the stored names with no message at all. Every
+	// other read of this page leaves it nil, and SANsToShow falls back to
+	// .Certificate.SANs.
+	//
+	// A POINTER, DELIBERATELY, not a []string -- WP-J9 whole-branch review
+	// (round 2). splitNames returns an unappended `var out []string` on empty
+	// input, i.e. nil, and nil is FALSY in html/template regardless of why the
+	// slice is empty. `{{if .SubmittedSANs}}` on a bare []string could not
+	// distinguish "the operator cleared the textarea on purpose" from
+	// "nothing was submitted at all" -- both render as the zero value -- so a
+	// refusal caused by an unrelated field (a bad fingerprint, say) would
+	// silently revert a deliberate deletion back to the stored names. Exactly
+	// the class finding 1 exists to close, reached through this field's own
+	// fix. A *[]string has no such ambiguity: nil means "not this request",
+	// a non-nil pointer to an empty slice means "submitted, and it was
+	// empty" -- and SANsToShow resolves it in Go, not with template
+	// truthiness, so the same mistake cannot recur in a future template edit.
+	SubmittedSANs *[]string
+}
+
+// SANsToShow is what the certificate edit form's textarea renders: the
+// operator's own submission on a refused save, the stored value everywhere
+// else. See SubmittedSANs's doc comment for why this is a pointer check in Go
+// rather than an {{if}} in the template.
+func (p certificatePage) SANsToShow() []string {
+	if p.SubmittedSANs != nil {
+		return *p.SubmittedSANs
+	}
+	if p.Certificate != nil {
+		return p.Certificate.SANs
+	}
+	return nil
 }
 
 // CertificateList shows every certificate, soonest expiry first.
@@ -52,8 +86,19 @@ func (a *App) CertificateList(w http.ResponseWriter, r *http.Request) {
 	a.renderCertificateList(w, r, http.StatusOK, nil, domain.CertificateSpec{})
 }
 
-func (a *App) renderCertificateList(w http.ResponseWriter, r *http.Request, status int,
-	errs map[string]string, spec domain.CertificateSpec) {
+// renderCertificateListPage assembles the certificates page and renders ONE of
+// its two swappable regions: the list, or the create form.
+//
+// THE QUERY IS NOT OPTIONAL ON THE REFUSAL PATH, and the design document's
+// suggestion that a form-only refusal "drops a ListCertificates query" is wrong
+// -- ruled on 2026-09-16. Respond renders the WHOLE PAGE when the request is
+// not an HX-Request, and pages/certificate_list.html dereferences .Certificates
+// and .Filter. Handing it a struct with an empty list would show "No
+// certificates match." to a JavaScript-off operator looking at a populated
+// estate. One extra read on a path that only runs when somebody typed something
+// wrong is the correct trade.
+func (a *App) renderCertificateListPage(w http.ResponseWriter, r *http.Request, status int,
+	errs map[string]string, spec domain.CertificateSpec, region string) {
 
 	q := r.URL.Query()
 	filter := store.CertificateFilter{
@@ -68,7 +113,7 @@ func (a *App) renderCertificateList(w http.ResponseWriter, r *http.Request, stat
 	}
 	teams, roles := a.responsibilityOptions(r)
 
-	a.Render.Respond(w, r, status, "certificate_list", "certificate_list_panel", certificateListPage{
+	a.Render.Respond(w, r, status, "certificate_list", region, certificateListPage{
 		Base:         a.base(r, "Certificates", "certificates"),
 		Errors:       orEmpty(errs),
 		Certificates: certificates,
@@ -77,6 +122,45 @@ func (a *App) renderCertificateList(w http.ResponseWriter, r *http.Request, stat
 		Spec:         spec,
 		Filter:       filter,
 	})
+}
+
+// renderCertificateList is a read: the list is what changed.
+func (a *App) renderCertificateList(w http.ResponseWriter, r *http.Request, status int,
+	errs map[string]string, spec domain.CertificateSpec) {
+	a.renderCertificateListPage(w, r, status, errs, spec, "certificate_list_panel")
+}
+
+// refuseCertificateCreate is a refusal: THE FORM is what changed, and it is the
+// only place .Errors and .Spec are rendered. See certificate_form's own comment.
+//
+// Note on who can reach this refusal: POST /certificates is registered "write",
+// not "writeAdminOnly" (routes.go), so a project owner who is not an
+// Administrator can post here. The form this renders is rendered through
+// pagePartial, which executes the "certificate_form" {{define}} directly -- it
+// is NOT inside the page's {{if .IsAdmin}} wrapper that hides it from the nav
+// for a non-Administrator. That is a real behaviour change: today such a
+// caller's refusal renders the list (also outside any admin gate) instead. It
+// is deliberately left as-is rather than "fixed" here, because it grants no
+// new capability -- "certificate" classifies as domain.ScopeTopology, which
+// defaults to Administrator-only at the store's permit check, but that check
+// never runs: domain validation fails first, exactly as for team (whose scope
+// is ScopeEstateConfig).
+//
+// What the form actually discloses, stated rather than copied wrong from
+// team_create_form's comment: certificate_form is NOT a bare echo of the
+// caller's own submission. It also `{{range .Teams}}` and `{{range .Roles}}`
+// (partials/certificates.html) -- every team's id and code, and the manager
+// role vocabulary. That is already readable regardless: GET /teams is
+// `read(...)` in routes.go, so any authenticated session, including a
+// project owner's, can already list every team by name. The conclusion
+// (no new capability) survives; the earlier claim that the form discloses
+// "nothing beyond what the caller just submitted" did not, and this project
+// has already struck a whole spec ruling for carrying a wrong reason forward
+// -- a wrong reason here is how the next person justifies the wrong change.
+func (a *App) refuseCertificateCreate(w http.ResponseWriter, r *http.Request,
+	errs map[string]string, spec domain.CertificateSpec) {
+	a.renderCertificateListPage(w, r, http.StatusUnprocessableEntity, errs, spec,
+		"certificate_form")
 }
 
 // CertificateCreate stores a new certificate.
@@ -88,7 +172,7 @@ func (a *App) CertificateCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		if errs, ok := validationErrors(err); ok {
-			a.renderCertificateList(w, r, http.StatusUnprocessableEntity, errs, spec)
+			a.refuseCertificateCreate(w, r, errs, spec)
 			return
 		}
 		a.handleStoreError(w, r, err)
@@ -99,10 +183,11 @@ func (a *App) CertificateCreate(w http.ResponseWriter, r *http.Request) {
 
 // CertificateDetail is the page somebody opens from the expiry report.
 func (a *App) CertificateDetail(w http.ResponseWriter, r *http.Request) {
-	a.renderCertificate(w, r, http.StatusOK, nil)
+	a.renderCertificate(w, r, http.StatusOK, nil, nil)
 }
 
-func (a *App) renderCertificate(w http.ResponseWriter, r *http.Request, status int, errs map[string]string) {
+func (a *App) renderCertificate(w http.ResponseWriter, r *http.Request, status int,
+	errs map[string]string, submittedSANs *[]string) {
 	id := r.PathValue("id")
 	certificate, err := a.Store.GetCertificate(r.Context(), id)
 	if err != nil {
@@ -132,16 +217,17 @@ func (a *App) renderCertificate(w http.ResponseWriter, r *http.Request, status i
 	teams, roles := a.responsibilityOptions(r)
 
 	a.Render.Respond(w, r, status, "certificate_detail", "certificate_panel", certificatePage{
-		Base:        a.base(r, "Certificate: "+certificate.SubjectCN, "certificates"),
-		Errors:      orEmpty(errs),
-		Certificate: certificate,
-		Assets:      assets,
-		Services:    services,
-		AllAssets:   allAssets,
-		AllServices: allServices,
-		Teams:       teams,
-		Roles:       roles,
-		Lifecycles:  domain.CertificateLifecycles,
+		Base:          a.base(r, "Certificate: "+certificate.SubjectCN, "certificates"),
+		Errors:        orEmpty(errs),
+		Certificate:   certificate,
+		Assets:        assets,
+		Services:      services,
+		AllAssets:     allAssets,
+		AllServices:   allServices,
+		Teams:         teams,
+		Roles:         roles,
+		Lifecycles:    domain.CertificateLifecycles,
+		SubmittedSANs: submittedSANs,
 	})
 }
 
@@ -174,7 +260,16 @@ func (a *App) CertificateUpdate(w http.ResponseWriter, r *http.Request) {
 
 	if err := a.Store.UpdateCertificate(r.Context(), a.permit(r), &updated); err != nil {
 		if errs, ok := validationErrors(err); ok {
-			a.renderCertificate(w, r, http.StatusUnprocessableEntity, errs)
+			// &spec.SANs, not updated.SANs and not a bare spec.SANs: what the
+			// operator typed, so a "sans" refusal re-fills the textarea
+			// instead of silently reverting it to the stored names with no
+			// message at all (WP-J9 whole-branch review). The pointer is
+			// mandatory, not decoration -- a bare spec.SANs is nil whenever
+			// the operator cleared the textarea on purpose, indistinguishable
+			// in the template from "not submitted" and reverting that
+			// deliberate deletion just as silently on ANY unrelated
+			// validation failure (round 2 of the same review).
+			a.renderCertificate(w, r, http.StatusUnprocessableEntity, errs, &spec.SANs)
 			return
 		}
 		a.handleStoreError(w, r, err)
@@ -225,7 +320,7 @@ func (a *App) CertificateUndeployService(w http.ResponseWriter, r *http.Request)
 func (a *App) afterCertificateWrite(w http.ResponseWriter, r *http.Request, err error, id string) {
 	if err != nil {
 		if errs, ok := validationErrors(err); ok {
-			a.renderCertificate(w, r, http.StatusUnprocessableEntity, errs)
+			a.renderCertificate(w, r, http.StatusUnprocessableEntity, errs, nil)
 			return
 		}
 		a.handleStoreError(w, r, err)

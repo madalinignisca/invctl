@@ -168,8 +168,19 @@
                  estate. Until this control existed it could be placed and
                  never removed. */}}
             <a class="btn btn-sm" href="/network?edit={{.ID}}">Edit</a>
+            {{/* hx-target="this" hx-swap="none" -- a declaration, not an
+                 exemption (docs/htmx-swap-targets-design.md rule 1): if
+                 NetworkAnchorRetire ever grows a path that renders a
+                 fragment, "none" declines to swap it rather than
+                 swallowing it into this element, and stays correct even if
+                 app.js's force-swap ever widens past 422. Argued from the
+                 handler, per rule 4: NetworkAnchorRetire
+                 (handlers/reach_repair.go) answers flash+render.Redirect on
+                 success and handleStoreError on failure, never a fragment.
+                 See partials/teams.html's retire forms for the full
+                 reasoning. */}}
             <form method="post" action="/network/anchors/{{.ID}}/retire"
-                  hx-post="/network/anchors/{{.ID}}/retire"
+                  hx-post="/network/anchors/{{.ID}}/retire" hx-target="this" hx-swap="none"
                   hx-confirm="Withdraw anchor {{.Code}}? Every reachability verdict computed through it changes. The record is kept."
                   style="display:inline">
               <input type="hidden" name="csrf_token" value="{{$.CSRF}}">

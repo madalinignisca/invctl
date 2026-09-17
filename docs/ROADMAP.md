@@ -1228,6 +1228,31 @@ feature did not exist. `writeSurfaceUnbuilt` in
 `internal/store/write_surface_test.go` pointed here, and failed if an entity
 listed there quietly grew both verbs.
 
+**WP-J9 · HTMX swap targets** — S — **DONE 2026-09-16**
+
+Every `hx-post` element in `web/templates` declares `hx-target` and `hx-swap`, enforced by
+`internal/web/hx_target_test.go` with an empty exemption map. Three handlers stopped
+answering a validation failure by re-rendering a list the form is not inside:
+`CertificateCreate`, `TeamCreate` and `UserCreate` now re-render `certificate_form`,
+`team_create_form` and `user_form`. `handleStoreError`'s `domain.ErrInvalid` branch stopped
+being swapped at all — 422, an out-of-band flash and `HX-Reswap: none`, the first use of that
+header in this codebase.
+
+**NOT covered, deliberately:** widening `app.js`'s force-swap beyond 422 (409 is the obvious
+candidate, it changes the behaviour of all 90 elements at once and needs its own evidence, and
+it is exactly the change that would re-arm any status-based exemption — which is why the
+exemption criterion refuses to depend on it); plain `method="post"` forms with no `hx-post`
+(outside this census, correct by a different route — they navigate and never swap); redesigning
+which partial each handler re-renders on 422 in general (only the three surfaces where
+targeting alone inverted the failure were touched); a behavioural test per element; and DRIFT
+DETECTION for the 15 `hx-swap="none"` declarations that point to `partials/teams.html`'s retire
+forms for their reasoning — each is correct because its handler renders no fragment today, not
+because `"none"` is self-correcting if that stops being true, and nothing here re-checks the
+claim when a handler changes what it answers with. Building an element→route→handler join to
+catch that automatically was considered and rejected (it is the `matchRoutes` complexity this
+work package's own design doc already ruled out); the corrected comment says so instead of
+implying a safety property the attribute does not have.
+
 **WP-J7 · Capacity findings** — M — **DONE**
 Three findings, three audiences. A project allocated **above what it was priced
 for** is the CEO's alert: nobody is in breach, the engagement has simply grown
