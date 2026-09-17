@@ -34,7 +34,7 @@ footnote.
 
 ---
 
-## [Unreleased]
+## [1.1.0] — 2026-09-17
 
 ### Action required
 
