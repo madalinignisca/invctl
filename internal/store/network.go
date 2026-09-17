@@ -933,6 +933,20 @@ func authorizeBreakoutSubjects(ctx context.Context, q dbGetter, p domain.Permit,
 	return domain.ScopedPermit(p.Actor(), nil, domain.ScopedEntities{"link": scope}), nil
 }
 
+// THERE IS NO "ADD A STRAND", AND THAT IS NOT A MISSING REPAIR PATH.
+// writeSurfaceGaps reached zero on 2026-09-17 and this is deliberately not a
+// new entry in it. A breakout is one moulded assembly: a QSFP-to-4xSFP+ DAC
+// has four strands because the factory fitted four, and nobody adds a fifth to
+// a cable they are holding. The count is a fact about the object, not a field
+// somebody chose, so "correct the strand count" is not an operation the estate
+// has. What a person actually does when the cable was recorded wrong is
+// withdraw it and declare the real one -- which is exactly what the surface
+// offers, via RetireLink on the strands and a fresh CreateBreakout.
+//
+// This is the same reasoning writeSurfaceByDesign uses elsewhere, and the
+// entry in writeSurfaceAliases points Breakout at UpdateLink/RetireLink for
+// it: a strand IS a link, corrected and withdrawn as one.
+//
 // CreateBreakout declares one breakout cable: one moulded assembly, one a-end
 // interface, and n b-end interfaces it fans out to. It writes n `link` rows
 // in a single transaction, sharing one generated breakout id, positions
