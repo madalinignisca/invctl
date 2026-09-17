@@ -231,34 +231,22 @@ jobs:
       # timestamp would have made every rebuild differ. It also keeps event
       # data out of a shell command entirely, which is the rule that stops a
       # workflow becoming an injection surface.
-      - name: build
-        run: |
-          SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)"
-          export SOURCE_DATE_EPOCH
-          make build
-          ./bin/invctl -version
-
-      # The name says what it is and what it runs on. Somebody downloading this
-      # in six months has only the filename to go on.
-      - name: package
-        env:
-          VERSION: ${{ needs.preflight.outputs.version }}
-        run: |
-          mkdir -p dist
-          cp bin/invctl "dist/invctl_${VERSION}_linux_amd64"
-          cp LICENSE README.md CHANGELOG.md dist/
-          cd dist
-          # Checksums, because a binary downloaded over a link somebody pasted
-          # into a chat is a binary nobody verified. sha256sum -c reads this
-          # file directly.
-          sha256sum "invctl_${VERSION}_linux_amd64" > "invctl_${VERSION}_checksums.txt"
-          cat "invctl_${VERSION}_checksums.txt"
-
-      # THE TAG IS CREATED HERE, AFTER THE GATE, AND ONLY FOR THE BUTTON.
+      # THE TAG IS CREATED HERE: AFTER THE GATE, BEFORE THE BUILD.
       #
-      # Tagging by hand pushes the tag first and finds out afterwards, so a red
-      # build leaves a tag already published that somebody has to delete. This
-      # way round, a failed run leaves nothing behind.
+      # AFTER THE GATE, because tagging by hand pushes the tag first and finds
+      # out afterwards -- a red build then leaves a published tag somebody has
+      # to delete. verify has already passed by the time this runs, so a failure
+      # leaves nothing behind.
+      #
+      # BEFORE THE BUILD, and 1.1.0 is why. The Makefile takes its version from
+      # `git describe --tags`, so a binary built before its own tag exists names
+      # itself after the PREVIOUS one: v1.1.0 shipped reporting
+      # "v1.0.0-380-g059ad0e". docs/INSTALL.md tells operators to run
+      # `invctl -version` to "confirm what is actually running", and it answered
+      # with a version that was never released. This file already warned about
+      # the shape -- "the version string comes from git describe, and a shallow
+      # clone would produce a build that cannot name itself" -- and the same
+      # defect arrived through ordering rather than through clone depth.
       #
       # Pushing with GITHUB_TOKEN deliberately does NOT start another run of
       # this workflow -- GitHub suppresses that to stop workflows triggering
@@ -285,6 +273,29 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git tag -a "$TAG" "$SHA" -m "invctl $VERSION"
           git push origin "$TAG"
+
+      - name: build
+        run: |
+          SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)"
+          export SOURCE_DATE_EPOCH
+          make build
+          ./bin/invctl -version
+
+      # The name says what it is and what it runs on. Somebody downloading this
+      # in six months has only the filename to go on.
+      - name: package
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          mkdir -p dist
+          cp bin/invctl "dist/invctl_${VERSION}_linux_amd64"
+          cp LICENSE README.md CHANGELOG.md dist/
+          cd dist
+          # Checksums, because a binary downloaded over a link somebody pasted
+          # into a chat is a binary nobody verified. sha256sum -c reads this
+          # file directly.
+          sha256sum "invctl_${VERSION}_linux_amd64" > "invctl_${VERSION}_checksums.txt"
+          cat "invctl_${VERSION}_checksums.txt"
 
       - name: release
         env:
