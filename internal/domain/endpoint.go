@@ -8,7 +8,10 @@
 
 package domain
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // L4 protocols.
 const (
@@ -173,6 +176,39 @@ type BackendPool struct {
 	UpdatedAt   string  `db:"updated_at"`
 }
 
+// NewBackendPool validates and constructs a pool.
+func NewBackendPool(id, serviceID, name string, lbAlgorithm *string) (*BackendPool, error) {
+	p := &BackendPool{
+		ID: id, ServiceID: serviceID, Name: strings.TrimSpace(name),
+		LBAlgorithm: lbAlgorithm, Lifecycle: LifecycleActive,
+	}
+	if err := p.Validate(); err != nil {
+		return nil, err
+	}
+	return p, nil
+}
+
+// Validate checks a pool against its business rules.
+//
+// SEPARATE FROM THE CONSTRUCTOR, the same shape Identity.Validate's own doc
+// comment records the defect of not having: UpdateBackendPool (write-surface-
+// gaps Task 3) is handed an existing *BackendPool with the constructor never
+// in the loop, so a check that only lived inside NewBackendPool would let a
+// correction write a blank name straight past it, with the table CHECK the
+// only thing standing in the way.
+func (p *BackendPool) Validate() error {
+	ve := &ValidationError{}
+	checkRequired(ve, "service_id", p.ServiceID)
+	p.Name = checkRequired(ve, "name", p.Name)
+	if p.Lifecycle != LifecycleActive && p.Lifecycle != LifecycleRetired {
+		ve.Add("lifecycle", "%q is not a lifecycle", p.Lifecycle)
+	}
+	return ve.OrNil()
+}
+
+// Retired reports whether this pool has been withdrawn.
+func (p *BackendPool) Retired() bool { return p.Lifecycle == LifecycleRetired }
+
 // BackendMember places an endpoint into a pool.
 type BackendMember struct {
 	PoolID     string `db:"pool_id"`
@@ -216,18 +252,38 @@ type Route struct {
 
 // NewRoute validates and constructs a routing rule.
 func NewRoute(id, frontendEndpointID, matchType, backendPoolID string) (*Route, error) {
-	ve := &ValidationError{}
-	checkRequired(ve, "frontend_endpoint_id", frontendEndpointID)
-	checkRequired(ve, "backend_pool_id", backendPoolID)
-	checkEnum(ve, "match_type", matchType, MatchTypes)
-	if err := ve.OrNil(); err != nil {
-		return nil, err
-	}
-	return &Route{
+	r := &Route{
 		ID: id, FrontendEndpointID: frontendEndpointID,
 		MatchType: matchType, BackendPoolID: backendPoolID, Priority: 100,
-	}, nil
+		Lifecycle: LifecycleActive,
+	}
+	if err := r.Validate(); err != nil {
+		return nil, err
+	}
+	return r, nil
 }
+
+// Validate checks a routing rule against its business rules.
+//
+// SEPARATE FROM THE CONSTRUCTOR, for the reason BackendPool.Validate's own
+// comment gives: UpdateRoute (write-surface-gaps Task 3) is handed an existing
+// *Route with NewRoute never in the loop, so the checks that used to live only
+// there -- match_type, tls_termination, the two foreign keys -- have to be
+// reachable from a value that already exists, not just from one being built.
+func (r *Route) Validate() error {
+	ve := &ValidationError{}
+	checkRequired(ve, "frontend_endpoint_id", r.FrontendEndpointID)
+	checkRequired(ve, "backend_pool_id", r.BackendPoolID)
+	checkEnum(ve, "match_type", r.MatchType, MatchTypes)
+	checkOptionalEnum(ve, "tls_termination", r.TLSTermination, TLSTerminations)
+	if r.Lifecycle != LifecycleActive && r.Lifecycle != LifecycleRetired {
+		ve.Add("lifecycle", "%q is not a lifecycle", r.Lifecycle)
+	}
+	return ve.OrNil()
+}
+
+// Retired reports whether this route has been withdrawn.
+func (r *Route) Retired() bool { return r.Lifecycle == LifecycleRetired }
 
 // Identity kinds.
 const (
