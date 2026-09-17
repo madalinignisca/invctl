@@ -185,9 +185,9 @@ var writeSurfaceGaps = map[string]string{
 	// the WHOLE story rather than half of it.
 	//
 	// --- reachable, and the row carries attributes somebody typed ---
-	"Aggregate": "no correction for a declared aggregate's bounds or purpose.",
-	"ASN":       "no correction: a mistyped AS number is withdraw-and-redeclare.",
-	"L2VPN":     "no correction for an L2VPN's own attributes.",
+	//
+	// EMPTIED 2026-09-17. Aggregate, ASN and L2VPN gained UpdateX; a mistyped
+	// AS number is a correction now, not a withdraw-and-redeclare.
 
 	// Interface left this list 2026-09-09 (migration 00062). It was the
 	// most-referenced table in the schema with no lifecycle column at all --
@@ -209,10 +209,41 @@ var writeSurfaceGaps = map[string]string{
 	// pointing at it untouched. See that method's own doc comment.
 
 	// --- latent: no create route yet. Live the moment any gets a UI ---
-	"BackendPool": "neither, and no route today.",
-	"RIR":         "neither, and no route today.",
-	"Route":       "neither, and no route today.",
-	"VLANGroup":   "neither, and no route today.",
+	//
+	// EMPTIED 2026-09-17, and this is the map reaching zero for the first time
+	// since it was written. BackendPool, RIR, Route and VLANGroup gained both
+	// a correction and a withdrawal.
+	//
+	// WHAT IT COST, so the next person adding an entity knows the bar. Four of
+	// the seven were cheap. Two were not: backend_pool and route came from
+	// shared/00004 and predated every convention in this repo -- no lifecycle,
+	// no row_version, no timestamps -- so migration 00070 had to catch them up
+	// before either verb was expressible. That migration also had to move
+	// backend_pool's UNIQUE (service_id, name) to a live-scoped partial index,
+	// because a retired pool that keeps its name reserved forever means a
+	// service can never re-declare one it just withdrew (migration 00003's
+	// lesson for identity, paid again).
+	//
+	// THREE THINGS NEARLY SHIPPED WRONG, all the same shape -- a fix
+	// reintroducing the defect it was fixing, one step sideways:
+	//   1. The column additions went in migrations/shared/ first. Migrate()
+	//      runs ALL of shared/ before any dialect file, and sqlite/00005
+	//      rebuilds `route` create-copy-drop-rename with its 2026 column list,
+	//      so the new columns were dropped on any FRESH install while every
+	//      existing database stayed fine. That asymmetry is why every portable
+	//      ADD COLUMN since 00010 duplicates across both dialect directories
+	//      instead of using shared/ -- it reads as style and is a guard.
+	//   2. UpdateRoute pinned match_type. Nothing validates match_value
+	//      against match_type, so the pin bought no consistency and cost the
+	//      ability to correct a route declared with the wrong one -- this
+	//      backlog's own defect, one field down.
+	//   3. RetireBackendPool refused while any backend_member row existed.
+	//      AddBackendMember exists; RemoveBackendMember does not. A pool that
+	//      ever gained a member could never be withdrawn by anyone.
+	//
+	// KEEP THIS MAP. Empty is the goal and empty is not the end: it is
+	// two-directional, so an entity arriving tomorrow without a repair path
+	// fails here by name. A deleted map cannot do that.
 }
 
 // TestEveryCreatedEntityCanBeCorrectedOrWithdrawn fails when something a person
