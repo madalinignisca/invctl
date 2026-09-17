@@ -108,47 +108,17 @@ var unreachableRepairPaths = map[string]string{
 	// CreateIdentity had no route reaching them at all -- narrower, but the
 	// same shape.
 
-	// The write-surface-gaps plan (2026-09-17): UpdateAggregate, UpdateRIR,
-	// UpdateASN, UpdateL2VPN and UpdateVLANGroup are Task 3's store methods,
-	// deliberately built ahead of Task 5's web layer the same order every
-	// pair above took. Before Task 5 wires a route to each, a mistyped
-	// registry name, a wrong AS number, an overlay's kind or a numbering
-	// scope's scope asset genuinely cannot be fixed through the product --
-	// the operator's only recourse is withdraw-and-redeclare, which is
-	// exactly the defect writeSurfaceGaps records for each of them. All five
-	// entries come out the moment their routes land.
-	"UpdateAggregate": "no route yet (write-surface-gaps Task 5); a wrong CIDR, RIR link, allocation date or description cannot be corrected through the product until then.",
-	"UpdateRIR":       "no route yet (write-surface-gaps Task 5); a mistyped registry name cannot be corrected through the product until then.",
-	"UpdateASN":       "no route yet (write-surface-gaps Task 5); the roadmap's own gap -- a mistyped AS number is withdraw-and-redeclare -- stays true until then.",
-	"UpdateL2VPN":     "no route yet (write-surface-gaps Task 5); an overlay's name, kind, identifier or description cannot be corrected through the product until then.",
-	"UpdateVLANGroup": "no route yet (write-surface-gaps Task 5); a numbering scope's name or scope asset cannot be corrected through the product until then.",
-	// UpdateBackendPool and UpdateRoute are the same shape, one step behind:
-	// migration 00070 (Task 1) gave backend_pool and route the columns a
-	// correction needs, Task 2 gave both entities a Validate() reachable
-	// without their constructors, and these are Task 3's store methods.
-	// Until Task 5 wires POST /pools/{id} and POST /routes/{id}, a pool's
-	// name or algorithm and a route's match value, tls_termination or
-	// priority cannot be corrected through the product either.
-	"UpdateBackendPool": "no route yet (write-surface-gaps Task 5); a pool's name or lb_algorithm cannot be corrected through the product until then.",
-	"UpdateRoute":       "no route yet (write-surface-gaps Task 5); a route's match_value, tls_termination or priority cannot be corrected through the product until then.",
-
-	// RetireRIR, RetireVLANGroup, RetireBackendPool and RetireRoute are
-	// Task 4's withdrawal paths for the write-surface-gaps plan, built ahead
-	// of Task 5's web layer the same order the five corrections above took.
-	// Each refuses rather than cascades -- RetireRIR while a live aggregate
-	// still names the registry, RetireVLANGroup while a live VLAN still
-	// numbers within the scope, RetireBackendPool while a live route or
-	// member still uses the pool, RetireRoute while a live dependency still
-	// resolves through it -- but nothing in the product can call any of them
-	// yet. Until Task 5 wires POST /rirs/{id}/retire, .../vlan-groups/{id}/
-	// retire, .../pools/{id}/retire and .../routes/{id}/retire, a wrongly
-	// declared registry, numbering scope, pool or route genuinely cannot be
-	// taken back through the product. All four entries come out the moment
-	// their routes land.
-	"RetireRIR":         "no route yet (write-surface-gaps Task 5); a wrongly declared registry cannot be withdrawn through the product until then.",
-	"RetireVLANGroup":   "no route yet (write-surface-gaps Task 5); a wrongly declared numbering scope cannot be withdrawn through the product until then.",
-	"RetireBackendPool": "no route yet (write-surface-gaps Task 5); a wrongly declared pool cannot be withdrawn through the product until then.",
-	"RetireRoute":       "no route yet (write-surface-gaps Task 5); a wrongly declared route cannot be withdrawn through the product until then.",
+	// The write-surface-gaps plan's eleven entries -- UpdateAggregate,
+	// UpdateRIR, UpdateASN, UpdateL2VPN, UpdateVLANGroup, UpdateBackendPool,
+	// UpdateRoute, RetireRIR, RetireVLANGroup, RetireBackendPool and
+	// RetireRoute -- filled this map from Tasks 3 and 4 (the store methods)
+	// until Task 5 (2026-09-17) wired POST /allocations/{id}, POST /asn/{id},
+	// POST /overlays/{id}, POST /rirs/{id} (+/retire), POST /vlan-groups/{id}
+	// (+/retire), POST /pools/{id} (+/retire) and POST /routes/{id}
+	// (+/retire). All eleven came out the moment those routes landed, the
+	// same as every pair before them. RetireAggregate, RetireASN and
+	// RetireL2VPN never appeared here: their routes shipped with the original
+	// create routes, well before this plan.
 }
 
 // TestEveryUpdateMethodIsReachable fails when a store method written to correct
