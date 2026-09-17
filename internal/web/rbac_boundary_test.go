@@ -1226,7 +1226,12 @@ func TestNoWriteRouteIsReachableWithNoSessionAtAll(t *testing.T) {
 	// The store methods had no route at all until this task, the fourth is
 	// the one the work package exists for, and it is the only route in the
 	// router whose whole job is to stamp a date.
-	const pinnedNoSessionRouteCount = 223
+	// 223 -> 234: write-surface-gaps plan, Task 5 -- eleven routes closing
+	// unreachableRepairPaths: POST /allocations/{id}, /asn/{id},
+	// /overlays/{id}, /rirs/{id} (+/retire), /vlan-groups/{id} (+/retire),
+	// /pools/{id} (+/retire) and /routes/{id} (+/retire). Every one of these
+	// store methods (Tasks 3 and 4) had no route reaching it until now.
+	const pinnedNoSessionRouteCount = 234
 
 	for _, eng := range boundaryEngines(t) {
 		t.Run(eng.name, func(t *testing.T) {

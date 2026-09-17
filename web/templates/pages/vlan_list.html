@@ -112,6 +112,75 @@
   {{end}}
 </div>
 
+<div class="panel">
+  <div class="panel-head">
+    <h2>{{pluralise (len .Groups) "numbering scope" "numbering scopes"}}</h2>
+    <span class="panel-note">Where a VLAN's tag is unique -- two sites can both use VLAN 10</span>
+  </div>
+  {{/* A GROUP HAS NO CREATE ROUTE -- see routes.go's own comment. This panel
+       is correction and withdrawal only (write-surface-gaps Task 5). Before
+       this, a mistyped scope name or a wrongly declared scope asset could not
+       be fixed, and a wrongly declared scope could not be taken back. */}}
+  {{if .Groups}}
+  <div class="scroll-x">
+    <table>
+      <thead><tr><th>Name</th><th>Scope asset</th><th>Description</th><th class="num">VLANs</th>{{if .IsAdmin}}<th></th>{{end}}</tr></thead>
+      <tbody>
+        {{range .Groups}}
+        {{if and $.IsAdmin (eq .ID $.EditRow)}}
+        <tr class="row-editing">
+          <td><input form="grp-{{.ID}}" class="{{if $.Edit.Err "name"}}invalid{{end}}" type="text"
+                     name="name" value="{{$.Edit.Value "name" .Name}}"
+                     aria-label="Name" required style="width:12em">
+              {{with $.Edit.Err "name"}}<div class="field-error">{{.}}</div>{{end}}</td>
+          <td>
+            {{$sc := $.Edit.Value "scope_asset_id" (deref .ScopeAssetID)}}
+            <select form="grp-{{.ID}}" name="scope_asset_id" aria-label="Scope asset">
+              <option value="">estate-wide</option>
+              {{range $.Assets}}<option value="{{.ID}}" {{if eq .ID $sc}}selected{{end}}>{{.Name}}</option>{{end}}
+            </select>
+          </td>
+          <td><input form="grp-{{.ID}}" type="text" name="description"
+                     value="{{$.Edit.Value "description" (deref .Description)}}" aria-label="Description"></td>
+          <td class="num">{{.VLANCount}}</td>
+          <td style="white-space:nowrap">
+            <form id="grp-{{.ID}}" method="post" action="/vlan-groups/{{.ID}}" style="display:inline">
+              <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+              <input type="hidden" name="row_version" value="{{$.Edit.Value "row_version" (itoa .RowVersion)}}">
+              <button class="btn btn-sm btn-primary" type="submit">Save</button>
+            </form>
+            <a class="btn btn-sm" href="/vlans">Cancel</a>
+          </td>
+        </tr>
+        {{else}}
+        <tr>
+          <td>{{.Name}}</td>
+          <td>{{if .ScopeAssetName}}{{.ScopeAssetName}}{{else}}<span class="util-note">estate-wide</span>{{end}}</td>
+          <td>{{if .Description}}{{deref .Description}}{{else}}—{{end}}</td>
+          <td class="num">{{.VLANCount}}</td>
+          {{if $.IsAdmin}}
+          <td style="white-space:nowrap">
+            <a class="btn btn-sm" href="/vlans?edit={{.ID}}">Edit</a>
+            {{/* Withdrawal offered unconditionally -- RetireVLANGroup's own
+                 guard (a live VLAN still numbering within it) refuses with a
+                 flash the operator can read. See VLANGroupRetire's comment. */}}
+            <form method="post" action="/vlan-groups/{{.ID}}/retire" style="display:inline">
+              <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+              <button class="btn btn-sm btn-danger" type="submit">Withdraw</button>
+            </form>
+          </td>
+          {{end}}
+        </tr>
+        {{end}}
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{else}}
+  <div class="empty"><strong>No numbering scopes recorded.</strong>Every VLAN below is estate-wide until one exists.</div>
+  {{end}}
+</div>
+
 {{if .IsAdmin}}
 <form id="vlan-form" class="panel" method="post" action="/vlans"
       hx-post="/vlans" hx-target="#vlan-form" hx-swap="outerHTML">

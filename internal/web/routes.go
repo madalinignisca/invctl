@@ -520,6 +520,15 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	write("POST /dependencies/{id}", app.DependencyUpdate)
 	write("POST /dependencies/{id}/retire", app.DependencyRetire)
 	write("POST /dependencies/{id}/verify", app.DependencyVerify)
+	// Pools and routes have no create route: both are seeded
+	// (internal/seed/seed_services.go's routing phase) and CreateBackendPool /
+	// CreateRoute are store-only by design. Correction and withdrawal are
+	// write-surface-gaps Task 5, rendered on the owning service's detail page
+	// -- a pool by service_id, a route by its frontend endpoint's service.
+	write("POST /pools/{id}", app.BackendPoolUpdate)
+	write("POST /pools/{id}/retire", app.BackendPoolRetire)
+	write("POST /routes/{id}", app.RouteUpdate)
+	write("POST /routes/{id}/retire", app.RouteRetire)
 
 	write("POST /assets/{id}/interfaces", app.InterfaceCreate)
 	write("POST /addresses", app.IPAddressCreate)
@@ -561,12 +570,33 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	write("POST /providers/{id}", app.ProviderUpdate)
 	write("POST /providers/{id}/retire", app.ProviderRetire)
 	write("POST /overlays", app.L2VPNCreate)
+	// Correcting one (write-surface-gaps Task 5). UpdateL2VPN shipped in Task 3
+	// with nothing reaching it -- an overlay's name, kind, identifier or
+	// description could only be fixed by withdrawing it and declaring another,
+	// losing its attachment history to fix a typo.
+	write("POST /overlays/{id}", app.L2VPNUpdate)
 	write("POST /overlays/{id}/retire", app.L2VPNRetire)
 	write("POST /overlays/{id}/terminations", app.L2VPNAttach)
 	write("POST /overlays/{id}/terminations/{termID}/retire", app.L2VPNDetach)
 	write("POST /allocations", app.AggregateCreate)
+	// Correcting one (write-surface-gaps Task 5). UpdateAggregate shipped in
+	// Task 3 with nothing reaching it -- a wrong CIDR, RIR link, allocation date
+	// or description was withdraw-and-redeclare only.
+	write("POST /allocations/{id}", app.AggregateUpdate)
 	write("POST /allocations/{id}/retire", app.AggregateRetire)
+	// RIR has no create route: the operator's only two registries and their
+	// RFC1918 companions are seeded, and CreateRIR is store-only by design (see
+	// writeSurfaceGaps's history). Correction and withdrawal still have to be
+	// reachable, because a mistyped registry name or a wrongly declared one is
+	// not fixed by shipping no create route -- write-surface-gaps Task 5.
+	write("POST /rirs/{id}", app.RIRUpdate)
+	write("POST /rirs/{id}/retire", app.RIRRetire)
 	write("POST /asn", app.ASNCreate)
+	// Correcting one (write-surface-gaps Task 5). UpdateASN shipped in Task 3
+	// with nothing reaching it. THE NUMBER ITSELF IS CORRECTABLE here -- see
+	// UpdateASN's own comment: an AS number is a value somebody typed, not an
+	// identity another row depends on.
+	write("POST /asn/{id}", app.ASNUpdate)
 	write("POST /asn/{id}/retire", app.ASNRetire)
 	write("POST /redundancy", app.FHRPCreate)
 	// Correcting a group's own fields. UpdateFHRPGroup existed in the store
@@ -595,6 +625,11 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	// history to fix a typo.
 	write("POST /vlans/{id}", app.VLANUpdate)
 	write("POST /vlans/{id}/retire", app.VLANRetire)
+	// A numbering scope has no create route either (VLANGroup is seeded, the
+	// same story RIR's comment above tells). UpdateVLANGroup and
+	// RetireVLANGroup are Task 3/4 of write-surface-gaps; this is Task 5.
+	write("POST /vlan-groups/{id}", app.VLANGroupUpdate)
+	write("POST /vlan-groups/{id}/retire", app.VLANGroupRetire)
 	write("POST /vlans/{id}/ports", app.VLANPortAdd)
 	write("POST /vlans/{id}/ports/{ifaceID}/remove", app.VLANPortRemove)
 	write("POST /wireless", app.WirelessCreate)

@@ -9,6 +9,7 @@
 package handlers
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/madalinignisca/invctl/internal/domain"
@@ -280,4 +281,168 @@ func (a *App) renderDependencyForm(w http.ResponseWriter, r *http.Request, consu
 	}
 	a.Render.Partial(w, http.StatusUnprocessableEntity, "dependency_form",
 		a.newDependencyForm(r, consumerID, messages, spec, endpoints, routes, identities, classOptions))
+}
+
+// BackendPoolUpdate corrects a pool's name or lb_algorithm (write-surface-gaps
+// Task 5). No create route exists for a pool -- see routes.go's own comment --
+// so this and BackendPoolRetire are the whole surface.
+//
+// service_id is NEVER taken from the form: UpdateBackendPool pins it from the
+// stored row (see that method's own comment), and the redirect below always
+// goes back to the pool's OWN service, never one the caller might have named.
+//
+// Copy-then-overwrite, ProviderUpdate's shape: UpdateBackendPool writes every
+// column, so building a fresh BackendPool from the form would blank whatever
+// the form does not carry.
+func (a *App) BackendPoolUpdate(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Could not read that form.", http.StatusBadRequest)
+		return
+	}
+	id := r.PathValue("id")
+	existing, err := a.Store.GetBackendPool(r.Context(), id)
+	if err != nil {
+		a.handleStoreError(w, r, err)
+		return
+	}
+
+	updated := *existing
+	updated.Name = formValue(r, "name")
+	updated.LBAlgorithm = optionalString(r, "lb_algorithm")
+	updated.RowVersion = submittedVersion(r, updated.RowVersion)
+
+	if err := a.Store.UpdateBackendPool(r.Context(), a.permit(r), &updated); err != nil {
+		messages, ok := refusalMessages(err, nil)
+		if !ok {
+			a.handleStoreError(w, r, err)
+			return
+		}
+		edit := rejected(r, id, messages, "name", "lb_algorithm")
+		a.renderServiceDetail(w, r, refusalStatus(err), existing.ServiceID,
+			endpointFormState{}, edit)
+		return
+	}
+	a.setFlash(r, "success", "Pool "+updated.Name+" updated.")
+	render.Redirect(w, r, "/services/"+existing.ServiceID)
+}
+
+// BackendPoolRetire withdraws a pool, refusing while a live route still
+// points at it.
+func (a *App) BackendPoolRetire(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	pool, err := a.Store.GetBackendPool(r.Context(), id)
+	if err != nil {
+		a.handleStoreError(w, r, err)
+		return
+	}
+	if err := a.Store.RetireBackendPool(r.Context(), a.permit(r), id); err != nil {
+		if isConflict(err) {
+			a.setFlash(r, "error", "That pool still has a live route pointing at it. "+
+				"Withdraw the route, or re-point it at another pool, first.")
+			render.Redirect(w, r, "/services/"+pool.ServiceID)
+			return
+		}
+		a.handleStoreError(w, r, err)
+		return
+	}
+	a.setFlash(r, "success", "Pool withdrawn.")
+	render.Redirect(w, r, "/services/"+pool.ServiceID)
+}
+
+// routeServiceID resolves the service whose page a route's correction and
+// withdrawal forms live on: the service that owns the route's FRONTEND
+// endpoint, the same resolution RouteRow's own join uses to render
+// FrontendService.
+func (a *App) routeServiceID(ctx context.Context, route *domain.Route) (string, error) {
+	ep, err := a.Store.GetEndpoint(ctx, route.FrontendEndpointID)
+	if err != nil {
+		return "", err
+	}
+	return ep.ServiceID, nil
+}
+
+// RouteUpdate corrects a route's match_type, match_value, tls_termination or
+// priority (write-surface-gaps Task 5). No create route exists for a route --
+// see routes.go's own comment -- so this and RouteRetire are the whole
+// surface.
+//
+// frontend_endpoint_id and backend_pool_id are NEVER taken from the form:
+// UpdateRoute pins both from the stored row (see that method's own comment --
+// re-pointing either is a different act from correcting how a route matches).
+//
+// Copy-then-overwrite, ProviderUpdate's shape: UpdateRoute writes every
+// column, so building a fresh Route from the form would blank whatever the
+// form does not carry.
+func (a *App) RouteUpdate(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Could not read that form.", http.StatusBadRequest)
+		return
+	}
+	id := r.PathValue("id")
+	existing, err := a.Store.GetRoute(r.Context(), id)
+	if err != nil {
+		a.handleStoreError(w, r, err)
+		return
+	}
+	serviceID, err := a.routeServiceID(r.Context(), existing)
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
+
+	nums := optionalNumbers(r)
+	updated := *existing
+	updated.MatchType = formValue(r, "match_type")
+	updated.MatchValue = optionalString(r, "match_value")
+	updated.TLSTermination = optionalString(r, "tls_termination")
+	if p := nums.opt("priority"); p != nil {
+		updated.Priority = *p
+	}
+	updated.RowVersion = submittedVersion(r, updated.RowVersion)
+
+	if msgs := nums.messages(); msgs != nil {
+		err = domain.NewValidationFrom(msgs)
+	} else {
+		err = a.Store.UpdateRoute(r.Context(), a.permit(r), &updated)
+	}
+	if err != nil {
+		messages, ok := refusalMessages(err, nil)
+		if !ok {
+			a.handleStoreError(w, r, err)
+			return
+		}
+		edit := rejected(r, id, messages, "match_type", "match_value", "tls_termination", "priority")
+		a.renderServiceDetail(w, r, refusalStatus(err), serviceID, endpointFormState{}, edit)
+		return
+	}
+	a.setFlash(r, "success", "Route updated.")
+	render.Redirect(w, r, "/services/"+serviceID)
+}
+
+// RouteRetire withdraws a route, refusing while a live dependency still
+// resolves through it.
+func (a *App) RouteRetire(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	route, err := a.Store.GetRoute(r.Context(), id)
+	if err != nil {
+		a.handleStoreError(w, r, err)
+		return
+	}
+	serviceID, err := a.routeServiceID(r.Context(), route)
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
+	if err := a.Store.RetireRoute(r.Context(), a.permit(r), id); err != nil {
+		if isConflict(err) {
+			a.setFlash(r, "error", "That route still has a live dependency resolving "+
+				"through it. Withdraw the dependency first.")
+			render.Redirect(w, r, "/services/"+serviceID)
+			return
+		}
+		a.handleStoreError(w, r, err)
+		return
+	}
+	a.setFlash(r, "success", "Route withdrawn.")
+	render.Redirect(w, r, "/services/"+serviceID)
 }

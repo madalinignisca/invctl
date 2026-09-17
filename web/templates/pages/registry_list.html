@@ -31,6 +31,42 @@
       <thead><tr><th>Block</th><th>Registry</th><th>Allocated</th><th class="num">Networks</th><th>Used</th>{{if .IsAdmin}}<th></th>{{end}}</tr></thead>
       <tbody>
         {{range .Aggregates}}
+        {{/* CORRECTING one (write-surface-gaps Task 5). UpdateAggregate shipped
+             in Task 3 with nothing reaching it, so a wrong CIDR, RIR link,
+             allocation date or description was withdraw-and-redeclare only --
+             the same defect this codebase already fixed for a provider's name,
+             per that form's own comment. */}}
+        {{if and $.IsAdmin (eq .ID $.EditRow)}}
+        <tr class="row-editing">
+          <td><input form="agg-{{.ID}}" class="mono {{if $.Edit.Err "cidr_text"}}invalid{{end}}" type="text"
+                     name="cidr_text" value="{{$.Edit.Value "cidr_text" .CIDRText}}"
+                     aria-label="Block" required style="width:12em">
+              {{with $.Edit.Err "cidr_text"}}<div class="field-error">{{.}}</div>{{end}}</td>
+          <td>
+            <select form="agg-{{.ID}}" name="rir_id" aria-label="Registry">
+              <option value="">—</option>
+              {{$rid := $.Edit.Value "rir_id" (deref .RIRID)}}
+              {{range $.RIRs}}<option value="{{.ID}}" {{if eq .ID $rid}}selected{{end}}>{{.Name}}</option>{{end}}
+            </select>
+          </td>
+          <td><input form="agg-{{.ID}}" class="{{if $.Edit.Err "allocated_on"}}invalid{{end}}" type="date"
+                     name="allocated_on" value="{{$.Edit.Value "allocated_on" (deref .AllocatedOn)}}"
+                     aria-label="Allocated on">
+              {{with $.Edit.Err "allocated_on"}}<div class="field-error">{{.}}</div>{{end}}</td>
+          <td class="num">{{.Prefixes}}</td>
+          <td style="white-space:nowrap">
+            <form id="agg-{{.ID}}" method="post" action="/allocations/{{.ID}}" style="display:inline">
+              <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+              <input type="hidden" name="row_version" value="{{$.Edit.Value "row_version" (itoa .RowVersion)}}">
+              {{/* Carried, not shown: UpdateAggregate writes every column, so
+                   dropping this would blank the description on save. */}}
+              <input type="hidden" name="description" value="{{$.Edit.Value "description" (deref .Description)}}">
+              <button class="btn btn-sm btn-primary" type="submit">Save</button>
+            </form>
+            <a class="btn btn-sm" href="/allocations">Cancel</a>
+          </td>
+        </tr>
+        {{else}}
         <tr>
           <td class="mono">{{.CIDRText}}</td>
           <td>
@@ -48,6 +84,7 @@
           </td>
           {{if $.IsAdmin}}
           <td style="white-space:nowrap">
+            <a class="btn btn-sm" href="/allocations?edit={{.ID}}">Edit</a>
             <form method="post" action="/allocations/{{.ID}}/retire" style="display:inline">
               <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
               <button class="btn btn-sm btn-danger" type="submit">Withdraw</button>
@@ -55,6 +92,7 @@
           </td>
           {{end}}
         </tr>
+        {{end}}
         {{end}}
       </tbody>
     </table>
@@ -72,6 +110,37 @@
       <thead><tr><th>Number</th><th>Name</th><th>Registry</th>{{if .IsAdmin}}<th></th>{{end}}</tr></thead>
       <tbody>
         {{range .ASNs}}
+        {{/* CORRECTING one (write-surface-gaps Task 5). THE NUMBER ITSELF IS
+             CORRECTABLE -- see UpdateASN's own comment: an AS number is a
+             value somebody typed, not an identity another row depends on the
+             way a route depends on its pool, so there is no seizure to guard
+             against by pinning it. */}}
+        {{if and $.IsAdmin (eq .ID $.EditRow)}}
+        <tr class="row-editing">
+          <td><input form="asn-{{.ID}}" class="mono {{if $.Edit.Err "number"}}invalid{{end}}" type="number"
+                     name="number" min="1" max="4294967294"
+                     value="{{$.Edit.Value "number" (printf "%d" .Number)}}"
+                     aria-label="Number" required style="width:9em">
+              {{with $.Edit.Err "number"}}<div class="field-error">{{.}}</div>{{end}}</td>
+          <td><input form="asn-{{.ID}}" type="text" name="name"
+                     value="{{$.Edit.Value "name" (deref .Name)}}" aria-label="Name"></td>
+          <td>
+            <select form="asn-{{.ID}}" name="rir_id" aria-label="Registry">
+              <option value="">—</option>
+              {{$rid := $.Edit.Value "rir_id" (deref .RIRID)}}
+              {{range $.RIRs}}<option value="{{.ID}}" {{if eq .ID $rid}}selected{{end}}>{{.Name}}</option>{{end}}
+            </select>
+          </td>
+          <td style="white-space:nowrap">
+            <form id="asn-{{.ID}}" method="post" action="/asn/{{.ID}}" style="display:inline">
+              <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+              <input type="hidden" name="row_version" value="{{$.Edit.Value "row_version" (itoa .RowVersion)}}">
+              <button class="btn btn-sm btn-primary" type="submit">Save</button>
+            </form>
+            <a class="btn btn-sm" href="/allocations">Cancel</a>
+          </td>
+        </tr>
+        {{else}}
         <tr>
           <td class="mono">AS{{.Number}}
             {{if .IsPrivate}}<span class="pill pill-degraded" title="A private-use AS number. Announcing one to a transit provider is a misconfiguration, not a design">private</span>{{end}}
@@ -80,6 +149,7 @@
           <td>{{if .RIRName}}{{.RIRName}}{{else}}<span class="util-note">unrecorded</span>{{end}}</td>
           {{if $.IsAdmin}}
           <td style="white-space:nowrap">
+            <a class="btn btn-sm" href="/allocations?edit={{.ID}}">Edit</a>
             <form method="post" action="/asn/{{.ID}}/retire" style="display:inline">
               <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
               <button class="btn btn-sm btn-danger" type="submit">Withdraw</button>
@@ -88,11 +158,78 @@
           {{end}}
         </tr>
         {{end}}
+        {{end}}
       </tbody>
     </table>
   </div>
   {{else}}
   <div class="empty"><strong>No AS numbers recorded.</strong></div>
+  {{end}}
+</div>
+
+<div class="panel">
+  <div class="panel-head">
+    <h2>{{pluralise (len .RIRs) "registry" "registries"}}</h2>
+    <span class="panel-note">Where a delegation or an AS number's own registry link points</span>
+  </div>
+  {{/* RIR HAS NO CREATE ROUTE -- see routes.go's own comment. The two real
+       registries and the RFC1918/RFC4193/CGNAT companions are seeded; this
+       panel is correction and withdrawal only (write-surface-gaps Task 5). A
+       mistyped registry name could not be fixed before this, and a wrongly
+       declared one could not be taken back. */}}
+  {{if .RIRs}}
+  <div class="scroll-x">
+    <table>
+      <thead><tr><th>Name</th><th>Private</th><th>Description</th>{{if .IsAdmin}}<th></th>{{end}}</tr></thead>
+      <tbody>
+        {{range .RIRs}}
+        {{if and $.IsAdmin (eq .ID $.EditRow)}}
+        <tr class="row-editing">
+          <td><input form="rir-{{.ID}}" class="{{if $.Edit.Err "name"}}invalid{{end}}" type="text"
+                     name="name" value="{{$.Edit.Value "name" .Name}}"
+                     aria-label="Name" required style="width:12em">
+              {{with $.Edit.Err "name"}}<div class="field-error">{{.}}</div>{{end}}</td>
+          <td>
+            <label><input form="rir-{{.ID}}" type="checkbox" name="is_private" value="1"
+                          {{if $.Edit.Checked "is_private" .IsPrivate}}checked{{end}}> private</label>
+          </td>
+          <td><input form="rir-{{.ID}}" type="text" name="description"
+                     value="{{$.Edit.Value "description" (deref .Description)}}" aria-label="Description"></td>
+          <td style="white-space:nowrap">
+            <form id="rir-{{.ID}}" method="post" action="/rirs/{{.ID}}" style="display:inline">
+              <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+              <input type="hidden" name="row_version" value="{{$.Edit.Value "row_version" (itoa .RowVersion)}}">
+              <button class="btn btn-sm btn-primary" type="submit">Save</button>
+            </form>
+            <a class="btn btn-sm" href="/allocations">Cancel</a>
+          </td>
+        </tr>
+        {{else}}
+        <tr>
+          <td>{{.Name}}</td>
+          <td>{{if .IsPrivate}}<span class="pill pill-muted">private</span>{{else}}—{{end}}</td>
+          <td>{{if .Description}}{{deref .Description}}{{else}}—{{end}}</td>
+          {{if $.IsAdmin}}
+          <td style="white-space:nowrap">
+            <a class="btn btn-sm" href="/allocations?edit={{.ID}}">Edit</a>
+            {{/* Withdrawal offered unconditionally -- RetireRIR's own guard
+                 (a live aggregate still naming it) refuses with a flash the
+                 operator can read, rather than needing a count column here to
+                 pre-empt it. See RIRRetire's own comment. */}}
+            <form method="post" action="/rirs/{{.ID}}/retire" style="display:inline">
+              <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+              <button class="btn btn-sm btn-danger" type="submit">Withdraw</button>
+            </form>
+          </td>
+          {{end}}
+        </tr>
+        {{end}}
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{else}}
+  <div class="empty"><strong>No registries recorded.</strong></div>
   {{end}}
 </div>
 

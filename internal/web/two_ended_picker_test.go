@@ -123,7 +123,10 @@ func setupPickerFixture(t *testing.T, ctx context.Context, h *harness, fx *bound
 	// disagree and any query resolving off the wrong one is caught.
 	mkRoute := func(frontendServiceID, poolServiceID, name string) string {
 		frontend := mkEndpoint(frontendServiceID, name+"-front")
-		pool := &domain.BackendPool{ID: store.NewID(), ServiceID: poolServiceID, Name: name + "-pool"}
+		pool, err := domain.NewBackendPool(store.NewID(), poolServiceID, name+"-pool", nil)
+		if err != nil {
+			t.Fatalf("building backend pool for route %s: %v", name, err)
+		}
 		if err := h.store.CreateBackendPool(ctx, admin, pool); err != nil {
 			t.Fatalf("creating backend pool for route %s: %v", name, err)
 		}

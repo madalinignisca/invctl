@@ -28,6 +28,41 @@
       <thead><tr><th>Name</th><th>Carried by</th><th class="num">Identifier</th><th>Reach</th>{{if .IsAdmin}}<th></th>{{end}}</tr></thead>
       <tbody>
         {{range .Overlays}}
+        {{/* CORRECTING one (write-surface-gaps Task 5). UpdateL2VPN shipped in
+             Task 3 with nothing reaching it -- a typo in the name, kind,
+             identifier or description was withdraw-and-redeclare only, and
+             that throws away the overlay's attachment history to fix it. */}}
+        {{if and $.IsAdmin (eq .ID $.EditRow)}}
+        <tr class="row-editing">
+          <td><input form="ovl-{{.ID}}" class="{{if $.Edit.Err "name"}}invalid{{end}}" type="text"
+                     name="name" value="{{$.Edit.Value "name" .Name}}"
+                     aria-label="Name" required style="width:12em">
+              {{with $.Edit.Err "name"}}<div class="field-error">{{.}}</div>{{end}}</td>
+          <td>
+            <select form="ovl-{{.ID}}" name="kind" aria-label="Carried by">
+              {{$k := $.Edit.Value "kind" .Kind}}
+              {{range $.Kinds}}<option value="{{.}}" {{if eq . $k}}selected{{end}}>{{.}}</option>{{end}}
+            </select>
+          </td>
+          <td><input form="ovl-{{.ID}}" class="mono {{if $.Edit.Err "identifier"}}invalid{{end}}" type="number"
+                     name="identifier" min="0" max="16777215"
+                     value="{{$.Edit.Value "identifier" (derefInt64 .Identifier)}}"
+                     aria-label="Identifier" style="width:8em">
+              {{with $.Edit.Err "identifier"}}<div class="field-error">{{.}}</div>{{end}}</td>
+          <td></td>
+          <td style="white-space:nowrap">
+            <form id="ovl-{{.ID}}" method="post" action="/overlays/{{.ID}}" style="display:inline">
+              <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+              <input type="hidden" name="row_version" value="{{$.Edit.Value "row_version" (itoa .RowVersion)}}">
+              {{/* Carried, not shown: UpdateL2VPN writes every column, so
+                   dropping this would blank the description on save. */}}
+              <input type="hidden" name="description" value="{{$.Edit.Value "description" (deref .Description)}}">
+              <button class="btn btn-sm btn-primary" type="submit">Save</button>
+            </form>
+            <a class="btn btn-sm" href="/overlays">Cancel</a>
+          </td>
+        </tr>
+        {{else}}
         <tr>
           <td><a href="/overlays/{{.ID}}">{{.Name}}</a></td>
           <td class="mono">{{.Kind}}</td>
@@ -39,6 +74,7 @@
           </td>
           {{if $.IsAdmin}}
           <td style="white-space:nowrap">
+            <a class="btn btn-sm" href="/overlays?edit={{.ID}}">Edit</a>
             <form method="post" action="/overlays/{{.ID}}/retire" style="display:inline">
               <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
               <button class="btn btn-sm btn-danger" type="submit">Withdraw</button>
@@ -46,6 +82,7 @@
           </td>
           {{end}}
         </tr>
+        {{end}}
         {{end}}
       </tbody>
     </table>

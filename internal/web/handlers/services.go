@@ -201,8 +201,28 @@ type serviceDetailPage struct {
 	Instances    []store.InstanceRow
 	Endpoints    []store.EndpointRow
 	Routes       []store.RouteRow
-	Upstream     depRowList
-	Downstream   depRowList
+	// RouteEdit and RouteEditRow are the route correction form's own edit
+	// state, the same shape depEdit/openDepEditor give a dependency row --
+	// this page already spends EditRow on the service and on an endpoint row,
+	// so a route correction opens on its own ?route= key rather than
+	// overloading it.
+	RouteEdit    *editState
+	RouteEditRow string
+	// MatchTypes and TLSTerminations feed the inline route editor. From the
+	// domain rather than a lookup table, the same reasoning RuntimeTypes and
+	// DesiredStates give below: both are CHECK-constrained enums with a Go
+	// constant set beside them.
+	MatchTypes      []string
+	TLSTerminations []string
+	// Pools is this service's own backend pools (write-surface-gaps Task 5):
+	// BackendPool has no create route, so this panel is correction and
+	// withdrawal only. PoolEdit/PoolEditRow are ?pool='s own edit state, the
+	// same reasoning RouteEdit gives.
+	Pools       []store.BackendPoolRow
+	PoolEdit    *editState
+	PoolEditRow string
+	Upstream    depRowList
+	Downstream  depRowList
 	// InstanceHealth is what the estate reports about each placement, keyed by
 	// instance id, with staleness applied and any override alongside rather
 	// than merged in. A service has no health of its own -- only the places it
@@ -276,6 +296,11 @@ func (a *App) renderServiceDetail(w http.ResponseWriter, r *http.Request, status
 		return
 	}
 	routes, err := a.Store.ListRoutesByService(r.Context(), id)
+	if err != nil {
+		a.serverError(w, r, err)
+		return
+	}
+	pools, err := a.Store.ListBackendPoolsByService(r.Context(), id)
 	if err != nil {
 		a.serverError(w, r, err)
 		return
@@ -473,33 +498,59 @@ func (a *App) renderServiceDetail(w http.ResponseWriter, r *http.Request, status
 		Edit:         editFor(edit, depEdit),
 	})
 
+	// Route and pool corrections open on their own ?route=/?pool= keys, for
+	// the same reason depEdit gives: EditRow is already spent on the service
+	// and on an endpoint row. A refused correction is told apart from every
+	// other editor on this page by a field name unique to its own form --
+	// lb_algorithm only ever appears in a pool's rejected() call, match_type
+	// only in a route's.
+	routeEdit := r.URL.Query().Get("route")
+	if edit != nil {
+		if _, ok := edit.Values["match_type"]; ok {
+			routeEdit = edit.ID
+		}
+	}
+	poolEdit := r.URL.Query().Get("pool")
+	if edit != nil {
+		if _, ok := edit.Values["lb_algorithm"]; ok {
+			poolEdit = edit.ID
+		}
+	}
+
 	a.Render.Page(w, status, "service_detail", serviceDetailPage{
-		Providers:      providers,
-		CustomFields:   customFields,
-		Tags:           tags,
-		Base:           b,
-		Service:        service,
-		Certificates:   certificates,
-		Costs:          costs,
-		CostTotals:     store.TotalCosts(costs, domain.FormatDate(a.Store.Now())),
-		CostKinds:      costKinds,
-		CostPeriods:    domain.CostPeriods,
-		Instances:      instances,
-		Endpoints:      endpoints,
-		Routes:         routes,
-		Upstream:       up,
-		Downstream:     down,
-		InstanceHealth: instanceHealth,
-		Timeline:       timeline,
-		InstanceForm:   a.newInstanceForm(r, id, nil, hostable),
-		EndpointForm:   a.newEndpointForm(r, id, addEndpointErrs(epState)),
-		EndpointEdit:   a.endpointEditForm(r, b, endpoints, epState),
-		RuntimeTypes:   domain.RuntimeTypes,
-		DesiredStates:  domain.DesiredStates,
-		ServiceEdit:    serviceEdit,
-		Edit:           edit,
-		DependencyForm: a.newDependencyForm(r, id, nil, domain.DependencySpec{}, allEndpoints, allRoutes, identities, classOptions),
-		OverrideForm:   a.newOverrideForm(r, overrideTargets, nil, overrideForm{}),
+		Providers:       providers,
+		CustomFields:    customFields,
+		Tags:            tags,
+		Base:            b,
+		Service:         service,
+		Certificates:    certificates,
+		Costs:           costs,
+		CostTotals:      store.TotalCosts(costs, domain.FormatDate(a.Store.Now())),
+		CostKinds:       costKinds,
+		CostPeriods:     domain.CostPeriods,
+		Instances:       instances,
+		Endpoints:       endpoints,
+		Routes:          routes,
+		RouteEdit:       editFor(edit, routeEdit),
+		RouteEditRow:    routeEdit,
+		MatchTypes:      domain.MatchTypes,
+		TLSTerminations: domain.TLSTerminations,
+		Pools:           pools,
+		PoolEdit:        editFor(edit, poolEdit),
+		PoolEditRow:     poolEdit,
+		Upstream:        up,
+		Downstream:      down,
+		InstanceHealth:  instanceHealth,
+		Timeline:        timeline,
+		InstanceForm:    a.newInstanceForm(r, id, nil, hostable),
+		EndpointForm:    a.newEndpointForm(r, id, addEndpointErrs(epState)),
+		EndpointEdit:    a.endpointEditForm(r, b, endpoints, epState),
+		RuntimeTypes:    domain.RuntimeTypes,
+		DesiredStates:   domain.DesiredStates,
+		ServiceEdit:     serviceEdit,
+		Edit:            edit,
+		DependencyForm:  a.newDependencyForm(r, id, nil, domain.DependencySpec{}, allEndpoints, allRoutes, identities, classOptions),
+		OverrideForm:    a.newOverrideForm(r, overrideTargets, nil, overrideForm{}),
 	})
 }
 

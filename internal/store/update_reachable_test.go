@@ -107,6 +107,18 @@ var unreachableRepairPaths = map[string]string{
 	// what writeSurfaceUnbuilt described before ListIdentities and
 	// CreateIdentity had no route reaching them at all -- narrower, but the
 	// same shape.
+
+	// The write-surface-gaps plan's eleven entries -- UpdateAggregate,
+	// UpdateRIR, UpdateASN, UpdateL2VPN, UpdateVLANGroup, UpdateBackendPool,
+	// UpdateRoute, RetireRIR, RetireVLANGroup, RetireBackendPool and
+	// RetireRoute -- filled this map from Tasks 3 and 4 (the store methods)
+	// until Task 5 (2026-09-17) wired POST /allocations/{id}, POST /asn/{id},
+	// POST /overlays/{id}, POST /rirs/{id} (+/retire), POST /vlan-groups/{id}
+	// (+/retire), POST /pools/{id} (+/retire) and POST /routes/{id}
+	// (+/retire). All eleven came out the moment those routes landed, the
+	// same as every pair before them. RetireAggregate, RetireASN and
+	// RetireL2VPN never appeared here: their routes shipped with the original
+	// create routes, well before this plan.
 }
 
 // TestEveryUpdateMethodIsReachable fails when a store method written to correct

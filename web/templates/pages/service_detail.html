@@ -248,9 +248,50 @@
   </div>
   <div class="scroll-x">
     <table>
-      <thead><tr><th>Match</th><th>Frontend</th><th>Backend pool</th><th>Members</th><th>TLS</th><th>Priority</th></tr></thead>
+      <thead><tr><th>Match</th><th>Frontend</th><th>Backend pool</th><th>Members</th><th>TLS</th><th>Priority</th>{{if .IsAdmin}}<th></th>{{end}}</tr></thead>
       <tbody>
         {{range .Routes}}
+        {{/* CORRECTING one, and WITHDRAWING one (write-surface-gaps Task 5).
+             ROUTE HAS NO CREATE ROUTE -- see routes.go's own comment -- so
+             this is the whole surface. frontend_endpoint_id and
+             backend_pool_id are never offered here: UpdateRoute pins both
+             from the stored row (see that method's own comment -- re-pointing
+             either is a different act, not a repair of one). */}}
+        {{if and $.IsAdmin (eq .ID $.RouteEditRow)}}
+        <tr class="row-editing">
+          <td>
+            <select form="route-{{.ID}}" name="match_type" aria-label="Match type">
+              {{$mt := $.RouteEdit.Value "match_type" .MatchType}}
+              {{range $.MatchTypes}}<option value="{{.}}" {{if eq . $mt}}selected{{end}}>{{.}}</option>{{end}}
+            </select>
+            <input form="route-{{.ID}}" class="mono {{if $.RouteEdit.Err "match_value"}}invalid{{end}}" type="text"
+                   name="match_value" value="{{$.RouteEdit.Value "match_value" (deref .MatchValue)}}"
+                   aria-label="Match value" style="width:12em">
+            {{with $.RouteEdit.Err "match_value"}}<div class="field-error">{{.}}</div>{{end}}
+          </td>
+          <td class="mono">{{.FrontendName}}</td>
+          <td class="mono">{{.PoolName}}</td>
+          <td class="num">{{.MemberCount}}</td>
+          <td>
+            <select form="route-{{.ID}}" name="tls_termination" aria-label="TLS termination">
+              <option value="">—</option>
+              {{$tls := $.RouteEdit.Value "tls_termination" (deref .TLSTermination)}}
+              {{range $.TLSTerminations}}<option value="{{.}}" {{if eq . $tls}}selected{{end}}>{{.}}</option>{{end}}
+            </select>
+          </td>
+          <td class="num"><input form="route-{{.ID}}" class="num {{if $.RouteEdit.Err "priority"}}invalid{{end}}"
+                     type="number" name="priority" value="{{$.RouteEdit.Value "priority" (itoa .Priority)}}"
+                     aria-label="Priority" style="width:6em"></td>
+          <td style="white-space:nowrap">
+            <form id="route-{{.ID}}" method="post" action="/routes/{{.ID}}" style="display:inline">
+              <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+              <input type="hidden" name="row_version" value="{{$.RouteEdit.Value "row_version" (itoa .RowVersion)}}">
+              <button class="btn btn-sm btn-primary" type="submit">Save</button>
+            </form>
+            <a class="btn btn-sm" href="/services/{{$.Service.ID}}#routes">Cancel</a>
+          </td>
+        </tr>
+        {{else}}
         <tr>
           <td class="mono">{{.MatchType}} {{deref .MatchValue}}</td>
           <td class="mono">{{.FrontendName}}</td>
@@ -258,7 +299,80 @@
           <td class="num">{{.MemberCount}}</td>
           <td class="mono" style="font-size:12px">{{deref .TLSTermination}}</td>
           <td class="num">{{.Priority}}</td>
+          {{if $.IsAdmin}}
+          <td style="white-space:nowrap">
+            <a class="btn btn-sm" href="/services/{{$.Service.ID}}?route={{.ID}}#routes">Edit</a>
+            {{/* Withdrawal offered unconditionally -- RetireRoute's own guard
+                 (a live dependency still resolving through it) refuses with a
+                 flash the operator can read. See RouteRetire's comment. */}}
+            <form method="post" action="/routes/{{.ID}}/retire" style="display:inline">
+              <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+              <button class="btn btn-sm btn-danger" type="submit">Withdraw</button>
+            </form>
+          </td>
+          {{end}}
         </tr>
+        {{end}}
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+</div>
+{{end}}
+
+{{if .Pools}}
+<div class="panel">
+  <div class="panel-head">
+    <h2>Backend pools</h2>
+    <span class="panel-note">What a route feeds traffic to. No create route exists for a pool -- correction and withdrawal only.</span>
+  </div>
+  <div class="scroll-x">
+    <table>
+      <thead><tr><th>Name</th><th>Algorithm</th><th class="num">Members</th>{{if .IsAdmin}}<th></th>{{end}}</tr></thead>
+      <tbody>
+        {{range .Pools}}
+        {{/* CORRECTING one, and WITHDRAWING one (write-surface-gaps Task 5).
+             service_id is never offered here: UpdateBackendPool pins it from
+             the stored row (see that method's own comment). */}}
+        {{if and $.IsAdmin (eq .ID $.PoolEditRow)}}
+        <tr class="row-editing">
+          <td><input form="pool-{{.ID}}" class="{{if $.PoolEdit.Err "name"}}invalid{{end}}" type="text"
+                     name="name" value="{{$.PoolEdit.Value "name" .Name}}"
+                     aria-label="Name" required style="width:12em">
+              {{with $.PoolEdit.Err "name"}}<div class="field-error">{{.}}</div>{{end}}</td>
+          <td><input form="pool-{{.ID}}" class="mono" type="text" name="lb_algorithm"
+                     value="{{$.PoolEdit.Value "lb_algorithm" (deref .LBAlgorithm)}}"
+                     aria-label="Algorithm" style="width:10em"></td>
+          <td class="num">{{.MemberCount}}</td>
+          <td style="white-space:nowrap">
+            <form id="pool-{{.ID}}" method="post" action="/pools/{{.ID}}" style="display:inline">
+              <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+              <input type="hidden" name="row_version" value="{{$.PoolEdit.Value "row_version" (itoa .RowVersion)}}">
+              <button class="btn btn-sm btn-primary" type="submit">Save</button>
+            </form>
+            <a class="btn btn-sm" href="/services/{{$.Service.ID}}#pools">Cancel</a>
+          </td>
+        </tr>
+        {{else}}
+        <tr>
+          <td class="mono">{{.Name}}</td>
+          <td class="mono">{{if .LBAlgorithm}}{{deref .LBAlgorithm}}{{else}}—{{end}}</td>
+          <td class="num">{{.MemberCount}}</td>
+          {{if $.IsAdmin}}
+          <td style="white-space:nowrap">
+            <a class="btn btn-sm" href="/services/{{$.Service.ID}}?pool={{.ID}}#pools">Edit</a>
+            {{/* Withdrawal offered unconditionally -- RetireBackendPool's own
+                 guard (a live route still pointing at it) refuses with a
+                 flash the operator can read. Membership does not hold a
+                 pool's withdrawal -- see that method's own comment. */}}
+            <form method="post" action="/pools/{{.ID}}/retire" style="display:inline">
+              <input type="hidden" name="csrf_token" value="{{$.CSRF}}">
+              <button class="btn btn-sm btn-danger" type="submit">Withdraw</button>
+            </form>
+          </td>
+          {{end}}
+        </tr>
+        {{end}}
         {{end}}
       </tbody>
     </table>

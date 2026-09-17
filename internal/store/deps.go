@@ -267,16 +267,121 @@ func pluralDependencies(n int) string {
 // ---------- pools and routes ----------
 
 // CreateBackendPool inserts a pool.
+//
+// created_at/updated_at ARE SET HERE IN GO, deliberately, even though migration
+// 00070 (Task 1) gave the column a literal default: that default exists to
+// stamp the ROWS THAT PREDATE THE COLUMN, the same reasoning 00019 used for
+// row_version. A pool created after the migration through this method must
+// carry the real moment it was declared, not the migration's date -- the
+// INSERT below names every one of the four columns so no new row can silently
+// fall through to that default the way it would if they were left for SQL to
+// fill in.
 func (s *SQLStore) CreateBackendPool(ctx context.Context, permit domain.Permit, p *domain.BackendPool) error {
+	if err := p.Validate(); err != nil {
+		return err
+	}
+	p.RowVersion = 1
+	at := domain.FormatTime(s.now())
+	p.CreatedAt, p.UpdatedAt = at, at
 	return s.write(ctx, permit, func(t *tx) error {
-		_, err := t.exec(ctx,
-			`INSERT INTO backend_pool (id, service_id, name, lb_algorithm) VALUES (?, ?, ?, ?)`,
-			p.ID, p.ServiceID, p.Name, p.LBAlgorithm)
+		_, err := t.exec(ctx, `
+			INSERT INTO backend_pool (id, service_id, name, lb_algorithm, lifecycle,
+			                          row_version, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			p.ID, p.ServiceID, p.Name, p.LBAlgorithm, p.Lifecycle,
+			p.RowVersion, p.CreatedAt, p.UpdatedAt)
 		if err != nil {
 			return translateWriteErr(err, "creating backend pool")
 		}
 		return t.logCreate(ctx, "backend_pool", p.ID, p)
 	})
+}
+
+// GetBackendPool loads one pool by id.
+func (s *SQLStore) GetBackendPool(ctx context.Context, id string) (*domain.BackendPool, error) {
+	var p domain.BackendPool
+	if err := s.readOne(ctx, &p, `SELECT * FROM backend_pool WHERE id = ?`, id); err != nil {
+		return nil, fmt.Errorf("getting backend pool %s: %w", id, err)
+	}
+	return &p, nil
+}
+
+// UpdateBackendPool corrects a pool's descriptive attributes: name and
+// lb_algorithm.
+//
+// service_id IS PINNED FROM THE STORED ROW, never taken from the caller. A
+// pool is a set of endpoints behind ONE service's proxy; re-pointing it at a
+// different service would silently move every route and member hanging off it
+// to a service that never declared them, and offering that through a
+// correction form would be a seizure surface -- the same reasoning UpdateLink
+// gives for a_interface_id/b_interface_id. The right path for "this pool
+// belongs to the wrong service" is RetireBackendPool and CreateBackendPool
+// under the right one.
+//
+// lifecycle IS ALSO PINNED, for the reason UpdateVLAN and UpdateNetGroup pin
+// theirs: this method would otherwise be a second withdrawal path with none of
+// RetireBackendPool's guard (Task 4), so a caller could set lifecycle =
+// retired on a pool that a live route still points at.
+func (s *SQLStore) UpdateBackendPool(ctx context.Context, p domain.Permit, pool *domain.BackendPool) error {
+	before, err := s.GetBackendPool(ctx, pool.ID)
+	if err != nil {
+		return err
+	}
+	pool.ServiceID = before.ServiceID
+	pool.Lifecycle = before.Lifecycle
+	pool.CreatedAt = before.CreatedAt
+	if err := pool.Validate(); err != nil {
+		return err
+	}
+	at := domain.FormatTime(s.now())
+	pool.UpdatedAt = at
+
+	return s.write(ctx, p, func(t *tx) error {
+		res, err := t.exec(ctx, `
+			UPDATE backend_pool SET name = ?, lb_algorithm = ?,
+			                        updated_at = ?, row_version = row_version + 1
+			WHERE id = ? AND row_version = ?`,
+			pool.Name, pool.LBAlgorithm, at, pool.ID, pool.RowVersion)
+		if err != nil {
+			return translateWriteErr(err, "updating backend pool")
+		}
+		if err := requireVersion(res, "backend_pool", pool.ID, &pool.RowVersion); err != nil {
+			return err
+		}
+		return t.logUpdate(ctx, "backend_pool", pool.ID, before, pool)
+	})
+}
+
+// BackendPoolRow is a pool with the member count needed to render it.
+//
+// MemberCount READS backend_member DIRECTLY rather than through
+// RetireBackendPool's own COUNT, because it exists for a different question:
+// that guard asks "does a live ROUTE point at this pool" (the only thing
+// RetireBackendPool refuses on -- membership does not hold a pool's
+// withdrawal, see its own comment). This is display only, telling the
+// operator how staffed a pool is before they decide whether to correct or
+// withdraw it.
+type BackendPoolRow struct {
+	domain.BackendPool
+	MemberCount int `db:"member_count"`
+}
+
+const backendPoolSelect = `
+	SELECT p.*,
+	       (SELECT COUNT(*) FROM backend_member bm WHERE bm.pool_id = p.id) AS member_count
+	FROM backend_pool p`
+
+// ListBackendPoolsByService returns every pool a service fronts, retired ones
+// included -- the same "what is stored keeps displaying" rule ListRoutesByService
+// and ListAllRoutes already follow for routes, so a correction or a withdrawal
+// form can still find the row it names.
+func (s *SQLStore) ListBackendPoolsByService(ctx context.Context, serviceID string) ([]BackendPoolRow, error) {
+	var rows []BackendPoolRow
+	err := s.read(ctx, &rows, backendPoolSelect+` WHERE p.service_id = ? ORDER BY p.name`, serviceID)
+	if err != nil {
+		return nil, fmt.Errorf("listing backend pools of service %s: %w", serviceID, err)
+	}
+	return rows, nil
 }
 
 // AddBackendMember puts an endpoint into a pool.
@@ -292,19 +397,262 @@ func (s *SQLStore) AddBackendMember(ctx context.Context, p domain.Permit, m *dom
 	})
 }
 
+// RetireBackendPool withdraws a pool, refusing while it is still fronted or
+// still staffed.
+//
+// ONE HOLD: a live route still pointing at this pool. That is what
+// RetireEndpoint's own comment calls out -- withdrawing what a route feeds
+// traffic to would leave the route resolving to nothing, silently, with
+// nothing on the route's own row to say why.
+// MEMBERSHIP DOES NOT HOLD IT, AND THAT WAS DECIDED THE OTHER WAY FIRST. The
+// plan for this method specified a second guard: refuse while any
+// backend_member row exists, on the reasoning that "a pool whose members are
+// still declared is still in service". That guard was written, and it was a
+// trap.
+//
+// AddBackendMember exists. RemoveBackendMember does not, and neither does
+// SetBackendMembers. So a pool that ever gained one member could never be
+// withdrawn by anybody, through any path -- a refusal with no way to clear
+// what it refuses on. That is the write-surface gap this whole work package
+// exists to close, rebuilt inside the fix for it, which is the third time that
+// exact shape has appeared in two days (see the match_type pin above, and
+// WP-J9's four).
+//
+// The structural answer agrees. backend_member is a SET owned by the pool --
+// composite primary key, no id, no lifecycle, no row_version -- structurally
+// identical to cable_bundle_member, and CLAUDE.md names that class explicitly.
+// RetireBundle, the direct sibling, has no member guard at all: a set owned by
+// a parent does not get a vote on the parent's withdrawal, because it is not a
+// separate thing that depends on it. A route is; membership is the pool
+// describing itself.
+//
+// So the member rows stay, describing a pool that is no longer in service,
+// exactly as a retired bundle keeps its cables. If a genuine need for
+// SetBackendMembers appears it is its own work, and it does not change this.
+//
+// REFUSED, NOT CASCADED, for the same reason every other guard in this file
+// gives: a route or a membership is a fact somebody else declared, and
+// quietly withdrawing either as a side effect of a pool withdrawal would write
+// a change_log entry attributing that decision to an operator who never made
+// it.
+//
+// Serializable, for the reason RetireEndpoint's own comment gives: the COUNT
+// below asserts an invariant this transaction is about to depend on, and at
+// read-committed a route declared concurrently is invisible to it.
+func (s *SQLStore) RetireBackendPool(ctx context.Context, p domain.Permit, id string) error {
+	before, err := s.GetBackendPool(ctx, id)
+	if err != nil {
+		return err
+	}
+	if before.Retired() {
+		// Already withdrawn: a second audit entry would claim a withdrawal
+		// that did not happen. RetireIdentity does the same.
+		return nil
+	}
+	at := domain.FormatTime(s.now())
+	after := *before
+	after.Lifecycle = domain.LifecycleRetired
+	after.UpdatedAt = at
+
+	return s.writeSerializable(ctx, p, func(t *tx) error {
+		var routes int
+		if err := t.get(ctx, &routes, `
+			SELECT COUNT(*) FROM route WHERE backend_pool_id = ? AND lifecycle <> ?`,
+			id, domain.LifecycleRetired); err != nil {
+			return fmt.Errorf("checking pool %s for routes: %w", id, err)
+		}
+		if routes > 0 {
+			return fmt.Errorf("pool %s cannot be withdrawn while %d live route(s) point at it: %w",
+				before.Name, routes, domain.ErrConflict)
+		}
+
+		res, err := t.exec(ctx, `
+			UPDATE backend_pool SET lifecycle = ?, updated_at = ?,
+			                        row_version = row_version + 1
+			WHERE id = ? AND row_version = ?`,
+			domain.LifecycleRetired, at, id, before.RowVersion)
+		if err != nil {
+			return translateWriteErr(err, "retiring backend pool")
+		}
+		if err := requireVersion(res, "backend_pool", id, &before.RowVersion); err != nil {
+			return err
+		}
+		return t.logUpdate(ctx, "backend_pool", id, before, &after)
+	})
+}
+
 // CreateRoute inserts an L7 routing rule.
+//
+// created_at/updated_at ARE SET HERE IN GO, for the reason CreateBackendPool's
+// own comment gives: migration 00070's literal default exists to stamp the
+// rows that predate the column, not new ones, so the INSERT below names every
+// one of the four columns rather than letting a new row fall through to it.
 func (s *SQLStore) CreateRoute(ctx context.Context, p domain.Permit, r *domain.Route) error {
+	if err := r.Validate(); err != nil {
+		return err
+	}
+	r.RowVersion = 1
+	at := domain.FormatTime(s.now())
+	r.CreatedAt, r.UpdatedAt = at, at
 	return s.write(ctx, p, func(t *tx) error {
 		_, err := t.exec(ctx, `
 			INSERT INTO route (id, frontend_endpoint_id, match_type, match_value,
-			                   backend_pool_id, tls_termination, priority)
-			VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			                   backend_pool_id, tls_termination, priority, lifecycle,
+			                   row_version, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			r.ID, r.FrontendEndpointID, r.MatchType, r.MatchValue,
-			r.BackendPoolID, r.TLSTermination, r.Priority)
+			r.BackendPoolID, r.TLSTermination, r.Priority, r.Lifecycle,
+			r.RowVersion, r.CreatedAt, r.UpdatedAt)
 		if err != nil {
 			return translateWriteErr(err, "creating route")
 		}
 		return t.logCreate(ctx, "route", r.ID, r)
+	})
+}
+
+// GetRoute loads one routing rule by id.
+func (s *SQLStore) GetRoute(ctx context.Context, id string) (*domain.Route, error) {
+	var r domain.Route
+	if err := s.readOne(ctx, &r, `SELECT * FROM route WHERE id = ?`, id); err != nil {
+		return nil, fmt.Errorf("getting route %s: %w", id, err)
+	}
+	return &r, nil
+}
+
+// UpdateRoute corrects a routing rule's descriptive attributes: match_value,
+// tls_termination and priority.
+//
+// frontend_endpoint_id AND backend_pool_id ARE PINNED FROM THE STORED ROW,
+// never taken from the caller -- the plan's own words for this method:
+// re-pointing a route at a different pool is a DIFFERENT ACT from correcting
+// its match value, and doing it through a correction form would be a seizure
+// surface. A route re-pointed at another pool silently redirects every
+// dependency resolving through it to a backend nobody declared this route as
+// fronting. The right path for "this route was built against the wrong
+// frontend or pool" is RetireRoute and CreateRoute naming the right ones.
+//
+// match_type IS ALSO PINNED. host_header, sni and path_prefix parse
+// match_value differently, and a form correcting a typo in the VALUE must not
+// be able to silently change what KIND of value it is -- that is a rebuild of
+// the rule, not a repair of it, the same distinction UpdateInterface draws
+// between correcting a speed and moving a chassis.
+//
+// lifecycle IS PINNED for the reason UpdateBackendPool's is: this method would
+// otherwise be a second withdrawal path with none of RetireRoute's guard
+// (Task 4).
+func (s *SQLStore) UpdateRoute(ctx context.Context, p domain.Permit, r *domain.Route) error {
+	before, err := s.GetRoute(ctx, r.ID)
+	if err != nil {
+		return err
+	}
+	// PINNED: what this route IS. A route's identity is the pair it joins --
+	// which frontend endpoint it fronts and which pool it feeds -- and moving
+	// either is a different act from correcting how it matches. Offering that
+	// through a correction form is a seizure surface: it would let somebody
+	// re-point a live route at a pool they own by editing a field.
+	r.FrontendEndpointID = before.FrontendEndpointID
+	r.BackendPoolID = before.BackendPoolID
+	r.Lifecycle = before.Lifecycle
+	r.CreatedAt = before.CreatedAt
+
+	// match_type is CORRECTABLE, deliberately, and this decision was taken the
+	// other way first. The argument for pinning it is that match_value's
+	// meaning depends on it -- an `sni` value is a hostname, a `path_prefix`
+	// value is a path -- so changing one without the other produces a route
+	// that reads as valid and matches nothing.
+	//
+	// That is true of the world and false of this code: nothing validates
+	// match_value against match_type (Route.Validate checks only that
+	// match_type is in the enum), so pinning it buys no consistency. What it
+	// would cost is exact: a route declared with the wrong match_type could
+	// only ever be withdrawn and re-declared -- which is the gap
+	// writeSurfaceGaps existed to close, reintroduced one field down, inside
+	// the fix for it.
+	//
+	// Both fields move together in one submission, which is how an operator
+	// thinks about it anyway. If match_value ever gains per-type validation,
+	// it belongs in Route.Validate where both values are in scope -- not here
+	// as a pin that silently forbids the correction.
+	if err := r.Validate(); err != nil {
+		return err
+	}
+	at := domain.FormatTime(s.now())
+	r.UpdatedAt = at
+
+	return s.write(ctx, p, func(t *tx) error {
+		res, err := t.exec(ctx, `
+			UPDATE route SET match_type = ?, match_value = ?, tls_termination = ?,
+			                 priority = ?, updated_at = ?, row_version = row_version + 1
+			WHERE id = ? AND row_version = ?`,
+			r.MatchType, r.MatchValue, r.TLSTermination, r.Priority, at, r.ID, r.RowVersion)
+		if err != nil {
+			return translateWriteErr(err, "updating route")
+		}
+		if err := requireVersion(res, "route", r.ID, &r.RowVersion); err != nil {
+			return err
+		}
+		return t.logUpdate(ctx, "route", r.ID, before, r)
+	})
+}
+
+// RetireRoute withdraws an L7 routing rule.
+//
+// REFUSED WHILE A LIVE DEPENDENCY STILL NAMES IT AS PROVIDER, the mirror of
+// requireLiveProvider above: that function refuses a NEW dependency from
+// resolving through an already-retired route, and this one refuses to retire
+// a route out from under a dependency that already resolves through it. A
+// dependency declares that traffic is believed to flow through this exact
+// route; withdrawing it underneath that declaration would leave an edge on
+// screen naming a route the tool itself says no longer exists, and the impact
+// engine would quietly stop propagating an outage along it -- the same
+// misattribution-by-omission RetireEndpoint's own comment refuses to commit.
+// Retire the dependency first, which is a decision somebody has to make
+// rather than one this method can make for them.
+//
+// Serializable, for the reason requireLiveProvider's callers use it: the COUNT
+// below asserts an invariant this transaction is about to depend on, and at
+// read-committed a dependency declared against this route concurrently is
+// invisible to it.
+func (s *SQLStore) RetireRoute(ctx context.Context, p domain.Permit, id string) error {
+	before, err := s.GetRoute(ctx, id)
+	if err != nil {
+		return err
+	}
+	if before.Retired() {
+		// Already withdrawn: a second audit entry would claim a withdrawal
+		// that did not happen. RetireIdentity does the same.
+		return nil
+	}
+	at := domain.FormatTime(s.now())
+	after := *before
+	after.Lifecycle = domain.LifecycleRetired
+	after.UpdatedAt = at
+
+	return s.writeSerializable(ctx, p, func(t *tx) error {
+		var deps int
+		if err := t.get(ctx, &deps, `
+			SELECT COUNT(*) FROM dependency
+			WHERE provider_route_id = ? AND lifecycle = ?`,
+			id, domain.LifecycleActive); err != nil {
+			return fmt.Errorf("checking route %s for dependents: %w", id, err)
+		}
+		if deps > 0 {
+			return fmt.Errorf("route %s cannot be withdrawn while %d live %s resolve(s) through it: %w",
+				id, deps, pluralDependencies(deps), domain.ErrConflict)
+		}
+
+		res, err := t.exec(ctx, `
+			UPDATE route SET lifecycle = ?, updated_at = ?,
+			                 row_version = row_version + 1
+			WHERE id = ? AND row_version = ?`,
+			domain.LifecycleRetired, at, id, before.RowVersion)
+		if err != nil {
+			return translateWriteErr(err, "retiring route")
+		}
+		if err := requireVersion(res, "route", id, &before.RowVersion); err != nil {
+			return err
+		}
+		return t.logUpdate(ctx, "route", id, before, &after)
 	})
 }
 

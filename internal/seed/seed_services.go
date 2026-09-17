@@ -352,9 +352,11 @@ func (b *builder) routing() {
 	// One pool, two members -- and both members' instances live on vm-app-1.
 	// Neither the pool nor the route says so; only placement does, which is
 	// exactly the finding the impact engine has to produce.
-	pool := &domain.BackendPool{
-		ID: store.NewID(), ServiceID: b.refs.Services["haproxy-edge"],
-		Name: "orders-pool", LBAlgorithm: str("roundrobin"),
+	pool, err := domain.NewBackendPool(store.NewID(), b.refs.Services["haproxy-edge"],
+		"orders-pool", str("roundrobin"))
+	if err != nil {
+		b.fail(fmt.Errorf("building backend pool: %w", err))
+		return
 	}
 	if err := b.store.CreateBackendPool(b.ctx, Permit, pool); err != nil {
 		b.fail(fmt.Errorf("seeding backend pool: %w", err))

@@ -433,7 +433,10 @@ func TestAPoolBackendCannotBeWithdrawn(t *testing.T) {
 			s, ctx := newStore(t, e)
 			_, provider, epID := servicePairWithEndpoint(t, s, ctx, 8080)
 
-			pool := &domain.BackendPool{ID: NewID(), ServiceID: provider, Name: "web", LBAlgorithm: strPtr("roundrobin")}
+			pool, err := domain.NewBackendPool(NewID(), provider, "web", strPtr("roundrobin"))
+			if err != nil {
+				t.Fatalf("building the pool: %v", err)
+			}
 			if err := s.CreateBackendPool(ctx, testPermit, pool); err != nil {
 				t.Fatalf("creating the pool: %v", err)
 			}
@@ -442,7 +445,7 @@ func TestAPoolBackendCannotBeWithdrawn(t *testing.T) {
 				t.Fatalf("adding the backend: %v", err)
 			}
 
-			err := s.RetireEndpoint(ctx, testPermit, epID)
+			err = s.RetireEndpoint(ctx, testPermit, epID)
 			if err == nil {
 				t.Fatal("a socket still serving a pool was withdrawn")
 			}
