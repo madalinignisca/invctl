@@ -30,7 +30,7 @@ import (
 // fold share, and neither excludes it. A caller that wants only live cables
 // (the impact view) filters BundleMemberRow.Lifecycle itself.
 const bundleMemberQuery = `
-	SELECT l.id AS link_id, l.lifecycle,
+	SELECT l.id AS link_id, l.lifecycle, l.breakout_id, l.breakout_position,
 	       ia.name AS a_iface, aa.name AS a_asset_name,
 	       ib.name AS b_iface, ab.name AS b_asset_name
 	FROM cable_bundle_member m
@@ -40,7 +40,7 @@ const bundleMemberQuery = `
 	JOIN asset aa ON aa.id = ia.asset_id
 	JOIN asset ab ON ab.id = ib.asset_id
 	WHERE m.bundle_id = ?
-	ORDER BY aa.name, ia.name`
+	ORDER BY aa.name, ia.name, l.breakout_position`
 
 // BundleRow is a bundle with its membership count resolved.
 type BundleRow struct {
@@ -53,12 +53,21 @@ type BundleRow struct {
 // to resolve both ends. Lifecycle is the LINK's, not the bundle's, so a
 // caller can tell a retired member from a live one without a second query.
 type BundleMemberRow struct {
-	LinkID     string `db:"link_id"`
-	Lifecycle  string `db:"lifecycle"`
-	AIface     string `db:"a_iface"`
-	AAssetName string `db:"a_asset_name"`
-	BIface     string `db:"b_iface"`
-	BAssetName string `db:"b_asset_name"`
+	LinkID    string `db:"link_id"`
+	Lifecycle string `db:"lifecycle"`
+	// BreakoutID and BreakoutPosition (migration 00071) are nil for an
+	// ordinary cable and shared across every strand of one breakout DAC.
+	// This is what the DISPLAY groups by (docs/breakout-cables-design.md
+	// D5, groupBundleMembers): cable_bundle_member keys on link_id, so one
+	// physical breakout pulled through a duct is n member rows here -- the
+	// membership model stays untouched, only what the page reports as "one
+	// cable" changes.
+	BreakoutID       *string `db:"breakout_id"`
+	BreakoutPosition *int    `db:"breakout_position"`
+	AIface           string  `db:"a_iface"`
+	AAssetName       string  `db:"a_asset_name"`
+	BIface           string  `db:"b_iface"`
+	BAssetName       string  `db:"b_asset_name"`
 }
 
 // Label is how a bundle member is named in a sentence, the same shape as
