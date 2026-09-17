@@ -272,6 +272,17 @@ jobs:
           VERSION: ${{ needs.preflight.outputs.version }}
         run: |
           set -euo pipefail
+          # AN ANNOTATED TAG NEEDS A COMMITTER, and a runner has none. `git tag
+          # -a` records who made the tag and when, so it fails with "empty ident
+          # name" on a fresh runner where user.name and user.email are unset.
+          # This is the canonical identity GitHub uses for its own bot, so the
+          # tag is attributed to the automation rather than to whoever happened
+          # to click the button.
+          #
+          # Repository-local, not --global: nothing else on this runner should
+          # inherit an identity set for one tag.
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git tag -a "$TAG" "$SHA" -m "invctl $VERSION"
           git push origin "$TAG"
 
