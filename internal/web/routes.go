@@ -561,12 +561,33 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	write("POST /providers/{id}", app.ProviderUpdate)
 	write("POST /providers/{id}/retire", app.ProviderRetire)
 	write("POST /overlays", app.L2VPNCreate)
+	// Correcting one (write-surface-gaps Task 5). UpdateL2VPN shipped in Task 3
+	// with nothing reaching it -- an overlay's name, kind, identifier or
+	// description could only be fixed by withdrawing it and declaring another,
+	// losing its attachment history to fix a typo.
+	write("POST /overlays/{id}", app.L2VPNUpdate)
 	write("POST /overlays/{id}/retire", app.L2VPNRetire)
 	write("POST /overlays/{id}/terminations", app.L2VPNAttach)
 	write("POST /overlays/{id}/terminations/{termID}/retire", app.L2VPNDetach)
 	write("POST /allocations", app.AggregateCreate)
+	// Correcting one (write-surface-gaps Task 5). UpdateAggregate shipped in
+	// Task 3 with nothing reaching it -- a wrong CIDR, RIR link, allocation date
+	// or description was withdraw-and-redeclare only.
+	write("POST /allocations/{id}", app.AggregateUpdate)
 	write("POST /allocations/{id}/retire", app.AggregateRetire)
+	// RIR has no create route: the operator's only two registries and their
+	// RFC1918 companions are seeded, and CreateRIR is store-only by design (see
+	// writeSurfaceGaps's history). Correction and withdrawal still have to be
+	// reachable, because a mistyped registry name or a wrongly declared one is
+	// not fixed by shipping no create route -- write-surface-gaps Task 5.
+	write("POST /rirs/{id}", app.RIRUpdate)
+	write("POST /rirs/{id}/retire", app.RIRRetire)
 	write("POST /asn", app.ASNCreate)
+	// Correcting one (write-surface-gaps Task 5). UpdateASN shipped in Task 3
+	// with nothing reaching it. THE NUMBER ITSELF IS CORRECTABLE here -- see
+	// UpdateASN's own comment: an AS number is a value somebody typed, not an
+	// identity another row depends on.
+	write("POST /asn/{id}", app.ASNUpdate)
 	write("POST /asn/{id}/retire", app.ASNRetire)
 	write("POST /redundancy", app.FHRPCreate)
 	// Correcting a group's own fields. UpdateFHRPGroup existed in the store

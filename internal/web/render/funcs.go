@@ -49,6 +49,7 @@ func funcs() template.FuncMap {
 		"natureDesc":     domain.NatureDescription,
 		"deref":          deref,
 		"derefInt":       derefInt,
+		"derefInt64":     derefInt64,
 		"join":           strings.Join,
 		// has reports membership in a string slice, for a checkbox that has to
 		// render what is already stored. slices.Contains is not reachable from
@@ -301,6 +302,17 @@ func derefInt(n *int) string {
 		return ""
 	}
 	return strconv.Itoa(*n)
+}
+
+// derefInt64 is derefInt for the *int64 columns -- an L2VPN's identifier (a
+// VNI or VC-ID) needs the wider type, and Go templates do not implicitly
+// convert one pointer's element type to another's the way they auto-deref a
+// plain {{.}}.
+func derefInt64(n *int64) string {
+	if n == nil {
+		return ""
+	}
+	return strconv.FormatInt(*n, 10)
 }
 
 func titleCase(s string) string {

@@ -21,24 +21,35 @@ type l2vpnListPage struct {
 	Overlays []store.L2VPNRow
 	Kinds    []string
 	Errors   map[string]string
+	// Edit is set only when a correction was refused; see editState. Nil-safe,
+	// the same shape renderVLANs and renderCircuits use.
+	Edit *editState
 }
 
 // L2VPNList renders every overlay.
 func (a *App) L2VPNList(w http.ResponseWriter, r *http.Request) {
-	a.renderL2VPNs(w, r, http.StatusOK, nil)
+	a.renderL2VPNs(w, r, http.StatusOK, nil, nil)
 }
 
-func (a *App) renderL2VPNs(w http.ResponseWriter, r *http.Request, status int, errs map[string]string) {
+func (a *App) renderL2VPNs(w http.ResponseWriter, r *http.Request, status int,
+	errs map[string]string, edit *editState) {
 	overlays, err := a.Store.ListL2VPNs(r.Context())
 	if err != nil {
 		a.serverError(w, r, err)
 		return
 	}
+	base := a.base(r, "Overlays", "l2vpn")
+	// A refused correction reopens the row it was refused on, the same rule
+	// renderVLANs and renderCircuits follow.
+	if edit != nil {
+		base.EditRow = edit.ID
+	}
 	a.Render.Page(w, status, "l2vpn_list", l2vpnListPage{
-		Base:     a.base(r, "Overlays", "l2vpn"),
+		Base:     base,
 		Overlays: overlays,
 		Kinds:    domain.L2VPNKinds,
 		Errors:   orEmpty(errs),
+		Edit:     edit,
 	})
 }
 
@@ -127,10 +138,58 @@ func (a *App) L2VPNCreate(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		a.renderL2VPNs(w, r, http.StatusUnprocessableEntity, messages)
+		a.renderL2VPNs(w, r, http.StatusUnprocessableEntity, messages, nil)
 		return
 	}
 	a.setFlash(r, "success", "Overlay "+vpn.Name+" declared.")
+	render.Redirect(w, r, "/overlays")
+}
+
+// L2VPNUpdate corrects an overlay's name, kind, identifier or description
+// (write-surface-gaps Task 5). UpdateL2VPN shipped in Task 3 with nothing
+// reaching it -- a typo was withdraw-and-redeclare only, which throws away
+// the overlay's attachment history to fix it.
+//
+// Copy-then-overwrite, ProviderUpdate's shape: UpdateL2VPN writes every
+// column, so building a fresh L2VPN from the form would blank whatever the
+// form does not carry.
+func (a *App) L2VPNUpdate(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "Could not read that form.", http.StatusBadRequest)
+		return
+	}
+	id := r.PathValue("id")
+	existing, err := a.Store.GetL2VPN(r.Context(), id)
+	if err != nil {
+		a.handleStoreError(w, r, err)
+		return
+	}
+
+	updated := *existing
+	updated.Name = formValue(r, "name")
+	updated.Kind = formValue(r, "kind")
+	if n := optionalNumbers(r).opt("identifier"); n != nil {
+		v := int64(*n)
+		updated.Identifier = &v
+	} else {
+		updated.Identifier = nil
+	}
+	updated.Description = optionalString(r, "description")
+	updated.RowVersion = submittedVersion(r, updated.RowVersion)
+
+	if err := a.Store.UpdateL2VPN(r.Context(), a.permit(r), &updated); err != nil {
+		messages, ok := refusalMessages(err, map[string]string{
+			"name": "an overlay with that name already exists",
+		})
+		if !ok {
+			a.handleStoreError(w, r, err)
+			return
+		}
+		a.renderL2VPNs(w, r, refusalStatus(err), messages,
+			rejected(r, id, messages, "name", "kind", "identifier", "description"))
+		return
+	}
+	a.setFlash(r, "success", "Overlay "+updated.Name+" updated.")
 	render.Redirect(w, r, "/overlays")
 }
 
