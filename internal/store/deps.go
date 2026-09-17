@@ -429,11 +429,34 @@ func (s *SQLStore) UpdateRoute(ctx context.Context, p domain.Permit, r *domain.R
 	if err != nil {
 		return err
 	}
+	// PINNED: what this route IS. A route's identity is the pair it joins --
+	// which frontend endpoint it fronts and which pool it feeds -- and moving
+	// either is a different act from correcting how it matches. Offering that
+	// through a correction form is a seizure surface: it would let somebody
+	// re-point a live route at a pool they own by editing a field.
 	r.FrontendEndpointID = before.FrontendEndpointID
 	r.BackendPoolID = before.BackendPoolID
-	r.MatchType = before.MatchType
 	r.Lifecycle = before.Lifecycle
 	r.CreatedAt = before.CreatedAt
+
+	// match_type is CORRECTABLE, deliberately, and this decision was taken the
+	// other way first. The argument for pinning it is that match_value's
+	// meaning depends on it -- an `sni` value is a hostname, a `path_prefix`
+	// value is a path -- so changing one without the other produces a route
+	// that reads as valid and matches nothing.
+	//
+	// That is true of the world and false of this code: nothing validates
+	// match_value against match_type (Route.Validate checks only that
+	// match_type is in the enum), so pinning it buys no consistency. What it
+	// would cost is exact: a route declared with the wrong match_type could
+	// only ever be withdrawn and re-declared -- which is the gap
+	// writeSurfaceGaps existed to close, reintroduced one field down, inside
+	// the fix for it.
+	//
+	// Both fields move together in one submission, which is how an operator
+	// thinks about it anyway. If match_value ever gains per-type validation,
+	// it belongs in Route.Validate where both values are in scope -- not here
+	// as a pin that silently forbids the correction.
 	if err := r.Validate(); err != nil {
 		return err
 	}
@@ -442,10 +465,10 @@ func (s *SQLStore) UpdateRoute(ctx context.Context, p domain.Permit, r *domain.R
 
 	return s.write(ctx, p, func(t *tx) error {
 		res, err := t.exec(ctx, `
-			UPDATE route SET match_value = ?, tls_termination = ?, priority = ?,
-			                 updated_at = ?, row_version = row_version + 1
+			UPDATE route SET match_type = ?, match_value = ?, tls_termination = ?,
+			                 priority = ?, updated_at = ?, row_version = row_version + 1
 			WHERE id = ? AND row_version = ?`,
-			r.MatchValue, r.TLSTermination, r.Priority, at, r.ID, r.RowVersion)
+			r.MatchType, r.MatchValue, r.TLSTermination, r.Priority, at, r.ID, r.RowVersion)
 		if err != nil {
 			return translateWriteErr(err, "updating route")
 		}

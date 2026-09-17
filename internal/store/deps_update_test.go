@@ -249,6 +249,13 @@ func TestUpdateRoutePinsFrontendAndPool(t *testing.T) {
 			got.FrontendEndpointID = frontendB
 			got.BackendPoolID = poolB.ID
 			got.MatchValue = ptr("orders-corrected.example.com")
+			// match_type moves WITH match_value, deliberately. Pinning it was
+			// tried and reverted: nothing validates match_value against
+			// match_type, so a pin bought no consistency and cost the ability
+			// to correct a route declared with the wrong one -- the gap this
+			// whole work package exists to close, reintroduced one field down
+			// inside its own fix. See UpdateRoute's comment.
+			got.MatchType = "sni"
 			if err := s.UpdateRoute(ctx, testPermit, got); err != nil {
 				t.Fatalf("updating route: %v", err)
 			}
@@ -266,9 +273,15 @@ func TestUpdateRoutePinsFrontendAndPool(t *testing.T) {
 					"submitted pool through, which is exactly the seizure surface the plan "+
 					"calls out by name", after.BackendPoolID, poolA.ID)
 			}
-			// The genuinely correctable field DID go through.
+			// The genuinely correctable fields DID go through.
 			if after.MatchValue == nil || *after.MatchValue != "orders-corrected.example.com" {
 				t.Errorf("match_value = %v, want the correction to have taken", after.MatchValue)
+			}
+			if after.MatchType != "sni" {
+				t.Errorf("match_type = %q, want the correction to have taken. A route "+
+					"declared with the wrong match_type must be correctable; if it is "+
+					"pinned, fixing one is withdraw-and-redeclare, which is the defect "+
+					"writeSurfaceGaps existed to record.", after.MatchType)
 			}
 
 			var diffs []string
