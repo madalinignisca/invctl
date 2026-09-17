@@ -352,6 +352,38 @@ func (s *SQLStore) UpdateBackendPool(ctx context.Context, p domain.Permit, pool 
 	})
 }
 
+// BackendPoolRow is a pool with the member count needed to render it.
+//
+// MemberCount READS backend_member DIRECTLY rather than through
+// RetireBackendPool's own COUNT, because it exists for a different question:
+// that guard asks "does a live ROUTE point at this pool" (the only thing
+// RetireBackendPool refuses on -- membership does not hold a pool's
+// withdrawal, see its own comment). This is display only, telling the
+// operator how staffed a pool is before they decide whether to correct or
+// withdraw it.
+type BackendPoolRow struct {
+	domain.BackendPool
+	MemberCount int `db:"member_count"`
+}
+
+const backendPoolSelect = `
+	SELECT p.*,
+	       (SELECT COUNT(*) FROM backend_member bm WHERE bm.pool_id = p.id) AS member_count
+	FROM backend_pool p`
+
+// ListBackendPoolsByService returns every pool a service fronts, retired ones
+// included -- the same "what is stored keeps displaying" rule ListRoutesByService
+// and ListAllRoutes already follow for routes, so a correction or a withdrawal
+// form can still find the row it names.
+func (s *SQLStore) ListBackendPoolsByService(ctx context.Context, serviceID string) ([]BackendPoolRow, error) {
+	var rows []BackendPoolRow
+	err := s.read(ctx, &rows, backendPoolSelect+` WHERE p.service_id = ? ORDER BY p.name`, serviceID)
+	if err != nil {
+		return nil, fmt.Errorf("listing backend pools of service %s: %w", serviceID, err)
+	}
+	return rows, nil
+}
+
 // AddBackendMember puts an endpoint into a pool.
 func (s *SQLStore) AddBackendMember(ctx context.Context, p domain.Permit, m *domain.BackendMember) error {
 	return s.write(ctx, p, func(t *tx) error {

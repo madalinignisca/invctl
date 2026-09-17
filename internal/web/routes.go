@@ -520,6 +520,15 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	write("POST /dependencies/{id}", app.DependencyUpdate)
 	write("POST /dependencies/{id}/retire", app.DependencyRetire)
 	write("POST /dependencies/{id}/verify", app.DependencyVerify)
+	// Pools and routes have no create route: both are seeded
+	// (internal/seed/seed_services.go's routing phase) and CreateBackendPool /
+	// CreateRoute are store-only by design. Correction and withdrawal are
+	// write-surface-gaps Task 5, rendered on the owning service's detail page
+	// -- a pool by service_id, a route by its frontend endpoint's service.
+	write("POST /pools/{id}", app.BackendPoolUpdate)
+	write("POST /pools/{id}/retire", app.BackendPoolRetire)
+	write("POST /routes/{id}", app.RouteUpdate)
+	write("POST /routes/{id}/retire", app.RouteRetire)
 
 	write("POST /assets/{id}/interfaces", app.InterfaceCreate)
 	write("POST /addresses", app.IPAddressCreate)
