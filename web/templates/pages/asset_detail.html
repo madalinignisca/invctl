@@ -447,9 +447,16 @@
     </div>
     {{end}}
     {{/* The outer if is exactly this form's near-end gate too: reaching here
-         means CanWriteEntity(asset) or IsAdmin already held. */}}
+         means CanWriteEntity(asset) or IsAdmin already held. Same reasoning
+         for breakout_form: a breakout's a-end is always THIS asset
+         (CreateBreakout, "the a-end is checked once"), so the near-end gate
+         that already covers link_form covers it too -- the far-end pickers
+         are what Targets/writableInterfaceOptions narrows. */}}
     <div style="margin-top:12px">
       {{template "link_form" .LinkForm}}
+    </div>
+    <div style="margin-top:12px">
+      {{template "breakout_form" .BreakoutForm}}
     </div>
   </div>
   {{end}}

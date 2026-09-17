@@ -38,6 +38,7 @@ POST /assets/{id}/power/{inputID}/retire | PowerInputRetire | write | true
 POST /assets/{id}/retire | AssetRetire | write | true
 POST /assets/{id}/storage | AssetStorageClaim | write | true
 POST /assets/{id}/tags | AssetTags | write | true
+POST /breakouts | BreakoutCreate | write | true
 POST /bundles | BundleCreate | write | true
 POST /bundles/{id} | BundleUpdate | write | true
 POST /bundles/{id}/members | BundleSetMembers | write | true

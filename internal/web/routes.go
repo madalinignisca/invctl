@@ -535,6 +535,7 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	write("POST /links", app.LinkCreate)
 	write("POST /links/{id}", app.LinkUpdate)
 	write("POST /links/{id}/retire", app.LinkRetire)
+	write("POST /breakouts", app.BreakoutCreate)
 	write("POST /prefixes", app.PrefixCreate)
 	// Reservations live on the prefixes page rather than a page of their own:
 	// a span of addresses only means anything beside the network it falls in.

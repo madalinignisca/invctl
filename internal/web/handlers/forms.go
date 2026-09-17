@@ -366,6 +366,35 @@ type linkFormData struct {
 	TargetHint string
 }
 
+// breakoutMaxStrands bounds how many strand pickers the template renders.
+// Not a business rule -- domain.BreakoutSpec.Validate enforces the real
+// minimum (2) and nothing upper -- purely how many rows a fixed-size HTML
+// form can offer before Alpine's add/remove controls run out of rows to
+// reveal. A QSFP-DD to 8x25G breakout is the widest thing in the DAC
+// catalogue this project has seen named; raise it if a wider one shows up.
+const breakoutMaxStrands = 8
+
+type breakoutFormData struct {
+	Base
+	AssetID    string
+	Errors     map[string]string
+	Interfaces []store.InterfaceRow    // this asset's unpatched ports, the shared a-end
+	Targets    []store.InterfaceOption // candidates across the estate, the b-end strands
+	TargetHint string
+	// Strands carries what a refused declaration submitted, padded to
+	// breakoutMaxStrands, so the template can render a FIXED set of pickers
+	// (required for Alpine's show/hide-by-count to work without the server
+	// deciding row count) while still reopening with every strand the
+	// operator already chose still selected -- CLAUDE.md's "a refused form
+	// comes back with the typed input intact" applies to a multi-valued
+	// field exactly as it does to a single one.
+	Strands []string
+	// StrandCount is how many of Strands to show enabled on first paint: 2
+	// (BreakoutSpec.Validate's own minimum) for a fresh form, or however many
+	// were actually submitted for a refused one.
+	StrandCount int
+}
+
 type passThroughFormData struct {
 	Base
 	AssetID string
@@ -728,6 +757,46 @@ func (a *App) newLinkForm(r *http.Request, assetID string, errs map[string]strin
 			"There are no unpatched ports in the estate yet.",
 			"There is nothing here you can cable to -- every unpatched port belongs to an asset you don't own.",
 			"Showing %d of %d ports -- the rest belong to assets you don't own."),
+	}
+}
+
+// newBreakoutForm builds the "declare a breakout" panel: one moulded
+// assembly, one a-end on this asset, several b-ends elsewhere -- a
+// QSFP-to-4xSFP+ DAC, say (docs/breakout-cables-design.md). Targets is
+// filtered the same way newLinkForm's is and for the identical reason: the
+// picker and CreateBreakout's own authorizeBreakoutSubjects both ask
+// permit.Covers on every b-end, so they cannot disagree about what is
+// offered versus what is accepted.
+func (a *App) newBreakoutForm(r *http.Request, assetID string, errs map[string]string,
+	interfaces []store.InterfaceRow, targets []store.InterfaceOption, chosen []string,
+) breakoutFormData {
+	base := a.base(r, "Assets", "assets")
+	filteredTargets := writableInterfaceOptions(base, targets)
+
+	strands := make([]string, breakoutMaxStrands)
+	count := 2
+	if n := len(chosen); n > 0 {
+		count = n
+		if count > breakoutMaxStrands {
+			count = breakoutMaxStrands
+		}
+	}
+	for i := 0; i < len(chosen) && i < breakoutMaxStrands; i++ {
+		strands[i] = chosen[i]
+	}
+
+	return breakoutFormData{
+		Base:       base,
+		AssetID:    assetID,
+		Errors:     orEmpty(errs),
+		Interfaces: unpatchedInterfaces(interfaces),
+		Targets:    filteredTargets,
+		TargetHint: pickerHint(len(filteredTargets), len(targets),
+			"There are no unpatched ports in the estate yet.",
+			"There is nothing here you can cable to -- every unpatched port belongs to an asset you don't own.",
+			"Showing %d of %d ports -- the rest belong to assets you don't own."),
+		Strands:     strands,
+		StrandCount: count,
 	}
 }
 
