@@ -75,6 +75,36 @@ fragments:
       - "the rotation capture is made by RECORDING one on the local copy: svc-sso is overdue in the seed, and the after shot needs it not to be"
     generated_at: b1ca309c2449
 
+  - id: cables
+    title: Bundles, breakout cables and wireless
+    file: parts/42-cables.md
+    pages:
+      - /bundles
+      - /bundles/{id}/impact
+      - /wireless
+      - /assets/{id}
+    screenshots:
+      - img/cables-1-bundles.png
+      - img/cables-2-bundle-cut.png
+      - img/cables-3-breakout-form.png
+      - img/cables-4-wireless.png
+    depends_on:
+      - internal/store/cable_bundles.go
+      - internal/store/network.go
+      - internal/store/wireless.go
+      - internal/web/handlers/bundles.go
+      - internal/web/handlers/wireless.go
+      - web/templates/pages/bundle_list.html
+      - web/templates/pages/bundle_impact.html
+      - web/templates/pages/wireless_list.html
+      - web/templates/partials/forms.html
+    preconditions:
+      - "one bundle holding at least two cables, so the cut page has something to sever"
+      - "a bundle whose cut joins nothing modelled, so the 'joins nothing' panel is visible — it is the answer most easily mistaken for a bug"
+      - "an asset with a free port, so the breakout form renders its strand selectors"
+      - "at least one SSID with radios and one carrying a VLAN, so both columns are exercised"
+    generated_at: 9242f03b438c
+
   - id: installation
     title: Installing and running invctl
     file: parts/10-installation.md
