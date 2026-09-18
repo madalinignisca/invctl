@@ -26,7 +26,7 @@ pages. The rail's footer shows which you have.
 The first page is not a dashboard of counts. It is a list of **what needs a
 decision**.
 
-![The overview page. A table headed "21 findings" lists rows tagged FAULT, RISK or GAP, each with a count, a finding and an example — "past its date, 6, sw-core-1 lapsed on 2025-06-03", "too deep for the rack, 3, hv-esx-01 in rack-a2: 772mm chassis plus 75mm for cabling needs 847mm, and the cabinet has 600mm", and "project grown past what it was priced for, 2, platform: using 28 vCPU against the 24 it was priced for — nobody is in breach, the margin is eroding".](../img/getting-started-2-overview.png)
+![The overview page. A table headed "26 findings" lists rows tagged FAULT, RISK or GAP, each with a count, a finding and an example — "past its date, 6, sw-core-1 lapsed on 2025-07-13", "power convergence, 3, hv-01: inputs A and B converge on ups UPS-A — one failure takes all of them", "credential past its own rotation rule, 1, svc-sso was last rotated 2026-02-28, against a 90-day rule", and "project grown past what it was priced for, 2, platform: using 28 vCPU against the 24 it was priced for — nobody is in breach, the margin is eroding".](../img/getting-started-2-overview.png)
 
 Every row here was already computed by some other page. What this adds is the
 one place that says them together, because a finding on a page nobody opened
@@ -56,6 +56,12 @@ outgrown the assumption its price was built on, and the margin is eroding
 quietly. It sits in the same list as a lapsed certificate because it needs the
 same thing — somebody to decide — and because the person who would notice it is
 not the person watching the racks.
+
+*"Credential past its own rotation rule"* is the same shape again. Nothing has
+been breached; somebody wrote down that a credential should be rotated every
+ninety days, and the date says it has not been. The rule and the date are both
+things a person declared, so the finding is the inventory holding you to your
+own policy rather than to one it invented.
 
 Every finding links to the page that explains it. Nothing here is stored — it is
 recomputed on each visit, so it cannot go stale against the pages it summarises.

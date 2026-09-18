@@ -38,7 +38,7 @@ fragments:
     preconditions:
       - "the overview shows at least one finding of each severity (fault, risk, gap)"
       - "no invctl.nav.* keys in localStorage before capturing: a persistent browser profile carries the previous run's expanded groups into the next, and a fresh reader sees everything collapsed"
-    generated_at: 732c6b0af36c
+    generated_at: c26fa18d302a
 
   - id: installation
     title: Installing and running invctl
