@@ -172,7 +172,7 @@ fragments:
       - "one VLAN carrying two prefixes (the dual-stack case)"
       - "at least one reservation, so 'next free' visibly skips it"
       - "one registry allocation with nothing carved out of it, so 'unused' is visible"
-    generated_at: 7ba77afbb08a
+    generated_at: 48409d2a8134
 
   - id: network
     title: Network — topology, circuits, overlays, redundancy

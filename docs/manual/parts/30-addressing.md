@@ -49,7 +49,7 @@ issues from it.
 
 ## VLANs
 
-![The VLANs page listing four VLANs — 10, 30, 40 and 99 — each in the estate-wide group, with columns for networks and ports. VLAN 30 carries 2 networks; VLAN 10 has 5 ports. A caption reads "A VLAN ID is only unique within its group".](../img/addressing-2-vlans.png)
+![The VLANs page listing four VLANs — 10, 30, 40 and 99 — each in the estate-wide group, with columns for role, environment, networks and ports. VLAN 30 carries 2 networks and 2 ports; VLAN 40 has 1 network and no ports at all. A caption reads "A VLAN ID is only unique within its group".](../img/addressing-2-vlans.png)
 
 A VLAN is a broadcast domain, not a number written on a network. Two ports in
 the same VLAN can reach each other whether or not a cable was drawn between
@@ -65,7 +65,7 @@ A VLAN's detail page leads with its **ports**, and says so when there are none �
 a VLAN with networks and no ports is a declared record rather than a broadcast
 domain, and nothing can reach anything through it.
 
-![The VLAN 30 detail page. A ports panel lists sw-core-1 and sw-core-2 on Ethernet1, both tagged TRUNK, with a form to add a port and choose tagged or untagged. Beside it a networks panel shows 10.20.30.0/24 and 2001:db8:20::/64, with a note explaining that more than one network on one VLAN is normally dual-stack.](../img/addressing-3-vlan-detail.png)
+![The VLAN production-workloads detail page. A ports panel lists sw-core-1 and sw-core-2 on Ethernet2, both tagged TRUNK, each with a Remove control, and a form to add a port and choose tagged or untagged. A networks panel shows 10.20.30.0/24 at 4% and 2001:db8:20::/64 at 0%, with a note explaining that more than one network on one VLAN is normally dual-stack.](../img/addressing-3-vlan-detail.png)
 
 More than one network on one VLAN is normal and usually dual-stack: the IPv4 and
 IPv6 halves of a broadcast domain are one place. A bare VLAN number written on
@@ -77,7 +77,7 @@ rather than refusing.
 
 ## Allocations
 
-![The allocations page. Two allocations: 10.20.0.0/16 with 5 networks inside it and 100% used, and 185.42.128.0/22 allocated on 2019-06-14 with 0 networks and 0.0% marked "unused". Below, one AS number, AS64512, tagged PRIVATE.](../img/addressing-4-allocations.png)
+![The allocations page. Two allocations: 10.20.0.0/16 allocated 2016-03-02 with 5 networks inside it and 100.0% used, and 185.42.128.0/22 allocated 2019-06-14 with 0 networks and 0.0% marked "unused". Both show their registry as "unrecorded". Below, one AS number — AS64512, tagged PRIVATE, named Internal transit — and an empty registries panel reading "No registries recorded".](../img/addressing-4-allocations.png)
 
 A prefix says a network exists. An allocation says whether the space is
 **yours**: a registry delegation you keep, a slice of a provider's range that
@@ -95,3 +95,12 @@ and counting both is how a delegation reports more than 100% used.
 
 An untouched private range is untidy. An untouched registry allocation is money,
 and only the second is flagged.
+
+**The registry itself is optional, and both rows above show it as
+"unrecorded".** A registry is who delegated the space — RIPE, ARIN, a provider
+— and naming one is what turns "we have this range" into "we hold this range
+from somebody, under something". Until you record one, invctl will not guess:
+the allocation still counts its utilisation, and the column says plainly that
+nobody has said where it came from. Registries are not created from this page;
+they are recorded separately, and an allocation is linked to one when you edit
+it.
