@@ -14,7 +14,7 @@ hypervisor, a virtual machine, a bridge. They nest — a VM inside a hypervisor
 inside a rack inside a site — and that containment is what makes *"this rack
 loses power"* and *"reboot this VM"* the same kind of question.
 
-![The asset list. Filters for name or serial, kind and environment sit above a table of 72 assets with columns for name, kind, contained by, environments, serial and lifecycle. A bridge shows DEV and PROD together with a SPANS tag.](../img/estate-1-assets.png)
+![The asset list. Filters for name or serial, kind and environment sit above a table of 77 assets with columns for name, kind, contained by, environments, serial and lifecycle. Access points sit in dc-oslo; a bridge is contained by the hypervisor it runs on. Assets in more than one environment carry a SPANS tag.](../img/estate-1-assets.png)
 
 The **contained by** column is the tree; nothing else on the row is. Environment
 membership in particular is a set rather than a place, and an asset in more than
@@ -68,7 +68,7 @@ shows **where it came from**: recorded on this asset, or inherited from a named
 model. A report that renders those identically has merged a fact with an
 assumption.
 
-![The hv-win-01 asset page. Under Details, "supported until" reads 2031-10-31, in 5 years, with the line "inherited from Hewlett Packard Enterprise ProLiant DL380 Gen11 — this asset has no date of its own". Panels for Contains, Observed health and Workloads sit beside and below it.](../img/estate-2-asset-detail.png)
+![The hv-win-01 asset page. Under Details, "supported until" reads 2031-10-31, in 5 years, followed by "inherited from Hewlett Packard Enterprise ProLiant DL380 Gen11" — the box has no date of its own and the model's is standing in. Serial CZ2341001, looked after by Platform & Core Services.](../img/estate-2-asset-detail.png)
 
 The asset page is where that shows plainly. `hv-win-01` has no date of its own,
 so the page names the model it took one from — and had somebody typed a date
@@ -92,7 +92,7 @@ from the things inside it.
 What a person knows that no column has a place for: why it is on that firmware,
 which case covers it, what was decided and by whom.
 
-![The Notes panel on the rack-a2 page. A note tagged DECISION by "Seeded administrator" reads "The three ESX hosts stay in this cabinet until the A-row refresh. We know they overhang: the rear door is off and cable-tied open, and facilities have signed that off in writing until Q1." Below it a form with a Kind selector and a body field, and beneath that the Timeline showing the same note as a journal row beside declared changes.](../img/estate-5-notes.png)
+![The Notes panel on the hv-win-01 page. A note tagged MAINTENANCE by "Seeded administrator" records a firmware update, an iLO reset and the NIC ordering being re-checked against the patch record before the guests were started; Edit and Withdraw sit under it. Below is an empty form whose placeholder reads "What somebody should know six months from now", with a warning that notes are kept indefinitely and attributed to you. Beneath that the Timeline shows the same note as a journal row beside declared changes, each tagged USER or SYSTEM.](../img/estate-5-notes.png)
 
 Four kinds, because a reader scanning a timeline wants to tell them apart:
 **note** for context, **incident** for what happened while it was happening,
@@ -127,7 +127,7 @@ defining the field and filling in a value.
 
 ## Clusters
 
-![The clusters page listing six clusters — dev-hetzner, dev-pve, dr-pve, prod-pve, stg-vmware, win-hyperv — with columns for what they run, HA policy, host and guest counts, and what losing one host would do. The last column reads GUESTS RELOCATE, "its guests go down with it", or NOT SURVIVABLE.](../img/estate-3-clusters.png)
+![The clusters page listing two clusters. dev-hetzner runs proxmox with 2 hosts, 0 guests and GUESTS RELOCATE; prod-virt runs proxmox with 3 hosts, 15 guests and NOT SURVIVABLE. A note beside the heading says "At risk" means it cannot survive losing one host. Below, a form declares a cluster with fields for HA policy, hosts needed and CPU overcommit.](../img/estate-3-clusters.png)
 
 This is the one page whose values change **what a simulation concludes**, not
 just what a report shows.
@@ -148,27 +148,27 @@ guests to fit. Leave it blank and any single survivor is assumed to do, which is
 optimistic — and optimistic on purpose, because it is what an operator believes
 before checking, and therefore the belief worth testing against reality.
 
-The last column does the arithmetic for you, and the demo shows all three
-answers side by side. `dev-hetzner` has two hosts and no floor, so its guests
-**relocate**. `stg-vmware` has no HA at all, so its guests **go down with it** —
-the honest answer, not a failure. And `win-hyperv` has three hosts, needs three,
-and reads **not survivable**: HA is configured and cannot help.
+The last column does the arithmetic for you. `dev-hetzner` has two hosts and no
+floor, so its guests **relocate**. `prod-virt` has three hosts, needs three, and
+reads **not survivable**: HA is configured and cannot help. A cluster with no HA
+at all reads **its guests go down with it** — the honest answer rather than a
+failure, though the demo has none to show at the moment.
 
 That last one is the case worth understanding, because it looks identical to a
 healthy cluster on every other page in the software. The detail page says it in
 full:
 
-![The win-hyperv cluster page. A banner reads "Losing one host is not survivable — HA is configured and cannot help: 3 host(s) in the cluster and 3 needed to carry the guests." Below it, a table of the three hosts and a multi-select for setting the membership.](../img/estate-4-cluster-detail.png)
+![The prod-virt cluster page. A banner reads "Losing one host is not survivable — HA is configured and cannot help: 3 host(s) in the cluster and 3 needed to carry the guests. This looks identical to a healthy cluster on every other page." Below it, the three hosts with their guest counts, and a multi-select for replacing the membership.](../img/estate-4-cluster-detail.png)
 
 A host belongs to at most one cluster — two would make "where do its guests go"
 ambiguous — and the membership is replaced wholesale when you save it, with the
 change recorded against the cluster.
 
 **Retiring every host does not retire the cluster.** It keeps its row and shows
-with no members, as `dev-pve` does in the screenshot. That is deliberate rather
-than an oversight: the cluster is something a person declared, and only a person
-withdraws it. An empty one is worth seeing — it is either a migration nobody
-finished tidying up or a name about to be reused.
+with no members. That is deliberate rather than an oversight: the cluster is
+something a person declared, and only a person withdraws it. An empty one is
+worth seeing — it is either a migration nobody finished tidying up or a name
+about to be reused.
 
 ### How big it is, and who is standing on it
 

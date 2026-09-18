@@ -109,7 +109,7 @@ fragments:
       - "one cluster whose min_hosts equals its host count, so the 'not survivable' row is visible"
       - "one asset whose EOL date is inherited from its device type, so the source is shown"
       - "at least one journal entry exists — the seeded estate has NONE, so the notes capture is made by writing one on the local copy first (see REGENERATING.md)"
-    generated_at: 732c6b0af36c
+    generated_at: ecad4bc829e8
 
   - id: racks
     title: Racks — will it fit, will it hold, will it stay cool
