@@ -271,12 +271,23 @@ jobs:
           # inherit an identity set for one tag.
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # LOCAL ONLY. The push is a separate step AFTER the build has proven
+          # itself -- see "publish the tag" below. Creating and pushing here in
+          # one go is what left a stray v1.1.1 on the remote when the build
+          # failed: the tag has to exist for `git describe`, but it must not
+          # reach anybody until the thing it names is known to be good.
           git tag -a "$TAG" "$SHA" -m "invctl $VERSION"
-          git push origin "$TAG"
 
       - name: build
         env:
-          VERSION: ${{ needs.preflight.outputs.version }}
+          # NOT named VERSION. The Makefile has `VERSION ?= $(shell git describe
+          # --tags ...)`, and `?=` means an environment variable WINS -- so a
+          # VERSION here silently replaces git describe as the source of the
+          # version string. That is how this step first failed: the binary was
+          # stamped "1.1.1" from the environment rather than "v1.1.1" from the
+          # tag, the assertion below rejected it, and the ordering fix this
+          # guard exists to protect was never exercised at all.
+          RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
         run: |
           SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)"
           export SOURCE_DATE_EPOCH
@@ -295,8 +306,8 @@ jobs:
           # version string goes wrong -- a shallow clone, a Makefile change, a
           # tag that did not push -- fails here, before anything is published.
           BUILT="$(./bin/invctl -version | awk '{print $2}')"
-          if [ "$BUILT" != "v${VERSION}" ]; then
-            echo "::error::The binary reports $BUILT but this is the v${VERSION} release."
+          if [ "$BUILT" != "v${RELEASE_VERSION}" ]; then
+            echo "::error::The binary reports $BUILT but this is the v${RELEASE_VERSION} release."
             echo "::error::docs/INSTALL.md tells operators to run 'invctl -version' to confirm"
             echo "::error::what is running; shipping a binary that misnames itself breaks that."
             exit 1
@@ -305,6 +316,15 @@ jobs:
 
       # The name says what it is and what it runs on. Somebody downloading this
       # in six months has only the filename to go on.
+      # THE TAG REACHES THE REMOTE ONLY NOW, with a built and self-verified
+      # binary behind it. Everything above this line is undoable by deleting a
+      # workflow run; everything below it is visible to other people.
+      - name: publish the tag
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          TAG: ${{ needs.preflight.outputs.tag }}
+        run: git push origin "$TAG"
+
       - name: package
         env:
           VERSION: ${{ needs.preflight.outputs.version }}
