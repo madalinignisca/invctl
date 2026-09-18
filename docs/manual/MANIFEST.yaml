@@ -240,7 +240,7 @@ fragments:
       - "a power chain producing a false-redundancy finding AND one converging upstream as designed — the manual turns on the difference"
       - "an asset whose loss empties a VLAN or reduces a redundancy group"
       - "an asset whose loss changes NO service status but does change reachability (sw-core-1 in the seeded estate)"
-    generated_at: 8cc0d28bcf9d
+    generated_at: 9a4f3cc787e4
 
   - id: money
     title: Money — what it costs, and whose cost it is

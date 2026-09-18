@@ -65,7 +65,7 @@ safe one.
 
 ## What expires
 
-![The "What expires" page. Three counts at the top: 6 already expired, 13 within 12 months, 57 with no date recorded. A horizon selector offers 3, 6, 12, 24 and 60 months. The table lists 19 things with a date, soonest first, each with what rides on it and a state badge reading EXPIRED 14 MONTHS AGO or IN 5 DAYS.](../img/reports-1-expiry.png)
+![The "What expires" page. Three counts at the top: 6 already expired, 12 within 12 months, 62 with no date recorded. A horizon selector offers 3, 6, 12, 24 and 60 months. Below, "18 things with a date", soonest first and the already-past at the top: sw-core-1 and sw-core-2 expired 14 months ago, fw-edge-1 three months ago, and the vault.internal certificate 46 days ago with 3 deployments riding on it.](../img/reports-1-expiry.png)
 
 One list, ordered by date, of everything with a date: hardware support,
 certificates, service end-of-life, and circuit contract ends.
