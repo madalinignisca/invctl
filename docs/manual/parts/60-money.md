@@ -86,7 +86,7 @@ the old figure was *true then*: if it was, reprice; if it never was, correct it.
 The price-movement panel answers that for one thing. **Reports → Suppliers**
 answers it for the estate, by asking who invoiced each line.
 
-![The supplier report. A warning panel reads "What this ranking does not cover — 85 cost line(s) name no supplier, worth €11,197.67 a month." Below, a table headed "Worst first": Nordic IT Partner at €3,020.00 a month across 10 lines, 1 moved, 23% nominal and 21% real, tagged BEYOND INFLATION; then GlobalConnect, Nordvind Fiber, Telenor, Altibox, Hetzner Online and Scaleway, each reading "steady" with a dash for real.](../img/money-7-suppliers.png)
+![The supplier report. A warning panel reads "What this ranking does not cover — 89 cost line(s) name no supplier, worth €8,301.84 a month. They are not in the table below. A ranking over part of the book reads exactly like a ranking over all of it, so the part it misses is stated rather than left for somebody to discover."](../img/money-7-suppliers.png)
 
 Set the supplier on a cost line — the *"who invoices it"* picker, on any asset,
 service, project or circuit — and it appears here.

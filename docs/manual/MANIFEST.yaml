@@ -287,5 +287,5 @@ fragments:
       - "a project allocated above what it was priced for, so the commercial finding appears"
       - "one cost line repriced at least twice, with an inflation series covering those years, so nominal and real movement differ visibly"
       - "several cost lines attributed to suppliers AND several deliberately not, so the supplier report can show both a ranking and what it could not rank"
-    generated_at: 732c6b0af36c
+    generated_at: 8206acf78042
 
