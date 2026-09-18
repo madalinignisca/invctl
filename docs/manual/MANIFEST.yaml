@@ -40,6 +40,41 @@ fragments:
       - "no invctl.nav.* keys in localStorage before capturing: a persistent browser profile carries the previous run's expanded groups into the next, and a fresh reader sees everything collapsed"
     generated_at: c26fa18d302a
 
+  - id: services
+    title: Services, certificates and credentials
+    file: parts/70-services.md
+    pages:
+      - /services
+      - /certificates
+      - /identities
+      - /identities/{id}
+    screenshots:
+      - img/services-1-services.png
+      - img/services-2-certificates.png
+      - img/services-3-identities.png
+      - img/services-4-identity-detail.png
+      - img/services-5-rotation-recorded.png
+    depends_on:
+      - internal/domain/endpoint.go
+      - internal/store/identities.go
+      - internal/store/certificates.go
+      - internal/store/services.go
+      - internal/web/handlers/identities.go
+      - internal/web/handlers/certificates.go
+      - internal/web/handlers/services.go
+      - web/templates/pages/identity_list.html
+      - web/templates/pages/identity_detail.html
+      - web/templates/pages/certificate_list.html
+      - web/templates/pages/service_list.html
+    preconditions:
+      - "all four rotation states present at once: one with no policy, one with a policy and no recorded rotation, one inside its window, one overdue"
+      - "one identity whose secret_ref is recorded, so the path renders on the detail page with its caption"
+      - "one identity with at least one dependency authenticating through it, so 'What would notice' is not empty"
+      - "at least one expired certificate and one expiring inside 30 days"
+      - "one certificate covering several names (SANs), so 'covers' shows '+N more'"
+      - "the rotation capture is made by RECORDING one on the local copy: svc-sso is overdue in the seed, and the after shot needs it not to be"
+    generated_at: b1ca309c2449
+
   - id: installation
     title: Installing and running invctl
     file: parts/10-installation.md
