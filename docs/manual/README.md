@@ -14,8 +14,11 @@ for the people using it.
 | [Racks](parts/25-racks.md) | elevations, whether a box fits, load, airflow, cabling |
 | [Addressing](parts/30-addressing.md) | prefixes, reservations, VLANs, allocations |
 | [Network](parts/40-network.md) | topology, circuits, overlays, redundancy groups |
+| [Bundles, breakout cables and wireless](parts/42-cables.md) | cables that share a duct, one cable with several ends, SSIDs as broadcast domains |
+| [Services, certificates and credentials](parts/70-services.md) | what runs, what proves its identity, and what it authenticates as |
 | [Reports](parts/50-reports.md) | outage simulation, what expires, power findings, the change log |
 | [Money](parts/60-money.md) | what things cost, how big they are, who holds what share, and what that share costs |
+| [Settings](parts/80-settings.md) | users and roles, cost visibility, erasure, custom fields, vocabularies — **for administrators** |
 
 Screenshots are of the public demo at `https://invctl.madalin.me`: a small
 company that owns its production hardware in Oslo, rents a rack in a colo for
