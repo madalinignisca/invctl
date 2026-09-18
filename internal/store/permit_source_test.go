@@ -667,6 +667,13 @@ var storeWidePermitCallers = map[string]string{
 	"users.go SQLStore.UpsertLDAPUser": "the directory is the actor, not the person signing in: " +
 		"the row exists because LDAP said so, and there is no request permit to inherit -- " +
 		"the bind happens before any session exists",
+	"users.go SQLStore.UpsertOIDCUser": "the identity provider is the actor, not the person " +
+		"signing in, the same shape as UpsertLDAPUser just above: the row exists because " +
+		"Keycloak verified them, and there is no request permit to inherit -- the callback " +
+		"happens before any session exists",
+	"users.go SQLStore.updateOIDCUser": "the profile refresh on a repeat OIDC sign-in has the " +
+		"same unauthenticated-caller shape as UpsertOIDCUser's create branch -- it is called " +
+		"from inside UpsertOIDCUser itself, before any session exists",
 }
 
 // TestNoStoreMethodMintsAPermitWiderThanItsCaller closes the seam between the

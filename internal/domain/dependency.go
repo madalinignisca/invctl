@@ -501,16 +501,22 @@ type AppUser struct {
 	// role vocabulary and CanSeeCosts semantics belong to task 2/4, not here.
 	Role        string `db:"role"`
 	CanSeeCosts bool   `db:"can_see_costs"`
+	// Subject is the OIDC `sub` claim: an immutable identifier issued by the
+	// provider. NULL for local and LDAP accounts. Matching on it rather than
+	// on username is what stops a Keycloak account named `admin` inheriting
+	// this system's admin (docs/superpowers/specs/2026-09-18-keycloak-oidc-design.md D2).
+	Subject *string `db:"subject"`
 }
 
 // User sources.
 const (
 	UserSourceLocal = "local"
 	UserSourceLDAP  = "ldap"
+	UserSourceOIDC  = "oidc"
 )
 
 // UserSources is the Go side of the app_user.source CHECK constraint.
-var UserSources = []string{UserSourceLocal, UserSourceLDAP}
+var UserSources = []string{UserSourceLocal, UserSourceLDAP, UserSourceOIDC}
 
 // NewAppUser validates and constructs an account.
 func NewAppUser(id, username, source string, now time.Time) (*AppUser, error) {

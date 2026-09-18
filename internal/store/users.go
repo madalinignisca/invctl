@@ -108,11 +108,11 @@ func (s *SQLStore) CreateUser(ctx context.Context, p domain.Permit, u *domain.Ap
 		_, err := t.exec(ctx, `
 			INSERT INTO app_user (id, username, display_name, email, source,
 			                      password_hash, is_active, last_login_at, created_at,
-			                      role, can_see_costs)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			                      role, can_see_costs, subject)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			u.ID, u.Username, u.DisplayName, u.Email, u.Source,
 			u.PasswordHash, u.IsActive, u.LastLoginAt, u.CreatedAt,
-			u.Role, u.CanSeeCosts)
+			u.Role, u.CanSeeCosts, u.Subject)
 		if err != nil {
 			return translateWriteErr(err, "creating user")
 		}
@@ -178,4 +178,119 @@ func (s *SQLStore) TouchLogin(ctx context.Context, userID string) error {
 		return fmt.Errorf("recording login for %s: %w", userID, err)
 	}
 	return nil
+}
+
+// GetUserBySubject loads an account by its OIDC `sub` claim. Returns
+// domain.ErrNotFound if no account carries that subject -- the first sign-in
+// through a given Keycloak realm always takes this branch.
+func (s *SQLStore) GetUserBySubject(ctx context.Context, subject string) (*domain.AppUser, error) {
+	var u domain.AppUser
+	if err := s.readOne(ctx, &u, `SELECT * FROM app_user WHERE subject = ?`, subject); err != nil {
+		return nil, fmt.Errorf("getting user by subject: %w", err)
+	}
+	return &u, nil
+}
+
+// UpsertOIDCUser records an account after a successful Keycloak sign-in.
+//
+// MATCHING IS ON `subject` (the OIDC `sub` claim), NEVER ON USERNAME -- spec
+// D2. `sub` is immutable at the provider, so a person renamed in Keycloak
+// still resolves to the same app_user row; username is not, and trusting it
+// would let a Keycloak account merely named e.g. `admin` silently take over
+// an existing local or LDAP account of that name (spec D4) -- the entire
+// reason this function refuses instead of upserting-by-username the way
+// UpsertLDAPUser's directory-of-truth conflict does.
+//
+// A brand-new account is created as an observer with no projects and no
+// password hash (spec D1): Keycloak answers WHO signed in, never WHAT they
+// may do here -- an Administrator grants access afterwards.
+func (s *SQLStore) UpsertOIDCUser(ctx context.Context, subject, username, displayName, email string) (*domain.AppUser, error) {
+	existing, err := s.GetUserBySubject(ctx, subject)
+	switch {
+	case err == nil:
+		return s.updateOIDCUser(ctx, existing, username, displayName, email)
+
+	case errors.Is(err, domain.ErrNotFound):
+		// Expected: first sign-in for this subject.
+
+	default:
+		// A transient failure must not be mistaken for "no such subject", or
+		// the insert below turns a database blip into a phantom account.
+		return nil, fmt.Errorf("looking up oidc user by subject %q: %w", subject, err)
+	}
+
+	switch byUsername, err := s.GetUserByUsername(ctx, username); {
+	case err == nil:
+		// D4: a DIFFERENT account -- matched by subject failed above -- already
+		// holds this username. Refuse rather than merge identities; an
+		// Administrator has to resolve the collision by hand.
+		return nil, fmt.Errorf(
+			"recording oidc user %s: a %s account already owns that username: %w",
+			username, byUsername.Source, domain.ErrConflict)
+
+	case errors.Is(err, domain.ErrNotFound):
+		// Expected: nobody has that username either.
+
+	default:
+		return nil, fmt.Errorf("checking for a username collision for %s: %w", username, err)
+	}
+
+	u, err := domain.NewAppUser(NewID(), username, domain.UserSourceOIDC, s.now())
+	if err != nil {
+		return nil, err
+	}
+	u.Subject = &subject
+	if displayName != "" {
+		u.DisplayName = &displayName
+	}
+	if email != "" {
+		u.Email = &email
+	}
+	// Keycloak is the actor here, not the person signing in: the account row
+	// exists because the identity provider verified them, the same shape
+	// UpsertLDAPUser already uses for the directory.
+	if err := s.CreateUser(ctx, domain.AdministratorPermit(domain.Actor{ID: "oidc", Name: "oidc", Kind: "system"}), u); err != nil {
+		return nil, err
+	}
+	return u, nil
+}
+
+// updateOIDCUser refreshes the profile fields Keycloak may have changed since
+// the last sign-in. last_login_at is deliberately excluded from the audited
+// comparison, the same rule TouchLogin follows for the same reason: it is
+// observed telemetry (domain.ObservedColumns["app_user"]), and logging it on
+// every sign-in would bury the changes that matter under one change_log row
+// per login.
+func (s *SQLStore) updateOIDCUser(ctx context.Context, u *domain.AppUser, username, displayName, email string) (*domain.AppUser, error) {
+	before := *u
+	after := *u
+	after.Username = lower(username)
+	after.DisplayName = nil
+	if displayName != "" {
+		after.DisplayName = &displayName
+	}
+	after.Email = nil
+	if email != "" {
+		after.Email = &email
+	}
+	loginAt := domain.FormatTime(s.now())
+
+	err := s.write(ctx, domain.AdministratorPermit(domain.Actor{ID: "oidc", Name: "oidc", Kind: "system"}),
+		func(t *tx) error {
+			_, err := t.exec(ctx,
+				`UPDATE app_user SET username = ?, display_name = ?, email = ?, last_login_at = ?
+				 WHERE id = ?`,
+				after.Username, after.DisplayName, after.Email, loginAt, after.ID)
+			if err != nil {
+				return translateWriteErr(err, "updating oidc user")
+			}
+			auditBefore, auditAfter := before, after
+			auditBefore.LastLoginAt, auditAfter.LastLoginAt = nil, nil
+			return t.logUpdate(ctx, "app_user", after.ID, &auditBefore, &auditAfter)
+		})
+	if err != nil {
+		return nil, err
+	}
+	after.LastLoginAt = &loginAt
+	return &after, nil
 }

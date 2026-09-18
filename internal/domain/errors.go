@@ -303,6 +303,13 @@ var RedactedFields = map[string]bool{
 	// could ever carry a lead, and change_log records THAT it changed and never
 	// what to.
 	"psk_ref": true,
+	// The OIDC `sub` claim (migration 00072). Not a secret, but a second,
+	// external identity for the account -- change_log already carries the
+	// person via the opaque app_user.id in `actor`, and recording their
+	// provider-side subject too would put a second identifier for the same
+	// person into a trail that is kept forever
+	// (docs/superpowers/specs/2026-09-18-keycloak-oidc-design.md §4).
+	"subject": true,
 }
 
 // RedactedFieldsByEntity covers columns that are sensitive only on certain
