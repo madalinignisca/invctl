@@ -34,6 +34,26 @@ footnote.
 
 ---
 
+## [1.1.1] — 2026-09-18
+
+### Fixed
+
+- **The 1.1.0 binary reported the wrong version.** `invctl -version` on the
+  published 1.1.0 artefact answered `v1.0.0-380-g059ad0e` — a string that was
+  never released. The release workflow built the binary before creating the
+  tag, and the version is taken from `git describe --tags`, so it named itself
+  after the previous tag plus a commit count. It matters because
+  `docs/INSTALL.md` tells you to run `invctl -version` to confirm what is
+  actually running, and on 1.1.0 that answer was useless.
+
+  **Nothing else differs between 1.1.0 and 1.1.1** — same code, same schema,
+  same behaviour, same migrations. If you already installed 1.1.0 it is working
+  correctly and the only thing wrong is what it calls itself; replace the binary
+  at your convenience, no migration and no downtime beyond the restart.
+
+  The 1.1.0 release is left published rather than deleted, because deleting a
+  tag people may have fetched is worse than superseding it.
+
 ## [1.1.0] — 2026-09-17
 
 ### Action required
