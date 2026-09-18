@@ -137,7 +137,7 @@ fragments:
       - "two vertically adjacent boxes with opposing airflow"
       - "one box carrying 24 or more leads, and one declared cable length too short for its span"
       - "rack-a2 and colo-rack-07 in the seeded estate hold all of the above between them"
-    generated_at: 732c6b0af36c
+    generated_at: 923de209f4cc
 
   - id: addressing
     title: Addressing — prefixes, VLANs, allocations
