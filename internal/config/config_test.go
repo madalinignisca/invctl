@@ -41,6 +41,7 @@ func pristineEnv(t *testing.T) {
 		"INV_AGENT_TOKENS", "INV_AGENT_SCOPES", "INV_AGENT_VOCAB",
 		"INV_API_TOKENS", "INV_API_SCOPES",
 		"INV_POWER_TARIFF_MINOR_PER_KWH",
+		"INV_OIDC_ISSUER", "INV_OIDC_CLIENT_ID", "INV_OIDC_CLIENT_SECRET", "INV_OIDC_REDIRECT_URL",
 	} {
 		t.Setenv(key, "")
 	}
@@ -101,6 +102,119 @@ func TestSeedE2EProjectOwnerOptIn(t *testing.T) {
 	}
 	if !cfg.SeedE2EProjectOwner {
 		t.Error("INV_SEED_E2E_PROJECT_OWNER=true did not set SeedE2EProjectOwner")
+	}
+}
+
+// testOIDCEnv is the minimum set of variables that makes AuthOIDC true and
+// passes validate() -- every test below starts from it and breaks exactly
+// one thing, the same shape TestValidationRefusesToStart already uses for
+// LDAP.
+func testOIDCEnv(t *testing.T) {
+	t.Helper()
+	t.Setenv("INV_ADMIN_USERS", "gabriel")
+	t.Setenv("INV_OIDC_ISSUER", "https://keycloak.example.com/realms/corp")
+	t.Setenv("INV_OIDC_CLIENT_ID", "invctl")
+	t.Setenv("INV_OIDC_REDIRECT_URL", "https://invctl.example.com/auth/oidc/callback")
+}
+
+func TestOIDCIssuerEnablesOIDC(t *testing.T) {
+	pristineEnv(t)
+	testOIDCEnv(t)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.AuthOIDC {
+		t.Error("INV_OIDC_ISSUER is set, but AuthOIDC is false")
+	}
+	if cfg.OIDC.Issuer != "https://keycloak.example.com/realms/corp" {
+		t.Errorf("OIDC.Issuer = %q, not carried through from the environment", cfg.OIDC.Issuer)
+	}
+	if cfg.OIDC.ClientID != "invctl" {
+		t.Errorf("OIDC.ClientID = %q, want invctl", cfg.OIDC.ClientID)
+	}
+}
+
+func TestOIDCRequiresClientIDAndRedirectURL(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		unset   string
+		wantErr string
+	}{
+		{"missing client id", "INV_OIDC_CLIENT_ID", "INV_OIDC_CLIENT_ID"},
+		{"missing redirect url", "INV_OIDC_REDIRECT_URL", "INV_OIDC_REDIRECT_URL"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pristineEnv(t)
+			testOIDCEnv(t)
+			t.Setenv(tc.unset, "")
+
+			_, err := Load()
+			if err == nil {
+				t.Fatalf("Load succeeded with %s unset, want an error mentioning %q", tc.unset, tc.wantErr)
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Errorf("error = %q, want it to mention %q", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+// TestConfiguringOIDCTurnsLocalAuthOff is spec D3, the behaviour change that
+// matters most in this task: with OIDC configured and INV_AUTH_LOCAL unset,
+// AuthLocal must be false. Getting this backwards means every account
+// carrying a password hash bypasses Keycloak, and with it Keycloak's MFA,
+// entirely -- silently, because the login page still has a password field.
+func TestConfiguringOIDCTurnsLocalAuthOff(t *testing.T) {
+	pristineEnv(t)
+	testOIDCEnv(t)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.AuthLocal {
+		t.Fatal("AuthLocal is true with OIDC configured and INV_AUTH_LOCAL left unset. " +
+			"This is spec D3: local login must default OFF once Keycloak is configured, " +
+			"or a local password bypasses Keycloak's MFA entirely")
+	}
+}
+
+// TestLocalAuthCanBeForcedBackOnForRecovery is the other half of D3: an
+// operator who can reach the host and set an environment variable can always
+// recover, which is the documented break-glass path in docs/RECOVERY.md.
+func TestLocalAuthCanBeForcedBackOnForRecovery(t *testing.T) {
+	pristineEnv(t)
+	testOIDCEnv(t)
+	t.Setenv("INV_AUTH_LOCAL", "true")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.AuthLocal {
+		t.Fatal("INV_AUTH_LOCAL=true did not win over the OIDC default. An explicit setting " +
+			"must always win -- it is the only recovery path once local auth has been turned off")
+	}
+}
+
+// TestAtLeastOneAuthenticatorIsRequired extends the existing rule
+// (TestValidationRefusesToStart's "no authenticator enabled" case) to name
+// OIDC explicitly: a deployment with local, LDAP AND OIDC all disabled must
+// still be refused at startup, not discovered at the login page.
+func TestAtLeastOneAuthenticatorIsRequired(t *testing.T) {
+	pristineEnv(t)
+	t.Setenv("INV_ADMIN_USERS", "gabriel")
+	t.Setenv("INV_AUTH_LOCAL", "false")
+	t.Setenv("INV_AUTH_LDAP", "false")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("Load succeeded with local, LDAP and OIDC authentication all disabled")
+	}
+	if !strings.Contains(err.Error(), "at least one of") {
+		t.Errorf("error = %q, want it to mention \"at least one of\"", err)
 	}
 }
 

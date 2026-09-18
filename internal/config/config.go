@@ -121,8 +121,16 @@ type Config struct {
 
 	AuthLocal bool
 	AuthLDAP  bool
+	// AuthOIDC is true whenever INV_OIDC_ISSUER is set. There is no separate
+	// INV_AUTH_OIDC toggle -- an issuer with no consumer would be a
+	// half-configured deployment either way, so the issuer's presence IS the
+	// toggle, the same way LDAP's URL implies its own enablement nowhere but
+	// here it is spelled out as its own field because AuthLocal's default
+	// depends on it (see the flip below Load's struct literal).
+	AuthOIDC bool
 
 	LDAP LDAPConfig
+	OIDC OIDCConfig
 
 	// SeedOnStart loads the demo estate when the database is empty. Intended
 	// for the demo and for development, off by default.
@@ -200,6 +208,19 @@ func (l LDAPConfig) Encrypted() bool {
 	return l.StartTLS || strings.HasPrefix(strings.ToLower(strings.TrimSpace(l.URL)), "ldaps://")
 }
 
+// OIDCConfig is the four settings a Keycloak (or any OIDC) client needs.
+//
+// This mirrors auth.OIDCConfig field-for-field rather than reusing it: the
+// auth package already imports this one (LDAPConfig and AgentCredential
+// travel the other way, into internal/auth/ldap.go and agent.go), so
+// internal/config importing internal/auth back would be a dependency cycle.
+// main.go, which is downstream of both, converts one struct to the other
+// with a plain type conversion -- legal because the field names, order and
+// (absent) tags are identical -- when it builds the provider.
+type OIDCConfig struct {
+	Issuer, ClientID, ClientSecret, RedirectURL string
+}
+
 // Load reads configuration from the environment and validates it.
 func Load() (*Config, error) {
 	// Collected rather than returned inline so an operator with two typos
@@ -233,6 +254,36 @@ func Load() (*Config, error) {
 			StartTLS:       envBool("INV_LDAP_STARTTLS", false, &badBools),
 			SkipVerify:     envBool("INV_LDAP_SKIP_VERIFY", false, &badBools),
 		},
+		OIDC: OIDCConfig{
+			Issuer:       os.Getenv("INV_OIDC_ISSUER"),
+			ClientID:     os.Getenv("INV_OIDC_CLIENT_ID"),
+			ClientSecret: os.Getenv("INV_OIDC_CLIENT_SECRET"),
+			RedirectURL:  os.Getenv("INV_OIDC_REDIRECT_URL"),
+		},
+	}
+	// The issuer's presence IS the toggle -- see AuthOIDC's own comment.
+	cfg.AuthOIDC = cfg.OIDC.Issuer != ""
+
+	// INV_AUTH_LOCAL defaults to FALSE once OIDC is configured -- the inverse
+	// of its default without OIDC, and deliberately (spec D3). Leaving the
+	// password form reachable would let any account carrying a hash skip
+	// Keycloak, and with it Keycloak's MFA, entirely; the goal of this whole
+	// feature is MFA enforced at the IdP, and an always-available password
+	// path quietly makes that untrue for every local account, not just one.
+	//
+	// Reading the raw environment variable rather than trusting envBool's
+	// parsed AuthLocal is the only way to tell "the operator wants local
+	// auth back on" from "nobody said anything" once both produce the same
+	// bool -- envBool's fallback for an unset INV_AUTH_LOCAL is already
+	// `true`, so by this point AuthLocal is `true` whether the operator set
+	// it or not. INV_AUTH_LOCAL=true set explicitly must still win: that is
+	// the documented break-glass recovery path (docs/RECOVERY.md) -- if you
+	// can reach the host and set an environment variable, you can recover;
+	// if you cannot, you cannot bypass MFA either. An explicit
+	// INV_AUTH_LOCAL=false changes nothing here since AuthLocal is already
+	// false in that case.
+	if cfg.AuthOIDC && os.Getenv("INV_AUTH_LOCAL") == "" {
+		cfg.AuthLocal = false
 	}
 
 	if len(badBools) > 0 {
@@ -289,8 +340,9 @@ func (c *Config) validate() error {
 	if c.DBDSN == "" {
 		return errors.New("validating config: INV_DB_DSN is required")
 	}
-	if !c.AuthLocal && !c.AuthLDAP {
-		return errors.New("validating config: at least one of INV_AUTH_LOCAL or INV_AUTH_LDAP must be enabled")
+	if !c.AuthLocal && !c.AuthLDAP && !c.AuthOIDC {
+		return errors.New("validating config: at least one of INV_AUTH_LOCAL, INV_AUTH_LDAP or " +
+			"INV_OIDC_ISSUER must be enabled")
 	}
 	if c.AuthLDAP {
 		if c.LDAP.URL == "" {
@@ -332,6 +384,26 @@ func (c *Config) validate() error {
 				"answer %q could present its own certificate and collect operator passwords. "+
 				"Add the directory's CA to the host trust store instead", c.LDAP.URL)
 		}
+	}
+	if c.AuthOIDC {
+		// ClientSecret is deliberately not required here -- OIDCConfig's own
+		// comment and spec §5 note a public client is viable because PKCE is
+		// always sent (internal/auth/oidc.go's AuthCodeURL). Issuer is
+		// already known to be non-empty; it is what makes AuthOIDC true.
+		if c.OIDC.ClientID == "" {
+			return errors.New("validating config: INV_OIDC_CLIENT_ID is required when INV_OIDC_ISSUER is set")
+		}
+		if c.OIDC.RedirectURL == "" {
+			return errors.New("validating config: INV_OIDC_REDIRECT_URL is required when INV_OIDC_ISSUER is set")
+		}
+		// Discovery itself -- the network call against c.OIDC.Issuer -- does
+		// NOT happen here. This function only checks the settings an
+		// operator typed; validate() must stay a pure, offline check the way
+		// every other rule in it is, so config_test.go's suite can exercise
+		// every refusal without a test issuer running. The startup refusal
+		// spec §3 promises ("a bad issuer refuses the start and names the
+		// setting") is main.go's job: it calls auth.NewOIDCProvider right
+		// after Load succeeds and before the server starts serving.
 	}
 	if c.PowerTariffHundredthsMinorPerKWh < 0 {
 		return fmt.Errorf("validating config: INV_POWER_TARIFF_MINOR_PER_KWH is %s; "+
