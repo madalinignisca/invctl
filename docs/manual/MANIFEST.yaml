@@ -105,6 +105,38 @@ fragments:
       - "at least one SSID with radios and one carrying a VLAN, so both columns are exercised"
     generated_at: 9242f03b438c
 
+  - id: settings
+    title: Settings — people, fields and vocabularies
+    file: parts/80-settings.md
+    pages:
+      - /users
+      - /custom-fields
+      - /tags
+      - /vocabularies
+      - /inflation
+    screenshots:
+      - img/settings-1-users.png
+      - img/settings-2-custom-fields.png
+    # Only two captures for five pages, deliberately. Users and custom fields
+    # are where a reader can do something irreversible or confusing; tags,
+    # vocabularies and inflation are single-purpose list-and-add pages whose
+    # screenshots would show a table this fragment already describes in a
+    # sentence. An image per page is not the rule -- an image where it teaches
+    # something is.
+    depends_on:
+      - internal/auth/auth.go
+      - internal/domain/role.go
+      - internal/store/users.go
+      - internal/store/customfields.go
+      - internal/web/handlers/users.go
+      - internal/web/handlers/customfields.go
+      - web/templates/pages/user_list.html
+      - web/templates/pages/custom_field_list.html
+    preconditions:
+      - "at least one custom field with values recorded and one with an unassigned or retired owning team, so the ownership consequence is visible"
+      - "the users page reachable as an Administrator — it is the one page an observer cannot usefully be shown"
+    generated_at: dc1641ef82e6
+
   - id: installation
     title: Installing and running invctl
     file: parts/10-installation.md
