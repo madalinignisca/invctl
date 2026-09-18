@@ -57,7 +57,7 @@ fragments:
       - internal/version/version.go
     preconditions:
       - "none: nothing here is read off a running instance"
-    generated_at: 7ba77afbb08a
+    generated_at: a43859a408d0
 
   - id: directory
     title: Directory authentication — LDAP and Active Directory

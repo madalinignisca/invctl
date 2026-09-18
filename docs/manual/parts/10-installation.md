@@ -17,7 +17,7 @@ run in segmented networks with no outbound access.
 Download the release, verify it, put it somewhere sensible.
 
 ```bash
-VERSION=0.1.0
+VERSION=1.1.1
 BASE=https://github.com/madalinignisca/invctl/releases/download/v${VERSION}
 
 curl -fLO ${BASE}/invctl_${VERSION}_linux_amd64
@@ -197,7 +197,7 @@ sudo -u invctl sqlite3 /var/lib/invctl/invctl.db \
 #    CHANGELOG.md, "Action required" first.
 
 # 3. Replace the binary.
-sudo install -m 0755 invctl_0.2.0_linux_amd64 /usr/local/bin/invctl
+sudo install -m 0755 invctl_1.1.1_linux_amd64 /usr/local/bin/invctl
 
 # 4. Restart. Migrations run here.
 sudo systemctl restart invctl
@@ -221,10 +221,41 @@ What to expect:
 - **Downtime is a restart**, a few seconds, unless a migration has to rewrite a
   large table — the changelog says so when that is true.
 - **Sessions survive** if `INV_SESSION_KEY` is set, and do not if it is not.
-- **Read `Action required` before every upgrade.** While the version is `0.x`, a
-  minor bump may change behaviour. That is what `0.x` means.
+- **Read `Action required` before every upgrade.** A minor bump may still need
+  a one-off command from you — see below.
+
+**From 1.0 onward the database schema, the URLs and the `INV_*` variables are
+stable.** Fields may be added to `/api/v1` and never removed or renamed, and a
+consumer must tolerate fields it does not recognise. Anything that would break
+those becomes 2.0, or `/api/v2` alongside v1. That is a promise the test suite
+enforces rather than one this page makes.
 
 Skipping versions is fine: migrations are cumulative and run in order.
+
+### A release can need a command as well as a restart
+
+Migrations fix the schema. They cannot fix rows that are already correct for
+the old behaviour and wrong for the new one — and that failure is invisible,
+because the page still loads and the data is still there.
+
+1.1.0 is the worked example. Credential references became searchable, but only
+ones written by the new code index themselves; identities declared before the
+upgrade had a row and no search document, and nothing a later write would do
+could reach them. Searching for a credential you can see on `/identities`
+returned nothing, which looks exactly like the feature still being broken.
+
+```bash
+invctl -reindex-identities
+```
+
+It writes a search document for every identity, live and retired, reports the
+count and exits. Safe to repeat — the write is an upsert. It touches no
+declared state and writes no `change_log` row, because rebuilding an index
+table changes no fact about your estate.
+
+**This is why `Action required` is the first section of the changelog** rather
+than a footnote: the commands there are the ones with no symptom if you skip
+them.
 
 ## Backups
 
