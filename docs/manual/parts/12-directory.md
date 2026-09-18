@@ -154,26 +154,48 @@ nothing for the person signing in to choose.
 
 ## Who can change anything
 
-`INV_ADMIN_USERS`, and nothing else, in this release.
+**Signing in and being allowed to write are two different questions, and your
+directory only answers the first.** LDAP decides who you are. invctl decides
+what you may do, from its own records, and never consults a directory group.
 
 ```bash
 INV_ADMIN_USERS=agrindheim,jlarsen
 ```
 
-Membership grants write access to everything; everyone else who can sign in gets
-read-only access to the same pages. Directory groups are **not** consulted, so
-adding somebody to an AD group changes nothing here — you have to edit this
-variable and restart.
+`INV_ADMIN_USERS` names **Administrators** — estate-wide write, and the only
+people who can grant roles to anybody else. It is read at startup, so adding a
+name means editing configuration and restarting.
 
-That is a deliberate limit of an early release rather than an oversight. The
-check lives behind one function so that group-derived roles can arrive later
-without touching the handlers, but today the list is the whole model. Two
-consequences worth planning around:
+It is no longer the whole model. Every account also carries a **role**, set on
+`/users`:
 
-- The variable is part of your configuration management, not of your directory.
-  Somebody leaving the company loses **sign-in** immediately, which is the half
-  that matters; their name lingers in this list until it is tidied.
-- There is no per-site or per-team restriction. Write access is estate-wide.
+| | |
+|---|---|
+| **Administrator** | writes anything, sees every cost, manages users |
+| **Project owner** | writes the assets, services and circuits belonging to projects they own — and nothing outside them |
+| **Observer** | reads everything, writes nothing |
+
+**A project owner can write.** If you read one sentence here, read that one:
+granting the role is not a way of giving somebody a slightly better read-only
+account. Scope comes from project membership, so an owner with no projects can
+change nothing at all, and an owner of one project cannot touch the rest of the
+estate.
+
+Seeing money is a **separate grant** again (`can_see_costs` on `/users`), not
+implied by any role except Administrator. A project owner who may change a
+cost line must also be allowed to read one — otherwise they could write a price
+they cannot see, which is its own leak.
+
+`docs/ROLES.md` is the full account, including what a project owner is
+deliberately refused and why. Two consequences of the directory boundary are
+worth planning around regardless:
+
+- **A leaver loses sign-in immediately**, which is the half that matters,
+  because authentication is the directory's job. Their invctl account and its
+  role linger until somebody tidies them.
+- **Adding somebody to an AD group changes nothing here.** Group-derived roles
+  do not exist; a role is granted in invctl, by an Administrator, and recorded
+  in the change log like any other decision.
 
 ## Checking it works
 
@@ -181,9 +203,12 @@ consequences worth planning around:
    start and says which setting.
 2. Sign in as a directory user. On success `source=ldap` appears against the
    new account.
-3. Confirm read-only is real: a user **not** in `INV_ADMIN_USERS` should see the
-   rail's footer say `read only`, and every edit control should be absent rather
-   than present-and-failing.
+3. Confirm read-only is real: a **new** directory user — not in
+   `INV_ADMIN_USERS`, and not yet granted a role — should see the rail's footer
+   say `read only`, and every edit control should be absent rather than
+   present-and-failing. Absent from `INV_ADMIN_USERS` is no longer the same
+   statement as read-only, so check the footer rather than inferring it from
+   the variable.
 4. Sign in as a local account too, so you know that route still works before you
    need it.
 

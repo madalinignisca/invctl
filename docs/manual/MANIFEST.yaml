@@ -71,7 +71,7 @@ fragments:
       - internal/config/config.go
     preconditions:
       - "none: the worked examples are configuration, not estate data"
-    generated_at: 567556aee363
+    generated_at: 16211b036d72
 
   - id: estate
     title: The estate — assets, catalogue, power, clusters
