@@ -209,7 +209,7 @@ fragments:
       - "one circuit with a contract end inside the expiry horizon"
       - "one overlay with fewer than two terminations"
       - "one circuit that IS a connectivity edge (both ends on ports, in two different forwarder groups) and one that is not — the manual documents both verdicts"
-    generated_at: 732c6b0af36c
+    generated_at: 3add51d58e25
 
   - id: reports
     title: Reports — what expires, power, impact

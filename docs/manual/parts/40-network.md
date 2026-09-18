@@ -37,7 +37,7 @@ by a group does not live on one box.
 
 ## Circuits
 
-![The circuits page. Four circuits — AB-FTTH-99312, TN-4471182, GC-88-21104 and DF-OSLO-BGO-01 — with provider, service type, commit, contract end and an "ends recorded" column reading BOTH or an amber "0 OF 2". Below, a table of the four providers with account references.](../img/network-1-circuits.png)
+![The circuits page. Two circuits: TN-DEMO-1 from Demo Telecom, a 1000 Mb DIA ending 2026-11-16 with an amber "1 of 2" in the ends-recorded column, and DF-OSLO-BGO-01 from Nordvind Fiber, a 10000 Mb dark fibre ending 2028-02-16 reading "both". Each has a Cease control. Below, five providers with their account references and circuit counts.](../img/network-1-circuits.png)
 
 The estate already records the *port* a handoff lands on. A circuit is the other
 half: who sells it, what was committed, what it costs a month, and **when the
@@ -107,7 +107,7 @@ says so itself rather than letting a quiet result be read as reassurance.
 
 ## Overlays
 
-![The overlays page. Two overlays carried by vxlan: dr-replication with identifier 10040 tagged UNATTACHED in red, and prod-stretch with identifier 10030 showing "2 attachments".](../img/network-3-overlays.png)
+![The overlays page. One overlay, site-stretch, carried by vxlan with identifier 10030, whose terminations column reads "one end" — a stretch declared between two places that has only been attached at one of them.](../img/network-3-overlays.png)
 
 A VLAN is a broadcast domain on one fabric. An overlay carries one *across* a
 fabric — VXLAN over an IP underlay, VPLS over MPLS. It matters because every
