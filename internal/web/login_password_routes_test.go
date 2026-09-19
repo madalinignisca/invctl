@@ -18,13 +18,20 @@ import (
 // The login page must offer every password route that POST /login can
 // actually authenticate, and no others.
 //
-// These are one property tested three ways, because the property is an
-// agreement between two files that have no compile-time link: the template
-// gates the form on ShowPassword, and cmd/invctl/main.go's buildAuthenticator
-// decides independently which authenticators POST /login chains. When
-// ShowPassword was AuthLocal alone, they disagreed in both directions at once
-// -- an LDAP-only deployment rendered no way in at all, and an OIDC+LDAP
-// deployment hid a form whose handler still worked.
+// THIS FILE TESTS ONE HALF OF THE PROPERTY, and the half it does not test is
+// the one that matters more. What renders here is the template's view;
+// whether POST /login can authenticate anybody at all is decided by
+// buildAuthenticator in cmd/invctl/main.go, which this package cannot reach.
+// Chain the local authenticator unconditionally and every case below stays
+// green while spec D3's actual property is gone.
+//
+// cmd/invctl/auth_wiring_test.go is the other half, and it asserts the
+// agreement itself using the same expression this one does. Neither test is
+// sufficient alone; changing one policy without the other fails that one.
+//
+// When ShowPassword was AuthLocal alone the two disagreed in both directions
+// at once -- an LDAP-only deployment rendered no way in at all, and an
+// OIDC+LDAP deployment hid a form whose handler still worked.
 func TestLoginPageOffersExactlyThePasswordRoutesThatWork(t *testing.T) {
 	const passwordField = `name="password"`
 

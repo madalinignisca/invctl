@@ -642,7 +642,11 @@ func newSessionManager(db *store.DB, cfg *config.Config) (*scs.SessionManager, e
 }
 
 // buildAuthenticator assembles the configured authenticators into a chain.
-func buildAuthenticator(st *store.SQLStore, cfg *config.Config) (auth.Authenticator, error) {
+// Returns the concrete *auth.Chain rather than the auth.Authenticator
+// interface so a test can ask what it actually chained -- see
+// auth_wiring_test.go, which pins this function against the login page's idea
+// of the same policy.
+func buildAuthenticator(st *store.SQLStore, cfg *config.Config) (*auth.Chain, error) {
 	var authenticators []auth.Authenticator
 	if cfg.AuthLocal {
 		authenticators = append(authenticators, auth.NewLocalAuthenticator(st))
