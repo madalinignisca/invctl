@@ -137,6 +137,12 @@ func Routes(app *handlers.App, static fs.FS, authz *auth.Authorizer, agents *Age
 	mux.HandleFunc("GET /login", app.LoginForm)
 	mux.HandleFunc("POST /login", app.Login)
 	mux.HandleFunc("POST /logout", app.Logout)
+	// Keycloak sign-in (spec §3). Both public GETs, neither behind CSRF:
+	// `state`, generated and checked entirely inside OIDCStart/OIDCCallback,
+	// is this flow's own CSRF defence -- a redirect back from an external
+	// IdP cannot carry this application's own CSRF token.
+	mux.HandleFunc("GET /auth/oidc", app.OIDCStart)
+	mux.HandleFunc("GET /auth/oidc/callback", app.OIDCCallback)
 
 	// Authenticated reads.
 	read := func(pattern string, h http.HandlerFunc) {

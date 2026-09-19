@@ -99,6 +99,18 @@ var dialAllowlist = map[string]map[string]string{
 	"internal/auth/ldap.go": {
 		"ldap.DialURL": "simple bind against INV_LDAP_URL: invctl's own directory, not an inventoried host",
 	},
+	// The OIDC issuer. The SECOND outbound destination in this codebase, and it
+	// is here for the same reason LDAP's entry is: authentication is the one
+	// thing that genuinely has to ask somebody else. Discovery and JWKS fetch
+	// are the only calls; no token is relayed and nothing is fetched per
+	// request. http.Client appears here rather than a request-shaped symbol
+	// because oidc.NewProvider and oauth2.Config.Exchange take a *http.Client
+	// through the request context (oidc.ClientContext) instead of a bare
+	// http.Get -- the capability being granted is the same one LDAP's dial is,
+	// carried a different way by a library this codebase does not control.
+	"internal/auth/oidc.go": {
+		"http.Client": "discovery, JWKS fetch and the authorization-code exchange against INV_OIDC_ISSUER: invctl's own identity provider, not an inventoried host",
+	},
 }
 
 // TestNothingReachesOutOfThisProcess is the structural half of CLAUDE.md's

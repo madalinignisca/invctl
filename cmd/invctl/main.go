@@ -193,6 +193,10 @@ func run() error {
 		return err
 	}
 
+	// After ensureAdmin, so a fresh local install does not warn about the
+	// account it is about to create.
+	warnAboutRecoverability(ctx, st, cfg)
+
 	// After ensureAdmin, because an override is declared state and needs a real
 	// operator to attribute it to. Best-effort: a demo without an override is
 	// still a demo, and refusing to start over presentation data would be
@@ -249,6 +253,11 @@ func run() error {
 		return err
 	}
 
+	oidcProvider, err := buildOIDCProvider(ctx, cfg)
+	if err != nil {
+		return err
+	}
+
 	renderer, err := render.New(webassets.FS, *devMode, cfg.Currency)
 	if err != nil {
 		return err
@@ -265,6 +274,7 @@ func run() error {
 		Auth:     authenticator,
 		Authz:    auth.NewAuthorizer(cfg.AdminUsers, st),
 		Config:   cfg,
+		OIDC:     oidcProvider,
 	}
 
 	// One recorder, shared between the webhook and the flusher below. Two
@@ -636,7 +646,11 @@ func newSessionManager(db *store.DB, cfg *config.Config) (*scs.SessionManager, e
 }
 
 // buildAuthenticator assembles the configured authenticators into a chain.
-func buildAuthenticator(st *store.SQLStore, cfg *config.Config) (auth.Authenticator, error) {
+// Returns the concrete *auth.Chain rather than the auth.Authenticator
+// interface so a test can ask what it actually chained -- see
+// auth_wiring_test.go, which pins this function against the login page's idea
+// of the same policy.
+func buildAuthenticator(st *store.SQLStore, cfg *config.Config) (*auth.Chain, error) {
 	var authenticators []auth.Authenticator
 	if cfg.AuthLocal {
 		authenticators = append(authenticators, auth.NewLocalAuthenticator(st))
@@ -646,9 +660,102 @@ func buildAuthenticator(st *store.SQLStore, cfg *config.Config) (auth.Authentica
 		slog.Info("ldap authentication enabled", "url", cfg.LDAP.URL)
 	}
 	if len(authenticators) == 0 {
+		if cfg.AuthOIDC {
+			// Keycloak is the only authenticator configured. It is not an
+			// auth.Authenticator (internal/auth/oidc.go's package comment,
+			// spec §1) -- POST /login has nothing to chain to. The route
+			// still exists (the password form is hidden by the template,
+			// not removed from the mux), so this must refuse cleanly rather
+			// than leave Auth nil for a handler to dereference: an empty
+			// Chain's Authenticate always returns ErrInvalidCredentials.
+			return auth.NewChain(st), nil
+		}
 		return nil, errors.New("building authenticator: none enabled")
 	}
 	return auth.NewChain(st, authenticators...), nil
+}
+
+// buildOIDCProvider performs discovery against the configured issuer and
+// returns nil, nil when OIDC is not configured -- the zero-value case
+// App.OIDC's own comment expects. Discovery is a network call, so it runs
+// here, at startup, right after configuration is loaded and validated: a
+// bad issuer refuses the start and names the setting, matching how a bad
+// LDAP configuration already behaves (spec §3).
+func buildOIDCProvider(ctx context.Context, cfg *config.Config) (*auth.OIDCProvider, error) {
+	if !cfg.AuthOIDC {
+		return nil, nil
+	}
+	// A plain conversion between two structurally identical types --
+	// config.OIDCConfig exists only to avoid the import cycle explained on
+	// its own comment; this is the one place both types are in scope.
+	provider, err := auth.NewOIDCProvider(ctx, auth.OIDCConfig(cfg.OIDC))
+	if err != nil {
+		return nil, fmt.Errorf("configuring oidc: %w", err)
+	}
+	slog.Info("oidc authentication enabled", "issuer", cfg.OIDC.Issuer)
+	return provider, nil
+}
+
+// warnAboutRecoverability prints what an operator cannot see from their own
+// configuration: whether they could still get in if Keycloak were down, and
+// whether anybody can grant a role.
+//
+// WARNS, NEVER REFUSES. A legitimate fresh OIDC-only install has zero
+// password accounts and zero administrators by definition -- that is the
+// correct state five minutes before the first person signs in, so refusing to
+// start would make the normal path the broken one. It prints on every restart
+// until acted on, which is the point: the failure it describes is invisible
+// until the morning it is not.
+//
+// This is the reminder, not a second way in. A CLI subcommand to mint or
+// reset a local account was the obvious alternative and was rejected: it
+// needs host access, the same prerequisite as setting INV_AUTH_LOCAL=true, so
+// it removes no barrier -- while adding a privileged write path into app_user
+// that bypasses the tx.log seam where actor and entity are both visible. A
+// permanent audit hole bought to fix a problem whose real cause is that
+// nobody was reminded.
+//
+// Best-effort: a failed count must not stop the server. The database is
+// already known to be reachable by this point, so an error here is worth
+// saying out loud and nothing more.
+func warnAboutRecoverability(ctx context.Context, st *store.SQLStore, cfg *config.Config) {
+	if !cfg.AuthOIDC {
+		return
+	}
+
+	if !cfg.AuthLocal && !cfg.AuthLDAP {
+		passwordAccounts, err := st.CountActivePasswordAccounts(ctx)
+		if err != nil {
+			slog.Warn("could not check whether a break-glass account exists", "error", err)
+		} else if passwordAccounts == 0 {
+			slog.Warn("no break-glass account: if the identity provider is unreachable, "+
+				"nobody can sign in. Switching INV_AUTH_LOCAL=true during an outage will "+
+				"NOT help -- accounts created through SSO have no password. Create a local "+
+				"account on /users now, while sign-in still works",
+				"remedy", "docs/RECOVERY.md part two")
+		}
+	}
+
+	admins, err := st.CountActiveAdministrators(ctx)
+	if err != nil {
+		slog.Warn("could not check whether an administrator exists", "error", err)
+		return
+	}
+	switch {
+	case admins == 0 && len(cfg.AdminUsers) == 0:
+		slog.Warn("nobody can grant a role: there is no active administrator and " +
+			"INV_ADMIN_USERS is empty. Everyone arriving through the identity provider " +
+			"becomes an observer, including the first person. Set INV_ADMIN_USERS to a " +
+			"Keycloak preferred_username and restart")
+	case admins > 0 && len(cfg.AdminUsers) > 0:
+		// Not a fault -- but INV_ADMIN_USERS is break-glass, and on an OIDC
+		// deployment it is a privileged string matched against a claim from a
+		// system invctl does not control. Once the role column can answer the
+		// question, the variable is risk with no remaining job.
+		slog.Info("INV_ADMIN_USERS is set and an administrator exists by role; "+
+			"the override is no longer needed and can be removed",
+			"active_administrators", admins)
+	}
 }
 
 // ensureAdmin seeds the first account so a fresh database is usable.

@@ -34,6 +34,76 @@ footnote.
 
 ---
 
+## [1.2.0] — 2026-09-19
+
+### Added
+
+- **Single sign-on through Keycloak, or any OpenID Connect provider.** Set
+  `INV_OIDC_ISSUER`, `INV_OIDC_CLIENT_ID`, `INV_OIDC_CLIENT_SECRET` and
+  `INV_OIDC_REDIRECT_URL` and the login page grows a sign-on button.
+  Authorization code flow with PKCE; the identity token's signature, issuer,
+  audience and nonce are all verified before a session starts. Setting the
+  issuer is the toggle — there is no `INV_AUTH_OIDC`, because an issuer nobody
+  consumes is a setting that looks enabled and is not.
+
+  **The reason to want it is MFA.** invctl has no second factor and is not
+  getting one: a second factor belongs to whoever holds the credential, and
+  with SSO that is Keycloak.
+
+  **Check what your realm enforces before relying on it.** Keycloak's stock
+  browser flow makes OTP conditional on the user having enrolled, so an
+  unenrolled account signs in with a password alone — adding an OTP step is
+  not the same as requiring one. invctl verifies the token's signature,
+  issuer, audience, expiry and nonce; it does **not** verify that a second
+  factor was used, and a token cannot be assumed to say. The manual's
+  directory fragment covers how to make enrolment unavoidable and how to
+  confirm it with an unenrolled test user.
+
+  Accounts are created on first sign-in as **observers with no projects**, and
+  matched on the provider's immutable subject rather than on the username — so
+  renaming somebody in Keycloak keeps their account, role and audit history
+  attached to them. A sign-in whose username is already held by a different
+  account is refused rather than merged.
+
+  invctl keeps **no token**: the code is exchanged, the identity token is
+  verified, and what survives is an ordinary session cookie. Nothing is
+  refreshed, and the IdP is not consulted again until the next sign-in.
+
+  **`INV_AUTH_LOCAL` defaults to `false` once an issuer is set** — the inverse
+  of its default everywhere else, so that a password form is not left answering
+  beside the MFA you just deployed. This changes nothing for an existing
+  deployment, which is why it is not filed under **Action required**: the flip
+  happens only when you set an issuer, and nobody has one before this release.
+
+  **Decide your break-glass account while you set this up, not afterwards.**
+  With local sign-in off, an identity provider outage locks everybody out, and
+  switching `INV_AUTH_LOCAL=true` during the incident produces a password form
+  that no account can use — accounts created through SSO have no password, and
+  invctl seeds an administrator only into a completely empty user table. A
+  local account created in advance is the way back in. `docs/RECOVERY.md` part
+  two is the procedure, and it is new in this release.
+
+  On a **fresh** OIDC-only install there is no seeded administrator at all, for
+  the same reason: set `INV_ADMIN_USERS` to a Keycloak `preferred_username` as
+  part of the first deployment. It is recoverable afterwards — set the variable
+  to somebody who has signed in and restart — but you will be discovering that
+  at the moment you needed to write something.
+
+- **The login page now shows a password form whenever a password
+  authenticator is enabled**, rather than only when `INV_AUTH_LOCAL` is. An
+  LDAP-only deployment (`INV_AUTH_LOCAL=false INV_AUTH_LDAP=true`) previously
+  rendered neither a form nor a sign-on button, which was a lockout with a
+  working back end. The same line hid the form on an OIDC deployment that had
+  deliberately kept LDAP on, while `POST /login` went on binding against it —
+  hiding a control is not closing it. `INV_AUTH_LDAP` remains off by default,
+  and an LDAP bind beside an issuer is as much an MFA bypass as a local
+  password; the page now says so by showing it.
+
+- Migration `00072` adds a `subject` column to `app_user`, widens its `source`
+  check to admit `oidc`, and indexes the subject. It is additive: it runs on
+  upgrade, changes no existing row, and a deployment that never sets an issuer
+  will not notice it.
+
 ## [1.1.1] — 2026-09-18
 
 ### Fixed

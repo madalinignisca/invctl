@@ -13,13 +13,28 @@ consequences. It never changes anything on your estate.
 
 ![The sign-in page: a centred card with Username and Password fields and a Sign in button, on an otherwise empty page.](../img/getting-started-1-login.png)
 
-Two kinds of account exist. A **local** account has a password stored as an
+Three kinds of account exist. A **local** account has a password stored as an
 argon2id hash. An **LDAP** account is checked against your directory on each
-sign-in and has no password here at all.
+sign-in and has no password here at all. An **OIDC** account is one your
+identity provider vouched for — Keycloak or similar — and it has no password
+here either.
 
-Whether you can change anything is decided by one list: usernames in
-`INV_ADMIN_USERS` may write, and everyone else has read-only access to the same
-pages. The rail's footer shows which you have.
+The screenshot above is a local-and-LDAP deployment. Where single sign-on is
+configured the card carries a sign-on button instead, and usually **no password
+fields at all**: `INV_AUTH_LOCAL` turns itself off when an issuer is set, so
+that the provider's MFA is the only way in. See
+[Directory authentication](12-directory.md).
+
+Whether you can change anything is a **separate question from who you are**,
+and it is not decided by how you signed in. Every account carries a role —
+Administrator, project owner, or observer — granted in invctl on `/users`.
+`INV_ADMIN_USERS` still exists beside that as a break-glass override read from
+configuration at startup, which is what makes it work when the role column is
+what went wrong (`docs/RECOVERY.md`).
+
+The rail's footer tells you what you have. Read it rather than inferring from
+whether your name is in a variable — a project owner writes plenty and is named
+in no list at all.
 
 ## The overview
 

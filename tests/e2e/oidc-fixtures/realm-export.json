@@ -1,0 +1,52 @@
+{
+  "realm": "e2e",
+  "enabled": true,
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "clients": [
+    {
+      "clientId": "invctl-e2e",
+      "name": "invctl (E2E)",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": [
+        "http://localhost:18088/auth/oidc/callback"
+      ],
+      "webOrigins": [
+        "http://localhost:18088"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256"
+      },
+      "defaultClientScopes": [
+        "web-origins",
+        "acr",
+        "profile",
+        "email",
+        "roles"
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "e2e-user",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "E2E",
+      "lastName": "User",
+      "email": "e2e-user@example.invalid",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "e2e-password",
+          "temporary": false
+        }
+      ]
+    }
+  ]
+}

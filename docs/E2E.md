@@ -296,6 +296,17 @@ come back to these two files and remove the `test.fail()` calls.
   asset that holds it; entirely absent (not merely unselected) on one that
   doesn't. Does not submit the form -- see above.
 
+- **`oidc-sign-in.spec.js`** -- one round trip through a real Keycloak:
+  sign in via the provider and land authenticated, then sign out and confirm a
+  protected page sends you back to `/login`. Asserts the password form is
+  **absent** from `/login` before clicking through, which is the MFA boundary
+  (spec D3) rather than a cosmetic check — a password form still answering
+  beside the provider is a route around the MFA the provider enforces.
+  Deliberately asserts nothing about Keycloak's own session: invctl's session
+  is its own, and single sign-out is a separate protocol this does not
+  implement. Runs against its own throwaway pair of servers — see the section
+  above, it does not use `INV_E2E_BASE_URL` the way the others do.
+
 - **`smoke.spec.js`** -- every main section (overview, assets, an asset's
   detail/impact/neighbourhood pages, services, changes, custom fields) loads
   with no console errors, no failed or 4xx/5xx requests, and no request to
@@ -346,6 +357,78 @@ come back to these two files and remove the `test.fail()` calls.
   `INV_E2E_DISPOSABLE` opt-in or hostname denylist. Needs
   `INV_SEED_COMPANY=true` for the "commerce" team and the
   "sso.example.com" certificate fixtures.
+
+## `oidc-sign-in.spec.js` runs differently from everything else
+
+Every other spec points `INV_E2E_BASE_URL` at one seeded instance and lets
+`global-setup.js` sign in once with the demo password. The OIDC spec cannot
+use that, and the reason is the feature itself: an instance with
+`INV_OIDC_ISSUER` set has `INV_AUTH_LOCAL` off by default (spec D3), so there
+is no password form for `global-setup.js` to fill.
+
+It therefore needs **two throwaway servers of its own**: a Keycloak with the
+realm fixture imported, and an invctl pointed at it on a dedicated port.
+
+```bash
+# 1. Keycloak, with tests/e2e/oidc-fixtures/realm-export.json imported
+docker compose --profile oidc-e2e up -d --wait keycloak
+
+# 2. A throwaway invctl on the exact host:port the realm expects
+INV_DB_DRIVER=sqlite \
+INV_DB_DSN='file:/tmp/oidc-e2e.db?_txlock=immediate' \
+INV_LISTEN=localhost:18088 \
+INV_SEED=true INV_SECURE_COOKIES=false \
+INV_OIDC_ISSUER=http://localhost:18089/realms/e2e \
+INV_OIDC_CLIENT_ID=invctl-e2e \
+INV_OIDC_REDIRECT_URL=http://localhost:18088/auth/oidc/callback \
+./bin/invctl
+
+# 3. The spec
+cd tests/e2e && INV_E2E_BASE_URL=http://localhost:18088 \
+  INV_E2E_OIDC_ONLY=true npx playwright test specs/oidc-sign-in.spec.js
+```
+
+Three things bite, and all three fail in ways that look like something else:
+
+- **`localhost`, never `127.0.0.1`.** Keycloak treats them as different
+  origins for its redirect-URI check, and the invctl session cookie set on one
+  is not sent back on the other. The symptom is indistinguishable from a
+  genuine redirect-URL misconfiguration.
+- **`INV_E2E_OIDC_ONLY=true` is required**, and it is an explicit opt-in rather
+  than a silent fallback — it tells `global-setup.js` not to attempt the
+  password login. This suite's rule is that a step never skips itself because
+  an element was missing; it skips only on a declared precondition, and this is
+  one.
+- **The realm fixture hardcodes `localhost:18088`.** A redirect URI has to
+  match byte for byte, so it is pinned rather than parameterised. Changing the
+  port means editing `realm-export.json` and the run command together.
+
+**Tear down by naming the service.** `docker compose down` takes the whole
+project with it, including the `postgres` service that `make test` and other
+work rely on:
+
+```bash
+docker compose --profile oidc-e2e down keycloak
+```
+
+### Proving this one can fail
+
+A green OIDC E2E that would also pass against a broken redirect configuration
+is testing nothing, because a redirect-URI mismatch is the single most common
+way this feature is misconfigured in the wild. The check, run when the spec
+landed:
+
+Change `redirectUris` in the realm fixture to something else, force-recreate
+the Keycloak container so the change actually reimports, and rerun against an
+unchanged invctl. Both tests must fail **waiting on Keycloak's `#username`
+field**, because the browser lands on Keycloak's own error page — *"We are
+sorry… Invalid parameter: redirect_uri"* — rather than on its login form. Then
+restore the fixture, force-recreate Keycloak again (fresh signing keys mean
+invctl needs a fresh discovery, so restart it too) and confirm both go green.
+
+Failing at the Keycloak page rather than at an invctl assertion is the whole
+point: it proves the spec is exercising the agreement between two separately
+configured servers, which is the one thing no unit test in this repo can see.
 
 ## Adding a spec
 

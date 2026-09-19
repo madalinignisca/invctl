@@ -210,6 +210,14 @@ the password is then in your journal, and in your journal's backups.
 After signing in, read `docs/ROLES.md` and give people real roles. The
 seeded account exists to bootstrap the first real one.
 
+**None of this happens on an OIDC-only deployment.** Seeding is skipped
+entirely when local sign-in is off, and local sign-in is off by default once
+`INV_OIDC_ISSUER` is set — so no administrator is ever created, and everybody
+arriving through the identity provider lands as an observer who cannot grant a
+role to anybody. Set `INV_ADMIN_USERS` to a Keycloak `preferred_username` as
+part of that first deployment. `docs/RECOVERY.md` part two covers this and the
+break-glass account you should create alongside it.
+
 ## Sessions
 
 **`INV_SESSION_KEY` is generated when unset**, and invctl logs a warning
@@ -225,8 +233,9 @@ openssl rand -base64 32
 
 ## Authentication
 
-**At least one of `INV_AUTH_LOCAL` or `INV_AUTH_LDAP` must be enabled** —
-invctl refuses to start with neither, rather than starting with no way in.
+**At least one of `INV_AUTH_LOCAL`, `INV_AUTH_LDAP` or `INV_OIDC_ISSUER` must
+be enabled** — invctl refuses to start with none of them, rather than starting
+with no way in.
 
 Local accounts are the default. For LDAP:
 
@@ -245,6 +254,64 @@ and for what that costs you when somebody changes job.
 `INV_LDAP_SKIP_VERIFY` exists for a lab and **invctl refuses to start with it
 set** in any configuration it considers real, because accepting any
 certificate hands every operator's password to whoever is in the middle.
+
+### Single sign-on (Keycloak, or any OIDC provider)
+
+```
+INV_OIDC_ISSUER=https://sso.example.com/realms/example
+INV_OIDC_CLIENT_ID=invctl
+INV_OIDC_CLIENT_SECRET=<the client secret Keycloak generated>
+INV_OIDC_REDIRECT_URL=https://invctl.example.com/auth/oidc/callback
+```
+
+**Setting the issuer is what turns it on.** There is no `INV_AUTH_OIDC`
+toggle, because an issuer nobody consumes is a setting that looks enabled and
+is not.
+
+`INV_AUTH_LDAP` is off by default and should stay off here: an LDAP simple
+bind is a username and a password with no second factor, so it is the same
+bypass a local account is. Set it to `true` alongside an issuer only if you
+mean to keep that route, and the login page will then show the password form
+rather than hiding a route that still works.
+
+**`INV_ADMIN_USERS` is matched against the `preferred_username` claim.**
+Whoever controls usernames in your realm therefore controls who can hold
+Administrator here, including by renaming an existing account onto the name in
+that variable. Keycloak's defaults keep username assignment with realm
+administrators; keep it that way.
+
+**`INV_AUTH_LOCAL` defaults to `false` once an issuer is set** — the inverse of
+its default everywhere else, and the one surprise in this section. The point of
+putting sign-in behind an identity provider is that the provider's MFA and
+password policy are the only way in; a password form still answering beside it
+is a way around the thing you just deployed. Set `INV_AUTH_LOCAL=true`
+explicitly to keep both, and read `docs/RECOVERY.md` first — it is the escape
+hatch for the morning the IdP is down, and it is worth deciding about before
+you need it rather than during.
+
+The redirect URL must match the client's registered redirect URI in Keycloak
+**exactly** — scheme, host, port and path. A mismatch is refused by Keycloak,
+on Keycloak's own error page, before the browser ever comes back here; that is
+the failure to expect and it is not an invctl error however much it looks like
+one.
+
+Discovery runs at startup, not at first sign-in: invctl fetches the issuer's
+`.well-known/openid-configuration` while starting, so an unreachable or
+misspelled issuer **refuses the start and names the setting** rather than
+answering 500 to the first person who tries to sign in on Monday.
+
+An account is created on first successful sign-in as an **observer with no
+projects** — able to read, able to change nothing — and roles are granted in
+invctl afterwards, on `/users`. Accounts are matched on the provider's
+immutable subject rather than on the username, so renaming somebody in Keycloak
+keeps their invctl account, their role and their audit history attached to them.
+A sign-in whose username is already held by a *different* account is refused
+rather than merged.
+
+**invctl keeps no token.** The authorization code is exchanged, the identity
+token is verified, and what survives is an ordinary invctl session cookie. It
+holds no access token, refreshes nothing, and calls the IdP again only at the
+next sign-in.
 
 ## Optional surfaces, both off until you configure them
 
@@ -295,7 +362,10 @@ invctl validates its configuration before binding and says which variable is
 wrong. The ones that stop it: no authenticator enabled, `INV_LDAP_SKIP_VERIFY`
 set, a token under 24 characters, a duplicate credential id, a token shared
 between two credentials, and a boolean variable set to something that is not
-a boolean.
+a boolean. `INV_OIDC_ISSUER` set without `INV_OIDC_CLIENT_ID` or
+`INV_OIDC_REDIRECT_URL` stops it too, as does an issuer whose discovery
+document cannot be fetched — that last one is a network failure reported at
+startup rather than a typo.
 
 ## Three failures that look like something else
 

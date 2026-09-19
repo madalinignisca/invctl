@@ -81,15 +81,23 @@ whatever manages your services is the only place settings live.
 | `INV_SESSION_TIMEOUT` | `12h` | idle timeout |
 | `INV_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` |
 | `INV_CURRENCY` | `EUR` | display only; it does no conversion |
-| `INV_AUTH_LOCAL` | `true` | local accounts with argon2id hashes |
+| `INV_AUTH_LOCAL` | `true`, but `false` once `INV_OIDC_ISSUER` is set | local accounts with argon2id hashes |
 | `INV_AUTH_LDAP` | `false` | see [Directory authentication](12-directory.md) |
+| `INV_OIDC_ISSUER` | — | setting it enables single sign-on and turns `INV_AUTH_LOCAL` off; see [Directory authentication](12-directory.md) |
 | `INV_ADMIN_USERNAME` | `admin` | the seeded first account |
 | `INV_ADMIN_PASSWORD` | — | its password; a random one is generated and logged once if unset |
 | `INV_API_TOKENS` | — | `id:token` pairs, comma separated. Unset means the read-only inventory API (`/api/v1`, `docs/API.md`) is not mounted at all — every route answers 404 |
 | `INV_API_SCOPES` | — | required once `INV_API_TOKENS` is set: maps each id to the pipe-separated environment codes that credential may read. No wildcard — a credential naming no environment sees nothing |
 
-At least one of `INV_AUTH_LOCAL` and `INV_AUTH_LDAP` must be on. The server
-refuses to start with both off, rather than starting and accepting nobody.
+At least one of `INV_AUTH_LOCAL`, `INV_AUTH_LDAP` and `INV_OIDC_ISSUER` must be
+on. The server refuses to start with all three off, rather than starting and
+accepting nobody.
+
+Note the one default that inverts: setting `INV_OIDC_ISSUER` turns
+`INV_AUTH_LOCAL` **off** unless you set it explicitly, so that a password form
+is not left answering beside the identity provider's MFA. That makes an IdP
+outage a total lockout — `docs/RECOVERY.md` part two is the account to create
+before it happens.
 
 `INV_API_TOKENS` and `INV_API_SCOPES` are for machine readers only — Ansible's
 dynamic inventory, or a metrics system resolving a label back to a name. They
@@ -284,7 +292,9 @@ The startup log says why. It is structured and the first few lines carry it.
 | Symptom | Cause |
 |---|---|
 | `INV_DB_DRIVER must be sqlite or postgres` | typo, or an empty variable that the unit file did not pass through |
-| `at least one of INV_AUTH_LOCAL or INV_AUTH_LDAP must be enabled` | both were turned off |
+| `at least one of INV_AUTH_LOCAL, INV_AUTH_LDAP or INV_OIDC_ISSUER must be enabled` | all three were turned off |
+| `INV_OIDC_CLIENT_ID is required when INV_OIDC_ISSUER is set` | an issuer with no client to present |
+| `configuring oidc: ...` at startup | discovery could not fetch the issuer's `.well-known/openid-configuration` — wrong URL, or the IdP is unreachable from this host |
 | `INV_LDAP_BIND_DN must contain %s for the username` | the template has no substitution point |
 | Sign-in appears to succeed, then returns to the login page | `INV_SECURE_COOKIES=true` without TLS in front |
 | Sign-in returns 400 | the proxy stripped `Origin` and `Referer` |

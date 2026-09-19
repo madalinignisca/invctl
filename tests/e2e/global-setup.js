@@ -22,6 +22,21 @@
 // tests that quietly skip themselves because the thing they needed never
 // showed up. See CLAUDE.md: "the page didn't load so I skipped" is exactly
 // the shape of bug this suite exists to not reproduce.
+//
+// SECOND EXPLICIT OPT-OUT: INV_E2E_OIDC_ONLY=true. tests/e2e/specs/
+// oidc-sign-in.spec.js runs against a throwaway instance where OIDC is
+// configured and INV_AUTH_LOCAL therefore defaults to false (spec D3) -- by
+// design there is no password form to fill in at all. That is a second,
+// narrower, EXPLICITLY DECLARED precondition (CLAUDE.md's testing policy:
+// "a runtime skip is legitimate only on ... an env-var opt-in"), not a
+// silent "the field wasn't there so let's carry on": without this flag set,
+// a genuinely missing password form still fails the run below exactly as it
+// always has. With it set, this function does nothing further -- no
+// storageState is written, and the OIDC spec never reads one, because it
+// drives its own sign-in through Keycloak in each test (matching
+// login-and-version.spec.js's own clean-context pattern for the same
+// reason: a pre-authenticated session would skip past the form the test
+// exists to exercise).
 import { chromium } from '@playwright/test';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
@@ -32,6 +47,9 @@ const authStatePath = path.join(here, 'auth-state.json');
 export default async function globalSetup() {
   const baseURL = process.env.INV_E2E_BASE_URL;
   if (!baseURL) {
+    return;
+  }
+  if (process.env.INV_E2E_OIDC_ONLY === 'true') {
     return;
   }
 

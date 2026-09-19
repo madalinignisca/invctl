@@ -157,6 +157,22 @@ INV_LDAP_STARTTLS=false
 `docker compose --profile ldap up -d` starts a directory with two test users
 (`nikolaj` / `ldappass1`, `ingrid` / `ldappass2`) for exercising that path.
 
+Single sign-on through Keycloak, or any OIDC provider:
+
+```bash
+INV_OIDC_ISSUER=https://sso.example.com/realms/example
+INV_OIDC_CLIENT_ID=invctl
+INV_OIDC_CLIENT_SECRET=<from Keycloak>
+INV_OIDC_REDIRECT_URL=https://invctl.example.com/auth/oidc/callback
+```
+
+Setting the issuer is the toggle, and it turns `INV_AUTH_LOCAL` **off** — the
+point of putting sign-in behind an identity provider is that its MFA is the
+only way in, not one of two. That makes an IdP outage a lockout, so read
+`docs/RECOVERY.md` part two and create the break-glass account before you need
+it. Accounts arrive as observers and are matched on the provider's immutable
+subject, so a rename in Keycloak keeps the person's role and audit history.
+
 A custom field's value is folded into the audit trail as a plain change
 counter, not as text — which field, how many times it has changed, never the
 value itself. There is no key involved and nothing to configure; see
@@ -164,7 +180,9 @@ value itself. There is no key involved and nothing to configure; see
 
 If no account exists on first run, one is created. Without
 `INV_ADMIN_PASSWORD` a random password is generated and logged once — there is
-no default password.
+no default password. None of that happens on an OIDC-only deployment: seeding
+is skipped when local sign-in is off, so `INV_ADMIN_USERS` has to name a
+Keycloak username or the install has no administrator at all.
 
 If every account ever loses write access — the last Administrator was
 demoted, deactivated, or never handed off — `docs/RECOVERY.md` is the

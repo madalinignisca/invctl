@@ -37,6 +37,13 @@ type App struct {
 	Auth     auth.Authenticator
 	Authz    *auth.Authorizer
 	Config   *config.Config
+	// OIDC is nil unless Config.AuthOIDC is set. It is not an
+	// auth.Authenticator (see internal/auth/oidc.go's package comment) --
+	// OIDCStart and OIDCCallback call it directly rather than through Auth.
+	// Both handlers refuse with a server error if this is nil, which should
+	// only ever happen if a route were reachable without config.AuthOIDC
+	// being true; main.go only sets this field when that config is true.
+	OIDC *auth.OIDCProvider
 	// Agents is the configured credential list, used to show a credential that
 	// has never checked in. Without it the reporters panel is built purely from
 	// rows that exist, so a collector provisioned and never deployed -- or one

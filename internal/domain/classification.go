@@ -130,7 +130,7 @@ var ObservedColumns = map[string][]string{
 // whether a row is authoritative, which is why rule 7 governs them separately:
 // no machine may assert that a fact was hand-declared.
 //
-// app_user.source is deliberately absent. Its vocabulary is local|ldap -- which
+// app_user.source is deliberately absent. Its vocabulary is local|ldap|oidc -- which
 // authentication backend owns the account -- and shares no value with the
 // declared/discovered_* provenance vocabulary, so rule 7 has nothing to say
 // about it. It is a property of the account, and declared.
@@ -157,6 +157,14 @@ var DeclaredColumns = map[string][]string{
 		// FALSE; see the migration for why that direction, not the reverse,
 		// is the safe one.
 		"role", "can_see_costs",
+		// The OIDC `sub` claim (migration 00072). Declared: a person's
+		// identity at the provider, recorded because they signed in through
+		// it -- not observed about the estate, and not a claim about where a
+		// fact came from (see ProvenanceColumns' note on app_user.source
+		// just above this map). Never enters change_log: the actor column
+		// already holds the opaque app_user.id, and sub is a second identity
+		// that has no business in the audit trail.
+		"subject",
 	},
 	"asset": {
 		"id", "kind", "name", "parent_id", "serial", "asset_tag", "vendor",

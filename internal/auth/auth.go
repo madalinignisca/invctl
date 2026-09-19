@@ -115,6 +115,24 @@ func NewChain(users UserStore, authenticators ...Authenticator) *Chain {
 // Name identifies the chain.
 func (c *Chain) Name() string { return "chain" }
 
+// Authenticators names what this chain will actually try, in order.
+//
+// It exists for one test. Which authenticators get chained (buildAuthenticator
+// in cmd/invctl/main.go) and whether the login page renders a password form
+// (App.passwordLoginEnabled) are ONE policy written in two files, with no
+// compile-time link between them. When they drifted apart, an LDAP-only
+// deployment rendered no way to sign in while POST /login worked perfectly,
+// and an OIDC deployment hid a form whose handler still bound against LDAP.
+// Nothing could observe the disagreement from outside the package, so nothing
+// did.
+func (c *Chain) Authenticators() []string {
+	names := make([]string, 0, len(c.authenticators))
+	for _, a := range c.authenticators {
+		names = append(names, a.Name())
+	}
+	return names
+}
+
 // Authenticate tries each configured authenticator in turn.
 //
 // A non-credential error (LDAP unreachable, database down) stops the chain

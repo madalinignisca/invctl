@@ -56,6 +56,33 @@ func (s *SQLStore) CountActiveAdministrators(ctx context.Context) (int, error) {
 	return int(n), nil
 }
 
+// CountActivePasswordAccounts reports how many accounts could still sign in
+// if the identity provider were unreachable.
+//
+// That is the whole question behind the break-glass advice in
+// docs/RECOVERY.md part two, and it is the one an operator cannot answer by
+// looking at configuration: with OIDC configured and local sign-in off, an
+// IdP outage locks everybody out, and switching local sign-in back on only
+// helps if an account with a password already exists. Accounts created
+// through OIDC and LDAP carry no hash at all, so on a deployment that has
+// only ever used SSO the answer is zero and nothing says so until the
+// morning it matters.
+//
+// Counts the hash, not the source: what matters is whether the local
+// authenticator could match this row (see auth.LocalAuthenticator, which
+// requires an active local account with a non-NULL hash), not how the row was
+// first created.
+func (s *SQLStore) CountActivePasswordAccounts(ctx context.Context) (int, error) {
+	n, err := s.countOne(ctx,
+		`SELECT COUNT(*) FROM app_user
+		  WHERE is_active = TRUE AND source = ? AND password_hash IS NOT NULL`,
+		domain.UserSourceLocal)
+	if err != nil {
+		return 0, fmt.Errorf("counting active password accounts: %w", err)
+	}
+	return int(n), nil
+}
+
 // getUser loads a row inside the write transaction. Never s.read/s.readOne:
 // the reader pool is a separate connection and cannot see this transaction's
 // view of the table, which matters for exactly one caller here --
@@ -289,10 +316,25 @@ func (s *SQLStore) ScrubUser(ctx context.Context, p domain.Permit, id string) er
 			}
 		}
 		scrubbedName := scrubbedUsername(id)
+		// subject = NULL IS PART OF THE ERASURE, NOT TIDYING UP.
+		//
+		// Local and LDAP accounts are matched on USERNAME, and the line above
+		// randomises it -- so a scrubbed person who signs in again cannot land
+		// on their old row and simply gets a fresh account. OIDC is matched on
+		// `subject` instead (spec D2), which is exactly what makes it survive a
+		// rename in Keycloak. Left behind, it survives an erasure too:
+		// GetUserBySubject finds the scrubbed row on the next sign-in ATTEMPT
+		// and updateOIDCUser writes the name and email straight back from the
+		// fresh claims -- an erasure reversed by the erased person merely
+		// trying to log in, and audited while it happens.
+		//
+		// The unique index is partial (`WHERE subject IS NOT NULL`, migration
+		// 00072) precisely so every scrubbed row can hold NULL here.
+		// TestScrubbingAnOIDCUserSurvivesTheirNextSignIn is the guard.
 		if _, err := t.exec(ctx,
 			`UPDATE app_user
 			 SET username = ?, display_name = NULL, email = NULL,
-			     password_hash = NULL, is_active = FALSE
+			     password_hash = NULL, is_active = FALSE, subject = NULL
 			 WHERE id = ?`,
 			scrubbedName, id); err != nil {
 			return translateWriteErr(err, "scrubbing user "+id)
@@ -328,6 +370,7 @@ func (s *SQLStore) ScrubUser(ctx context.Context, p domain.Permit, id string) er
 		after.Email = nil
 		after.PasswordHash = nil
 		after.IsActive = false
+		after.Subject = nil
 		return t.logUpdate(ctx, "app_user", id, before, &after)
 	})
 }
