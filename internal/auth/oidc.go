@@ -114,7 +114,16 @@ func NewOIDCProvider(ctx context.Context, cfg OIDCConfig) (*OIDCProvider, error)
 // parameter, so there is no case where skipping it is the better trade.
 func (p *OIDCProvider) AuthCodeURL(state, nonce, verifier string) string {
 	return p.oauth2Config.AuthCodeURL(state,
+		// Sends the SHA-256 hash of the verifier, not the verifier. The
+		// verifier itself is held back and travels once, later, straight to
+		// the token endpoint in Exchange -- which is the whole mechanism:
+		// whoever intercepts this URL learns the hash and still cannot redeem
+		// the code.
 		oauth2.S256ChallengeOption(verifier),
+		// SENDS the nonce; it does not check one. Keycloak echoes it into the
+		// `nonce` claim of the ID token it mints, and Exchange compares that
+		// claim against this same value. Both halves are needed and they are
+		// in different functions, so: written here, verified there.
 		oidc.Nonce(nonce))
 }
 
@@ -134,6 +143,10 @@ func (p *OIDCProvider) AuthCodeURL(state, nonce, verifier string) string {
 func (p *OIDCProvider) Exchange(ctx context.Context, code, verifier, nonce string) (*OIDCClaims, error) {
 	ctx = oidc.ClientContext(ctx, p.httpClient)
 
+	// VerifierOption sends the PKCE verifier to the token endpoint. Keycloak
+	// hashes it and compares against the challenge it was given in
+	// AuthCodeURL; a mismatch means whoever is redeeming this code is not who
+	// started the flow, and the code is refused there rather than here.
 	token, err := p.oauth2Config.Exchange(ctx, code, oauth2.VerifierOption(verifier))
 	if err != nil {
 		// This is the token endpoint call. A rejected code (wrong PKCE
@@ -205,6 +218,24 @@ func (p *OIDCProvider) Exchange(ctx context.Context, code, verifier, nonce strin
 		// but it is a shape problem worth telling the operator about, not a
 		// credential failure to blame on the user.
 		return nil, fmt.Errorf("decoding oidc claims: %w", err)
+	}
+
+	// An empty preferred_username is refused for the same reason an empty
+	// subject is, one step further out: UpsertOIDCUser has to write SOMETHING
+	// to app_user.username. Without this, a realm that lost its username
+	// mapper (or a client that lost the `profile` scope) writes `username=''`
+	// over an existing row on every sign-in -- after which Authenticate reads
+	// the session as anonymous and the account cannot be reached at all,
+	// while a second such user collides on the UNIQUE index.
+	//
+	// It is a realm misconfiguration rather than a bad credential, but it is
+	// refused the same way and for the same reason the subject check is: the
+	// alternative is persisting corruption driven from the IdP side. The log
+	// line is what tells the operator which of the two it was.
+	if strings.TrimSpace(extra.PreferredUsername) == "" {
+		LogSecurityEvent(ctx, slog.LevelWarn, EventSignInFailed,
+			"authenticator", "oidc", "reason", "empty preferred_username claim")
+		return nil, ErrInvalidCredentials
 	}
 
 	return &OIDCClaims{

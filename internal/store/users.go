@@ -216,7 +216,14 @@ func (s *SQLStore) UpsertOIDCUser(ctx context.Context, subject, username, displa
 	default:
 		// A transient failure must not be mistaken for "no such subject", or
 		// the insert below turns a database blip into a phantom account.
-		return nil, fmt.Errorf("looking up oidc user by subject %q: %w", subject, err)
+		// The subject is deliberately NOT in this message. It is the one
+		// identifier that resolves to a named person at the provider, and
+		// an error string ends up in the server log, which is a different
+		// retention story from change_log (where TestUpsertOIDCUserNeverLogs\
+		// TheSubject already keeps it out). The failure this reports is a
+		// database failure; knowing WHICH subject was being looked up adds
+		// nothing to diagnosing it.
+		return nil, fmt.Errorf("looking up an oidc user by subject: %w", err)
 	}
 
 	switch byUsername, err := s.GetUserByUsername(ctx, username); {
@@ -264,7 +271,11 @@ func (s *SQLStore) UpsertOIDCUser(ctx context.Context, subject, username, displa
 func (s *SQLStore) updateOIDCUser(ctx context.Context, u *domain.AppUser, username, displayName, email string) (*domain.AppUser, error) {
 	before := *u
 	after := *u
-	after.Username = lower(username)
+	// domain.NormalizeUsername, NOT the store's ASCII-only lower(): this
+	// value comes from an IdP claim and has to end up spelled the same way
+	// the create path spells it, or a rename could write a variant that the
+	// UNIQUE index treats as a different name from the one lookups build.
+	after.Username = domain.NormalizeUsername(username)
 	after.DisplayName = nil
 	if displayName != "" {
 		after.DisplayName = &displayName

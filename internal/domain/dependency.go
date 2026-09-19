@@ -518,10 +518,21 @@ const (
 // UserSources is the Go side of the app_user.source CHECK constraint.
 var UserSources = []string{UserSourceLocal, UserSourceLDAP, UserSourceOIDC}
 
+// NormalizeUsername is the ONE spelling of a username this system stores.
+//
+// Every path that writes app_user.username must go through it, or two paths
+// disagree about whether " Alice" and "alice" are the same person -- and the
+// UNIQUE index then enforces one answer while the lookups use the other. The
+// OIDC update path was normalising with an ASCII-only helper and no trim
+// while the create path used this rule, which is exactly that disagreement.
+func NormalizeUsername(s string) string {
+	return strings.ToLower(strings.TrimSpace(s))
+}
+
 // NewAppUser validates and constructs an account.
 func NewAppUser(id, username, source string, now time.Time) (*AppUser, error) {
 	ve := &ValidationError{}
-	username = strings.ToLower(checkRequired(ve, "username", username))
+	username = NormalizeUsername(checkRequired(ve, "username", username))
 	checkEnum(ve, "source", source, UserSources)
 	if err := ve.OrNil(); err != nil {
 		return nil, err

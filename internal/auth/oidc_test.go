@@ -293,6 +293,23 @@ func TestExchangeRefusesABadToken(t *testing.T) {
 			mutate: func(c map[string]any) { c["nonce"] = "not-the-one-we-sent" },
 			want:   "nonce",
 		},
+		{
+			// Not an attack -- a realm that lost its username mapper, or a
+			// client that lost the `profile` scope. Refused all the same,
+			// because the alternative is writing username='' over a real
+			// account on every sign-in: the row then reads as anonymous to
+			// Authenticate and cannot be reached at all, and a second such
+			// user collides on the UNIQUE index. Corruption driven from the
+			// IdP side is still corruption.
+			name:   "preferred_username claim is missing",
+			mutate: func(c map[string]any) { delete(c, "preferred_username") },
+			want:   "preferred_username",
+		},
+		{
+			name:   "preferred_username claim is blank",
+			mutate: func(c map[string]any) { c["preferred_username"] = "   " },
+			want:   "preferred_username",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newFakeIssuer(t)
