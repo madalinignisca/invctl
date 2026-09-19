@@ -219,10 +219,10 @@ func (s *SQLStore) UpsertOIDCUser(ctx context.Context, subject, username, displa
 		// The subject is deliberately NOT in this message. It is the one
 		// identifier that resolves to a named person at the provider, and
 		// an error string ends up in the server log, which is a different
-		// retention story from change_log (where TestUpsertOIDCUserNeverLogs\
-		// TheSubject already keeps it out). The failure this reports is a
-		// database failure; knowing WHICH subject was being looked up adds
-		// nothing to diagnosing it.
+		// retention story from change_log, where the subject is already kept
+		// out (TestUpsertOIDCUserNeverLogsTheSubject). The failure this
+		// reports is a database failure; knowing WHICH subject was being
+		// looked up adds nothing to diagnosing it.
 		return nil, fmt.Errorf("looking up an oidc user by subject: %w", err)
 	}
 

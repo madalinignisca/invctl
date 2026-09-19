@@ -56,6 +56,33 @@ func (s *SQLStore) CountActiveAdministrators(ctx context.Context) (int, error) {
 	return int(n), nil
 }
 
+// CountActivePasswordAccounts reports how many accounts could still sign in
+// if the identity provider were unreachable.
+//
+// That is the whole question behind the break-glass advice in
+// docs/RECOVERY.md part two, and it is the one an operator cannot answer by
+// looking at configuration: with OIDC configured and local sign-in off, an
+// IdP outage locks everybody out, and switching local sign-in back on only
+// helps if an account with a password already exists. Accounts created
+// through OIDC and LDAP carry no hash at all, so on a deployment that has
+// only ever used SSO the answer is zero and nothing says so until the
+// morning it matters.
+//
+// Counts the hash, not the source: what matters is whether the local
+// authenticator could match this row (see auth.LocalAuthenticator, which
+// requires an active local account with a non-NULL hash), not how the row was
+// first created.
+func (s *SQLStore) CountActivePasswordAccounts(ctx context.Context) (int, error) {
+	n, err := s.countOne(ctx,
+		`SELECT COUNT(*) FROM app_user
+		  WHERE is_active = TRUE AND source = ? AND password_hash IS NOT NULL`,
+		domain.UserSourceLocal)
+	if err != nil {
+		return 0, fmt.Errorf("counting active password accounts: %w", err)
+	}
+	return int(n), nil
+}
+
 // getUser loads a row inside the write transaction. Never s.read/s.readOne:
 // the reader pool is a separate connection and cannot see this transaction's
 // view of the table, which matters for exactly one caller here --
