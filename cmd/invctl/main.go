@@ -249,6 +249,11 @@ func run() error {
 		return err
 	}
 
+	oidcProvider, err := buildOIDCProvider(ctx, cfg)
+	if err != nil {
+		return err
+	}
+
 	renderer, err := render.New(webassets.FS, *devMode, cfg.Currency)
 	if err != nil {
 		return err
@@ -265,6 +270,7 @@ func run() error {
 		Auth:     authenticator,
 		Authz:    auth.NewAuthorizer(cfg.AdminUsers, st),
 		Config:   cfg,
+		OIDC:     oidcProvider,
 	}
 
 	// One recorder, shared between the webhook and the flusher below. Two
@@ -646,9 +652,40 @@ func buildAuthenticator(st *store.SQLStore, cfg *config.Config) (auth.Authentica
 		slog.Info("ldap authentication enabled", "url", cfg.LDAP.URL)
 	}
 	if len(authenticators) == 0 {
+		if cfg.AuthOIDC {
+			// Keycloak is the only authenticator configured. It is not an
+			// auth.Authenticator (internal/auth/oidc.go's package comment,
+			// spec §1) -- POST /login has nothing to chain to. The route
+			// still exists (the password form is hidden by the template,
+			// not removed from the mux), so this must refuse cleanly rather
+			// than leave Auth nil for a handler to dereference: an empty
+			// Chain's Authenticate always returns ErrInvalidCredentials.
+			return auth.NewChain(st), nil
+		}
 		return nil, errors.New("building authenticator: none enabled")
 	}
 	return auth.NewChain(st, authenticators...), nil
+}
+
+// buildOIDCProvider performs discovery against the configured issuer and
+// returns nil, nil when OIDC is not configured -- the zero-value case
+// App.OIDC's own comment expects. Discovery is a network call, so it runs
+// here, at startup, right after configuration is loaded and validated: a
+// bad issuer refuses the start and names the setting, matching how a bad
+// LDAP configuration already behaves (spec §3).
+func buildOIDCProvider(ctx context.Context, cfg *config.Config) (*auth.OIDCProvider, error) {
+	if !cfg.AuthOIDC {
+		return nil, nil
+	}
+	// A plain conversion between two structurally identical types --
+	// config.OIDCConfig exists only to avoid the import cycle explained on
+	// its own comment; this is the one place both types are in scope.
+	provider, err := auth.NewOIDCProvider(ctx, auth.OIDCConfig(cfg.OIDC))
+	if err != nil {
+		return nil, fmt.Errorf("configuring oidc: %w", err)
+	}
+	slog.Info("oidc authentication enabled", "issuer", cfg.OIDC.Issuer)
+	return provider, nil
 }
 
 // ensureAdmin seeds the first account so a fresh database is usable.

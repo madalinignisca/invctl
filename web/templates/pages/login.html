@@ -31,20 +31,35 @@
       <div class="flash flash-error" style="margin-bottom:14px" role="alert">{{.Error}}</div>
     {{end}}
 
-    <form method="post" action="/login">
-      <input type="hidden" name="csrf_token" value="{{.CSRF}}">
-      <input type="hidden" name="next" value="{{.Next}}">
-      <div class="field">
-        <label for="username">Username</label>
-        <input id="username" class="mono" type="text" name="username" value="{{.Username}}"
-               autocomplete="username" autofocus required>
-      </div>
-      <div class="field">
-        <label for="password">Password</label>
-        <input id="password" type="password" name="password" autocomplete="current-password" required>
-      </div>
-      <button class="btn btn-primary" type="submit" style="width:100%;justify-content:center">Sign in</button>
-    </form>
+    {{if .ShowOIDC}}
+      {{/* A plain link, not a form: OIDCStart is a GET that redirects to
+           Keycloak, and a GET needs no CSRF token to carry. */}}
+      <a class="btn btn-primary" href="/auth/oidc"
+         style="width:100%;justify-content:center;display:flex;margin-bottom:{{if .ShowPassword}}18px{{else}}0{{end}}">
+        Sign in with Keycloak
+      </a>
+    {{end}}
+
+    {{if and .ShowOIDC .ShowPassword}}
+      <div style="text-align:center;color:var(--faint);font-size:12px;margin-bottom:18px">or</div>
+    {{end}}
+
+    {{if .ShowPassword}}
+      <form method="post" action="/login">
+        <input type="hidden" name="csrf_token" value="{{.CSRF}}">
+        <input type="hidden" name="next" value="{{.Next}}">
+        <div class="field">
+          <label for="username">Username</label>
+          <input id="username" class="mono" type="text" name="username" value="{{.Username}}"
+                 autocomplete="username" autofocus required>
+        </div>
+        <div class="field">
+          <label for="password">Password</label>
+          <input id="password" type="password" name="password" autocomplete="current-password" required>
+        </div>
+        <button class="btn btn-primary" type="submit" style="width:100%;justify-content:center">Sign in</button>
+      </form>
+    {{end}}
   </div>
 </div>
 </body>

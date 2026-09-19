@@ -29,12 +29,14 @@ import (
 // by the boundary suite. Every other entry is a route that deliberately does
 // not.
 var allowedDirectRegistrations = map[string]string{
-	"pattern":        "the read/write/writeAdminOnly/self registrar closures themselves",
-	`"GET /static/"`: "static assets; no handler, no store access",
-	`"GET /healthz"`: "liveness probe, unauthenticated by design",
-	`"GET /login"`:   "the login form; unauthenticated by necessity",
-	`"POST /login"`:  "the login attempt itself; rate-limited, not session-gated",
-	`"POST /logout"`: "ends a session; requires one to matter",
+	"pattern":                   "the read/write/writeAdminOnly/self registrar closures themselves",
+	`"GET /static/"`:            "static assets; no handler, no store access",
+	`"GET /healthz"`:            "liveness probe, unauthenticated by design",
+	`"GET /login"`:              "the login form; unauthenticated by necessity",
+	`"POST /login"`:             "the login attempt itself; rate-limited, not session-gated",
+	`"POST /logout"`:            "ends a session; requires one to matter",
+	`"GET /auth/oidc"`:          "starts the OIDC redirect; unauthenticated by necessity",
+	`"GET /auth/oidc/callback"`: "the IdP redirects here; state is its CSRF defence, not a session token",
 	`"POST " + ObservationsPath`: "the observed-state webhook -- a machine credential, " +
 		"never an app_user, gated by middleware.RequireAgent and the single " +
 		"documented CSRF exemption (see docs/AUDIT.md rule 6)",
