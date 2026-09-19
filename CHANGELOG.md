@@ -48,8 +48,16 @@ footnote.
 
   **The reason to want it is MFA.** invctl has no second factor and is not
   getting one: a second factor belongs to whoever holds the credential, and
-  with SSO that is Keycloak. Require it in the realm's browser flow and every
-  invctl sign-in inherits it.
+  with SSO that is Keycloak.
+
+  **Check what your realm enforces before relying on it.** Keycloak's stock
+  browser flow makes OTP conditional on the user having enrolled, so an
+  unenrolled account signs in with a password alone — adding an OTP step is
+  not the same as requiring one. invctl verifies the token's signature,
+  issuer, audience, expiry and nonce; it does **not** verify that a second
+  factor was used, and a token cannot be assumed to say. The manual's
+  directory fragment covers how to make enrolment unavoidable and how to
+  confirm it with an unenrolled test user.
 
   Accounts are created on first sign-in as **observers with no projects**, and
   matched on the provider's immutable subject rather than on the username — so
@@ -77,8 +85,19 @@ footnote.
 
   On a **fresh** OIDC-only install there is no seeded administrator at all, for
   the same reason: set `INV_ADMIN_USERS` to a Keycloak `preferred_username` as
-  part of the first deployment, or the estate is readable and permanently
-  unwritable.
+  part of the first deployment. It is recoverable afterwards — set the variable
+  to somebody who has signed in and restart — but you will be discovering that
+  at the moment you needed to write something.
+
+- **The login page now shows a password form whenever a password
+  authenticator is enabled**, rather than only when `INV_AUTH_LOCAL` is. An
+  LDAP-only deployment (`INV_AUTH_LOCAL=false INV_AUTH_LDAP=true`) previously
+  rendered neither a form nor a sign-on button, which was a lockout with a
+  working back end. The same line hid the form on an OIDC deployment that had
+  deliberately kept LDAP on, while `POST /login` went on binding against it —
+  hiding a control is not closing it. `INV_AUTH_LDAP` remains off by default,
+  and an LDAP bind beside an issuer is as much an MFA bypass as a local
+  password; the page now says so by showing it.
 
 - Migration `00072` adds a `subject` column to `app_user`, widens its `source`
   check to admit `oidc`, and indexes the subject. It is additive: it runs on

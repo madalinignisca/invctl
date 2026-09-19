@@ -170,7 +170,12 @@ ever created. The first person to sign in through Keycloak becomes an
 **observer with no projects**, and so does the second.
 
 Set `INV_ADMIN_USERS` to a Keycloak `preferred_username` as part of the first
-deployment, not afterwards. Without it a fresh OIDC-only install has nobody who
-can grant a role to anybody, including themselves — the estate is readable and
-permanently unwritable, and the only fix is the variable you could have set at
-the start.
+deployment. Without it a fresh OIDC-only install has nobody who can grant a
+role to anybody, including themselves, and the estate is readable and
+unwritable.
+
+**This is recoverable, and by exactly the route part one describes**: set the
+variable to the username of somebody who has already signed in, restart, and
+they are an Administrator. It is worth doing at first deployment only because
+discovering it later means discovering it at the moment you needed to write
+something.

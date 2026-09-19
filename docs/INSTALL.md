@@ -268,6 +268,18 @@ INV_OIDC_REDIRECT_URL=https://invctl.example.com/auth/oidc/callback
 toggle, because an issuer nobody consumes is a setting that looks enabled and
 is not.
 
+`INV_AUTH_LDAP` is off by default and should stay off here: an LDAP simple
+bind is a username and a password with no second factor, so it is the same
+bypass a local account is. Set it to `true` alongside an issuer only if you
+mean to keep that route, and the login page will then show the password form
+rather than hiding a route that still works.
+
+**`INV_ADMIN_USERS` is matched against the `preferred_username` claim.**
+Whoever controls usernames in your realm therefore controls who can hold
+Administrator here, including by renaming an existing account onto the name in
+that variable. Keycloak's defaults keep username assignment with realm
+administrators; keep it that way.
+
 **`INV_AUTH_LOCAL` defaults to `false` once an issuer is set** — the inverse of
 its default everywhere else, and the one surprise in this section. The point of
 putting sign-in behind an identity provider is that the provider's MFA and

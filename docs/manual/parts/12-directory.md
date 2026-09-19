@@ -188,6 +188,43 @@ that demands it and deliberately does not: a second factor enforced by the
 application that just received an assertion saying the person is authenticated
 is a second factor enforced in the wrong place.
 
+**But check what your realm actually enforces, because the default is weaker
+than it looks.** Keycloak's stock browser flow makes the OTP step
+*conditional* on the user having configured one — so somebody who never
+enrolled signs in with a password alone, and nothing about that looks like a
+failure from either side. Adding an OTP step is not the same as requiring one.
+
+To get MFA for everybody you have to make enrolment unavoidable: set the OTP
+subflow in your browser flow to **Required** rather than Conditional, or make
+"Configure OTP" a default required action — and note that the required action
+applies to accounts created afterwards, so existing users need handling too.
+Label details move between Keycloak versions, so confirm it the only way that
+proves anything: **sign in as a test user who has never enrolled, and check
+you are forced to enrol rather than let through.**
+
+**invctl cannot check this for you and does not pretend to.** It verifies the
+token's signature, issuer, audience, expiry and nonce — but the token does not
+have to say how the person authenticated, and invctl does not require it to.
+A sign-in that used only a password and one that used a hardware key arrive
+here identical. What the realm enforces is what you get.
+
+**Turn LDAP off as well, unless you mean it.** `INV_AUTH_LDAP` is a password
+route with no second factor, exactly like a local account, so leaving it on
+beside an issuer is the same bypass `INV_AUTH_LOCAL` would be. It defaults to
+off and stays off unless you set it; if you set it to `true` alongside an
+issuer the login page will show the password form, because a form that works
+should be visible rather than hidden.
+
+**Usernames in your realm decide who can be an Administrator here.**
+`INV_ADMIN_USERS` is matched against the `preferred_username` claim, so
+whoever can set usernames in Keycloak can hand somebody the name in that
+variable — and a rename onto an existing account promotes *that* account at
+its next sign-in, which is when invctl learns the new name. Keycloak's
+defaults already prevent this (realm self-registration off, "Edit username"
+off), which is why it is a precondition to keep rather than a hole to plug:
+keep username assignment in administrators' hands, and treat the names in
+`INV_ADMIN_USERS` as privileged strings in both systems.
+
 ### `INV_AUTH_LOCAL` flips to off, and it matters
 
 Once `INV_OIDC_ISSUER` is set, `INV_AUTH_LOCAL` defaults to **`false`** —
