@@ -289,10 +289,25 @@ func (s *SQLStore) ScrubUser(ctx context.Context, p domain.Permit, id string) er
 			}
 		}
 		scrubbedName := scrubbedUsername(id)
+		// subject = NULL IS PART OF THE ERASURE, NOT TIDYING UP.
+		//
+		// Local and LDAP accounts are matched on USERNAME, and the line above
+		// randomises it -- so a scrubbed person who signs in again cannot land
+		// on their old row and simply gets a fresh account. OIDC is matched on
+		// `subject` instead (spec D2), which is exactly what makes it survive a
+		// rename in Keycloak. Left behind, it survives an erasure too:
+		// GetUserBySubject finds the scrubbed row on the next sign-in ATTEMPT
+		// and updateOIDCUser writes the name and email straight back from the
+		// fresh claims -- an erasure reversed by the erased person merely
+		// trying to log in, and audited while it happens.
+		//
+		// The unique index is partial (`WHERE subject IS NOT NULL`, migration
+		// 00072) precisely so every scrubbed row can hold NULL here.
+		// TestScrubbingAnOIDCUserSurvivesTheirNextSignIn is the guard.
 		if _, err := t.exec(ctx,
 			`UPDATE app_user
 			 SET username = ?, display_name = NULL, email = NULL,
-			     password_hash = NULL, is_active = FALSE
+			     password_hash = NULL, is_active = FALSE, subject = NULL
 			 WHERE id = ?`,
 			scrubbedName, id); err != nil {
 			return translateWriteErr(err, "scrubbing user "+id)
@@ -328,6 +343,7 @@ func (s *SQLStore) ScrubUser(ctx context.Context, p domain.Permit, id string) er
 		after.Email = nil
 		after.PasswordHash = nil
 		after.IsActive = false
+		after.Subject = nil
 		return t.logUpdate(ctx, "app_user", id, before, &after)
 	})
 }
