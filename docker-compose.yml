@@ -68,3 +68,44 @@ services:
       timeout: 5s
       retries: 20
       start_period: 10s
+
+  # Keycloak for tests/e2e/specs/oidc-sign-in.spec.js -- the one spec that
+  # needs a real IdP rather than the demo estate. Not needed for anything
+  # else here; start it with `docker compose --profile oidc-e2e up -d` and
+  # see docs/E2E.md's OIDC section before running that spec.
+  #
+  # The realm is IMPORTED, not built through Keycloak's admin API: a test
+  # that stages its own fixture through a second API is two things that can
+  # break instead of one, and an import is a file the spec's own behaviour
+  # does not depend on the shape of. `--import-realm` reads everything under
+  # /opt/keycloak/data/import at startup; overwriting an existing "e2e" realm
+  # would be a foot-gun, but this container has no volume for realm state so
+  # every start IS a fresh import, deliberately.
+  #
+  # The redirect URI and web origin baked into the realm export are fixed to
+  # http://localhost:18088 -- the throwaway invctl instance this spec expects
+  # (see the spec's own header). Unlike an asset name, resolved dynamically
+  # elsewhere in this suite, a redirect URI is exactly the kind of thing that
+  # must match byte-for-byte or the flow fails at Keycloak's own page, so it
+  # is pinned rather than parameterised.
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0
+    profiles: ["oidc-e2e"]
+    command: ["start-dev", "--import-realm", "--http-port=8080"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      KC_HEALTH_ENABLED: "false"
+    volumes:
+      - ./tests/e2e/oidc-fixtures:/opt/keycloak/data/import:ro
+    ports:
+      - "127.0.0.1:18089:8080"
+    healthcheck:
+      # No curl/wget in this image (RHEL micro base) -- a bare TCP probe on
+      # the HTTP port is enough to know the server accepted the socket;
+      # the spec itself is what proves the realm actually imported.
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/8080'"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+      start_period: 10s
