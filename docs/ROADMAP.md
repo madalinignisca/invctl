@@ -1029,6 +1029,44 @@ transaction and a different audit story — twelve `change_log` rows, not one.*
 
 ---
 
+**WP-G8 · Single sign-out** — S — deferred from the Keycloak work (v1.2.0)
+
+Signing out of invctl ends the invctl session and leaves the Keycloak session
+untouched, so the next person to click "Sign in with Keycloak" on that browser
+is signed straight back in as whoever used it last — and every write they make
+is attributed to that account in `change_log`. For a system whose whole premise
+is an audit trail somebody can rely on a year later, misattribution is a worse
+failure than an inconvenience.
+
+The design spec (§8) refused RP-initiated logout "for the availability reason
+in D5", and that reasoning does not survive inspection: D5 is about not
+RETAINING tokens, while RP-initiated logout is a redirect that takes
+`client_id` and `post_logout_redirect_uri` and needs no `id_token_hint`. "We
+hold no token" and "we cannot sign you out" are independent statements, and the
+spec treated the first as implying the second. Recorded here rather than
+silently fixed because the decision was signed off as written, and because the
+replacement is a product trade: ending the Keycloak session signs the person
+out of every application in the realm, which is right on a shared operations
+workstation and intrusive on somebody's own laptop. A "sign out everywhere"
+control beside the ordinary one is the shape that has both.
+
+Until it exists, the manual's directory fragment states the behaviour plainly
+rather than letting an operator assume otherwise.
+
+Two smaller items from the same review, both low and both recorded so they are
+not rediscovered as new:
+
+- `azp` is not validated on a multi-audience ID token. Not reachable — a token
+  can only arrive through a code exchange this session began and bound with
+  PKCE, and `Exchange` compares the `nonce` claim against a value only this
+  session generated, so a token minted for another client cannot both reach the
+  callback and carry this session's nonce. Adding the check is still what the
+  spec asks for.
+- The D4 username-collision message names the conflicting account's source, a
+  deliberate exception to the generic-refusal rule (spec §6). It is a small
+  existence oracle over the user table for the self-registration population D2
+  names as its own threat model.
+
 ### Group H — Configuration data
 
 **WP-H1 · Config contexts and config templates** — L — **DROPPED AS WRITTEN,
