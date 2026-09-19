@@ -182,7 +182,10 @@ type oidcHarness struct {
 	dsn    string
 }
 
-func newOIDCHarness(t *testing.T, issuer *fakeOIDCIssuer, authLocal bool) *oidcHarness {
+// opts lets a test set the rest of the auth configuration (AuthLDAP,
+// AuthOIDC) without every existing caller growing two more booleans it does
+// not care about. Applied after the defaults below, so an option wins.
+func newOIDCHarness(t *testing.T, issuer *fakeOIDCIssuer, authLocal bool, opts ...func(*config.Config)) *oidcHarness {
 	t.Helper()
 
 	ctx := context.Background()
@@ -225,6 +228,9 @@ func newOIDCHarness(t *testing.T, issuer *fakeOIDCIssuer, authLocal bool) *oidcH
 		AdminUsers: []string{"admin"},
 		AuthLocal:  authLocal,
 		AuthOIDC:   true,
+	}
+	for _, opt := range opts {
+		opt(cfg)
 	}
 	authz := auth.NewAuthorizer(cfg.AdminUsers, st)
 

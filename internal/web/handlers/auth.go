@@ -34,6 +34,37 @@ const (
 	sessionOIDCVerifierKey = "oidc_verifier"
 )
 
+// passwordLoginEnabled reports whether POST /login can authenticate anybody.
+//
+// IT MUST MATCH buildAuthenticator (cmd/invctl/main.go), which chains the
+// local authenticator on AuthLocal and the LDAP one on AuthLDAP,
+// INDEPENDENTLY of each other. This function is the template's view of that
+// same question, and the two drifting apart is the defect it exists to
+// prevent.
+//
+// It used to be `a.Config.AuthLocal`, which was wrong in both directions
+// once the login template started gating the form on it:
+//
+//   - INV_AUTH_LOCAL=false INV_AUTH_LDAP=true -- a configuration validate()
+//     explicitly accepts -- rendered no form AND no button. LDAP worked
+//     perfectly; there was simply no way to reach it. A lockout.
+//   - INV_OIDC_ISSUER set with INV_AUTH_LDAP=true hid the form while
+//     POST /login went on binding against LDAP. Hiding a control is not
+//     enforcement (TestHidingAControlIsNotTheEnforcement), and a hidden
+//     password route around Keycloak's MFA is worse than a visible one,
+//     because the operator reading the login page believes it is gone.
+//
+// An LDAP simple bind is a username and a password with no second factor, so
+// it is the same MFA bypass a local account is. That is a configuration
+// decision, not something to paper over here: INV_AUTH_LDAP defaults to
+// false and an operator who sets it to true alongside an issuer has chosen
+// the password route deliberately, exactly as INV_AUTH_LOCAL=true would be.
+// What this function guarantees is only that the page tells the truth about
+// which routes are open.
+func (a *App) passwordLoginEnabled() bool {
+	return a.Config.AuthLocal || a.Config.AuthLDAP
+}
+
 type loginPage struct {
 	Base
 	Error    string
@@ -45,6 +76,9 @@ type loginPage struct {
 	// OIDC on (spec D3's default once Keycloak is configured), OIDC can be
 	// off with local login on (no Keycloak configured at all), and for a
 	// short window during recovery both can be true at once.
+	//
+	// ShowPassword is set from passwordLoginEnabled, NEVER from AuthLocal
+	// alone -- see that function for what went wrong when it was.
 	ShowPassword bool
 	ShowOIDC     bool
 }
@@ -58,7 +92,7 @@ func (a *App) LoginForm(w http.ResponseWriter, r *http.Request) {
 	a.Render.Page(w, http.StatusOK, "login", loginPage{
 		Base:         a.base(r, "Sign in", ""),
 		Next:         safeNext(r.URL.Query().Get("next")),
-		ShowPassword: a.Config.AuthLocal,
+		ShowPassword: a.passwordLoginEnabled(),
 		ShowOIDC:     a.Config.AuthOIDC,
 	})
 }
@@ -86,7 +120,7 @@ func (a *App) Login(w http.ResponseWriter, r *http.Request) {
 			Error:        "That username and password combination was not recognised.",
 			Username:     username,
 			Next:         next,
-			ShowPassword: a.Config.AuthLocal,
+			ShowPassword: a.passwordLoginEnabled(),
 			ShowOIDC:     a.Config.AuthOIDC,
 		})
 		return
@@ -182,6 +216,11 @@ func (a *App) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 	// whatever happens next, a second request replaying this exact callback
 	// URL finds an empty session and fails the missing-state check, not a
 	// state comparison against a value still sitting there to be reused.
+	//
+	// The checks below still work because the three values were read into
+	// locals just above. Nothing after this point re-reads the session for
+	// them, so deleting them here costs this request nothing and costs a
+	// replay everything.
 	a.Sessions.Remove(r.Context(), sessionOIDCStateKey)
 	a.Sessions.Remove(r.Context(), sessionOIDCNonceKey)
 	a.Sessions.Remove(r.Context(), sessionOIDCVerifierKey)
@@ -228,12 +267,39 @@ func (a *App) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 				Base: a.base(r, "Sign in", ""),
 				Error: fmt.Sprintf("A local or LDAP account named %q already exists. "+
 					"An Administrator can resolve this on /users.", claims.Username),
-				ShowPassword: a.Config.AuthLocal,
+				ShowPassword: a.passwordLoginEnabled(),
 				ShowOIDC:     a.Config.AuthOIDC,
 			})
 			return
 		}
 		a.serverError(w, r, fmt.Errorf("resolving oidc account: %w", err))
+		return
+	}
+
+	// A DEACTIVATED ACCOUNT IS REFUSED HERE, not left to the middleware.
+	//
+	// middleware.Authenticate does drop the session on the next request
+	// (it reloads the user and checks IsActive), so what follows would be a
+	// void session rather than access. Refusing here anyway, for two
+	// reasons the middleware cannot fix retroactively:
+	//
+	//   - Otherwise this path logs EventSignInSucceeded for a sign-in that
+	//     did not succeed. LDAP logs a failure for exactly this case
+	//     (internal/auth/ldap.go). Anyone alerting on sign-in events would
+	//     get the opposite signal from the two authenticators for the same
+	//     situation, which is worse than either answer alone.
+	//   - The person is bounced to /login with no message, having been told
+	//     nothing. A refusal says what happened.
+	//
+	// The profile write inside UpsertOIDCUser has already happened by this
+	// point and is left alone: it is the same shape UpsertLDAPUser has, and
+	// recording that a deactivated account attempted a sign-in is not the
+	// thing that needed preventing.
+	if !user.IsActive {
+		auth.LogSecurityEvent(r.Context(), slog.LevelWarn, auth.EventSignInFailed,
+			"authenticator", "oidc", "reason", "account deactivated",
+			"username", user.Username, "remote", r.RemoteAddr)
+		a.oidcRefused(w, r)
 		return
 	}
 
@@ -259,7 +325,7 @@ func (a *App) oidcRefused(w http.ResponseWriter, r *http.Request) {
 	a.Render.Page(w, http.StatusUnauthorized, "login", loginPage{
 		Base:         a.base(r, "Sign in", ""),
 		Error:        "Sign-in with Keycloak did not succeed. Please try again.",
-		ShowPassword: a.Config.AuthLocal,
+		ShowPassword: a.passwordLoginEnabled(),
 		ShowOIDC:     a.Config.AuthOIDC,
 	})
 }
