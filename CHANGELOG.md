@@ -34,6 +34,57 @@ footnote.
 
 ---
 
+## [1.2.0] — 2026-09-19
+
+### Added
+
+- **Single sign-on through Keycloak, or any OpenID Connect provider.** Set
+  `INV_OIDC_ISSUER`, `INV_OIDC_CLIENT_ID`, `INV_OIDC_CLIENT_SECRET` and
+  `INV_OIDC_REDIRECT_URL` and the login page grows a sign-on button.
+  Authorization code flow with PKCE; the identity token's signature, issuer,
+  audience and nonce are all verified before a session starts. Setting the
+  issuer is the toggle — there is no `INV_AUTH_OIDC`, because an issuer nobody
+  consumes is a setting that looks enabled and is not.
+
+  **The reason to want it is MFA.** invctl has no second factor and is not
+  getting one: a second factor belongs to whoever holds the credential, and
+  with SSO that is Keycloak. Require it in the realm's browser flow and every
+  invctl sign-in inherits it.
+
+  Accounts are created on first sign-in as **observers with no projects**, and
+  matched on the provider's immutable subject rather than on the username — so
+  renaming somebody in Keycloak keeps their account, role and audit history
+  attached to them. A sign-in whose username is already held by a different
+  account is refused rather than merged.
+
+  invctl keeps **no token**: the code is exchanged, the identity token is
+  verified, and what survives is an ordinary session cookie. Nothing is
+  refreshed, and the IdP is not consulted again until the next sign-in.
+
+  **`INV_AUTH_LOCAL` defaults to `false` once an issuer is set** — the inverse
+  of its default everywhere else, so that a password form is not left answering
+  beside the MFA you just deployed. This changes nothing for an existing
+  deployment, which is why it is not filed under **Action required**: the flip
+  happens only when you set an issuer, and nobody has one before this release.
+
+  **Decide your break-glass account while you set this up, not afterwards.**
+  With local sign-in off, an identity provider outage locks everybody out, and
+  switching `INV_AUTH_LOCAL=true` during the incident produces a password form
+  that no account can use — accounts created through SSO have no password, and
+  invctl seeds an administrator only into a completely empty user table. A
+  local account created in advance is the way back in. `docs/RECOVERY.md` part
+  two is the procedure, and it is new in this release.
+
+  On a **fresh** OIDC-only install there is no seeded administrator at all, for
+  the same reason: set `INV_ADMIN_USERS` to a Keycloak `preferred_username` as
+  part of the first deployment, or the estate is readable and permanently
+  unwritable.
+
+- Migration `00072` adds a `subject` column to `app_user`, widens its `source`
+  check to admit `oidc`, and indexes the subject. It is additive: it runs on
+  upgrade, changes no existing row, and a deployment that never sets an issuer
+  will not notice it.
+
 ## [1.1.1] — 2026-09-18
 
 ### Fixed

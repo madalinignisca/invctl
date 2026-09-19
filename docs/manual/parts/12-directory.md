@@ -1,10 +1,22 @@
-# Directory authentication — LDAP and Active Directory
+# Directory authentication — LDAP, Active Directory and Keycloak
 
-> Covers: `INV_AUTH_LDAP` and the `INV_LDAP_*` settings
-> Regenerated when: the LDAP authenticator or its configuration changes.
+> Covers: `INV_AUTH_LDAP` with the `INV_LDAP_*` settings, and `INV_OIDC_ISSUER`
+> with the `INV_OIDC_*` settings
+> Regenerated when: the LDAP or OIDC authenticator, or its configuration,
+> changes.
 
 Sign-in against an existing directory, so people use the account they already
 have and leaving the company removes their access here too.
+
+Two ways to do that, and the choice is mostly about where the password goes.
+**LDAP** takes the password typed into invctl's own form and binds with it —
+invctl sees it, in memory, every time. **OIDC** sends the person to your
+identity provider and never sees a password at all, which is what makes
+multi-factor authentication possible: MFA is a conversation between the person
+and the IdP, and a form that only collects a password has nowhere to put it.
+
+Everything below about *who may change anything* applies to both, and is the
+part people most often assume their directory decides. It does not.
 
 ## What it does, exactly
 
@@ -139,6 +151,100 @@ An empty password is also rejected before the connection. Most directories treat
 a bind with an empty password as an **anonymous** bind, which succeeds — so
 without that check, a blank password would authenticate anybody.
 
+## Keycloak and other OIDC providers
+
+The browser goes to the identity provider, the person proves who they are by
+whatever means that provider demands — password, MFA, hardware token, a
+conditional-access policy you configured somewhere else entirely — and comes
+back with a signed assertion. invctl verifies the assertion and starts a
+session.
+
+**invctl never learns the password, and that is the point.** It also never
+learns whether MFA was used, because it does not need to: the IdP decides
+whether the sign-in was good enough, and the assertion is the answer.
+
+### Settings
+
+| Variable | Example | Notes |
+|---|---|---|
+| `INV_OIDC_ISSUER` | `https://sso.example.com/realms/example` | setting it is what turns SSO on |
+| `INV_OIDC_CLIENT_ID` | `invctl` | the client you created in Keycloak |
+| `INV_OIDC_CLIENT_SECRET` | *(from Keycloak)* | for a confidential client |
+| `INV_OIDC_REDIRECT_URL` | `https://invctl.example.com/auth/oidc/callback` | must match Keycloak's registered redirect URI **exactly** |
+
+There is no `INV_AUTH_OIDC` toggle. An issuer nobody consumes would be a
+setting that looks enabled and is not, so the issuer's presence is the switch.
+
+### In Keycloak
+
+A confidential client in your realm, standard flow on, with the redirect URI
+set to the same string as `INV_OIDC_REDIRECT_URL`. Nothing else in invctl reads
+the realm — no groups, no roles, no attribute mapping — so there is nothing
+else to configure on the Keycloak side beyond the authentication policy you
+want enforced, which is where MFA belongs.
+
+**Require MFA in the realm's browser flow, not here.** invctl has no setting
+that demands it and deliberately does not: a second factor enforced by the
+application that just received an assertion saying the person is authenticated
+is a second factor enforced in the wrong place.
+
+### `INV_AUTH_LOCAL` flips to off, and it matters
+
+Once `INV_OIDC_ISSUER` is set, `INV_AUTH_LOCAL` defaults to **`false`** —
+the inverse of its default everywhere else. The login page then offers the
+sign-on button alone, with no password form.
+
+This is the whole reason to deploy SSO. A password form still answering beside
+it is a route around the MFA you just required, available to anybody who knows
+a username and a password and nothing else.
+
+Setting `INV_AUTH_LOCAL=true` explicitly keeps both, and both then appear on
+the same login page with nothing for the person to choose — the same way LDAP
+and local already share it.
+
+**Read `docs/RECOVERY.md` part two before deciding.** With local sign-in off,
+an identity provider outage is a total lockout, and the account that gets you
+back in has to exist *before* the outage: turning local sign-in on afterwards
+produces a password form that no account can use, because accounts created
+through SSO have no password at all.
+
+### Accounts, renames and roles
+
+On the first successful sign-in invctl creates an `app_user` row with
+`source='oidc'` and **no password hash**, exactly as LDAP does.
+
+**The account is matched on the provider's subject, not on the username.** The
+subject is the IdP's immutable identifier for that person; the username is a
+label that can change. So renaming somebody in Keycloak keeps their invctl
+account, their role, their projects and their audit history attached to them —
+where matching on a name would have silently created a second account and left
+the first one's history orphaned.
+
+The reverse case is refused rather than resolved: a sign-in carrying a username
+that **another** account already holds is rejected. Two people with a claim to
+one username is a directory problem, and quietly merging them or renaming one
+would be invctl inventing an answer to a question it cannot see.
+
+New accounts arrive as **observers with no projects** — able to read, able to
+change nothing. Roles are granted afterwards, on `/users`, by an Administrator.
+
+### Sessions end here, not there
+
+Signing out of invctl ends the invctl session. It does not end the Keycloak
+session, and nothing invctl does can — single sign-*out* is a separate protocol
+this does not implement.
+
+The practical consequence: after signing out, clicking the sign-on button may
+put you straight back in without being asked for anything, because Keycloak
+still considers you signed in. That is the IdP's session doing its job. To end
+that one, sign out of Keycloak.
+
+invctl keeps **no token**. The authorization code is exchanged once, the
+identity token is verified, and what survives is an ordinary invctl session
+cookie. Nothing is refreshed and the IdP is not contacted again until the next
+sign-in — which also means a person disabled in Keycloak keeps their invctl
+session until it expires. Deactivate them on `/users` too if that matters.
+
 ## Keep one local account
 
 Leave `INV_AUTH_LOCAL=true` and keep the seeded administrator.
@@ -151,6 +257,12 @@ you get in to look at the logs.
 
 Both authenticators run in the same login form. There is no second page and
 nothing for the person signing in to choose.
+
+**With SSO the advice is the same and the arithmetic is not.** Keeping local
+sign-in on defeats the MFA you deployed SSO to enforce, so the answer is not
+`INV_AUTH_LOCAL=true` and a seeded administrator — it is one deliberate
+break-glass account, created in advance, with local sign-in left off until the
+day it is needed. `docs/RECOVERY.md` part two is that procedure.
 
 ## Who can change anything
 
@@ -195,7 +307,12 @@ worth planning around regardless:
   role linger until somebody tidies them.
 - **Adding somebody to an AD group changes nothing here.** Group-derived roles
   do not exist; a role is granted in invctl, by an Administrator, and recorded
-  in the change log like any other decision.
+  in the change log like any other decision. A Keycloak realm role or group
+  membership changes nothing here either, for the same reason.
+
+With SSO, name the `preferred_username` claim in `INV_ADMIN_USERS` — that is
+what invctl stores as the username and what the variable is compared against.
+Not the email address, and not the subject.
 
 ## Checking it works
 
@@ -211,6 +328,17 @@ worth planning around regardless:
    the variable.
 4. Sign in as a local account too, so you know that route still works before you
    need it.
+
+For SSO, the first two steps are different and the rest are the same:
+
+1. Restart, and watch the startup log. Discovery runs at startup, so a bad
+   issuer **refuses the start and names the setting** rather than waiting to
+   fail on somebody's first sign-in.
+2. Sign in through the button. On success `source=oidc` appears against the new
+   account, and the role column says observer — that is correct, not a
+   permissions failure.
+3. Confirm the password form is genuinely absent from `/login`, rather than
+   present and ignored. Present means MFA has a route around it.
 
 A failed bind is logged as a security event with the username and the reason.
 An unreachable directory logs an operational error — the two are distinguished

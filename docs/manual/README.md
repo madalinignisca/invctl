@@ -8,7 +8,7 @@ for the people using it.
 | | |
 |---|---|
 | [Installing and running](parts/10-installation.md) | install, configure, first run, upgrades, backups — **for administrators** |
-| [Directory authentication](parts/12-directory.md) | LDAP and Active Directory sign-in |
+| [Directory authentication](parts/12-directory.md) | LDAP, Active Directory and Keycloak single sign-on |
 | [Getting started](parts/00-getting-started.md) | signing in, the overview, finding your way around |
 | [The estate](parts/20-estate.md) | assets, the hardware catalogue, notes, CSV, power, clusters |
 | [Racks](parts/25-racks.md) | elevations, whether a box fits, load, airflow, cabling |

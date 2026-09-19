@@ -21,6 +21,7 @@ Four separate things live in one row, and they are separate on purpose:
 | | |
 |---|---|
 | **Role** | administrator, project owner, or observer |
+| **Source** | `local`, `ldap` or `oidc` — which authenticator vouched for them. Only a `local` account has a password here |
 | **Sees costs** | a grant of its own, not implied by any role except Administrator |
 | **Projects** | what a project owner's write scope actually covers — an owner with none can change nothing |
 | **State** | active, deactivated, or scrubbed |
@@ -45,6 +46,13 @@ leaves the audit trail intact — which is possible only because `change_log`
 never stored a name in the first place: it holds an opaque account id, and the
 UI resolves it for display. After a scrub the log keeps its integrity and simply
 stops resolving that id to a person.
+
+**A scrubbed person who signs in again gets a new, empty account** rather than
+their old one back. That is deliberate and it is the part worth checking if you
+ever audit this: an erasure that a later sign-in could undo would not be an
+erasure. For local and LDAP accounts it falls out of the username being
+randomised; for OIDC the provider's subject is cleared too, because that is
+what the next sign-in would otherwise match on.
 
 Their saved views go too. A saved view is one person's shortcut, so once its
 owner is erased it belongs to nobody and serves nothing; keeping it would be
