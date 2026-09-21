@@ -56,6 +56,53 @@
     invctl_upgrade_db_dsn: "{{ invctl_env['INV_DB_DSN'] }}"
   no_log: true
 
+# DERIVED FROM THE DSN, NEVER ASSUMED FROM invctl_data_dir.
+#
+# An earlier version backed up `{{ invctl_data_dir }}/invctl.db` literally. The
+# default DSN points exactly there, so every default deployment was backed up
+# correctly and the mistake was invisible -- but invctl_db_dsn is a supported
+# override, and on a host using a different filename the role backed up a file
+# the service was not using. The gate could not catch it either: it compared the
+# backup against THE SAME hardcoded path, so both sides of the comparison were
+# wrong together and agreed. A gate whose two inputs share a bug is not a gate.
+#
+# The DSN form is `file:/path/to.db?params` (docs/INSTALL.md). Strip the scheme,
+# drop the query, and what remains is the file. Anything else is refused below
+# rather than guessed at, because the guess is silently backing up the wrong
+# file -- and the whole point of this task is that the backup is the rollback.
+- name: Derive the SQLite path from the DSN the service was using
+  ansible.builtin.set_fact:
+    # `[?]`, A CHARACTER CLASS, NOT `\?`. The escaping has to survive YAML and
+    # then Jinja, and a backslash does not: written `\?` here the whole chain
+    # silently produced an EMPTY string, which the assertion below then caught.
+    # A character class needs no backslash and cannot be eaten by either layer.
+    # Same family as the assert.that double-templating trap in read_env.yml --
+    # on this stack, prefer a construct that does not require escaping over one
+    # that requires getting the escape depth right.
+    #
+    # Verified both shapes: with a query string
+    # (file:/var/lib/invctl/elsewhere.db?_txlock=immediate) and without
+    # (file:/var/lib/invctl/plain.db).
+    invctl_upgrade_sqlite_path: >-
+      {{ invctl_upgrade_db_dsn | regex_replace('^file:', '')
+                               | regex_replace('[?].*$', '') }}
+  when: invctl_upgrade_db_driver == 'sqlite'
+  no_log: true
+
+- name: Refuse a SQLite DSN this role cannot turn into a path
+  ansible.builtin.assert:
+    that:
+      - invctl_upgrade_db_dsn is match('^file:/')
+      - invctl_upgrade_sqlite_path | length > 1
+    fail_msg: >-
+      INV_DB_DSN in {{ invctl_config_dir }}/invctl.env is not a form this role
+      can back up. It expects an absolute SQLite path, as
+      file:/var/lib/invctl/invctl.db?_txlock=immediate . The upgrade stops here,
+      before anything is stopped or replaced, because the alternative is backing
+      up a file the service is not using and calling that a rollback plan.
+    success_msg: "the running database is {{ invctl_upgrade_sqlite_path }}"
+  when: invctl_upgrade_db_driver == 'sqlite'
+
 - name: Name this upgrade's backup
   ansible.builtin.set_fact:
     # UTC, from the control node, in the format docs/UPGRADE.md uses. One clock
@@ -68,15 +115,30 @@
     # the same second. An operator has no reason to ever pass this.
     invctl_backup_stamp: "{{ invctl_backup_stamp | default(lookup('pipe', 'date -u +%Y%m%dT%H%M%SZ')) }}"
 
+# NAMED AFTER THE DATABASE IT ACTUALLY CAME FROM.
+#
+# These were `invctl.db.<stamp>` literally. With the source path now derived
+# from the DSN, a host using a different filename produced a backup whose
+# CONTENTS were right and whose NAME said `invctl.db` -- a file that does not
+# exist on that host. The filename is what an operator reads at 03:00 to decide
+# which backup to restore and where to put it, so a name that points at the
+# wrong database is a rollback instruction that is wrong in the one place it
+# gets read.
 - name: Work out where this upgrade's backup will go
   ansible.builtin.set_fact:
+    invctl_backup_basename: >-
+      {{ invctl_upgrade_sqlite_path | basename
+         if invctl_upgrade_db_driver == 'sqlite' else '' }}
     invctl_backup_path: >-
-      {{ (invctl_backup_dir ~ '/invctl.db.' ~ invctl_backup_stamp)
+      {{ (invctl_backup_dir ~ '/' ~ (invctl_upgrade_sqlite_path | basename)
+          ~ '.' ~ invctl_backup_stamp)
          if invctl_upgrade_db_driver == 'sqlite'
          else (invctl_backup_dir ~ '/invctl-' ~ invctl_backup_stamp ~ '.dump') }}
     invctl_backup_sidecars: >-
-      {{ [invctl_backup_dir ~ '/invctl.db-wal.' ~ invctl_backup_stamp,
-          invctl_backup_dir ~ '/invctl.db-shm.' ~ invctl_backup_stamp]
+      {{ [invctl_backup_dir ~ '/' ~ (invctl_upgrade_sqlite_path | basename)
+          ~ '-wal.' ~ invctl_backup_stamp,
+          invctl_backup_dir ~ '/' ~ (invctl_upgrade_sqlite_path | basename)
+          ~ '-shm.' ~ invctl_backup_stamp]
          if invctl_upgrade_db_driver == 'sqlite' else [] }}
 
 - name: Look for a backup already at those names
@@ -205,7 +267,7 @@
 
     - name: Back up the SQLite database
       ansible.builtin.copy:
-        src: "{{ invctl_data_dir }}/invctl.db"
+        src: "{{ invctl_upgrade_sqlite_path }}"
         dest: "{{ invctl_backup_path }}"
         remote_src: true
         owner: root
@@ -215,7 +277,7 @@
 
     - name: Look for the write-ahead log files
       ansible.builtin.stat:
-        path: "{{ invctl_data_dir }}/invctl.db{{ item }}"
+        path: "{{ invctl_upgrade_sqlite_path }}{{ item }}"
       loop: ["-wal", "-shm"]
       register: invctl_wal
       when: invctl_upgrade_db_driver == 'sqlite'
@@ -264,7 +326,7 @@
 
     - name: Checksum the live SQLite database for comparison
       ansible.builtin.stat:
-        path: "{{ invctl_data_dir }}/invctl.db"
+        path: "{{ invctl_upgrade_sqlite_path }}"
         get_checksum: true
         checksum_algorithm: sha256
       register: invctl_db_live
@@ -299,7 +361,7 @@
           - invctl_backup_stat.stat.checksum == invctl_db_live.stat.checksum
         fail_msg: >-
           The backup at {{ invctl_backup_path }} is not a faithful copy of
-          {{ invctl_data_dir }}/invctl.db.
+          {{ invctl_upgrade_sqlite_path }}.
           header: {{ invctl_backup_magic.stdout | default('(unreadable)') }} (want 'SQLite format 3')
           size:   {{ invctl_backup_stat.stat.size }} vs {{ invctl_db_live.stat.size }}
           sha256: {{ invctl_backup_stat.stat.checksum }} vs {{ invctl_db_live.stat.checksum }}
