@@ -140,6 +140,40 @@ no "did you remember to migrate" failure mode. To apply them without serving —
 useful when you want the schema change and the restart to be separate events —
 run `invctl -migrate`.
 
+### Read the first few log lines; they are addressed to you
+
+On a deployment using single sign-on, invctl checks two things at startup that
+you cannot see from your own configuration, and says so in the log. Neither
+stops it starting — a legitimate fresh install is in exactly this state five
+minutes before the first person signs in — but both describe a situation that
+is invisible until the morning it matters.
+
+```
+no break-glass account: if the identity provider is unreachable, nobody can
+sign in. Switching INV_AUTH_LOCAL=true during an outage will NOT help --
+accounts created through SSO have no password. Create a local account on
+/users now, while sign-in still works
+```
+
+That one is counting accounts that could sign in if Keycloak were down: local
+accounts with a password. SSO and LDAP accounts carry no password hash, so on a
+deployment that has only ever used SSO the answer is zero. See `docs/RECOVERY.md`
+part two.
+
+```
+nobody can grant a role: there is no active administrator and INV_ADMIN_USERS
+is empty. Everyone arriving through the identity provider becomes an observer,
+including the first person. Set INV_ADMIN_USERS to a Keycloak
+preferred_username and restart
+```
+
+There is a third, at info rather than warning: once an administrator exists by
+role **and** `INV_ADMIN_USERS` is still set, invctl says the override is no
+longer needed. It is break-glass, and on an SSO deployment it is a privileged
+string matched against a claim from a system invctl does not control — once the
+role column can answer the question, leaving it set is risk with no remaining
+job.
+
 A systemd unit, minus the environment:
 
 ```ini
