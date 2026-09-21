@@ -27,14 +27,14 @@
 
 - name: Download the release binary from GitHub
   ansible.builtin.get_url:
-    url: "https://github.com/madalinignisca/invctl/releases/download/v{{ invctl_version }}/invctl_{{ invctl_version }}_linux_amd64"
+    url: "{{ invctl_release_base_url }}/invctl_{{ invctl_version }}_linux_amd64"
     dest: "{{ invctl_stage.path }}/invctl_{{ invctl_version }}_linux_amd64"
     mode: "0644"
   when: invctl_source == 'github'
 
 - name: Download the checksums file from GitHub
   ansible.builtin.get_url:
-    url: "https://github.com/madalinignisca/invctl/releases/download/v{{ invctl_version }}/invctl_{{ invctl_version }}_checksums.txt"
+    url: "{{ invctl_release_base_url }}/invctl_{{ invctl_version }}_checksums.txt"
     dest: "{{ invctl_stage.path }}/invctl_{{ invctl_version }}_checksums.txt"
     mode: "0644"
   when: invctl_source == 'github'
@@ -53,7 +53,7 @@
       invctl_{{ invctl_version }}_linux_amd64 and
       invctl_{{ invctl_version }}_checksums.txt .
       Download them from
-      https://github.com/madalinignisca/invctl/releases/download/v{{ invctl_version }}/
+      {{ invctl_release_base_url }}/
       on a machine that can reach it. The checksums file is not optional: the
       offline path verifies exactly as the online one does (spec D5).
   delegate_to: localhost

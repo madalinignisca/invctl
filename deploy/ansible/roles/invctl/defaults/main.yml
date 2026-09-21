@@ -20,6 +20,25 @@ invctl_version: "1.2.0"
 # same task file (spec D5).
 invctl_source: github
 
+# Where the `github` source fetches from. A variable rather than three hardcoded
+# copies of the same URL, for two reasons beyond the obvious one.
+#
+# An internal artefact mirror is the middle ground this role's audience actually
+# occupies: a segmented network that cannot reach github.com but does have a
+# local HTTP server. Without this they are pushed all the way to `files` and
+# copying binaries by hand, for what is really a change of hostname.
+#
+# It is also what makes the `github` path TESTABLE. It is the default source, and
+# the test container here has no egress to github.com, so before this variable
+# existed the default path was the one path that could not be exercised end to
+# end -- the inverse of where the risk is. Pointing it at a local server proves
+# the download, the filenames, the destination and the handoff to
+# verify_checksum.yml; only DNS and TLS to GitHub itself go unproven.
+#
+# Whatever it points at, the checksum verification is identical and mandatory: a
+# mirror is a convenience, never a reason to trust an artefact more.
+invctl_release_base_url: "https://github.com/madalinignisca/invctl/releases/download/v{{ invctl_version }}"
+
 # invctl binds plaintext HTTP and this role installs no proxy, no certificate
 # and no DNS (spec D3). After a successful run NOTHING answers from outside this
 # host. That is correct; see deploy/ansible/README.md.
