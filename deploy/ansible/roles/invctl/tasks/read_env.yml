@@ -1,0 +1,109 @@
+# invctl — infrastructure inventory
+# Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+#
+# Licensed under the GNU Affero General Public License, version 3 only —
+# no later version applies. See LICENSE for the full text.
+#
+# SPDX-License-Identifier: AGPL-3.0-only
+
+---
+# Parse the configuration ALREADY ON THE HOST, once, for the two callers that
+# need it: configure.yml recovers the session key and the seed password from it,
+# and upgrade.yml learns which database the service was actually using.
+#
+# ONE PARSER, FOR THE SAME REASON THERE IS ONE CHECKSUM VERIFIER (spec D5): a
+# strict parser written twice is a parser that is strict in one place.
+#
+# THIS FILE FAILS CLOSED, DELIBERATELY, AND AN EARLIER DRAFT DID NOT. It used
+# `slurp` with `failed_when: false`, so an unreadable or half-written file read
+# as empty -- which mints a NEW INV_SESSION_KEY and signs out every user, on a
+# run that reported itself routine. Losing everybody's session is not an error
+# anything raises; it is just Monday morning. So "cannot read" and "cannot
+# parse" both stop the play.
+
+- name: The one assignment form this role writes and accepts
+  ansible.builtin.set_fact:
+    # KEY='value': single-quoted, no single quote inside, nothing before or
+    # after. Everything else is malformed.
+    #
+    # A truncated INV_SESSION_KEY='abc passes a naive "does the file contain
+    # INV_SESSION_KEY='" test and then yields the malformed text as the value,
+    # which is then written back to the host as the session key. Double-quoted,
+    # unquoted, whitespace-padded and duplicated assignments are all likewise
+    # something a human did that this role must not silently reinterpret.
+    invctl_env_record_re: "^INV_[A-Z0-9_]+='[^']*'$"
+
+- name: Look for the configuration already on the host
+  ansible.builtin.stat:
+    path: "{{ invctl_config_dir }}/invctl.env"
+  register: invctl_env_stat
+
+# NO failed_when HERE. A file that exists and cannot be read is a reason to
+# stop. ONLY "the file is absent" means "this is a first install".
+- name: Read it
+  ansible.builtin.slurp:
+    src: "{{ invctl_config_dir }}/invctl.env"
+  register: invctl_env_slurp
+  when: invctl_env_stat.stat.exists
+  no_log: true
+
+- name: Split it into lines
+  ansible.builtin.set_fact:
+    invctl_env_lines: >-
+      {{ (invctl_env_slurp.content | b64decode).splitlines()
+         if invctl_env_stat.stat.exists else [] }}
+  no_log: true
+
+- name: Separate the assignments from the comments and the blank lines
+  ansible.builtin.set_fact:
+    invctl_env_records: >-
+      {{ invctl_env_lines | select('match', invctl_env_record_re) | list }}
+    invctl_env_unparsed: >-
+      {{ invctl_env_lines
+         | reject('match', invctl_env_record_re)
+         | reject('match', '^#')
+         | reject('match', '^$')
+         | list }}
+  no_log: true
+
+- name: Refuse a configuration file this role cannot have written
+  ansible.builtin.assert:
+    # \\1, DOUBLE-ESCAPED, AND THAT IS NOT A TYPO. Unlike a set_fact's `{{ }}`,
+    # an `assert: that:` item is templated TWICE -- once as the raw condition
+    # source, once to evaluate it -- so a single '\1' backreference is consumed
+    # by the first pass and the duplicate check below silently evaluates as
+    # though every key were unique, regardless of what the file said. Proven by
+    # mutation: with a single backslash this assertion could not fail even when
+    # fed a file with INV_ADMIN_USERS declared twice. Confirmed against this
+    # host's live ansible-core, not assumed from the docs.
+    that:
+      - invctl_env_unparsed | length == 0
+      - (invctl_env_records
+         | map('regex_replace', "^(INV_[A-Z0-9_]+)='.*$", "\\1")
+         | list | unique | length) == (invctl_env_records | length)
+    fail_msg: >-
+      {{ invctl_config_dir }}/invctl.env has
+      {{ invctl_env_unparsed | length }} line(s) this role cannot parse, or
+      assigns the same variable twice, and it will not guess at what was meant.
+      Every line must be blank, a comment, or exactly KEY='value' with no single
+      quote in the value.
+      THE SESSION KEY LIVES IN THIS FILE: reading it wrongly would replace the
+      key and sign out every user, so a file that is not exactly what this role
+      writes stops the run instead.
+      Fix the line, or move the file aside and re-run with
+      invctl_admin_password set to seed it again -- ALL SESSIONS WILL END if you
+      do that, because the key goes with it.
+  when: invctl_env_stat.stat.exists
+  no_log: true
+
+- name: Build the configuration map
+  ansible.builtin.set_fact:
+    # zip rather than a separator character: a DSN or a password can contain
+    # any byte except a single quote and a newline, so there is no separator
+    # that is safe to split on.
+    invctl_env: >-
+      {{ dict(invctl_env_records
+                | map('regex_replace', "^(INV_[A-Z0-9_]+)='.*$", '\1') | list
+              | zip(invctl_env_records
+                | map('regex_replace', "^INV_[A-Z0-9_]+='(.*)'$", '\1') | list)) }}
+  no_log: true

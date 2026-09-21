@@ -1,0 +1,21 @@
+# invctl — infrastructure inventory
+# Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+#
+# Licensed under the GNU Affero General Public License, version 3 only —
+# no later version applies. See LICENSE for the full text.
+#
+# SPDX-License-Identifier: AGPL-3.0-only
+
+---
+# THE MECHANISM D7 RESTS ON. A template task reports `changed` only on a real
+# diff, and a handler notified by it fires only then. That gives "do not restart
+# when nothing changed" WITHOUT also giving "do not look at the configuration"
+# -- which is exactly the pair the first draft of the spec conflated.
+- name: reload systemd
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+
+- name: restart invctl
+  ansible.builtin.systemd_service:
+    name: invctl
+    state: restarted

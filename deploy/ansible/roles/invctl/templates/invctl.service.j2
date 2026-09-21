@@ -1,0 +1,37 @@
+# invctl — infrastructure inventory
+# Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+#
+# Licensed under the GNU Affero General Public License, version 3 only —
+# no later version applies. See LICENSE for the full text.
+#
+# SPDX-License-Identifier: AGPL-3.0-only
+
+# MANAGED BY ANSIBLE. This is docs/INSTALL.md's unit with one change:
+# EnvironmentFile= instead of Environment= lines, because `systemctl show`
+# discloses the latter to everybody and a DSN carries a password (spec D6).
+[Unit]
+Description=invctl infrastructure inventory
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# Type=simple, NOT Type=notify. invctl does not implement sd_notify; a notify
+# unit waits for a readiness message that never arrives and systemd eventually
+# fails the start.
+Type=simple
+User=invctl
+Group=invctl
+WorkingDirectory={{ invctl_data_dir }}
+EnvironmentFile={{ invctl_config_dir }}/invctl.env
+ExecStart={{ invctl_install_dir }}/invctl
+Restart=on-failure
+RestartSec=5s
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths={{ invctl_data_dir }}
+
+[Install]
+WantedBy=multi-user.target

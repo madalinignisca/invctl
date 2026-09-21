@@ -1,0 +1,236 @@
+# invctl — infrastructure inventory
+# Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+#
+# Licensed under the GNU Affero General Public License, version 3 only —
+# no later version applies. See LICENSE for the full text.
+#
+# SPDX-License-Identifier: AGPL-3.0-only
+
+---
+# TWO AXES, KEPT APART (spec D7).
+#
+#   the BINARY  -- a three-state machine: absent / same / different
+#   the CONFIG  -- not a state machine at all; templated every run, and a
+#                  restart only when a template really changed
+#
+# The first draft of the spec keyed everything on the binary and therefore
+# ignored the configuration whenever the version matched. That is not
+# idempotent, it is inert: the DSN on the host could drift from the DSN in the
+# inventory with nothing to show for it.
+#
+# STATE IS READ FROM THE TARGET, NEVER ASSUMED (spec §4).
+
+# --- before anything else -------------------------------------------------
+
+- name: Look for an interrupted upgrade
+  ansible.builtin.stat:
+    path: "{{ invctl_config_dir }}/upgrade-in-progress"
+  register: invctl_upgrade_marker
+
+- name: Read the interrupted upgrade's note
+  ansible.builtin.slurp:
+    src: "{{ invctl_config_dir }}/upgrade-in-progress"
+  register: invctl_upgrade_marker_body
+  when: invctl_upgrade_marker.stat.exists
+
+# THIS REFUSAL IS THE FIRST TASK IN THE ROLE FOR A REASON, AND THE REASON IS NOT
+# OBVIOUS FROM THE DIFF.
+#
+# If `invctl -migrate` fails during an upgrade, the NEW binary is already on
+# disk and the service is stopped. On the next run `-version` now MATCHES the
+# pin, so the binary axis says NO-OP -- and D7's unconditional configure + verify
+# would then START the service. invctl migrates automatically at startup, before
+# binding (docs/UPGRADE.md), so that start is a second migration attempt made
+# OUTSIDE the backup gate, on a database whose state nobody has looked at.
+#
+# The backup from the interrupted attempt does still exist, so this is not
+# unrecoverable. It is the role walking silently past a half-finished upgrade,
+# which is the one behaviour D1 says it must never have.
+- name: Refuse to proceed past an interrupted upgrade
+  ansible.builtin.fail:
+    msg: >-
+      An upgrade on this host did not finish. {{ invctl_config_dir }}/upgrade-in-progress
+      records it:
+
+      {{ invctl_upgrade_marker_body.content | b64decode }}
+
+      The role will do NOTHING -- not even converge configuration -- until a
+      person has decided what happened, because starting invctl would itself
+      apply migrations, outside the backup gate, to a database nobody has
+      looked at.
+      Read docs/UPGRADE.md, "When a migration fails". The backup named above
+      exists and is the rollback. When you have decided and acted, clear the
+      marker by hand:
+        rm {{ invctl_config_dir }}/upgrade-in-progress
+      There is deliberately no variable that does this for you.
+  when: invctl_upgrade_marker.stat.exists
+
+# --- what is actually on this host ----------------------------------------
+
+- name: Look for an installed binary
+  ansible.builtin.stat:
+    path: "{{ invctl_install_dir }}/invctl"
+  register: invctl_binary
+
+# `invctl -version` is printed BEFORE config.Load (cmd/invctl/main.go:99-105),
+# so this works on a host whose configuration is missing or wrong -- which is
+# exactly the host somebody is standing at when they need to know what is
+# deployed.
+- name: Ask the installed binary what it is
+  ansible.builtin.command:
+    argv: ["{{ invctl_install_dir }}/invctl", -version]
+  register: invctl_version_probe
+  changed_when: false
+  when: invctl_binary.stat.exists
+
+# `invctl v1.2.0 (commit ..., built ..., linux/amd64, go1.26.6)` -- the second
+# whitespace-separated field, with the leading v stripped.
+- name: Record the installed version
+  ansible.builtin.set_fact:
+    invctl_installed_version: >-
+      {{ (invctl_version_probe.stdout.split()[1] | regex_replace('^v', ''))
+         if invctl_binary.stat.exists else '' }}
+
+- name: Read the configuration already on the host
+  ansible.builtin.include_tasks: read_env.yml
+
+# --- preflight ------------------------------------------------------------
+
+# ONLY ON A FRESH INSTALL (spec §2). ensureAdmin returns early once any account
+# exists, so requiring this on every run would keep a credential in the
+# inventory to satisfy an assertion and nothing else -- and would stop the
+# playbook running unattended, which D7 otherwise makes possible.
+- name: Refuse a fresh install without an administrator password
+  ansible.builtin.assert:
+    that:
+      - invctl_admin_password is defined
+      - (invctl_admin_password | default('')) | length > 0
+    fail_msg: >-
+      invctl_admin_password is required for a FIRST install of this host and has
+      no default, ever. A default admin password in a deployment role is a
+      default admin password in production. Pass it from a vault, or with
+      -e invctl_admin_password=... for a throwaway. Later runs against this host
+      will not need it.
+  no_log: true
+  when: invctl_installed_version == ''
+
+- name: Refuse PostgreSQL without a DSN
+  ansible.builtin.assert:
+    that:
+      - invctl_db_dsn is defined
+      - invctl_db_dsn is search('^postgres')
+    fail_msg: >-
+      invctl_db_driver is 'postgres' and invctl_db_dsn is not a PostgreSQL DSN.
+      This role never installs a database server (spec D2): point it at one
+      somebody else manages.
+  no_log: true
+  when: invctl_db_driver == 'postgres'
+
+- name: Collect the values that will be written to the environment file
+  ansible.builtin.set_fact:
+    invctl_env_candidate_values:
+      - "{{ invctl_listen }}"
+      - "{{ invctl_db_dsn }}"
+      - "{{ invctl_admin_username }}"
+      - "{{ invctl_admin_password | default('') }}"
+      - "{{ invctl_admin_users }}"
+  no_log: true
+
+# A SINGLE QUOTE ENDS THE VALUE EARLY. A NEWLINE ENDS THE LINE EARLY, AND
+# WHATEVER FOLLOWS BECOMES A SETTING OF ITS OWN -- so a password containing a
+# line break could set INV_SECURE_COOKIES=false, and nothing would look wrong.
+# Both are refused rather than escaped: this role reads the file back, and one
+# unambiguous form is worth more than the ability to carry an exotic value.
+- name: Refuse a configuration value containing a quote or a line break
+  ansible.builtin.assert:
+    that:
+      - (invctl_env_candidate_values | select('search', "'") | list | length) == 0
+      - (invctl_env_candidate_values | select('search', '[\r\n]') | list | length) == 0
+    fail_msg: >-
+      A configuration value contains a single quote, a carriage return or a
+      newline. The environment file writes every value as KEY='value' on one
+      line, and reads it back in exactly that form; a quote would truncate the
+      value and a line break would turn the remainder into a separate setting.
+      Change the value -- most often this is a password out of a vault that
+      picked up a trailing newline.
+  no_log: true
+
+- name: Require psql for the PostgreSQL reachability check
+  ansible.builtin.command:
+    argv: [sh, -c, 'command -v psql']
+  register: invctl_psql
+  changed_when: false
+  failed_when: false
+  when: invctl_db_driver == 'postgres'
+
+# community.postgresql is deliberately NOT used: it is not installed here and
+# would be a new dependency for one query (spec D2). psql comes from
+# postgresql-client, the same package §8 already needs for pg_dump.
+- name: Fail early when psql is missing
+  ansible.builtin.assert:
+    that:
+      - invctl_psql.rc == 0
+    fail_msg: >-
+      psql is not on PATH on this host. Install postgresql-client: it provides
+      psql (this check), pg_dump (the upgrade backup) and pg_restore (the check
+      that the backup is readable). The database SERVER stays wherever it is;
+      only the client is needed here.
+  when: invctl_db_driver == 'postgres'
+
+# BEFORE ANY CONFIGURATION IS WRITTEN (spec D2), so a typo fails at the start
+# rather than as a crash-looping service somebody has to read a journal for.
+- name: Verify the PostgreSQL database is reachable
+  ansible.builtin.command:
+    argv: [psql, "{{ invctl_db_dsn }}", -tAc, 'SELECT 1']
+  register: invctl_pg_reachable
+  changed_when: false
+  failed_when: false
+  no_log: true
+  when: invctl_db_driver == 'postgres'
+
+- name: Fail when the database cannot be reached
+  ansible.builtin.assert:
+    that:
+      - invctl_pg_reachable.rc == 0
+    fail_msg: >-
+      The PostgreSQL database named by invctl_db_dsn could not be reached, and
+      nothing has been written. The role does not install a database server
+      (spec D2); create the database first, per the SQL in docs/INSTALL.md.
+  when: invctl_db_driver == 'postgres'
+
+- name: Report the state this run is acting on
+  ansible.builtin.debug:
+    msg: >-
+      binary: installed={{ invctl_installed_version | default('(none)', true) }}
+      pinned={{ invctl_version }}
+      action={{ 'INSTALL' if invctl_installed_version == ''
+                else ('NO-OP' if invctl_installed_version == invctl_version
+                      else 'UPGRADE') }};
+      configuration is converged on every run regardless (spec D7).
+
+# --- the binary axis ------------------------------------------------------
+
+- name: Install
+  ansible.builtin.include_tasks: install.yml
+  when: invctl_installed_version == ''
+
+# REPLACED BY tasks/upgrade.yml IN TASK 6. Until then the role refuses rather
+# than doing nothing: a host pinned to a version it is not running is a fact an
+# operator has to be told, and a silent no-op tells them nothing.
+- name: Refuse an upgrade this role cannot yet perform
+  ansible.builtin.fail:
+    msg: >-
+      invctl {{ invctl_installed_version }} is installed and {{ invctl_version }}
+      is pinned. This role does not perform upgrades yet. Nothing has been
+      changed.
+  when:
+    - invctl_installed_version != ''
+    - invctl_installed_version != invctl_version
+
+# --- the configuration axis, always ---------------------------------------
+
+- name: Converge the configuration and the unit
+  ansible.builtin.include_tasks: configure.yml
+
+- name: Start it and prove it is serving
+  ansible.builtin.include_tasks: verify.yml
