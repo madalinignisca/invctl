@@ -1,0 +1,84 @@
+# invctl — infrastructure inventory
+# Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+#
+# Licensed under the GNU Affero General Public License, version 3 only —
+# no later version applies. See LICENSE for the full text.
+#
+# SPDX-License-Identifier: AGPL-3.0-only
+
+---
+# A fresh install: the user, the directories and the binary. The config file and
+# the unit are NOT here -- they belong to configure.yml, which main.yml runs on
+# every run (spec D7). Templating them here would mean they were only ever
+# written on the first run, which is the inert behaviour D7 corrects.
+#
+# NO EXPLICIT MIGRATION STEP IS NEEDED: invctl runs migrations automatically at
+# startup, before binding, and exits on failure rather than serving a
+# half-migrated schema (docs/UPGRADE.md). On a fresh install there is nothing to
+# lose, so the health check in verify.yml is a sufficient gate (spec §4).
+
+- name: Create the invctl system group
+  ansible.builtin.group:
+    name: invctl
+    system: true
+
+- name: Create the invctl system user
+  ansible.builtin.user:
+    name: invctl
+    group: invctl
+    system: true
+    create_home: false
+    shell: /usr/sbin/nologin
+
+- name: Create the directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: "{{ item.group }}"
+    mode: "{{ item.mode }}"
+  loop:
+    # The binary is root-owned and the service user only executes it: a service
+    # that can rewrite its own binary is a privilege escalation waiting for a
+    # file-permission mistake.
+    - { path: "{{ invctl_install_dir }}", owner: root, group: root, mode: "0755" }
+    - { path: "{{ invctl_data_dir }}", owner: invctl, group: invctl, mode: "0750" }
+    - { path: "{{ invctl_config_dir }}", owner: root, group: root, mode: "0750" }
+    # Backups are database dumps: everything in the inventory, in one file.
+    - { path: "{{ invctl_backup_dir }}", owner: root, group: root, mode: "0700" }
+  loop_control:
+    label: "{{ item.path }}"
+
+# SKIPPED WHOLE UNDER --check, NOT MERELY LEFT TO FAIL QUIETLY.
+#
+# `tempfile` (inside acquire.yml) has NO check_mode support at all, so under
+# --check it is skipped outright and never registers invctl_stage --
+# `get_url`/`copy` have only partial support and would not actually populate
+# a staging directory either way. Letting this run under --check does not
+# produce a safe, empty preview: it produces `invctl_stage.path` referencing
+# a dict with no `path` key, and the role crashes on the next task's template
+# rather than reporting anything. The `when` below turns that crash into an
+# honest "not shown" -- see the debug task right after it.
+- name: Acquire and verify the binary
+  ansible.builtin.include_tasks: acquire.yml
+  when: not ansible_check_mode
+
+- name: Report what would be acquired and installed (check mode preview)
+  ansible.builtin.debug:
+    msg: >-
+      Would acquire invctl {{ invctl_version }} from '{{ invctl_source }}'
+      ({{ invctl_release_base_url if invctl_source == 'github'
+         else role_path ~ '/files' }}), verify its checksum, and install it
+      to {{ invctl_install_dir }}/invctl. --check does not download or
+      verify a binary.
+  when: ansible_check_mode
+
+- name: Install the verified binary
+  ansible.builtin.copy:
+    src: "{{ invctl_stage.path }}/invctl_{{ invctl_version }}_linux_amd64"
+    dest: "{{ invctl_install_dir }}/invctl"
+    remote_src: true
+    owner: root
+    group: root
+    mode: "0755"
+  when: not ansible_check_mode

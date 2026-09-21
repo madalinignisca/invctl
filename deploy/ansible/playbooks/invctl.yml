@@ -1,0 +1,16 @@
+# invctl — infrastructure inventory
+# Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+#
+# Licensed under the GNU Affero General Public License, version 3 only —
+# no later version applies. See LICENSE for the full text.
+#
+# SPDX-License-Identifier: AGPL-3.0-only
+
+---
+# Hosts and the role, and nothing else (spec §1). Logic that creeps into a
+# playbook is logic the role cannot be tested without.
+- name: invctl
+  hosts: invctl
+  become: true
+  roles:
+    - role: invctl

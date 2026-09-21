@@ -1,0 +1,94 @@
+# invctl — infrastructure inventory
+# Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+#
+# Licensed under the GNU Affero General Public License, version 3 only —
+# no later version applies. See LICENSE for the full text.
+#
+# SPDX-License-Identifier: AGPL-3.0-only
+
+---
+# PINNED, AND A TEST KEEPS IT HONEST. internal/license/role_version_pin_test.go
+# fails when CHANGELOG.md's newest version heading is not this number, so
+# cutting a release without bumping this line turns CI red and names the file to
+# edit. The release workflow deliberately does NOT write here: having a release
+# commit to the repository adds a new way for the one process most worth keeping
+# boring to go wrong (spec D4).
+invctl_version: "1.2.0"
+
+# github downloads the release assets; files reads them from this role's files/
+# directory for a segmented environment. BOTH verify the checksum, through the
+# same task file (spec D5).
+invctl_source: github
+
+# Where the `github` source fetches from. A variable rather than three hardcoded
+# copies of the same URL, for two reasons beyond the obvious one.
+#
+# An internal artefact mirror is the middle ground this role's audience actually
+# occupies: a segmented network that cannot reach github.com but does have a
+# local HTTP server. Without this they are pushed all the way to `files` and
+# copying binaries by hand, for what is really a change of hostname.
+#
+# It is also what makes the `github` path TESTABLE. It is the default source, and
+# the test container here has no egress to github.com, so before this variable
+# existed the default path was the one path that could not be exercised end to
+# end -- the inverse of where the risk is. Pointing it at a local server proves
+# the download, the filenames, the destination and the handoff to
+# verify_checksum.yml; only DNS and TLS to GitHub itself go unproven.
+#
+# Whatever it points at, the checksum verification is identical and mandatory: a
+# mirror is a convenience, never a reason to trust an artefact more.
+invctl_release_base_url: "https://github.com/madalinignisca/invctl/releases/download/v{{ invctl_version }}"
+
+# invctl binds plaintext HTTP and this role installs no proxy, no certificate
+# and no DNS (spec D3). After a successful run NOTHING answers from outside this
+# host. That is correct; see deploy/ansible/README.md.
+invctl_listen: "127.0.0.1:8080"
+
+invctl_db_driver: sqlite
+
+# Required when invctl_db_driver is postgres, and the role fails naming it. The
+# role never installs a database server: a role that installs one also owns its
+# version, upgrades, backups and tuning, which is a second product hiding inside
+# a deployment role (spec D2).
+invctl_db_dsn: "file:{{ invctl_data_dir }}/invctl.db?_txlock=immediate"
+
+# Correct behind TLS, which is where this is expected to end up. Set false only
+# for a plain-HTTP lab -- docs/INSTALL.md, "Two settings behind a proxy".
+invctl_secure_cookies: true
+
+invctl_admin_username: admin
+
+# invctl_admin_password HAS NO DEFAULT, ON PURPOSE, and never will. A default
+# admin password in a deployment role is a default admin password in production.
+#
+# It is required ONLY on a fresh install (spec §2): ensureAdmin returns early
+# once any account exists, so demanding it on every run would mean keeping a
+# credential in the inventory to satisfy an assertion and nothing else -- and
+# would stop the playbook running unattended, which D7 otherwise makes possible.
+# On later runs tasks/configure.yml reads the value back off the host.
+
+# Break-glass. Read docs/RECOVERY.md before deciding what goes here.
+invctl_admin_users: admin
+
+invctl_backup_dir: /var/backups/invctl
+invctl_install_dir: /opt/invctl
+invctl_data_dir: /var/lib/invctl
+invctl_config_dir: /etc/invctl
+
+# THE RUN LOCK, NOT AN OPERATOR-FACING KNOB IN THE ORDINARY CASE.
+#
+# /run rather than invctl_config_dir: this is a mutex for one run of this
+# playbook against this host, not a fact about the estate, and a tmpfs that
+# is empty after every reboot is a second, free line of defence against a
+# lock nobody ever releases -- on top of the age-based break below, which is
+# the one that matters when the host never reboots between the crash and the
+# next attempt.
+invctl_lock_dir: /run/invctl-ansible.lock
+
+# How long a lock is honoured before a later run treats it as abandoned and
+# breaks it rather than refusing forever. Long enough to cover a real
+# PostgreSQL pg_dump on a large database plus the health-check retries in
+# verify.yml; short enough that a genuinely crashed run does not lock a host
+# out for a working day. Override with -e only if a specific host's backup
+# is known to run long.
+invctl_lock_max_age_seconds: 1800

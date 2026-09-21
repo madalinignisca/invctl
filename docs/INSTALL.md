@@ -154,6 +154,21 @@ Environment lines in a unit file are world-readable via `systemctl show`. If
 that is not acceptable for your database password, use `EnvironmentFile=`
 pointing at a file owned by root and mode `0600`.
 
+## Doing this with Ansible instead
+
+Everything above is the procedure a person follows by hand. `deploy/ansible/`
+encodes exactly this page as a repeatable role — the user, the directories,
+the binary, the unit, the checksum verification, the safe upgrade ordering —
+so that doing it again on a second host, or on this one after a version bump,
+does not mean re-reading this page and re-typing commands. It goes one step
+further than the unit above: it uses `EnvironmentFile=` **unconditionally**,
+never `Environment=` lines, rather than only when a database password is
+involved — the same reasoning as the warning just above, applied every time
+rather than judged case by case.
+
+This page stays authoritative for what each setting *means*; the role is
+authoritative for how the host gets there. See `deploy/ansible/README.md`.
+
 ## TLS in front
 
 invctl listens in plaintext on `INV_LISTEN`. Bind it to loopback and put a
@@ -408,3 +423,4 @@ one — which is exactly the wrong place to go looking.
 - `docs/ROLES.md` — the three roles, and who can do what.
 - `docs/RECOVERY.md` — getting back in when no account can write.
 - `docs/API.md` — the read-only API in detail.
+- `deploy/ansible/README.md` — doing all of the above with Ansible.

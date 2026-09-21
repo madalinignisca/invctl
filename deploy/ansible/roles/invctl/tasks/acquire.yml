@@ -1,0 +1,79 @@
+# invctl — infrastructure inventory
+# Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+#
+# Licensed under the GNU Affero General Public License, version 3 only —
+# no later version applies. See LICENSE for the full text.
+#
+# SPDX-License-Identifier: AGPL-3.0-only
+
+---
+# Put a verified binary in a staging directory on the target. Two sources, ONE
+# verification -- see verify_checksum.yml (spec D5).
+#
+# Nothing here touches /opt/invctl. An acquire that fails leaves the installed
+# binary exactly as it was, which is what lets the upgrade path treat "we have
+# the new binary" and "we have replaced the old one" as two separate facts.
+#
+# Included only by install.yml and upgrade.yml, never unconditionally: on a
+# NO-OP run nothing is downloaded and nothing is staged, which is most of why a
+# scheduled run costs nothing.
+
+- name: Stage the release artefacts somewhere temporary
+  ansible.builtin.tempfile:
+    state: directory
+    suffix: invctl-acquire
+  register: invctl_stage
+  changed_when: false
+
+- name: Download the release binary from GitHub
+  ansible.builtin.get_url:
+    url: "{{ invctl_release_base_url }}/invctl_{{ invctl_version }}_linux_amd64"
+    dest: "{{ invctl_stage.path }}/invctl_{{ invctl_version }}_linux_amd64"
+    mode: "0644"
+  when: invctl_source == 'github'
+
+- name: Download the checksums file from GitHub
+  ansible.builtin.get_url:
+    url: "{{ invctl_release_base_url }}/invctl_{{ invctl_version }}_checksums.txt"
+    dest: "{{ invctl_stage.path }}/invctl_{{ invctl_version }}_checksums.txt"
+    mode: "0644"
+  when: invctl_source == 'github'
+
+# "Which file, where" is the ENTIRE question an air-gapped operator has, so the
+# refusal answers it in full rather than reporting a path that was not found.
+- name: Assert both offline artefacts are present on the control node
+  ansible.builtin.assert:
+    that:
+      - (role_path ~ '/files/invctl_' ~ invctl_version ~ '_linux_amd64') is file
+      - (role_path ~ '/files/invctl_' ~ invctl_version ~ '_checksums.txt') is file
+    fail_msg: >-
+      invctl_source is 'files' and the release artefacts are not where the role
+      reads them from. Put BOTH of these, with exactly these names, in
+      {{ role_path }}/files/ :
+      invctl_{{ invctl_version }}_linux_amd64 and
+      invctl_{{ invctl_version }}_checksums.txt .
+      Download them from
+      {{ invctl_release_base_url }}/
+      on a machine that can reach it. The checksums file is not optional: the
+      offline path verifies exactly as the online one does (spec D5).
+  delegate_to: localhost
+  become: false
+  run_once: true
+  when: invctl_source == 'files'
+
+- name: Copy the offline binary to the target
+  ansible.builtin.copy:
+    src: "invctl_{{ invctl_version }}_linux_amd64"
+    dest: "{{ invctl_stage.path }}/invctl_{{ invctl_version }}_linux_amd64"
+    mode: "0644"
+  when: invctl_source == 'files'
+
+- name: Copy the offline checksums file to the target
+  ansible.builtin.copy:
+    src: "invctl_{{ invctl_version }}_checksums.txt"
+    dest: "{{ invctl_stage.path }}/invctl_{{ invctl_version }}_checksums.txt"
+    mode: "0644"
+  when: invctl_source == 'files'
+
+- name: Verify the binary against its recorded checksum
+  ansible.builtin.include_tasks: verify_checksum.yml

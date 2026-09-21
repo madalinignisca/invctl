@@ -1,0 +1,25 @@
+# invctl — infrastructure inventory
+# Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+#
+# Licensed under the GNU Affero General Public License, version 3 only —
+# no later version applies. See LICENSE for the full text.
+#
+# SPDX-License-Identifier: AGPL-3.0-only
+
+---
+# CONTROL-NODE PREREQUISITE, NOT A TARGET-HOST ONE.
+#
+# roles/invctl/tasks/configure.yml mints the session key with
+# `lookup('community.general.random_string', ...)`, and that lookup plugin
+# runs on the CONTROL node, before anything is templated to the target. A
+# fresh operator with only ansible-core installed gets an opaque "couldn't
+# resolve module/action 'community.general.random_string'" on the very first
+# install, with nothing here to point at what is missing -- this file names
+# it, and the README Quick Start says to install it first.
+#
+# test/inventory/incus-test.ini also depends on this collection, for
+# `ansible_connection=community.general.incus` -- one more reason it belongs
+# here rather than only in a comment.
+collections:
+  - name: community.general
+    version: ">=8.0.0"

@@ -1,0 +1,71 @@
+# invctl — infrastructure inventory
+# Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+#
+# Licensed under the GNU Affero General Public License, version 3 only —
+# no later version applies. See LICENSE for the full text.
+#
+# SPDX-License-Identifier: AGPL-3.0-only
+
+---
+# A UNIT THAT STARTED IS NOT A SERVICE THAT WORKS. invctl exits on a failed
+# migration, and `systemctl start` returning success only means the fork
+# happened. This is the difference between "systemd is content" and "the
+# application is serving" (spec §6).
+
+- name: Apply any pending restart before checking health
+  # Flushed HERE rather than at the end of the play, so the health check below
+  # tests the configuration this run wrote and not the one it replaced.
+  ansible.builtin.meta: flush_handlers
+
+# SKIPPED UNDER --check ON A FRESH HOST FOR THE SAME REASON AS THE HANDLERS
+# IN handlers/main.yml: the unit file was only ever PREDICTED to be written
+# (template has full check_mode support and does not write for real), so on
+# a host with no invctl unit yet, systemd genuinely has nothing to enable or
+# start, and systemd_service fails asking rather than predicting. On an
+# already-converged host this task would predict correctly, but the
+# distinction is not worth two different behaviours for one preview task.
+- name: Enable and start invctl
+  # NO daemon_reload HERE, deliberately: the module reports `changed` whenever
+  # it performs one, which would make every run a changed run and destroy the
+  # property Task 5 asserts. The `reload systemd` handler covers it, and fires
+  # only when the unit file really changed.
+  ansible.builtin.systemd_service:
+    name: invctl
+    enabled: true
+    state: started
+  when: not ansible_check_mode
+
+# /healthz requires no authentication (internal/web/routes.go:136), which is
+# what makes it usable here -- there is no session to obtain first.
+#
+# `ansible.builtin.uri` has NO check_mode support and is skipped under
+# --check regardless of the `when` below -- correctly: an operator using
+# --check to preview a change is not meant to get a live health verdict from
+# a service --check never actually started or reconfigured.
+- name: Wait for /healthz to answer 200
+  ansible.builtin.uri:
+    url: "http://{{ invctl_listen }}/healthz"
+    status_code: 200
+  register: invctl_health
+  retries: 30
+  delay: 2
+  until: invctl_health.status is defined and invctl_health.status == 200
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Report what is serving
+  ansible.builtin.debug:
+    msg: >-
+      invctl {{ invctl_version }} is serving on {{ invctl_listen }};
+      /healthz reports {{ invctl_health.json | default({}) }}.
+      NOTHING ANSWERS FROM OUTSIDE THIS HOST -- this role installs no reverse
+      proxy, no TLS certificate and no DNS (spec D3). See deploy/ansible/README.md.
+  when: not ansible_check_mode
+
+- name: Report what would be started and checked (check mode preview)
+  ansible.builtin.debug:
+    msg: >-
+      Would enable and start invctl, then wait for
+      http://{{ invctl_listen }}/healthz to answer 200. --check does not
+      start the service or perform a live health check.
+  when: ansible_check_mode
