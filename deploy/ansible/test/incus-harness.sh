@@ -58,10 +58,23 @@ up() {
 }
 
 down() {
-	# --force stops it first. Missing is success: teardown runs after a failure,
-	# and a teardown that fails because there was nothing to tear down turns a
-	# test failure into two.
-	sudo incus delete --force "$CONTAINER" 2>/dev/null || true
+	# Missing is success: teardown runs after a failure, and a teardown that
+	# fails because there was nothing to tear down turns one test failure into
+	# two. But ONLY missing is success.
+	#
+	# An earlier version was `delete --force ... 2>/dev/null || true`, which
+	# swallowed every error and then printed "is gone" regardless. A delete
+	# that genuinely failed -- busy, storage error, permissions changed under
+	# us -- reported success, and the next `up` refused with "already exists;
+	# run 'down' first" to somebody who had just run it and been told it
+	# worked. The script has to be able to say it did not manage it.
+	if ! sudo incus info "$CONTAINER" >/dev/null 2>&1; then
+		echo "$CONTAINER is already gone"
+		return 0
+	fi
+	# --force stops it first. No redirect and no `|| true`: a real failure here
+	# must reach the caller, because the container is still there.
+	sudo incus delete --force "$CONTAINER"
 	echo "$CONTAINER is gone"
 }
 
