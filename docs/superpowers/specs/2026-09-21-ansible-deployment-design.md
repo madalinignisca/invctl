@@ -98,9 +98,13 @@ modes. That is a second product hiding inside a deployment role. Handing the
 role a DSN for a database somebody else manages keeps it to one job.
 
 When `invctl_db_driver: postgres`, `invctl_db_dsn` is **required** and the role
-fails with a clear message if it is unset. It verifies reachability before
-writing any configuration, so a typo fails at the start rather than as a
-crash-looping service.
+fails with a clear message if it is unset. It verifies reachability with
+`psql "$DSN" -tAc 'SELECT 1'` before writing any configuration, so a typo fails
+at the start rather than as a crash-looping service. `psql` comes from
+`postgresql-client`, the same package that provides the `pg_dump` §8 already
+requires on this host; the role asserts it is present and names the package if
+it is not. The `community.postgresql` collection is deliberately not used — it
+is not installed here and would be a new dependency for one query.
 
 ### D3 — No reverse proxy; the bind address is a variable
 
@@ -154,6 +158,39 @@ systemd reads `EnvironmentFile=` as root, in the manager, before dropping to
 the service user. The `invctl` user therefore never needs to read the file, and
 the strictest mode that works is the right one: `0600 root:root`.
 
+### D7 — Configuration converges on every run; only the binary has a NO-OP
+
+**This corrects an error in the first draft of this spec**, found by the
+implementation planner before any code was written.
+
+That draft keyed the entire state machine on the installed binary version, and
+defined the matching-version case as "no file changes, no handler fires, no
+restart". The consequence, which the planner spelled out and the draft did not:
+change `invctl_listen`, `invctl_secure_cookies`, `invctl_admin_users` or the
+DSN, re-run the playbook, and the role reports `changed=0` and does nothing at
+all. The configuration on the host would drift from the configuration in the
+inventory with no indication.
+
+The draft conflated two different properties:
+
+- *Do not restart the service when nothing has changed.* Correct, and worth
+  keeping — it is what lets the playbook run on a schedule.
+- *Do not look at the configuration when the version matches.* Wrong. A role
+  that cannot converge configuration is not idempotent, it is inert, and
+  convergence is the reason to use Ansible rather than a shell script.
+
+Ansible's own mechanism already gives the first without the second: a
+`template` task reports `changed` only on a real diff, and a handler notified
+by it fires only then. So:
+
+- The config file and the unit file are templated on **every** run.
+- A restart happens when, and only when, one of them actually changed.
+- The binary's version still drives INSTALL / NO-OP / UPGRADE independently.
+
+A run where nothing differs is still zero changed tasks and no restart. A run
+where the DSN changed rewrites the file and restarts. Both are what an operator
+expects, and the second is what the first draft got wrong.
+
 ---
 
 ## 1. Layout
@@ -166,7 +203,8 @@ deploy/ansible/
   roles/invctl/
     defaults/main.yml
     tasks/main.yml              detect state, dispatch
-    tasks/acquire.yml           fetch or read the binary, verify checksum
+    tasks/acquire.yml           fetch or read the binary, then include:
+    tasks/verify_checksum.yml   the ONE verification both paths share (D5)
     tasks/install.yml           user, directories, binary, unit, config
     tasks/upgrade.yml           stop, back up, gate, replace, migrate
     tasks/verify.yml            start and wait for /healthz
@@ -202,6 +240,12 @@ In this repository rather than its own, because D4's check has to read both
 a deployment role is a default admin password in production, and the seeding
 code already refuses to invent one silently (`ensureAdmin` logs a generated
 password exactly once rather than shipping a known value).
+
+It is required **only on a fresh install**, not on every run. It seeds the
+first account and does nothing afterwards (`ensureAdmin` returns early once any
+account exists), so demanding it on an upgrade or a no-op run would mean
+keeping a credential in the inventory purely to satisfy an assertion — and
+would stop the playbook running unattended, which D7 otherwise makes possible.
 
 ## 3. Acquiring the binary
 
@@ -258,6 +302,16 @@ unanswerable.
 4. Preserve the outgoing binary as `/opt/invctl/invctl.<oldversion>`.
 5. Install the new binary.
 6. Run `invctl -migrate` as the `invctl` user; a non-zero exit aborts.
+
+   **D6 makes this less obvious than it looks.** The config file is
+   `0600 root:root`, so the `invctl` user cannot read its own configuration —
+   and `-migrate` runs after `config.Load`, so it needs `INV_DB_DRIVER` and
+   `INV_DB_DSN`. The two database variables are therefore passed explicitly to
+   that one command, from Ansible, with `no_log`, rather than by making the
+   file readable. Running the migration as **root** is not the way out: on
+   SQLite it would create root-owned `-wal` and `-shm` files next to the
+   database, which the service then cannot write, converting a successful
+   migration into a service that will not start.
 7. Start, then §6.
 
 Step 3 before step 4 is the whole design. Any other order can leave a host with
