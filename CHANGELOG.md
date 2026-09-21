@@ -34,6 +34,31 @@ footnote.
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- **An Ansible role for deployment**, `deploy/ansible/roles/invctl`. One
+  playbook run takes an empty Debian host to a running, healthy invctl; a
+  second run converges whatever configuration has drifted and restarts only
+  when something actually changed; a version bump performs a safe upgrade —
+  stop, verified backup, gate, binary swap, migrate, health check — or
+  refuses outright, never leaving a host with half of one. Includes an
+  offline path (`invctl_source: files`) for a segmented network that cannot
+  reach GitHub, a backup gate that proves the backup is *readable* and not
+  merely non-empty before anything is replaced, and a durable
+  interrupted-upgrade marker that stops every later run from silently
+  starting the service into a second, ungated migration attempt. See
+  `deploy/ansible/README.md`.
+
+  Nothing here is required of an existing manual deployment: this is a new,
+  optional way to run the same procedure `docs/INSTALL.md` already describes.
+
+  **For maintainers:** `deploy/ansible/roles/invctl/defaults/main.yml`'s
+  `invctl_version` must be bumped in the same commit as every release's
+  changelog heading. `make test` fails until it is
+  (`TestTheAnsibleRolePinMatchesTheChangelog`).
+
 ## [1.2.0] — 2026-09-19
 
 ### Added
