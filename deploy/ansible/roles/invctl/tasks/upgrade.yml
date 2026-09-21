@@ -14,8 +14,23 @@
 # Every refusal in this preflight happens BEFORE the service is stopped, so a
 # refusal costs no downtime at all.
 
+# SKIPPED WHOLE UNDER --check -- see the matching comment in install.yml.
+# `tempfile` has no check_mode support and never registers invctl_stage, so
+# letting this run under --check does not produce a safe preview, it produces
+# a crash on the very next task that reads invctl_stage.path.
 - name: Acquire and verify the new binary before anything is stopped
   ansible.builtin.include_tasks: acquire.yml
+  when: not ansible_check_mode
+
+- name: Report what would be acquired (check mode preview)
+  ansible.builtin.debug:
+    msg: >-
+      Would acquire invctl {{ invctl_version }} from '{{ invctl_source }}'
+      ({{ invctl_release_base_url if invctl_source == 'github'
+         else role_path ~ '/files' }}) and verify its checksum before
+      touching anything already installed. --check does not download or
+      verify a binary.
+  when: ansible_check_mode
 
 # THE DATABASE THIS UPGRADE ACTS ON IS THE ONE THE HOST WAS RUNNING, NOT THE ONE
 # IN THE INVENTORY, AND THAT DISTINCTION IS NOT COSMETIC.
@@ -166,12 +181,16 @@
       aside deliberately, or wait a second and run again -- the name is stamped
       to the second.
 
+# `check_mode: false`: read-only presence check whose output feeds the
+# assert right after it -- without this, `command` SKIPS under --check and
+# the assert throws on an undefined `.rc` instead of reporting the finding.
 - name: Require pg_dump and pg_restore before an upgrade begins
   ansible.builtin.command:
     argv: [sh, -c, 'command -v pg_dump && command -v pg_restore']
   register: invctl_pg_tools
   changed_when: false
   failed_when: false
+  check_mode: false
   when: invctl_upgrade_db_driver == 'postgres'
 
 # EARLY, AND WITH THAT SPECIFIC MESSAGE (spec §8). These must exist on the
@@ -192,13 +211,31 @@
 # this service deliberately -- during an incident, or before a maintenance
 # window -- and a rescue that starts it regardless is not restoring anything, it
 # is making a second unexpected change on top of a failure.
+# `check_mode: false`: read-only, and it is what the rescue below uses to
+# decide whether to restart the service -- but the block that consumes it is
+# itself skipped entirely under --check (see the `when` on the block), so
+# this only actually matters on a real run. Forced to run regardless anyway,
+# for consistency with the other systemd-state probes in this role.
 - name: Record whether the service was running before this upgrade
   ansible.builtin.command:
     argv: [systemctl, show, invctl, --property=ActiveState, --value]
   register: invctl_active_before
   changed_when: false
+  check_mode: false
 
+# SKIPPED WHOLE UNDER --check. Every task in this block writes to the host --
+# it stops the service, copies or dumps the database, and stats what it just
+# wrote -- and none of that is something a dry run is allowed to do. Letting
+# individual tasks inside "handle" check mode on their own would leave
+# `Ask systemd what state the unit is in now` reporting the service's REAL,
+# unstopped state (systemd_service has full check_mode support and would not
+# actually stop it), which would then fail
+# `The service is actually stopped, not merely asked to stop` on every
+# --check run against a healthy host -- turning the preview itself into a
+# false alarm. See the debug task after this block for what --check reports
+# instead.
 - name: Stop, back up and prove the backup
+  when: not ansible_check_mode
   block:
     - name: Stop invctl
       # Stopped first: copying a .db while the process is running gives you a
@@ -227,13 +264,19 @@
       # /proc and readlink rather than lsof or fuser: neither is guaranteed on
       # a minimal Debian container and this role installs no packages. `exit 0`
       # because the loop finding nothing is the good case.
+      # `| quote` on the templated path: invctl_install_dir is an
+      # operator-controlled inventory variable reaching a shell string here
+      # (argv[2] of `sh -c`), the one place in this role a templated value
+      # lands in a shell script rather than an argv list. Low severity on its
+      # own host and inventory, but cheap to close and it is the only place
+      # that needed it.
       ansible.builtin.command:
         argv:
           - sh
           - -c
           - >-
             for p in /proc/[0-9]*; do
-              [ "$(readlink "$p/exe" 2>/dev/null)" = "{{ invctl_install_dir }}/invctl" ] &&
+              [ "$(readlink "$p/exe" 2>/dev/null)" = {{ (invctl_install_dir ~ '/invctl') | quote }} ] &&
                 echo "${p#/proc/}";
             done; exit 0
       register: invctl_leftover
@@ -303,6 +346,19 @@
           - "{{ invctl_upgrade_db_dsn }}"
       no_log: true          # the DSN carries a password
       changed_when: true
+      when: invctl_upgrade_db_driver == 'postgres'
+
+    # pg_dump does not take a --mode: it creates the file with the process
+    # umask, and every SQLite backup artefact in this same block is written
+    # explicitly 0600. Without this the PostgreSQL dump -- which, like the
+    # SQLite one, is the entire inventory in one file -- is protected only
+    # incidentally by invctl_backup_dir's 0700, not by a mode of its own.
+    - name: Restrict the PostgreSQL dump to root
+      ansible.builtin.file:
+        path: "{{ invctl_backup_path }}"
+        owner: root
+        group: root
+        mode: "0600"
       when: invctl_upgrade_db_driver == 'postgres'
 
     - name: Stat the backup
@@ -420,97 +476,119 @@
           "nothing happened", never "half an upgrade" (spec D1).
 
 # From here the host changes in ways that cannot be undone by aborting.
-
-# WRITTEN BEFORE THE FIRST WRITE INTO /opt, CLEARED ONLY WHEN THE NEW VERSION IS
-# SERVING (main.yml, after verify.yml).
 #
-# If `invctl -migrate` below fails, the new binary is already on disk and the
-# service is stopped. On the next run `-version` MATCHES the pin, so the binary
-# axis says NO-OP -- and D7's unconditional configure + verify would START the
-# service. invctl migrates automatically at startup, before binding, so that
-# start is a second migration attempt made OUTSIDE this gate, against a database
-# in whatever state the failure left. The backup above still exists, so this is
-# recoverable; it is the role walking silently past a half-finished upgrade,
-# which is the one thing D1 says it must never do.
-#
-# No DSN in this file: it carries a password, and D6's point is one 0600 file
-# holding secrets, not two.
-- name: Mark this host as mid-upgrade before anything in /opt is touched
-  ansible.builtin.copy:
-    dest: "{{ invctl_config_dir }}/upgrade-in-progress"
-    owner: root
-    group: root
-    mode: "0600"
-    content: |
-      An upgrade of invctl started and has not been confirmed finished.
+# THE WHOLE BLOCK BELOW IS SKIPPED UNDER --check, FOR THE SAME REASON THE
+# STOP-AND-BACKUP BLOCK ABOVE IS: every task in it writes to the host -- the
+# marker, the preserved old binary, the new binary, the migration -- and a
+# dry run may not do any of that. See the debug task after the block for
+# what --check reports in its place.
+- name: Replace the binary and migrate
+  when: not ansible_check_mode
+  block:
+    # WRITTEN BEFORE THE FIRST WRITE INTO /opt, CLEARED ONLY WHEN THE NEW
+    # VERSION IS SERVING (main.yml, after verify.yml).
+    #
+    # If `invctl -migrate` below fails, the new binary is already on disk and
+    # the service is stopped. On the next run `-version` MATCHES the pin, so
+    # the binary axis says NO-OP -- and D7's unconditional configure + verify
+    # would START the service. invctl migrates automatically at startup,
+    # before binding, so that start is a second migration attempt made
+    # OUTSIDE this gate, against a database in whatever state the failure
+    # left. The backup above still exists, so this is recoverable; it is the
+    # role walking silently past a half-finished upgrade, which is the one
+    # thing D1 says it must never do.
+    #
+    # No DSN in this file: it carries a password, and D6's point is one 0600
+    # file holding secrets, not two.
+    - name: Mark this host as mid-upgrade before anything in /opt is touched
+      ansible.builtin.copy:
+        dest: "{{ invctl_config_dir }}/upgrade-in-progress"
+        owner: root
+        group: root
+        mode: "0600"
+        content: |
+          An upgrade of invctl started and has not been confirmed finished.
 
-      started_at:   {{ invctl_backup_stamp }}
-      from_version: {{ invctl_installed_version }}
-      to_version:   {{ invctl_version }}
-      db_driver:    {{ invctl_upgrade_db_driver }}
-      backup:       {{ invctl_backup_path }}
+          started_at:   {{ invctl_backup_stamp }}
+          from_version: {{ invctl_installed_version }}
+          to_version:   {{ invctl_version }}
+          db_driver:    {{ invctl_upgrade_db_driver }}
+          backup:       {{ invctl_backup_path }}
 
-      The backup above was taken with the service stopped and verified
-      readable before the binary was replaced. It is the rollback.
-      See docs/UPGRADE.md, "When a migration fails".
-      Delete this file by hand once you have decided what happened.
+          The backup above was taken with the service stopped and verified
+          readable before the binary was replaced. It is the rollback.
+          See docs/UPGRADE.md, "When a migration fails".
+          Delete this file by hand once you have decided what happened.
 
-- name: Remember that this run wrote the marker
-  ansible.builtin.set_fact:
-    invctl_upgrade_started: true
+    - name: Remember that this run wrote the marker
+      ansible.builtin.set_fact:
+        invctl_upgrade_started: true
 
-- name: Keep the outgoing binary
-  # Rolling back means restoring the database backup AND putting this binary
-  # back. A new binary against an old schema is not a supported combination
-  # (docs/UPGRADE.md). The role keeps both and performs neither: rollback is a
-  # decision with data loss in it, made by a person who has looked at what they
-  # are about to lose.
-  ansible.builtin.copy:
-    src: "{{ invctl_install_dir }}/invctl"
-    dest: "{{ invctl_install_dir }}/invctl.{{ invctl_installed_version }}"
-    remote_src: true
-    owner: root
-    group: root
-    mode: "0755"
+    - name: Keep the outgoing binary
+      # Rolling back means restoring the database backup AND putting this
+      # binary back. A new binary against an old schema is not a supported
+      # combination (docs/UPGRADE.md). The role keeps both and performs
+      # neither: rollback is a decision with data loss in it, made by a
+      # person who has looked at what they are about to lose.
+      ansible.builtin.copy:
+        src: "{{ invctl_install_dir }}/invctl"
+        dest: "{{ invctl_install_dir }}/invctl.{{ invctl_installed_version }}"
+        remote_src: true
+        owner: root
+        group: root
+        mode: "0755"
 
-- name: Install the verified new binary
-  ansible.builtin.copy:
-    src: "{{ invctl_stage.path }}/invctl_{{ invctl_version }}_linux_amd64"
-    dest: "{{ invctl_install_dir }}/invctl"
-    remote_src: true
-    owner: root
-    group: root
-    mode: "0755"
+    - name: Install the verified new binary
+      ansible.builtin.copy:
+        src: "{{ invctl_stage.path }}/invctl_{{ invctl_version }}_linux_amd64"
+        dest: "{{ invctl_install_dir }}/invctl"
+        remote_src: true
+        owner: root
+        group: root
+        mode: "0755"
 
-- name: Apply migrations with the new binary, as the invctl user
-  # AS THE INVCTL USER, NOT ROOT. On SQLite, root would create root-owned -wal
-  # and -shm files beside the database that the service then cannot write,
-  # turning a successful migration into a service that will not start (spec §4
-  # step 6). runuser rather than Ansible's become, because become from root to
-  # an unprivileged user needs setfacl on the target and this role installs no
-  # packages.
-  #
-  # -m preserves the environment below. -u execs directly and does not use the
-  # user's shell, which is /usr/sbin/nologin.
-  #
-  # The config file is 0600 root:root (D6), so the invctl user CANNOT read its
-  # own configuration -- and -migrate runs after config.Load
-  # (cmd/invctl/main.go:125), so it needs the two database variables. They are
-  # passed explicitly here, with no_log, rather than by loosening the file, and
-  # they are the HOST's values rather than the inventory's, for the reason the
-  # preflight gives. It needs nothing else: local auth is on by default, so
-  # validation passes.
-  ansible.builtin.command:
-    argv:
-      - runuser
-      - -u
-      - invctl
-      - -m
-      - --
-      - "{{ invctl_install_dir }}/invctl"
-      - -migrate
-  environment:
-    INV_DB_DRIVER: "{{ invctl_upgrade_db_driver }}"
-    INV_DB_DSN: "{{ invctl_upgrade_db_dsn }}"
-  no_log: true
-  changed_when: true
+    - name: Apply migrations with the new binary, as the invctl user
+      # AS THE INVCTL USER, NOT ROOT. On SQLite, root would create
+      # root-owned -wal and -shm files beside the database that the service
+      # then cannot write, turning a successful migration into a service
+      # that will not start (spec §4 step 6). runuser rather than Ansible's
+      # become, because become from root to an unprivileged user needs
+      # setfacl on the target and this role installs no packages.
+      #
+      # -m preserves the environment below. -u execs directly and does not
+      # use the user's shell, which is /usr/sbin/nologin.
+      #
+      # The config file is 0600 root:root (D6), so the invctl user CANNOT
+      # read its own configuration -- and -migrate runs after config.Load
+      # (cmd/invctl/main.go:125), so it needs the two database variables.
+      # They are passed explicitly here, with no_log, rather than by
+      # loosening the file, and they are the HOST's values rather than the
+      # inventory's, for the reason the preflight gives. It needs nothing
+      # else: local auth is on by default, so validation passes.
+      ansible.builtin.command:
+        argv:
+          - runuser
+          - -u
+          - invctl
+          - -m
+          - --
+          - "{{ invctl_install_dir }}/invctl"
+          - -migrate
+      environment:
+        INV_DB_DRIVER: "{{ invctl_upgrade_db_driver }}"
+        INV_DB_DSN: "{{ invctl_upgrade_db_dsn }}"
+      no_log: true
+      changed_when: true
+
+- name: Report what the upgrade would do (check mode preview)
+  ansible.builtin.debug:
+    msg: >-
+      Would stop invctl, back up the {{ invctl_upgrade_db_driver }} database
+      to {{ invctl_backup_path }}, verify that backup, preserve
+      {{ invctl_install_dir }}/invctl as
+      {{ invctl_install_dir }}/invctl.{{ invctl_installed_version }},
+      install invctl {{ invctl_version }}, and run `invctl -migrate` as the
+      invctl user. --check does not stop the service, take a backup, swap
+      the binary or run migrations -- see deploy/ansible/README.md,
+      "What --check actually tells you".
+  when: ansible_check_mode

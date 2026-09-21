@@ -49,8 +49,29 @@
   loop_control:
     label: "{{ item.path }}"
 
+# SKIPPED WHOLE UNDER --check, NOT MERELY LEFT TO FAIL QUIETLY.
+#
+# `tempfile` (inside acquire.yml) has NO check_mode support at all, so under
+# --check it is skipped outright and never registers invctl_stage --
+# `get_url`/`copy` have only partial support and would not actually populate
+# a staging directory either way. Letting this run under --check does not
+# produce a safe, empty preview: it produces `invctl_stage.path` referencing
+# a dict with no `path` key, and the role crashes on the next task's template
+# rather than reporting anything. The `when` below turns that crash into an
+# honest "not shown" -- see the debug task right after it.
 - name: Acquire and verify the binary
   ansible.builtin.include_tasks: acquire.yml
+  when: not ansible_check_mode
+
+- name: Report what would be acquired and installed (check mode preview)
+  ansible.builtin.debug:
+    msg: >-
+      Would acquire invctl {{ invctl_version }} from '{{ invctl_source }}'
+      ({{ invctl_release_base_url if invctl_source == 'github'
+         else role_path ~ '/files' }}), verify its checksum, and install it
+      to {{ invctl_install_dir }}/invctl. --check does not download or
+      verify a binary.
+  when: ansible_check_mode
 
 - name: Install the verified binary
   ansible.builtin.copy:
@@ -60,3 +81,4 @@
     owner: root
     group: root
     mode: "0755"
+  when: not ansible_check_mode
