@@ -215,6 +215,14 @@ off and stays off unless you set it; if you set it to `true` alongside an
 issuer the login page will show the password form, because a form that works
 should be visible rather than hidden.
 
+The rule behind that, which also matters on a deployment with no SSO at all:
+**the login page shows a password form whenever any password authenticator is
+enabled** — local or LDAP. A form that is hidden while `POST /login` still
+answers is not a closed route, it is a closed route the operator cannot see.
+The inverse used to be possible too: an LDAP-only deployment, with
+`INV_AUTH_LOCAL=false` and `INV_AUTH_LDAP=true`, rendered no form and no
+sign-on button at all — a working back end nobody could reach.
+
 **Usernames in your realm decide who can be an Administrator here.**
 `INV_ADMIN_USERS` is matched against the `preferred_username` claim, so
 whoever can set usernames in Keycloak can hand somebody the name in that
@@ -264,6 +272,19 @@ would be invctl inventing an answer to a question it cannot see.
 
 New accounts arrive as **observers with no projects** — able to read, able to
 change nothing. Roles are granted afterwards, on `/users`, by an Administrator.
+
+**Deactivating an account stops it signing in here, whatever Keycloak thinks.**
+The provider has no idea you deactivated somebody and will go on vouching for
+them happily; invctl refuses the sign-in at the callback and logs it as a
+failure, the same way LDAP does. The person gets the ordinary refusal page
+rather than a session that silently does nothing.
+
+**A sign-in carrying no `preferred_username` is refused too.** That is not an
+attack, it is a realm that lost its username mapper or a client that lost the
+`profile` scope — but invctl has to write *something* as the username, and
+writing an empty one over a real account makes that account unreachable. The
+refusal names the claim in the log, so it reads as the configuration problem it
+is rather than as a bad password.
 
 ### Sessions end here, not there
 
