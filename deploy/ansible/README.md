@@ -40,11 +40,19 @@ other is a documented failure mode, not an edge case.
 ## Quick start
 
 ```
+ansible-galaxy collection install -r requirements.yml
 cp inventory/hosts.example inventory/hosts
 $EDITOR inventory/hosts               # your host, under [invctl]
 ansible-playbook -i inventory/hosts playbooks/invctl.yml \
     --ask-vault-pass -e @secrets.vault.yml
 ```
+
+The collection install is not optional. `tasks/configure.yml` mints the
+session key with `lookup('community.general.random_string', ...)`, which runs
+on the **control node** — without `community.general` present there, the
+first install fails with an opaque "couldn't resolve module/action" error
+that names a lookup plugin, not a missing package. `requirements.yml` names
+the one collection this role needs; ansible-core alone is not enough.
 
 `invctl_admin_password` is required only for the **first** run against a
 given host, and it is a secret: put it in an Ansible Vault file, never in the
@@ -72,6 +80,8 @@ Verbatim from the design spec (§2). No variable outside this table exists;
 | `invctl_install_dir` | `/opt/invctl` | matches `docs/INSTALL.md` |
 | `invctl_data_dir` | `/var/lib/invctl` | matches `docs/INSTALL.md` |
 | `invctl_config_dir` | `/etc/invctl` | |
+| `invctl_lock_dir` | `/run/invctl-ansible.lock` | the concurrency guard; see "Concurrency guard" below |
+| `invctl_lock_max_age_seconds` | `1800` | how long before an unreleased lock is treated as abandoned |
 
 One more exists beyond the spec's table, added during implementation because
 the spec's `github` source turned out to have no way to be tested on a
@@ -214,6 +224,98 @@ is not a supported combination.
 happen — including whether the run would even be permitted to proceed — before
 it touches anything.
 
+## What `--check` actually tells you, and what it does not
+
+`--check` reports which of INSTALL / NO-OP / UPGRADE this run would take,
+whether the preflight refusals would pass (a fresh install missing
+`invctl_admin_password`, a PostgreSQL DSN with no reachable database, mixing a
+database change with a version bump, a backup name that would collide with
+one already on disk), and what the rendered configuration would be. That is
+genuinely useful for rehearsing an upgrade, but it stops there:
+
+**`--check` never downloads or verifies a binary, stops the service, takes a
+backup, swaps a binary, or runs a migration.** Every one of those is gated on
+`not ansible_check_mode` and replaced with a `debug` describing what a real
+run would do instead. This is a deliberate, narrower contract, not an
+oversight — earlier, most of that work ran anyway under `--check`, because
+two of Ansible's own building blocks do not support check mode the way this
+role's design assumes:
+
+- `ansible.builtin.tempfile` has **no** check-mode support at all, so under
+  `--check` it is skipped outright and never stages anything — which then
+  crashed the role outright (`object of type 'dict' has no attribute 'path'`)
+  on the very next task, rather than reporting anything.
+- `ansible.builtin.command` has only **partial** check-mode support (the
+  `creates`/`removes` workaround, which none of this role's uses of it need):
+  every read-only probe this role runs with `command` — the version probe,
+  `systemctl show`, the `/proc` leftover scan, `command -v` presence checks,
+  `psql ... SELECT 1` — is skipped under `--check` by default, and an
+  `assert` reading its `.stdout`/`.rc` right after then throws on an
+  undefined attribute instead of failing cleanly.
+
+Two different fixes for two different problems, and they are not
+interchangeable:
+
+- The **read-only** probes above are forced to run under `--check` with
+  `check_mode: false` on the task itself — safe, because none of them write
+  anything, and doing so is what makes the state report (`action=INSTALL` /
+  `NO-OP` / `UPGRADE`, the PostgreSQL reachability check, the preflight
+  refusals) accurate under `--check` at all.
+- Everything that actually **writes** — acquisition and checksum
+  verification (`acquire.yml`, both call sites), the stop-and-backup block,
+  the marker, the binary swap, and the migration — is skipped whole under
+  `not ansible_check_mode`, each replaced with a `debug` naming what would
+  have happened and to where. **Do not "fix" this by forcing `tempfile`
+  to run under `--check` and letting `get_url`/`copy` continue as normal**:
+  `get_url` and `copy` do not populate a real file under check mode either
+  (their own check-mode support is `partial`/`full` by *predicting* a
+  result, not by actually writing), so the result is not a working preview,
+  it is `verify_checksum.yml` asserting a checksum match against a file that
+  was never downloaded — trading one crash for a confusing false failure.
+
+`Wait for /healthz to answer 200` (`ansible.builtin.uri`) has **no**
+check-mode support and is skipped under `--check` regardless of anything
+above — correctly: an operator previewing a change is not meant to get a
+live health verdict from a service `--check` never actually started or
+reconfigured.
+
+## Concurrency guard
+
+The very first thing this role does — before even looking at
+`upgrade-in-progress` — is take an exclusive lock at `invctl_lock_dir`
+(`/run/invctl-ansible.lock` by default) by creating that directory with
+`mkdir`, the one filesystem primitive that is atomic on its own. **This is a
+different mechanism from the upgrade marker, and protects a different
+thing**: the marker records that an upgrade did not finish and protects the
+*database*; the lock stops two runs from acting on this host *at the same
+time* in the first place — an operator re-running what looked like a hang,
+landing in the same window as a cron trigger, for instance. Without it, both
+runs can read the marker as absent before either has written it, and both
+proceed through the preflight, stop, backup and replace concurrently — the
+duplicate-backup-name check in `upgrade.yml` only catches a collision on the
+destination *name*, after both runs have already raced past every earlier
+gate together.
+
+A second run against a locked host is refused immediately, naming the lock
+path and when the holding run started. **The lock releases itself when the
+run finishes, whether it succeeded or failed** — an `always:` block around
+the whole of the role's work removes it either way, so a legitimate failure
+(a bad DSN, a refused preflight) does not leave the host locked out for
+`invctl_lock_max_age_seconds`. The one case an `always:` block cannot cover
+is the control node vanishing outright — a killed `ansible-playbook`, a
+severed network — since neither `rescue:` nor `always:` runs if Ansible
+never gets to finish talking to the host at all. For that case every lock
+records the time it was taken, and a run that finds one older than
+`invctl_lock_max_age_seconds` (1800 seconds / 30 minutes by default) treats
+it as abandoned, breaks it, and proceeds — loudly, via `debug`, never
+silently.
+
+`--check` never takes this lock at all: every mutating action in this role is
+already skipped under `--check` (see above), so two concurrent `--check` runs
+cannot race each other into a bad state, and acquiring a real lock during a
+dry run would itself be the kind of surprise side effect `--check` is not
+supposed to have.
+
 ## Two changes the role will not make in one run
 
 Changing `invctl_db_dsn` and bumping `invctl_version` in the same run is
@@ -287,6 +389,20 @@ mutation-tested failure paths for the stop-proof and the backup gate; the
 PostgreSQL path has been read carefully and follows the same structure, but
 an operator relying on it for a first production upgrade should treat it as
 less proven and rehearse it against a disposable copy first.
+
+**On PostgreSQL, reachability is checked on every run, not only install or
+upgrade.** `tasks/main.yml` runs `psql ... SELECT 1` before any configuration
+is written, on every plain convergence run as well as an install or upgrade —
+this is a deliberate consequence of D7 (the configuration axis, including
+this preflight, runs unconditionally), not a side effect nobody noticed. It
+means a transient network blip between the invctl host and the database
+fails an otherwise routine scheduled run that would have changed nothing.
+The alternative — checking reachability only when the binary axis is about
+to do something — would let a scheduled convergence run silently stop
+verifying that the configured database is actually reachable at all, which
+is a worse failure to have hidden. If your PostgreSQL host has a history of
+brief blips, budget for an occasional failed convergence run rather than
+loosening this check.
 
 ## Non-goals
 
