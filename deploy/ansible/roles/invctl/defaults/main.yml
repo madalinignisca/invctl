@@ -1,0 +1,57 @@
+# invctl — infrastructure inventory
+# Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+#
+# Licensed under the GNU Affero General Public License, version 3 only —
+# no later version applies. See LICENSE for the full text.
+#
+# SPDX-License-Identifier: AGPL-3.0-only
+
+---
+# PINNED, AND A TEST KEEPS IT HONEST. internal/license/role_version_pin_test.go
+# fails when CHANGELOG.md's newest version heading is not this number, so
+# cutting a release without bumping this line turns CI red and names the file to
+# edit. The release workflow deliberately does NOT write here: having a release
+# commit to the repository adds a new way for the one process most worth keeping
+# boring to go wrong (spec D4).
+invctl_version: "1.2.0"
+
+# github downloads the release assets; files reads them from this role's files/
+# directory for a segmented environment. BOTH verify the checksum, through the
+# same task file (spec D5).
+invctl_source: github
+
+# invctl binds plaintext HTTP and this role installs no proxy, no certificate
+# and no DNS (spec D3). After a successful run NOTHING answers from outside this
+# host. That is correct; see deploy/ansible/README.md.
+invctl_listen: "127.0.0.1:8080"
+
+invctl_db_driver: sqlite
+
+# Required when invctl_db_driver is postgres, and the role fails naming it. The
+# role never installs a database server: a role that installs one also owns its
+# version, upgrades, backups and tuning, which is a second product hiding inside
+# a deployment role (spec D2).
+invctl_db_dsn: "file:{{ invctl_data_dir }}/invctl.db?_txlock=immediate"
+
+# Correct behind TLS, which is where this is expected to end up. Set false only
+# for a plain-HTTP lab -- docs/INSTALL.md, "Two settings behind a proxy".
+invctl_secure_cookies: true
+
+invctl_admin_username: admin
+
+# invctl_admin_password HAS NO DEFAULT, ON PURPOSE, and never will. A default
+# admin password in a deployment role is a default admin password in production.
+#
+# It is required ONLY on a fresh install (spec §2): ensureAdmin returns early
+# once any account exists, so demanding it on every run would mean keeping a
+# credential in the inventory to satisfy an assertion and nothing else -- and
+# would stop the playbook running unattended, which D7 otherwise makes possible.
+# On later runs tasks/configure.yml reads the value back off the host.
+
+# Break-glass. Read docs/RECOVERY.md before deciding what goes here.
+invctl_admin_users: admin
+
+invctl_backup_dir: /var/backups/invctl
+invctl_install_dir: /opt/invctl
+invctl_data_dir: /var/lib/invctl
+invctl_config_dir: /etc/invctl
