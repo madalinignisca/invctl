@@ -221,15 +221,8 @@
   ansible.builtin.include_tasks: install.yml
   when: invctl_installed_version == ''
 
-# REPLACED BY tasks/upgrade.yml IN TASK 6. Until then the role refuses rather
-# than doing nothing: a host pinned to a version it is not running is a fact an
-# operator has to be told, and a silent no-op tells them nothing.
-- name: Refuse an upgrade this role cannot yet perform
-  ansible.builtin.fail:
-    msg: >-
-      invctl {{ invctl_installed_version }} is installed and {{ invctl_version }}
-      is pinned. This role does not perform upgrades yet. Nothing has been
-      changed.
+- name: Upgrade
+  ansible.builtin.include_tasks: upgrade.yml
   when:
     - invctl_installed_version != ''
     - invctl_installed_version != invctl_version
@@ -241,3 +234,13 @@
 
 - name: Start it and prove it is serving
   ansible.builtin.include_tasks: verify.yml
+
+# CLEARED ONLY HERE: after -migrate returned zero AND /healthz answered 200. If
+# either failed, the play has already stopped and the marker is still on disk,
+# which is what makes the next run refuse instead of starting the service into a
+# second ungated migration.
+- name: Clear the upgrade marker now that the new version is serving
+  ansible.builtin.file:
+    path: "{{ invctl_config_dir }}/upgrade-in-progress"
+    state: absent
+  when: invctl_upgrade_started | default(false)
