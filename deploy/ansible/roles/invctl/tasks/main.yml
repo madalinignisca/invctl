@@ -20,227 +20,402 @@
 #
 # STATE IS READ FROM THE TARGET, NEVER ASSUMED (spec §4).
 
-# --- before anything else -------------------------------------------------
+# --- concurrency guard, before absolutely anything else ---------------------
+#
+# THIS PROTECTS THE MARKER BELOW, NOT THE DATABASE DIRECTLY.
+#
+# Two runs against one host -- an operator re-running what looks like a hang,
+# plus a cron trigger landing in the same window -- can both read
+# upgrade-in-progress as absent before either of them has written it, and then
+# both proceed through the preflight, stop, backup and replace at once.
+# Checking for a duplicate BACKUP NAME (upgrade.yml, "Refuse to overwrite a
+# backup that is already there") does not catch this: it only rejects a
+# duplicate destination, after both runs have already raced past every
+# earlier gate together.
+#
+# A lock DIRECTORY, not a file: `mkdir` is the one filesystem primitive that
+# is atomic without needing a lock of its own to protect it -- it either
+# creates the directory or fails with EEXIST, with no window in between for a
+# second `mkdir` to also succeed.
+#
+# --check NEVER MUTATES -- every real action below is already gated on
+# `not ansible_check_mode` -- so two concurrent --check runs cannot race each
+# other into a bad state, and acquiring a real lock during a dry run would
+# itself be exactly the kind of surprise side effect --check is not supposed
+# to have. The lock is skipped entirely under --check.
+#
+# STALE LOCKS EXPIRE ON THEIR OWN, RATHER THAN RELYING SOLELY ON A CLEAN EXIT.
+# There is no `always:` block that can run if the connection to the target is
+# lost outright -- a killed ansible-playbook, a network partition -- so a lock
+# that only a graceful handler can clear is a lock that can never clear after
+# exactly the kind of failure a mutex exists to survive. Every lock records
+# when it was taken; a run that finds one older than
+# invctl_lock_max_age_seconds treats it as abandoned, breaks it, and
+# proceeds -- loudly, via debug, never silently.
+- name: Note the time, for the lock and for judging any lock already there
+  ansible.builtin.set_fact:
+    invctl_lock_now_epoch: "{{ lookup('pipe', 'date -u +%s') }}"
+  when: not ansible_check_mode
 
-- name: Look for an interrupted upgrade
-  ansible.builtin.stat:
-    path: "{{ invctl_config_dir }}/upgrade-in-progress"
-  register: invctl_upgrade_marker
+- name: Try to take the run lock
+  ansible.builtin.command:
+    argv: [mkdir, "{{ invctl_lock_dir }}"]
+  register: invctl_lock_attempt
+  changed_when: invctl_lock_attempt.rc == 0
+  failed_when: false
+  when: not ansible_check_mode
 
-- name: Read the interrupted upgrade's note
+- name: Read the lock that is already there, if we did not get it
   ansible.builtin.slurp:
-    src: "{{ invctl_config_dir }}/upgrade-in-progress"
-  register: invctl_upgrade_marker_body
-  when: invctl_upgrade_marker.stat.exists
+    src: "{{ invctl_lock_dir }}/holder"
+  register: invctl_lock_holder_raw
+  failed_when: false
+  when:
+    - not ansible_check_mode
+    - invctl_lock_attempt.rc != 0
 
-# THIS REFUSAL IS THE FIRST TASK IN THE ROLE FOR A REASON, AND THE REASON IS NOT
-# OBVIOUS FROM THE DIFF.
-#
-# If `invctl -migrate` fails during an upgrade, the NEW binary is already on
-# disk and the service is stopped. On the next run `-version` now MATCHES the
-# pin, so the binary axis says NO-OP -- and D7's unconditional configure + verify
-# would then START the service. invctl migrates automatically at startup, before
-# binding (docs/UPGRADE.md), so that start is a second migration attempt made
-# OUTSIDE the backup gate, on a database whose state nobody has looked at.
-#
-# The backup from the interrupted attempt does still exist, so this is not
-# unrecoverable. It is the role walking silently past a half-finished upgrade,
-# which is the one behaviour D1 says it must never have.
-- name: Refuse to proceed past an interrupted upgrade
+- name: Work out whether that lock is current or abandoned
+  ansible.builtin.set_fact:
+    invctl_lock_holder_info: >-
+      {{ (invctl_lock_holder_raw.content | b64decode)
+         if (invctl_lock_holder_raw.content is defined)
+         else 'unknown (the lock exists but its holder file could not be read)' }}
+    invctl_lock_holder_epoch: >-
+      {{ (((invctl_lock_holder_raw.content | b64decode).splitlines()
+           | select('match', '^started_epoch=') | list | first)
+          | regex_replace('^started_epoch=', ''))
+         if (invctl_lock_holder_raw.content is defined
+             and ((invctl_lock_holder_raw.content | b64decode).splitlines()
+                  | select('match', '^started_epoch=') | list | length) > 0)
+         else '0' }}
+  when:
+    - not ansible_check_mode
+    - invctl_lock_attempt.rc != 0
+
+- name: An existing lock is still within its age limit -- refuse to run
   ansible.builtin.fail:
     msg: >-
-      An upgrade on this host did not finish. {{ invctl_config_dir }}/upgrade-in-progress
-      records it:
+      Another run against this host holds the lock at {{ invctl_lock_dir }},
+      and it is not yet {{ invctl_lock_max_age_seconds }} seconds old:
 
-      {{ invctl_upgrade_marker_body.content | b64decode }}
+      {{ invctl_lock_holder_info }}
 
-      The role will do NOTHING -- not even converge configuration -- until a
-      person has decided what happened, because starting invctl would itself
-      apply migrations, outside the backup gate, to a database nobody has
-      looked at.
-      Read docs/UPGRADE.md, "When a migration fails". The backup named above
-      exists and is the rollback. When you have decided and acted, clear the
-      marker by hand:
-        rm {{ invctl_config_dir }}/upgrade-in-progress
-      There is deliberately no variable that does this for you.
-  when: invctl_upgrade_marker.stat.exists
+      This role refuses to run concurrently with another run against the same
+      host -- see "Concurrency guard" in deploy/ansible/README.md. If you are
+      certain no other run is genuinely in progress (for instance, a control
+      node that crashed without cleaning up), either wait for the lock to age
+      out or remove {{ invctl_lock_dir }} by hand.
+  when:
+    - not ansible_check_mode
+    - invctl_lock_attempt.rc != 0
+    - ((invctl_lock_now_epoch | int) - (invctl_lock_holder_epoch | int)) < invctl_lock_max_age_seconds
 
-# --- what is actually on this host ----------------------------------------
-
-- name: Look for an installed binary
-  ansible.builtin.stat:
-    path: "{{ invctl_install_dir }}/invctl"
-  register: invctl_binary
-
-# `invctl -version` is printed BEFORE config.Load (cmd/invctl/main.go:99-105),
-# so this works on a host whose configuration is missing or wrong -- which is
-# exactly the host somebody is standing at when they need to know what is
-# deployed.
-# `check_mode: false` forces this to run even under --check. Without it the
-# command module SKIPS in check mode (it cannot know whether a command has a
-# side effect), invctl_version_probe.stdout is then undefined, and the very
-# next task's `.split()[1]` throws -- so --check failed outright rather than
-# reporting what a real run would do. -version is read-only: nothing about
-# forcing it to run is unsafe under --check.
-- name: Ask the installed binary what it is
-  ansible.builtin.command:
-    argv: ["{{ invctl_install_dir }}/invctl", -version]
-  register: invctl_version_probe
-  changed_when: false
-  check_mode: false
-  when: invctl_binary.stat.exists
-
-# `invctl v1.2.0 (commit ..., built ..., linux/amd64, go1.26.6)` -- the second
-# whitespace-separated field, with the leading v stripped.
-- name: Record the installed version
-  ansible.builtin.set_fact:
-    invctl_installed_version: >-
-      {{ (invctl_version_probe.stdout.split()[1] | regex_replace('^v', ''))
-         if invctl_binary.stat.exists else '' }}
-
-- name: Read the configuration already on the host
-  ansible.builtin.include_tasks: read_env.yml
-
-# --- preflight ------------------------------------------------------------
-
-# ONLY ON A FRESH INSTALL (spec §2). ensureAdmin returns early once any account
-# exists, so requiring this on every run would keep a credential in the
-# inventory to satisfy an assertion and nothing else -- and would stop the
-# playbook running unattended, which D7 otherwise makes possible.
-- name: Refuse a fresh install without an administrator password
-  ansible.builtin.assert:
-    that:
-      - invctl_admin_password is defined
-      - (invctl_admin_password | default('')) | length > 0
-    fail_msg: >-
-      invctl_admin_password is required for a FIRST install of this host and has
-      no default, ever. A default admin password in a deployment role is a
-      default admin password in production. Pass it from a vault, or with
-      -e invctl_admin_password=... for a throwaway. Later runs against this host
-      will not need it.
-  no_log: true
-  when: invctl_installed_version == ''
-
-- name: Refuse PostgreSQL without a DSN
-  ansible.builtin.assert:
-    that:
-      - invctl_db_dsn is defined
-      - invctl_db_dsn is search('^postgres')
-    fail_msg: >-
-      invctl_db_driver is 'postgres' and invctl_db_dsn is not a PostgreSQL DSN.
-      This role never installs a database server (spec D2): point it at one
-      somebody else manages.
-  no_log: true
-  when: invctl_db_driver == 'postgres'
-
-- name: Collect the values that will be written to the environment file
-  ansible.builtin.set_fact:
-    invctl_env_candidate_values:
-      - "{{ invctl_listen }}"
-      - "{{ invctl_db_dsn }}"
-      - "{{ invctl_admin_username }}"
-      - "{{ invctl_admin_password | default('') }}"
-      - "{{ invctl_admin_users }}"
-  no_log: true
-
-# A SINGLE QUOTE ENDS THE VALUE EARLY. A NEWLINE ENDS THE LINE EARLY, AND
-# WHATEVER FOLLOWS BECOMES A SETTING OF ITS OWN -- so a password containing a
-# line break could set INV_SECURE_COOKIES=false, and nothing would look wrong.
-# Both are refused rather than escaped: this role reads the file back, and one
-# unambiguous form is worth more than the ability to carry an exotic value.
-- name: Refuse a configuration value containing a quote or a line break
-  ansible.builtin.assert:
-    that:
-      - (invctl_env_candidate_values | select('search', "'") | list | length) == 0
-      - (invctl_env_candidate_values | select('search', '[\r\n]') | list | length) == 0
-    fail_msg: >-
-      A configuration value contains a single quote, a carriage return or a
-      newline. The environment file writes every value as KEY='value' on one
-      line, and reads it back in exactly that form; a quote would truncate the
-      value and a line break would turn the remainder into a separate setting.
-      Change the value -- most often this is a password out of a vault that
-      picked up a trailing newline.
-  no_log: true
-
-- name: Require psql for the PostgreSQL reachability check
-  ansible.builtin.command:
-    argv: [sh, -c, 'command -v psql']
-  register: invctl_psql
-  changed_when: false
-  failed_when: false
-  when: invctl_db_driver == 'postgres'
-
-# community.postgresql is deliberately NOT used: it is not installed here and
-# would be a new dependency for one query (spec D2). psql comes from
-# postgresql-client, the same package §8 already needs for pg_dump.
-- name: Fail early when psql is missing
-  ansible.builtin.assert:
-    that:
-      - invctl_psql.rc == 0
-    fail_msg: >-
-      psql is not on PATH on this host. Install postgresql-client: it provides
-      psql (this check), pg_dump (the upgrade backup) and pg_restore (the check
-      that the backup is readable). The database SERVER stays wherever it is;
-      only the client is needed here.
-  when: invctl_db_driver == 'postgres'
-
-# BEFORE ANY CONFIGURATION IS WRITTEN (spec D2), so a typo fails at the start
-# rather than as a crash-looping service somebody has to read a journal for.
-- name: Verify the PostgreSQL database is reachable
-  ansible.builtin.command:
-    argv: [psql, "{{ invctl_db_dsn }}", -tAc, 'SELECT 1']
-  register: invctl_pg_reachable
-  changed_when: false
-  failed_when: false
-  no_log: true
-  when: invctl_db_driver == 'postgres'
-
-- name: Fail when the database cannot be reached
-  ansible.builtin.assert:
-    that:
-      - invctl_pg_reachable.rc == 0
-    fail_msg: >-
-      The PostgreSQL database named by invctl_db_dsn could not be reached, and
-      nothing has been written. The role does not install a database server
-      (spec D2); create the database first, per the SQL in docs/INSTALL.md.
-  when: invctl_db_driver == 'postgres'
-
-- name: Report the state this run is acting on
+- name: An existing lock has aged out -- report that it is being broken
   ansible.builtin.debug:
     msg: >-
-      binary: installed={{ invctl_installed_version | default('(none)', true) }}
-      pinned={{ invctl_version }}
-      action={{ 'INSTALL' if invctl_installed_version == ''
-                else ('NO-OP' if invctl_installed_version == invctl_version
-                      else 'UPGRADE') }};
-      configuration is converged on every run regardless (spec D7).
+      {{ invctl_lock_dir }} is held by a run that started more than
+      {{ invctl_lock_max_age_seconds }} seconds ago and never released it:
 
-# --- the binary axis ------------------------------------------------------
+      {{ invctl_lock_holder_info }}
 
-- name: Install
-  ansible.builtin.include_tasks: install.yml
-  when: invctl_installed_version == ''
-
-- name: Upgrade
-  ansible.builtin.include_tasks: upgrade.yml
+      Treating it as abandoned -- most likely a control node that crashed
+      mid-run -- and proceeding. If that other run is genuinely still in
+      progress, both runs will now act on this host at the same time.
   when:
-    - invctl_installed_version != ''
-    - invctl_installed_version != invctl_version
+    - not ansible_check_mode
+    - invctl_lock_attempt.rc != 0
+    - ((invctl_lock_now_epoch | int) - (invctl_lock_holder_epoch | int)) >= invctl_lock_max_age_seconds
 
-# --- the configuration axis, always ---------------------------------------
-
-- name: Converge the configuration and the unit
-  ansible.builtin.include_tasks: configure.yml
-
-- name: Start it and prove it is serving
-  ansible.builtin.include_tasks: verify.yml
-
-# CLEARED ONLY HERE: after -migrate returned zero AND /healthz answered 200. If
-# either failed, the play has already stopped and the marker is still on disk,
-# which is what makes the next run refuse instead of starting the service into a
-# second ungated migration.
-- name: Clear the upgrade marker now that the new version is serving
+- name: Remove the stale lock
   ansible.builtin.file:
-    path: "{{ invctl_config_dir }}/upgrade-in-progress"
+    path: "{{ invctl_lock_dir }}"
     state: absent
-  when: invctl_upgrade_started | default(false)
+  when:
+    - not ansible_check_mode
+    - invctl_lock_attempt.rc != 0
+    - ((invctl_lock_now_epoch | int) - (invctl_lock_holder_epoch | int)) >= invctl_lock_max_age_seconds
+
+- name: Take the lock, now that the stale one is out of the way
+  ansible.builtin.command:
+    argv: [mkdir, "{{ invctl_lock_dir }}"]
+  register: invctl_lock_takeover
+  changed_when: true
+  when:
+    - not ansible_check_mode
+    - invctl_lock_attempt.rc != 0
+    - ((invctl_lock_now_epoch | int) - (invctl_lock_holder_epoch | int)) >= invctl_lock_max_age_seconds
+
+- name: Remember whether this run holds the lock
+  # Read below in the `always:` block: only the run that actually created the
+  # directory may remove it. A run that was refused above never reaches this
+  # task at all (the `fail` above already stopped the play).
+  ansible.builtin.set_fact:
+    invctl_lock_acquired: >-
+      {{ (invctl_lock_attempt.rc | default(1) == 0)
+         or (invctl_lock_takeover.rc | default(1) == 0) }}
+  when: not ansible_check_mode
+
+- name: Record who holds the lock and when they took it
+  ansible.builtin.copy:
+    dest: "{{ invctl_lock_dir }}/holder"
+    owner: root
+    group: root
+    mode: "0600"
+    content: |
+      started_epoch={{ invctl_lock_now_epoch }}
+      started_at={{ lookup('pipe', 'date -u -d @' ~ invctl_lock_now_epoch ~ ' +%Y-%m-%dT%H:%M:%SZ') }}
+      run_user={{ lookup('env', 'USER') | default('unknown', true) }}
+  when:
+    - not ansible_check_mode
+    - invctl_lock_acquired | default(false)
+
+- name: Do the work this role exists for, holding the lock the whole time
+  block:
+    # --- before anything else -------------------------------------------------
+
+    - name: Look for an interrupted upgrade
+      ansible.builtin.stat:
+        path: "{{ invctl_config_dir }}/upgrade-in-progress"
+      register: invctl_upgrade_marker
+
+    - name: Read the interrupted upgrade's note
+      ansible.builtin.slurp:
+        src: "{{ invctl_config_dir }}/upgrade-in-progress"
+      register: invctl_upgrade_marker_body
+      when: invctl_upgrade_marker.stat.exists
+
+    # THIS REFUSAL IS THE FIRST TASK IN THE ROLE FOR A REASON, AND THE REASON IS NOT
+    # OBVIOUS FROM THE DIFF.
+    #
+    # If `invctl -migrate` fails during an upgrade, the NEW binary is already on
+    # disk and the service is stopped. On the next run `-version` now MATCHES the
+    # pin, so the binary axis says NO-OP -- and D7's unconditional configure + verify
+    # would then START the service. invctl migrates automatically at startup, before
+    # binding (docs/UPGRADE.md), so that start is a second migration attempt made
+    # OUTSIDE the backup gate, on a database whose state nobody has looked at.
+    #
+    # The backup from the interrupted attempt does still exist, so this is not
+    # unrecoverable. It is the role walking silently past a half-finished upgrade,
+    # which is the one behaviour D1 says it must never have.
+    - name: Refuse to proceed past an interrupted upgrade
+      ansible.builtin.fail:
+        msg: >-
+          An upgrade on this host did not finish. {{ invctl_config_dir }}/upgrade-in-progress
+          records it:
+
+          {{ invctl_upgrade_marker_body.content | b64decode }}
+
+          The role will do NOTHING -- not even converge configuration -- until a
+          person has decided what happened, because starting invctl would itself
+          apply migrations, outside the backup gate, to a database nobody has
+          looked at.
+          Read docs/UPGRADE.md, "When a migration fails". The backup named above
+          exists and is the rollback. When you have decided and acted, clear the
+          marker by hand:
+            rm {{ invctl_config_dir }}/upgrade-in-progress
+          There is deliberately no variable that does this for you.
+      when: invctl_upgrade_marker.stat.exists
+
+    # --- what is actually on this host ----------------------------------------
+
+    - name: Look for an installed binary
+      ansible.builtin.stat:
+        path: "{{ invctl_install_dir }}/invctl"
+      register: invctl_binary
+
+    # `invctl -version` is printed BEFORE config.Load (cmd/invctl/main.go:99-105),
+    # so this works on a host whose configuration is missing or wrong -- which is
+    # exactly the host somebody is standing at when they need to know what is
+    # deployed.
+    # `check_mode: false` forces this to run even under --check. Without it the
+    # command module SKIPS in check mode (it cannot know whether a command has a
+    # side effect), invctl_version_probe.stdout is then undefined, and the very
+    # next task's `.split()[1]` throws -- so --check failed outright rather than
+    # reporting what a real run would do. -version is read-only: nothing about
+    # forcing it to run is unsafe under --check.
+    - name: Ask the installed binary what it is
+      ansible.builtin.command:
+        argv: ["{{ invctl_install_dir }}/invctl", -version]
+      register: invctl_version_probe
+      changed_when: false
+      check_mode: false
+      when: invctl_binary.stat.exists
+
+    # `invctl v1.2.0 (commit ..., built ..., linux/amd64, go1.26.6)` -- the second
+    # whitespace-separated field, with the leading v stripped.
+    - name: Record the installed version
+      ansible.builtin.set_fact:
+        invctl_installed_version: >-
+          {{ (invctl_version_probe.stdout.split()[1] | regex_replace('^v', ''))
+             if invctl_binary.stat.exists else '' }}
+
+    - name: Read the configuration already on the host
+      ansible.builtin.include_tasks: read_env.yml
+
+    # --- preflight ------------------------------------------------------------
+
+    # ONLY ON A FRESH INSTALL (spec §2). ensureAdmin returns early once any account
+    # exists, so requiring this on every run would keep a credential in the
+    # inventory to satisfy an assertion and nothing else -- and would stop the
+    # playbook running unattended, which D7 otherwise makes possible.
+    - name: Refuse a fresh install without an administrator password
+      ansible.builtin.assert:
+        that:
+          - invctl_admin_password is defined
+          - (invctl_admin_password | default('')) | length > 0
+        fail_msg: >-
+          invctl_admin_password is required for a FIRST install of this host and has
+          no default, ever. A default admin password in a deployment role is a
+          default admin password in production. Pass it from a vault, or with
+          -e invctl_admin_password=... for a throwaway. Later runs against this host
+          will not need it.
+      no_log: true
+      when: invctl_installed_version == ''
+
+    - name: Refuse PostgreSQL without a DSN
+      ansible.builtin.assert:
+        that:
+          - invctl_db_dsn is defined
+          - invctl_db_dsn is search('^postgres')
+        fail_msg: >-
+          invctl_db_driver is 'postgres' and invctl_db_dsn is not a PostgreSQL DSN.
+          This role never installs a database server (spec D2): point it at one
+          somebody else manages.
+      no_log: true
+      when: invctl_db_driver == 'postgres'
+
+    - name: Collect the values that will be written to the environment file
+      ansible.builtin.set_fact:
+        invctl_env_candidate_values:
+          - "{{ invctl_listen }}"
+          - "{{ invctl_db_dsn }}"
+          - "{{ invctl_admin_username }}"
+          - "{{ invctl_admin_password | default('') }}"
+          - "{{ invctl_admin_users }}"
+      no_log: true
+
+    # A SINGLE QUOTE ENDS THE VALUE EARLY. A NEWLINE ENDS THE LINE EARLY, AND
+    # WHATEVER FOLLOWS BECOMES A SETTING OF ITS OWN -- so a password containing a
+    # line break could set INV_SECURE_COOKIES=false, and nothing would look wrong.
+    # Both are refused rather than escaped: this role reads the file back, and one
+    # unambiguous form is worth more than the ability to carry an exotic value.
+    - name: Refuse a configuration value containing a quote or a line break
+      ansible.builtin.assert:
+        that:
+          - (invctl_env_candidate_values | select('search', "'") | list | length) == 0
+          - (invctl_env_candidate_values | select('search', '[\r\n]') | list | length) == 0
+        fail_msg: >-
+          A configuration value contains a single quote, a carriage return or a
+          newline. The environment file writes every value as KEY='value' on one
+          line, and reads it back in exactly that form; a quote would truncate the
+          value and a line break would turn the remainder into a separate setting.
+          Change the value -- most often this is a password out of a vault that
+          picked up a trailing newline.
+      no_log: true
+
+    # `check_mode: false`: read-only presence check whose output feeds the assert
+    # right after it. Without this, `command` SKIPS under --check,
+    # invctl_psql.rc is undefined, and the assert throws instead of reporting
+    # what a real run would find.
+    - name: Require psql for the PostgreSQL reachability check
+      ansible.builtin.command:
+        argv: [sh, -c, 'command -v psql']
+      register: invctl_psql
+      changed_when: false
+      failed_when: false
+      check_mode: false
+      when: invctl_db_driver == 'postgres'
+
+    # community.postgresql is deliberately NOT used: it is not installed here and
+    # would be a new dependency for one query (spec D2). psql comes from
+    # postgresql-client, the same package §8 already needs for pg_dump.
+    - name: Fail early when psql is missing
+      ansible.builtin.assert:
+        that:
+          - invctl_psql.rc == 0
+        fail_msg: >-
+          psql is not on PATH on this host. Install postgresql-client: it provides
+          psql (this check), pg_dump (the upgrade backup) and pg_restore (the check
+          that the backup is readable). The database SERVER stays wherever it is;
+          only the client is needed here.
+      when: invctl_db_driver == 'postgres'
+
+    # BEFORE ANY CONFIGURATION IS WRITTEN (spec D2), so a typo fails at the start
+    # rather than as a crash-looping service somebody has to read a journal for.
+    # `check_mode: false`: read-only (SELECT 1), and its output feeds the assert
+    # right after it -- same reasoning as the psql presence check above.
+    - name: Verify the PostgreSQL database is reachable
+      ansible.builtin.command:
+        argv: [psql, "{{ invctl_db_dsn }}", -tAc, 'SELECT 1']
+      register: invctl_pg_reachable
+      changed_when: false
+      failed_when: false
+      no_log: true
+      check_mode: false
+      when: invctl_db_driver == 'postgres'
+
+    - name: Fail when the database cannot be reached
+      ansible.builtin.assert:
+        that:
+          - invctl_pg_reachable.rc == 0
+        fail_msg: >-
+          The PostgreSQL database named by invctl_db_dsn could not be reached, and
+          nothing has been written. The role does not install a database server
+          (spec D2); create the database first, per the SQL in docs/INSTALL.md.
+      when: invctl_db_driver == 'postgres'
+
+    - name: Report the state this run is acting on
+      ansible.builtin.debug:
+        msg: >-
+          binary: installed={{ invctl_installed_version | default('(none)', true) }}
+          pinned={{ invctl_version }}
+          action={{ 'INSTALL' if invctl_installed_version == ''
+                    else ('NO-OP' if invctl_installed_version == invctl_version
+                          else 'UPGRADE') }};
+          configuration is converged on every run regardless (spec D7).
+          {{ '--check: no binary is downloaded, verified, backed up or migrated below -- see deploy/ansible/README.md, "What --check actually tells you".' if ansible_check_mode else '' }}
+
+    # --- the binary axis ------------------------------------------------------
+
+    - name: Install
+      ansible.builtin.include_tasks: install.yml
+      when: invctl_installed_version == ''
+
+    - name: Upgrade
+      ansible.builtin.include_tasks: upgrade.yml
+      when:
+        - invctl_installed_version != ''
+        - invctl_installed_version != invctl_version
+
+    # --- the configuration axis, always ---------------------------------------
+
+    - name: Converge the configuration and the unit
+      ansible.builtin.include_tasks: configure.yml
+
+    - name: Start it and prove it is serving
+      ansible.builtin.include_tasks: verify.yml
+
+    # CLEARED ONLY HERE: after -migrate returned zero AND /healthz answered 200. If
+    # either failed, the play has already stopped and the marker is still on disk,
+    # which is what makes the next run refuse instead of starting the service into a
+    # second ungated migration.
+    - name: Clear the upgrade marker now that the new version is serving
+      ansible.builtin.file:
+        path: "{{ invctl_config_dir }}/upgrade-in-progress"
+        state: absent
+      when: invctl_upgrade_started | default(false)
+  always:
+    # RUNS ON SUCCESS AND ON FAILURE. A `rescue:` would only cover a failure
+    # inside the block that Ansible can still recover from on this host; a
+    # fatal connection loss skips both `rescue:` and `always:` alike, which is
+    # exactly the gap the age-based break-out above exists to cover. This is
+    # the ordinary path: the play finished, one way or the other, and the lock
+    # this run took is released so the next run does not have to wait out
+    # invctl_lock_max_age_seconds for nothing.
+    - name: Release the run lock
+      ansible.builtin.file:
+        path: "{{ invctl_lock_dir }}"
+        state: absent
+      when:
+        - not ansible_check_mode
+        - invctl_lock_acquired | default(false)

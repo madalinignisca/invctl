@@ -74,3 +74,21 @@ invctl_backup_dir: /var/backups/invctl
 invctl_install_dir: /opt/invctl
 invctl_data_dir: /var/lib/invctl
 invctl_config_dir: /etc/invctl
+
+# THE RUN LOCK, NOT AN OPERATOR-FACING KNOB IN THE ORDINARY CASE.
+#
+# /run rather than invctl_config_dir: this is a mutex for one run of this
+# playbook against this host, not a fact about the estate, and a tmpfs that
+# is empty after every reboot is a second, free line of defence against a
+# lock nobody ever releases -- on top of the age-based break below, which is
+# the one that matters when the host never reboots between the crash and the
+# next attempt.
+invctl_lock_dir: /run/invctl-ansible.lock
+
+# How long a lock is honoured before a later run treats it as abandoned and
+# breaks it rather than refusing forever. Long enough to cover a real
+# PostgreSQL pg_dump on a large database plus the health-check retries in
+# verify.yml; short enough that a genuinely crashed run does not lock a host
+# out for a working day. Override with -e only if a specific host's backup
+# is known to run long.
+invctl_lock_max_age_seconds: 1800
