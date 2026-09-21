@@ -76,11 +76,18 @@
 # so this works on a host whose configuration is missing or wrong -- which is
 # exactly the host somebody is standing at when they need to know what is
 # deployed.
+# `check_mode: false` forces this to run even under --check. Without it the
+# command module SKIPS in check mode (it cannot know whether a command has a
+# side effect), invctl_version_probe.stdout is then undefined, and the very
+# next task's `.split()[1]` throws -- so --check failed outright rather than
+# reporting what a real run would do. -version is read-only: nothing about
+# forcing it to run is unsafe under --check.
 - name: Ask the installed binary what it is
   ansible.builtin.command:
     argv: ["{{ invctl_install_dir }}/invctl", -version]
   register: invctl_version_probe
   changed_when: false
+  check_mode: false
   when: invctl_binary.stat.exists
 
 # `invctl v1.2.0 (commit ..., built ..., linux/amd64, go1.26.6)` -- the second
