@@ -242,6 +242,112 @@ from the check-mode recap is correct — an operator using `--check` to preview
 an upgrade is not meant to get a live health verdict from it, only a diff of
 what would change.
 
+## Task 6 scenarios — upgrade: prove the stop, the backup, the gate and the finish
+
+Every command below is `cd deploy/ansible` first, and the `$BASE`/`$SEED` flags
+above still apply. These scenarios recreate the container more often than
+Task 5's do — see "Several scenarios below recreate the container" earlier in
+this file: reusing a host whose schema has already been migrated forward
+would mean testing a downgrade, which invctl does not support.
+
+A real 1.1.1 to 1.2.0 upgrade (`docs/superpowers/specs/...Task 6, Step 7`)
+proves the whole path end to end: acquire and verify the new binary, stop the
+service, prove the stop, back up and verify the backup, mark the host
+mid-upgrade, replace the binary, migrate as the unprivileged `invctl` user,
+converge configuration, start, and clear the marker. Confirmed: `v1.2.0`
+serving, `invctl.1.1.1` preserved alongside the new binary, a non-empty
+verified backup, no leftover marker, and every file under `/var/lib/invctl`
+(including `-wal`/`-shm`) owned by `invctl` rather than root — proof the
+migration did not run with root's privileges.
+
+Four gate mutations, each restored with `cp` from a saved copy immediately
+after observing it (never `git checkout --`):
+
+- **An empty backup is refused** (`Back up the SQLite database` replaced with
+  a `file: state=touch`). Fails at `The backup exists and is not empty`, the
+  rescue restarts the service (it was running), `v1.1.1` stays installed, and
+  nothing is preserved or marked.
+- **A truncated-but-non-empty backup is refused** (`head -c 4096` in place of
+  the real copy). Fails at the *second* half of the gate,
+  `The SQLite backup is a faithful copy of a SQLite database` — not the first
+  — because a 4 KB file passes "non-empty" and even has a valid header.
+  Deleting that second assertion and re-running was **observed to succeed
+  behind a 4 KB backup**: this is the defect part two of the gate exists to
+  catch.
+- **An unstopped service is caught** (`Stop invctl` replaced with a no-op
+  `debug`). Fails at `The service is actually stopped, not merely asked to
+  stop`, naming the surviving PID; no backup file is created, because the
+  assertion sits before the first copy. Deleting that assertion and
+  re-running with the same no-op stop was **observed to succeed**, taking a
+  backup from a live, still-writing database — the intermittent failure this
+  assertion exists to make impossible rather than merely unlikely.
+- **An interrupted migration marks the host, and the next run refuses.** The
+  most valuable test here: with `Apply migrations` forced to `exit 1`, the
+  play fails with the **new** binary already on disk (`-version` reports
+  `v1.2.0`) and the service **inactive** — the half-finished state the marker
+  exists to describe. The marker names the from/to versions, the driver and
+  the backup path. The very next run, unmodified, fails at the **first task**,
+  `Refuse to proceed past an interrupted upgrade`, and the service stays
+  inactive — the role does nothing at all until a human clears the marker by
+  hand. Removing the `Look for an interrupted upgrade` / `Refuse to proceed`
+  pair from `main.yml` and repeating the failed-migration setup was
+  **observed** to let the next run silently start the service — applying a
+  second migration attempt outside the gate, with the play reporting
+  `failed=0`. That silent walk-past is exactly what D1 says the role must
+  never do.
+
+**The database-and-version refusal** (`Refuse to change the database and the
+version in one run`): bumping `invctl_version` and `invctl_db_dsn` in the same
+run fails there, before the service is stopped — no backup taken, no new
+database file created. Moving the DSN alone (version unchanged) converges and
+restarts normally; a subsequent version bump then backs up whatever database
+the host's env file names.
+
+**The backup-collision refusal, made deterministic.** Guessing a stamp by
+calling `date` and hoping the play starts in the same second proves nothing —
+the collision usually just doesn't happen. `invctl_backup_stamp` is a
+`set_fact` with a `| default(lookup('pipe', 'date -u ...'))` form specifically
+so it is **overridable from the command line**:
+
+```bash
+sudo incus exec invctl-ansible-test -- \
+  sh -c "echo pretend > /var/backups/invctl/invctl.db.FIXED"
+./test/incus-harness.sh run $BASE -e invctl_backup_stamp=FIXED
+```
+
+**This override exists for this test only — it is not an operator-facing
+knob**, and the task comment above the `set_fact` says so. It fails at
+`Refuse to overwrite a backup that is already there`, naming the exact path,
+and the word `pretend` survives untouched. Removing that assertion and
+repeating the same two commands was **observed** to destroy it: the upgrade
+proceeds and overwrites the file with a real (and in this case unverifiable,
+since nothing checked it first) database dump — the loss of the most valuable
+file on the host, which the check exists to prevent.
+
+**A deliberately stopped service is left stopped.** Stop `invctl` by hand,
+then force the gate to fail (the empty-backup mutation above): the rescue's
+abort message says the service *was not running when this run began*, and
+`systemctl is-active` still reports `inactive` afterward — a rescue that
+started it regardless would have been a second unexpected change stacked on
+top of whatever incident had it stopped.
+
+**The run after an upgrade is quiet.** Immediately after a successful upgrade,
+a further plain run reports `changed=0` — an upgrade that leaves the *next*
+run noisy would undo Task 5's convergence property without anyone noticing.
+
+**A known limitation, found by this testing, not fixed by it:** the SQLite
+backup and comparison tasks read and write
+`{{ invctl_data_dir }}/invctl.db` unconditionally rather than deriving the
+path from `invctl_upgrade_db_dsn` (the host's actual, possibly customised,
+DSN). For the **default** DSN this is a no-op, because the default *is*
+`file:{{ invctl_data_dir }}/invctl.db?...` — every scenario above uses the
+default and is unaffected. But a host whose SQLite DSN has been pointed at a
+different filename is backed up from the **wrong file**: the gate still
+reports success, because it consistently compares the hardcoded path against
+itself, not against the live database the service is actually using. See the
+implementation report for Task 6 for the exact reproduction (checksums
+included) and the decision this needs before it is closed.
+
 ## Teardown
 
 ```bash
