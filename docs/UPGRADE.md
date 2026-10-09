@@ -116,6 +116,21 @@ The service will not start, and the error names the migration.
    working system.
 4. Then work out what the data violated, at leisure, on a copy.
 
+**If this upgrade was run by the Ansible role in `deploy/ansible/`**, a
+failure at this point leaves `/etc/invctl/upgrade-in-progress` on the host.
+It names the backup taken before anything was replaced, and its presence
+means **no further playbook run will do anything at all** — not even
+converge configuration — until it is removed by hand. That is deliberate:
+the role's own state machine would otherwise see a version match on the next
+run, treat it as nothing-to-do, and start the service — which applies
+migrations automatically before it binds, retrying the very migration that
+just failed, a second time, outside the backup gate, against a database in
+whatever state the first failure left it. Follow steps 1–4 above, then clear
+the marker: `rm /etc/invctl/upgrade-in-progress`. See
+`deploy/ansible/README.md`, "The upgrade did not finish", for the full
+explanation; it is here too because this is the page read at 03:00, not that
+one.
+
 ### The class of migration that does this
 
 A migration that adds a `CHECK` or a `UNIQUE` constraint can fail on data

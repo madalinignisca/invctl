@@ -1,0 +1,38 @@
+# invctl — infrastructure inventory
+# Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+#
+# Licensed under the GNU Affero General Public License, version 3 only —
+# no later version applies. See LICENSE for the full text.
+#
+# SPDX-License-Identifier: AGPL-3.0-only
+
+---
+# THE MECHANISM D7 RESTS ON. A template task reports `changed` only on a real
+# diff, and a handler notified by it fires only then. That gives "do not restart
+# when nothing changed" WITHOUT also giving "do not look at the configuration"
+# -- which is exactly the pair the first draft of the spec conflated.
+# BOTH SKIPPED UNDER --check, ON A FRESH HOST FOR A REASON THAT IS NOT
+# ABOUT SAFETY BUT ABOUT WHAT SYSTEMD CAN EVEN ANSWER.
+#
+# `template`/`copy` have full check_mode support, so under --check the unit
+# file and env file that would notify these handlers are never actually
+# written to disk (D7's convergence is only PREDICTED). On a fresh host that
+# means invctl.service and invctl.env, on this run, never touched systemd at
+# all: `systemd_service` querying a genuinely unknown unit does not
+# gracefully predict "would restart", it fails outright ("Could not find the
+# requested service invctl: host"), because there is nothing on this host for
+# it to inspect. That is a real systemd_service limitation, not a bug in this
+# role's use of it, and forcing `check_mode: false` here would turn a preview
+# into an ACTUAL restart of a real service on a converged host -- the exact
+# opposite of what --check promises. See "What --check actually tells you"
+# in deploy/ansible/README.md.
+- name: reload systemd
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+  when: not ansible_check_mode
+
+- name: restart invctl
+  ansible.builtin.systemd_service:
+    name: invctl
+    state: restarted
+  when: not ansible_check_mode

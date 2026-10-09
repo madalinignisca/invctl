@@ -1,0 +1,63 @@
+# invctl — infrastructure inventory
+# Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+#
+# Licensed under the GNU Affero General Public License, version 3 only —
+# no later version applies. See LICENSE for the full text.
+#
+# SPDX-License-Identifier: AGPL-3.0-only
+
+---
+# RUNS ON EVERY RUN, whatever the binary axis decided (spec D7). Change
+# invctl_listen or the DSN in your inventory, re-run without touching
+# invctl_version, and the host converges and restarts. Change nothing and the
+# templates report no diff, no handler fires, and the run costs a probe.
+#
+# Two values come from the host rather than from the inventory, because
+# re-deriving them would produce a spurious diff on every run -- and under D7
+# that means a RESTART on every run, which is precisely what makes a scheduled
+# playbook unusable. read_env.yml has already parsed them, strictly.
+
+# A NEW KEY ON EVERY RUN SIGNS EVERYBODY OUT ON EVERY RUN, and nobody would
+# connect that symptom to Ansible (spec §5). Minted once, then read back for
+# ever. read_env.yml has already refused a file it could not parse, so a missing
+# key here means genuinely missing, never "unreadable".
+- name: Keep the existing session key, or mint one
+  ansible.builtin.set_fact:
+    invctl_session_key: >-
+      {{ invctl_env['INV_SESSION_KEY']
+         if 'INV_SESSION_KEY' in invctl_env
+         else lookup('community.general.random_string', length=32, base64=true) }}
+  no_log: true
+
+# Prefer a supplied password so an operator who passes it from a vault on every
+# run stays diff-free; fall back to the host's so an unattended run does too.
+# Empty means the line is omitted from the rendered file entirely -- see the
+# template. An operator who deleted it meant to delete it.
+- name: Decide the administrator password to render, if there is one
+  ansible.builtin.set_fact:
+    invctl_admin_password_effective: >-
+      {{ invctl_admin_password
+         if (invctl_admin_password | default('')) | length > 0
+         else (invctl_env['INV_ADMIN_PASSWORD'] | default('')) }}
+  no_log: true
+
+- name: Write the configuration
+  ansible.builtin.template:
+    src: invctl.env.j2
+    dest: "{{ invctl_config_dir }}/invctl.env"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  notify: restart invctl
+
+- name: Write the systemd unit
+  ansible.builtin.template:
+    src: invctl.service.j2
+    dest: /etc/systemd/system/invctl.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - reload systemd
+    - restart invctl

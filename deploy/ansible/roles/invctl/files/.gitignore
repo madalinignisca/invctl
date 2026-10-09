@@ -1,0 +1,4 @@
+# The release artefacts an operator drops here are large and are not ours to
+# version. A binary committed by accident is permanent in the history.
+invctl_*_linux_amd64
+invctl_*_checksums.txt

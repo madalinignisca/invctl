@@ -1,0 +1,20 @@
+# invctl — infrastructure inventory
+# Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+#
+# Licensed under the GNU Affero General Public License, version 3 only —
+# no later version applies. See LICENSE for the full text.
+#
+# SPDX-License-Identifier: AGPL-3.0-only
+
+# Copy to hosts, edit, and keep it out of this repository.
+#
+# invctl_admin_password is NOT here and must not be put here in plaintext: it is
+# the first administrator's password. Pass it from a vault, or on the command
+# line for a throwaway. It is needed only for the FIRST run against a host; the
+# role reads it back off the host afterwards, so scheduled runs need no
+# credential at all.
+[invctl]
+inventory.example.com
+
+[invctl:vars]
+ansible_user=root

@@ -1,0 +1,84 @@
+# invctl — infrastructure inventory
+# Copyright (C) 2026 Madalin Ignisca <hi@madalin.me>
+#
+# Licensed under the GNU Affero General Public License, version 3 only —
+# no later version applies. See LICENSE for the full text.
+#
+# SPDX-License-Identifier: AGPL-3.0-only
+
+---
+# THE ONLY CHECKSUM VERIFICATION IN THIS ROLE, and both acquisition paths end
+# here. Sharing it is deliberate: two verification code paths means the
+# rarely-exercised one eventually stops verifying, and nobody notices because
+# the symptom is silence (spec D5).
+#
+# The checksums file is standard sha256sum output: `<hash>  <filename>`, two
+# spaces, bare filename. Parsed rather than fed to `sha256sum -c` because the
+# file lists a bare filename and would have to be run from the right directory,
+# and because stat's checksum needs no shell.
+
+- name: Read the checksums file
+  ansible.builtin.slurp:
+    src: "{{ invctl_stage.path }}/invctl_{{ invctl_version }}_checksums.txt"
+  register: invctl_checksums_raw
+
+- name: Find the checksums record for this binary
+  ansible.builtin.set_fact:
+    # THE ANCHORS AND THE COUNT ARE THE SECURITY PROPERTY, not tidiness.
+    #
+    # An unanchored filename match -- `select('search', 'invctl_1.2.0_linux_amd64$')`
+    # -- also matches a line for `other_invctl_1.2.0_linux_amd64`, and would
+    # then verify our binary against somebody else's hash. A checksums file is
+    # attacker-influenced in exactly the scenario this check exists for, so the
+    # record is matched whole: 64 lowercase hex, the two spaces sha256sum
+    # writes, then the filename and nothing else.
+    #
+    # regex_escape because the version contains dots, and an unescaped dot
+    # matches any character -- 1.2.0 would accept a record for 1x2y0.
+    invctl_checksum_records: >-
+      {{ (invctl_checksums_raw.content | b64decode).splitlines()
+         | select('match', '^[0-9a-f]{64}  invctl_'
+                  ~ (invctl_version | regex_escape) ~ '_linux_amd64$')
+         | list }}
+
+- name: Assert exactly one record names this binary
+  ansible.builtin.assert:
+    that:
+      - invctl_checksum_records | length == 1
+    fail_msg: >-
+      invctl_{{ invctl_version }}_checksums.txt contains
+      {{ invctl_checksum_records | length }} records for
+      invctl_{{ invctl_version }}_linux_amd64, and exactly one is required.
+      Zero means the file is for a different version, is truncated, or has
+      Windows line endings. More than one means it has been edited or
+      concatenated, and the role will not pick. Nothing has been installed.
+      A verification that accepts "some line looked close enough" is not a
+      verification (spec D5).
+
+- name: Take the recorded hash
+  ansible.builtin.set_fact:
+    invctl_expected_sha256: "{{ (invctl_checksum_records | first).split() | first }}"
+
+- name: Compute the SHA-256 of the staged binary
+  ansible.builtin.stat:
+    path: "{{ invctl_stage.path }}/invctl_{{ invctl_version }}_linux_amd64"
+    get_checksum: true
+    checksum_algorithm: sha256
+  register: invctl_staged_binary
+
+- name: Verify the staged binary
+  ansible.builtin.assert:
+    that:
+      - invctl_staged_binary.stat.exists
+      - invctl_staged_binary.stat.checksum == invctl_expected_sha256
+    fail_msg: >-
+      CHECKSUM MISMATCH for invctl_{{ invctl_version }}_linux_amd64 from
+      '{{ invctl_source }}'.
+      recorded: {{ invctl_expected_sha256 }}
+      computed: {{ invctl_staged_binary.stat.checksum | default('(no file)') }}
+      Nothing has been installed and nothing has been replaced. Do not work
+      around this by re-running: a binary that does not match its checksum is
+      either a truncated download or not the binary that was published.
+    success_msg: >-
+      invctl {{ invctl_version }} verified from '{{ invctl_source }}':
+      {{ invctl_expected_sha256 }}
