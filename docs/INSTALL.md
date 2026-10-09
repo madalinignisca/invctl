@@ -21,8 +21,9 @@ at, `make demo` is faster than any of this.
 ## Before you start
 
 - **Go 1.26.6** to build from source (`go.mod` pins it), or a binary someone
-  built for you. The build sets `CGO_ENABLED=0`, so the result runs on any
-  Linux with a matching architecture and needs no shared libraries.
+  built for you. One `linux/amd64` build runs on every current Debian and
+  Ubuntu and needs no shared libraries — see "One binary, every target" below
+  for why, and for the two host files it does still read.
 - **`git` and `make`**, if you are building. Obvious once said and absent from
   a minimal server image: a clean Debian 13 has neither, and the first command
   below is `git clone`.
@@ -63,6 +64,50 @@ So build somewhere with network access and copy `bin/invctl` to the target.
 That is what "a binary someone built for you" above means in practice, and it
 is the normal case rather than the exception: the result is one static file
 with everything compiled in, which is the whole reason it ships that way.
+
+## One binary, every target, and the two things it still needs
+
+**One `linux/amd64` build covers Debian 12 and 13, Ubuntu 24.04 and 26.04,
+and almost anything else.** Not "probably" — the binary has no dynamic
+section, no program interpreter, and `ldd` answers *not a dynamic executable*:
+
+```
+$ file invctl
+ELF 64-bit LSB executable, x86-64, statically linked, stripped
+```
+
+Three decisions make that true, and all three are load-bearing:
+`CGO_ENABLED=0` in the build; `modernc.org/sqlite`, a pure-Go SQLite driver,
+which is the only reason CGO *can* be off; and no `GOAMD64` setting, so the
+baseline `v1` instruction set is used and any x86-64 processor will run it.
+glibc versions are the usual reason a binary will not move between
+distributions, and there is no glibc here to disagree about.
+
+**The web assets are inside it too.** `web/assets.go` embeds the templates and
+`web/static` — HTMX, Alpine, the compiled CSS — and the migrations are
+embedded separately. There is no asset directory to ship beside the binary and
+no step that can be forgotten; serving a page needs nothing on disk but the
+database. That is why a release publishes a bare binary and not a tarball.
+
+Two things it does still read from the host, and neither is a shared library:
+
+- **The CA certificate store**, for any outbound TLS: the OIDC issuer,
+  `ldaps://`, a PostgreSQL server with `sslmode=verify-full`. Debian and Ubuntu
+  ship `ca-certificates` in their standard images, so this is a non-event on a
+  normal server — but a `FROM scratch` container image has no trust store and
+  every HTTPS call fails verification. Copy
+  `/etc/ssl/certs/ca-certificates.crt` in, or start from `debian:stable-slim`.
+- **`/etc/resolv.conf`, and only that.** With CGO disabled, Go resolves names
+  itself instead of calling into the system resolver, which means
+  **`/etc/nsswitch.conf` is ignored**. `systemd-resolved` on `127.0.0.53` works
+  normally because it answers real DNS. What will not resolve is a hostname
+  that exists only behind an NSS module — `sssd`, `nss-ldap`, mDNS. Worth
+  knowing before you point `INV_OIDC_ISSUER` or `INV_LDAP_URL` at a name that
+  only resolves inside a directory-integrated host, because the failure is a
+  plain "no such host" and nothing about it suggests NSS.
+
+Timezone data is not needed: invctl stores and compares RFC3339 UTC and never
+asks the host what time zone it is in.
 
 ## The database
 
